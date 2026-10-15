@@ -4642,7 +4642,7 @@ nemo jobs results [OPTIONS] COMMAND [ARGS]...
 * `create`: Create a new result for a job.
 * `download`: Download a job result file.
 * `list`: List results for a job.
-* `get`: Get a specific job result.
+* `get`: Get a result from a specific job attempt.
 
 ##### nemo jobs results create
 
@@ -4748,7 +4748,7 @@ nemo jobs results list [OPTIONS] NAME
 
 ##### nemo jobs results get
 
-Get a specific job result.
+Get a result from a specific job attempt.
 
 **Usage:**
 
@@ -4762,9 +4762,9 @@ nemo jobs results get [OPTIONS] NAME
 
 **Options:**
 
-* `--workspace`
-* `--job`: (required)
+* `--job`: Job name or ID
 * `--attempt-id`: Attempt ID or 'current'
+* `--workspace`
 
 **Help:**
 

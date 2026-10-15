@@ -123,7 +123,6 @@ class _JobsMethods:
     # Job results
     create_job_result = method(endpoints.create_job_result)
     list_job_results = method(endpoints.list_job_results)
-    get_job_result = method(endpoints.get_job_result)
     download_job_result = method(endpoints.download_job_result)
     create_attempt_result = method(endpoints.create_attempt_result)
     list_attempt_results = method(endpoints.list_attempt_results)

@@ -266,8 +266,8 @@ paths:
     get:
       tags:
       - Safe Synthesizer
-      summary: Get Job Result
-      operationId: get_job_result_apis_safe_synthesizer_v2_workspaces__workspace__jobs__job__results__name__get
+      summary: Get Attempt Result
+      operationId: get_attempt_result_apis_safe_synthesizer_v2_workspaces__workspace__jobs__job__results__name__get
       parameters:
       - name: workspace
         in: path
@@ -289,10 +289,12 @@ paths:
           title: Name
       - name: attempt_id
         in: query
-        required: false
+        required: true
         schema:
-          title: Attempt Id
           type: string
+          description: Attempt ID or 'current'
+          title: Attempt Id
+        description: Attempt ID or 'current'
       responses:
         '200':
           description: Successful Response

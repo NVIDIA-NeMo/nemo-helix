@@ -184,11 +184,6 @@ def list_job_results(
 ) -> HelixJobListResultResponse: ...
 
 
-@get("/apis/jobs/v2/workspaces/{workspace}/jobs/{job}/results/{name}")
-@abstractmethod
-def get_job_result(*, workspace: str | None = None, job: str, name: str) -> HelixJobResultResponse: ...
-
-
 @get("/apis/jobs/v2/workspaces/{workspace}/jobs/{job}/results/{name}/download")
 @abstractmethod
 def download_job_result(*, workspace: str | None = None, job: str, name: str) -> BinaryContent: ...

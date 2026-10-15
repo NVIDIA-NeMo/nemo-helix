@@ -6474,46 +6474,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-    get:
-      tags:
-      - Jobs
-      summary: Get Job Result
-      description: Get a specific job result.
-      operationId: get_job_result_apis_jobs_v2_workspaces__workspace__jobs__job__results__name__get
-      parameters:
-      - name: job
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Job
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HelixJobResultResponse'
-        '404':
-          description: Not Found
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
   /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/results/{name}/download:
     get:
       tags:

@@ -238,11 +238,22 @@ def _resolve_pretrained_model(
         workspace_fallback=workspace,
     )
     try:
-        adapter_result = (
-            JobsClient.from_client(client)
-            .get_job_result(name="adapter", job=model_job, workspace=model_workspace)
+        jobs = JobsClient.from_client(client)
+        attempt_id = (
+            jobs.get_job_attempt(
+                job=model_job,
+                attempt="current",
+                workspace=model_workspace,
+            )
             .data()
+            .id
         )
+        adapter_result = jobs.get_attempt_result(
+            name="adapter",
+            job=model_job,
+            attempt=attempt_id,
+            workspace=model_workspace,
+        ).data()
     except Exception as e:
         raise RuntimeError(
             f"Failed to resolve adapter result for pretrained_model_job={job_config.pretrained_model_job!r}"

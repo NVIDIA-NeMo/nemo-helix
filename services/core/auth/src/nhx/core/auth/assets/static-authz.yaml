@@ -1327,12 +1327,6 @@ authz:
         - jobs:write
         - platform:write
     /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/results/{name}:
-      get:
-        permissions:
-        - jobs.read
-        scopes:
-        - jobs:read
-        - platform:read
       post:
         permissions:
         - jobs.create

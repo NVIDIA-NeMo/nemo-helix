@@ -1451,28 +1451,25 @@ def job_route_factory(
         @router.get(
             "/jobs/{job}/results/{name}",
         )
-        async def get_job_result(
+        async def get_attempt_result(
             workspace: str,
             job: str,
             name: str,
             request: Request,
             async_client: AsyncNemoClient = Depends(get_nemo_client),
-            attempt_id: str | None = Query(default=None),
+            attempt_id: str = Query(description="Attempt ID or 'current'"),
         ) -> HelixJobResultResponse:
-            f"""Get the result of a job by name for the {service_name} microservice."""
+            f"""Get a result from a specific job attempt for the {service_name} microservice."""
 
             jobs = AsyncJobsClient.from_client(async_client)
-            if attempt_id is not None:
-                result_obj = (
-                    await jobs.get_attempt_result(
-                        name=name,
-                        job=job,
-                        attempt=attempt_id,
-                        workspace=workspace,
-                    )
-                ).data()
-            else:
-                result_obj = (await jobs.get_job_result(name=name, job=job, workspace=workspace)).data()
+            result_obj = (
+                await jobs.get_attempt_result(
+                    name=name,
+                    job=job,
+                    attempt=attempt_id,
+                    workspace=workspace,
+                )
+            ).data()
 
             # Construct the URL for downloading this result
             result_dict = result_obj.model_dump()
@@ -1492,7 +1489,7 @@ def job_route_factory(
         _stamp(cancel_job, perm="cancel", write=True)
         _stamp(get_job_logs, perm="read", write=False)
         _stamp(list_job_results, perm="read", write=False)
-        _stamp(get_job_result, perm="read", write=False)
+        _stamp(get_attempt_result, perm="read", write=False)
 
         # Result downloads:
         # Services that use the api factory can utilize `job_result_routes` to map specific
@@ -1521,17 +1518,19 @@ def job_route_factory(
             """
 
             jobs = AsyncJobsClient.from_client(async_client)
-            if attempt_id is not None:
-                result_info = (
-                    await jobs.get_attempt_result(
-                        name=name,
-                        job=job,
-                        attempt=attempt_id,
-                        workspace=workspace,
-                    )
-                ).data()
-            else:
-                result_info = (await jobs.get_job_result(name=name, job=job, workspace=workspace)).data()
+            selected_attempt = attempt_id
+            if selected_attempt is None:
+                selected_attempt = (
+                    (await jobs.get_job_attempt(job=job, attempt="current", workspace=workspace)).data().id
+                )
+            result_info = (
+                await jobs.get_attempt_result(
+                    name=name,
+                    job=job,
+                    attempt=selected_attempt,
+                    workspace=workspace,
+                )
+            ).data()
             _, tmp_dir_path = await download_from_result_info(
                 result_name=name,
                 job_name=job,

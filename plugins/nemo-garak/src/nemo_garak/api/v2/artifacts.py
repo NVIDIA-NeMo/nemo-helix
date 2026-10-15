@@ -64,6 +64,7 @@ async def download_audit_artifacts(
     """Stream an aggregate tar.gz of all garak report artifacts for an audit job."""
     jobs_client = AsyncJobsClient.from_client(client)
     files_client = AsyncFilesClient.from_client(client)
+    attempt_id = (await jobs_client.get_job_attempt(job=job, attempt="current", workspace=workspace)).data().id
     result_manager = async_result_manager_factory(
         job_name=job,
         workspace=workspace,
@@ -78,7 +79,14 @@ async def download_audit_artifacts(
 
         for result_name in _REPORT_RESULT_NAMES:
             try:
-                result_info = (await jobs_client.get_job_result(name=result_name, job=job, workspace=workspace)).data()
+                result_info = (
+                    await jobs_client.get_attempt_result(
+                        name=result_name,
+                        job=job,
+                        attempt=attempt_id,
+                        workspace=workspace,
+                    )
+                ).data()
             except NotFoundError:
                 continue
 

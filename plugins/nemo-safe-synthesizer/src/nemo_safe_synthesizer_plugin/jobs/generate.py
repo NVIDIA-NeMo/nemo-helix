@@ -145,7 +145,23 @@ class GenerateJob(NemoJob):
             )
             try:
                 jobs_client = AsyncJobsClient.from_client(async_sdk)
-                await jobs_client.get_job_result(name="adapter", job=model_job, workspace=model_workspace)
+                attempt_id = (
+                    (
+                        await jobs_client.get_job_attempt(
+                            job=model_job,
+                            attempt="current",
+                            workspace=model_workspace,
+                        )
+                    )
+                    .data()
+                    .id
+                )
+                await jobs_client.get_attempt_result(
+                    name="adapter",
+                    job=model_job,
+                    attempt=attempt_id,
+                    workspace=model_workspace,
+                )
             except ClientNotFoundError as e:
                 raise HelixJobCompilationError(
                     f"Could not find adapter result for NSS job {model_workspace}/{model_job!r}"

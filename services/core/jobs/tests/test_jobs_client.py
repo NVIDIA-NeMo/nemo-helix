@@ -313,7 +313,15 @@ async def test_result_methods_round_trip(
 
     listed = (await jobs_client.list_job_results(workspace="default", name=job.name)).data()
     assert [item.name for item in listed.data] == ["output"]
-    fetched = (await jobs_client.get_job_result(workspace="default", job=job.name, name="output")).data()
+    assert job.attempt_id is not None
+    fetched = (
+        await jobs_client.get_attempt_result(
+            workspace="default",
+            job=job.name,
+            attempt=job.attempt_id,
+            name="output",
+        )
+    ).data()
     assert fetched.artifact_url == "default/test-fileset#output.txt"
 
     result_dir = tmp_path / "typed-result"

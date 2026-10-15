@@ -103,8 +103,8 @@ paths:
     get:
       tags:
       - Data Designer
-      summary: Get Job Result
-      operationId: get_job_result_apis_data_designer_v2_workspaces__workspace__jobs_create__job__results__name__get
+      summary: Get Attempt Result
+      operationId: get_attempt_result_apis_data_designer_v2_workspaces__workspace__jobs_create__job__results__name__get
       parameters:
       - name: workspace
         in: path
@@ -126,10 +126,12 @@ paths:
           title: Name
       - name: attempt_id
         in: query
-        required: false
+        required: true
         schema:
-          title: Attempt Id
           type: string
+          description: Attempt ID or 'current'
+          title: Attempt Id
+        description: Attempt ID or 'current'
       responses:
         '200':
           description: Successful Response
@@ -664,8 +666,8 @@ paths:
     get:
       tags:
       - Data Designer
-      summary: Get Job Result
-      operationId: get_job_result_apis_data_designer_v2_workspaces__workspace__jobs_retrieval_generate__job__results__name__get
+      summary: Get Attempt Result
+      operationId: get_attempt_result_apis_data_designer_v2_workspaces__workspace__jobs_retrieval_generate__job__results__name__get
       parameters:
       - name: workspace
         in: path
@@ -687,10 +689,12 @@ paths:
           title: Name
       - name: attempt_id
         in: query
-        required: false
+        required: true
         schema:
-          title: Attempt Id
           type: string
+          description: Attempt ID or 'current'
+          title: Attempt Id
+        description: Attempt ID or 'current'
       responses:
         '200':
           description: Successful Response
@@ -1225,8 +1229,8 @@ paths:
     get:
       tags:
       - Data Designer
-      summary: Get Job Result
-      operationId: get_job_result_apis_data_designer_v2_workspaces__workspace__jobs_retrieval_prepare__job__results__name__get
+      summary: Get Attempt Result
+      operationId: get_attempt_result_apis_data_designer_v2_workspaces__workspace__jobs_retrieval_prepare__job__results__name__get
       parameters:
       - name: workspace
         in: path
@@ -1248,10 +1252,12 @@ paths:
           title: Name
       - name: attempt_id
         in: query
-        required: false
+        required: true
         schema:
-          title: Attempt Id
           type: string
+          description: Attempt ID or 'current'
+          title: Attempt Id
+        description: Attempt ID or 'current'
       responses:
         '200':
           description: Successful Response
@@ -1786,8 +1792,8 @@ paths:
     get:
       tags:
       - Data Designer
-      summary: Get Job Result
-      operationId: get_job_result_apis_data_designer_v2_workspaces__workspace__jobs_retrieval_run__job__results__name__get
+      summary: Get Attempt Result
+      operationId: get_attempt_result_apis_data_designer_v2_workspaces__workspace__jobs_retrieval_run__job__results__name__get
       parameters:
       - name: workspace
         in: path
@@ -1809,10 +1815,12 @@ paths:
           title: Name
       - name: attempt_id
         in: query
-        required: false
+        required: true
         schema:
-          title: Attempt Id
           type: string
+          description: Attempt ID or 'current'
+          title: Attempt Id
+        description: Attempt ID or 'current'
       responses:
         '200':
           description: Successful Response

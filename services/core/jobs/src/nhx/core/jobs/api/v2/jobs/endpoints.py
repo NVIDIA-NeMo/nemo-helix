@@ -830,31 +830,6 @@ async def list_job_results(
 
 
 @router.get(
-    "/v2/workspaces/{workspace}/jobs/{job}/results/{name}",
-    status_code=status.HTTP_200_OK,
-    responses={
-        status.HTTP_200_OK: {"description": "Successful Response"},
-        status.HTTP_404_NOT_FOUND: {"description": "Not Found"},
-    },
-)
-async def get_job_result(
-    job: str,
-    name: str,
-    workspace: str,
-    dispatcher: JobDispatcher = Depends(dep_dispatcher),
-) -> HelixJobResultResponse:
-    """Get a specific job result."""
-    with scoped_app_ctx(JobContext(id=job, result_name=name)):
-        result = await dispatcher.get_result(job, name, workspace)
-        if not result:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Result '{name}' for job '{job}' not found in workspace '{workspace}'.",
-            )
-        return result.to_response()
-
-
-@router.get(
     "/v2/workspaces/{workspace}/jobs/{job}/results/{name}/download",
     status_code=status.HTTP_200_OK,
     responses={

@@ -19,6 +19,7 @@ from nemo_helix_ext.cli.commands.jobs import (
     list_jobs,
     list_steps,
     retrieve_attempt,
+    retrieve_results,
     tail_platform_job,
     update_jobs,
     update_status_steps,
@@ -484,6 +485,32 @@ def test_download_result_with_attempt_uses_canonical_route(tmp_path: Path) -> No
     assert output_file.read_bytes() == b"bytes"
 
 
+def test_retrieve_result_requires_attempt_route() -> None:
+    platform_client = SimpleNamespace()
+    jobs_client = MagicMock()
+    result = SimpleNamespace(name="metrics")
+    jobs_client.get_attempt_result.return_value = _Response(result)
+
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
+        patch("nemo_helix_ext.cli.commands.jobs.format_output"),
+    ):
+        retrieve_results(
+            _ctx(platform_client),
+            name="metrics",
+            job="job-a",
+            attempt_id="att-1",
+            workspace="test-workspace",
+        )
+
+    jobs_client.get_attempt_result.assert_called_once_with(
+        workspace="test-workspace",
+        job="job-a",
+        attempt="att-1",
+        name="metrics",
+    )
+
+
 def test_jobs_code_generation_uses_source_owned_client_without_path_args_in_query_params() -> None:
     code = _generate_jobs_python_code(
         resource_path=["jobs", "results"],
@@ -522,3 +549,25 @@ def test_jobs_download_code_generation_streams_result() -> None:
     assert "with Path(args['output_file']).open('wb') as output:" in code
     assert "with response.stream() as chunks:" in code
     assert "output.write(chunk)" in code
+
+
+def test_jobs_result_get_code_generation_uses_attempt_route() -> None:
+    code = _generate_jobs_python_code(
+        resource_path=["jobs", "results"],
+        method="retrieve",
+        args={
+            "workspace": "test-workspace",
+            "job": "job-a",
+            "attempt_id": "att-1",
+            "name": "metrics",
+        },
+        base_url="http://example.test",
+        wait_config=None,
+        wait_options=None,
+        watch_config=None,
+        watch_options=None,
+    )
+
+    assert "get_attempt_result" in code
+    assert "get_job_result" not in code
+    assert "attempt=args['attempt_id']" in code

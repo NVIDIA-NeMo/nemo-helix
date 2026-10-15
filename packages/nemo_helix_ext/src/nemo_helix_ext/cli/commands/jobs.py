@@ -369,13 +369,11 @@ def _render_source_jobs_call(resource_path: list[str], method: str, args: dict[s
             "    print(item)",
         ]
     if operation == (("jobs", "results"), "retrieve"):
-        method = "get_attempt_result" if args.get("attempt_id") is not None else "get_job_result"
-        attempt_line = "    attempt=args['attempt_id']," if args.get("attempt_id") is not None else None
         return [
-            f"response = jobs_client.{method}(",
+            "response = jobs_client.get_attempt_result(",
             "    workspace=args.get('workspace'),",
             "    job=args['job'],",
-            *([attempt_line] if attempt_line else []),
+            "    attempt=args['attempt_id'],",
             "    name=args['name'],",
             ")",
             "print(response.data())",
@@ -1559,14 +1557,12 @@ def list_results(
 def retrieve_results(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument()],
+    job: Annotated[str, typer.Option("--job", help="Job name or ID")],
+    attempt_id: Annotated[str, typer.Option("--attempt-id", help="Attempt ID or 'current'")],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
-    job: Annotated[str | None, typer.Option("--job", help="(required)")] = None,
-    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     output_format: EntityOutputFormatOption = None,
 ) -> None:
-    """Get a specific job result."""
-    if job is None:
-        raise typer.BadParameter("--job is required")
+    """Get a result from a specific job attempt."""
 
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
@@ -1576,15 +1572,12 @@ def retrieve_results(
         return
 
     _, jobs_client = _jobs_client_from_state(state)
-    if attempt_id is not None:
-        result = jobs_client.get_attempt_result(
-            workspace=workspace,
-            job=job,
-            attempt=attempt_id,
-            name=name,
-        ).data()
-    else:
-        result = jobs_client.get_job_result(workspace=workspace, job=job, name=name).data()
+    result = jobs_client.get_attempt_result(
+        workspace=workspace,
+        job=job,
+        attempt=attempt_id,
+        name=name,
+    ).data()
 
     format_output(
         result,

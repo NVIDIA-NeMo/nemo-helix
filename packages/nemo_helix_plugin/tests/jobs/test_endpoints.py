@@ -220,12 +220,6 @@ def test_list_job_results() -> None:
     assert prepared.path_template.endswith("/jobs/{name}/results")
 
 
-def test_get_job_result() -> None:
-    prepared = endpoints.get_job_result(workspace="default", job="j-1", name="out")
-    assert prepared.method == "GET"
-    assert prepared.path_params == {"workspace": "default", "job": "j-1", "name": "out"}
-
-
 def test_download_job_result() -> None:
     prepared = endpoints.download_job_result(workspace="default", job="j-1", name="out")
     assert prepared.method == "GET"

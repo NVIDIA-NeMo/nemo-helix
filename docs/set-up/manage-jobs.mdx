@@ -18,7 +18,7 @@ nemo jobs attempts list <job-name> --workspace default
 nemo jobs attempts get current --job <job-name> --workspace default
 ```
 
-Attempt-scoped APIs keep execution data from different runs separate. Pass `--attempt-id <attempt-id>` or `--attempt-id current` to job result, step, task, log, watch, and tail commands when you need data from a specific run. Commands without an attempt selector continue to use the existing job-level API for compatibility.
+Attempt-scoped APIs keep execution data from different runs separate. `nemo jobs results get` requires `--attempt-id <attempt-id>` or `--attempt-id current`; result metadata cannot be retrieved ambiguously from the job alone. Step, task, log, watch, and tail commands also accept an attempt selector when you need data from a specific run.
 
 ## Updating Jobs
 
@@ -46,7 +46,7 @@ Use `nemo jobs tail` when you only need the newest lines from a long or running 
 nemo jobs tail <job-name> --workspace default -n 500
 ```
 
-Both commands support `--attempt-id`, `--step-id`, and `--task-id` to narrow the log output. The attempt selector accepts an attempt ID, an attempt name, or `current`.
+Both commands support `--attempt-id`, `--step-id`, and `--task-id` to narrow the log output. The attempt selector accepts an attempt ID or `current`.
 
 ## Execution Profiles
 

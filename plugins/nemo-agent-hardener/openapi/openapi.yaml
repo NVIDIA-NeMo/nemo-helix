@@ -118,8 +118,8 @@ paths:
     get:
       tags:
       - Agent Hardener Jobs
-      summary: Get Job Result
-      operationId: get_job_result_apis_agent_hardener_v2_workspaces__workspace__jobs__job__results__name__get
+      summary: Get Attempt Result
+      operationId: get_attempt_result_apis_agent_hardener_v2_workspaces__workspace__jobs__job__results__name__get
       parameters:
       - name: workspace
         in: path
@@ -141,10 +141,12 @@ paths:
           title: Name
       - name: attempt_id
         in: query
-        required: false
+        required: true
         schema:
-          title: Attempt Id
           type: string
+          description: Attempt ID or 'current'
+          title: Attempt Id
+        description: Attempt ID or 'current'
       responses:
         '200':
           description: Successful Response
@@ -1380,8 +1382,8 @@ paths:
     get:
       tags:
       - Agent Hardener Synth Jobs
-      summary: Get Job Result
-      operationId: get_job_result_apis_agent_hardener_v2_workspaces__workspace__synth_benign_jobs__job__results__name__get
+      summary: Get Attempt Result
+      operationId: get_attempt_result_apis_agent_hardener_v2_workspaces__workspace__synth_benign_jobs__job__results__name__get
       parameters:
       - name: workspace
         in: path
@@ -1403,10 +1405,12 @@ paths:
           title: Name
       - name: attempt_id
         in: query
-        required: false
+        required: true
         schema:
-          title: Attempt Id
           type: string
+          description: Attempt ID or 'current'
+          title: Attempt Id
+        description: Attempt ID or 'current'
       responses:
         '200':
           description: Successful Response

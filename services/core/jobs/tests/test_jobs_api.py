@@ -1224,7 +1224,11 @@ async def test_job_paging(test_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_job_result_crud(async_client: AsyncNemoClient, sample_platform_job_request: CreateHelixJobRequest):
+async def test_job_result_crud(
+    async_client: AsyncNemoClient,
+    test_client: AsyncClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
     jobs = AsyncJobsClient.from_client(async_client)
     job_resp = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
     resp = (
@@ -1258,10 +1262,20 @@ async def test_job_result_crud(async_client: AsyncNemoClient, sample_platform_jo
     assert len(results.data) == 2
     result2 = next(r for r in results.data if "result-name2" == r.name)
 
+    assert job_resp.attempt_id is not None
     another_result_2 = (
-        await jobs.get_job_result(name=result2.name, workspace=DEFAULT_WORKSPACE, job=job_resp.name)
+        await jobs.get_attempt_result(
+            name=result2.name,
+            workspace=DEFAULT_WORKSPACE,
+            job=job_resp.name,
+            attempt=job_resp.attempt_id,
+        )
     ).data()
     assert result2 == another_result_2
+    legacy_get = await test_client.get(
+        f"/apis/jobs/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/{job_resp.name}/results/{result2.name}"
+    )
+    assert legacy_get.status_code == 405
     # The result's namespace is inherited from the parent job, not from the create request
     # Since the job uses the default namespace, the result should too
     assert result2.workspace == "default"
