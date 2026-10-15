@@ -70,7 +70,14 @@ function readReleaseCatalog(workflow) {
     if (!block) {
       throw new Error(`Selected source release workflow is missing ${name}.`);
     }
-    const artifacts = JSON.parse(block[1]);
+    let artifacts;
+    try {
+      artifacts = JSON.parse(block[1]);
+    } catch (cause) {
+      throw new Error(`Selected source ${name} contains invalid JSON.`, {
+        cause,
+      });
+    }
     if (!Array.isArray(artifacts)) {
       throw new Error(`Selected source ${name} must be a JSON array.`);
     }

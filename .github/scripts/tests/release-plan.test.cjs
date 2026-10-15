@@ -82,10 +82,23 @@ test("rejects missing or invalid source catalogs", () => {
     () => readReleaseCatalog(sourceWorkflow({ containers: {} })),
     /RELEASE_CONTAINERS_JSON must be a JSON array/,
   );
-  assert.throws(
-    () => readReleaseCatalog(sourceWorkflow().replace('[{"id":', '[{"id"!')),
-    SyntaxError,
-  );
+  for (const name of ["RELEASE_WHEELS_JSON", "RELEASE_CONTAINERS_JSON"]) {
+    assert.throws(
+      () =>
+        readReleaseCatalog(
+          sourceWorkflow().replace(`${name}: >-\n    [`, `${name}: >-\n    ![`),
+        ),
+      (error) => {
+        assert.equal(error.constructor, Error);
+        assert.equal(
+          error.message,
+          `Selected source ${name} contains invalid JSON.`,
+        );
+        assert.ok(error.cause instanceof SyntaxError);
+        return true;
+      },
+    );
+  }
 });
 
 for (const [label, context] of [
