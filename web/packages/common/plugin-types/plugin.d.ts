@@ -9023,7 +9023,7 @@ interface RowActionsCellProps<TData> extends Omit<DropdownProps, 'items'> {
   ctx: CellContext<TData, unknown>;
   /**
    * A function that returns the items to render in the dropdown. For conditional row actions,
-   * return a falsey value to render nothing.
+   * return an empty array or a falsey value to render nothing.
    */
   rowActions?: (row: TData, ctx: CellContext<TData, unknown>) => DropdownProps['items'] | false | null | undefined;
 }
