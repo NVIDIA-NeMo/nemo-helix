@@ -27,6 +27,14 @@ class _TimezoneWithoutOffset(tzinfo):
         """
         return None
 
+    def tzname(self, dt: datetime | None) -> None:
+        """Return no zone name; ``tzinfo`` leaves this abstract."""
+        return None
+
+    def dst(self, dt: datetime | None) -> None:
+        """Return no DST offset; ``tzinfo`` leaves this abstract."""
+        return None
+
 
 @pytest.mark.parametrize(
     "threshold,task_count,expected",
