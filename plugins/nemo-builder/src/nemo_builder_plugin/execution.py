@@ -84,9 +84,20 @@ class ExecutionBackend:
         return fetch
 
     def check(self, plan: BuildPlan) -> None:
-        """Refuse every request while a setting with no default is unset, or the build's profiles disagree."""
+        """Refuse every request while a setting with no default is unset, or the build's profiles disagree.
+
+        Also refuse a copy from a registry the deployment doesn't allow.
+        """
         self._registry()
         self._work_profile()
+        allowed = self._config.import_registries
+        for image in plan.copies:
+            upstream = image.upstream
+            if upstream is not None and upstream.registry not in allowed:
+                raise BackendRejectedError(
+                    f"{image.name} copies from {upstream.registry}, which this deployment doesn't allow "
+                    f"(allowed: {', '.join(allowed) or 'none'})"
+                )
 
     def destination(self, image: PlannedImage) -> Destination:
         """The deployment's registry, under the submitting workspace, with a per-row system tag.

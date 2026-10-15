@@ -12,6 +12,7 @@ from nemo_builder_plugin.steps import (
     REGISTRY_USERNAME_ENV,
     SIGNING_KEY_ENV,
     ContextSource,
+    FetchImport,
     FetchStepConfig,
     PushImage,
     PushStepConfig,
@@ -39,14 +40,13 @@ WORK_MOUNT = DEFAULT_JOB_STORAGE_PATH
 
 
 def _fetch_sources(plan: BuildPlan) -> list[ContextSource]:
+    builds = [image for image in plan.images if image.upstream is None]
     whole_filesets = {
-        image.source.fileset
-        for image in plan.images
-        if image.source.archive is None and image.source.context_path is None
+        image.source.fileset for image in builds if image.source.archive is None and image.source.context_path is None
     }
 
     sources: list[ContextSource] = []
-    for image in plan.images:
+    for image in builds:
         source = image.source
         if source.archive is not None:
             # Unpacked whole, once, whichever directory of it each image builds from.
@@ -71,7 +71,13 @@ def _fetch_step(plan: BuildPlan, config: BuilderConfig, *, step_image: str) -> H
             container=ContainerSpec(image=step_image, command=["nhx-build", "fetch"]),
         ),
         environment=[HelixJobEnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value=WORK_MOUNT)],
-        config=FetchStepConfig(sources=_fetch_sources(plan)).model_dump(),
+        config=FetchStepConfig(
+            sources=_fetch_sources(plan),
+            imports=[
+                FetchImport(image=image.name, ref=image.pinned_upstream, platform=image.spec.platform)
+                for image in plan.copies
+            ],
+        ).model_dump(),
     )
 
 
@@ -133,6 +139,7 @@ def _push_step(plan: BuildPlan, config: BuilderConfig, *, registry: str, step_im
             # Always pushed: the one tag every image has, which no request can name.
             system_ref=image.placed.system_ref,
             caller_ref=image.caller_ref,
+            expected_digest=image.upstream_digest,
         )
         for image in plan.images
     ]
@@ -181,9 +188,8 @@ def compile_build_set(
 
     ``image_pull_secrets`` are the ones the sandbox pulls its image with.
     """
-    return HelixJobSpec(
-        steps=[
-            _fetch_step(plan, config, step_image=step_image),
+    build = (
+        [
             _build_step(
                 plan,
                 config,
@@ -191,7 +197,15 @@ def compile_build_set(
                 sandbox_image=sandbox_image,
                 image_pull_secrets=image_pull_secrets,
                 work_profile=work_profile,
-            ),
+            )
+        ]
+        if plan.groups()
+        else []
+    )
+    return HelixJobSpec(
+        steps=[
+            _fetch_step(plan, config, step_image=step_image),
+            *build,
             _push_step(plan, config, registry=registry, step_image=step_image),
         ]
     )

@@ -7,7 +7,14 @@ from __future__ import annotations
 
 import pytest
 from nemo_builder_plugin.entities import ContainerImage, Provenance
-from nemo_builder_plugin.schema import MAX_BUILD_SPECS, BuildOutput, BuildSet, BuildSpec, FileSetSource
+from nemo_builder_plugin.schema import (
+    MAX_BUILD_SPECS,
+    BuildOutput,
+    BuildSet,
+    BuildSpec,
+    FileSetSource,
+    ImageSource,
+)
 from pydantic import ValidationError
 
 _DIGEST = "sha256:" + "b" * 64
@@ -241,3 +248,23 @@ class TestContainerImage:
 
     def test_the_unnamed_spec_has_no_spec_name(self) -> None:
         assert _provenance(spec=None).spec is None
+
+
+class TestImageSources:
+    def test_a_spec_can_copy_an_image(self) -> None:
+        spec = BuildSpec.model_validate({"source": {"image": "ubuntu:24.04"}, "platform": "linux/arm64"})
+        assert spec.source == ImageSource(image="ubuntu:24.04")
+
+    def test_a_fileset_request_reads_and_serializes_as_before(self) -> None:
+        """Its request digest must not change, or resubmitting an earlier request would conflict."""
+        spec = BuildSpec.model_validate({"source": {"fileset": "fs-a"}})
+        assert isinstance(spec.source, FileSetSource)
+        assert spec.model_dump(mode="json")["source"] == {"fileset": "fs-a", "archive": None, "context_path": None}
+
+    def test_a_copy_names_no_dockerfile(self) -> None:
+        with pytest.raises(ValidationError, match="no dockerfile"):
+            BuildSpec.model_validate({"source": {"image": "ubuntu:24.04"}, "dockerfile": "Dockerfile"})
+
+    def test_an_image_that_is_not_a_reference_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="image reference"):
+            BuildSpec.model_validate({"source": {"image": "not a reference"}})

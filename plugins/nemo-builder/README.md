@@ -318,7 +318,8 @@ job, and each spec becomes one `ContainerImage` row.
 | `source.fileset` | The fileset holding the build context: `name` in this workspace, or `workspace/name`. |
 | `source.archive` | Optional. A tar archive in the fileset to build from, compressed or not, under any file name: the fetch step reads the format from the file, and a file that isn't a tar archive fails the build. Relative, with no `..`. |
 | `source.context_path` | Optional subdirectory to use as the context: of the fileset, or of the archive if `archive` is set. Relative, with no `..`. Omit it to use the whole fileset or archive. |
-| `dockerfile` | Path relative to the context. Absolute paths and `..` are rejected. Defaults to `Dockerfile`. |
+| `source.image` | Instead of a fileset, a published image to copy unchanged: see [Copying a published image](#copying-a-published-image). |
+| `dockerfile` | Path relative to the context. Absolute paths and `..` are rejected. Defaults to `Dockerfile`. A copy takes none. |
 | `platform` | Passed to kaniko. Defaults to `linux/amd64`. |
 | `output.repository`, `output.tag` | Optional. Where the image is published, within your workspace's part of the registry. Tags containing `--` or starting with `sha256-` are reserved for system tags and signatures. |
 
@@ -331,6 +332,19 @@ unpacks an archive once, however many of its specs use it:
 ```json
 {"name": "tests", "source": {"fileset": "tasks", "archive": "tb/hello-world.tar.gz", "context_path": "tests"}}
 ```
+
+#### Copying a published image
+
+A spec can copy an image instead of building one: `{"source": {"image": "ubuntu:24.04"}}`, by tag or
+digest, as `docker pull` takes it. At submit the builder resolves it, anonymously, to the one manifest
+for the spec's `platform`, and records the reference and that manifest's digest on the row as
+`provenance.upstream`. The job pulls exactly that manifest and pushes it unchanged, so the published
+digest is the upstream one; the push step and `complete` both refuse any other. The copy is signed
+like a build. Copies skip the build step, so a set of nothing but copies runs no sandbox.
+
+Only registries in the deployment's `import_registries` can be copied from, and only public images.
+A copy from any other registry is a `409`. A reference that doesn't resolve, or names no image for
+the platform, is a `400`; a registry that can't be reached is a `502`.
 
 Every image goes to the deployment's one registry. With an `output`, it goes to
 `<registry>/<repository_prefix>/<workspace>/<output.repository>:<output.tag>`. Without one, it goes
@@ -345,12 +359,12 @@ job: images in a set finish independently.
 | Status | When |
 |---|---|
 | `201` | Rows created and job submitted, or the same request was submitted before and these are its rows and job. |
-| `400` | Two specs would publish the same `repository:tag`, or the workspace name can't be a repository path component. |
+| `400` | Two specs would publish the same `repository:tag`, or the workspace name can't be a repository path component. Or an image to copy doesn't resolve to a public image for its platform. |
 | `401` | Platform auth is on and the request names no one. |
 | `403` | You may not submit builds in the workspace, or read Jobs' execution profiles, which every user can by default. Or you may, but may not create jobs there: the rows were already written, and stay `pending`. Or you're a service that isn't acting for a person. |
-| `409` | The deployment can't build: `registry` is unset, or the build's [Jobs execution profiles](#jobs-execution-profiles) are missing, aren't on Kubernetes, or disagree. Or the push step's secrets don't exist in the workspace, or you can't read them. Or this `name` and `revision` were already submitted with a different request, or the job's name is held by a job this request didn't create; the request's rows are then failed. |
+| `409` | An image to copy is on a registry the deployment doesn't allow. Or the deployment can't build: `registry` is unset, or the build's [Jobs execution profiles](#jobs-execution-profiles) are missing, aren't on Kubernetes, or disagree. Or the push step's secrets don't exist in the workspace, or you can't read them. Or this `name` and `revision` were already submitted with a different request, or the job's name is held by a job this request didn't create; the request's rows are then failed. |
 | `422` | The body failed validation: for example a path outside the context or fileset, a set or spec name that doesn't fit, more than 100 specs, duplicate spec names, a `revision` below 1, a repository or tag that isn't valid or is reserved, or an unknown field such as `output.registry`. |
-| `502` | Another platform service refused the build. If Jobs refused the job, the rows were already written, and stay `pending`. |
+| `502` | Another platform service refused the build. If Jobs refused the job, the rows were already written, and stay `pending`. Or the registry of an image to copy couldn't be reached. |
 | `500` | Anything else. |
 
 ### Read the results: `GET /container-images` and `GET /container-images/{name}`
@@ -615,6 +629,8 @@ builder:
   registry_username_secret: builder-registry-username
   registry_password_secret: builder-registry-password
   signing_key_secret: builder-signing-key
+  # Registries a build may copy a published image from. These are the defaults; [] refuses every copy.
+  import_registries: [docker.io, ghcr.io, nvcr.io, quay.io]
 ```
 
 `registry` has no default; while it is unset, submits fail with a `409` rather than as builds that

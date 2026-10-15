@@ -9,6 +9,7 @@ import pytest
 from nemo_builder_plugin.identity import (
     ImageIdentityError,
     compose_system_tag,
+    normalize_reference,
     validate_caller_tag,
     validate_registry_host,
 )
@@ -63,3 +64,26 @@ class TestRegistryHost:
     def test_anything_else_is_refused(self, bad: str) -> None:
         with pytest.raises(ImageIdentityError):
             validate_registry_host(bad)
+
+
+class TestNormalizeReference:
+    @pytest.mark.parametrize(
+        ("given", "expected"),
+        [
+            ("alpine", "docker.io/library/alpine:latest"),
+            ("ubuntu:24.04", "docker.io/library/ubuntu:24.04"),
+            ("org/app", "docker.io/org/app:latest"),
+            ("index.docker.io/library/python:3.12", "docker.io/library/python:3.12"),
+            ("ghcr.io/org/app:1", "ghcr.io/org/app:1"),
+            ("localhost:5000/team/app", "localhost:5000/team/app:latest"),
+            ("redis:7@sha256:" + "a" * 64, "docker.io/library/redis@sha256:" + "a" * 64),
+        ],
+    )
+    def test_docker_shorthand_is_expanded(self, given: str, expected: str) -> None:
+        """Two spellings of one image must normalize alike, or the allowlist is decided by spelling."""
+        assert str(normalize_reference(given)) == expected
+
+    @pytest.mark.parametrize("bad", ["", "a b", "https://ghcr.io/x", "ubuntu@sha256:abc", "Ubuntu"])
+    def test_anything_else_is_refused(self, bad: str) -> None:
+        with pytest.raises(ImageIdentityError):
+            normalize_reference(bad)

@@ -14,18 +14,20 @@ from nemo_builder_plugin.backend import BackendRejectedError
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import ContainerImage
 from nemo_builder_plugin.execution import ExecutionBackend
-from nemo_builder_plugin.identity import compose_system_tag
-from nemo_builder_plugin.schema import BuildOutput, BuildSet, BuildSpec, FileSetSource
-from nemo_builder_plugin.steps import PushStepConfig
+from nemo_builder_plugin.identity import ImageReference, compose_system_tag
+from nemo_builder_plugin.schema import BuildOutput, BuildSet, BuildSpec, FileSetSource, ImageSource
+from nemo_builder_plugin.steps import FetchStepConfig, PushStepConfig, SuperviseStepConfig
 from nemo_builder_plugin.submit import (
     JOB_SOURCE,
     BuildConflict,
     InvalidBuildRequest,
     MissingSecrets,
     SubmitResult,
+    UpstreamUnavailable,
     request_digest,
     submit_build_set,
 )
+from nemo_builder_plugin.upstream import UpstreamError, UpstreamNotFound
 from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.entities import EntityConflictError
 from nemo_helix_plugin.jobs.execution_profiles import KubernetesJobExecutionProfile
@@ -118,11 +120,19 @@ async def _submit(
     build_set: BuildSet | None = None,
     config: BuilderConfig | None = None,
     unreadable: frozenset[str] = frozenset(),
+    upstream: Mapping[str, str | Exception] | None = None,
 ) -> SubmitResult:
     jobs = jobs or FakeJobs(entity_client.events)
 
     async def secret_readable(workspace: str, name: str) -> bool:
         return f"{workspace}/{name}" not in unreadable
+
+    async def resolve_upstream(reference: ImageReference, platform: str) -> str:
+        entity_client.events.append(f"resolve:{reference}:{platform}")
+        found = (upstream or {})[str(reference)]
+        if isinstance(found, Exception):
+            raise found
+        return found
 
     return await submit_build_set(
         build_set or _set(),
@@ -132,6 +142,7 @@ async def _submit(
         create_job=jobs.create_job,
         get_job_fields=jobs.get_job_fields,
         secret_readable=secret_readable,
+        resolve_upstream=resolve_upstream,
     )
 
 
@@ -328,3 +339,85 @@ class TestTheJobRequest:
             tag = compose_system_tag(row.workspace, row.name)
             owners = [i for i, tags in enumerate(pushed) if any(t.endswith(f":{tag}") for t in tags)]
             assert owners == [index], f"row {row.name} tag {tag!r} is pushed by images {owners}"
+
+
+UBUNTU = "docker.io/library/ubuntu:24.04"
+UBUNTU_AMD64 = "sha256:" + "c" * 64
+
+
+def _copy_set(*images: str, build: bool = False) -> BuildSet:
+    specs = [BuildSpec(name=f"copy{i}", source=ImageSource(image=image)) for i, image in enumerate(images)]
+    if build:
+        specs.append(BuildSpec(name="built", source=FileSetSource(fileset="fs-a")))
+    return BuildSet(name="demo", revision=1, build_specs=specs)
+
+
+class TestCopies:
+    @pytest.mark.asyncio
+    async def test_a_copy_records_the_manifest_its_tag_named_at_submit(self) -> None:
+        entities = FakeEntityClient()
+        result = await _submit(entities, build_set=_copy_set("ubuntu:24.04"), upstream={UBUNTU: UBUNTU_AMD64})
+
+        upstream = result.images[0].provenance.upstream
+        assert upstream is not None
+        assert (upstream.image, upstream.manifest_digest) == (UBUNTU, UBUNTU_AMD64)
+        assert entities.events[0] == f"resolve:{UBUNTU}:linux/amd64"
+
+    @pytest.mark.asyncio
+    async def test_a_set_of_copies_pulls_and_pushes_without_a_build_step(self) -> None:
+        entities = FakeEntityClient()
+        jobs = FakeJobs(entities.events)
+        await _submit(entities, jobs, build_set=_copy_set("ubuntu:24.04"), upstream={UBUNTU: UBUNTU_AMD64})
+
+        steps = next(iter(jobs.jobs.values())).platform_spec.steps
+        assert [step.name for step in steps] == ["fetch", "push"]
+        fetch = FetchStepConfig.model_validate(steps[0].config)
+        assert fetch.sources == []
+        assert [(i.image, i.ref, i.platform) for i in fetch.imports] == [
+            ("demo-1.copy0", f"docker.io/library/ubuntu@{UBUNTU_AMD64}", "linux/amd64")
+        ]
+        assert PushStepConfig.model_validate(steps[1].config).images[0].expected_digest == UBUNTU_AMD64
+
+    @pytest.mark.asyncio
+    async def test_a_set_mixing_copies_and_builds_builds_only_the_builds(self) -> None:
+        entities = FakeEntityClient()
+        jobs = FakeJobs(entities.events)
+        await _submit(entities, jobs, build_set=_copy_set("ubuntu:24.04", build=True), upstream={UBUNTU: UBUNTU_AMD64})
+
+        steps = next(iter(jobs.jobs.values())).platform_spec.steps
+        assert [step.name for step in steps] == ["fetch", "build", "push"]
+        groups = SuperviseStepConfig.model_validate(steps[1].config).groups
+        assert [image.image for group in groups for image in group.images] == ["demo-1.built"]
+        pushed = PushStepConfig.model_validate(steps[2].config).images
+        assert [(image.image, image.expected_digest) for image in pushed] == [
+            ("demo-1.copy0", UBUNTU_AMD64),
+            ("demo-1.built", None),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_copy_from_a_registry_the_deployment_does_not_allow_writes_nothing(self) -> None:
+        entities = FakeEntityClient()
+        with pytest.raises(BackendRejectedError, match="registry.example.org"):
+            await _submit(entities, build_set=_copy_set("registry.example.org/app:1"))
+        assert entities.events == []
+
+    @pytest.mark.asyncio
+    async def test_an_empty_allowlist_refuses_every_copy(self) -> None:
+        with pytest.raises(BackendRejectedError, match="allowed: none"):
+            await _submit(FakeEntityClient(), build_set=_copy_set("ubuntu:24.04"), config=_config(import_registries=[]))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("failure", "error"),
+        [
+            (UpstreamNotFound("no linux/amd64 image"), InvalidBuildRequest),
+            (UpstreamError("timed out"), UpstreamUnavailable),
+        ],
+    )
+    async def test_an_image_that_does_not_resolve_writes_nothing(
+        self, failure: Exception, error: type[Exception]
+    ) -> None:
+        entities = FakeEntityClient()
+        with pytest.raises(error, match="demo-1.copy0"):
+            await _submit(entities, build_set=_copy_set("ubuntu:24.04"), upstream={UBUNTU: failure})
+        assert entities.events == [f"resolve:{UBUNTU}:linux/amd64"]

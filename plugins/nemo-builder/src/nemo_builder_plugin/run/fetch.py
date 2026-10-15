@@ -5,19 +5,21 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import tarfile
 import tempfile
 from pathlib import Path, PurePosixPath
 
+from nemo_builder_plugin.run.tools import run_tool
 from nemo_builder_plugin.run.utils import (
     job_identity,
     read_step_config,
     split_fileset_ref,
     work_mount,
 )
-from nemo_builder_plugin.steps import ContextSource, FetchStepConfig, WorkLayout
+from nemo_builder_plugin.steps import ContextSource, FetchImport, FetchStepConfig, WorkLayout
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client_provider import get_task_nemo_client
 from nemo_helix_plugin.files.client import FilesClient
@@ -152,6 +154,24 @@ def fetch_source(client: FilesClient, layout: WorkLayout, source: ContextSource,
     return count
 
 
+def pull_copy(layout: WorkLayout, copy: FetchImport) -> None:
+    """Pull the one manifest ``copy`` names into its image's OCI layout slot, unchanged.
+
+    Raises :class:`RuntimeError` and leaves no slot if the pull fails or yields anything but that manifest.
+    """
+    slot = Path(layout.output(copy.image))
+    expected = copy.ref.rpartition("@")[2]
+    try:
+        run_tool(["crane", "pull", "--format=oci", f"--platform={copy.platform}", copy.ref, str(slot)])
+        manifests = json.loads((slot / "index.json").read_text()).get("manifests") or []
+        digests = [entry.get("digest") for entry in manifests if isinstance(entry, dict)]
+        if digests != [expected]:
+            raise RuntimeError(f"pulling {copy.ref} produced {digests}, not exactly {expected}")
+    except Exception:
+        shutil.rmtree(slot, ignore_errors=True)
+        raise
+
+
 def clear_earlier_attempts(layout: WorkLayout) -> None:
     """Remove whatever an earlier run of this job left in its slice of the work volume.
 
@@ -181,5 +201,12 @@ def main() -> int:
             # Its entry names are the archive's, so the message is sanitized here rather than left to a traceback.
             logger.error("refusing to unpack %s", sanitize_for_log(str(exc)))
             return 1
+
+    for copy in config.imports:
+        try:
+            pull_copy(layout, copy)
+        except Exception as exc:
+            # The image's slot stays empty, so push counts it as failed; the other images still publish.
+            logger.error("could not pull %s for %s: %s", copy.ref, copy.image, sanitize_for_log(str(exc)))
 
     return 0

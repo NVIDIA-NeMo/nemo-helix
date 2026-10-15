@@ -19,6 +19,18 @@ from nemo_helix_plugin.refs import ENTITY_REF_PATTERN
 from pydantic import BaseModel, Field, computed_field
 
 
+class UpstreamImage(BaseModel):
+    """The published image a copy came from, resolved when the build was submitted."""
+
+    image: str = Field(
+        description="The image as the request named it, fully qualified: `docker.io/library/ubuntu:24.04`."
+    )
+    manifest_digest: str = Field(
+        pattern=DIGEST_PATTERN,
+        description="The manifest for the spec's platform that `image` named at submit. The copy's digest equals it.",
+    )
+
+
 class Provenance(BaseModel):
     """The build that produces the image, written at submit."""
 
@@ -35,6 +47,7 @@ class Provenance(BaseModel):
             "different request that reuses its revision. Every signature carries it."
         ),
     )
+    upstream: UpstreamImage | None = Field(default=None, description="For a copy, the image it copies.")
 
 
 class ContainerImage(NemoEntity, entity_type="container_image"):

@@ -13,9 +13,11 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from nemo_builder_plugin.backend import Backend, BackendRejectedError
-from nemo_builder_plugin.entities import ContainerImage, Provenance
-from nemo_builder_plugin.plan import BuildPlan
+from nemo_builder_plugin.entities import ContainerImage, Provenance, UpstreamImage
+from nemo_builder_plugin.identity import ImageReference
+from nemo_builder_plugin.plan import BuildPlan, PlannedImage
 from nemo_builder_plugin.schema import BuildSet
+from nemo_builder_plugin.upstream import UpstreamError, UpstreamNotFound
 from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.entities import EntityConflictError
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
@@ -41,6 +43,10 @@ GetJobFields = Callable[[str], Awaitable[Mapping[str, Any]]]
 #: Whether the caller can read the platform secret ``(workspace, name)``.
 SecretReadable = Callable[[str, str], Awaitable[bool]]
 
+#: The manifest digest an image reference names for a platform. Raises :class:`UpstreamNotFound` or
+#: :class:`UpstreamError`.
+ResolveUpstream = Callable[[ImageReference, str], Awaitable[str]]
+
 
 class InvalidBuildRequest(Exception):
     """The request contradicts itself or names something unusable (400).
@@ -51,6 +57,10 @@ class InvalidBuildRequest(Exception):
 
 class BuildConflict(Exception):
     """This ``(name, revision)`` was submitted with a different request, or its job name is taken (409)."""
+
+
+class UpstreamUnavailable(Exception):
+    """An image to copy couldn't be resolved because its registry failed (502)."""
 
 
 class MissingSecrets(Exception):
@@ -95,10 +105,31 @@ def _rows_for(plan: BuildPlan, digest: str) -> list[ContainerImage]:
                 spec=image.spec.name,
                 job=f"{plan.workspace}/{plan.job_name}",
                 request_digest=digest,
+                upstream=_upstream_image(image),
             ),
         )
         for image in plan.images
     ]
+
+
+def _upstream_image(image: PlannedImage) -> UpstreamImage | None:
+    if image.upstream is None or image.upstream_digest is None:
+        return None
+    return UpstreamImage(image=str(image.upstream), manifest_digest=image.upstream_digest)
+
+
+async def _resolve_copies(plan: BuildPlan, resolve_upstream: ResolveUpstream) -> BuildPlan:
+    digests: dict[str, str] = {}
+    for image in plan.copies:
+        upstream = image.upstream
+        assert upstream is not None
+        try:
+            digests[image.name] = await resolve_upstream(upstream, image.spec.platform)
+        except UpstreamNotFound as exc:
+            raise InvalidBuildRequest(f"{image.name}: {exc}") from exc
+        except UpstreamError as exc:
+            raise UpstreamUnavailable(f"{image.name}: {exc}") from exc
+    return plan.with_upstream(digests)
 
 
 async def submit_build_set(
@@ -110,12 +141,14 @@ async def submit_build_set(
     create_job: CreateJob,
     get_job_fields: GetJobFields,
     secret_readable: SecretReadable,
+    resolve_upstream: ResolveUpstream,
 ) -> SubmitResult:
     """Resolve, check, place, compile; then write the rows and create the job. In that order."""
     # Everything that can refuse the request runs before anything is written.
     try:
         plan = BuildPlan.resolve(build_set, workspace=workspace)
         backend.check(plan)
+        plan = await _resolve_copies(plan, resolve_upstream)
         plan = plan.with_destinations(backend.destination)
         platform_spec = backend.compile(plan)
     except BackendRejectedError:
