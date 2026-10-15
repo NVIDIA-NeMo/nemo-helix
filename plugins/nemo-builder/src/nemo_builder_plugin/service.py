@@ -44,11 +44,6 @@ from nemo_helix_plugin.service import NemoService, RouterSpec
 logger = logging.getLogger(__name__)
 
 
-async def job_custom_fields(jobs_client: AsyncJobsClient, *, workspace: str, name: str) -> dict:
-    """The ``custom_fields`` of the job ``name``: how a resubmit tells its own job from another's."""
-    return (await jobs_client.get_job(workspace=workspace, name=name)).data().custom_fields or {}
-
-
 async def _get_row(entity_client: NemoEntitiesClient, workspace: str, name: str) -> ContainerImage:
     try:
         return await entity_client.get(ContainerImage, name=name, workspace=workspace)
@@ -98,7 +93,7 @@ def _build_router() -> APIRouter:
             return await jobs_client.create_job(workspace=workspace, body=request)
 
         async def get_job_fields(name: str):
-            return await job_custom_fields(jobs_client, workspace=workspace, name=name)
+            return (await jobs_client.get_job(workspace=workspace, name=name)).data().custom_fields or {}
 
         secrets_client = AsyncSecretsClient.from_client(client)
 

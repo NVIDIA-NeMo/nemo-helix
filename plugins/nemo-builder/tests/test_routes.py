@@ -13,14 +13,15 @@ import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from nemo_builder_plugin import service
 from nemo_builder_plugin.completion import Caller, current_caller, submit_refusal
 from nemo_builder_plugin.entities import ContainerImage, Provenance
-from nemo_builder_plugin.service import BuilderService, job_custom_fields
+from nemo_builder_plugin.service import BuilderService
+from nemo_builder_plugin.submit import SubmitResult
 from nemo_helix_plugin.authz import CallerKind, get_path_rules
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError, get_entity_client
-from nemo_helix_plugin.jobs.client import AsyncJobsClient
 
 
 def _app(entities: AsyncMock, caller: Caller = Caller(auth=False)) -> FastAPI:
@@ -283,15 +284,17 @@ class TestWhoTheRoutesAdmit:
         assert self._callers()[("GET", "/container-images")] == {CallerKind.PRINCIPAL}
 
 
-class TestTheJobAResubmitFinds:
-    """A resubmit whose job already exists reads that job's ``custom_fields`` through the real Jobs client."""
+class TestAResubmitFindsItsJob:
+    """When the build set's job already exists, the route reads that job's ``custom_fields`` from Jobs."""
 
-    async def test_the_custom_fields_of_the_named_job(self) -> None:
+    def test_the_route_reads_the_named_job(self, monkeypatch: pytest.MonkeyPatch) -> None:
         fields = {"images": ["build-1-0"], "request_digest": "sha256:" + "a" * 64}
         requests: list[httpx.Request] = []
 
-        def handler(request: httpx.Request) -> httpx.Response:
+        def jobs(request: httpx.Request) -> httpx.Response:
             requests.append(request)
+            if request.url.path.endswith("/execution-profiles"):
+                return httpx.Response(200, json=[])
             return httpx.Response(
                 200,
                 json={
@@ -309,11 +312,23 @@ class TestTheJobAResubmitFinds:
                 },
             )
 
+        # The submit sequence has its own tests; here it only asks for the job a resubmit found.
+        async def submit(*_args, get_job_fields, **_kwargs) -> SubmitResult:
+            assert await get_job_fields("builder-build-1") == fields
+            return SubmitResult(job="builder-build-1", images=[])
+
+        monkeypatch.setattr(service, "load_backend", lambda *_args: None)
+        monkeypatch.setattr(service, "submit_build_set", submit)
         client = AsyncNemoClient(
-            base_url="http://platform.test", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+            base_url="http://platform.test", http_client=httpx.AsyncClient(transport=httpx.MockTransport(jobs))
         )
-        found = await job_custom_fields(AsyncJobsClient.from_client(client), workspace="ws-a", name="builder-build-1")
-        assert found == fields
-        assert [(r.method, r.url.path) for r in requests] == [
-            ("GET", "/apis/jobs/v2/workspaces/ws-a/jobs/builder-build-1")
+        app = _app(AsyncMock())
+        app.dependency_overrides[get_nemo_client] = lambda: client
+        body = {"name": "build", "revision": 1, "build_specs": [{"source": {"fileset": "ws-a/ctx"}}]}
+
+        response = TestClient(app).post("/v2/workspaces/ws-a/builds", json=body)
+
+        assert response.status_code == 201, response.text
+        assert ("GET", "/apis/jobs/v2/workspaces/ws-a/jobs/builder-build-1") in [
+            (r.method, r.url.path) for r in requests
         ]
