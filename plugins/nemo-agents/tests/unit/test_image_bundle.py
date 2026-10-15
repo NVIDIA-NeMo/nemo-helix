@@ -7,7 +7,9 @@ import base64
 import gzip
 import hashlib
 import io
+import ipaddress
 import json
+import socket
 import tarfile
 from typing import Any
 
@@ -17,8 +19,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_agents_plugin.api.v2 import agents as agents_router_module
 from nemo_agents_plugin.api.v2.dependencies import get_registry_http_client
+from nemo_agents_plugin.container import image_bundle
 from nemo_agents_plugin.container.image_bundle import (
     DOCKER_HUB_REGISTRY,
+    IMAGE_REGISTRIES_ENV,
     ImageAccessDeniedError,
     ImageBundleError,
     ImageNotFoundError,
@@ -28,6 +32,24 @@ from nemo_agents_plugin.container.image_bundle import (
 )
 
 AGENT_YAML = b"config_format: nemo-agents-spec-v1\nname: triage\n"
+PUBLIC_ADDRESS = ipaddress.ip_address("93.184.216.34")
+CDN_HOST = "cdn.example.net"
+
+
+@pytest.fixture(autouse=True)
+def resolve_everything_publicly(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
+    answers: dict[str, list[Any]] = {}
+
+    def resolve(host: str) -> list[Any]:
+        if host in answers:
+            return answers[host]
+        try:
+            return [ipaddress.ip_address(socket.inet_ntoa(socket.inet_aton(host)))]
+        except OSError:
+            return [PUBLIC_ADDRESS]
+
+    monkeypatch.setattr(image_bundle, "_resolve_host", resolve)
+    return answers
 
 
 def _layer(files: dict[str, bytes]) -> bytes:
@@ -55,6 +77,9 @@ class FakeRegistry:
         copy_command: str = "COPY ./ /workspace # buildkit",
         indexed: bool = True,
         private: bool = False,
+        redirect_blobs_to: str | None = None,
+        manifest_body: bytes | None = None,
+        layer_body: bytes | None = None,
     ) -> None:
         bundle = (
             {"workspace/agent.yaml": AGENT_YAML, "workspace/tools/search.py": b"print(1)\n"}
@@ -81,11 +106,18 @@ class FakeRegistry:
         ).encode()
         self.indexed = indexed
         self.private = private
+        self.redirect_blobs_to = redirect_blobs_to
+        self.manifest_body = manifest_body
+        self.layer_body = layer_body
         self.blob_requests: list[str] = []
+        self.requests: list[httpx.Request] = []
 
     def handle(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
         if request.url.host == "auth.docker.io":
             return httpx.Response(200, json={"token": "anon"})
+        if request.url.host == CDN_HOST:
+            return self._blob(request.url.path.rsplit("/", 1)[1])
         if request.headers.get("authorization") != "Bearer anon" or self.private:
             return httpx.Response(
                 401,
@@ -107,15 +139,20 @@ class FakeRegistry:
                     },
                 )
             if ref in ("0.1", _digest(self.manifest)):
-                return httpx.Response(200, content=self.manifest)
+                return httpx.Response(200, content=self.manifest if self.manifest_body is None else self.manifest_body)
             return httpx.Response(404)
         digest = path.rsplit("/", 1)[1]
         self.blob_requests.append(digest)
+        if self.redirect_blobs_to is not None:
+            return httpx.Response(307, headers={"location": f"{self.redirect_blobs_to}/blobs/{digest}"})
+        return self._blob(digest)
+
+    def _blob(self, digest: str) -> httpx.Response:
         if digest == _digest(self.config):
             return httpx.Response(200, content=self.config)
         for layer in self.layers:
             if digest == _digest(layer):
-                return httpx.Response(200, content=layer)
+                return httpx.Response(200, content=layer if self.layer_body is None else self.layer_body)
         return httpx.Response(404)
 
     def client(self) -> httpx.AsyncClient:
@@ -147,10 +184,151 @@ class TestParseImageReference:
         with pytest.raises(ImageBundleError, match="not an image reference"):
             parse_image_reference(image)
 
-    @pytest.mark.parametrize("image", ["localhost:5000/agent", "10.0.0.5:5000/agent", "169.254.169.254/agent"])
-    def test_refuses_registries_on_internal_networks(self, image: str) -> None:
-        with pytest.raises(ImageBundleError):
-            parse_image_reference(image)
+
+class TestRegistryPolicy:
+    async def test_refuses_registries_outside_the_allow_list(self) -> None:
+        async with FakeRegistry().client() as http:
+            with pytest.raises(ImageBundleError, match="not an allowed image registry"):
+                await read_agent_bundle("registry.example.com/team/agent", http=http)
+
+    async def test_allow_list_comes_from_the_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(IMAGE_REGISTRIES_ENV, "ghcr.io, Registry.Example.com")
+        async with FakeRegistry().client() as http:
+            with pytest.raises(ImageBundleError, match="not an allowed image registry"):
+                await read_agent_bundle(IMAGE, http=http)
+            with pytest.raises(ImageNotFoundError):
+                await read_agent_bundle("registry.example.com/team/agent", http=http)
+
+    @pytest.mark.parametrize(
+        "image",
+        [
+            "localhost:5000/agent",
+            "10.0.0.5:5000/agent",
+            "169.254.169.254/agent",
+            "127.1/agent",
+            "[::1]:5000/agent",
+            "[::ffff:127.0.0.1]/agent",
+            "registry.svc:5000/agent",
+            "intranet-registry:5000/agent",
+            "metadata.internal/agent",
+        ],
+    )
+    async def test_refuses_registries_on_internal_networks(self, image: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(IMAGE_REGISTRIES_ENV, "*")
+        async with FakeRegistry().client() as http:
+            with pytest.raises(ImageBundleError, match="private network"):
+                await read_agent_bundle(image, http=http)
+
+    async def test_refuses_registries_that_resolve_to_internal_addresses(
+        self, monkeypatch: pytest.MonkeyPatch, resolve_everything_publicly: dict[str, list[Any]]
+    ) -> None:
+        monkeypatch.setenv(IMAGE_REGISTRIES_ENV, "*")
+        resolve_everything_publicly["registry.example.com"] = [PUBLIC_ADDRESS, ipaddress.ip_address("10.0.0.5")]
+        registry = FakeRegistry()
+        async with registry.client() as http:
+            with pytest.raises(ImageBundleError, match="private network"):
+                await read_agent_bundle("registry.example.com/team/agent", http=http)
+        assert registry.requests == []
+
+    async def test_refuses_registries_that_do_not_resolve(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(IMAGE_REGISTRIES_ENV, "*")
+
+        def unresolvable(host: str) -> list[Any]:
+            raise OSError("no such host")
+
+        monkeypatch.setattr(image_bundle, "_resolve_host", unresolvable)
+        async with FakeRegistry().client() as http:
+            with pytest.raises(ImageBundleError, match="could not be resolved"):
+                await read_agent_bundle("registry.example.com/team/agent", http=http)
+
+    async def test_refuses_token_services_that_are_not_public_https(self) -> None:
+        registry = FakeRegistry()
+        original = registry.handle
+
+        def handle(request: httpx.Request) -> httpx.Response:
+            response = original(request)
+            if response.status_code == 401:
+                response.headers["www-authenticate"] = 'Bearer realm="http://169.254.169.254/token"'
+            return response
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+            with pytest.raises(ImageBundleError, match="token service"):
+                await read_agent_bundle(IMAGE, http=http)
+        assert all(request.url.host != "169.254.169.254" for request in registry.requests)
+
+
+class TestRedirects:
+    async def test_follows_https_blob_redirects_without_forwarding_the_token(self) -> None:
+        registry = FakeRegistry(redirect_blobs_to=f"https://{CDN_HOST}")
+        async with registry.client() as http:
+            bundle = await read_agent_bundle(IMAGE, http=http)
+
+        assert "agent.yaml" in bundle.files
+        cdn_requests = [request for request in registry.requests if request.url.host == CDN_HOST]
+        assert cdn_requests
+        assert all("authorization" not in request.headers for request in cdn_requests)
+
+    @pytest.mark.parametrize("target", [f"http://{CDN_HOST}", "https://10.0.0.5", "https://169.254.169.254"])
+    async def test_refuses_redirects_off_public_https(self, target: str) -> None:
+        registry = FakeRegistry(redirect_blobs_to=target)
+        async with registry.client() as http:
+            with pytest.raises(ImageBundleError):
+                await read_agent_bundle(IMAGE, http=http)
+        assert all(request.url.host in (DOCKER_HUB_REGISTRY, "auth.docker.io") for request in registry.requests)
+
+    async def test_gives_up_after_too_many_redirects(self) -> None:
+        def handle(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(302, headers={"location": str(request.url)})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+            with pytest.raises(ImageBundleError, match="too many times"):
+                await read_agent_bundle(IMAGE, http=http)
+
+
+class TestBodyLimits:
+    async def test_caps_the_layer_regardless_of_the_declared_size(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(image_bundle, "MAX_BUNDLE_LAYER_BYTES", 1024)
+        registry = FakeRegistry(layer_body=b"\0" * 2048)
+        async with registry.client() as http:
+            with pytest.raises(ImageBundleError, match="agent layer is larger than"):
+                await read_agent_bundle(IMAGE, http=http)
+
+    async def test_caps_metadata_bodies(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(image_bundle, "MAX_METADATA_BYTES", 64)
+        async with FakeRegistry(manifest_body=b"{" + b" " * 128 + b"}").client() as http:
+            with pytest.raises(ImageBundleError, match="manifest is larger than"):
+                await read_agent_bundle(IMAGE, http=http)
+
+    async def test_caps_how_far_the_layer_inflates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(image_bundle, "MAX_INFLATED_LAYER_BYTES", 1024 * 1024)
+        bomb = _layer({"workspace/agent.yaml": AGENT_YAML, "workspace/pad.bin": b"\0" * (4 * 1024 * 1024)})
+        async with FakeRegistry(layer_body=bomb).client() as http:
+            with pytest.raises(ImageBundleError, match="inflates to more than"):
+                await read_agent_bundle(IMAGE, http=http)
+
+    async def test_rejects_zstd_layers(self) -> None:
+        async with FakeRegistry(layer_body=b"\x28\xb5\x2f\xfd" + b"\0" * 16).client() as http:
+            with pytest.raises(ImageBundleError, match="zstd"):
+                await read_agent_bundle(IMAGE, http=http)
+
+    async def test_reports_malformed_registry_answers(self) -> None:
+        async with FakeRegistry(manifest_body=b"<html>busy</html>").client() as http:
+            with pytest.raises(ImageBundleError, match="manifest is not JSON"):
+                await read_agent_bundle(IMAGE, http=http)
+
+    async def test_does_not_echo_registry_status_codes(self) -> None:
+        registry = FakeRegistry()
+
+        def handle(request: httpx.Request) -> httpx.Response:
+            response = registry.handle(request)
+            if "/manifests/" in request.url.path and response.status_code == 200:
+                return httpx.Response(503)
+            return response
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+            with pytest.raises(ImageBundleError, match="unexpected response") as excinfo:
+                await read_agent_bundle(IMAGE, http=http)
+        assert "503" not in str(excinfo.value)
 
 
 class TestReadAgentBundle:
@@ -257,6 +435,9 @@ class TestReadAgentImageBundleRoute:
             (FakeRegistry(private=True), IMAGE, 403),
             (FakeRegistry(env=[]), IMAGE, 422),
             (FakeRegistry(), "https://hub.docker.com/r/org/agent", 422),
+            (FakeRegistry(), "registry.example.com/org/agent", 422),
+            (FakeRegistry(manifest_body=b"<html>busy</html>"), IMAGE, 422),
+            (FakeRegistry(redirect_blobs_to="https://10.0.0.5"), IMAGE, 422),
         ],
     )
     def test_maps_failures_to_status_codes(self, registry: FakeRegistry, image: str, status: int) -> None:

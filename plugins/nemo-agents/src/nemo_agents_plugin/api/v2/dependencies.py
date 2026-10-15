@@ -23,8 +23,11 @@ def get_files_client(client: AsyncNemoClient = Depends(get_nemo_client)) -> Asyn
 
 
 async def get_registry_http_client() -> AsyncIterator[httpx.AsyncClient]:
-    """Provide an HTTP client for reading public container registries."""
-    async with httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(30.0)) as http:
+    """Provide an HTTP client for reading public container registries.
+
+    Redirects are followed by image_bundle itself so each hop can be checked.
+    """
+    async with httpx.AsyncClient(follow_redirects=False, timeout=httpx.Timeout(30.0)) as http:
         yield http
 
 
