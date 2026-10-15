@@ -1391,17 +1391,6 @@ class JobDispatcher:
         operations_counter.add(1, attributes={"operation": "update_job_status_from_step"})
         return saved_step, attempt
 
-    async def update_job_status_details(
-        self, job_name: str, workspace: str, status_details: Dict[str, Any]
-    ) -> HelixJobResponse | None:
-        """Compatibility adapter that updates the current attempt once resolved."""
-        job = await self._resolve_job(job_name, workspace)
-        if job is None:
-            return None
-        if job.current_attempt_id is None:
-            raise JobHasNoAttemptError(f"Job '{job.name}' has not run yet.")
-        return await self.update_attempt_status_details(job.name, job.current_attempt_id, workspace, status_details)
-
     async def update_attempt_status_details(
         self,
         job_identifier: str,

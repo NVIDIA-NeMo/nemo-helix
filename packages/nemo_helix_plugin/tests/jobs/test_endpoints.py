@@ -157,18 +157,6 @@ def test_get_job_status() -> None:
     assert prepared.response_type is HelixJobStatusResponse
 
 
-def test_update_job_status_details() -> None:
-    prepared = endpoints.update_job_status_details(
-        workspace="default", name="j-1", body=JobStatusDetailsUpdate({"note": "x"})
-    )
-    assert prepared.method == "PATCH"
-    assert prepared.path_template.endswith("/jobs/{name}/status-details")
-    assert prepared.response_type is None
-    # RootModel serialises to the bare JSON object
-    assert isinstance(prepared.content, bytes)
-    assert json.loads(prepared.content) == {"note": "x"}
-
-
 def test_list_and_get_job_attempts() -> None:
     listed = endpoints.list_job_attempts(
         workspace="default",

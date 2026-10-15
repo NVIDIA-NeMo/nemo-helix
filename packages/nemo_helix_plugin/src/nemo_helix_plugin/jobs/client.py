@@ -111,7 +111,6 @@ class _JobsMethods:
 
     # Job status
     get_job_status = method(endpoints.get_job_status)
-    update_job_status_details = method(endpoints.update_job_status_details)
 
     # Job attempts
     list_job_attempts = method(endpoints.list_job_attempts)
@@ -153,21 +152,6 @@ class JobsClient(_JobsMethods, NemoClient):
 
     def list_execution_profiles(self) -> builtins.list[endpoints.ExecutionProfile]:
         return self.get_execution_profiles().data()
-
-    def update_status_details(
-        self,
-        name: str,
-        *,
-        workspace: str | None = None,
-        body: dict[str, object],
-    ) -> None:
-        """Compatibility alias for updating the current attempt."""
-        return self.update_attempt_status_details(
-            name,
-            "current",
-            workspace=workspace,
-            body=body,
-        )
 
     def update_attempt_status_details(
         self,
@@ -227,21 +211,6 @@ class AsyncJobsClient(_JobsMethods, AsyncNemoClient):
 
     async def list_execution_profiles(self) -> builtins.list[endpoints.ExecutionProfile]:
         return (await self.get_execution_profiles()).data()
-
-    async def update_status_details(
-        self,
-        name: str,
-        *,
-        workspace: str | None = None,
-        body: dict[str, object],
-    ) -> None:
-        """Compatibility alias for updating the current attempt."""
-        return await self.update_attempt_status_details(
-            name,
-            "current",
-            workspace=workspace,
-            body=body,
-        )
 
     async def update_attempt_status_details(
         self,

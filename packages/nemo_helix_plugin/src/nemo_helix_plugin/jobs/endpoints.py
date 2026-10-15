@@ -129,11 +129,6 @@ def resume_job(*, workspace: str | None = None, name: str) -> HelixJobResponse: 
 def get_job_status(*, workspace: str | None = None, name: str) -> HelixJobStatusResponse: ...
 
 
-@patch("/apis/jobs/v2/workspaces/{workspace}/jobs/{name}/status-details")
-@abstractmethod
-def update_job_status_details(*, workspace: str | None = None, name: str, body: JobStatusDetailsUpdate) -> None: ...
-
-
 # ---------------------------------------------------------------------------
 # Job attempts
 # ---------------------------------------------------------------------------

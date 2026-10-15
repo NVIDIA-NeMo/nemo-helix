@@ -166,9 +166,11 @@ async def test_status_steps_and_tasks_round_trip(
     sample_platform_job_request: CreateHelixJobRequest,
 ):
     job = await _create_job(jobs_client, sample_platform_job_request, "typed-state")
-    status_update = await jobs_client.update_job_status_details(
+    assert job.attempt_id is not None
+    status_update = await jobs_client.update_job_attempt_status_details(
         workspace="default",
-        name=job.name,
+        job=job.name,
+        attempt=job.attempt_id,
         body=JobStatusDetailsUpdate(root={"progress": 25}),
     )
     assert status_update.http_response.status_code == 200

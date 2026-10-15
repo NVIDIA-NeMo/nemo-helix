@@ -7168,50 +7168,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/status-details:
-    patch:
-      tags:
-      - Jobs
-      summary: Update Job Status Details
-      description: Update the current attempt's status details through a compatibility
-        route.
-      operationId: update_job_status_details_apis_jobs_v2_workspaces__workspace__jobs__name__status_details_patch
-      deprecated: true
-      parameters:
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
-              title: Request
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema: {}
-        '404':
-          description: Job not Found
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
   /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/steps:
     get:
       tags:

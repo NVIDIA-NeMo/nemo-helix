@@ -400,7 +400,7 @@ HelixJobStatusDetailsUpdateRequest = dict[str, Any]
 
 
 class JobStatusDetailsUpdate(RootModel[dict[str, Any]]):
-    """Client request body for ``update_job_status_details`` (a bare JSON object)."""
+    """Client request body for attempt status-details updates (a bare JSON object)."""
 
 
 # NB: list *filter* models (``HelixJobsListFilter`` etc.) are intentionally

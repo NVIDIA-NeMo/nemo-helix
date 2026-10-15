@@ -571,31 +571,6 @@ async def get_job_status(
         return job_status
 
 
-@router.patch(
-    "/v2/workspaces/{workspace}/jobs/{name}/status-details",
-    status_code=status.HTTP_200_OK,
-    deprecated=True,
-    responses={
-        status.HTTP_200_OK: {"description": "Successful Response"},
-        status.HTTP_404_NOT_FOUND: {"description": "Job not Found"},
-    },
-)
-async def update_job_status_details(
-    name: str,
-    request: HelixJobStatusDetailsUpdateRequest,
-    workspace: str,
-    dispatcher: JobDispatcher = Depends(dep_dispatcher),
-) -> None:
-    """Update the current attempt's status details through a compatibility route."""
-    with scoped_app_ctx(JobContext(id=name)):
-        result = await dispatcher.update_job_status_details(name, workspace, request)
-        if not result:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Job '{name}' not found in workspace '{workspace}'.",
-            )
-
-
 @router.get(
     "/v2/workspaces/{workspace}/jobs/{job}/attempts",
     response_model=Page[HelixJobAttemptResponse],

@@ -1340,7 +1340,7 @@ async def test_job_result_download(
 
 
 @pytest.mark.asyncio
-async def test_job_status_details_crud(
+async def test_attempt_status_details_crud(
     test_client: AsyncClient,
     async_client: AsyncNemoClient,
     sample_platform_job_request: CreateHelixJobRequest,
@@ -1353,12 +1353,13 @@ async def test_job_status_details_crud(
     jobs = AsyncJobsClient.from_client(async_client)
     job_resp = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
     job_name = job_resp.name  # API URLs use job name, not ID
+    attempt_id = job_resp.attempt_id
+    assert attempt_id is not None
+    status_details_path = f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/attempts/{attempt_id}/status-details"
 
     ### Test patching a job status details
     # Post a status update like we would from a job
-    resp = await test_client.patch(
-        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/status-details", json=original_details
-    )
+    resp = await test_client.patch(status_details_path, json=original_details)
     assert resp.status_code == 200
 
     # Update the job step from created to active
@@ -1379,8 +1380,13 @@ async def test_job_status_details_crud(
     assert original_details == job_status_details
 
     # Patch the status details, and ensure they match the updated details
-    resp = await test_client.patch(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/status-details", json=patch)
+    resp = await test_client.patch(status_details_path, json=patch)
     assert resp.status_code == 200
+    legacy_resp = await test_client.patch(
+        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/status-details",
+        json=patch,
+    )
+    assert legacy_resp.status_code == 404
     resp = await test_client.get(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}")
     assert resp.status_code == 200
     data = resp.json()

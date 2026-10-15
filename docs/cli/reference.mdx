@@ -4130,7 +4130,6 @@ nemo jobs [OPTIONS] COMMAND [ARGS]...
 * `resume`: Resume a paused platform job by name or ID.
 * `get`: Get a platform job by name or ID.
 * `update`: Update mutable job metadata or the definition used by...
-* `update-status-details`: Update the status details of a platform job.
 * `watch`: Watch a platform job until it reaches a terminal status.
 * `tail`: Print the newest lines from a platform job log.
 * `attempts`: Inspect job attempts
@@ -4475,49 +4474,6 @@ nemo jobs update [OPTIONS] NAME
 * `--custom-fields`: JSON string
 * `--spec`: JSON string
 * `--platform-spec`: JSON string
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Input Options:**
-
-* `--input-file`: Path to JSON file (use '-' for stdin)
-* `--input-data`: Input data for the request (JSON or YAML)
-
-**Output Options:**
-
-* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
-
-#### nemo jobs update-status-details
-
-Update the status details of a platform job.
-
-**Required fields:** body
-
-**Examples:**
-
-```shell
-nemo jobs update-status-details <name> --input-file config.json
-nemo jobs update-status-details <name> --input-data '`{"body": {}}`'
-echo '{"json": "data"}' | nemo jobs update-status-details <name> --input-file -
-nemo jobs update-status-details <name> --<option> "value"
-```
-
-**Usage:**
-
-```shell
-nemo jobs update-status-details [OPTIONS] NAME
-```
-
-**Arguments:**
-
-* `<NAME>`
-
-**Options:**
-
-* `--workspace`
-* `--body`: JSON string
 
 **Help:**
 

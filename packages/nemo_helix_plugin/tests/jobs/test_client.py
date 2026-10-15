@@ -173,26 +173,6 @@ async def test_async_attempt_status_details_uses_concrete_attempt_path() -> None
     assert request_url.endswith("/jobs/my-job/attempts/att-1/status-details")
 
 
-@pytest.mark.asyncio
-async def test_async_status_details_alias_targets_current_attempt() -> None:
-    mock_http = MagicMock(spec=httpx.AsyncClient)
-    mock_http.request = AsyncMock(
-        return_value=httpx.Response(
-            200,
-            request=httpx.Request(
-                "PATCH",
-                f"{BASE}/apis/jobs/v2/workspaces/default/jobs/my-job/attempts/current/status-details",
-            ),
-        )
-    )
-    client = AsyncJobsClient(base_url=BASE, workspace="default", http_client=mock_http)
-
-    await client.update_status_details("my-job", body={"progress": 50})
-
-    request_url = str(mock_http.request.call_args.args[1])
-    assert request_url.endswith("/jobs/my-job/attempts/current/status-details")
-
-
 def test_delete_job_returns_none() -> None:
     mock_http = _mock_http(
         httpx.Response(

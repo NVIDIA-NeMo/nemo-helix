@@ -17,7 +17,6 @@ from nemo_helix_plugin.jobs.types import (
     HelixJobStatusUpdateRequest,
     HelixJobTaskUpdate,
     JobLogsQueryParams,
-    JobStatusDetailsUpdate,
     ListAttemptsQueryParams,
     ListJobResultsQueryParams,
     ListJobsQueryParams,
@@ -205,7 +204,7 @@ def _generate_jobs_python_code(
         "from nemo_helix_plugin.jobs.schemas import HelixJobResultCreateRequest",
         (
             "from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, "
-            "JobStatusDetailsUpdate, HelixJobStatusUpdateRequest, HelixJobTaskUpdate, UpdateHelixJobRequest"
+            "HelixJobStatusUpdateRequest, HelixJobTaskUpdate, UpdateHelixJobRequest"
         ),
     ]
     if lifecycle_mode == "wait":
@@ -304,15 +303,6 @@ def _render_source_jobs_call(resource_path: list[str], method: str, args: dict[s
     if operation == (("jobs",), "get_status"):
         return [
             "response = jobs_client.get_job_status(name=args['name'], workspace=args.get('workspace'))",
-            "print(response.data())",
-        ]
-    if operation == (("jobs",), "update_status_details"):
-        return [
-            "response = jobs_client.update_job_status_details(",
-            "    name=args['name'],",
-            "    workspace=args.get('workspace'),",
-            "    body=JobStatusDetailsUpdate.model_validate(args['body']),",
-            ")",
             "print(response.data())",
         ]
     if operation == (("jobs", "attempts"), "list"):
@@ -1176,76 +1166,6 @@ def update_jobs(
         workspace=cast(str | None, input_payload.get("workspace")),
         body=UpdateHelixJobRequest.model_validate(request_payload),
     ).data()
-    format_output(
-        result,
-        is_list=False,
-        output_format=resolved_output_format,
-        no_truncate=state.get_no_truncate(),
-        timestamp_format=state.get_timestamp_format(),
-    )
-
-
-@app.command("update-status-details")
-@collect_warnings
-@handle_errors
-def update_status_details_jobs(
-    ctx: typer.Context,
-    name: Annotated[str, typer.Argument()],
-    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
-    body: Annotated[str | None, typer.Option("--body", help="JSON string (required)")] = None,
-    input_file: Annotated[
-        str | None,
-        typer.Option("--input-file", help="Path to JSON file (use '-' for stdin)", rich_help_panel="Input Options"),
-    ] = None,
-    input_data: Annotated[
-        str | None,
-        typer.Option("--input-data", help="Input data for the request (JSON or YAML)", rich_help_panel="Input Options"),
-    ] = None,
-    output_format: EntityOutputFormatOption = None,
-) -> None:
-    """Update the status details of a platform job.
-
-    [bold red]Required fields:[/] body
-
-    [green]Examples:[/]
-    nemo jobs update-status-details <name> --input-file config.json
-    nemo jobs update-status-details <name> --input-data '{"body": {}}'
-    echo '{"json": "data"}' | nemo jobs update-status-details <name> --input-file -
-    nemo jobs update-status-details <name> --<option> "value"
-    """
-    if input_file or input_data:
-        input_payload = read_data_input_with_flags(input_file=input_file, input_data=input_data)
-    else:
-        input_payload = {}
-
-    if workspace is not None:
-        input_payload["workspace"] = workspace
-    if body is not None:
-        input_payload["body"] = read_payload("body", body)
-
-    validate_required_fields(
-        input_payload,
-        ["body"],
-        "jobs update-status-details",
-        {
-            "body": "JSON string (required)",
-        },
-    )
-
-    all_kwargs = {"name": name, **input_payload}
-    state: CLIContext = ctx.obj
-    resolved_output_format = state.get_output_format(output_format)
-
-    if handle_code_generation(["jobs"], "update_status_details", all_kwargs, resolved_output_format, state):
-        return
-
-    _, jobs_client = _jobs_client_from_state(state)
-    result = jobs_client.update_job_status_details(
-        name=name,
-        workspace=cast(str | None, input_payload.get("workspace")),
-        body=JobStatusDetailsUpdate.model_validate(input_payload["body"]),
-    ).data()
-
     format_output(
         result,
         is_list=False,
