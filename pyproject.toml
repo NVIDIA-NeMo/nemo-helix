@@ -375,9 +375,10 @@ constraint-dependencies = [
 ]
 
 override-dependencies = [
-  # datasets<5 caps fsspec<=2025.9, and the mini-swe-agent/nooa harness extras need fsspec>=2026.6.
-  # Overrides unsloth (<4.4) and verifiers (<4.7); both are GPU-only training paths, unexercised here.
-  "datasets>=5.1.0,<6",
+  # unsloth caps datasets<4.4; datasets 4.3 caps fsspec<=2025.9, below the CVE-2026-104851 floor the
+  # Fabric mini-swe-agent/nooa adapters require. datasets' fsspec cap tracks releases, not a known break.
+  "datasets>=4.3.0,<4.4",
+  "fsspec>=2026.6.0",
   "jsonpath-ng>=1.6.1",
   "grpcio>=1.71.0",
   "huggingface-hub>=1.31.0,<2.0.0",
