@@ -199,7 +199,7 @@ class FakeEntityStore(EntityClient):
                 page=page,
                 page_size=page_size,
                 current_page_size=len(items),
-                total_pages=max(1, math.ceil(total_results / page_size)),
+                total_pages=math.ceil(total_results / page_size),
                 total_results=total_results,
             ),
         )

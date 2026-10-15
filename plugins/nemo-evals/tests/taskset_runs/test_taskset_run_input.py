@@ -21,7 +21,13 @@ from nemo_evals.api.taskset_run_schemas import (
 )
 from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, AgentEvalSpec, HarborRunnerTarget
 from nemo_evals.jobs.runner_targets import runner_to_target
-from nemo_evals.taskset_runs.entities import ResultState, TasksetRunEntity, TasksetRunPhase
+from nemo_evals.taskset_runs.entities import (
+    MemberPhase,
+    ResultState,
+    TasksetRunEntity,
+    TasksetRunMemberEntity,
+    TasksetRunPhase,
+)
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 from pydantic import ValidationError
 
@@ -412,3 +418,29 @@ def test_status_rejects_unmapped_future_domain_fields():
     )
     with pytest.raises(ValidationError, match="future_domain_field"):
         to_status(run)
+
+
+@pytest.mark.parametrize("phase", list(MemberPhase))
+@pytest.mark.parametrize("with_details", [False, True])
+def test_to_task_preserves_stored_fields_without_internal_metadata(phase, with_details):
+    """Task DTOs rename task_job and expose only the five stored public fields."""
+    from nemo_evals.api.taskset_run_schemas import to_task
+
+    member = TasksetRunMemberEntity(
+        name="task-10",
+        workspace="default",
+        task_index=10,
+        phase=phase,
+        task_job="run-selected-task-10" if with_details else None,
+        error="verifier exited 1\nfull diagnostic" if with_details else None,
+    )
+    member._parent = "taskset_run-parent"
+    member._id = "taskset_run_member-identifier"
+    task = to_task(member)
+    assert task.model_dump() == {
+        "task": "task-10",
+        "task_index": 10,
+        "phase": phase,
+        "job": "run-selected-task-10" if with_details else None,
+        "error": "verifier exited 1\nfull diagnostic" if with_details else None,
+    }

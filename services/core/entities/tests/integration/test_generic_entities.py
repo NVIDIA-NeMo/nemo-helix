@@ -373,7 +373,6 @@ class TestEntitySorting:
         priorities = [item["data"]["priority"] for item in response.json()["data"]]
         assert priorities == [3, 2, 1]
 
-    @pytest.mark.skip(reason="SQLite JSON path extraction differs from PostgreSQL for deeply nested fields")
     async def test_sort_by_deeply_nested_data_field(self, client: AsyncClient, ctx):
         """Test sorting by a deeply nested field (data.level1.level2)."""
         configs = [

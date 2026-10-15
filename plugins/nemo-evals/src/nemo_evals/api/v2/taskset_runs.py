@@ -1,21 +1,28 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Submit stored Harbor tasksets as durable runs under the agent-evaluate collection."""
+"""Submit Harbor tasksets and read stored runs/members under agent-evaluate."""
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.exceptions import RequestValidationError
 from nemo_evals.api.dependencies import get_taskset_run_service
 from nemo_evals.api.service.taskset_run_service import TasksetRunResolutionError, TasksetRunService
-from nemo_evals.api.taskset_run_schemas import TasksetRunInput, TasksetRunSubmitResponse
+from nemo_evals.api.taskset_run_schemas import (
+    TasksetRunInput,
+    TasksetRunStatus,
+    TasksetRunSubmitResponse,
+    TasksetRunTask,
+)
 from nemo_evals.authz import scope
+from nemo_evals.taskset_runs.entities import MemberPhase
 from nemo_evals.taskset_runs.store import RunRequestConflict
 from nemo_evals.taskset_runs.submission import TimeoutAboveMaximumError
 from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
 from nemo_helix_plugin.dependencies import get_effective_principal_id
 from nemo_helix_plugin.log_utils import sanitize_for_log
+from nemo_helix_plugin.schema import Page
 
 logger = logging.getLogger(__name__)
 
@@ -105,3 +112,136 @@ async def submit_taskset_run(
         raise HTTPException(status_code=500, detail="Internal server error") from None
     response.status_code = status.HTTP_201_CREATED if outcome.created else status.HTTP_200_OK
     return outcome.status
+
+
+@router.get(
+    "/agent-evaluate/runs",
+    summary="List Taskset Runs",
+    response_model=Page[TasksetRunStatus],
+    response_model_exclude_none=True,
+)
+@scope.read
+@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[TasksetRunPerms.LIST])
+async def list_taskset_runs(
+    workspace: str,
+    active: bool = Query(default=False, description="Include only accepted and running runs."),
+    mine: bool = Query(default=False, description="Include only runs created by the effective caller."),
+    page: int = Query(default=1, ge=1, description="One-based page number."),
+    page_size: int = Query(default=100, ge=1, le=1000, description="Maximum runs on the requested page."),
+    caller: str = Depends(get_effective_principal_id),
+    service: TasksetRunService = Depends(get_taskset_run_service),
+) -> Page[TasksetRunStatus]:
+    """Read a newest-first workspace run page with independent active/mine filters.
+
+    Args:
+        workspace: Workspace containing the records.
+        active: Restrict to accepted and running phases when True.
+        mine: Restrict to the effective caller's records when True.
+        page: One-based page number, validated by FastAPI.
+        page_size: Maximum page size, from 1 to 1000.
+        caller: Effective principal supplied by the platform dependency.
+        service: Shared request-scoped run service.
+
+    Returns:
+        Stored statuses and filtered pagination counts, excluding null optionals.
+
+    Raises:
+        HTTPException: Unexpected storage or projection failure, sanitized to 500.
+    """
+    try:
+        return await service.list_runs(
+            workspace,
+            caller=caller,
+            active=active,
+            mine=mine,
+            page=page,
+            page_size=page_size,
+        )
+    except Exception:
+        logger.exception("Failed to list taskset runs in workspace %s", sanitize_for_log(workspace))
+        raise HTTPException(status_code=500, detail="Internal server error") from None
+
+
+@router.get(
+    "/agent-evaluate/runs/{run_id}",
+    summary="Get Taskset Run",
+    response_model=TasksetRunStatus,
+    response_model_exclude_none=True,
+    responses={404: {"description": "Run not found in this workspace."}},
+)
+@scope.read
+@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[TasksetRunPerms.READ])
+async def get_taskset_run(
+    workspace: str,
+    run_id: str,
+    service: TasksetRunService = Depends(get_taskset_run_service),
+) -> TasksetRunStatus:
+    """Read one stored run without loading its plan or joining its tasks and Jobs.
+
+    Args:
+        workspace: Workspace that scopes the record lookup.
+        run_id: Public run name in that workspace.
+        service: Shared request-scoped run service.
+
+    Returns:
+        Current stored status, excluding null optionals and internal metadata.
+
+    Raises:
+        HTTPException: The record is absent (404), or an unexpected storage or
+            projection failure occurs (sanitized 500).
+    """
+    try:
+        result = await service.get(workspace, run_id)
+    except Exception:
+        logger.exception("Failed to get taskset run %s/%s", sanitize_for_log(workspace), sanitize_for_log(run_id))
+        raise HTTPException(status_code=500, detail="Internal server error") from None
+    if result is None:
+        raise HTTPException(status_code=404, detail="Taskset run not found")
+    return result
+
+
+@router.get(
+    "/agent-evaluate/runs/{run_id}/tasks",
+    summary="List Taskset Run Tasks",
+    response_model=Page[TasksetRunTask],
+    response_model_exclude_none=True,
+    responses={404: {"description": "Run not found in this workspace."}},
+)
+@scope.read
+@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[TasksetRunPerms.READ])
+async def list_taskset_run_tasks(
+    workspace: str,
+    run_id: str,
+    phase: MemberPhase | None = Query(default=None, description="Include only members in this stored phase."),
+    page: int = Query(default=1, ge=1, description="One-based page number."),
+    page_size: int = Query(default=100, ge=1, le=1000, description="Maximum tasks on the requested page."),
+    service: TasksetRunService = Depends(get_taskset_run_service),
+) -> Page[TasksetRunTask]:
+    """Read stored run members in numeric task-index order without inspecting Jobs.
+
+    Args:
+        workspace: Workspace containing the run and its children.
+        run_id: Public run name whose persisted entity ID scopes the members.
+        phase: Optional stored member phase filter.
+        page: One-based page number, validated by FastAPI.
+        page_size: Maximum page size, from 1 to 1000.
+        service: Shared request-scoped run service.
+
+    Returns:
+        Stored task page and filtered counts; existing runs with no members return
+        an empty page. Null Job/error details are omitted.
+
+    Raises:
+        HTTPException: The parent run is absent (404), or unexpected storage or
+            projection failure occurs (sanitized 500).
+    """
+    try:
+        result = await service.list_tasks(workspace, run_id, phase=phase, page=page, page_size=page_size)
+    except Exception:
+        logger.exception(
+            "Failed to list taskset run tasks %s/%s", sanitize_for_log(workspace), sanitize_for_log(run_id)
+        )
+        raise HTTPException(status_code=500, detail="Internal server error") from None
+    if result is None:
+        raise HTTPException(status_code=404, detail="Taskset run not found")
+    return result
