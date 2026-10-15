@@ -162,6 +162,20 @@ def _configure_deployments(
     return probed_hosts
 
 
+def test_list_deployments_redacts_read_protected_error_details() -> None:
+    deployment = _make_deployment(status="failed")
+    deployment.error = "Process exited with code 1. Last log lines:\nactionable startup diagnostic"
+    mock_entity_client = AsyncMock()
+    mock_entity_client.list = AsyncMock(return_value=SimpleNamespace(data=[deployment], pagination=None))
+    client = _test_client(mock_entity_client)
+
+    response = client.get("/apis/agents/v2/workspaces/default/deployments")
+
+    assert response.status_code == 200
+    assert response.json()["data"][0]["error"] == ""
+    assert deployment.error.endswith("actionable startup diagnostic")
+
+
 class TestSpecRevisionSnapshot:
     @staticmethod
     def _create(files_client: AsyncMock, *, agent: Agent | None = None) -> AgentDeployment:
