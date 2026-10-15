@@ -106,7 +106,8 @@ def package_lock_packages(
             continue
         key = (name, info["version"])
         packages[key] = NpmPackage(name, info["version"], info["resolved"])
-        integrities[key] = info["integrity"]
+        if "integrity" in info:
+            integrities[key] = info["integrity"]
     return [packages[key] for key in sorted(packages)], integrities
 
 

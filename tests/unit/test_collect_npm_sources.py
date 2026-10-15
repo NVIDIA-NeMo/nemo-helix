@@ -286,3 +286,30 @@ def test_collects_the_non_dev_packages_of_an_npm_package_lock() -> None:
 
     assert [(p.name, p.version) for p in packages] == [("cookie-es", "3.1.1"), ("react", "19.2.7")]
     assert integrities == {("cookie-es", "3.1.1"): "sha512-Y29va2ll", ("react", "19.2.7"): "sha512-cmVhY3Q="}
+
+
+def test_a_package_lock_entry_without_integrity_is_reported_by_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    module = load_module()
+    lock = tmp_path / "package-lock.json"
+    lock.write_text(
+        json.dumps(
+            {
+                "lockfileVersion": 3,
+                "packages": {
+                    "": {"name": "viewer", "version": "1.0.0"},
+                    "node_modules/from-git": {"version": "1.0.0", "resolved": "git+ssh://git@github.com/o/r.git#abc"},
+                },
+            }
+        )
+    )
+    monkeypatch.setenv("NHX_COLLECT_SOURCES", "1")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [str(SCRIPT), "--package-lock", str(lock), "--label", "viewer", "--output", str(tmp_path / "out")],
+    )
+
+    with pytest.raises(RuntimeError, match="has no integrity for: from-git@1.0.0"):
+        module.main()
