@@ -356,7 +356,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         """Create the sandbox, then verify its egress; it is killed if the policy can't be read or doesn't match."""
         if self._services is not None:
             await self._require_compose_extension()
-        expected = self.egress_policy()
+        egress_policy = self.egress_policy()
         sandbox = await self._driver.create(
             CreateRequest(
                 # _validate_definition guarantees the task names a prebuilt image.
@@ -369,7 +369,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                     MANAGED_BY_METADATA_KEY: MANAGED_BY_METADATA_VALUE,
                 },
                 resource=self._resource(),
-                network_policy=to_opensandbox_policy(expected),
+                network_policy=to_opensandbox_policy(egress_policy),
                 extensions=self._extensions(),
                 sandbox_timeout_sec=self._sandbox_timeout_sec,
                 ready_timeout_sec=self._ready_timeout_sec,
@@ -383,7 +383,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         try:
             await verify_applied_egress(
                 sandbox,
-                expected,
+                egress_policy,
                 mode=self._egress_verification,
                 label=f"OpenSandbox sandbox {sandbox_id(sandbox)} (session {self.session_id})",
                 require_readback=True,
@@ -393,7 +393,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             if isinstance(exc, EgressVerificationError):
                 raise RuntimeError(str(exc)) from exc
             raise
-        self._record_applied_egress(sandbox_id(sandbox), expected)
+        self._record_applied_egress(sandbox_id(sandbox), egress_policy)
         return sandbox
 
     def _record_applied_egress(self, recorded_id: str | None, policy: EgressPolicy) -> None:
