@@ -65,10 +65,18 @@ export const EvalWizardPage: FC<EvalWizardPageProps> = ({
   // Back to wherever the wizard was opened from, so a cancelled form is not left in history.
   const cancel = () =>
     location.key === 'default' ? navigate(cancelTo, { replace: true }) : navigate(-1);
+  // Enter in a field submits the form even while Continue is disabled, so it gets the same gate.
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    if (continueLoading || !canContinue) {
+      event.preventDefault();
+      return;
+    }
+    onSubmit(event);
+  };
 
   return (
     <AccessibleTitle title={heading}>
-      <form noValidate onSubmit={onSubmit} className="h-full">
+      <form noValidate aria-label={heading} onSubmit={submit} className="h-full">
         <Stack className="h-full">
           <Stack gap="density-2xl" className="shrink-0 px-6 pb-4 pt-6">
             <PageHeader slotHeading={heading} slotDescription={headingDescription} />
