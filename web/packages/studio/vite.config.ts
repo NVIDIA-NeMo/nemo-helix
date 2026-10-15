@@ -601,6 +601,12 @@ export default defineConfig(({ mode }) => {
                 changeOrigin: true,
                 secure: false,
               },
+              // Plugin UI bundles are served by the platform, not the dev server.
+              '/plugin-ui': {
+                target: proxyDomain,
+                changeOrigin: true,
+                secure: false,
+              },
             },
           }
         : {}),
