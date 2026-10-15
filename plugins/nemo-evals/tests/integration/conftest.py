@@ -26,6 +26,7 @@ import pytest
 import yaml
 from nemo_evals.shared.metric_bundles.cloudpickle import ALLOW_CLOUDPICKLE_METRICS_ENV_VAR
 from nhx.testing import igw_mock_provider_mode
+from nhx.testing.docker import remove_intake_clickhouse
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -150,6 +151,12 @@ def running_platform(
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait()
+        # Intake keeps its local ClickHouse container across shutdowns, keyed by data dir, so
+        # each per-run data dir would otherwise leave one behind. Only a data dir the caller passed
+        # in is throwaway: an NHX_DATA_DIR inherited from the shell is the developer's own platform,
+        # whose container must survive the test session.
+        if data_dir := (env_vars or {}).get(DATA_DIR_ENVVAR):
+            remove_intake_clickhouse(Path(data_dir))
 
 
 @pytest.fixture(autouse=True)

@@ -3,9 +3,17 @@
 
 """Unit tests for Docker testing helpers."""
 
+import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock
 
-from nhx.testing.docker import MODELS_CONTROLLER_MANAGED_LABEL, cleanup_model_deployment_containers
+import pytest
+from nhx.testing.docker import (
+    MODELS_CONTROLLER_MANAGED_LABEL,
+    cleanup_model_deployment_containers,
+    remove_intake_clickhouse,
+)
 
 
 def _container(name: str, labels: dict[str, str]) -> MagicMock:
@@ -52,3 +60,51 @@ def test_cleanup_model_deployment_containers_filters_by_owner_labels():
     matching_container.remove.assert_called_once_with(force=True)
     other_worker_container.stop.assert_not_called()
     other_worker_container.remove.assert_not_called()
+
+
+def test_remove_intake_clickhouse_removes_the_platform_data_dir_container(monkeypatch):
+    """Removal targets Intake's ClickHouse subdir without NHX_DATA_DIR, which skips the slow ownership restore."""
+    run = MagicMock(return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""))
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setenv("NHX_DATA_DIR", "/tmp/platform/data")
+    monkeypatch.setenv("NHX_BASE_URL", "http://localhost:8090")
+    data_dir = Path("/tmp/platform/data")
+
+    remove_intake_clickhouse(data_dir)
+
+    command = run.call_args.args[0]
+    assert command == [
+        sys.executable,
+        "-m",
+        "nhx.intake.local_clickhouse",
+        "--remove",
+        "--data-dir",
+        str(data_dir / "intake-clickhouse"),
+    ]
+    env = run.call_args.kwargs["env"]
+    assert "NHX_DATA_DIR" not in env
+    assert env["NHX_BASE_URL"] == "http://localhost:8090"
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        subprocess.CompletedProcess([], 1, stdout="", stderr="Docker daemon is unavailable."),
+        subprocess.TimeoutExpired(["python"], 120),
+        OSError("no python"),
+    ],
+    ids=["nonzero-exit", "timeout", "spawn-error"],
+)
+def test_remove_intake_clickhouse_failures_warn_without_raising(monkeypatch, capsys, outcome):
+    """Teardown cleanup is best effort, so a failed removal cannot mask the test's own result."""
+
+    def run(*args, **kwargs):
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    remove_intake_clickhouse(Path("/tmp/platform/data"))
+
+    assert "Could not remove Intake ClickHouse for /tmp/platform/data" in capsys.readouterr().out
