@@ -177,8 +177,8 @@ class InMemoryIntakeService:
         if not self.evaluation_exists:
             return httpx.Response(404, json={"detail": f"evaluation {workspace}/{name} not found"})
         if request.method == "PATCH" and "metadata" in self.evaluation_patches[-1]:
-            # A patch replaces the metadata dict wholesale, as Intake does.
-            self.evaluation_metadata = dict(self.evaluation_patches[-1]["metadata"])
+            # A patch replaces the metadata dict wholesale, and an explicit null clears it, as Intake does.
+            self.evaluation_metadata = dict(self.evaluation_patches[-1]["metadata"] or {})
         evaluation = EvaluationResponse(
             id=f"evaluation-{name}",
             name=name,

@@ -54,6 +54,8 @@ async def test_evaluation_lookup_patch_and_configured_failures() -> None:
     await intake.patch_evaluation(name="eval-1", body=EvaluationPatchRequest(metadata={"k": "w"}))
     assert service.evaluation_patches == [{"name": "eval-1", "metadata": {"k": "w"}}]
     assert (await intake.get_evaluation(name="eval-1")).data().metadata == {"k": "w"}
+    await intake.patch_evaluation(name="eval-1", body=EvaluationPatchRequest(metadata=None))
+    assert (await intake.get_evaluation(name="eval-1")).data().metadata == {}
 
     service.evaluation_exists = False
     with pytest.raises(NotFoundError):
