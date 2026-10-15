@@ -88,7 +88,7 @@ from nemo_helix_plugin.jobs.types import (
     HelixJobResponse as HelixJob,
 )
 from nemo_helix_plugin.schema import DatetimeFilter, Filter, Page, PaginationData, StringFilter
-from pydantic import BaseModel, Field, TypeAdapter, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -165,25 +165,20 @@ class BaseJob(BaseModel, Generic[JobConfigT]):
 
 
 class BaseJobUpdate(BaseModel, Generic[JobConfigT]):
-    """Mutable plugin job fields plus request-time compilation controls."""
+    """Mutable plugin job description or definition."""
+
+    model_config = ConfigDict(extra="forbid")
 
     description: str | None = None
-    project: str | None = None
-    ownership: dict[str, object] | None = None
-    custom_fields: dict[str, object] | None = None
     spec: JobConfigT | None = None
-    profile: str | None = None
-    options: dict[str, Any] | None = None
 
     @model_validator(mode="after")
-    def validate_compilation_controls(self) -> Self:
+    def validate_update(self) -> Self:
         if not self.model_fields_set:
             raise ValueError("at least one mutable job field is required")
         spec_supplied = "spec" in self.model_fields_set
         if spec_supplied and self.spec is None:
             raise ValueError("spec cannot be null")
-        if not spec_supplied and ({"profile", "options"} & self.model_fields_set):
-            raise ValueError("profile and options require spec")
         return self
 
 
@@ -192,7 +187,6 @@ class BaseJobAttempt(BaseModel, Generic[JobConfigT]):
     name: str
     job: str
     workspace: str
-    project: str | None = None
     seq: int
     spec: JobConfigT
     status: HelixJobStatus
@@ -1007,7 +1001,7 @@ def job_route_factory(
             attempt_id=getattr(job_resp, "attempt_id", None),
             name=job_resp.name,
             description=job_resp.description,
-            project=getattr(job_resp, "project", None),
+            project=job_resp.project,
             workspace=job_resp.workspace,
             created_at=job_resp.created_at,
             updated_at=job_resp.updated_at,
@@ -1025,7 +1019,6 @@ def job_route_factory(
             name=attempt.name,
             job=attempt.job,
             workspace=attempt.workspace,
-            project=attempt.project,
             seq=attempt.seq,
             spec=handle_job_spec_mismatch(job_output, attempt.spec),
             status=attempt.status,
@@ -1107,7 +1100,7 @@ def job_route_factory(
             custom_fields = stamp_job_telemetry_plugins(request.custom_fields, service_name)
             if custom_fields:
                 create_fields["custom_fields"] = custom_fields
-            if request.project is not None:
+            if request.project:
                 create_fields["project"] = request.project
             if request.output_location is not None:
                 create_fields["output_location"] = request.output_location
@@ -1226,14 +1219,8 @@ def job_route_factory(
             f"""Update a job for the {service_name} microservice."""
 
             update_fields = {
-                field_name: getattr(request, field_name)
-                for field_name in request.model_fields_set - {"spec", "profile", "options"}
+                field_name: getattr(request, field_name) for field_name in request.model_fields_set - {"spec"}
             }
-            if "custom_fields" in update_fields and update_fields["custom_fields"] is not None:
-                update_fields["custom_fields"] = stamp_job_telemetry_plugins(
-                    request.custom_fields,
-                    service_name,
-                )
             if "spec" in request.model_fields_set:
                 assert request.spec is not None
                 job_spec = await _transform_input_to_output(
@@ -1254,8 +1241,8 @@ def job_route_factory(
                     name,
                     service_name,
                     async_client,
-                    request.profile,
-                    request.options,
+                    None,
+                    None,
                 )
                 update_fields["spec"] = (
                     job_spec.model_dump(mode="json") if isinstance(job_spec, BaseModel) else job_spec

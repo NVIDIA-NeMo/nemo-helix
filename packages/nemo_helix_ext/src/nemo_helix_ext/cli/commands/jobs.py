@@ -1114,9 +1114,6 @@ def update_jobs(
     name: Annotated[str, typer.Argument(help="Job name or ID (both are accepted).")],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     description: Annotated[str | None, typer.Option("--description")] = None,
-    project: Annotated[str | None, typer.Option("--project")] = None,
-    ownership: Annotated[str | None, typer.Option("--ownership", help="JSON string")] = None,
-    custom_fields: Annotated[str | None, typer.Option("--custom-fields", help="JSON string")] = None,
     spec: Annotated[str | None, typer.Option("--spec", help="JSON string")] = None,
     platform_spec: Annotated[str | None, typer.Option("--platform-spec", help="JSON string")] = None,
     input_file: Annotated[
@@ -1129,7 +1126,7 @@ def update_jobs(
     ] = None,
     output_format: EntityOutputFormatOption = None,
 ) -> None:
-    """Update mutable job metadata or the definition used by future attempts."""
+    """Update a job description or the definition used by future attempts."""
     input_payload = (
         read_data_input_with_flags(input_file=input_file, input_data=input_data) if input_file or input_data else {}
     )
@@ -1137,12 +1134,6 @@ def update_jobs(
         input_payload["workspace"] = workspace
     if description is not None:
         input_payload["description"] = description
-    if project is not None:
-        input_payload["project"] = project
-    if ownership is not None:
-        input_payload["ownership"] = read_payload("ownership", ownership)
-    if custom_fields is not None:
-        input_payload["custom_fields"] = read_payload("custom_fields", custom_fields)
     if spec is not None:
         input_payload["spec"] = read_payload("spec", spec)
     if platform_spec is not None:
@@ -1558,7 +1549,7 @@ def retrieve_results(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument()],
     job: Annotated[str, typer.Option("--job", help="Job name or ID")],
-    attempt_id: Annotated[str, typer.Option("--attempt-id", help="Attempt ID or 'current'")],
+    attempt_id: Annotated[str, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = "current",
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     output_format: EntityOutputFormatOption = None,
 ) -> None:

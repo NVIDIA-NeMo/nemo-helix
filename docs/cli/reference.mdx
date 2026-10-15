@@ -4129,7 +4129,7 @@ nemo jobs [OPTIONS] COMMAND [ARGS]...
 * `pause`: Pause a platform job by name or ID.
 * `resume`: Resume a paused platform job by name or ID.
 * `get`: Get a platform job by name or ID.
-* `update`: Update mutable job metadata or the definition used by...
+* `update`: Update a job description or the definition used by future...
 * `watch`: Watch a platform job until it reaches a terminal status.
 * `tail`: Print the newest lines from a platform job log.
 * `attempts`: Inspect job attempts
@@ -4453,7 +4453,7 @@ nemo jobs get [OPTIONS] NAME
 
 #### nemo jobs update
 
-Update mutable job metadata or the definition used by future attempts.
+Update a job description or the definition used by future attempts.
 
 **Usage:**
 
@@ -4469,9 +4469,6 @@ nemo jobs update [OPTIONS] NAME
 
 * `--workspace`
 * `--description`
-* `--project`
-* `--ownership`: JSON string
-* `--custom-fields`: JSON string
 * `--spec`: JSON string
 * `--platform-spec`: JSON string
 
@@ -4763,7 +4760,7 @@ nemo jobs results get [OPTIONS] NAME
 **Options:**
 
 * `--job`: Job name or ID
-* `--attempt-id`: Attempt ID or 'current'
+* `--attempt-id`: Attempt ID or 'current' [default: current]
 * `--workspace`
 
 **Help:**

@@ -213,7 +213,6 @@ class HelixJobAttemptResponse(BaseModel):
     name: str
     job: str = Field(..., description="Parent job ID")
     workspace: str
-    project: str | None = None
     seq: int
     spec: dict[str, Any] = Field(default_factory=dict)
     platform_spec: HelixJobSpec
@@ -348,12 +347,11 @@ class CreateHelixJobRequest(BaseModel):
 
 
 class UpdateHelixJobRequest(BaseModel):
-    """Validated partial update for mutable job definition and metadata fields."""
+    """Validated partial update for a job description or definition."""
+
+    model_config = ConfigDict(extra="forbid")
 
     description: str | None = None
-    project: str | None = None
-    ownership: dict[str, Any] | None = None
-    custom_fields: dict[str, Any] | None = None
     spec: dict[str, Any] | None = None
     platform_spec: HelixJobSpec | None = None
 

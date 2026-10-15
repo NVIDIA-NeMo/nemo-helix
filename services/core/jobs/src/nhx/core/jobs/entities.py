@@ -194,7 +194,6 @@ class HelixJobResult(EntityBase):
             name=self.name,
             job=self.job,
             workspace=self.workspace,
-            project=self.project,
             attempt_id=self.attempt_id,
             created_at=self.created_at,  # type: ignore
             updated_at=self.updated_at,  # type: ignore

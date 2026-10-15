@@ -15124,9 +15124,6 @@ components:
         workspace:
           type: string
           title: Workspace
-        project:
-          title: Project
-          type: string
         seq:
           type: integer
           title: Seq
@@ -21669,27 +21666,16 @@ components:
         description:
           title: Description
           type: string
-        project:
-          title: Project
-          type: string
-        ownership:
-          title: Ownership
-          additionalProperties: true
-          type: object
-        custom_fields:
-          title: Custom Fields
-          additionalProperties: true
-          type: object
         spec:
           title: Spec
           additionalProperties: true
           type: object
         platform_spec:
           $ref: '#/components/schemas/HelixJobSpec'
+      additionalProperties: false
       type: object
       title: UpdateHelixJobRequest
-      description: Validated partial update for mutable job definition and metadata
-        fields.
+      description: Validated partial update for a job description or definition.
     UpdateModelDeploymentConfigRequest:
       properties:
         description:

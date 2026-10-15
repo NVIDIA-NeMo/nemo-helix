@@ -2902,7 +2902,7 @@ async def test_list_attempts_paginates_and_marks_current(
 
 
 @pytest.mark.asyncio
-async def test_update_job_clears_project_and_preserves_attempt_snapshot(
+async def test_update_job_preserves_attempt_snapshot(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
     sample_platform_job_request: CreateHelixJobRequest,
@@ -2916,7 +2916,6 @@ async def test_update_job_clears_project_and_preserves_attempt_snapshot(
         DEFAULT_WORKSPACE,
         UpdateHelixJobRequest(
             description="updated description",
-            project=None,
             spec={"revision": 2},
             platform_spec=TestConstants.PLATFORM_SPEC,
         ),
@@ -2924,7 +2923,6 @@ async def test_update_job_clears_project_and_preserves_attempt_snapshot(
 
     assert updated is not None
     assert updated.description == "updated description"
-    assert updated.project is None
     assert updated.spec == {"revision": 2}
     stored_attempt = await mock_store.get_by_id(HelixJobAttempt, created.attempt_id)
     assert stored_attempt.spec == original_spec

@@ -176,7 +176,6 @@ def create_attempt_response(attempt: HelixJobAttempt, *, current_attempt_id: str
         name=attempt.name,
         job=attempt.job,
         workspace=attempt.workspace,
-        project=attempt.project,
         seq=attempt.seq,
         spec=attempt.spec,
         platform_spec=attempt.platform_spec,

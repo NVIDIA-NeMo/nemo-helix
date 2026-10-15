@@ -433,7 +433,7 @@ def test_retrieve_current_attempt_uses_selector() -> None:
     )
 
 
-def test_update_job_preserves_explicit_null() -> None:
+def test_update_job_preserves_explicit_null_description() -> None:
     platform_client = SimpleNamespace()
     jobs_client = MagicMock()
     updated_job = SimpleNamespace(name="job-a")
@@ -447,13 +447,13 @@ def test_update_job_preserves_explicit_null() -> None:
             _ctx(platform_client),
             name="job-a",
             workspace="test-workspace",
-            input_data='{"project": null}',
+            input_data='{"description": null}',
         )
 
     call_kwargs = jobs_client.update_job.call_args.kwargs
     assert call_kwargs["workspace"] == "test-workspace"
-    assert call_kwargs["body"].project is None
-    assert "project" in call_kwargs["body"].model_fields_set
+    assert call_kwargs["body"].description is None
+    assert "description" in call_kwargs["body"].model_fields_set
 
 
 def test_download_result_with_attempt_uses_canonical_route(tmp_path: Path) -> None:
@@ -507,6 +507,30 @@ def test_retrieve_result_requires_attempt_route() -> None:
         workspace="test-workspace",
         job="job-a",
         attempt="att-1",
+        name="metrics",
+    )
+
+
+def test_retrieve_result_defaults_to_current_attempt() -> None:
+    platform_client = SimpleNamespace()
+    jobs_client = MagicMock()
+    jobs_client.get_attempt_result.return_value = _Response(SimpleNamespace(name="metrics"))
+
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
+        patch("nemo_helix_ext.cli.commands.jobs.format_output"),
+    ):
+        retrieve_results(
+            _ctx(platform_client),
+            name="metrics",
+            job="job-a",
+            workspace="test-workspace",
+        )
+
+    jobs_client.get_attempt_result.assert_called_once_with(
+        workspace="test-workspace",
+        job="job-a",
+        attempt="current",
         name="metrics",
     )
 

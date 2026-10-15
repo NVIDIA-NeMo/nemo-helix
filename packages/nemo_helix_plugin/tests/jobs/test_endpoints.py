@@ -107,14 +107,14 @@ def test_get_job() -> None:
     assert prepared.response_type is HelixJobResponse
 
 
-def test_update_job_preserves_explicit_null_metadata() -> None:
-    body = UpdateHelixJobRequest(project=None)
+def test_update_job_preserves_explicit_null_description() -> None:
+    body = UpdateHelixJobRequest(description=None)
     prepared = endpoints.update_job(workspace="default", name="j-1", body=body)
 
     assert prepared.method == "PATCH"
     assert prepared.path_params == {"workspace": "default", "name": "j-1"}
     assert isinstance(prepared.content, bytes)
-    assert json.loads(prepared.content) == {"project": None}
+    assert json.loads(prepared.content) == {"description": None}
 
 
 def test_delete_job() -> None:

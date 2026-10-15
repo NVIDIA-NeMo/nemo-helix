@@ -135,10 +135,7 @@ async def test_attempt_and_update_api_roundtrip(
         await jobs.update_job(
             workspace=DEFAULT_WORKSPACE,
             name=created.name,
-            body=UpdateHelixJobRequest(
-                description="updated",
-                project=None,
-            ),
+            body=UpdateHelixJobRequest(description="updated"),
         )
     ).data()
 
@@ -146,7 +143,6 @@ async def test_attempt_and_update_api_roundtrip(
     assert current.id == created.attempt_id
     assert current.is_current is True
     assert updated.description == "updated"
-    assert updated.project is None
 
 
 def test_jobs_api_models_hide_entity_store_versions() -> None:
@@ -176,6 +172,16 @@ async def test_job_update_validation_statuses(
 
     one_sided_spec = await test_client.patch(path, json={"spec": {"changed": True}})
     assert one_sided_spec.status_code == 422
+
+    for removed_field, value in (
+        ("project", "project-a"),
+        ("ownership", {"user": "owner"}),
+        ("custom_fields", {"key": "value"}),
+        ("profile", "default"),
+        ("options", {"backend": {}}),
+    ):
+        response = await test_client.patch(path, json={"description": "ignored", removed_field: value})
+        assert response.status_code == 422
 
     empty = await test_client.patch(path, json={})
     assert empty.status_code == 422

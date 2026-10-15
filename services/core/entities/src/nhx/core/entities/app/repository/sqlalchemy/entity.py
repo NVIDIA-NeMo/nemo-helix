@@ -294,7 +294,6 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
         new_name: str | None = None,
         parent: str | None = None,
         project: str | None = None,
-        project_set: bool = False,
         updated_by: str | None = None,
         expected_db_version: int | None = None,
         session: AsyncSession | None = None,
@@ -328,7 +327,7 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
             existing_entity.data = data
             if new_name is not None:
                 existing_entity.name = new_name
-            if project_set:
+            if project is not None:
                 existing_entity.project = project
             if updated_by is not None:
                 existing_entity.updated_by = updated_by

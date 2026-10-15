@@ -30,7 +30,7 @@ nemo jobs update <job-name> \
   --description "Updated description"
 ```
 
-Definition updates must provide both `spec` and `platform_spec`; the Jobs Factory recompiles plugin job specs before forwarding the paired fields. To explicitly clear a nullable field such as `project`, use `--input-data '{"project": null}'`.
+Definition updates must provide both `spec` and `platform_spec`; the Jobs Factory recompiles plugin job specs before forwarding the paired fields. To clear a job description, use `--input-data '{"description": null}'`.
 
 ## Viewing Job Logs
 

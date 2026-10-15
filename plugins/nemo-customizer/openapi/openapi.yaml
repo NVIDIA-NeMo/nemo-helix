@@ -2259,9 +2259,6 @@ components:
         workspace:
           type: string
           title: Workspace
-        project:
-          title: Project
-          type: string
         seq:
           type: integer
           title: Seq
@@ -2365,26 +2362,9 @@ components:
         description:
           title: Description
           type: string
-        project:
-          title: Project
-          type: string
-        ownership:
-          title: Ownership
-          additionalProperties: true
-          type: object
-        custom_fields:
-          title: Custom Fields
-          additionalProperties: true
-          type: object
         spec:
           $ref: '#/components/schemas/AutomodelJobInput'
-        profile:
-          title: Profile
-          type: string
-        options:
-          title: Options
-          additionalProperties: true
-          type: object
+      additionalProperties: false
       type: object
       required:
       - spec
@@ -4426,9 +4406,6 @@ components:
         workspace:
           type: string
           title: Workspace
-        project:
-          title: Project
-          type: string
         seq:
           type: integer
           title: Seq
@@ -4532,26 +4509,9 @@ components:
         description:
           title: Description
           type: string
-        project:
-          title: Project
-          type: string
-        ownership:
-          title: Ownership
-          additionalProperties: true
-          type: object
-        custom_fields:
-          title: Custom Fields
-          additionalProperties: true
-          type: object
         spec:
           $ref: '#/components/schemas/RlJobInput'
-        profile:
-          title: Profile
-          type: string
-        options:
-          title: Options
-          additionalProperties: true
-          type: object
+      additionalProperties: false
       type: object
       required:
       - spec
@@ -5131,9 +5091,6 @@ components:
         workspace:
           type: string
           title: Workspace
-        project:
-          title: Project
-          type: string
         seq:
           type: integer
           title: Seq
@@ -5237,26 +5194,9 @@ components:
         description:
           title: Description
           type: string
-        project:
-          title: Project
-          type: string
-        ownership:
-          title: Ownership
-          additionalProperties: true
-          type: object
-        custom_fields:
-          title: Custom Fields
-          additionalProperties: true
-          type: object
         spec:
           $ref: '#/components/schemas/UnslothJobInput'
-        profile:
-          title: Profile
-          type: string
-        options:
-          title: Options
-          additionalProperties: true
-          type: object
+      additionalProperties: false
       type: object
       required:
       - spec

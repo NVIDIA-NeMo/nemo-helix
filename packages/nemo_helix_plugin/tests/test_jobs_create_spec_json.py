@@ -106,7 +106,6 @@ def _mock_attempt_response(spec: dict[str, object]) -> SimpleNamespace:
         name="attempt-1",
         job="job-1",
         workspace="default",
-        project="project-a",
         seq=0,
         spec=spec,
         status="created",
@@ -346,6 +345,38 @@ def test_factory_update_rejects_internal_version_without_mutation() -> None:
     response = TestClient(app).patch(
         "/apis/widgets/v2/workspaces/default/jobs/test-job",
         json={"expected_db_version": 1},
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("project", "project-a"),
+        ("ownership", {"user": "owner"}),
+        ("custom_fields", {"key": "value"}),
+        ("profile", "default"),
+        ("options", {"backend": {}}),
+    ],
+)
+def test_factory_update_rejects_removed_fields(field: str, value: object) -> None:
+    router = job_route_factory(
+        service_name="widgets",
+        job_type="Widget",
+        job_input=_InputSpec,
+        job_output=_OutputSpec,
+        input_to_output=_to_output,
+        platform_job_config_compiler=_compiler,
+    )
+    app = FastAPI()
+    app.include_router(router, prefix="/apis/widgets/v2/workspaces/{workspace}")
+    app.dependency_overrides[get_nemo_client] = lambda: MagicMock()
+    app.dependency_overrides[get_entity_client] = lambda: MagicMock()
+
+    response = TestClient(app).patch(
+        "/apis/widgets/v2/workspaces/default/jobs/test-job",
+        json={"description": "ignored", field: value},
     )
 
     assert response.status_code == 422
