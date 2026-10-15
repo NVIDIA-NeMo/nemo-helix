@@ -230,6 +230,20 @@ class Manager:
         """Nothing to release."""
 
 
+class ConnectionConfig(SimpleNamespace):
+    """``opensandbox.config.ConnectionConfig``: its kwargs as attributes, plus what direct server requests read."""
+
+    headers = {"X-Client": "opensandbox-sdk"}
+
+    def get_api_key(self) -> str | None:
+        """The API key, as the SDK reports it."""
+        return self.api_key
+
+    def get_base_url(self) -> str:
+        """The server's API root, as the SDK builds it from the protocol and domain."""
+        return f"{self.protocol}://{self.domain}/v1"
+
+
 def mock_sdk(server: Server) -> dict[str, Any]:
     """SDK classes, as ``harbor_opensandbox_driver.load_sdk`` returns them, backed by ``server``."""
 
@@ -262,7 +276,7 @@ def mock_sdk(server: Server) -> dict[str, Any]:
     return {
         "Sandbox": MockSandbox,
         "SandboxManager": MockManager,
-        "ConnectionConfig": lambda **kwargs: SimpleNamespace(**kwargs),
+        "ConnectionConfig": ConnectionConfig,
         "RunCommandOpts": lambda **kwargs: SimpleNamespace(**kwargs),
         "SearchEntry": lambda **kwargs: SimpleNamespace(**kwargs),
         "WriteEntry": lambda **kwargs: SimpleNamespace(**{"data": None, **kwargs}),

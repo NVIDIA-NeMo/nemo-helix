@@ -19,6 +19,11 @@ OpenSandbox hooks. What it adds over a plain sandbox:
 * On an image with a non-root ``USER``, Harbor's ``user="root"`` commands run as the image's user.
   ``execd`` runs as that user and the kernel refuses its switch to uid 0, so asking for root fails
   every such command before it starts, even checks like ``tmux -V``.
+* Compose tasks run when the runner passes ``compose_services`` (see
+  ``scaled_evals.harbor_opensandbox_services``). The server's NeMo extension adds the services to
+  the sandbox pod, and Kubernetes starts them before ``main``. This class gives ``main`` its
+  entrypoint and env, fails the create early when a service can't start, waits for ``main``'s and
+  the services' readiness, and runs per-service operations through the extension's exec route.
 
 Loaded by Harbor through ``environment.import_path``; see ``NEMO_OPENSANDBOX_IMPORT_PATH`` in
 ``scaled_evals.dispatch.harbor_opensandbox``. This is the interim home until ``nhx-sandbox`` owns
@@ -28,15 +33,23 @@ OpenSandbox access.
 from __future__ import annotations
 
 import asyncio
+import base64
+import contextlib
 import hashlib
 import json
 import logging
+import math
 import os
+import random
 import shlex
 import stat
+import tarfile
+import tempfile
+import time
 from pathlib import Path, PurePosixPath
 from typing import Any, override
 
+import httpx
 from harbor.environments.base import BaseEnvironment, ExecResult
 from harbor.environments.capabilities import EnvironmentCapabilities, EnvironmentResourceCapabilities
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
@@ -59,6 +72,19 @@ from scaled_evals.harbor_opensandbox_driver import (
     OpenSandboxDriver,
     sandbox_id,
 )
+from scaled_evals.harbor_opensandbox_services import (
+    COMPOSE_FILENAMES,
+    EXTENSION_KEY,
+    MAIN_SERVICE,
+    ComposeServices,
+    parse_compose_services,
+)
+
+try:
+    from harbor.environments.base import ServiceOperationsUnsupportedError
+except ImportError:
+    # Harbor 0.13.2 has no per-service operations, so nothing there catches this error by type.
+    ServiceOperationsUnsupportedError = RuntimeError
 
 __all__ = [
     "CREATE_ATTEMPT_METADATA_KEY",
@@ -89,8 +115,24 @@ DEFAULT_READY_TIMEOUT_SEC = 60 * 60 * 24
 DEFAULT_HEALTH_CHECK_POLL_INTERVAL_SEC = 2.0
 # How long the one-time ``id -u`` probe of the image's user may take. 30 seconds.
 _IMAGE_UID_PROBE_TIMEOUT_SEC = 30
-# Compose files that mark a multi-container task, which this environment rejects.
-_COMPOSE_FILENAMES = ("docker-compose.yaml", "docker-compose.yml")
+# How long start() waits for main's readiness check and the services, when main has no timeout_sec.
+COMPOSE_READY_TIMEOUT_SEC = 300
+COMPOSE_READY_POLL_SEC = 2.0
+# The server's exec route accepts at most this timeout.
+SERVICE_EXEC_MAX_TIMEOUT_SEC = 3600
+SERVICE_EXEC_DEFAULT_TIMEOUT_SEC = 600
+# The exec route caps output at 16 MiB; an 8 MiB chunk is about 11 MiB once base64-encoded.
+SERVICE_DOWNLOAD_BLOCK_BYTES = 1024 * 1024
+SERVICE_DOWNLOAD_CHUNK_BLOCKS = 8
+# The server's own routes retry transient failures: the extension's 429 (every exec slot busy) and
+# the gateway errors a restarting or overloaded server answers with. Delays double from the base
+# up to the max, each scaled by a random factor so a burst of trials doesn't retry in step.
+SERVER_RETRY_STATUSES = frozenset({429, 502, 503, 504})
+SERVER_RETRY_ATTEMPTS = 5
+SERVER_RETRY_BASE_SEC = 0.5
+SERVER_RETRY_MAX_SEC = 8.0
+# The readiness wait polls the services status on every poll, so each read gets only this long.
+PROVISIONING_STATUS_BUDGET_SEC = 30
 
 
 def sandbox_role(session_id: str, trial_name: str) -> str:
@@ -113,7 +155,7 @@ def _local_write_mode(path: Path) -> int:
 
 
 class NemoOpenSandboxEnvironment(BaseEnvironment):
-    """One OpenSandbox sandbox per Harbor environment, with trusted egress, applied-policy verification, and cleanup.
+    """One OpenSandbox sandbox per Harbor environment, with trusted egress, applied-policy verification, cleanup, and compose services.
 
     Args:
         domain: OpenSandbox server address; defaults to ``OPENSANDBOX_DOMAIN``.
@@ -131,6 +173,9 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             ``/etc/resolv.conf``, which in-cluster is the resolver sandboxes share.
         egress_verification: How strictly to compare the applied policy with the requested one;
             see ``verify_applied_egress``. Readback itself is always required.
+        compose_services: The evaluation profile's ``compose_services``. Applied only when the
+            environment directory has a Compose file, so a separate verifier environment (built
+            from the task's ``tests/``) gets a plain sandbox.
 
     Any other keyword argument is Harbor's and goes to ``BaseEnvironment`` unchanged.
     """
@@ -155,11 +200,16 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         trusted_allowed_hosts: list[str] | None = None,
         resolver_addresses: list[str] | None = None,
         egress_verification: EgressVerificationMode = "default_action",
+        compose_services: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         """Store this environment's settings, then let ``BaseEnvironment`` validate the task against them."""
         # BaseEnvironment.__init__ runs the definition, capability and network policy validators,
         # which read these, so they are set first.
+        has_compose_file = any((environment_dir / name).is_file() for name in COMPOSE_FILENAMES)
+        self._services: ComposeServices | None = (
+            parse_compose_services(compose_services) if compose_services is not None and has_compose_file else None
+        )
         self._connection = Connection(
             domain=domain if domain is not None else os.environ.get("OPENSANDBOX_DOMAIN"),
             api_key=api_key if api_key is not None else os.environ.get("OPENSANDBOX_API_KEY"),
@@ -190,6 +240,10 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             **kwargs,
         )
         self._driver = OpenSandboxDriver(self._connection, logger=self.logger)
+        # Compose's environment for main is the base; task and trial env win over it. Set after
+        # BaseEnvironment fills in the task's env.
+        if self._services is not None:
+            self._persistent_env = {**self._services.main.env, **self._persistent_env}
 
     @staticmethod
     @override
@@ -205,6 +259,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             gpus=True,
             disable_internet=True,
             mounted=False,
+            docker_compose=self._services is not None,
             network_allowlist=True,
             network_allowlist_hostnames=True,
             network_allowlist_wildcard_hostnames=True,
@@ -232,9 +287,13 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
 
     @override
     def _validate_definition(self) -> None:
-        """Require a prebuilt image; OpenSandbox can't build one or run a Compose project."""
-        if any((self.environment_dir / name).exists() for name in _COMPOSE_FILENAMES):
-            raise ValueError("NemoOpenSandboxEnvironment does not support docker-compose tasks.")
+        """Require a prebuilt image; a Compose file only with its services configured, since OpenSandbox runs no Compose."""
+        has_compose_file = any((self.environment_dir / name).exists() for name in COMPOSE_FILENAMES)
+        if has_compose_file and self._services is None:
+            raise ValueError(
+                "NemoOpenSandboxEnvironment runs docker-compose tasks only when the evaluation profile "
+                "lists their services under environment.kwargs.compose_services."
+            )
         if self.task_env_config.docker_image:
             return
         if (self.environment_dir / "Dockerfile").exists():
@@ -285,13 +344,18 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         return resource
 
     def _extensions(self) -> dict[str, str]:
-        """Server extensions: the task's GPU types, under the key Harbor 0.20 used."""
+        """Server extensions: the task's GPU types, under the key Harbor 0.20 used, and the compose services."""
+        extensions: dict[str, str] = {}
         if self.task_env_config.gpu_types:
-            return {"harbor.gpu_types": ",".join(self.task_env_config.gpu_types)}
-        return {}
+            extensions["harbor.gpu_types"] = ",".join(self.task_env_config.gpu_types)
+        if self._services is not None:
+            extensions[EXTENSION_KEY] = self._services.to_json()
+        return extensions
 
     async def _create_sandbox(self) -> Any:
         """Create the sandbox, then verify its egress; it is killed if the policy can't be read or doesn't match."""
+        if self._services is not None:
+            await self._require_compose_extension()
         expected = self.egress_policy()
         sandbox = await self._driver.create(
             CreateRequest(
@@ -310,7 +374,11 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 sandbox_timeout_sec=self._sandbox_timeout_sec,
                 ready_timeout_sec=self._ready_timeout_sec,
                 health_check_poll_interval_sec=self._health_check_poll_interval_sec,
-            )
+                entrypoint=self._services.sandbox_entrypoint() if self._services is not None else None,
+            ),
+            # Kubernetes starts main only after the services, so without this a crashing service
+            # would leave the create waiting for main until its ready timeout.
+            failure_check=self._services_failure if self._services is not None else None,
         )
         try:
             await verify_applied_egress(
@@ -352,7 +420,10 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
 
     @override
     async def start(self, force_build: bool) -> None:
-        """Create the sandbox, prepare the log directories, and upload the task's environment directory."""
+        """Create the sandbox, prepare the log directories, and upload the task's environment directory.
+
+        With compose services, also wait for ``main``'s readiness check and every service.
+        """
         if force_build:
             self.logger.warning("NemoOpenSandboxEnvironment ignores force_build; it runs prebuilt images only.")
         self._sandbox = await self._create_sandbox()
@@ -377,6 +448,156 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
 
         # Supplementary files (scripts, data, configs) for prebuilt-image tasks go into the workdir.
         await self._upload_environment_dir_after_start()
+
+        if self._services is None:
+            return
+        # One deadline covers both waits, like a Compose healthcheck's overall start period.
+        readiness = self._services.main.readiness
+        deadline = time.monotonic() + (readiness.timeout_sec if readiness else COMPOSE_READY_TIMEOUT_SEC)
+        if readiness is not None:
+            await self._wait_for_main(readiness.exec_, deadline)
+        # after_main services start with main, so they may still be coming up.
+        await self._wait_for_services(deadline)
+
+    def _server(self) -> _ServerClient:
+        """A client for the extension's routes, on the same server and API key as the driver's SDK calls."""
+        return _ServerClient.from_connection_config(self._driver.connection_config())
+
+    async def _require_compose_extension(self) -> None:
+        """Fail before creating anything if the server can't run Compose services.
+
+        A stock server ignores unknown extensions and would create a sandbox without the services.
+        """
+        try:
+            response = await self._server().get("/nemo-ext/health", timeout=30)
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"Could not reach the OpenSandbox compose services extension: {exc}") from exc
+        if response.status_code != 200:
+            raise RuntimeError(
+                "The OpenSandbox server does not run the NeMo compose services extension; "
+                f"GET /v1/nemo-ext/health returned {response.status_code}. See "
+                "k8s/helm/examples/opensandbox/README.md, 'Compose services'."
+            )
+
+    async def _services_status(self, sandbox_id: str, deadline: float) -> dict[str, Any]:
+        """The extension's view of the sandbox's services: ``{"failure": str | None, "not_ready": [names]}``.
+
+        The read, with its retries, stops at ``deadline`` (a ``time.monotonic()`` value).
+        """
+        response = await self._server().get(f"/nemo-ext/sandboxes/{sandbox_id}/services", timeout=30, deadline=deadline)
+        if response.status_code != 200:
+            raise RuntimeError(f"reading compose services failed ({response.status_code}): {_error_text(response)}")
+        return response.json()
+
+    async def _services_failure(self, sandbox: Any) -> str | None:
+        """The driver's ``failure_check``: a compose service that can't start fails the create now, with its logs."""
+        try:
+            status = await self._services_status(
+                str(sandbox_id(sandbox)), deadline=time.monotonic() + PROVISIONING_STATUS_BUDGET_SEC
+            )
+        except Exception:
+            # The pod may not exist yet, or the read hit a transient error; the next poll asks again.
+            return None
+        if status.get("failure"):
+            return f"OpenSandbox sandbox {sandbox_id(sandbox)}: {status['failure']}"
+        return None
+
+    async def _wait_for_main(self, argv: list[str], deadline: float) -> None:
+        """Run ``argv`` in the sandbox until it exits 0, like a Compose healthcheck of ``main``.
+
+        Kubernetes only knows when the sandbox container started, not when the processes its
+        entrypoint launched are up.
+        """
+        command = shlex.join(argv)
+        while True:
+            # As root from /, like a Compose healthcheck, whatever the task's default user and workdir.
+            remaining = max(1, int(deadline - time.monotonic()))
+            last = await self.exec(command, cwd="/", user="root", timeout_sec=min(30, remaining))
+            if last.return_code == 0:
+                return
+            # Out of time: report the check's last output, which usually says what's missing.
+            if time.monotonic() >= deadline:
+                output = ((last.stdout or "") + (last.stderr or ""))[-2000:]
+                raise RuntimeError(f"main was not ready: {command!r} last exited {last.return_code}: {output}")
+            await asyncio.sleep(COMPOSE_READY_POLL_SEC)
+
+    async def _wait_for_services(self, deadline: float) -> None:
+        """Poll the services route until every service is ready; raise on a failure or at ``deadline``.
+
+        A failure is raised as soon as the route reports one, with the service's log lines.
+        """
+        current = str(sandbox_id(self._require_sandbox()))
+        while True:
+            status = await self._services_status(current, deadline)
+            if status["failure"]:
+                raise RuntimeError(f"OpenSandbox sandbox {current}: {status['failure']}")
+            if not status["not_ready"]:
+                return
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"compose services not ready: {', '.join(status['not_ready'])}")
+            await asyncio.sleep(COMPOSE_READY_POLL_SEC)
+
+    def _service_transport(self, service: str) -> _ServiceExecTransport:
+        """The transport for ``service``'s operations; only the profile's services qualify.
+
+        ``main`` is the sandbox itself, which callers reach through the regular methods.
+        """
+        if self._services is None:
+            raise ServiceOperationsUnsupportedError(
+                f"{self.type()} environment is not running a docker-compose task, so it cannot target "
+                f"compose service {service!r}."
+            )
+        if service not in self._services.names():
+            raise ServiceOperationsUnsupportedError(
+                f"compose service {service!r} is not one of this sandbox's services {self._services.names()}"
+                + (" (main is the sandbox itself)" if service == MAIN_SERVICE else "")
+            )
+        return _ServiceExecTransport(self._server(), str(sandbox_id(self._require_sandbox())))
+
+    # Harbor 0.20's per-service operations. Harbor 0.13.2 never calls them. ``service=None`` or
+    # ``main`` is the sandbox itself; any other service goes through the extension's exec route.
+
+    async def service_exec(
+        self,
+        command: str,
+        *,
+        service: str | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        timeout_sec: int | None = None,
+        user: str | int | None = None,
+    ) -> ExecResult:
+        """Run ``command`` in ``service``; a service's command doesn't get main's workdir, user or env."""
+        if service is None or service == MAIN_SERVICE:
+            return await self.exec(command, cwd=cwd, env=env, timeout_sec=timeout_sec, user=user)
+        return await self._service_transport(service).service_exec(
+            command, service=service, cwd=cwd, env=env, timeout_sec=timeout_sec, user=user
+        )
+
+    async def service_download_file(
+        self, source_path: str, target_path: Path | str, *, service: str | None = None
+    ) -> None:
+        """Copy ``source_path`` in ``service`` to ``target_path`` here."""
+        if service is None or service == MAIN_SERVICE:
+            await self.download_file(source_path, target_path)
+            return
+        await self._service_transport(service).service_download_file(source_path, target_path, service=service)
+
+    async def service_download_dir(
+        self, source_dir: str, target_dir: Path | str, *, service: str | None = None
+    ) -> None:
+        """Copy the directory ``source_dir`` in ``service`` to ``target_dir`` here."""
+        if service is None or service == MAIN_SERVICE:
+            await self.download_dir(source_dir, target_dir)
+            return
+        await self._service_transport(service).service_download_dir(source_dir, target_dir, service=service)
+
+    async def stop_service(self, service: str) -> None:
+        """Always unsupported: every service, ``main`` included, is a container in one running pod."""
+        self._service_transport(service)  # Raises first for main and services this sandbox doesn't have.
+        raise ServiceOperationsUnsupportedError(
+            f"compose service {service!r} runs as a container in the sandbox pod and can't be stopped on its own"
+        )
 
     @override
     async def stop(self, delete: bool) -> None:
@@ -538,3 +759,229 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 self.logger.warning(
                     "Could not read the sandbox image's uid; root commands are sent as uid 0", exc_info=True
                 )
+
+
+def _error_text(response: httpx.Response) -> str:
+    """A short error message from a server response: ``code: message`` when it has the server's error shape."""
+    try:
+        body = response.json()
+    except ValueError:
+        return response.text[:2000]
+    detail = body.get("detail", body) if isinstance(body, dict) else None
+    if isinstance(detail, dict) and "message" in detail:
+        return f"{detail.get('code', 'error')}: {detail['message']}"
+    return response.text[:2000]
+
+
+class _ServerClient:
+    """Requests to the OpenSandbox server's own API, authenticated like the SDK's."""
+
+    def __init__(self, base_url: str, headers: dict[str, str]) -> None:
+        """``base_url`` ends in the API version (``.../v1``); ``headers`` carry the API key."""
+        self.base_url = base_url.rstrip("/")
+        self.headers = headers
+
+    @classmethod
+    def from_connection_config(cls, config: Any) -> _ServerClient:
+        """Build a client from the SDK's ``ConnectionConfig``, so it reaches the same server with the same key."""
+        headers = dict(getattr(config, "headers", None) or {})
+        api_key = config.get_api_key()
+        if api_key:
+            headers["OPEN-SANDBOX-API-KEY"] = api_key
+        return cls(config.get_base_url(), headers)
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        timeout: float,
+        retry_statuses: frozenset[int],
+        retry_errors: tuple[type[httpx.HTTPError], ...],
+        body: dict[str, Any] | None = None,
+        deadline: float | None = None,
+    ) -> httpx.Response:
+        """Send one request, retrying a ``retry_statuses`` answer or a ``retry_errors`` failure with backoff.
+
+        After the last attempt the response is returned as is, or the error raised, so callers
+        map failures exactly as they would without retries. With a ``deadline`` (a
+        ``time.monotonic()`` value), no attempt waits past it by more than a second and none
+        starts after it, and a response that does arrive is returned whenever it came.
+        """
+        for attempt in range(1, SERVER_RETRY_ATTEMPTS + 1):
+            # Always at least one second, so a deadline that already passed still gets a real try.
+            attempt_timeout = timeout if deadline is None else max(1.0, min(timeout, deadline - time.monotonic()))
+            error: httpx.HTTPError | None = None
+            response: httpx.Response | None = None
+
+            try:
+                async with httpx.AsyncClient(timeout=attempt_timeout) as client:
+                    response = await client.request(method, f"{self.base_url}{path}", json=body, headers=self.headers)
+            except retry_errors as exc:
+                error = exc
+
+            is_final_attempt = attempt == SERVER_RETRY_ATTEMPTS or (
+                deadline is not None and time.monotonic() >= deadline
+            )
+            if response is not None and (is_final_attempt or response.status_code not in retry_statuses):
+                return response
+            if error is not None and is_final_attempt:
+                raise error
+
+            pause = min(SERVER_RETRY_MAX_SEC, SERVER_RETRY_BASE_SEC * 2 ** (attempt - 1)) * random.uniform(0.5, 1.0)
+            if deadline is not None:
+                pause = min(pause, deadline - time.monotonic())
+
+            await asyncio.sleep(pause)
+        raise AssertionError("unreachable")  # the last attempt returns or raises
+
+    async def get(self, path: str, *, timeout: float, deadline: float | None = None) -> httpx.Response:
+        """``GET base_url + path``; the response is returned whatever its status.
+
+        A read changes nothing, so any transport error or transient status is retried, until
+        ``deadline`` if there is one.
+        """
+        return await self._request(
+            "GET",
+            path,
+            timeout=timeout,
+            retry_statuses=SERVER_RETRY_STATUSES,
+            retry_errors=(httpx.TransportError,),
+            deadline=deadline,
+        )
+
+    async def post(self, path: str, body: dict[str, Any], *, timeout: float) -> httpx.Response:
+        """``POST base_url + path`` with a JSON ``body``; the response is returned whatever its status.
+
+        A POST may have run its command, so only what proves it didn't is retried: a 429, which
+        the server answers before running anything, and a connection that never opened.
+        """
+        return await self._request(
+            "POST",
+            path,
+            timeout=timeout,
+            retry_statuses=frozenset({429}),
+            retry_errors=(httpx.ConnectError, httpx.ConnectTimeout),
+            body=body,
+        )
+
+
+class _ServiceExecTransport:
+    """Harbor's per-service operations, run through the extension's exec route.
+
+    Commands run as the service container's own user; ``user`` is ignored because the
+    container's image decides which users exist. Downloads stream through exec output (base64) in
+    chunks that fit the route's output cap, so the service image needs ``sh``, ``wc``, ``dd``,
+    ``base64`` and, for directories, ``mktemp`` and ``tar``.
+    """
+
+    def __init__(self, client: _ServerClient, sandbox_id: str) -> None:
+        """Operations go to the services of ``sandbox_id`` through ``client``."""
+        self._client = client
+        self._sandbox_id = sandbox_id
+
+    async def _exec(self, service: str, argv: list[str], timeout_sec: int | None) -> ExecResult:
+        """Run ``argv`` in ``service``; a timeout is exit code 124, like ``timeout(1)``."""
+        timeout = min(timeout_sec or SERVICE_EXEC_DEFAULT_TIMEOUT_SEC, SERVICE_EXEC_MAX_TIMEOUT_SEC)
+        try:
+            # The HTTP timeout leaves the server time to report its own timeout first.
+            response = await self._client.post(
+                f"/nemo-ext/sandboxes/{self._sandbox_id}/services/{service}/exec",
+                {"command": argv, "timeout": timeout},
+                timeout=timeout + 30,
+            )
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"exec in compose service {service!r} failed: {exc}") from exc
+
+        # The extension's 504 is the command's own timeout, which Harbor expects as a result, not an
+        # error. Any other 504 (a gateway's, say) says nothing about the command, so it raises below.
+        if response.status_code == 504 and _error_text(response).startswith("NEMO::EXEC_TIMEOUT"):
+            return ExecResult(stdout="", stderr=f"timed out after {timeout}s", return_code=124)
+
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"exec in compose service {service!r} failed ({response.status_code}): {_error_text(response)}"
+            )
+
+        body = response.json()
+
+        return ExecResult(stdout=body["stdout"], stderr=body["stderr"], return_code=body["exit_code"])
+
+    async def service_exec(
+        self,
+        command: str,
+        *,
+        service: str,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        timeout_sec: int | None = None,
+        user: str | int | None = None,
+    ) -> ExecResult:
+        """Harbor's ``exec`` for a service: run the shell ``command`` with ``cwd`` and ``env`` applied."""
+        # The exec route takes an argv and has no cwd or env, so both go into the script.
+        script = command
+        if cwd:
+            script = f"cd {shlex.quote(cwd)} && {script}"
+        if env:
+            script = "".join(f"export {name}={shlex.quote(value)}; " for name, value in env.items()) + script
+        return await self._exec(service, ["sh", "-c", script], timeout_sec)
+
+    async def _run(self, service: str, script: str, what: str) -> str:
+        """Run a download helper ``script`` and return its stdout; any non-zero exit fails reading ``what``."""
+        result = await self._exec(service, ["sh", "-c", script], None)
+        if result.return_code != 0:
+            raise RuntimeError(
+                f"could not read {what} from compose service {service!r}: {(result.stderr or '').strip()}"
+            )
+        return result.stdout or ""
+
+    async def _download(self, service: str, source_path: str, target: Path, what: str) -> None:
+        """Copy one file out of ``service`` to ``target``, one base64 chunk per exec, and check the byte count."""
+        # The size up front tells how many chunks to read and lets the result be checked.
+        quoted = shlex.quote(source_path)
+        size = int((await self._run(service, f"wc -c < {quoted}", what)).strip())
+        chunk_bytes = SERVICE_DOWNLOAD_BLOCK_BYTES * SERVICE_DOWNLOAD_CHUNK_BLOCKS
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        # Each exec reads one chunk with dd; base64 keeps binary data intact in the JSON response.
+        written = 0
+        with target.open("wb") as out:
+            for index in range(math.ceil(size / chunk_bytes)):
+                script = (
+                    f"dd if={quoted} bs={SERVICE_DOWNLOAD_BLOCK_BYTES} "
+                    f"skip={index * SERVICE_DOWNLOAD_CHUNK_BLOCKS} count={SERVICE_DOWNLOAD_CHUNK_BLOCKS} "
+                    "2>/dev/null | base64"
+                )
+                written += out.write(base64.b64decode(await self._run(service, script, what)))
+        # A file that changed while being read would otherwise download silently truncated or mixed.
+        if written != size:
+            raise RuntimeError(f"could not read {what} from compose service {service!r}: got {written} of {size} bytes")
+
+    async def service_download_file(self, source_path: str, target_path: Path | str, *, service: str) -> None:
+        """Harbor's ``download_file`` for a service: copy ``source_path`` in the container to ``target_path`` here."""
+        await self._download(service, source_path, Path(target_path), source_path)
+
+    async def service_download_dir(self, source_dir: str, target_dir: Path | str, *, service: str) -> None:
+        """Harbor's ``download_dir`` for a service: tar the directory in the container, download the archive, and extract it here."""
+        # One archive keeps it to a single download, whatever the number of files.
+        script = f't=$(mktemp) && tar -C {shlex.quote(source_dir)} -czf "$t" . && echo "$t"'
+        remote = (await self._run(service, script, source_dir)).strip()
+        try:
+            with tempfile.TemporaryDirectory() as scratch:
+                local = Path(scratch) / "dir.tgz"
+                await self._download(service, remote, local, source_dir)
+                target = Path(target_dir)
+                target.mkdir(parents=True, exist_ok=True)
+                # The "data" filter refuses absolute paths, links out of the target, and device files.
+                with tarfile.open(local, mode="r:gz") as archive:
+                    archive.extractall(target, filter="data")
+        finally:
+            # Best effort: a failed cleanup must not replace the download's own error.
+            with contextlib.suppress(Exception):
+                await self._exec(service, ["rm", "-f", remote], None)
+
+    async def stop_service(self, service: str) -> None:
+        """Always unsupported: a container in a running pod can't be stopped on its own."""
+        raise ServiceOperationsUnsupportedError(
+            f"compose service {service!r} runs as a container in the sandbox pod and can't be stopped on its own"
+        )
