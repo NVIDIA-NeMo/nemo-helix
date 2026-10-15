@@ -1596,7 +1596,12 @@ def test_authentik_kubernetes_test_action_runs_host_contracts() -> None:
 
 
 def test_authentik_kubernetes_test_action_collects_pod_logs_before_deleting_the_cluster() -> None:
-    output = _run_authentik_script("test", "k8s", "--dry-run")
+    output = _run_authentik_script(
+        "test",
+        "k8s",
+        "--dry-run",
+        env={"NHX_AUTHENTIK_K8S_RUNTIME": "kind", "NHX_AUTHENTIK_K8S_KEEP_CLUSTER": "0"},
+    )
 
     collect = output.find("logs --all-containers --prefix --timestamps")
     delete = output.find("kind delete cluster")
