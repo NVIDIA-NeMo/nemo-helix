@@ -1,7 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { toAgentName } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
+import type { AgentImageBundleFile } from '@nemo/sdk/generated/agents/schema/AgentImageBundleFile';
+import type { UploadAgentEntry } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/type';
+import {
+  isIgnoredPath,
+  toAgentName,
+} from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
 
 const PATH_COMPONENT = '[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*';
 const REGISTRY = '[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?(?::[0-9]+)?';
@@ -37,3 +42,15 @@ const imageRepositoryName = (reference: string): string => {
 /** A starting point for the agent name, which the user can still edit before submitting. */
 export const agentNameFromImage = (reference: string): string =>
   toAgentName(imageRepositoryName(reference));
+
+/** The image's agent bundle as upload entries, so it is validated and stored like picked files. */
+export const imageBundleEntries = (files: AgentImageBundleFile[]): UploadAgentEntry[] =>
+  files
+    .filter(({ path }) => !isIgnoredPath(path))
+    .map(({ path, content }) => ({
+      path,
+      file: new File(
+        [Uint8Array.from(atob(content), (char) => char.charCodeAt(0))],
+        path.split('/').pop() ?? path
+      ),
+    }));

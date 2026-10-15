@@ -7,6 +7,9 @@ Re-exports the standard NeMo Helix dependencies so route handlers can import fro
 a single location.
 """
 
+from collections.abc import AsyncIterator
+
+import httpx
 from fastapi import Depends
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import get_nemo_client
@@ -19,4 +22,10 @@ def get_files_client(client: AsyncNemoClient = Depends(get_nemo_client)) -> Asyn
     return AsyncFilesClient.from_client(client)
 
 
-__all__ = ["get_entity_client", "get_files_client"]
+async def get_registry_http_client() -> AsyncIterator[httpx.AsyncClient]:
+    """Provide an HTTP client for reading public container registries."""
+    async with httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(30.0)) as http:
+        yield http
+
+
+__all__ = ["get_entity_client", "get_files_client", "get_registry_http_client"]

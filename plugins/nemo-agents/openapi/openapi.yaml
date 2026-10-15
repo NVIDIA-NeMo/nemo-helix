@@ -35,6 +35,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/agent-images/bundle:
+    post:
+      tags:
+      - Agents
+      summary: Read Agent Image Bundle
+      description: 'Read agent.yaml and the agent''s files from an image built by
+        ``nemo agents package``.
+
+
+        The image is read from its registry without pulling it, so an agent can be
+
+        registered from the same files that run inside the image.'
+      operationId: read_agent_image_bundle_apis_agents_v2_workspaces__workspace__agent_images_bundle_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReadAgentImageBundleRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentImageBundle'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/agents/v2/workspaces/{workspace}/agents:
     post:
       tags:
@@ -2862,6 +2901,45 @@ components:
         Entity type: ``agent_environment_spec``
 
         Referenced by an AgentEnvironment''s ``environment_spec`` (by name or inline).'
+    AgentImageBundle:
+      properties:
+        image:
+          type: string
+          title: Image
+          description: The image reference that was read.
+        config_path:
+          type: string
+          title: Config Path
+          description: AGENT_CONFIG_PATH inside the image.
+        files:
+          items:
+            $ref: '#/components/schemas/AgentImageBundleFile'
+          type: array
+          title: Files
+          description: Every file of the agent bundle, including agent.yaml.
+      type: object
+      required:
+      - image
+      - config_path
+      - files
+      title: AgentImageBundle
+      description: The agent directory that ``nemo agents package`` copied into an
+        image.
+    AgentImageBundleFile:
+      properties:
+        path:
+          type: string
+          title: Path
+          description: Path relative to the directory holding agent.yaml.
+        content:
+          type: string
+          title: Content
+          description: Base64-encoded file content.
+      type: object
+      required:
+      - path
+      - content
+      title: AgentImageBundleFile
     AgentInline:
       properties:
         description:
@@ -4855,6 +4933,18 @@ components:
       - total_pages
       - total_results
       title: PaginationData
+    ReadAgentImageBundleRequest:
+      properties:
+        image:
+          type: string
+          title: Image
+          description: Image reference, e.g. docker.io/org/agent:1.0, built by nemo
+            agents package.
+      type: object
+      required:
+      - image
+      title: ReadAgentImageBundleRequest
+      description: Request for ``POST /v2/workspaces/{workspace}/agent-images/bundle``.
     ResolvedAgentConfig:
       properties:
         name:

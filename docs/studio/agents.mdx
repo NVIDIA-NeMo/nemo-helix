@@ -35,7 +35,7 @@ Select **Register Agent** to open **Register an agent with NeMo Helix**. The dia
 | --- | ------------ |
 | Register with code upload | Choose or drop a folder containing `agent.yaml`, or select **Choose files instead** to pick individual files, then enter a **Name**. |
 | Register from GitHub | Enter a **Repository** (`github.com/owner/repo`, optionally with `@branch` and `#sub/directory`) and a **Name**. Select an **Access token secret** for a private repository. Studio reads the files from GitHub on demand rather than copying them. |
-| Register from container image | Enter a **Container image** built with `nemo agents package` (for example `docker.io/org/agent:1.0`), a **Name**, and a **Runtime** (Docker or Kubernetes). Studio registers the agent and deploys the image as is, using the `agent.yaml` and entrypoint inside it. Available only when a container runtime is enabled. |
+| Register from container image | Enter a public **Container image** built with `nemo agents package` (for example `docker.io/org/agent:1.0`), a **Name**, and a **Runtime** (Docker or Kubernetes). Studio reads `agent.yaml` and the agent's files from the image's registry, registers them as it would an upload, and deploys the image without building one. Available only when a container runtime is enabled. |
 | Register from traces | Select an unregistered agent that appears in ingested traces, identified by the `agent.name` attribute. The agent is registered without a configuration, so it needs one before you can deploy or chat with it. |
 | Coding agent prompt | Shows a prompt to give a coding agent so it can connect your agent to NeMo Helix. |
 

@@ -10,19 +10,30 @@ prefix from the RouterSpec).
 
 from __future__ import annotations
 
+import base64
 import logging
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, validate_agent_config
 from nemo_agents_plugin.api.v2._perms import AgentPerms
-from nemo_agents_plugin.api.v2.dependencies import get_entity_client
+from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_registry_http_client
 from nemo_agents_plugin.authz import scope
+from nemo_agents_plugin.container.image_bundle import (
+    ImageAccessDeniedError,
+    ImageBundleError,
+    ImageNotFoundError,
+    read_agent_bundle,
+)
 from nemo_agents_plugin.entities import Agent, AgentDeployment
 from nemo_agents_plugin.schema import (
     AgentFilter,
+    AgentImageBundle,
+    AgentImageBundleFile,
     AgentPage,
     CreateAgentRequest,
+    ReadAgentImageBundleRequest,
 )
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
@@ -198,6 +209,40 @@ async def delete_agent(
     except Exception as exc:
         logger.exception("Failed to delete agent '%s'", name)
         raise HTTPException(status_code=500, detail="Failed to delete agent.") from exc
+
+
+@router.post("/agent-images/bundle", response_model=AgentImageBundle, tags=["Agents"])
+@scope.write
+@path_rule(
+    callers=[CallerKind.PRINCIPAL],
+    permissions=[AgentPerms.CREATE],
+)
+async def read_agent_image_bundle(
+    workspace: str,
+    body: ReadAgentImageBundleRequest,
+    http: httpx.AsyncClient = Depends(get_registry_http_client),
+) -> AgentImageBundle:
+    """Read agent.yaml and the agent's files from an image built by ``nemo agents package``.
+
+    The image is read from its registry without pulling it, so an agent can be
+    registered from the same files that run inside the image.
+    """
+    try:
+        bundle = await read_agent_bundle(body.image, http=http)
+    except ImageNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ImageAccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ImageBundleError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return AgentImageBundle(
+        image=body.image.strip(),
+        config_path=bundle.config_path,
+        files=[
+            AgentImageBundleFile(path=path, content=base64.b64encode(content).decode("ascii"))
+            for path, content in bundle.files.items()
+        ],
+    )
 
 
 def _validate_agent_config_for_create(body: CreateAgentRequest) -> dict[str, Any]:
