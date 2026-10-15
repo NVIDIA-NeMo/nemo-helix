@@ -58,6 +58,23 @@ class TestParseImageReference:
         with pytest.raises(ImageReferenceError, match="not an image reference"):
             parse_image_reference(image)
 
+    def test_rejects_an_overlong_reference_before_matching_it(self) -> None:
+        with pytest.raises(ImageReferenceError, match="at most 512 characters"):
+            parse_image_reference("0" * 100_000)
+
+    @pytest.mark.parametrize(
+        "image",
+        [
+            f"{'0' * 400}!/agent",
+            f"org/agent@0{'+0' * 200}",
+            f"org/agent@{'0+' * 200}",
+            f"org/{'a-' * 200}!",
+        ],
+    )
+    def test_rejects_crafted_references_at_the_length_limit(self, image: str) -> None:
+        with pytest.raises(ImageReferenceError):
+            parse_image_reference(image)
+
     @pytest.mark.parametrize(
         ("image", "printed"),
         [

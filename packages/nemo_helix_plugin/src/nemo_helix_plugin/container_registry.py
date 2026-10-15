@@ -11,10 +11,13 @@ from dataclasses import dataclass
 DOCKER_HUB_REGISTRY = "registry-1.docker.io"
 _DOCKER_HUB_ALIASES = frozenset({"docker.io", "index.docker.io", DOCKER_HUB_REGISTRY})
 
-_REGISTRY = re.compile(r"(?:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?|\[[0-9a-f:.]+\])(?::[0-9]{1,5})?")
-_REPOSITORY_SEGMENT = re.compile(r"[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*")
-_TAG = re.compile(r"[\w][\w.-]{0,127}")
-_DIGEST = re.compile(r"[a-z0-9]+(?:[.+_-][a-z0-9]+)*:[a-zA-Z0-9=_-]{32,}")
+# Longer than any reference a registry accepts; bounds the work the patterns below can do.
+MAX_IMAGE_REFERENCE_LENGTH = 512
+
+_REGISTRY = re.compile(r"\A(?:[a-z0-9]+(?:[.-]+[a-z0-9]+)*|\[[0-9a-f:.]+\])(?::[0-9]{1,5})?\Z")
+_REPOSITORY_SEGMENT = re.compile(r"\A[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*\Z")
+_TAG = re.compile(r"\A[\w][\w.-]{0,127}\Z")
+_DIGEST = re.compile(r"\A[a-z0-9]+(?:[.+_-][a-z0-9]+)*:[a-zA-Z0-9=_-]{32,}\Z")
 
 # One `WWW-Authenticate` challenge's scheme, then its parameters: httpx joins repeated headers with `, `.
 _SCHEME = re.compile(r"[\s,]*([A-Za-z][A-Za-z0-9!#$%&'*+.^_`|~-]*)(?=\s|$)")
@@ -49,7 +52,9 @@ def normalize_registry(registry: str) -> str:
 def parse_image_reference(image: str) -> ImageReference:
     """Split ``[registry/]repository[:tag][@digest]`` the way ``docker pull`` does."""
     text = image.strip()
-    invalid = ImageReferenceError(f"'{image}' is not an image reference. Use registry/repository:tag.")
+    if len(text) > MAX_IMAGE_REFERENCE_LENGTH:
+        raise ImageReferenceError(f"An image reference is at most {MAX_IMAGE_REFERENCE_LENGTH} characters.")
+    invalid = ImageReferenceError(f"'{text}' is not an image reference. Use registry/repository:tag.")
     if not text or "://" in text or any(char.isspace() for char in text):
         raise invalid
 
