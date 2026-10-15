@@ -30,5 +30,5 @@ def test_worker_rejects_invalid_inputs_before_provisioning(
     provision_checks: list[object] = []
     monkeypatch.setattr(_common, "require_provisioned", provision_checks.append)
     with pytest.raises(ValidationError):
-        job_class()._execute(config, ctx=make_job_context(tmp_path))
+        job_class()._execute(config, ctx=make_job_context(tmp_path), openshell_home=tmp_path / "openshell")
     assert provision_checks == []

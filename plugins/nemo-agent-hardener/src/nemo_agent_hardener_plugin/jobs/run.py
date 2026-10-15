@@ -16,6 +16,8 @@ and ``run`` sequences the phases. The mechanics live in sibling modules:
 from __future__ import annotations
 
 import logging
+import tempfile
+from pathlib import Path
 from typing import Any, ClassVar, cast
 
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
@@ -186,7 +188,7 @@ class AgentHardenerRunJob(NemoJob):
     name = "war-game"  # CLI: `nemo agent-hardener war-game ...`; keeps `run` free for the wrapper command
     job_collection_path = "/jobs"
     description = "Run the Agent Hardener war-game against a deployed NAT agent."
-    container = _common.TASK_IMAGE
+    container = "cpu-tasks"
     spec_schema: ClassVar[type[BaseModel] | None] = WarGameSpec
 
     @classmethod
@@ -242,7 +244,10 @@ class AgentHardenerRunJob(NemoJob):
         """
         artifact_capture = ArtifactCapture()
         try:
-            return self._execute(config, ctx=ctx, sdk=sdk, artifact_capture=artifact_capture)
+            with tempfile.TemporaryDirectory(prefix="agent-hardener-openshell-") as openshell_home:
+                return self._execute(
+                    config, ctx=ctx, sdk=sdk, artifact_capture=artifact_capture, openshell_home=Path(openshell_home)
+                )
         except Exception as exc:
             failure = classify_exception(exc)
             logger.exception("agent-hardener war-game failed [%s]: %s", failure.category, failure.message)
@@ -292,7 +297,13 @@ class AgentHardenerRunJob(NemoJob):
         self.report_progress(ctx, work_done=0, work_total=1, status="failed", details=failure.as_error_details())
 
     def _execute(
-        self, config: dict, *, ctx: JobContext, sdk: Any = None, artifact_capture: ArtifactCapture | None = None
+        self,
+        config: dict,
+        *,
+        ctx: JobContext,
+        openshell_home: Path,
+        sdk: Any = None,
+        artifact_capture: ArtifactCapture | None = None,
     ) -> dict:
         if artifact_capture is None:
             artifact_capture = ArtifactCapture()
@@ -316,7 +327,9 @@ class AgentHardenerRunJob(NemoJob):
         models = _effective_models(sdk, config, ctx)
         if models is not None:
             config_overrides["models"] = models.model_dump(mode="json")
-        runtime_env = _common.job_runtime_env(plugin_config, sdk=sdk, workspace=ctx.workspace)
+        runtime_env = _common.job_runtime_env(
+            plugin_config, sdk=sdk, workspace=ctx.workspace, openshell_home=openshell_home
+        )
         model_env = {**runtime_env, **_common.build_model_env(models, sdk=sdk, workspace=ctx.workspace)}
         # Preflight user-chosen models against their endpoint before the (minutes-long) sandbox spin-up, so
         # a wrong model name / key fails in seconds with the list of models the credentials can actually reach.

@@ -130,9 +130,8 @@ async def test_the_router_dispatches_compile_to_this_job(
     agents_client.get_agent = AsyncMock(return_value=MagicMock())
     agents_client.get_agent.return_value.data.return_value = SimpleNamespace(config=source_agent)
     with (
-        patch.object(optimize_module, "client_from_platform", return_value=jobs_client),
         patch("nemo_helix_plugin.agents.validation.client_from_platform", return_value=agents_client),
-        patch("nemo_helix_plugin.jobs.executor.client_from_platform", return_value=jobs_client)
+        patch("nemo_helix_plugin.jobs.executor.client_from_platform", return_value=jobs_client),
     ):
         compiled = await _compile_through_router(spec, workspace="staging")
 

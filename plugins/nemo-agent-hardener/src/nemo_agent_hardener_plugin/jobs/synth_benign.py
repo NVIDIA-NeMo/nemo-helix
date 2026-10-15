@@ -17,6 +17,8 @@ suite on the manifest entity.
 from __future__ import annotations
 
 import logging
+import tempfile
+from pathlib import Path
 from typing import Any, ClassVar
 
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
@@ -56,7 +58,7 @@ class AgentHardenerSynthBenignJob(NemoJob):
     name = "synth"  # keeps the hand-written `nemo agent-hardener synth-benign` command unshadowed (cf. war-game/run)
     job_collection_path = "/synth-benign/jobs"
     description = "Synthesize a saved manifest's benign request suite and cache it on the manifest."
-    container = _common.TASK_IMAGE
+    container = "cpu-tasks"
     spec_schema: ClassVar[type[BaseModel] | None] = SynthBenignSpec
 
     @classmethod
@@ -97,7 +99,8 @@ class AgentHardenerSynthBenignJob(NemoJob):
     def run(self, config: dict, *, ctx: JobContext, sdk: Any = None) -> dict:
         """Run synthesis, classifying any failure into an operator-facing error result."""
         try:
-            return self._execute(config, ctx=ctx, sdk=sdk)
+            with tempfile.TemporaryDirectory(prefix="agent-hardener-openshell-") as openshell_home:
+                return self._execute(config, ctx=ctx, sdk=sdk, openshell_home=Path(openshell_home))
         except Exception as exc:
             failure = classify_exception(exc)
             logger.exception("agent-hardener synth-benign failed [%s]: %s", failure.category, failure.message)
@@ -111,7 +114,7 @@ class AgentHardenerSynthBenignJob(NemoJob):
                 },
             }
 
-    def _execute(self, config: dict, *, ctx: JobContext, sdk: Any = None) -> dict:
+    def _execute(self, config: dict, *, ctx: JobContext, openshell_home: Path, sdk: Any = None) -> dict:
         SynthBenignSpec.model_validate(config)
         plugin_config = AgentHardenerConfig.get()
         _common.require_provisioned(plugin_config)
@@ -122,7 +125,9 @@ class AgentHardenerSynthBenignJob(NemoJob):
         # Synthesis probes the live victim, so it needs the manifest's declared secrets: from the operator env,
         # the manifest's Secrets-store refs and any --env-file. Either way the victim's .env gets written.
         _common.warn_shadowed_operator_env(plugin_config)
-        runtime_env = _common.job_runtime_env(plugin_config, sdk=sdk, workspace=ctx.workspace)
+        runtime_env = _common.job_runtime_env(
+            plugin_config, sdk=sdk, workspace=ctx.workspace, openshell_home=openshell_home
+        )
         env, env_file = _common.prepare_victim_env(
             manifest,
             _build_native_subprocess_env(plugin_config, runtime_env),

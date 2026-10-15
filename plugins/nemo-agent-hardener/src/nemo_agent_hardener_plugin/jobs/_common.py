@@ -39,6 +39,7 @@ from nemo_helix_plugin.entities.base import parse_qualified_name
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable, ExecutorSpec, SubprocessExecutionProviderSpec
 from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.executor import resolve_task_executor
 from nemo_helix_plugin.secrets.client import SecretsClient
 
@@ -48,6 +49,15 @@ TASK_IMAGE = "nhx-agent-hardener-tasks"
 # The subprocess executor forwards only PATH/VIRTUAL_ENV, but on the host `setup` provisioned, openshell reads
 # its gateway registration from $HOME/.config/openshell (or $XDG_CONFIG_HOME) and reaches Docker via $DOCKER_HOST.
 _HOST_ENVVARS = ("HOME", "DOCKER_HOST", "XDG_CONFIG_HOME")
+# Task pods get no platform config file, so the job reads these from NEMO_AGENT_HARDENER_* env instead.
+_CONFIG_ENV_PREFIX = "NEMO_AGENT_HARDENER_"
+_TASK_POD_CONFIG_FIELDS = (
+    "inference_secret_name",
+    "openshell_gateway_endpoint",
+    "openshell_ca_secret",
+    "openshell_client_cert_secret",
+    "openshell_client_key_secret",
+)
 
 
 async def task_step_executor(
@@ -67,6 +77,21 @@ async def task_step_executor(
         environment += [
             EnvironmentVariable(name=name, value=value) for name in _HOST_ENVVARS if (value := os.environ.get(name))
         ]
+        return executor, environment
+
+    plugin_config = AgentHardenerConfig.get()
+    if not plugin_config.container_jobs:
+        raise HelixJobCompilationError(
+            f"The agent-hardener {step} step cannot run on this deployment yet: it registers no subprocess "
+            "profile, and container jobs are off because OpenShell 0.1.0 and later create sandboxes only from a "
+            "registry image while agent-hardener still builds the victim from a Dockerfile. Run it from a host "
+            "provisioned with `nemo agent-hardener setup`."
+        )
+    environment += [
+        EnvironmentVariable(name=f"{_CONFIG_ENV_PREFIX}{field.upper()}", value=str(value))
+        for field in _TASK_POD_CONFIG_FIELDS
+        if (value := getattr(plugin_config, field))
+    ]
     return executor, environment
 
 
@@ -172,19 +197,27 @@ def _optional_secret(sdk: Any, name: str, workspace: str) -> str | None:
         return None
 
 
-def job_runtime_env(plugin_config: AgentHardenerConfig, *, sdk: Any, workspace: str) -> dict[str, str]:
+_MTLS_PURPOSE = "the OpenShell mTLS bundle"
+
+
+def job_runtime_env(
+    plugin_config: AgentHardenerConfig, *, sdk: Any, workspace: str, openshell_home: Path
+) -> dict[str, str]:
     """Env a job adds for what `nemo agent-hardener setup` would otherwise have left on the host.
 
-    A container has no operator dotenv, so agent-hardener's own inference key comes from its Secret when
-    the process env doesn't carry one; and a configured OpenShell gateway is registered for the CLI.
+    agent-hardener's own inference key is the one :func:`resolve_model_key` picks, so the run uses the
+    credential its preflight validated; a configured OpenShell gateway is registered under *openshell_home*.
     """
     env: dict[str, str] = {}
-    if not build_subprocess_env(plugin_config).get(INFERENCE_API_KEY_ENVVAR):
-        key = _optional_secret(sdk, plugin_config.inference_secret_name, workspace)
-        if key:
-            env[INFERENCE_API_KEY_ENVVAR] = key
+    key = resolve_model_key(sdk, None, workspace=workspace)
+    if key:
+        env[INFERENCE_API_KEY_ENVVAR] = key
     env.update(
-        register_openshell_gateway(plugin_config, resolve_secret=lambda name: _optional_secret(sdk, name, workspace))
+        register_openshell_gateway(
+            plugin_config,
+            resolve_secret=lambda name: resolve_secret_refs(sdk, {_MTLS_PURPOSE: name}, workspace)[_MTLS_PURPOSE],
+            config_home=openshell_home,
+        )
     )
     return env
 
