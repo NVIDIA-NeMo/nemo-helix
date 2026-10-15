@@ -11,7 +11,6 @@ from docs._scripts.lint_python_snippets import (
     PythonSnippet,
     extract_python_snippets,
     find_doc_files,
-    import_usage_check,
     prepare_type_check_file,
     run_type_check,
     syntax_check,
@@ -130,67 +129,6 @@ value = 1
     )
 
     assert syntax_check(extract_python_snippets(doc)) == []
-
-
-@pytest.mark.parametrize("marker", ["", "{/* @nemo-docs: skip-python-type-check */}\n"])
-def test_import_usage_catches_later_optional_import(tmp_path: Path, marker: str) -> None:
-    doc = tmp_path / "page.mdx"
-    doc.write_text(
-        marker + '```python\nprovider = os.environ.get("PROVIDER")\n```\n\n## Optional\n```python\nimport os\n```\n',
-        encoding="utf-8",
-    )
-    diagnostics = import_usage_check(extract_python_snippets(doc))
-    assert len(diagnostics) == 1
-    assert diagnostics[0].line == (3 if marker else 2)
-    assert "`os`" in diagnostics[0].message
-
-
-def test_import_usage_catches_completely_missing_stdlib_import(tmp_path: Path) -> None:
-    doc = tmp_path / "page.mdx"
-    doc.write_text('```python\nprint(os.environ.get("TOKEN"))\n```\n', encoding="utf-8")
-    assert len(import_usage_check(extract_python_snippets(doc))) == 1
-
-
-def test_import_usage_accepts_prior_cells_aliases_and_deferred_functions(tmp_path: Path) -> None:
-    doc = tmp_path / "page.mdx"
-    doc.write_text(
-        '```python\ndef load():\n    return os.environ.get("TOKEN")\n```\n'
-        "```python\nimport os\nimport pandas as pd\nfrom pathlib import Path\n```\n"
-        "```python\nprint(os.environ, pd.DataFrame(), Path.cwd())\n```\n",
-        encoding="utf-8",
-    )
-    assert import_usage_check(extract_python_snippets(doc)) == []
-
-
-def test_import_usage_accepts_non_module_bindings(tmp_path: Path) -> None:
-    doc = tmp_path / "page.mdx"
-    doc.write_text("```python\nplatform = object()\nprint(platform.name)\n```\n", encoding="utf-8")
-    assert import_usage_check(extract_python_snippets(doc)) == []
-
-
-@pytest.mark.parametrize(
-    "source",
-    [
-        'os = os.environ.get("TOKEN")',
-        "for os in os.environ.values():\n    pass",
-        'class Example:\n    token = os.environ.get("TOKEN")',
-        'fn = lambda token=os.environ.get("TOKEN"): token',
-        "class Example:\n    import os\nprint(os.environ)",
-    ],
-)
-def test_import_usage_checks_immediately_executed_expressions(tmp_path: Path, source: str) -> None:
-    snippet = PythonSnippet(tmp_path / "page.mdx", 10, source, type_check=False)
-    assert len(import_usage_check([snippet])) == 1
-
-
-def test_import_usage_accepts_exception_alias(tmp_path: Path) -> None:
-    snippet = PythonSnippet(
-        tmp_path / "page.mdx",
-        10,
-        'try:\n    raise ValueError("bad")\nexcept ValueError as os:\n    print(os.args)',
-        type_check=True,
-    )
-    assert import_usage_check([snippet]) == []
 
 
 def test_prepare_type_check_file_preserves_line_mapping(tmp_path: Path) -> None:

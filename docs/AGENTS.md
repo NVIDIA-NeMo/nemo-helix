@@ -15,7 +15,7 @@ Run these from the repo root (they wrap `cd docs/fern && npm run …`):
 | `make docs` | Local dev server (live preview) |
 | `make docs-watch` | Local dev server plus repo-level watcher for `docs/**` changes outside `docs/fern/` |
 | `make docs-check` | `fern check` + MDX validation + NotebookViewer artifact validation + gated-link check (what CI runs) |
-| `make docs-lint-snippets` | Check Python syntax and module imports across all docs, type-check the curated executable-doc subset, validate Helm YAML and API examples, and run `docs-check-base-url` |
+| `make docs-lint-snippets` | Check Python syntax across all docs, type-check the curated executable-doc subset, validate Helm YAML and API examples, and run `docs-check-base-url` |
 | `make docs-lint-helm-snippets` | Parse Helm docs YAML, reject duplicate keys, and check chart-value nesting against `k8s/helm/values.yaml` |
 | `make docs-lint-api-examples` | Validate explicit OpenAPI examples against schemas, reject empty required objects that Fern drops, and check bodyless response samples |
 | `make docs-check-base-url` | Flag snippets that bypass the CLI context: Python that reads `NHX_BASE_URL`, or shell that assigns it a literal URL |
@@ -39,7 +39,7 @@ Use `make docs` when you are only editing `docs/fern/` config. Use `make docs-wa
 
 ## Snippet lint coverage
 
-Python module-import checks run in page order, including blocks marked `skip-python-type-check`, so an import in a later optional cell cannot satisfy an earlier use. Function bodies are deferred; this is not a general control-flow or runtime checker. Prefer a narrow, explained `ty: ignore[unresolved-import]` for a tutorial-only dependency over skipping an entire block's type checks.
+Python snippets are syntax-checked across all docs; the curated executable-doc subset is also checked with `ty`. These static checks do not verify notebook execution order, so an import in a later cell can hide an earlier runtime error. Prefer a narrow, explained `ty: ignore[unresolved-import]` for a tutorial-only dependency over skipping an entire block's type checks.
 
 Helm YAML syntax alone does not catch flattened nesting that still parses. The Helm snippet linter also checks partial overrides against the chart defaults, flags implicit empty values, and allows free-form configuration maps. Use explicit `null` for intentional deletion of a Helm default. These checks do not validate SCC admission, credentials, filesystem permissions, or whether prose agrees with configuration; those still need review or runtime tests.
 

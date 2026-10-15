@@ -110,6 +110,17 @@ def test_published_operation_examples():
     assert lint_spec(yaml.safe_load(_SPEC_PATH.read_text())) == []
 
 
+def test_docs_ci_checks_service_sources_and_documents_all_triggers():
+    root = _SPEC_PATH.parent.parent
+    workflow = yaml.load((root / ".github/workflows/fern-docs-ci.yaml").read_text(), Loader=yaml.BaseLoader)
+    paths = workflow["on"]["pull_request"]["paths"]
+    assert "services/**/src/**/*.py" in paths
+    readme = (root / "docs/fern/README.md").read_text()
+    trigger_row = next(line for line in readme.splitlines() if line.startswith("| `fern-docs-ci.yaml` |"))
+    for path in paths:
+        assert f"`{path}`" in trigger_row
+
+
 @pytest.mark.parametrize(
     "path,method,model",
     [

@@ -11,6 +11,7 @@ on:
     paths:
       - 'docs/**'
       - 'openapi/**'
+      - 'services/**/src/**/*.py'
       - 'k8s/helm/values.yaml'
       - 'pyproject.toml'
       - 'uv.lock'

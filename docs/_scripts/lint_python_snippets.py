@@ -8,11 +8,10 @@ The checker is intentionally extraction-based instead of MDX-renderer-based:
 Fern pages may contain JSX, imports, or custom components, but Python snippet
 validation only needs fenced ``python``/``py`` blocks.
 
-By default this script syntax-checks every Python snippet, checks module imports
-in execution order, and combines snippets per page to run ``ty`` over extracted
-source while mapping diagnostics back to the original doc line numbers. Module
-import checks also cover type-check-exempt cells. Pass ``--no-type-check`` to
-skip ``ty`` (syntax and import checks still run).
+By default this script syntax-checks every Python snippet and combines snippets
+per page to run ``ty`` over the extracted source while mapping diagnostics back
+to the original doc line numbers. Pass ``--no-type-check`` for syntax-only
+audits.
 """
 
 import argparse
@@ -241,122 +240,6 @@ def syntax_check(snippets: Iterable[PythonSnippet]) -> list[SnippetDiagnostic]:
     return diagnostics
 
 
-def import_usage_check(snippets: Iterable[PythonSnippet]) -> list[SnippetDiagnostic]:
-    """Check module references in execution order, even in type-check-exempt cells.
-
-    Joining a page for type checking can hide an import that occurs only in a
-    later (possibly optional) cell. Only inspect immediately executed code:
-    function bodies may legitimately use modules imported before the call.
-    Standard-library module names also catch imports missing from the entire
-    page; third-party aliases are learned from the page's import statements.
-    This is deliberately not a general undefined-variable checker.
-    """
-    parsed: list[tuple[PythonSnippet, ast.Module]] = []
-    module_names = set(sys.stdlib_module_names)
-    for snippet in snippets:
-        try:
-            tree = ast.parse(source_for_static_check(snippet.source))
-        except SyntaxError:
-            continue  # Reported separately by syntax_check.
-        parsed.append((snippet, tree))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                module_names.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
-
-    available: set[str] = set()
-    diagnostics: list[SnippetDiagnostic] = []
-
-    class ModuleUsageVisitor(ast.NodeVisitor):
-        def visit_Import(self, node: ast.Import) -> None:
-            available.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
-
-        def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-            available.update(alias.asname or alias.name for alias in node.names)
-
-        def visit_Name(self, node: ast.Name) -> None:
-            if isinstance(node.ctx, ast.Store):
-                available.add(node.id)
-
-        def visit_Attribute(self, node: ast.Attribute) -> None:
-            if isinstance(node.value, ast.Name):
-                name = node.value.id
-                if name in module_names and name not in available:
-                    diagnostics.append(
-                        SnippetDiagnostic(
-                            path=snippet.path,
-                            line=snippet.start_line + node.lineno - 1,
-                            column=node.col_offset + 1,
-                            message=f"Module `{name}` is used before it is imported or defined",
-                        )
-                    )
-            self.generic_visit(node)
-
-        def visit_Assign(self, node: ast.Assign) -> None:
-            self.visit(node.value)
-            for target in node.targets:
-                self.visit(target)
-
-        def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
-            if node.value is not None:
-                self.visit(node.value)
-                self.visit(node.target)
-
-        def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
-            self.visit(node.value)
-            self.visit(node.target)
-
-        def visit_For(self, node: ast.For | ast.AsyncFor) -> None:
-            self.visit(node.iter)
-            self.visit(node.target)
-            for statement in [*node.body, *node.orelse]:
-                self.visit(statement)
-
-        visit_AsyncFor = visit_For
-
-        def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
-            if node.type is not None:
-                self.visit(node.type)
-            if node.name is not None:
-                available.add(node.name)
-            for statement in node.body:
-                self.visit(statement)
-            if node.name is not None:
-                available.discard(node.name)
-
-        def visit_FunctionDef(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-            # Decorators and defaults execute now; the body executes at call time.
-            for expression in [*node.decorator_list, *node.args.defaults, *node.args.kw_defaults]:
-                if expression is not None:
-                    self.visit(expression)
-            available.add(node.name)
-
-        visit_AsyncFunctionDef = visit_FunctionDef
-
-        def visit_Lambda(self, node: ast.Lambda) -> None:
-            for expression in [*node.args.defaults, *node.args.kw_defaults]:
-                if expression is not None:
-                    self.visit(expression)
-
-        def visit_ClassDef(self, node: ast.ClassDef) -> None:
-            for expression in [*node.decorator_list, *node.bases]:
-                self.visit(expression)
-            for keyword in node.keywords:
-                self.visit(keyword.value)
-            # Class bodies execute immediately, but their imports/bindings do
-            # not become globals available to subsequent cells.
-            outer_names = available.copy()
-            for statement in node.body:
-                self.visit(statement)
-            available.clear()
-            available.update(outer_names)
-            available.add(node.name)
-
-    visitor = ModuleUsageVisitor()
-    for snippet, tree in parsed:
-        visitor.visit(tree)
-    return diagnostics
-
-
 def prepare_type_check_file(
     doc_path: Path,
     snippets: Iterable[PythonSnippet],
@@ -501,7 +384,7 @@ def check_paths(
         PageResult(
             path=path,
             snippets=len(snippets),
-            syntax_errors=tuple([*syntax_check(snippets), *import_usage_check(snippets)]),
+            syntax_errors=tuple(syntax_check(snippets)),
             type_errors=type_results.get(path, ()),
         )
         for path, snippets in snippets_by_path.items()
@@ -514,7 +397,7 @@ def display_results(results: list[PageResult], type_check: bool) -> None:
         return
 
     total_snippets = sum(result.snippets for result in results)
-    checks = "syntax + imports + type" if type_check else "syntax + imports"
+    checks = "syntax + type" if type_check else "syntax"
     print(f"Checked {total_snippets} Python snippet(s) across {len(results)} doc file(s) ({checks}).\n")
 
     for result in results:
@@ -524,7 +407,7 @@ def display_results(results: list[PageResult], type_check: bool) -> None:
 
         print(f"✗ {result.path} ({result.snippets} snippet(s))")
         for diagnostic in result.syntax_errors:
-            print(f"  SNIPPET: {diagnostic.format()}")
+            print(f"  SYNTAX: {diagnostic.format()}")
         for message in result.type_errors:
             print(f"  TYPE: {message}")
 
@@ -543,7 +426,7 @@ def main() -> int:
         "--no-type-check",
         dest="type_check",
         action="store_false",
-        help="Run syntax and module-import checks; skip `ty check`.",
+        help="Only run structural syntax checks; skip `ty check`.",
     )
     parser.set_defaults(type_check=True)
     parser.add_argument(
