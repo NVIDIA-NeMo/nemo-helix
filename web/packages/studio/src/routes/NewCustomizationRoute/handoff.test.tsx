@@ -36,11 +36,23 @@ vi.mock('@studio/components/CreateCustomizationStart', () => ({
       >
         Template
       </button>
+      <button
+        type="button"
+        onClick={() =>
+          onContinue({
+            optionId: 'template',
+            initialValues: VALUES,
+            savedTemplateName: 'my-sft-recipe',
+          })
+        }
+      >
+        Saved
+      </button>
     </>
   ),
 }));
 
-const renderRoute = () => {
+const mountRoute = () => {
   const router = createMemoryRouter(
     [
       { path: ROUTES.workspace.newCustomizationJob, element: <NewCustomizationRoute /> },
@@ -53,14 +65,23 @@ const renderRoute = () => {
       <RouterProvider router={router} />
     </TestProviders>
   );
+  return router;
 };
 
 describe('NewCustomizationRoute hand-off', () => {
   it.each(['AI', 'Template'])('opens the form filled in from the %s values', async (way) => {
-    renderRoute();
+    mountRoute();
     await userEvent.click(screen.getByRole('button', { name: way }));
 
     expect(await screen.findByRole('radio', { name: /Unsloth/ })).toBeChecked();
     expect(screen.getByDisplayValue('handed-over')).toBeInTheDocument();
+  });
+
+  it('names the saved template, so the form can offer to delete it', async () => {
+    const router = mountRoute();
+    await userEvent.click(screen.getByRole('button', { name: 'Saved' }));
+
+    await screen.findByRole('radio', { name: /Unsloth/ });
+    expect(router.state.location.state).toMatchObject({ savedTemplateName: 'my-sft-recipe' });
   });
 });
