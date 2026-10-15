@@ -10,7 +10,7 @@
 | 0 SDG | `nemo data-designer retrieval-generate` | stage0 fileset |
 | 1 Prep | `nemo data-designer retrieval-prepare` | `training.jsonl` + `eval_beir/` |
 | 0+1 | `nemo data-designer retrieval-run` | both |
-| 2 Finetune | `nemo customization automodel --job-json` `recipe: bi_encoder` | model entity |
+| 2 Finetune | `nemo customization automodel --job-json <embed-job.json>`, where the file holds the Stage 2 spec below (`recipe: bi_encoder`) | model entity |
 | 3 Eval | `nemo evals retrieve-eval` | `eval_results.json` |
 | 4 Export | Automodel job writes both layouts. Set `training.retrieval.export.primary` to `onnx` or `hf`. Newer Retriever NIMs (2.2.0+) need `hf` at the fileset root. | Retriever NIM layout |
 | 5 Deploy | ModelDeployment + Retriever NIM 2.2.0 | `/v1/embeddings` |
