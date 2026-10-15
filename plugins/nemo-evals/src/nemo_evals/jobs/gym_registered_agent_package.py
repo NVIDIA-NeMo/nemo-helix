@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib.resources
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -196,6 +197,20 @@ def _merged_manifest(root: Path, config_path: str, agent_name: str) -> dict[str,
     return manifest
 
 
+_OMEGACONF_INTERPOLATION = re.compile(r"(\\*)\$\{")
+
+
+def _omegaconf_literal(value: object) -> object:
+    """``value`` with every string escaped so OmegaConf reads it back verbatim instead of interpolating it."""
+    if isinstance(value, str):
+        return _OMEGACONF_INTERPOLATION.sub(lambda m: m.group(1) * 2 + "\\${", value)
+    if isinstance(value, dict):
+        return {key: _omegaconf_literal(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_omegaconf_literal(item) for item in value]
+    return value
+
+
 def write_registered_agent_package(
     root: Path,
     spec: GymRegisteredAgentPackageSpec,
@@ -231,7 +246,7 @@ def write_registered_agent_package(
         "description": f"Registered platform agent {spec.agent.root}, run through NeMo Fabric.",
         "resources_server": {"type": "resources_servers", "name": "???"},
         "model_server": {"type": "responses_api_models", "name": "policy_model"},
-        "fabric_config": spec.resolved_config,
+        "fabric_config": _omegaconf_literal(spec.resolved_config),
         "fabric_config_base_dir": base_dir,
     }
     instance_config = {instance: {CUSTOM_AGENT_SUBDIR: {REGISTERED_AGENT_GYM_COMPONENT: component}}}
