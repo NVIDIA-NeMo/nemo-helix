@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { FileFormat, InputFileSchemaType } from '@nemo/common/src/types';
-import type { DatasetInputFileResult } from '@studio/components/DatasetInputFile/types';
+import type { DatasetInputFileResult } from '@studio/types/dataset';
 
 /**
  * In-Studio sample prompt sets surfaced in the Run Prompts dataset picker.
