@@ -71,9 +71,13 @@ def list_all(
 
     `where` keeps only entities whose field holds one of the listed values. The
     values must not be None: the store does not promise to match a JSON null.
+    A boolean must be its field's only value: the store's `$in` compares text,
+    which never matches a JSON boolean, so a single value is sent as `$eq`.
     """
     operations: list[FilterOperation] = [
-        ComparisonOperation(operator=FilterOperator.IN, field=f"data.{field}", value=list(values))
+        ComparisonOperation(operator=FilterOperator.EQ, field=f"data.{field}", value=values[0])
+        if len(values) == 1
+        else ComparisonOperation(operator=FilterOperator.IN, field=f"data.{field}", value=list(values))
         for field, values in (where or {}).items()
     ]
     match = operations[0] if len(operations) == 1 else None

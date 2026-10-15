@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
@@ -15,14 +16,25 @@ from nemo_helix_plugin.filter_ops import FilterOperator
 _EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
 
 
+def _json_text(value: Any) -> str:
+    return json.dumps(value).strip('"')
+
+
 def _matches(entity: Any, operation: Any) -> bool:
-    """Evaluate the `$in` and `$and` filters `entity_store.list_all` builds."""
+    """Evaluate the `$eq`, `$in` and `$and` filters `entity_store.list_all` builds.
+
+    Like the real store, `$in` compares a JSON field's text with `str(value)`,
+    so it never matches a boolean.
+    """
     if operation is None:
         return True
     if operation.operator == FilterOperator.AND:
         return all(_matches(entity, item) for item in operation.operations)
+    value = getattr(entity, operation.field.removeprefix("data."))
+    if operation.operator == FilterOperator.EQ:
+        return value == operation.value
     if operation.operator == FilterOperator.IN:
-        return getattr(entity, operation.field.removeprefix("data.")) in operation.value
+        return _json_text(value) in [str(item) for item in operation.value]
     raise NotImplementedError(operation.operator)
 
 
