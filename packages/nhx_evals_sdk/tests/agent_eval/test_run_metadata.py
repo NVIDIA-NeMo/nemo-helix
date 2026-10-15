@@ -256,6 +256,7 @@ def test_gym_redacts_credential_looking_hydra_params() -> None:
         ({"region": "ASIA-SOUTHEAST-1-ZONE"}, []),
         ({"author": "AIzawaBenchmarkResults2026"}, []),
         ({"tokenizer": "o200k_base"}, []),
+        ({"max_tokens": "4096"}, []),
         ({"auth": "basic"}, []),
     ],
 )

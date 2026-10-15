@@ -257,8 +257,10 @@ def _codex_adapter_installed() -> bool:
     """
     try:
         importlib.import_module("nemo_fabric_adapters.codex.adapter")
-    except ImportError:  # the adapter package or one of its own dependencies (e.g. openai_codex) is absent
-        return False
+    except ModuleNotFoundError as error:
+        if (error.name or "").split(".")[0] in {"nemo_fabric_adapters", "openai_codex"}:
+            return False
+        raise
     return True
 
 

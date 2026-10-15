@@ -25,9 +25,12 @@ _SECRET_KEY_MARKERS = (
 )
 _REDACTED = "<redacted>"
 _ENV_TEMPLATE = re.compile(r"\$\{[^}]+\}")
-#: A marker standing as a word in a path: ``api_keys`` matches, ``tokenizer`` does not.
+#: A marker standing as a word in a path: ``api_keys`` matches, ``tokenizer`` does not. ``tokens`` is
+#: exempt from the plural: ``max_tokens`` is a model setting, not a credential.
 _SECRET_KEY_MARKER_RE = re.compile(
-    r"(?<![a-z0-9])(?:" + "|".join(re.escape(marker) for marker in _SECRET_KEY_MARKERS) + r")s?(?![a-z0-9])"
+    r"(?<![a-z0-9])(?:"
+    + "|".join(re.escape(marker) + ("" if marker == "token" else "s?") for marker in _SECRET_KEY_MARKERS)
+    + r")(?![a-z0-9])"
 )
 #: Issued-token shapes, for values whose key says nothing. A prefix ending in ``-`` or ``_`` delimits
 #: itself and needs no length: nothing ordinary reads as ``glpat-`` at the start of a value. A prefix

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared Harbor 0.20 result builders for evals SDK tests."""
+"""Shared Harbor result builders for evals SDK tests."""
 
 from __future__ import annotations
 

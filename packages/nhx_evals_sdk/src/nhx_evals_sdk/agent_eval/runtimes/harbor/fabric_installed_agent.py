@@ -232,10 +232,11 @@ class FabricInstalledAgent(BaseInstalledAgent):
     async def _ensure_curl(self, environment: BaseEnvironment) -> None:
         """Install curl and CA certificates through whichever package manager the image has.
 
-        Harbor 0.23 offers ``ensure_system_dependencies()`` for this; the repository pins 0.20, so
-        the same walk lives here. Every package-manager branch installs CA certificates even when
-        curl is already present: ``ubuntu:24.04`` ships neither, and without the certificates the uv
-        installer's HTTPS fetch fails with a bare curl exit code that reads like a network outage.
+        Harbor's ``ensure_system_dependencies("curl")`` is not used: it skips the install when curl
+        is already present, never installs CA certificates, and only warns when no package manager
+        exists. Every package-manager branch here installs CA certificates even when curl is already
+        present: ``ubuntu:24.04`` ships neither, and without the certificates the uv installer's HTTPS
+        fetch fails with a bare curl exit code that reads like a network outage.
         The last branch -- curl present, no package manager -- is the one exception, because there
         is nothing left to install certificates *with*; such an image has to bring its own CA store,
         and the uv fetch fails with a TLS error if it does not.

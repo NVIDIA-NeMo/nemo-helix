@@ -719,6 +719,7 @@ class TestRenderFabricDockerfile:
         assert PI_ADAPTER_NPM_SPEC in result
         assert "@earendil-works/pi-coding-agent@^1.0.0" in result
         assert "@earendil-works/pi-ai@^1.0.0" in result
+        assert "@earendil-works/pi-mcp@^1.0.0" in result
         # Relay 0.9 CLI for telemetry and git for the agent's own GitHub work.
         assert "nemo-relay-cli-bin" in result
         assert "ca-certificates curl git" in result
