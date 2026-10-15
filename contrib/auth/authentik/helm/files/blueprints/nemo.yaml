@@ -12,6 +12,33 @@ metadata:
     blueprints.goauthentik.io/description: "NeMo Helix OIDC provider + demo workload identity"
 
 entries:
+  # The flows and scope mappings found below come from authentik's default blueprints, which the
+  # worker applies in the background and in no fixed order. A !Find that runs first resolves to
+  # nothing: required fields then fail the apply, but an optional one like the brand's
+  # flow_device_code is silently left empty and /device answers 404. Applying those blueprints
+  # here makes them exist before anything references them; `required` fails this apply (so the
+  # caller retries) until the worker has discovered them.
+  - model: authentik_blueprints.metaapplyblueprint
+    attrs:
+      identifiers:
+        name: Default - Authentication flow
+      required: true
+  - model: authentik_blueprints.metaapplyblueprint
+    attrs:
+      identifiers:
+        name: Default - Provider authorization flow (implicit consent)
+      required: true
+  - model: authentik_blueprints.metaapplyblueprint
+    attrs:
+      identifiers:
+        name: Default - Provider invalidation flow
+      required: true
+  - model: authentik_blueprints.metaapplyblueprint
+    attrs:
+      identifiers:
+        name: System - OAuth2 Provider - Scopes
+      required: true
+
   - model: authentik_providers_oauth2.scopemapping
     id: nemo-groups-scope
     identifiers:
