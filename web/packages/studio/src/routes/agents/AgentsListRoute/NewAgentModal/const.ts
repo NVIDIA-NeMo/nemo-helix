@@ -55,8 +55,7 @@ export const uploadAgentFormSchema = z.object({
   image: z.string().trim().default(''),
   deploy: z.boolean().default(true),
   deploymentMode: z.nativeEnum(DeploymentModeAvailabilityMode).default('subprocess'),
-  // Its own field: a packaged image runs only in a container runtime, and choosing one must not
-  // move the runtime the other tabs deploy with.
+  // Separate so choosing an image runtime never moves the other tabs' runtime.
   imageDeploymentMode: z.nativeEnum(DeploymentModeAvailabilityMode).default('docker'),
 });
 

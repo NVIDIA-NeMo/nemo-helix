@@ -18,26 +18,7 @@ const IMAGE_REFERENCE = new RegExp(
   `^(?:${REGISTRY}/)?${PATH_COMPONENT}(?:/${PATH_COMPONENT})*(?::${TAG})?(?:@${DIGEST})?$`
 );
 
-const INTERNAL_HOST_SUFFIXES = ['.localhost', '.local', '.internal', '.svc', '.cluster.local'];
-const PRIVATE_IPV4 =
-  /^(?:0\.|10\.|127\.|169\.254\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/;
-
-// Mirrors the platform's refusal of its own network, so the field says so before a round trip.
-const registryProblem = (reference: string): string | undefined => {
-  const [first = '', ...rest] = reference.split('@')[0]?.split('/') ?? [];
-  const namesRegistry = rest.length > 0 && (first.includes('.') || first.includes(':'));
-  if (!namesRegistry && first !== 'localhost') {
-    return undefined;
-  }
-  const host = first.replace(/:\d+$/, '').toLowerCase();
-  const internal =
-    host === 'localhost' ||
-    INTERNAL_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix)) ||
-    !host.includes('.') ||
-    PRIVATE_IPV4.test(host);
-  return internal ? 'Images on private or local registries cannot be read.' : undefined;
-};
-
+// Which registries may be read is the platform's call, so only the shape is checked here.
 export const imageReferenceProblem = (reference: string): string | undefined => {
   const trimmed = reference.trim();
   if (!trimmed) {
@@ -49,7 +30,7 @@ export const imageReferenceProblem = (reference: string): string | undefined => 
   if (!IMAGE_REFERENCE.test(trimmed)) {
     return `"${trimmed}" is not an image reference. Use registry/repository:tag, for example docker.io/org/agent:1.0.`;
   }
-  return registryProblem(trimmed);
+  return undefined;
 };
 
 const imageRepositoryName = (reference: string): string => {

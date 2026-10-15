@@ -14,22 +14,10 @@ describe('imageReferenceProblem', () => {
     'org/agent@sha256:' + 'a'.repeat(64),
     'registry.example.com:443/team/agent:v2@sha256:' + 'b'.repeat(64),
     '203.0.113.7:5000/agent',
+    'harbor.corp:5000/team/agent:1.0',
+    'localhost:5000/agent',
   ])('accepts %s', (reference) => {
     expect(imageReferenceProblem(reference)).toBeUndefined();
-  });
-
-  it.each([
-    'localhost:5000/agent',
-    '10.0.0.5:5000/agent',
-    '172.20.1.1/agent',
-    '192.168.1.10:5000/agent',
-    '169.254.169.254/agent',
-    '127.0.0.1:5000/agent',
-    'registry.svc:5000/agent',
-    'metadata.internal/agent',
-    'intranet-registry:5000/agent',
-  ])('refuses the private registry %s', (reference) => {
-    expect(imageReferenceProblem(reference)).toMatch(/private or local registries/);
   });
 
   it('says nothing about an empty field', () => {

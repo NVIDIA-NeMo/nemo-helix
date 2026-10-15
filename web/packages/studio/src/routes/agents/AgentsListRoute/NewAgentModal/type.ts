@@ -27,6 +27,8 @@ export interface AgentSourceSelection {
   readonly error?: string;
   /** The image the entries were read from, so they stop counting once the reference changes. */
   readonly image?: string;
+  /** The image reference pinned to the digest that was read, which is what gets deployed. */
+  readonly pinnedImage?: string;
 }
 
 /** Which route into a new agent the modal is showing: an agent already seen in ingested traces, a

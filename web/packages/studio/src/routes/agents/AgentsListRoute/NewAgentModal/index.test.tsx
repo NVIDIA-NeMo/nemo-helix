@@ -11,7 +11,7 @@ import { agentSpecFilesetName } from '@studio/routes/agents/AgentsListRoute/NewA
 import { getAgentsListRoute } from '@studio/routes/utils';
 import { mockExecutionProfiles } from '@studio/tests/util/mockAgentDeploymentCapabilities';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
-import { fireEvent, within } from '@testing-library/react';
+import { act, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { useLocation } from 'react-router';
@@ -1012,6 +1012,8 @@ describe('NewAgentModal deploy after create', () => {
 
 describe('NewAgentModal container image', () => {
   const IMAGE = 'docker.io/sgavrilovic951/sample_agent:0.1';
+  const DIGEST = `sha256:${'c'.repeat(64)}`;
+  const PINNED_IMAGE = `${IMAGE}@${DIGEST}`;
   const BUNDLE_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/agent-images/bundle`;
   const encode = (text: string) => btoa(text);
 
@@ -1020,15 +1022,19 @@ describe('NewAgentModal container image', () => {
       'agent.yaml': FABRIC_YAML,
       'tools/search.py': 'print(1)\n',
       '__pycache__/search.cpython-313.pyc': 'x',
-    }
+    },
+    gate?: Promise<void>
   ) => {
     const requested: string[] = [];
     server.use(
       http.post(BUNDLE_URL, async ({ request }) => {
         const { image } = (await request.json()) as { image: string };
         requested.push(image);
+        await gate;
         return HttpResponse.json({
           image,
+          digest: DIGEST,
+          pinned_image: `${image}@${DIGEST}`,
           config_path: '/workspace/agent.yaml',
           files: Object.entries(files).map(([path, content]) => ({
             path,
@@ -1086,7 +1092,9 @@ describe('NewAgentModal container image', () => {
       config: { config_format: 'nemo-agents-spec-v1', name: 'calc' },
     });
     await waitFor(() =>
-      expect(deployments).toEqual([{ agent: 'calc', deployment_mode: 'docker', image: IMAGE }])
+      expect(deployments).toEqual([
+        { agent: 'calc', deployment_mode: 'docker', image: PINNED_IMAGE },
+      ])
     );
     expect(screen.queryByText(/Build then deploy/)).not.toBeInTheDocument();
   });
@@ -1123,7 +1131,7 @@ describe('NewAgentModal container image', () => {
     await submit(dialog, user);
 
     await waitFor(() =>
-      expect(deployments).toEqual([{ agent: 'calc', deployment_mode: 'k8s', image: IMAGE }])
+      expect(deployments).toEqual([{ agent: 'calc', deployment_mode: 'k8s', image: PINNED_IMAGE }])
     );
   });
 
@@ -1287,6 +1295,46 @@ describe('NewAgentModal container image', () => {
     expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
     expect(created).toHaveLength(1);
     expect(deployments).toEqual([]);
+  });
+
+  it('keeps reading the image when files are picked meanwhile', async () => {
+    const user = userEvent.setup();
+    let release = () => {};
+    serveBundle(undefined, new Promise<void>((resolve) => (release = resolve)));
+    mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await typeImage(dialog, user);
+    await openUploadTab(dialog);
+    pickDirectory(dialog);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
+    release();
+    await openImageTab(dialog);
+
+    expect(await within(dialog).findByText(new RegExp(`${IMAGE} — 2 files`))).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: 'Register' })).toBeEnabled()
+    );
+  });
+
+  it('drops a read that finishes after the modal is cancelled', async () => {
+    const user = userEvent.setup();
+    let release = () => {};
+    serveBundle(undefined, new Promise<void>((resolve) => (release = resolve)));
+    mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await typeImage(dialog, user);
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await act(async () => {
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    await openUploadTab(dialog);
+    expect(within(dialog).getByRole('textbox', { name: 'Name' })).toHaveValue('');
   });
 
   it('keeps an upload pick out of the image tab', async () => {

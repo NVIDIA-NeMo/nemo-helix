@@ -323,7 +323,14 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const setSelection = (kind: SourceKind, selection: AgentSourceSelection) =>
     (kind === 'image' ? setImageSelection : setUploadSelection)(selection);
 
+  // Reads finish out of order, so each source keeps only its newest; the two never cancel each other.
+  const selectionSeq = useRef<Record<SourceKind, number>>({ upload: 0, image: 0 });
+
   const resetAndClose = () => {
+    selectionSeq.current = {
+      upload: selectionSeq.current.upload + 1,
+      image: selectionSeq.current.image + 1,
+    };
     resetMutation();
     resetRepoMutation();
     resetTracedMutation();
@@ -339,23 +346,22 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     onClose();
   };
 
-  // Selection reads finish out of order, so the newest selection has to win.
-  const selectionSeq = useRef(0);
   const beginSelection = (kind: SourceKind): (() => boolean) => {
-    const selection = ++selectionSeq.current;
+    const selection = selectionSeq.current[kind] + 1;
+    selectionSeq.current = { ...selectionSeq.current, [kind]: selection };
     // Dropping the entries disables submit until this selection validates.
     resetMutation();
     resetRepoMutation();
     setSelection(kind, EMPTY_SELECTION);
     setReplaceArmedFor(null);
-    return () => selection !== selectionSeq.current;
+    return () => selection !== selectionSeq.current[kind];
   };
 
   // Picks, drops and image bundles all land here so every source is validated the same way.
   const acceptEntries = async (
     kind: SourceKind,
     collected: UploadAgentEntry[],
-    source: Pick<AgentSourceSelection, 'label' | 'image'>,
+    source: Pick<AgentSourceSelection, 'label' | 'image' | 'pinnedImage'>,
     superseded: () => boolean,
     fallbackName = ''
   ) => {
@@ -421,7 +427,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
       await acceptEntries(
         'image',
         imageBundleEntries(bundle.files),
-        { label: image, image },
+        { label: image, image, pinnedImage: bundle.pinned_image },
         superseded,
         agentNameFromImage(image)
       );
@@ -485,11 +491,15 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const onSubmit: SubmitHandler<UploadAgentFormData> = async (formData) => {
     const name = formData.name.trim();
     if (onImageTab) {
-      // The image already runs this agent, so it is deployed rather than rebuilt; when the
-      // runtimes could not be loaded the agent is still registered, to be deployed from its page.
-      deployAfterCreate.current = canDeployImage
-        ? { mode: formData.imageDeploymentMode, buildImage: false, image: formData.image }
-        : null;
+      // Deployed by digest so it runs the files that were read, even if the tag moves.
+      deployAfterCreate.current =
+        canDeployImage && imageSelection.pinnedImage
+          ? {
+              mode: formData.imageDeploymentMode,
+              buildImage: false,
+              image: imageSelection.pinnedImage,
+            }
+          : null;
     } else {
       deployAfterCreate.current =
         formData.deploy && canDeployOnCreate
