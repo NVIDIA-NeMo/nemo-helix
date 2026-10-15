@@ -208,6 +208,9 @@ def _discover_notebooks() -> list:
         if is_skip_test:
             marks.append(pytest.mark.skip(reason="@nemo-nb: skip-test"))
 
+        if rel == "docs/customizer/tutorials/dpo-customization-job.ipynb":
+            # NeMo-RL provisions a Ray cluster and has no Docker runtime fallback.
+            marks.append(pytest.mark.platform("kubernetes"))
         if _matches(rel, GPU_NOTEBOOKS):
             marks.append(pytest.mark.feature("gpu"))
         if _matches(rel, BIFURCATED_NOTEBOOKS):
