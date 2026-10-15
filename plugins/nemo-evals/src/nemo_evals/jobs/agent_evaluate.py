@@ -28,6 +28,7 @@ from typing import Any, ClassVar, Literal
 import nemo_evals.agent_seeds  # noqa: F401 - registers the platform 'fileset' workspace-seed handler
 from nemo_evals.config import get_config
 from nemo_evals.harbor.resolution import map_with_limited_concurrency
+from nemo_evals.jobs import harbor_opensandbox_poc
 from nemo_evals.jobs.agent_compiler import (
     _compile_agent_eval_cpu_job,
     compile_agent_eval_job,
@@ -308,7 +309,7 @@ class _AgentEvalJobBase(NemoJob):
                     )
                 except SandboxUnavailableError as exc:
                     raise HelixJobCompilationError(str(exc)) from exc
-        if isinstance(canonical_spec.target, HarborRunnerTarget):
+        if isinstance(canonical_spec.target, HarborRunnerTarget) and not harbor_opensandbox_poc.enabled():
             compilation = _compile_agent_eval_cpu_job(canonical_spec, profile=profile)
             compilation.eval_step["executor"] = await cls._resolve_harbor_subprocess_executor(
                 executor=compilation.executor,
@@ -490,6 +491,7 @@ class _AgentEvalJobBase(NemoJob):
             )
             if target.n_concurrent_trials is not None:
                 harbor_config.n_concurrent_trials = target.n_concurrent_trials
+            harbor_config = harbor_opensandbox_poc.configure_runtime(harbor_config, ctx)
             harbor_runtime = HarborAgentTaskRunner(
                 config=harbor_config,
                 secret_resolver=JobEnvSecretSource(workspace=ctx.workspace),

@@ -1,0 +1,12 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Development image: reuse a published dependency environment, replace workspace
+# runtime files with the current checkout. Existing dependency/assets stay in place.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ARG SOURCE_REVISION
+LABEL org.opencontainers.image.revision=${SOURCE_REVISION}
+COPY overlay/ /app/.venv/lib/python3.13/site-packages/
+COPY source-manifest.json /opt/helix-local-source-manifest.json

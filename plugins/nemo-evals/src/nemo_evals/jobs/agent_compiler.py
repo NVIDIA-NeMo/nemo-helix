@@ -13,10 +13,12 @@ secrets are surfaced as ``from_secret`` environment variables, as are the
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from dataclasses import dataclass
 
 from nemo_evals.config import config, platform_config
+from nemo_evals.jobs import harbor_opensandbox_poc
 from nemo_evals.jobs.agent_spec import (
     AgentEvalSpec,
     AgentTarget,
@@ -160,11 +162,15 @@ def _agent_eval_step(
         if is_colocated_gym and config.gym_tasks_image is not None
         else get_qualified_image(GYM_AGENT_EVAL_IMAGE if is_colocated_gym else AGENT_EVAL_IMAGE)
     )
+    command = AGENT_EVAL_COMMAND
+    if isinstance(spec.target, HarborRunnerTarget) and harbor_opensandbox_poc.enabled():
+        image = os.environ[harbor_opensandbox_poc.POC_WORKER_IMAGE]
+        command = harbor_opensandbox_poc.POC_COMMAND
     executor = _executor(
         profile=profile,
         image=image,
         entrypoint=GYM_AGENT_EVAL_ENTRYPOINT if is_colocated_gym else AGENT_EVAL_ENTRYPOINT,
-        command=AGENT_EVAL_COMMAND,
+        command=command,
         use_subprocess=use_subprocess,
     )
     return HelixJobStep(
@@ -189,13 +195,17 @@ def _agent_eval_cpu_step(
         if is_colocated_gym and config.gym_tasks_image is not None
         else get_qualified_image(GYM_AGENT_EVAL_IMAGE if is_colocated_gym else AGENT_EVAL_IMAGE)
     )
+    command = AGENT_EVAL_COMMAND
+    if isinstance(spec.target, HarborRunnerTarget) and harbor_opensandbox_poc.enabled():
+        image = os.environ[harbor_opensandbox_poc.POC_WORKER_IMAGE]
+        command = harbor_opensandbox_poc.POC_COMMAND
     executor = CPUExecutionProviderSpec(
         profile=profile or "default",
         provider="cpu",
         container=ContainerSpec(
             image=image,
             entrypoint=GYM_AGENT_EVAL_ENTRYPOINT if is_colocated_gym else AGENT_EVAL_ENTRYPOINT,
-            command=AGENT_EVAL_COMMAND,
+            command=command,
         ),
     )
     step = HelixJobStep(
@@ -227,6 +237,8 @@ def _environment(spec: AgentEvalSpec, *, sandbox_plan: SandboxPlan | None) -> li
     message naming the setting instead of failing partway through an evaluation.
     """
     environment = build_task_environment(_secret_refs(spec))
+    if isinstance(spec.target, HarborRunnerTarget) and harbor_opensandbox_poc.enabled():
+        environment.extend(harbor_opensandbox_poc.worker_environment())
     if sandbox_plan is None:
         return environment
     environment.append(EnvironmentVariable(name=GYM_SANDBOX_PLAN_ENVVAR, value=sandbox_plan.model_dump_json()))
