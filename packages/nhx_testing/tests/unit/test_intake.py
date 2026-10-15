@@ -32,6 +32,19 @@ async def test_records_ingest_and_resolves_root_spans() -> None:
 
 
 @pytest.mark.asyncio
+async def test_traces_exist_only_for_ingested_sessions() -> None:
+    service = InMemoryIntakeService()
+    intake = service.client()
+    await intake.create_atif(body=_atif("s-1"))
+
+    traces = [
+        trace async for trace in (await intake.list_traces(query_params={"filter": {"session_id": "s-2"}})).items()
+    ]
+
+    assert traces == []
+
+
+@pytest.mark.asyncio
 async def test_evaluation_lookup_patch_and_configured_failures() -> None:
     service = InMemoryIntakeService()
     service.evaluation_metadata = {"k": "v"}
@@ -40,6 +53,7 @@ async def test_evaluation_lookup_patch_and_configured_failures() -> None:
     assert (await intake.get_evaluation(name="eval-1")).data().metadata == {"k": "v"}
     await intake.patch_evaluation(name="eval-1", body=EvaluationPatchRequest(metadata={"k": "w"}))
     assert service.evaluation_patches == [{"name": "eval-1", "metadata": {"k": "w"}}]
+    assert (await intake.get_evaluation(name="eval-1")).data().metadata == {"k": "w"}
 
     service.evaluation_exists = False
     with pytest.raises(NotFoundError):
