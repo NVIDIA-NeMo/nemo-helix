@@ -496,7 +496,7 @@ def get_pod_details(core_v1: client.CoreV1Api, namespace: str, name: str) -> tup
         )
         pod_info = {
             "name": pod.metadata.name,  # type: ignore
-            "pod_phase": pod.status.phase,  # type: ignore
+            "phase": pod.status.phase,  # type: ignore
             "conditions": [],
             "containers": [],
             "events": None,
@@ -1389,7 +1389,7 @@ def update_all_tasks(
     has_errors = False
 
     for pod_status in pod_statuses:
-        status_details, error_details, error_stack = get_pod_details(core_v1, namespace, pod_status.name)
+        pod_details, error_details, error_stack = get_pod_details(core_v1, namespace, pod_status.name)
 
         # ERROR is terminal, so only let a Warning set it when the pod is neither live nor retrying:
         # events outlive the failure by an hour and a backing-off pull re-emits one per attempt.
@@ -1422,7 +1422,7 @@ def update_all_tasks(
             step=step.name,
             body=HelixJobTaskUpdate(
                 status=status,
-                status_details=status_details,
+                status_details={"pod": pod_details},
                 error_details=error_details,
                 error_stack=error_stack,
             ),

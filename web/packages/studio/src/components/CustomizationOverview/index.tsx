@@ -18,7 +18,6 @@ import { hasMetrics } from '@studio/types/customization';
 import { isGrpoJob } from '@studio/util/customizationBackend';
 import { resolveCustomizationFailure } from '@studio/util/customizationFailure';
 import {
-  getCurrentStage,
   getGrpoProgressTiles,
   getGrpoSummaryTiles,
   getJobDuration,
@@ -88,7 +87,6 @@ export const CustomizationOverview: FC<Props> = ({ customizationJobName, workspa
     isTerminal: isTerminalStatus,
     duration: getJobDuration(steps, isTerminalStatus, liveSeconds),
     failedAtStepLabel: resolveCustomizationFailure(customization, steps)?.failingStepLabel,
-    currentStage: getCurrentStage(steps),
   };
 
   return (

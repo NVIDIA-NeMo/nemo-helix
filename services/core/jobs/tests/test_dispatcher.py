@@ -1098,6 +1098,36 @@ async def test_create_or_update_task_records_progress_reported_after_error(
 
 
 @pytest.mark.asyncio
+async def test_create_or_update_task_keeps_the_task_phase_when_the_controller_reports_the_pod(
+    mock_dispatcher: JobDispatcher, mock_store: EntityClient
+):
+    """The controller and the task's own code write to the same details, merged key by key."""
+    _, job_name, _, step_id, task_id, _ = await create_test_job_data(mock_store, "pod-details-job")
+    step = await mock_store.get_by_id(HelixJobStep, step_id)
+    task = await mock_store.get_by_id(HelixJobTask, task_id)
+    task.status = HelixJobStatus.ACTIVE
+    task.status_details = {"phase": "training", "step": 12}
+    await mock_store.update(task)
+
+    updated = await mock_dispatcher.create_or_update_task(
+        job_name,
+        task.name,
+        DEFAULT_WORKSPACE,
+        HelixJobTaskUpdate(
+            status=HelixJobStatus.ACTIVE,
+            status_details={"pod": {"name": "pod-1", "phase": "Running"}},
+        ),
+        step,
+    )
+
+    assert updated.status_details == {
+        "phase": "training",
+        "step": 12,
+        "pod": {"name": "pod-1", "phase": "Running"},
+    }
+
+
+@pytest.mark.asyncio
 async def test_create_or_update_task_ignores_statusless_poll_after_error(
     mock_dispatcher: JobDispatcher, mock_store: EntityClient
 ):

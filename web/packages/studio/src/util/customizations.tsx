@@ -355,13 +355,9 @@ const TRAINING_PHASE_LABELS: Record<string, string> = {
   automodel_recipe_setup: 'Recipe Setup',
   training: 'Training',
   validation: 'Validation',
-  saving_checkpoint: 'Saving Checkpoint',
   checkpoint_saved: 'Checkpoint Saved',
   epoch_end: 'Epoch End',
-  merging_adapter: 'Merging Adapter',
-  finalizing_checkpoint: 'Finalizing Checkpoint',
   processing_checkpoint: 'Processing Checkpoint',
-  registering_model: 'Registering Model',
   completed: 'Completed',
 };
 
@@ -371,49 +367,6 @@ export const formatTrainingPhase = (phase: string): string =>
     .split('_')
     .map((word) => (word ? word.charAt(0).toUpperCase() + word.slice(1) : word))
     .join(' ');
-
-/** Short names for the pipeline steps, so the tile reads as a stage rather than a step id. */
-const STAGE_LABELS: Record<string, string> = {
-  'model-and-dataset-download': 'Downloading',
-  'model-dataset-environment-download': 'Downloading',
-  training: 'Training',
-  'grpo-training': 'Training',
-  'dpo-training': 'Training',
-  'model-upload': 'Uploading Model',
-  'model-entity-creation': 'Registering Model',
-};
-
-export interface JobStageStep {
-  name: string;
-  status: string;
-  tasks?: readonly { status_details?: Record<string, unknown> }[];
-}
-
-export interface CurrentStage {
-  label: string;
-  /** What the step's own code says it is doing, when it says something the label doesn't. */
-  detail?: string;
-}
-
-/**
- * The first step that has not completed is where the job is. The controller sets each step's
- * status from its pod, so unlike the job-level `phase` this is never another step's value.
- */
-export const getCurrentStage = (
-  steps: readonly JobStageStep[] | undefined
-): CurrentStage | undefined => {
-  const step = steps?.find(({ status }) => status !== 'completed');
-  if (!step) return undefined;
-
-  const label = STAGE_LABELS[step.name] ?? formatTrainingPhase(step.name.replace(/-/g, '_'));
-  // Only the step's tasks carry `phase`, and on a multi-node step only the coordinator's does.
-  const phase = step.tasks
-    ?.map((task) => asNonEmptyString(task.status_details?.phase))
-    .find(Boolean);
-  const detail = phase ? formatTrainingPhase(phase).toLowerCase() : undefined;
-  if (detail && detail !== label.toLowerCase()) return { label, detail };
-  return step.status === 'active' ? { label } : { label, detail: 'starting' };
-};
 
 export interface JobDurationStep {
   created_at: string;
@@ -449,13 +402,12 @@ interface TrainingDiagnosticsContext {
   duration: string;
   /** Display name of the failing pipeline step, when the job errored. */
   failedAtStepLabel?: string;
-  currentStage?: CurrentStage;
 }
 
 /** Where the run ended up: failing step, total time once finished, or current stage while running. */
 const getRunStateTile = (
   telemetry: CustomizationTrainingTelemetry,
-  { isTerminal, duration, failedAtStepLabel, currentStage }: TrainingDiagnosticsContext
+  { isTerminal, duration, failedAtStepLabel }: TrainingDiagnosticsContext
 ): StatTileDiagnosticProps => {
   if (failedAtStepLabel) {
     return {
@@ -470,19 +422,13 @@ const getRunStateTile = (
   }
   return isTerminal
     ? { label: 'Duration', value: duration, hint: 'total run time' }
-    : currentStage
-      ? {
-          label: 'Phase',
-          value: truncatePhase(currentStage.label),
-          hint: currentStage.detail ?? 'current stage',
-        }
-      : {
-          label: 'Phase',
-          value: telemetry.phase
-            ? truncatePhase(formatTrainingPhase(telemetry.phase))
-            : NOT_AVAILABLE,
-          hint: 'current stage',
-        };
+    : {
+        label: 'Phase',
+        value: telemetry.phase
+          ? truncatePhase(formatTrainingPhase(telemetry.phase))
+          : NOT_AVAILABLE,
+        hint: 'current stage',
+      };
 };
 
 export const getTrainingDiagnosticsTiles = (
