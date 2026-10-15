@@ -109,3 +109,18 @@ def test_a_digest_reference_served_as_other_bytes_is_refused() -> None:
 
     with pytest.raises(UpstreamError, match="served as"):
         registry.resolve(normalize_reference(f"ubuntu@{asked}"), platform="linux/amd64")
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"platform": {"os": "linux", "architecture": "amd64"}},
+        {"digest": "md5:abc", "platform": {"os": "linux", "architecture": "amd64"}},
+    ],
+)
+def test_an_index_entry_for_the_platform_without_a_sha256_digest_is_an_upstream_error(entry: dict) -> None:
+    index = json.dumps({"manifests": [{"platform": "not an object"}, entry]}).encode()
+    registry = _registry({f"{BASE}/manifests/24.04": (index, INDEX)})
+
+    with pytest.raises(UpstreamError, match="without a sha256 digest"):
+        registry.resolve(normalize_reference("ubuntu:24.04"), platform="linux/amd64")

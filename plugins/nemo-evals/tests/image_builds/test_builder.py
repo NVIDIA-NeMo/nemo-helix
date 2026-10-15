@@ -50,8 +50,9 @@ def _submitted(name: str, revision: int) -> SubmitBuildResponse:
 
 
 class _Builder:
-    def __init__(self, revisions: list[Literal["pending", "ready", "failed"]]) -> None:
+    def __init__(self, revisions: list[Literal["pending", "ready", "failed"]], *, job: str | None = "active") -> None:
         self.statuses = revisions
+        self.job = job
         self.submitted: list[int] = []
 
     async def get_image(self, name: str) -> ContainerImage | None:
@@ -61,7 +62,7 @@ class _Builder:
         return _container_image(name, self.statuses[revision - 1])
 
     async def job_status(self, job: str) -> str | None:
-        return "active"
+        return self.job
 
     async def submit(
         self, *, name: str, revision: int, source: FileSetSource | ImageSource, dockerfile: str | None
@@ -214,3 +215,13 @@ def test_copy_builder_name_depends_on_the_image() -> None:
 
     assert name.startswith("harbor-img-") and len(name) == len("harbor-img-") + 12
     assert copy_builder_name("docker.io/library/ubuntu:22.04") != name
+
+
+@pytest.mark.parametrize(("job", "submitted"), [("active", 1), ("completed", 2), ("error", 2), (None, 2)])
+async def test_a_pending_revision_whose_job_ended_or_never_ran_is_replaced(job: str | None, submitted: int) -> None:
+    """Builder leaves a dead build pending; rejoining it would fail every later request for that image."""
+    builder = _Builder(["pending"], job=job)
+
+    await ensure_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+
+    assert builder.submitted == [submitted]

@@ -164,6 +164,16 @@ async def test_a_prebuilt_image_is_copied_alongside_built_ones(entity_store, sto
     assert main.builder_image is not None and main.builder_image.startswith("harbor-img-")
 
 
+async def test_a_copy_is_submitted_by_its_fully_qualified_reference(entity_store, store_task, archive) -> None:
+    """Two spellings of one image share a Builder name, so they must send the same request."""
+    spec = await _start(entity_store, store_task, config={"environment": {"docker_image": "ubuntu:24.04"}})
+    builder = _Builder({"docker.io/library/ubuntu:24.04": "ready"})
+
+    await _run(entity_store, spec, builder)
+
+    assert builder.submits == [ImageSource(image="docker.io/library/ubuntu:24.04")]
+
+
 async def test_an_image_whose_builder_job_ended_without_it_fails(entity_store, store_task, archive) -> None:
     """Builder leaves a failed build's image pending, so its ended job is what says it won't finish."""
     spec = await _start(entity_store, store_task, config={})

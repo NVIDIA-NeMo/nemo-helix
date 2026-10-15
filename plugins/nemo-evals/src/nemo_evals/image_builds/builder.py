@@ -66,15 +66,25 @@ def archive_source(fileset_ref: str, context_path: str) -> FileSetSource:
 async def ensure_build(
     builder: ImageBuilder, *, name: str, source: FileSetSource | ImageSource, dockerfile: str | None
 ) -> SubmitBuildResponse:
-    """Submit the newest revision of ``name`` again, or the next one when the newest failed."""
+    """Submit the newest revision of ``name`` again, or the next one when the newest failed.
+
+    A pending revision whose job has ended, or has none, counts as failed: Builder leaves it pending for good.
+    """
     newest: ContainerImage | None = None
     revision = 1
     while (image := await builder.get_image(f"{name}-{revision}")) is not None:
         newest = image
         revision += 1
-    if newest is not None and newest.status != "failed":
+    if newest is not None and not await _abandoned(builder, newest):
         revision -= 1
     return await builder.submit(name=name, revision=revision, source=source, dockerfile=dockerfile)
+
+
+async def _abandoned(builder: ImageBuilder, image: ContainerImage) -> bool:
+    if image.status != "pending":
+        return image.status == "failed"
+    status = await builder.job_status(image.provenance.job.rpartition("/")[2])
+    return status is None or status in ENDED_JOB_STATUSES
 
 
 class HttpImageBuilder:

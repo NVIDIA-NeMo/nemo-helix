@@ -169,8 +169,9 @@ async def _submit(builder: ImageBuilder, image: BuildImage, definition: HarborTa
     source: FileSetSource | ImageSource
     dockerfile: str | None
     if image.image is not None:
-        name = copy_builder_name(str(normalize_reference(image.image)))
-        source, dockerfile = ImageSource(image=image.image), None
+        reference = str(normalize_reference(image.image))
+        name = copy_builder_name(reference)
+        source, dockerfile = ImageSource(image=reference), None
     else:
         assert image.context_path is not None and image.dockerfile is not None
         name = builder_name(

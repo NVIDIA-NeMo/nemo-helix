@@ -397,7 +397,7 @@ Names come from the request:
 
 ## How a build runs
 
-A submitted build set becomes one Jobs job with three steps, each under its own ServiceAccount. Your
+A submitted build set becomes one Jobs job with three steps, each under its own ServiceAccount (two when every spec is a copy, which needs no build step). Your
 Dockerfiles run in sandboxes, one pod per build context, which aren't job steps and hold nothing. The
 steps are trusted (green): they run the builder's own code. The sandboxes are untrusted (red): they
 run yours. What a sandbox writes reaches the steps two ways only: the layouts on the work volume, and
@@ -819,7 +819,7 @@ The tests need no cluster, registry or running platform.
 | `plan.py` | `BuildPlan`: a request resolved into names, then placed by the backend |
 | `backend.py` | The backend interface: what a backend refuses, compiles and places |
 | `backends.py`, `execution.py` | The deployment's backend, and the `execution` backend |
-| `compile.py` | Turns a plan into the three-step `HelixJobSpec`, as a pure function |
+| `compile.py` | Turns a plan into the `HelixJobSpec`, fetch, build and push, as a pure function |
 | `submit.py` | The submit sequence: plan, secrets, rows, then the job |
 | `completion.py` | Who may complete an image, and the one write that makes its row `ready` |
 | `signing.py` | What a signature says, cosign's format for storing it, and the key that makes it |

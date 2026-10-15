@@ -10,11 +10,12 @@ credential. The digest is computed from the bytes the registry serves, never tak
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 import httpx
-from nemo_builder_plugin.identity import ImageReference
+from nemo_builder_plugin.identity import DIGEST_PATTERN, ImageReference
 from nemo_builder_plugin.registry_auth import parse_challenges
 
 MANIFEST_ACCEPT = ", ".join(
@@ -90,8 +91,13 @@ class UpstreamRegistry:
         document = _json(manifest, str(reference))
         if manifest.headers.get("Content-Type", "").split(";")[0] in _INDEX_TYPES:
             for entry in document.get("manifests") or []:
-                if isinstance(entry, dict) and _platform_matches(entry.get("platform") or {}, platform):
-                    return UpstreamManifest(reference, str(entry["digest"]))
+                if not isinstance(entry, dict) or not isinstance(entry.get("platform"), dict):
+                    continue
+                if _platform_matches(entry["platform"], platform):
+                    child = entry.get("digest")
+                    if not isinstance(child, str) or not re.fullmatch(DIGEST_PATTERN, child):
+                        raise UpstreamError(f"{reference} lists its {platform} image without a sha256 digest")
+                    return UpstreamManifest(reference, child)
             raise UpstreamNotFound(f"{reference} has no {platform} image")
         config_digest = (document.get("config") or {}).get("digest")
         if not isinstance(config_digest, str):
