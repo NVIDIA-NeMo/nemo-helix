@@ -215,9 +215,9 @@ all of the following are true:
 - At least 10 new sessions have arrived since the last successful run. The
   first scheduled run for an agent skips this check.
 
-Scheduled runs are incremental: each analyzes only traces since the last
-successful run. A trace that arrives while a run is in progress is still
-eligible for the next run. On-demand runs do not affect the schedule.
+Scheduled runs are incremental: each analyzes traces starting from the previous
+successful run’s start time. Late-arriving traces with an earlier start time may be missed.
+On-demand runs do not affect the schedule.
 
 `status` shows whether each agent is enabled and which model pair it uses. The
 scheduler's own state for an agent, including the last error, is available from Python:
