@@ -48,7 +48,8 @@ class ModelEntityTaskConfig(BaseModel):
         default=None,
         description=(
             "Deployment configuration. A string references an existing ModelDeploymentConfig "
-            "by name. An object provides inline NIM deployment parameters. Omit to skip deployment."
+            "by name. An object provides inline deployment parameters, deployed with NIM unless engine is 'vllm'. "
+            "Omit to skip deployment."
         ),
     )
 

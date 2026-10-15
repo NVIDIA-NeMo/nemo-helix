@@ -4,7 +4,7 @@
 """Shared auto-deployment schemas for customization job specs.
 
 Every customization backend can ask the platform to deploy a model once training
-finishes. The parameters describe a NIM deployment, not a training regime, so the
+finishes. The parameters describe a deployment, not a training regime, so the
 shape is identical across backends and lives here rather than being restated by
 each one.
 
@@ -15,7 +15,9 @@ one shared model emits one ``DeploymentParams`` schema in the merged
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Literal, Self
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ToolCallParams(BaseModel):
@@ -52,6 +54,10 @@ class DeploymentParams(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    engine: Literal["nim", "vllm"] = Field(
+        default="nim",
+        description="Inference engine for the deployment: 'nim' (default) or 'vllm'.",
+    )
     gpu: int = Field(default=1, gt=0, description="Number of GPUs required for the deployment.")
     additional_envs: dict[str, str] | None = Field(
         default=None,
@@ -60,9 +66,12 @@ class DeploymentParams(BaseModel):
     disk_size: str | None = Field(default=None, description="Disk size for the deployment.")
     image_name: str | None = Field(
         default=None,
-        description="Container image name from NGC. If not specified, defaults to multi-llm.",
+        description="Container image name. If not specified, the platform default image for the engine is used.",
     )
-    image_tag: str | None = Field(default=None, description="Container image tag from NGC.")
+    image_tag: str | None = Field(
+        default=None,
+        description="Container image tag. If not specified, the platform default tag for the engine is used.",
+    )
     lora_enabled: bool = Field(
         default=True,
         description=(
@@ -72,13 +81,21 @@ class DeploymentParams(BaseModel):
     )
     tool_call_config: ToolCallParams | None = Field(
         default=None,
-        description="Tool calling configuration override for the NIM deployment.",
+        description="Tool calling configuration override. Only applies when engine is 'nim'.",
     )
+
+    @model_validator(mode="after")
+    def _tool_call_config_requires_nim(self) -> Self:
+        # The vLLM compiler does not read tool_call_config, so accepting it there would
+        # silently drop the setting.
+        if self.tool_call_config is not None and self.engine != "nim":
+            raise ValueError("tool_call_config is only supported with engine='nim'")
+        return self
 
 
 DEPLOYMENT_CONFIG_DESCRIPTION = (
     "Deployment configuration for auto-deploying the model after training. "
     "Pass a string to reference an existing ModelDeploymentConfig by name "
-    "('my-config' or 'workspace/my-config'). An object provides inline NIM "
-    "deployment parameters. Omit to skip deployment."
+    "('my-config' or 'workspace/my-config'). An object provides inline "
+    "deployment parameters, deployed with NIM unless engine is 'vllm'. Omit to skip deployment."
 )
