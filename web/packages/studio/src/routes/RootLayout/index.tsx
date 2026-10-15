@@ -7,6 +7,7 @@ import { isLocalDevelopmentEnv, REACT_QUERY_DEVTOOLS_ENABLED } from '@studio/con
 import { BreadcrumbsProvider } from '@studio/providers/breadcrumbs/BreadcrumbsProvider';
 import { WorkersProvider } from '@studio/providers/workers/WorkersProvider';
 import { WorkspaceProvider } from '@studio/providers/workspace';
+import { PlatformGuard } from '@studio/routes/RootLayout/PlatformGuard';
 import { Suspense, lazy } from 'react';
 import { Outlet } from 'react-router';
 
@@ -22,17 +23,19 @@ const ReactQueryDevtools =
 
 export const RootLayout = () => {
   return (
-    <WorkspaceProvider>
-      <ToastProvider>
-        <WorkersProvider>
-          <BreadcrumbsProvider>
-            <Suspense fallback={<Loading />}>
-              <Outlet />
-              <ReactQueryDevtools initialIsOpen={false} />
-            </Suspense>
-          </BreadcrumbsProvider>
-        </WorkersProvider>
-      </ToastProvider>
-    </WorkspaceProvider>
+    <PlatformGuard>
+      <WorkspaceProvider>
+        <ToastProvider>
+          <WorkersProvider>
+            <BreadcrumbsProvider>
+              <Suspense fallback={<Loading />}>
+                <Outlet />
+                <ReactQueryDevtools initialIsOpen={false} />
+              </Suspense>
+            </BreadcrumbsProvider>
+          </WorkersProvider>
+        </ToastProvider>
+      </WorkspaceProvider>
+    </PlatformGuard>
   );
 };
