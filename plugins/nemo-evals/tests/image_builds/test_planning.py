@@ -157,6 +157,15 @@ def test_a_compose_main_image_replaces_the_docker_image() -> None:
     assert _plan(config, archive, ["ghcr.io"]) == [("main", "prebuilt", None, None, "ghcr.io/org/sort:2")]
 
 
+def test_a_docker_image_wins_over_a_compose_main_build() -> None:
+    """Harbor builds over a `docker_image` only with `force_build`, which a trial never sets."""
+    config = {"environment": {"docker_image": "ghcr.io/org/sort:1"}}
+    compose = "services:\n  main:\n    build: {context: ., dockerfile: Dockerfile.custom}\n"
+    archive = _archive("environment/Dockerfile", "environment/Dockerfile.custom", compose=compose)
+
+    assert _plan(config, archive, ["ghcr.io"]) == [("main", "prebuilt", None, None, "ghcr.io/org/sort:1")]
+
+
 def test_a_compose_service_named_like_the_separate_verifier_is_refused() -> None:
     config = {"verifier": {"environment_mode": "separate"}}
     compose = "services:\n  verifier:\n    image: redis:7\n"

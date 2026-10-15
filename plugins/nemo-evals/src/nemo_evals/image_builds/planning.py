@@ -133,7 +133,8 @@ def _main_image(environment: EnvironmentConfig, archive: TaskArchive, overlay: d
     """``main`` as Harbor's base compose file makes it, with the task's compose file laid over it.
 
     The base's ``main`` is the task's ``docker_image``, or a build of ``environment/`` with ``Dockerfile``. Over a
-    ``docker_image``, the task's ``main.image`` replaces it. Over a build, the task's ``main.build`` overrides the
+    ``docker_image``, the task's ``main.image`` replaces it and its ``main.build`` is never built: a trial starts
+    without ``force_build``, so Harbor runs the prebuilt image. Over a build, the task's ``main.build`` overrides the
     fields it sets, and its ``main.image`` only names the image built.
     """
     if environment.docker_image:
