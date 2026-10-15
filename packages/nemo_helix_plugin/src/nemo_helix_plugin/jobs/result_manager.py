@@ -89,9 +89,10 @@ class ResultManager(BaseResultManager):
             local_path=artifact_local_path, remote_path=remote_path, ignore_patterns=ignore_patterns
         )
         try:
-            job_result = self.jobs_client.create_job_result(
+            job_result = self.jobs_client.create_attempt_result(
                 name=result_name,
                 job=self.job_name,
+                attempt=attempt_id,
                 workspace=self.workspace,
                 body=HelixJobResultCreateRequest(
                     artifact_url=artifact_url,
@@ -101,9 +102,10 @@ class ResultManager(BaseResultManager):
         except ClientConflictError:
             # Result already exists - fetch and return the existing one
             # This supports the use case of saving partial results across multiple batches
-            job_result = self.jobs_client.get_job_result(
+            job_result = self.jobs_client.get_attempt_result(
                 name=result_name,
                 job=self.job_name,
+                attempt=attempt_id,
                 workspace=self.workspace,
             ).data()
         except NemoClientError as e:
@@ -161,9 +163,10 @@ class AsyncResultManager(BaseResultManager):
         )
         try:
             job_result = (
-                await self.jobs_client.create_job_result(
+                await self.jobs_client.create_attempt_result(
                     name=result_name,
                     job=self.job_name,
+                    attempt=attempt_id,
                     workspace=self.workspace,
                     body=HelixJobResultCreateRequest(
                         artifact_url=artifact_url,
@@ -175,9 +178,10 @@ class AsyncResultManager(BaseResultManager):
             # Result already exists - fetch and return the existing one
             # This supports the use case of saving partial results across multiple batches
             job_result = (
-                await self.jobs_client.get_job_result(
+                await self.jobs_client.get_attempt_result(
                     name=result_name,
                     job=self.job_name,
+                    attempt=attempt_id,
                     workspace=self.workspace,
                 )
             ).data()

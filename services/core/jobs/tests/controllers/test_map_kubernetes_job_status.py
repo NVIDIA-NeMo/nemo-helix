@@ -203,7 +203,7 @@ def test_update_all_tasks_ignores_warning_events_for_a_running_pod(
     has_errors = update_all_tasks(MagicMock(), MagicMock(), "ns", test_step_active)
 
     assert has_errors is False
-    body = jobs_client.update_job_step_task.call_args.kwargs["body"]
+    body = jobs_client.update_attempt_step_task.call_args.kwargs["body"]
     assert body.status == HelixJobStatus.ACTIVE
     assert body.error_details == {}
 
@@ -226,7 +226,7 @@ def test_update_all_tasks_keeps_a_retrying_pull_pending(
     has_errors = update_all_tasks(MagicMock(), MagicMock(), "ns", test_step_active)
 
     assert has_errors is False
-    body = jobs_client.update_job_step_task.call_args.kwargs["body"]
+    body = jobs_client.update_attempt_step_task.call_args.kwargs["body"]
     assert body.status == HelixJobStatus.PENDING
     assert body.error_details == {}
 
@@ -251,7 +251,7 @@ def test_update_all_tasks_reports_error_when_a_sibling_container_failed(
     has_errors = update_all_tasks(MagicMock(), MagicMock(), "ns", test_step_active)
 
     assert has_errors is True
-    body = jobs_client.update_job_step_task.call_args.kwargs["body"]
+    body = jobs_client.update_attempt_step_task.call_args.kwargs["body"]
     assert body.status == HelixJobStatus.ERROR
     assert body.error_details["failed"] == "sidecar exited 1"
 
@@ -273,7 +273,7 @@ def test_update_all_tasks_reports_error_when_an_active_sibling_container_failed(
     has_errors = update_all_tasks(MagicMock(), MagicMock(), "ns", test_step_active)
 
     assert has_errors is True
-    body = jobs_client.update_job_step_task.call_args.kwargs["body"]
+    body = jobs_client.update_attempt_step_task.call_args.kwargs["body"]
     assert body.status == HelixJobStatus.ERROR
     assert body.error_details["failed"] == "sidecar exited 1"
 
@@ -295,7 +295,7 @@ def test_update_all_tasks_reports_error_for_a_pending_pod_that_is_not_retrying(
     has_errors = update_all_tasks(MagicMock(), MagicMock(), "ns", test_step_active)
 
     assert has_errors is True
-    body = jobs_client.update_job_step_task.call_args.kwargs["body"]
+    body = jobs_client.update_attempt_step_task.call_args.kwargs["body"]
     assert body.status == HelixJobStatus.ERROR
     assert body.error_details["inspect_failed"] == "no such image"
 

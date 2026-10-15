@@ -12,6 +12,7 @@ from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.job_usage import HelixJobUsageReporter
 from nemo_helix_plugin.jobs.constants import (
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
@@ -62,6 +63,7 @@ def test_get_workspace_fails_when_workspace_env_missing(monkeypatch: pytest.Monk
 
 def test_get_ctx_uses_platform_usage_reporter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(NEMO_JOB_ID_ENVVAR, "anonymizer-job")
+    monkeypatch.setenv(NEMO_JOB_ATTEMPT_ID_ENVVAR, "attempt-a")
     monkeypatch.setenv(NEMO_JOB_WORKSPACE_ENVVAR, "team-a")
     monkeypatch.setenv(EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, str(tmp_path / "ephemeral"))
     monkeypatch.setenv(PERSISTENT_JOB_STORAGE_PATH_ENVVAR, str(tmp_path / "persistent"))
@@ -70,3 +72,4 @@ def test_get_ctx_uses_platform_usage_reporter(tmp_path: Path, monkeypatch: pytes
     ctx = task_run._get_ctx(client)
 
     assert isinstance(ctx.usage, HelixJobUsageReporter)
+    assert ctx.attempt_id == "attempt-a"

@@ -29,10 +29,12 @@ from nhx.common.entities import (
 from nhx.common.jobs.schemas import FileStorageType, HelixJobStatus
 from nhx.core.jobs.api.v2.jobs.schemas import (
     CreateHelixJobRequest,
+    HelixJobAttemptSortField,
     HelixJobResponse,
     HelixJobSortField,
     HelixJobStepsListFilter,
     HelixJobTaskUpdate,
+    UpdateHelixJobRequest,
 )
 from nhx.core.jobs.app.constants import JOB_TASK_CLEANUP_PENDING_KEY
 from nhx.core.jobs.app.dispatcher import JobDeletionConflictError, JobDispatcher, JobStatusUpdateSkippedError
@@ -2809,3 +2811,199 @@ async def test_list_jobs_filter_name_operator_and_project_like(
     assert "excluded-job" not in returned_names
     assert "no-project-job" not in returned_names
     assert len(returned_names) == 1
+
+
+@pytest.mark.asyncio
+async def test_current_attempt_uses_pointer_not_highest_sequence(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    original = await mock_store.get_by_id(HelixJobAttempt, job.attempt_id)
+    newer = await mock_store.add(
+        HelixJobAttempt(
+            name="detached-newer",
+            workspace=DEFAULT_WORKSPACE,
+            job=job.id,
+            seq=99,
+            spec={"detached": True},
+            platform_spec=TestConstants.PLATFORM_SPEC,
+        )
+    )
+
+    current = await mock_dispatcher.get_current_attempt(job.name, DEFAULT_WORKSPACE)
+    resolved = await mock_dispatcher.resolve_attempt(job.name, "current", DEFAULT_WORKSPACE)
+
+    assert current is not None
+    assert current.id == original.id
+    assert resolved is not None
+    assert resolved[1].id == original.id
+    assert resolved[1].id != newer.id
+
+
+@pytest.mark.asyncio
+async def test_list_attempts_paginates_and_marks_current(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    for seq in (1, 2):
+        await mock_store.add(
+            HelixJobAttempt(
+                name=f"attempt-{seq}",
+                workspace=DEFAULT_WORKSPACE,
+                job=job.id,
+                seq=seq,
+                spec={"seq": seq},
+                platform_spec=TestConstants.PLATFORM_SPEC,
+            )
+        )
+
+    result = await mock_dispatcher.list_attempts(
+        job.name,
+        DEFAULT_WORKSPACE,
+        ParsedFilter(operation=None),
+        page=1,
+        page_size=2,
+        sort=HelixJobAttemptSortField.SEQ_DESC,
+    )
+
+    assert result is not None
+    attempts, total = result
+    assert total == 3
+    assert [attempt.seq for attempt in attempts] == [2, 1]
+    assert not any(attempt.is_current for attempt in attempts)
+
+    ascending = await mock_dispatcher.list_attempts(
+        job.id,
+        DEFAULT_WORKSPACE,
+        ParsedFilter(operation=None),
+        page=1,
+        page_size=3,
+        sort=HelixJobAttemptSortField.SEQ_ASC,
+    )
+    assert ascending is not None
+    assert [attempt.seq for attempt in ascending[0]] == [0, 1, 2]
+    assert ascending[0][0].is_current is True
+
+
+@pytest.mark.asyncio
+async def test_update_job_clears_project_checks_version_and_preserves_attempt_snapshot(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    created = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    original_attempt = await mock_store.get_by_id(HelixJobAttempt, created.attempt_id)
+    original_spec = dict(original_attempt.spec)
+
+    updated = await mock_dispatcher.update_job(
+        created.name,
+        DEFAULT_WORKSPACE,
+        UpdateHelixJobRequest(
+            description="updated description",
+            project=None,
+            spec={"revision": 2},
+            platform_spec=TestConstants.PLATFORM_SPEC,
+            expected_db_version=created.db_version,
+        ),
+    )
+
+    assert updated is not None
+    assert updated.description == "updated description"
+    assert updated.project is None
+    assert updated.spec == {"revision": 2}
+    assert updated.db_version > created.db_version
+    stored_attempt = await mock_store.get_by_id(HelixJobAttempt, created.attempt_id)
+    assert stored_attempt.spec == original_spec
+
+    with pytest.raises(EntityConflictError, match="Expected version"):
+        await mock_dispatcher.update_job(
+            created.name,
+            DEFAULT_WORKSPACE,
+            UpdateHelixJobRequest(description="stale", expected_db_version=created.db_version),
+        )
+
+
+@pytest.mark.asyncio
+async def test_attempt_scoped_results_allow_duplicate_names_and_legacy_lookup_wins(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    second = await mock_store.add(
+        HelixJobAttempt(
+            name="attempt-2",
+            workspace=DEFAULT_WORKSPACE,
+            job=job.id,
+            seq=1,
+            spec=job.spec,
+            platform_spec=job.platform_spec,
+        )
+    )
+    first_result = await mock_dispatcher.create_result(
+        job.id,
+        job.name,
+        "metrics",
+        "default/results#first",
+        FileStorageType.FILESET,
+        DEFAULT_WORKSPACE,
+        attempt_id=job.attempt_id,
+    )
+    second_result = await mock_dispatcher.create_result(
+        job.id,
+        job.name,
+        "metrics",
+        "default/results#second",
+        FileStorageType.FILESET,
+        DEFAULT_WORKSPACE,
+        attempt_id=second.id,
+    )
+    legacy = await mock_store.add(
+        HelixJobResult(
+            name="metrics",
+            workspace=DEFAULT_WORKSPACE,
+            job=job.id,
+            artifact_url="default/results#legacy",
+            artifact_storage_type=FileStorageType.FILESET,
+        )
+    )
+
+    assert first_result.parent == job.attempt_id
+    assert second_result.parent == second.id
+    resolved_first = await mock_dispatcher.get_attempt_result(job.name, job.attempt_id, "metrics", DEFAULT_WORKSPACE)
+    resolved_second = await mock_dispatcher.get_attempt_result(job.name, second.id, "metrics", DEFAULT_WORKSPACE)
+    resolved_legacy = await mock_dispatcher.get_result(job.name, "metrics", DEFAULT_WORKSPACE)
+
+    assert resolved_first is not None
+    assert resolved_second is not None
+    assert resolved_legacy is not None
+    assert resolved_first.id == first_result.id
+    assert resolved_second.id == second_result.id
+    assert resolved_legacy.id == legacy.id
+
+
+@pytest.mark.asyncio
+async def test_attempt_step_lookup_rejects_cross_job_attempts(
+    mock_dispatcher: JobDispatcher,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    first = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    second = await mock_dispatcher.create_job(
+        sample_platform_job_request.model_copy(update={"name": "other-job"}),
+        DEFAULT_WORKSPACE,
+    )
+
+    assert await mock_dispatcher.resolve_attempt(first.name, second.attempt_id, DEFAULT_WORKSPACE) is None
+    assert (
+        await mock_dispatcher.get_attempt_step_by_name(
+            first.name,
+            second.attempt_id,
+            "basic",
+            DEFAULT_WORKSPACE,
+        )
+        is None
+    )

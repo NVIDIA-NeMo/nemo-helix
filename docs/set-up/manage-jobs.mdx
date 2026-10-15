@@ -9,6 +9,30 @@ description: ""
 
 This section describes how to configure jobs in NeMo Helix. The Jobs service is responsible for scheduling batch jobs, collecting telemetry and managing job results.
 
+## Viewing Job Attempts
+
+Each job run creates an attempt. The job response includes `attempt_id` for the current attempt and `db_version` for optimistic updates. List the attempt history or retrieve the current attempt without first looking up its ID:
+
+```bash
+nemo jobs attempts list <job-name> --workspace default
+nemo jobs attempts get current --job <job-name> --workspace default
+```
+
+Attempt-scoped APIs keep execution data from different runs separate. Pass `--attempt-id <attempt-id>` or `--attempt-id current` to job result, step, task, log, watch, and tail commands when you need data from a specific run. Commands without an attempt selector continue to use the existing job-level API for compatibility.
+
+## Updating Jobs
+
+Use `nemo jobs update` to change mutable metadata or the job definition used by future attempts:
+
+```bash
+nemo jobs update <job-name> \
+  --workspace default \
+  --description "Updated description" \
+  --expected-db-version 3
+```
+
+Read `db_version` from `nemo jobs get` and send it as `--expected-db-version` when concurrent writers are possible. The update returns HTTP 409 if the stored version changed. Definition updates must provide both `spec` and `platform_spec`; the Jobs Factory recompiles plugin job specs before forwarding the paired fields. To explicitly clear a nullable field such as `project`, use `--input-data '{"project": null}'`.
+
 ## Viewing Job Logs
 
 Use `nemo jobs get-logs` to inspect paginated job logs:
@@ -23,7 +47,7 @@ Use `nemo jobs tail` when you only need the newest lines from a long or running 
 nemo jobs tail <job-name> --workspace default -n 500
 ```
 
-Both commands support `--attempt-id`, `--step-id`, and `--task-id` to narrow the log output.
+Both commands support `--attempt-id`, `--step-id`, and `--task-id` to narrow the log output. The attempt selector accepts an attempt ID, an attempt name, or `current`.
 
 ## Execution Profiles
 

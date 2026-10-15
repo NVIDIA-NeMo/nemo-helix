@@ -280,6 +280,31 @@ class TestEntityCRUD:
         assert "created_by" in updated
         assert "updated_by" in updated
 
+    async def test_update_entity_by_name_clears_project_with_explicit_null(self, client: AsyncClient, ctx):
+        project_response = await client.post(
+            "/apis/entities/v2/workspaces/default/projects",
+            json={"name": "clear-project", "description": "temporary project"},
+        )
+        assert project_response.status_code == 201
+        create_response = await client.post(
+            "/apis/entities/v2/workspaces/default/entities/customization_config",
+            json={
+                "name": "clear-project-test",
+                "project": "clear-project",
+                "data": {"target_id": "llama-2-7b"},
+            },
+        )
+        assert create_response.status_code == 201
+        assert create_response.json()["project"] == "clear-project"
+
+        response = await client.put(
+            "/apis/entities/v2/workspaces/default/entities/customization_config/clear-project-test",
+            json={"project": None, "data": {"target_id": "llama-2-7b"}},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["project"] is None
+
     async def test_update_nonexistent_entity_fails(self, client: AsyncClient, ctx):
         """Test updating a non-existent entity returns 404."""
         response = await client.put(

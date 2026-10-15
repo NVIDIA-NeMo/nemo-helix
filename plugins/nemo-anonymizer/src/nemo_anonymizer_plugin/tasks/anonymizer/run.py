@@ -37,6 +37,7 @@ from nemo_helix_plugin.job_usage import HelixJobUsageReporter
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.constants import (
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
     NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
@@ -251,6 +252,7 @@ def _load_step_config() -> AnonymizerStepConfig:
 def _get_ctx(sdk: NemoClient) -> JobContext:
     workspace = _get_workspace()
     job_name = _get_job_name()
+    attempt_id = _get_required_env(NEMO_JOB_ATTEMPT_ID_ENVVAR)
     client = client_from_platform(sdk, NemoClient)
     storage = StoragePaths(
         ephemeral=Path(_get_required_env(EPHEMERAL_TASK_STORAGE_PATH_ENVVAR)),
@@ -264,10 +266,12 @@ def _get_ctx(sdk: NemoClient) -> JobContext:
     return JobContext(
         workspace=workspace,
         job_id=job_name,
+        attempt_id=attempt_id,
         storage=storage,
         results=results,
         usage=HelixJobUsageReporter(
             job_name=job_name,
+            attempt_id=attempt_id,
             workspace=workspace,
             jobs_client=JobsClient.from_client(client),
         ),

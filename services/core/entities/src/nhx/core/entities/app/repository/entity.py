@@ -150,6 +150,7 @@ class EntityRepositoryInterface(ABC):
         new_name: str | None = None,
         parent: Optional[str] = None,
         project: Optional[str] = None,
+        project_set: bool = False,
         updated_by: str | None = None,
         expected_db_version: Optional[int] = None,
         session: AsyncSession | None = None,
@@ -164,6 +165,7 @@ class EntityRepositoryInterface(ABC):
             new_name: Optional new name for the entity
             parent: Optional parent entity ID (None for root entities)
             project: Optional project name for the entity
+            project_set: Whether project was explicitly supplied, including null
             updated_by: Optional principal ID for the updater
             expected_db_version: Optional expected database version for optimistic locking. If provided,
                 update will fail if current version doesn't match.

@@ -122,7 +122,10 @@ def test_job_factory_stamps_every_core_route_exactly() -> None:
         (base, "post"): ("customization.jobs.create", _WRITE),
         (base, "get"): ("customization.jobs.list", _READ),
         (f"{base}/{{name}}", "get"): ("customization.jobs.read", _READ),
+        (f"{base}/{{name}}", "patch"): ("customization.jobs.update", _WRITE),
         (f"{base}/{{name}}", "delete"): ("customization.jobs.delete", _WRITE),
+        (f"{base}/{{name}}/attempts", "get"): ("customization.jobs.read", _READ),
+        (f"{base}/{{name}}/attempts/{{attempt}}", "get"): ("customization.jobs.read", _READ),
         (f"{base}/{{name}}/status", "get"): ("customization.jobs.read", _READ),
         (f"{base}/{{name}}/cancel", "post"): ("customization.jobs.cancel", _WRITE),
         (f"{base}/{{name}}/logs", "get"): ("customization.jobs.read", _READ),
@@ -199,6 +202,7 @@ def test_job_factory_derivation_end_to_end() -> None:
         "customization.jobs.create",
         "customization.jobs.list",
         "customization.jobs.read",
+        "customization.jobs.update",
         "customization.jobs.delete",
         "customization.jobs.cancel",
     } <= set(contrib.permissions)

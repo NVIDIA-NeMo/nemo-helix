@@ -105,6 +105,19 @@ def test_update_entity_by_name_excludes_unset_fields() -> None:
     assert "expected_db_version" not in content
 
 
+def test_update_entity_by_name_preserves_explicit_null_project() -> None:
+    body = EntityUpdate(data={"colour": "red"}, project=None)
+    prepared = endpoints.update_entity_by_name(
+        workspace="default",
+        entity_type="widget",
+        name="my-widget",
+        body=body,
+    )
+
+    assert isinstance(prepared.content, bytes)
+    assert json.loads(prepared.content)["project"] is None
+
+
 def test_delete_entity_by_name() -> None:
     prepared = endpoints.delete_entity_by_name(workspace="default", entity_type="widget", name="my-widget")
 

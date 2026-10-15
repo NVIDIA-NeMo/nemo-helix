@@ -519,6 +519,7 @@ async def update_entity_by_name(
 
     # Validate project exists if specified
     await validate_project_exists(repository, workspace, entity_data.project)
+    project_set = "project" in entity_data.model_fields_set
 
     try:
         entity = await repository.update_entity_by_name(
@@ -529,6 +530,7 @@ async def update_entity_by_name(
             new_name=entity_data.new_name,
             parent=parent,
             project=entity_data.project,
+            project_set=project_set,
             updated_by=auth_client.principal.effective_id,
             expected_db_version=entity_data.expected_db_version,
         )

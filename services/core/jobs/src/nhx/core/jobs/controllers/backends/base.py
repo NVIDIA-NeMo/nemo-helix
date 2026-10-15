@@ -378,27 +378,36 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
                 env_var_str += f"{envvar.name}={secret_ref.workspace}/{secret_ref.name}"
         return env_var_str
 
-    def get_step(self, job: str, step_name: str, workspace: str) -> HelixJobStepResponse:
+    def get_step(self, job: str, step_name: str, workspace: str, attempt_id: str | None = None) -> HelixJobStepResponse:
         """Fetch the latest state of a job step via the typed Jobs client."""
+        if attempt_id is not None:
+            return self._jobs.get_attempt_step(
+                name=step_name,
+                workspace=workspace,
+                job=job,
+                attempt=attempt_id,
+            ).data()
         return self._jobs.get_job_step(name=step_name, workspace=workspace, job=job).data()
 
-    def get_step_safe(self, job: str, step_name: str, workspace: str) -> Optional[HelixJobStepResponse]:
+    def get_step_safe(
+        self, job: str, step_name: str, workspace: str, attempt_id: str | None = None
+    ) -> Optional[HelixJobStepResponse]:
         """Fetch the job step, or None if not found (e.g. 404, workspace deleted)."""
         try:
-            return self.get_step(job=job, step_name=step_name, workspace=workspace)
+            return self.get_step(job=job, step_name=step_name, workspace=workspace, attempt_id=attempt_id)
         except ClientNotFoundError:
             return None
         except Exception as e:
             raise e
 
-    def check_step_is_terminal(self, job: str, step_name: str, workspace: str) -> bool:
+    def check_step_is_terminal(self, job: str, step_name: str, workspace: str, attempt_id: str | None = None) -> bool:
         """Return True if the job step is terminal (cancelled/error/completed) or the step entity is not found (e.g. 404).
 
         Used by cleanup: when the entity is missing (e.g. workspace deleted) but the backend job is terminal and
         has our labels, we treat as terminal so we can clean up backend resources.
         """
         try:
-            step = self.get_step(job=job, step_name=step_name, workspace=workspace)
+            step = self.get_step(job=job, step_name=step_name, workspace=workspace, attempt_id=attempt_id)
             return step.status in ("cancelled", "error", "completed")
         except ClientNotFoundError:
             # If the job step entity is not found, we treat it as terminal so cleanup can proceed.
@@ -417,7 +426,9 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
         except Exception as e:
             raise RuntimeError(f"Failed to fetch job '{workspace}/{job}' to check if terminal") from e
 
-    def check_job_persistent_storage_cleanup_allowed(self, job: str, step_name: str, workspace: str) -> bool:
+    def check_job_persistent_storage_cleanup_allowed(
+        self, job: str, step_name: str, workspace: str, attempt_id: str | None = None
+    ) -> bool:
         """Return whether a completed step may delete persistent job storage.
 
         The jobs controller owns aggregate terminal-state transitions. Backend cleanup only checks that the
@@ -436,7 +447,7 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
             return False
 
         try:
-            step = self.get_step(job=job, step_name=step_name, workspace=workspace)
+            step = self.get_step(job=job, step_name=step_name, workspace=workspace, attempt_id=attempt_id)
         except ClientNotFoundError:
             return True
         except Exception as e:
@@ -528,9 +539,10 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
             return False
 
         try:
-            tasks = self._jobs.list_job_step_tasks(
-                name=step.name,
+            tasks = self._jobs.list_attempt_step_tasks(
+                step=step.name,
                 job=step.job,
+                attempt=step.attempt_id,
                 workspace=step.workspace,
             ).data()
         except Exception:

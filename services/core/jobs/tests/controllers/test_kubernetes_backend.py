@@ -2670,7 +2670,7 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(kubernetes_j
     kubernetes_job._execution_profile_config.storage.volume_permissions_image = "busybox"
 
     # Mock check_step_is_terminal: step1 terminal (True), step2 not terminal (False)
-    def check_step_side_effect(job, step_name, workspace):
+    def check_step_side_effect(job, step_name, workspace, attempt_id=None):
         return step_name == "step1"
 
     kubernetes_job.check_step_is_terminal = MagicMock(side_effect=check_step_side_effect)
@@ -2750,12 +2750,12 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(kubernetes_j
         # Verify check_step_is_terminal was called for step 1 (and step 2, but we skip step 2)
         assert kubernetes_job.check_step_is_terminal.call_count >= 1
         kubernetes_job.check_step_is_terminal.assert_any_call(
-            job="multi-step-job", step_name="step1", workspace="default"
+            job="multi-step-job", step_name="step1", workspace="default", attempt_id=None
         )
 
         # Verify persistent storage cleanup eligibility was checked for step 1
         kubernetes_job.check_job_persistent_storage_cleanup_allowed.assert_called_once_with(
-            job="multi-step-job", step_name="step1", workspace="default"
+            job="multi-step-job", step_name="step1", workspace="default", attempt_id=None
         )
 
         # Verify persistent storage cleanup was NOT called

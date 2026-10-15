@@ -103,6 +103,7 @@ class _JobsMethods:
     create_job = method(endpoints.create_job)
     list_jobs = method(endpoints.list_jobs)
     get_job = method(endpoints.get_job)
+    update_job = method(endpoints.update_job)
     delete_job = method(endpoints.delete_job)
     cancel_job = method(endpoints.cancel_job)
     pause_job = method(endpoints.pause_job)
@@ -112,6 +113,11 @@ class _JobsMethods:
     get_job_status = method(endpoints.get_job_status)
     update_job_status_details = method(endpoints.update_job_status_details)
 
+    # Job attempts
+    list_job_attempts = method(endpoints.list_job_attempts)
+    get_job_attempt = method(endpoints.get_job_attempt)
+    update_job_attempt_status_details = method(endpoints.update_job_attempt_status_details)
+
     # Job logs
     list_job_logs = method(endpoints.list_job_logs)
 
@@ -120,16 +126,26 @@ class _JobsMethods:
     list_job_results = method(endpoints.list_job_results)
     get_job_result = method(endpoints.get_job_result)
     download_job_result = method(endpoints.download_job_result)
+    create_attempt_result = method(endpoints.create_attempt_result)
+    list_attempt_results = method(endpoints.list_attempt_results)
+    get_attempt_result = method(endpoints.get_attempt_result)
+    download_attempt_result = method(endpoints.download_attempt_result)
 
     # Job steps
     list_steps = method(endpoints.list_steps)
     get_job_step = method(endpoints.get_job_step)
     update_job_step_status = method(endpoints.update_job_step_status)
+    list_attempt_steps = method(endpoints.list_attempt_steps)
+    get_attempt_step = method(endpoints.get_attempt_step)
+    update_attempt_step_status = method(endpoints.update_attempt_step_status)
 
     # Job tasks
     list_job_step_tasks = method(endpoints.list_job_step_tasks)
     update_job_step_task = method(endpoints.update_job_step_task)
     get_job_step_task = method(endpoints.get_job_step_task)
+    list_attempt_step_tasks = method(endpoints.list_attempt_step_tasks)
+    update_attempt_step_task = method(endpoints.update_attempt_step_task)
+    get_attempt_step_task = method(endpoints.get_attempt_step_task)
 
 
 class JobsClient(_JobsMethods, NemoClient):
@@ -151,6 +167,21 @@ class JobsClient(_JobsMethods, NemoClient):
             body=JobStatusDetailsUpdate.model_validate(body),
         ).data()
 
+    def update_attempt_status_details(
+        self,
+        name: str,
+        attempt: str,
+        *,
+        workspace: str | None = None,
+        body: dict[str, object],
+    ) -> None:
+        return self.update_job_attempt_status_details(
+            job=name,
+            attempt=attempt,
+            workspace=workspace,
+            body=JobStatusDetailsUpdate.model_validate(body),
+        ).data()
+
     def watch_job(
         self,
         name: str,
@@ -160,7 +191,7 @@ class JobsClient(_JobsMethods, NemoClient):
         timeout: float | None = None,
         include_history: bool = True,
         include_logs: bool = True,
-        attempt_id: int | None = None,
+        attempt_id: str | None = None,
         step_id: str | None = None,
         task_id: str | None = None,
         limit: int | None = None,
@@ -210,6 +241,23 @@ class AsyncJobsClient(_JobsMethods, AsyncNemoClient):
             )
         ).data()
 
+    async def update_attempt_status_details(
+        self,
+        name: str,
+        attempt: str,
+        *,
+        workspace: str | None = None,
+        body: dict[str, object],
+    ) -> None:
+        return (
+            await self.update_job_attempt_status_details(
+                job=name,
+                attempt=attempt,
+                workspace=workspace,
+                body=JobStatusDetailsUpdate.model_validate(body),
+            )
+        ).data()
+
     def watch_job(
         self,
         name: str,
@@ -219,7 +267,7 @@ class AsyncJobsClient(_JobsMethods, AsyncNemoClient):
         timeout: float | None = None,
         include_history: bool = True,
         include_logs: bool = True,
-        attempt_id: int | None = None,
+        attempt_id: str | None = None,
         step_id: str | None = None,
         task_id: str | None = None,
         limit: int | None = None,

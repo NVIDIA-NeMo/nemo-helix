@@ -107,9 +107,16 @@ def report_run_outcome(outcome: RunOutcome, *, ctx: JobContext, async_client: As
     job_id = ctx.job_id
 
     async def _update(client: AsyncNemoClient) -> None:
-        await AsyncJobsClient.from_client(client).update_status_details(
-            job_id, workspace=ctx.workspace, body=outcome.status_details()
-        )
+        jobs = AsyncJobsClient.from_client(client)
+        if ctx.attempt_id is None:
+            await jobs.update_status_details(job_id, workspace=ctx.workspace, body=outcome.status_details())
+        else:
+            await jobs.update_attempt_status_details(
+                job_id,
+                ctx.attempt_id,
+                workspace=ctx.workspace,
+                body=outcome.status_details(),
+            )
 
     try:
         run_with_isolated_async_client(async_client, _update)

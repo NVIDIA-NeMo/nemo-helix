@@ -516,11 +516,10 @@ def _entity_update_fields(entity: EntityBase, *, original_name: str | None = Non
     update_fields: dict[str, Any] = {
         "data": entity._get_data_fields(),
         "expected_db_version": entity.db_version,
+        "project": entity.project,
     }
     if original_name:
         update_fields["new_name"] = entity.name
-    if entity.project:
-        update_fields["project"] = entity.project
     return update_fields
 
 

@@ -55,6 +55,27 @@ def _make_files_client() -> MagicMock:
     return files
 
 
+def test_progress_reporter_routes_updates_to_concrete_attempt() -> None:
+    from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+    from nhx.customization_common.tasks.file_io_progress_reporter import JobsServiceProgressReporter
+
+    jobs = MagicMock()
+    reporter = JobsServiceProgressReporter(
+        jobs,
+        "default",
+        "job-1",
+        "model-upload",
+        "task-1",
+        attempt_id="attempt-0",
+    )
+
+    reporter.update_progress(HelixJobStatus.ACTIVE, status_details={"rows": 3})
+
+    jobs.update_attempt_step_task.assert_called_once()
+    assert jobs.update_attempt_step_task.call_args.kwargs["attempt"] == "attempt-0"
+    jobs.update_job_step_task.assert_not_called()
+
+
 def _raise_runner_conflict() -> None:
     import sys
 
