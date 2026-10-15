@@ -145,7 +145,7 @@ const renderModal = () =>
   });
 
 const openUploadTab = async (dialog: HTMLElement) => {
-  fireEvent.click(within(dialog).getByRole('tab', { name: 'Register with code upload' }));
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'Code upload' }));
   await screen.findByTestId('agent-directory-input');
 };
 
@@ -154,7 +154,7 @@ const openPromptTab = (dialog: HTMLElement) => {
 };
 
 const openGitHubTab = async (dialog: HTMLElement) => {
-  fireEvent.click(within(dialog).getByRole('tab', { name: 'Register from GitHub' }));
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'GitHub' }));
   await within(dialog).findByRole('textbox', { name: 'Repository' });
 };
 
@@ -237,7 +237,7 @@ describe('NewAgentModal upload tab', () => {
     renderModal();
     const dialog = await screen.findByRole('dialog');
 
-    expect(within(dialog).getByRole('tab', { name: 'Register with code upload' })).toHaveAttribute(
+    expect(within(dialog).getByRole('tab', { name: 'Code upload' })).toHaveAttribute(
       'aria-selected',
       'true'
     );
@@ -639,7 +639,7 @@ describe('NewAgentModal imported traces tab', () => {
   };
 
   const openTracesTab = async (dialog: HTMLElement, user: ReturnType<typeof userEvent.setup>) => {
-    await user.click(within(dialog).getByRole('tab', { name: 'Register from traces' }));
+    await user.click(within(dialog).getByRole('tab', { name: 'Traces' }));
   };
 
   it('offers each distinct agent seen in the traces', async () => {
@@ -1044,7 +1044,7 @@ describe('NewAgentModal container image', () => {
     server.use(http.get(DEPLOYMENT_MODES_URL, () => HttpResponse.json({ data: modes })));
 
   const openImageTab = async (dialog: HTMLElement) => {
-    fireEvent.click(within(dialog).getByRole('tab', { name: 'Register from container image' }));
+    fireEvent.click(within(dialog).getByRole('tab', { name: 'Container image' }));
     return within(dialog).findByRole('textbox', { name: 'Container image' });
   };
 

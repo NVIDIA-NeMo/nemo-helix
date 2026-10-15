@@ -601,12 +601,12 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
       >
         <TabsRoot value={tab} onValueChange={(value) => setTab(value as NewAgentTab)}>
           <TabsList aria-label="Ways to register an agent">
-            <TabsTrigger value="upload">Register with code upload</TabsTrigger>
-            <TabsTrigger value="github">Register from GitHub</TabsTrigger>
+            <TabsTrigger value="upload">Code upload</TabsTrigger>
+            <TabsTrigger value="github">GitHub</TabsTrigger>
             {AGENT_CONTAINER_DEPLOYMENTS_ENABLED ? (
-              <TabsTrigger value="image">Register from container image</TabsTrigger>
+              <TabsTrigger value="image">Container image</TabsTrigger>
             ) : null}
-            <TabsTrigger value="imported-traces">Register from traces</TabsTrigger>
+            <TabsTrigger value="imported-traces">Traces</TabsTrigger>
             <TabsTrigger value="coding-agent-prompt">Coding agent prompt</TabsTrigger>
           </TabsList>
 
