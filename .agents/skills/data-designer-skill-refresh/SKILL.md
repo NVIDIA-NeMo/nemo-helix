@@ -2,8 +2,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-name: refresh-data-designer-skill
-description: Refresh the vendored data-designer skill bundle in this plugin from the upstream NVIDIA-NeMo/DataDesigner repo at the pinned library version, adapting CLI commands and platform-specific guidance to the NeMo plugin context. Use when bumping the `data-designer` library pin in pyproject.toml, when upstream ships skill changes that need to land here, or when auditing drift. Trigger keywords - refresh data designer skill, update data designer skill, vendor data designer skill, sync data designer skill, bump data-designer version.
+name: data-designer-skill-refresh
+description: Refresh the Data Designer plugin's user-facing skill bundle (`skills/nemo-data-designer-plugin/`) from the upstream NVIDIA-NeMo/DataDesigner repo at the pinned library version, adapting CLI commands and platform-specific guidance to NeMo Helix. Use when upstream ships skill changes that need to land here, when auditing drift, or as a step of `data-designer-version-bump`. For bumping the `data-designer` version itself, use `data-designer-version-bump` instead. Trigger keywords - refresh data designer skill, update data designer skill, vendor data designer skill, sync data designer skill.
 ---
 
 # Refresh Data Designer Skill
@@ -22,7 +22,7 @@ Earlier versions of this playbook copied upstream wholesale and tried to teach a
 
 ## When to use
 
-- After bumping the `data-designer==X.Y.Z` pin. The repo-level `bump-data-designer` skill (`.agents/skills/bump-data-designer/`) runs this as its Step 8.
+- After bumping the `data-designer==X.Y.Z` pin. The `data-designer-version-bump` skill (`.agents/skills/data-designer-version-bump/`) runs this as its Step 8.
 - When upstream ships skill changes that should land here.
 - When auditing drift between the vendored copy and upstream.
 

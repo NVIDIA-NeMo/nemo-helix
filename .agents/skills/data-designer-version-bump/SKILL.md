@@ -1,5 +1,5 @@
 ---
-name: bump-data-designer
+name: data-designer-version-bump
 description: Bump the upstream NVIDIA NeMo Data Designer library (`data-designer`, `data-designer-config`, `data-designer-engine`) to a new release in nemo-helix. Covers upstream research, pin edits, relocking, dependency-conflict triage, wheel constraints, versioned doc links, generated license/OpenAPI/CLI artifacts, API-change adoption, the vendored plugin skill refresh, and verification. Use when asked to bump, upgrade, or update Data Designer or the data-designer dependency to a new version. Not for nemo-anonymizer, which releases on its own cadence.
 ---
 
@@ -177,7 +177,7 @@ make update-licenses                 # third_party/licenses.jsonl, requirements-
 
 ## Step 8: Refresh the vendored plugin skill
 
-Follow `plugins/nemo-data-designer/.agents/skills/refresh-data-designer-skill/SKILL.md` with `$VERSION=$NEW`.
+Follow the `data-designer-skill-refresh` skill (`.agents/skills/data-designer-skill-refresh/SKILL.md`) with `$VERSION=$NEW`.
 
 - If Step 1.4 showed upstream skill changes, run the full procedure.
 - If not, run only its **Step 6: Verify**. The `nemo data-designer` command surface can drift even when upstream's skill doesn't change.
