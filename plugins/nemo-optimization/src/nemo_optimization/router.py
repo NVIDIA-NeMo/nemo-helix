@@ -178,9 +178,11 @@ def _preflight(
                 sdk=sdk,
             )
         except OptimizerConfigError as exc:
+            failed_index = _failed_preflight_index(plan, current_index=index, error_phase=exc.phase)
+            failed_item = plan[failed_index]
             failure = OptimizationPhaseResult(
-                phase=item.phase,
-                backend=item.backend_name,
+                phase=failed_item.phase,
+                backend=failed_item.backend_name,
                 status=OptimizationPhaseStatus.FAILED,
                 optimized_payload=copy.deepcopy(payload),
                 summary={
@@ -191,11 +193,29 @@ def _preflight(
                 },
             )
             return [
-                *_skipped(plan[:index], payload, 0, item.phase),
+                *_skipped(plan[:failed_index], payload, 0, failed_item.phase),
                 failure,
-                *_skipped(plan[index + 1 :], payload, 0, item.phase),
+                *_skipped(plan[failed_index + 1 :], payload, 0, failed_item.phase),
             ]
     return None
+
+
+def _failed_preflight_index(
+    plan: list[_PhasePlan],
+    *,
+    current_index: int,
+    error_phase: str | None,
+) -> int:
+    if error_phase is not None:
+        try:
+            phase = OptimizationPhase(error_phase)
+        except ValueError:
+            pass
+        else:
+            for index, item in enumerate(plan):
+                if item.phase is phase:
+                    return index
+    return current_index
 
 
 def _skipped(
