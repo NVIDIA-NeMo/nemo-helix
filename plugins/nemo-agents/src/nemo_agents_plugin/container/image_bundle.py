@@ -34,11 +34,15 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 from nemo_agents_plugin.entities import AGENT_CONFIG_FILENAME
+from nemo_helix_plugin.container_registry import (
+    DOCKER_HUB_REGISTRY,
+    ImageReference,
+    ImageReferenceError,
+    parse_challenges,
+    parse_image_reference,
+)
 
 LOGGER = logging.getLogger(__name__)
-
-DOCKER_HUB_REGISTRY = "registry-1.docker.io"
-_DOCKER_HUB_ALIASES = frozenset({"docker.io", "index.docker.io", "registry-1.docker.io"})
 
 IMAGE_REGISTRIES_ENV = "NEMO_AGENT_IMAGE_REGISTRIES"
 ANY_REGISTRY = "*"
@@ -67,9 +71,12 @@ _MAX_REDIRECTS = 3
 _BUILD_ARTIFACT_NAMES = frozenset({"Dockerfile.generated", "Dockerfile.generated.dockerignore", ".dockerignore"})
 _BUILD_ARTIFACT_SUFFIXES = (".whl",)
 
-_AUTH_PARAM = re.compile(r'(\w+)="([^"]*)"')
 _GZIP_MAGIC = b"\x1f\x8b"
 _ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
+
+_BUILDKIT_COPY = re.compile(r"^(?:COPY|ADD)\b(.*?)(?:\s+#\s*buildkit)?$")
+_LEGACY_COPY = re.compile(r"#\(nop\)\s+(?:COPY|ADD)\s+\S+\s+in\s+(\S+)\s*$")
+_WORKDIR = re.compile(r"(?:^|#\(nop\)\s+)WORKDIR\s+(\S+)")
 
 _INTERNAL_HOST_SUFFIXES = (".localhost", ".local", ".internal", ".svc", ".cluster.local")
 # Ranges is_global misses or that are never a public registry.
@@ -92,45 +99,11 @@ class ImageAccessDeniedError(ImageBundleError):
 
 
 @dataclass(frozen=True)
-class ImageReference:
-    registry: str
-    repository: str
-    reference: str
+class ExtractedBundle:
+    """The agent directory pulled out of an image layer, keyed by path relative to that directory."""
 
-
-@dataclass(frozen=True)
-class AgentImageBundle:
     config_path: str
     files: dict[str, bytes]
-
-
-def parse_image_reference(image: str) -> ImageReference:
-    """Split ``[registry/]repository[:tag][@digest]`` the way ``docker pull`` does."""
-    text = image.strip()
-    if not text or "://" in text or any(char.isspace() for char in text):
-        raise ImageBundleError(f"'{image}' is not an image reference. Use registry/repository:tag.")
-
-    name, _, digest = text.partition("@")
-    last_slash = name.rfind("/")
-    colon = name.rfind(":")
-    tag = ""
-    if colon > last_slash:
-        name, tag = name[:colon], name[colon + 1 :]
-
-    first, _, rest = name.partition("/")
-    if rest and ("." in first or ":" in first or first == "localhost"):
-        registry, repository = first.lower(), rest
-    else:
-        registry, repository = DOCKER_HUB_REGISTRY, name
-
-    if registry in _DOCKER_HUB_ALIASES:
-        registry = DOCKER_HUB_REGISTRY
-        if "/" not in repository:
-            repository = f"library/{repository}"
-
-    if not repository:
-        raise ImageBundleError(f"'{image}' is not an image reference. Use registry/repository:tag.")
-    return ImageReference(registry=registry, repository=repository, reference=digest or tag or "latest")
 
 
 def allowed_registries() -> frozenset[str]:
@@ -278,9 +251,10 @@ class _RegistryClient:
         raise ImageBundleError(f"Registry {self._image.registry} redirected too many times.")
 
     async def _anonymous_token(self, challenge: str) -> str | None:
-        if not challenge.lower().startswith("bearer "):
+        bearer = dict(parse_challenges(challenge)).get("bearer")
+        if bearer is None:
             return None
-        params = dict(_AUTH_PARAM.findall(challenge))
+        params = dict(bearer)
         realm = params.pop("realm", "")
         await _assert_public_https_url(realm, what="token service")
         params.setdefault("scope", f"repository:{self._image.repository}:pull")
@@ -293,7 +267,7 @@ class _RegistryClient:
         return token if isinstance(token, str) else None
 
     def _display(self) -> str:
-        return f"{self._image.registry}/{self._image.repository}:{self._image.reference}"
+        return str(self._image)
 
 
 def _digest_of(entry: Any) -> str:
@@ -325,15 +299,46 @@ def _env_value(config: dict[str, Any], name: str) -> str | None:
     return None
 
 
+def _copy_destination(created_by: str, workdir: str) -> str | None:
+    """Where a ``COPY``/``ADD`` history entry landed, in BuildKit or legacy builder wording."""
+    legacy = _LEGACY_COPY.search(created_by)
+    if legacy:
+        destination = legacy.group(1)
+    else:
+        buildkit = _BUILDKIT_COPY.match(created_by.strip())
+        if not buildkit:
+            return None
+        operands = [token for token in buildkit.group(1).split() if not token.startswith("--")]
+        if len(operands) < 2:
+            return None
+        destination = operands[-1]
+    return posixpath.normpath(posixpath.join(workdir, destination))
+
+
+def _copies_into(destination: str, bundle_dir: str) -> bool:
+    # A copy onto "/" is a base image's rootfs, never the agent directory.
+    return bundle_dir == destination or (destination != "/" and bundle_dir.startswith(destination + "/"))
+
+
 def _bundle_layer_digest(image_config: dict[str, Any], layers: list[dict[str, Any]], bundle_dir: str) -> str:
-    """The layer created by the packaged Dockerfile's ``COPY ./ <bundle_dir>``."""
+    """The last layer whose ``COPY`` landed on *bundle_dir* or on a directory above it.
+
+    ``WORKDIR`` is tracked through the history so a relative destination such as
+    ``COPY . .`` resolves the way the builder resolved it.
+    """
     history = [entry for entry in image_config.get("history") or [] if isinstance(entry, dict)]
-    layer_history = [entry for entry in history if not entry.get("empty_layer")]
-    if len(layer_history) != len(layers):
+    workdir = "/"
+    destinations: list[str | None] = []
+    for entry in history:
+        created_by = str(entry.get("created_by", ""))
+        if changed := _WORKDIR.search(created_by):
+            workdir = posixpath.normpath(posixpath.join(workdir, changed.group(1)))
+        if not entry.get("empty_layer"):
+            destinations.append(_copy_destination(created_by, workdir))
+    if len(destinations) != len(layers):
         raise ImageBundleError("The image history does not line up with its layers.")
-    copy_into_bundle = re.compile(rf"\bCOPY\b.*\s{re.escape(bundle_dir)}/?(\s|$)")
-    for entry, layer in zip(reversed(layer_history), reversed(layers), strict=True):
-        if copy_into_bundle.search(str(entry.get("created_by", ""))):
+    for destination, layer in zip(reversed(destinations), reversed(layers), strict=True):
+        if destination is not None and _copies_into(destination, bundle_dir):
             return _digest_of(layer)
     raise ImageBundleError(f"No layer copies the agent into {bundle_dir}. Package the image with nemo agents package.")
 
@@ -398,9 +403,12 @@ def _extract_bundle(layer: bytes, bundle_dir: str) -> dict[str, bytes]:
     return files
 
 
-async def read_agent_bundle(image: str, *, http: httpx.AsyncClient) -> AgentImageBundle:
+async def read_agent_bundle(image: str, *, http: httpx.AsyncClient) -> ExtractedBundle:
     """Fetch the agent directory that ``nemo agents package`` copied into *image*."""
-    reference = parse_image_reference(image)
+    try:
+        reference = parse_image_reference(image)
+    except ImageReferenceError as exc:
+        raise ImageBundleError(str(exc)) from exc
     _assert_allowed_registry(reference.registry)
     await assert_public_host(_host_of(reference.registry))
     registry = _RegistryClient(http, reference)
@@ -435,4 +443,4 @@ async def read_agent_bundle(image: str, *, http: httpx.AsyncClient) -> AgentImag
         raise ImageBundleError(f"The agent layer has no {config_name}.")
     if config_name != AGENT_CONFIG_FILENAME:
         files[AGENT_CONFIG_FILENAME] = files.pop(config_name)
-    return AgentImageBundle(config_path=config_path, files=dict(sorted(files.items())))
+    return ExtractedBundle(config_path=config_path, files=dict(sorted(files.items())))

@@ -53,6 +53,7 @@ import {
 import { agentIntegrationPrompt } from '@studio/routes/agents/AgentDetailRoute/overview/codingAgentPrompts';
 import {
   AGENT_CONFIG_FILENAME,
+  EMPTY_SELECTION,
   UPLOAD_AGENT_FORM_DEFAULTS,
   uploadAgentFormSchema,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
@@ -67,6 +68,7 @@ import {
   imageReferenceProblem,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/image';
 import type {
+  AgentSourceSelection,
   NewAgentModalProps,
   NewAgentTab,
   PickedFile,
@@ -107,6 +109,21 @@ const OFFERED_ON_CREATE: readonly DeploymentMode[] = AGENT_CONTAINER_DEPLOYMENTS
   ? ['subprocess', ...IMAGE_DEPLOYMENT_MODES]
   : ['subprocess'];
 
+type SourceKind = 'upload' | 'image';
+
+const summarizeSelection = ({ entries, label }: AgentSourceSelection): string | undefined => {
+  if (entries.length === 0) return undefined;
+  const size = `${entries.length} ${entries.length === 1 ? 'file' : 'files'}, ${Math.max(1, Math.round(totalEntryBytes(entries) / 1000))} KB`;
+  return label ? `${label} — ${size}` : size;
+};
+
+const binaryFileProblem = (path: string, kind: SourceKind): string => {
+  const why = `${path} is not a text file. Agent files are delivered to container deployments as text, so the agent would fail to deploy.`;
+  return kind === 'image'
+    ? `${why} Rebuild the image without it, or upload the agent's text files instead.`
+    : `${why} Remove it and try again.`;
+};
+
 export const NewAgentModal: FC<NewAgentModalProps> = ({
   open,
   onClose,
@@ -122,12 +139,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     // webkitdirectory is absent from React's input attribute types.
     node?.setAttribute('webkitdirectory', '');
   }, []);
-  const [entries, setEntries] = useState<UploadAgentEntry[]>([]);
-  const [sourceLabel, setSourceLabel] = useState('');
-  const [selectionError, setSelectionError] = useState<string | undefined>(undefined);
-  // Upload picks and image bundles share the entries, so each tab only uses the ones it read.
-  const [selectionFor, setSelectionFor] = useState<'upload' | 'image'>('upload');
-  const [bundleImage, setBundleImage] = useState('');
+  const [uploadSelection, setUploadSelection] = useState<AgentSourceSelection>(EMPTY_SELECTION);
+  const [imageSelection, setImageSelection] = useState<AgentSourceSelection>(EMPTY_SELECTION);
   const [replaceArmedFor, setReplaceArmedFor] = useState<string | null>(null);
   const [tab, setTab] = useState<NewAgentTab>('upload');
   const [isSecretModalOpen, setSecretModalOpen] = useState(false);
@@ -243,8 +256,9 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     [deploymentModeState]
   );
   const isModesLoading = deploymentModeState.status === 'loading';
+  const isModesUnknown = deploymentModeState.status === 'unknown';
   const canDeployOnCreate = deploymentModes.length > 0;
-  const offeredModes = onImageTab ? imageDeploymentModes : deploymentModes;
+  const canDeployImage = imageDeploymentModes.length > 0;
 
   const {
     mutateAsync: createTracedAgent,
@@ -253,12 +267,9 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     reset: resetTracedMutation,
   } = useAgentsCreateAgent({ mutation: { onSuccess: onAgentCreated } });
 
-  // useWatch re-renders this modal on every keystroke; the summary depends only on entries.
-  const entriesSummary = useMemo(() => {
-    if (entries.length === 0) return undefined;
-    const size = `${entries.length} ${entries.length === 1 ? 'file' : 'files'}, ${Math.max(1, Math.round(totalEntryBytes(entries) / 1000))} KB`;
-    return sourceLabel ? `${sourceLabel} — ${size}` : size;
-  }, [sourceLabel, entries]);
+  // useWatch re-renders this modal on every keystroke; the summaries depend only on the selections.
+  const uploadSummary = useMemo(() => summarizeSelection(uploadSelection), [uploadSelection]);
+  const imageSummary = useMemo(() => summarizeSelection(imageSelection), [imageSelection]);
 
   const watchedName = useWatch({ control, name: 'name' });
   const watchedRepoUrl = useWatch({ control, name: 'repoUrl' });
@@ -266,13 +277,21 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const watchedImage = useWatch({ control, name: 'image' });
   const watchedDeploy = useWatch({ control, name: 'deploy' });
   const watchedDeploymentMode = useWatch({ control, name: 'deploymentMode' });
+  const watchedImageDeploymentMode = useWatch({ control, name: 'imageDeploymentMode' });
 
   useEffect(() => {
-    const firstMode = offeredModes.at(0);
-    if (firstMode && !offeredModes.includes(watchedDeploymentMode)) {
+    const firstMode = deploymentModes.at(0);
+    if (firstMode && !deploymentModes.includes(watchedDeploymentMode)) {
       setValue('deploymentMode', firstMode);
     }
-  }, [offeredModes, watchedDeploymentMode, setValue]);
+  }, [deploymentModes, watchedDeploymentMode, setValue]);
+
+  useEffect(() => {
+    const firstMode = imageDeploymentModes.at(0);
+    if (firstMode && !imageDeploymentModes.includes(watchedImageDeploymentMode)) {
+      setValue('imageDeploymentMode', firstMode);
+    }
+  }, [imageDeploymentModes, watchedImageDeploymentMode, setValue]);
 
   // A repository is only a source once it parses; a half-typed URL must not enable submit.
   const parsedRepo = useMemo((): { source?: GitHubAgentSource; problem?: string } => {
@@ -293,11 +312,16 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const imageProblem = imageReferenceProblem(watchedImage ?? '');
   const imageReady = Boolean(watchedImage?.trim()) && !imageProblem;
   const imageFieldError = errors.image?.message ?? (imageBlurred ? imageProblem : undefined);
-  const noImageModes = deploymentModeState.status === 'ready' && imageDeploymentModes.length === 0;
-  const uploadEntries = selectionFor === 'upload' ? entries : [];
+  const noImageModes = deploymentModeState.status === 'ready' && !canDeployImage;
+  const uploadEntries = uploadSelection.entries;
   // Editing the reference after a read leaves the files of a different image, so they stop counting.
   const imageEntries =
-    selectionFor === 'image' && bundleImage === watchedImage?.trim() ? entries : [];
+    imageSelection.image !== undefined && imageSelection.image === watchedImage?.trim()
+      ? imageSelection.entries
+      : [];
+
+  const setSelection = (kind: SourceKind, selection: AgentSourceSelection) =>
+    (kind === 'image' ? setImageSelection : setUploadSelection)(selection);
 
   const resetAndClose = () => {
     resetMutation();
@@ -305,11 +329,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     resetTracedMutation();
     resetForm({ ...UPLOAD_AGENT_FORM_DEFAULTS, name: initialName ?? '' });
     deployAfterCreate.current = null;
-    setEntries([]);
-    setSourceLabel('');
-    setSelectionError(undefined);
-    setSelectionFor('upload');
-    setBundleImage('');
+    setUploadSelection(EMPTY_SELECTION);
+    setImageSelection(EMPTY_SELECTION);
     setReplaceArmedFor(null);
     setRepoBlurred(false);
     setImageBlurred(false);
@@ -320,42 +341,37 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
 
   // Selection reads finish out of order, so the newest selection has to win.
   const selectionSeq = useRef(0);
-  const beginSelection = (kind: 'upload' | 'image'): (() => boolean) => {
+  const beginSelection = (kind: SourceKind): (() => boolean) => {
     const selection = ++selectionSeq.current;
     // Dropping the entries disables submit until this selection validates.
     resetMutation();
     resetRepoMutation();
-    setEntries([]);
-    setSelectionError(undefined);
-    setSelectionFor(kind);
-    setBundleImage('');
+    setSelection(kind, EMPTY_SELECTION);
     setReplaceArmedFor(null);
     return () => selection !== selectionSeq.current;
   };
 
   // Picks, drops and image bundles all land here so every source is validated the same way.
   const acceptEntries = async (
+    kind: SourceKind,
     collected: UploadAgentEntry[],
-    label: string,
+    source: Pick<AgentSourceSelection, 'label' | 'image'>,
     superseded: () => boolean,
     fallbackName = ''
   ) => {
-    setSourceLabel(label);
+    const reject = (error: string) => setSelection(kind, { ...source, entries: [], error });
+    setSelection(kind, { ...source, entries: [] });
 
     const problem = validateAgentEntries(collected);
     if (problem) {
-      setEntries([]);
-      setSelectionError(problem);
+      reject(problem);
       return;
     }
 
     const binaryPath = await findNonUtf8Path(collected);
     if (superseded()) return;
     if (binaryPath) {
-      setEntries([]);
-      setSelectionError(
-        `${binaryPath} is not a text file. Agent files are delivered to container deployments as text, so the agent would fail to deploy. Remove it and try again.`
-      );
+      reject(binaryFileProblem(binaryPath, kind));
       return;
     }
 
@@ -368,18 +384,20 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
       });
     } catch (error) {
       if (superseded()) return;
-      setEntries([]);
-      setSelectionError(
-        getErrorMessage(error as Error) || `Could not read ${AGENT_CONFIG_FILENAME}`
-      );
+      reject(getErrorMessage(error as Error) || `Could not read ${AGENT_CONFIG_FILENAME}`);
       return;
     }
 
-    setEntries(collected);
+    setSelection(kind, { ...source, entries: collected });
   };
 
   const acceptPicked = (picked: PickedFile[], superseded: () => boolean) =>
-    acceptEntries(collectAgentEntries(picked), selectionRootName(picked), superseded);
+    acceptEntries(
+      'upload',
+      collectAgentEntries(picked),
+      { label: selectionRootName(picked) },
+      superseded
+    );
 
   const onRepoUrlBlur = () => {
     setRepoBlurred(true);
@@ -390,7 +408,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const onImageBlur = async () => {
     setImageBlurred(true);
     const image = watchedImage.trim();
-    if (!imageReady || (selectionFor === 'image' && image === bundleImage)) {
+    if (!imageReady || image === imageSelection.image) {
       return;
     }
 
@@ -400,10 +418,10 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
       if (superseded()) {
         return;
       }
-      setBundleImage(image);
       await acceptEntries(
+        'image',
         imageBundleEntries(bundle.files),
-        image,
+        { label: image, image },
         superseded,
         agentNameFromImage(image)
       );
@@ -411,17 +429,18 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
       if (superseded()) {
         return;
       }
-      setSourceLabel('');
-      setSelectionError(getErrorMessage(error as Error) || `Could not read ${image}`);
+      // No `image`: a failed read is retried on the next blur of the same reference.
+      setImageSelection({
+        ...EMPTY_SELECTION,
+        error: getErrorMessage(error as Error) || `Could not read ${image}`,
+      });
     }
   };
 
   const rejectOversized = (count: number): boolean => {
     const oversized = tooManyPickedFiles(count);
     if (!oversized) return false;
-    setEntries([]);
-    setSourceLabel('');
-    setSelectionError(oversized);
+    setUploadSelection({ ...EMPTY_SELECTION, error: oversized });
     return true;
   };
 
@@ -454,7 +473,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     if (superseded()) return;
 
     if (picked.length === 0) {
-      setSelectionError('That drop contained no readable files.');
+      setUploadSelection({ ...EMPTY_SELECTION, error: 'That drop contained no readable files.' });
       return;
     }
     if (rejectOversized(picked.length)) return;
@@ -466,12 +485,11 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const onSubmit: SubmitHandler<UploadAgentFormData> = async (formData) => {
     const name = formData.name.trim();
     if (onImageTab) {
-      // The image already runs this agent, so it is always deployed rather than rebuilt.
-      deployAfterCreate.current = {
-        mode: formData.deploymentMode,
-        buildImage: false,
-        image: formData.image,
-      };
+      // The image already runs this agent, so it is deployed rather than rebuilt; when the
+      // runtimes could not be loaded the agent is still registered, to be deployed from its page.
+      deployAfterCreate.current = canDeployImage
+        ? { mode: formData.imageDeploymentMode, buildImage: false, image: formData.image }
+        : null;
     } else {
       deployAfterCreate.current =
         formData.deploy && canDeployOnCreate
@@ -519,8 +537,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   };
 
   // No fallback argument: getErrorMessage prefers one over a plain Error's own message.
-  const tabSelectionError =
-    (onImageTab ? 'image' : 'upload') === selectionFor ? selectionError : undefined;
+  const tabSelectionError = (onImageTab ? imageSelection : uploadSelection).error;
   const failure = onGitHubTab
     ? repoError
     : onTracesTab
@@ -541,7 +558,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
       return !repoSource || awaitingDeployModes;
     }
     if (onImageTab) {
-      return imageEntries.length === 0 || isReadingImage || imageDeploymentModes.length === 0;
+      return imageEntries.length === 0 || isReadingImage || isModesLoading || noImageModes;
     }
     if (onTracesTab) {
       return !tracedAgent;
@@ -618,7 +635,9 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
                   className="w-full"
                   data-testid="agent-directory-dropzone"
                   onDrop={onFilesDropped}
-                  slotAnchor={sourceLabel ? 'Choose a different folder' : 'Choose a folder'}
+                  slotAnchor={
+                    uploadSelection.label ? 'Choose a different folder' : 'Choose a folder'
+                  }
                   slotHeaderText=" containing agent.yaml, or drop it here."
                 >
                   <UploadInputElement
@@ -649,9 +668,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
                   onChange={onFilesPicked}
                 />
               </Flex>
-              {selectionFor === 'upload' && entriesSummary ? (
-                <Text kind="body/regular/sm">{entriesSummary}</Text>
-              ) : null}
+              {uploadSummary ? <Text kind="body/regular/sm">{uploadSummary}</Text> : null}
               <ControlledTextInput
                 useControllerProps={{ control, name: 'name' }}
                 label="Name"
@@ -723,8 +740,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
                   <Text kind="body/regular/sm" color="subtle">
                     Reading agent files from the image…
                   </Text>
-                ) : imageEntries.length > 0 && entriesSummary ? (
-                  <Text kind="body/regular/sm">{entriesSummary}</Text>
+                ) : imageEntries.length > 0 && imageSummary ? (
+                  <Text kind="body/regular/sm">{imageSummary}</Text>
                 ) : null}
                 <ControlledTextInput
                   useControllerProps={{ control, name: 'name' }}
@@ -735,9 +752,14 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
                   <Text kind="body/regular/sm" color="subtle">
                     This platform has no container runtime enabled, so an image cannot be deployed.
                   </Text>
+                ) : isModesUnknown ? (
+                  <Text kind="body/regular/sm" color="subtle">
+                    The platform&apos;s deployment runtimes could not be loaded, so the agent will
+                    be registered without being deployed. Deploy it from its page.
+                  </Text>
                 ) : (
                   <DeploymentModeSelect
-                    useControllerProps={{ control, name: 'deploymentMode' }}
+                    useControllerProps={{ control, name: 'imageDeploymentMode' }}
                     modes={imageDeploymentModes}
                     loading={isModesLoading}
                   />

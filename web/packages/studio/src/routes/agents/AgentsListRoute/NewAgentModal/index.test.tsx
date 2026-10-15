@@ -1235,6 +1235,60 @@ describe('NewAgentModal container image', () => {
     expect(register).toBeDisabled();
   });
 
+  it('leaves the upload runtime alone when the image tab is visited', async () => {
+    const user = userEvent.setup();
+    serveModeList([
+      { mode: 'subprocess', enabled: true, requires_image: false },
+      { mode: 'docker', enabled: true, requires_image: true },
+    ]);
+    const { deployments } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openImageTab(dialog);
+    expect(await within(dialog).findByRole('combobox', { name: 'Runtime' })).toHaveTextContent(
+      'Docker'
+    );
+    await openUploadTab(dialog);
+    pickDirectory(dialog);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
+    expect(within(dialog).getByRole('combobox', { name: 'Runtime' })).toHaveTextContent(
+      'Subprocess'
+    );
+    await submit(dialog, user);
+
+    await waitFor(() =>
+      expect(deployments).toEqual([{ agent: 'calc', deployment_mode: 'subprocess' }])
+    );
+  });
+
+  it('registers without deploying when the runtimes cannot be loaded', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(DEPLOYMENT_MODES_URL, () => HttpResponse.json({}, { status: 500 })));
+    serveBundle();
+    const { created, deployments } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await typeImage(dialog, user);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
+
+    expect(
+      await within(dialog).findByText(/runtimes could not be loaded/, undefined, {
+        timeout: 5000,
+      })
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByRole('combobox', { name: 'Runtime' })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: 'Register' })).toBeEnabled()
+    );
+    await submit(dialog, user);
+
+    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
+    expect(created).toHaveLength(1);
+    expect(deployments).toEqual([]);
+  });
+
   it('keeps an upload pick out of the image tab', async () => {
     mockHelix();
 

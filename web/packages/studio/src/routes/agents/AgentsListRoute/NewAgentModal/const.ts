@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DeploymentModeAvailabilityMode } from '@studio/api/agents/useDeploymentModes';
+import type { AgentSourceSelection } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/type';
 import { z } from 'zod';
 
 export const AGENT_CONFIG_FILENAME = 'agent.yaml';
+
+export const EMPTY_SELECTION: AgentSourceSelection = { entries: [], label: '' };
 
 export const FABRIC_CONFIG_FORMAT = 'nemo-agents-spec-v1';
 
@@ -52,6 +55,9 @@ export const uploadAgentFormSchema = z.object({
   image: z.string().trim().default(''),
   deploy: z.boolean().default(true),
   deploymentMode: z.nativeEnum(DeploymentModeAvailabilityMode).default('subprocess'),
+  // Its own field: a packaged image runs only in a container runtime, and choosing one must not
+  // move the runtime the other tabs deploy with.
+  imageDeploymentMode: z.nativeEnum(DeploymentModeAvailabilityMode).default('docker'),
 });
 
 export const UPLOAD_AGENT_FORM_DEFAULTS = {

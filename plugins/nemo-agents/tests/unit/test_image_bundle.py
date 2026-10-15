@@ -26,8 +26,6 @@ from nemo_agents_plugin.container.image_bundle import (
     ImageAccessDeniedError,
     ImageBundleError,
     ImageNotFoundError,
-    ImageReference,
-    parse_image_reference,
     read_agent_bundle,
 )
 
@@ -75,6 +73,7 @@ class FakeRegistry:
         bundle: dict[str, bytes] | None = None,
         env: list[str] | None = None,
         copy_command: str = "COPY ./ /workspace # buildkit",
+        workdir: str | None = None,
         indexed: bool = True,
         private: bool = False,
         redirect_blobs_to: str | None = None,
@@ -93,6 +92,7 @@ class FakeRegistry:
                 "history": [
                     {"created_by": "/bin/sh -c #(nop) ADD file:abc in /"},
                     {"created_by": "ENV PORT=8000", "empty_layer": True},
+                    *([{"created_by": f"WORKDIR {workdir}", "empty_layer": True}] if workdir else []),
                     {"created_by": copy_command},
                     {"created_by": "RUN uv venv /workspace/.venv"},
                 ],
@@ -162,30 +162,13 @@ class FakeRegistry:
 IMAGE = "docker.io/sgavrilovic951/sample_agent:0.1"
 
 
-class TestParseImageReference:
-    @pytest.mark.parametrize(
-        ("image", "expected"),
-        [
-            (IMAGE, ImageReference(DOCKER_HUB_REGISTRY, "sgavrilovic951/sample_agent", "0.1")),
-            ("ubuntu", ImageReference(DOCKER_HUB_REGISTRY, "library/ubuntu", "latest")),
-            ("nvcr.io/nvidia/nemo/agent:1.0", ImageReference("nvcr.io", "nvidia/nemo/agent", "1.0")),
-            (
-                "registry.example.com:5000/team/agent",
-                ImageReference("registry.example.com:5000", "team/agent", "latest"),
-            ),
-            (f"org/agent@sha256:{'a' * 64}", ImageReference(DOCKER_HUB_REGISTRY, "org/agent", f"sha256:{'a' * 64}")),
-        ],
-    )
-    def test_resolves_registry_repository_and_reference(self, image: str, expected: ImageReference) -> None:
-        assert parse_image_reference(image) == expected
-
-    @pytest.mark.parametrize("image", ["", "https://docker.io/org/agent", "org agent"])
-    def test_rejects_what_is_not_a_reference(self, image: str) -> None:
-        with pytest.raises(ImageBundleError, match="not an image reference"):
-            parse_image_reference(image)
-
-
 class TestRegistryPolicy:
+    @pytest.mark.parametrize("image", ["", "https://docker.io/org/agent", "org agent"])
+    async def test_rejects_what_is_not_a_reference(self, image: str) -> None:
+        async with FakeRegistry().client() as http:
+            with pytest.raises(ImageBundleError, match="not an image reference"):
+                await read_agent_bundle(image, http=http)
+
     async def test_refuses_registries_outside_the_allow_list(self) -> None:
         async with FakeRegistry().client() as http:
             with pytest.raises(ImageBundleError, match="not an allowed image registry"):
@@ -379,6 +362,37 @@ class TestReadAgentBundle:
         async with FakeRegistry(env=["PATH=/bin"]).client() as http:
             with pytest.raises(ImageBundleError, match="AGENT_CONFIG_PATH"):
                 await read_agent_bundle(IMAGE, http=http)
+
+    async def test_takes_only_the_config_directory_from_a_wider_copy(self) -> None:
+        registry = FakeRegistry(
+            bundle={
+                "workspace/configs/agent.yaml": AGENT_YAML,
+                "workspace/configs/prompts/system.md": b"be helpful",
+                "workspace/pyproject.toml": b"[project]",
+            },
+            env=["AGENT_CONFIG_PATH=/workspace/configs/agent.yaml"],
+        )
+        async with registry.client() as http:
+            bundle = await read_agent_bundle(IMAGE, http=http)
+
+        assert bundle.files == {"agent.yaml": AGENT_YAML, "prompts/system.md": b"be helpful"}
+
+    async def test_resolves_a_relative_copy_against_workdir(self) -> None:
+        registry = FakeRegistry(copy_command="COPY . . # buildkit", workdir="/workspace")
+        async with registry.client() as http:
+            bundle = await read_agent_bundle(IMAGE, http=http)
+
+        assert "agent.yaml" in bundle.files
+
+    async def test_reads_legacy_builder_history(self) -> None:
+        registry = FakeRegistry(
+            copy_command="/bin/sh -c #(nop) COPY dir:0123abcd in /workspace",
+            workdir=None,
+        )
+        async with registry.client() as http:
+            bundle = await read_agent_bundle(IMAGE, http=http)
+
+        assert "agent.yaml" in bundle.files
 
     async def test_requires_the_copy_layer(self) -> None:
         async with FakeRegistry(copy_command="RUN true").client() as http:

@@ -6,32 +6,12 @@
 from __future__ import annotations
 
 import base64
-import re
 from urllib.parse import urlsplit
 
 import httpx
+from nemo_helix_plugin.container_registry import parse_challenges
 
-#: One `WWW-Authenticate` challenge's scheme, then each of its parameters, read per challenge: a
-#: header can carry several, and httpx joins repeated headers with `, `.
-_SCHEME = re.compile(r"[\s,]*([A-Za-z][A-Za-z0-9!#$%&'*+.^_`|~-]*)(?=\s|$)")
-_PARAM = re.compile(r'\s*([A-Za-z0-9!#$%&\'*+.^_`|~-]+)\s*=\s*("(?:[^"\\]|\\.)*"|[^\s,]*)\s*(?:,|$)')
-
-
-def parse_challenges(header: str) -> list[tuple[str, dict[str, str]]]:
-    """``[(scheme, {param: value})]``, schemes and parameter names lowercased (RFC 9110)."""
-    challenges: list[tuple[str, dict[str, str]]] = []
-    position = 0
-    while scheme := _SCHEME.match(header, position):
-        position = scheme.end()
-        params: dict[str, str] = {}
-        while param := _PARAM.match(header, position):
-            value = param.group(2)
-            if value.startswith('"'):
-                value = re.sub(r"\\(.)", r"\1", value[1:-1])
-            params[param.group(1).lower()] = value
-            position = param.end()
-        challenges.append((scheme.group(1).lower(), params))
-    return challenges
+__all__ = ["RegistryAuthError", "basic", "login", "parse_challenges"]
 
 
 class RegistryAuthError(Exception):
