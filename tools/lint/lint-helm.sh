@@ -207,6 +207,41 @@ otel_explicit_empty_output=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER
 grep -Fq "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT" <<<"${otel_explicit_empty_output}"
 grep -Fq "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT" <<<"${otel_explicit_empty_output}"
 
+# The OpenSandbox compose services extension renders nothing by default. Enabled, it renders the ConfigMap with
+# exactly the keys the example server values mount, in the server's namespace, and the RBAC in the sandbox namespace.
+if [[ -n "$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" | grep -F "nemo-opensandbox-ext" || true)" ]]; then
+  echo "The OpenSandbox compose services extension rendered while disabled" >&2
+  exit 1
+fi
+opensandbox_ext_output=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" \
+  --namespace release-ns \
+  --show-only templates/opensandbox-ext.yaml \
+  --set sandboxClusterCapable=true \
+  --set opensandbox.namespace=os-ns \
+  --set opensandbox.composeServices.enabled=true)
+opensandbox_ext_keys=$(grep -E '^  [A-Za-z_]+\.py:' <<<"${opensandbox_ext_output}" | sed -E 's/^  ([^:]+):.*/\1/' | sort)
+opensandbox_server_keys=$(grep -oE 'key: [A-Za-z_]+\.py' "${HELM_FOLDER}/examples/opensandbox/opensandbox-server.yaml" | sed 's/key: //' | sort)
+if [[ -z "${opensandbox_ext_keys}" || "${opensandbox_ext_keys}" != "${opensandbox_server_keys}" ]]; then
+  echo "The extension ConfigMap keys differ from the items the example server values mount" >&2
+  diff <(echo "${opensandbox_ext_keys}") <(echo "${opensandbox_server_keys}") >&2 || true
+  exit 1
+fi
+opensandbox_ext_configmap=$(awk '/^kind: ConfigMap/,/^---/' <<<"${opensandbox_ext_output}")
+grep -Fq "namespace: os-ns" <<<"${opensandbox_ext_configmap}"
+opensandbox_ext_rbac=$(awk '/^kind: Role$/,0' <<<"${opensandbox_ext_output}")
+test "$(grep -c "namespace: release-ns" <<<"${opensandbox_ext_rbac}")" = 2
+grep -Fq "name: opensandbox-server" <<<"${opensandbox_ext_rbac}"
+if grep -Fq "opensandbox-server-kata" <<<"${opensandbox_ext_rbac}"; then
+  echo "The Kata server was bound without opensandbox.composeServices.kataServerServiceAccount" >&2
+  exit 1
+fi
+opensandbox_ext_no_capable=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" \
+  --set opensandbox.composeServices.enabled=true 2>&1) && {
+  echo "The compose services extension rendered without sandboxClusterCapable" >&2
+  exit 1
+}
+grep -Fq "opensandbox.composeServices.enabled needs sandboxClusterCapable" <<<"${opensandbox_ext_no_capable}"
+
 # Validate the Helm chart by rendering templates with all values files in ci/ directory
 shopt -s nullglob
 for value_file in "${HELM_FOLDER}"/ci/*.yaml; do

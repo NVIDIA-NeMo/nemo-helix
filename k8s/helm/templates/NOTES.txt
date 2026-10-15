@@ -160,5 +160,13 @@ Successfully installed {{ .Chart.Name }}-{{ .Chart.Version }}, named {{ .Release
   Copy Secret {{ .Values.opensandbox.apiKeySecret }} into this release namespace.
   The chart does not install OpenSandbox. See helm show readme and
   https://docs.nvidia.com/nemo-helix/latest/documentation/kubernetes-deployment/setup/helm/open-sandbox
+{{- if .Values.opensandbox.composeServices.enabled }}
+
+  The compose services extension is in ConfigMap nemo-opensandbox-ext in namespace {{ .Values.opensandbox.namespace }}.
+  The OpenSandbox server loads it only at start, so restart the server (the Deployment name depends on how you
+  installed it):
+
+    kubectl rollout restart deploy/opensandbox-server -n {{ .Values.opensandbox.namespace }}
+{{- end }}
 
 {{- end }}

@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# The OpenSandbox compose services extension, with the server in its own namespace and a Kata server.
+sandboxClusterCapable: true
+opensandbox:
+  namespace: opensandbox-system
+  composeServices:
+    enabled: true
+    sandboxNamespace: nemo-sandboxes
+    kataServerServiceAccount: opensandbox-server-kata
