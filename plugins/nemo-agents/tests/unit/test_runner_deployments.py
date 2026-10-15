@@ -935,7 +935,7 @@ async def test_create_deployment_readiness_probe_settings(
         **overrides,
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     with patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"):
         info = await backend.create_deployment(
             workspace="default", name="agent", config=agent_config, port=0, deployment_mode="k8s"
@@ -955,7 +955,8 @@ async def test_create_deployment_readiness_probe_settings(
     }
 
 
-def test_entity_client_builds_typed_entities_client() -> None:
+@pytest.mark.asyncio
+async def test_entity_client_builds_typed_entities_client() -> None:
     backend = _backend()
     client = MagicMock()
     typed_client = MagicMock()
@@ -982,6 +983,28 @@ def test_entity_client_builds_typed_entities_client() -> None:
     assert result is entity_client
 
 
+def test_entity_client_is_cached_per_event_loop() -> None:
+    backend = _backend()
+
+    async def entity_client_twice() -> tuple[Any, Any]:
+        return backend._entity_client(), backend._entity_client()
+
+    with (
+        patch("nemo_agents_plugin.runner.deployments_backend.get_async_nemo_client"),
+        patch("nemo_agents_plugin.runner.deployments_backend.AsyncEntitiesClient.from_client"),
+        patch(
+            "nemo_agents_plugin.runner.deployments_backend.NemoEntitiesClient",
+            side_effect=lambda _client: MagicMock(),
+        ),
+    ):
+        first_loop = asyncio.run(entity_client_twice())
+        second_loop = asyncio.run(entity_client_twice())
+
+    assert first_loop[0] is first_loop[1]
+    assert second_loop[0] is second_loop[1]
+    assert first_loop[0] is not second_loop[0]
+
+
 @pytest.mark.asyncio
 async def test_registry_initialization_is_shared_across_concurrent_log_requests() -> None:
     backend = _backend()
@@ -1005,7 +1028,7 @@ async def test_get_logs_raises_when_executor_resolution_fails(caplog: pytest.Log
             DeploymentConfig(name="dep", workspace="default", labels={"nemo.agents/deployment": "dep"}),
         ]
     )
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     registry = MagicMock()
     registry.resolve.side_effect = KeyError("missing")
     backend._executor_registry = registry
@@ -1020,7 +1043,7 @@ async def test_get_logs_raises_when_executor_resolution_fails(caplog: pytest.Log
 async def test_create_deployment_writes_config_and_deployment() -> None:
     backend = _backend(default_image="nat:latest", default_executor="local-docker")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
 
     with patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://127.0.0.1:8080"):
         info = await backend.create_deployment(
@@ -1048,7 +1071,7 @@ async def test_create_deployment_writes_config_and_deployment() -> None:
 async def test_create_deployment_docker_rewrites_loopback_base_url() -> None:
     backend = _backend(default_image="nat:latest", default_executor="local-docker")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     config = {
         "llms": {
             "llm": {
@@ -1080,7 +1103,7 @@ async def test_create_deployment_k8s_rewrites_loopback_to_internal() -> None:
         k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     config = {
         "llms": {
             "llm": {
@@ -1106,7 +1129,7 @@ async def test_create_deployment_k8s_rewrites_loopback_to_internal() -> None:
 async def test_create_deployment_k8s_without_internal_url_fails() -> None:
     backend = _backend(default_image="nat:latest", default_executor="k8s")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
         patch("nemo_agents_plugin.runner.deployments_backend.get_internal_base_url", return_value=None),
@@ -1132,7 +1155,7 @@ async def test_create_deployment_openshell_rebases_onto_platform_egress(monkeypa
     monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
     backend = _backend(default_image="fabric:latest", openshell_executor="openshell-local")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     config = {
         "llms": {
             "llm": {
@@ -1168,7 +1191,7 @@ async def test_create_deployment_openshell_without_platform_egress_fails(monkeyp
     monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
     backend = _backend(default_image="fabric:latest", openshell_executor="openshell-local")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     with patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"):
         info = await backend.create_deployment(
             workspace="default", name="hello-dep", config={}, port=0, deployment_mode="openshell"
@@ -1195,7 +1218,7 @@ async def test_create_deployment_openshell_override_wins_without_platform_egress
         gateway_url_override="http://igw.example:8080",
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     with patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"):
         info = await backend.create_deployment(
             workspace="default", name="hello-dep", config={}, port=0, deployment_mode="openshell"
@@ -1211,7 +1234,7 @@ async def test_create_deployment_openshell_override_wins_without_platform_egress
 async def test_create_deployment_openshell_rejects_image_entrypoint_before_entity_create() -> None:
     backend = _backend(default_image="fabric:latest", openshell_executor="openshell-local")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     info = await backend.create_deployment(
         workspace="default",
         name="hello-dep",
@@ -1235,7 +1258,7 @@ async def test_create_deployment_k8s_auth_on_requests_auth_proxy_sidecar() -> No
         k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     config = {
         "llms": {
             "llm": {
@@ -1291,7 +1314,7 @@ async def test_create_deployment_k8s_trusted_header_auth_without_creator_omits_o
         k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
         patch("nemo_deployments_plugin.deployment_auth.platform_auth_enabled", return_value=True),
@@ -1319,7 +1342,7 @@ async def test_create_deployment_k8s_token_exchange_without_auth_context_fails_c
         k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
         patch("nemo_deployments_plugin.deployment_auth.platform_auth_enabled", return_value=True),
@@ -1350,7 +1373,7 @@ async def test_create_deployment_k8s_token_exchange_uses_proxy_without_trusted_o
         k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     auth_context = AuthContext(principal_id="user:alice", principal_groups=["research"])
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
@@ -1393,7 +1416,7 @@ async def test_create_deployment_k8s_auth_off_no_sidecar() -> None:
         k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     config = {
         "llms": {
             "llm": {
@@ -1424,7 +1447,7 @@ async def test_create_deployment_k8s_auth_off_no_sidecar() -> None:
 async def test_create_deployment_fabric_docker_rewrites_model_base_url() -> None:
     backend = _backend(default_image="fabric:latest", default_executor="local-docker")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     config = {
         "config_format": "nemo-agents-spec-v1",
         "name": "fabric-agent",
@@ -1459,7 +1482,7 @@ async def test_create_deployment_fabric_docker_rewrites_model_base_url() -> None
 async def test_create_deployment_fabric_can_preserve_image_entrypoint() -> None:
     backend = _backend(default_image="fabric:latest", default_executor="local-docker")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     config = {
         "config_format": "nemo-agents-spec-v1",
         "name": "fabric-agent",
@@ -1502,7 +1525,7 @@ async def test_create_deployment_fabric_k8s_rewrites_model_base_url() -> None:
         k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     config = {
         "config_format": "nemo-agents-spec-v1",
         "name": "fabric-agent",
@@ -1539,7 +1562,7 @@ async def test_create_deployment_fabric_k8s_auth_on_rewrites_to_auth_proxy() -> 
         k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     config = {
         "config_format": "nemo-agents-spec-v1",
         "name": "fabric-agent",
@@ -1589,7 +1612,8 @@ async def test_deploying_one_config_twice_does_not_carry_the_first_workspace_ove
     backend = _backend(
         default_image="fabric:latest", default_executor="k8s", k8s_internal_base_url="http://nhx-api:8080"
     )
-    backend._entities = AsyncMock()
+    entities = AsyncMock()
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     config = {
         "config_format": "nemo-agents-spec-v1",
         "name": "fabric-agent",
@@ -1612,9 +1636,7 @@ async def test_deploying_one_config_twice_does_not_carry_the_first_workspace_ove
 
     # Each deployment creates a DeploymentConfig and a Deployment; only the
     # former carries the baked agent config.
-    configs = [
-        call.args[0] for call in backend._entities.create.await_args_list if hasattr(call.args[0], "config_files")
-    ]
+    configs = [call.args[0] for call in entities.create.await_args_list if hasattr(call.args[0], "config_files")]
     baked = yaml.safe_load(configs[1].config_files[0].content)
     endpoint = baked["telemetry"]["atif"]["storage"][0]["endpoint"]
     assert "workspace-b" in endpoint and "workspace-a" not in endpoint
@@ -1640,7 +1662,7 @@ async def test_create_deployment_cleans_config_on_deployment_failure() -> None:
     entities = AsyncMock()
     entities.create = AsyncMock(side_effect=[None, RuntimeError("boom")])
     entities.delete = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
 
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://127.0.0.1:8080"),
@@ -1674,7 +1696,7 @@ async def test_get_deployment_status_projects_endpoints() -> None:
             endpoints=[PluginEndpoint(name="http", url="http://127.0.0.1:32768", protocol="http")],
         )
     )
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
 
     info = await backend.get_deployment_status("default", "hello-dep")
     assert info is not None
@@ -1699,7 +1721,7 @@ async def test_delete_waits_for_deployment_gone_before_config_delete() -> None:
     entities.get = AsyncMock(side_effect=[deployment, NemoEntityNotFoundError("gone"), deployment_config])
     entities.update = AsyncMock()
     entities.delete = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
 
     with patch("nemo_agents_plugin.runner.deployments_backend.asyncio.sleep", new_callable=AsyncMock):
         cleaned = await backend.delete_deployment("default", "hello-dep")
@@ -1727,7 +1749,7 @@ async def test_delete_returns_false_when_deployment_still_present() -> None:
     entities.get = AsyncMock(return_value=deployment)
     entities.update = AsyncMock()
     entities.delete = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
 
     with patch("nemo_agents_plugin.runner.deployments_backend.asyncio.sleep", new_callable=AsyncMock):
         with patch("nemo_agents_plugin.runner.deployments_backend.time.monotonic", side_effect=[0.0, 0.0, 6.0]):
@@ -1751,7 +1773,7 @@ def test_agent_deployment_defaults_are_subprocess() -> None:
 async def test_create_deployment_fabric_docker_stages_fileset_artifacts() -> None:
     backend = _backend(default_image="fabric:latest", default_executor="local-docker")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     config = {
         "config_format": "nemo-agents-spec-v1",
         "name": "fabric-agent",
@@ -1806,7 +1828,7 @@ async def test_create_deployment_fabric_k8s_stages_fileset_artifacts() -> None:
         k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     config = {
         "config_format": "nemo-agents-spec-v1",
         "name": "fabric-agent",
@@ -1853,7 +1875,7 @@ async def test_create_deployment_fabric_k8s_stages_fileset_artifacts() -> None:
 async def test_create_deployment_fabric_staging_error_fails_before_entity_create() -> None:
     backend = _backend(default_image="fabric:latest", default_executor="local-docker")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     config = {
         "config_format": "nemo-agents-spec-v1",
         "name": "fabric-agent",
@@ -1895,7 +1917,7 @@ async def test_create_deployment_fabric_staging_error_fails_before_entity_create
 async def test_create_deployment_enables_workload_identity_with_auth_context() -> None:
     backend = _backend(default_image="nat:latest", default_executor="local-docker")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entities_by_loop[asyncio.get_running_loop()] = entities
     auth_context = AuthContext(principal_id="user:alice", principal_groups=["research"])
 
     with (
