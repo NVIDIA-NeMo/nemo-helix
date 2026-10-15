@@ -8,16 +8,19 @@ from __future__ import annotations
 from typing import Literal
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from nemo_builder_plugin.completion import Caller, current_caller, submit_refusal
 from nemo_builder_plugin.entities import ContainerImage, Provenance
-from nemo_builder_plugin.service import BuilderService
+from nemo_builder_plugin.service import BuilderService, job_custom_fields
 from nemo_helix_plugin.authz import CallerKind, get_path_rules
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError, get_entity_client
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
 
 
 def _app(entities: AsyncMock, caller: Caller = Caller(auth=False)) -> FastAPI:
@@ -278,3 +281,39 @@ class TestWhoTheRoutesAdmit:
     def test_listing_admits_people_only(self) -> None:
         """A service could see every row at once; one row at a time, it must act for a person."""
         assert self._callers()[("GET", "/container-images")] == {CallerKind.PRINCIPAL}
+
+
+class TestTheJobAResubmitFinds:
+    """A resubmit whose job already exists reads that job's ``custom_fields`` through the real Jobs client."""
+
+    async def test_the_custom_fields_of_the_named_job(self) -> None:
+        fields = {"images": ["build-1-0"], "request_digest": "sha256:" + "a" * 64}
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "id": "job-1",
+                    "attempt_id": "attempt-1",
+                    "name": "builder-build-1",
+                    "workspace": "ws-a",
+                    "source": "builder",
+                    "platform_spec": {
+                        "steps": [{"name": "fetch", "executor": {"provider": "cpu", "container": {"image": "busybox"}}}]
+                    },
+                    "fileset": "job-fileset-builder-build-1",
+                    "status": "active",
+                    "custom_fields": fields,
+                },
+            )
+
+        client = AsyncNemoClient(
+            base_url="http://platform.test", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        )
+        found = await job_custom_fields(AsyncJobsClient.from_client(client), workspace="ws-a", name="builder-build-1")
+        assert found == fields
+        assert [(r.method, r.url.path) for r in requests] == [
+            ("GET", "/apis/jobs/v2/workspaces/ws-a/jobs/builder-build-1")
+        ]
