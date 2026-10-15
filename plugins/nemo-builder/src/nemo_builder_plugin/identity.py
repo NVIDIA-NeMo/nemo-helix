@@ -10,6 +10,8 @@ from dataclasses import dataclass
 
 #: Lowercase hex only, so that one digest has one spelling.
 DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
+#: An OCI platform as builds and pulls name it: ``os/architecture``, with an optional ``/variant``.
+PLATFORM_PATTERN = r"^[a-z0-9]+/[a-z0-9]+(/[a-z0-9]+)?$"
 
 _REGISTRY = re.compile(r"(?:localhost|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::[0-9]{1,5})?")
 _REPOSITORY_COMPONENT = re.compile(r"[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*")

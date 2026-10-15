@@ -145,6 +145,7 @@ async def _submit(
         get_job_fields=jobs.get_job_fields,
         secret_readable=secret_readable,
         resolve_upstream=resolve_upstream,
+        default_platform=(config or _config()).default_platform,
     )
 
 
@@ -166,7 +167,10 @@ class TestOrdering:
     async def test_every_row_records_the_request_that_wrote_it(self) -> None:
         client = FakeEntityClient()
         result = await _submit(client)
-        assert all(image.provenance.request_digest == request_digest(_set()) for image in result.images)
+        assert all(
+            image.provenance.request_digest == request_digest(_set().with_default_platform("linux/amd64"))
+            for image in result.images
+        )
 
     @pytest.mark.asyncio
     async def test_every_row_names_its_job_and_spec(self) -> None:
@@ -326,7 +330,7 @@ class TestTheJobRequest:
         assert request.source == JOB_SOURCE
         assert request.custom_fields == {
             "images": ["demo-1.img0", "demo-1.img1"],
-            "request_digest": request_digest(_set()),
+            "request_digest": request_digest(_set().with_default_platform("linux/amd64")),
         }
 
     @pytest.mark.asyncio
@@ -473,3 +477,53 @@ class TestCopies:
         with pytest.raises(error, match="demo-1.copy0"):
             await _submit(entities, build_set=_copy_set("ubuntu:24.04"), upstream={UBUNTU: failure})
         assert entities.events == ["get:demo-1.copy0", f"resolve:{UBUNTU}:linux/amd64"]
+
+
+class TestPlatforms:
+    """A spec that names no platform is built for the deployment's `default_platform`."""
+
+    @staticmethod
+    def _supervise_platforms(jobs: FakeJobs) -> list[str]:
+        steps = next(iter(jobs.jobs.values())).platform_spec.steps
+        supervise = next(step for step in steps if step.name == "build")
+        return [i.platform for g in SuperviseStepConfig.model_validate(supervise.config).groups for i in g.images]
+
+    @pytest.mark.asyncio
+    async def test_the_default_platform_builds_a_spec_that_names_none(self) -> None:
+        entities = FakeEntityClient()
+        jobs = FakeJobs(entities.events)
+        await _submit(entities, jobs, build_set=_set(1), config=_config(default_platform="linux/arm64"))
+
+        assert self._supervise_platforms(jobs) == ["linux/arm64"]
+        assert next(iter(jobs.jobs.values())).spec["build_specs"][0]["platform"] == "linux/arm64"
+
+    @pytest.mark.asyncio
+    async def test_a_spec_that_names_a_platform_keeps_it(self) -> None:
+        entities = FakeEntityClient()
+        jobs = FakeJobs(entities.events)
+        build_set = _set(1)
+        build_set.build_specs[0].platform = "linux/amd64"
+        await _submit(entities, jobs, build_set=build_set, config=_config(default_platform="linux/arm64"))
+
+        assert self._supervise_platforms(jobs) == ["linux/amd64"]
+
+    @pytest.mark.asyncio
+    async def test_a_copy_resolves_the_default_platform(self) -> None:
+        entities = FakeEntityClient()
+        await _submit(
+            entities,
+            build_set=_copy_set("ubuntu:24.04"),
+            config=_config(default_platform="linux/arm64"),
+            upstream={UBUNTU: UBUNTU_AMD64},
+        )
+
+        assert entities.events[:2] == ["get:demo-1.copy0", f"resolve:{UBUNTU}:linux/arm64"]
+
+    @pytest.mark.asyncio
+    async def test_naming_the_default_is_the_same_request_as_naming_nothing(self) -> None:
+        """Requests from before the default was configurable, which left it out, keep their digest."""
+        explicit = _set(1)
+        explicit.build_specs[0].platform = "linux/amd64"
+        result = await _submit(FakeEntityClient(), build_set=_set(1))
+
+        assert result.images[0].provenance.request_digest == request_digest(explicit)
