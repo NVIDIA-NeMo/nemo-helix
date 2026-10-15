@@ -20,9 +20,12 @@ Throughout, `$OLD` is the currently pinned version and `$NEW` is the target. Use
 
 ## Step 0: Preflight
 
+`$NEW` is the version the user asked for. If they didn't name one, use the latest upstream release (`gh release view -R NVIDIA-NeMo/DataDesigner --json tagName -q '.tagName | ltrimstr("v")'`) and confirm it with them before going further.
+
 ```bash
 git status --short                      # must be clean
 git branch --show-current               # must not be main; branch as <name>/<username>
+NEW=<target version>
 OLD=$(grep -oE '"data-designer==[^"]+"' plugins/nemo-data-designer/pyproject.toml | head -1 | sed -E 's/.*==([^"]+)"/\1/')
 echo "$OLD -> $NEW"
 ```
