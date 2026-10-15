@@ -212,6 +212,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
         accessor((row) => row.evaluation?.aggregate_scores, {
           id: 'aggregate_scores',
           header: 'Scores',
+          size: 280,
           enableSorting: false,
           cell: ({ row }) => {
             const { evaluation } = row.original;
@@ -333,6 +334,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
       <StudioDataView<AgentEvalTableRow>
         dataViewState={dataViewState}
         makeColumns={makeColumns}
+        maxTwoLines={false}
         onRowClick={(row, _index, event) => {
           const destination = destinationFor(row);
           if (destination) openRow(event, destination);
