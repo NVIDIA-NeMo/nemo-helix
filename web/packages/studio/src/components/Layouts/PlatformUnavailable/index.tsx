@@ -6,14 +6,14 @@ import { Anchor, CodeSnippet, Stack, StatusMessage, Text } from '@nvidia/foundat
 import { GlobeX } from 'lucide-react';
 import type { FC } from 'react';
 
-interface HelixUnavailableProps {
+interface PlatformUnavailableProps {
   /** URL Studio probed, shown so the user can confirm it points at the right platform. */
   healthUrl: string;
   onRetry: () => void;
   isRetrying?: boolean;
 }
 
-export const HelixUnavailable: FC<HelixUnavailableProps> = ({
+export const PlatformUnavailable: FC<PlatformUnavailableProps> = ({
   healthUrl,
   onRetry,
   isRetrying = false,
@@ -42,7 +42,7 @@ export const HelixUnavailable: FC<HelixUnavailableProps> = ({
         gap="density-sm"
         align="center"
         className="w-full max-w-[640px] text-center"
-        data-testid="helix-unavailable-help"
+        data-testid="platform-unavailable-help"
       >
         <CodeSnippet
           value="nemo services run"

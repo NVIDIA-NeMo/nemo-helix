@@ -13,27 +13,27 @@ import axios from 'axios';
  *   proxy that could not reach its target, or any response (even a 200) that is not the
  *   platform's.
  */
-export type HelixHealthStatus = 'live' | 'unreachable';
+export type PlatformHealthStatus = 'live' | 'unreachable';
 
-export const HELIX_HEALTH_QUERY_KEY = ['platform-health'] as const;
+export const PLATFORM_HEALTH_QUERY_KEY = ['platform-health'] as const;
 
 const HEALTH_TIMEOUT_MS = 10_000;
-export const HELIX_HEALTH_RETRY_INTERVAL_MS = 5_000;
+export const PLATFORM_HEALTH_RETRY_INTERVAL_MS = 5_000;
 
 /** Liveness probe exposed by the platform runner; it is not part of the OpenAPI spec. */
-export const getHelixHealthUrl = (): string =>
+export const getPlatformHealthUrl = (): string =>
   `${PLATFORM_BASE_URL.replace(/\/+$/, '')}/health/live`;
 
 const isLiveResponse = (data: unknown): boolean =>
   typeof data === 'object' && data !== null && 'status' in data && data.status === 'live';
 
-export const checkHelixHealth = async (): Promise<HelixHealthStatus> => {
+export const checkPlatformHealth = async (): Promise<PlatformHealthStatus> => {
   try {
-    const { data } = await axios.get<unknown>(getHelixHealthUrl(), {
+    const { data } = await axios.get<unknown>(getPlatformHealthUrl(), {
       timeout: HEALTH_TIMEOUT_MS,
       validateStatus: (status) => status === 200,
     });
-    // A 200 without Helix's body (e.g. a dev server's SPA fallback serving index.html) is
+    // A 200 without the platform's body (e.g. a dev server's SPA fallback serving index.html) is
     // not the platform answering, so it must not unblock the app.
     return isLiveResponse(data) ? 'live' : 'unreachable';
   } catch {
@@ -46,10 +46,10 @@ export const checkHelixHealth = async (): Promise<HelixHealthStatus> => {
  * Studio blocked after the platform recovers. Stops polling once liveness is confirmed;
  * individual features handle their own service errors. `refetch` also allows manual retry.
  */
-export const useHelixHealth = () =>
+export const usePlatformHealth = () =>
   useQuery({
-    queryKey: HELIX_HEALTH_QUERY_KEY,
-    queryFn: checkHelixHealth,
+    queryKey: PLATFORM_HEALTH_QUERY_KEY,
+    queryFn: checkPlatformHealth,
     retry: false,
     staleTime: Infinity,
     gcTime: Infinity,
@@ -57,5 +57,5 @@ export const useHelixHealth = () =>
     refetchOnReconnect: false,
     refetchOnMount: false,
     refetchInterval: (query) =>
-      query.state.data === 'unreachable' ? HELIX_HEALTH_RETRY_INTERVAL_MS : false,
+      query.state.data === 'unreachable' ? PLATFORM_HEALTH_RETRY_INTERVAL_MS : false,
   });

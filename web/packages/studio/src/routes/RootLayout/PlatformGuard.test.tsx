@@ -1,11 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getHelixHealthUrl, HELIX_HEALTH_RETRY_INTERVAL_MS } from '@studio/api/helixHealth';
+import {
+  getPlatformHealthUrl,
+  PLATFORM_HEALTH_RETRY_INTERVAL_MS,
+} from '@studio/api/platformHealth';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { server } from '@studio/mocks/node';
-import { HelixGuard } from '@studio/routes/RootLayout/HelixGuard';
+import { PlatformGuard } from '@studio/routes/RootLayout/PlatformGuard';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -16,16 +19,16 @@ const renderGuard = (initialPath = '/workspaces/default') =>
   render(
     <TestProviders>
       <MemoryRouter initialEntries={[initialPath]}>
-        <HelixGuard>
+        <PlatformGuard>
           <div>protected content</div>
-        </HelixGuard>
+        </PlatformGuard>
       </MemoryRouter>
     </TestProviders>
   );
 
-const platformDown = () => server.use(http.get(getHelixHealthUrl(), () => HttpResponse.error()));
+const platformDown = () => server.use(http.get(getPlatformHealthUrl(), () => HttpResponse.error()));
 
-describe('HelixGuard', () => {
+describe('PlatformGuard', () => {
   it('shows a connecting state, then renders children once the platform is live', async () => {
     renderGuard();
     expect(screen.getByText('Connecting to NeMo Helix...')).toBeInTheDocument();
@@ -37,9 +40,9 @@ describe('HelixGuard', () => {
     renderGuard();
 
     expect(await screen.findByText("Studio can't connect to NeMo Helix")).toBeInTheDocument();
-    const help = screen.getByTestId('helix-unavailable-help');
+    const help = screen.getByTestId('platform-unavailable-help');
     expect(help).toHaveTextContent('nemo services run');
-    expect(help).toHaveTextContent(getHelixHealthUrl());
+    expect(help).toHaveTextContent(getPlatformHealthUrl());
     expect(screen.queryByText('protected content')).not.toBeInTheDocument();
   });
 
@@ -78,7 +81,7 @@ describe('HelixGuard', () => {
     const livenessProbe = vi.fn(() =>
       isLive ? HttpResponse.json({ status: 'live' }) : HttpResponse.error()
     );
-    server.use(http.get(getHelixHealthUrl(), livenessProbe));
+    server.use(http.get(getPlatformHealthUrl(), livenessProbe));
     const { unmount } = renderGuard();
 
     try {
@@ -91,14 +94,16 @@ describe('HelixGuard', () => {
           'protected content',
           {},
           {
-            timeout: HELIX_HEALTH_RETRY_INTERVAL_MS + 2_000,
+            timeout: PLATFORM_HEALTH_RETRY_INTERVAL_MS + 2_000,
           }
         )
       ).toBeInTheDocument();
       expect(livenessProbe).toHaveBeenCalledTimes(2);
 
       await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, HELIX_HEALTH_RETRY_INTERVAL_MS + 100));
+        await new Promise((resolve) =>
+          setTimeout(resolve, PLATFORM_HEALTH_RETRY_INTERVAL_MS + 100)
+        );
       });
       expect(livenessProbe).toHaveBeenCalledTimes(2);
     } finally {
