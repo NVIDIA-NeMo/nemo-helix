@@ -102,6 +102,16 @@ def test_format_exception_summary_uses_chained_cause_when_message_is_empty() -> 
         assert _format_exception_summary(error) == "root cause"
 
 
+def test_format_exception_summary_appends_chained_cause() -> None:
+    try:
+        try:
+            raise ConnectionError("connection refused")
+        except ConnectionError as cause:
+            raise RuntimeError("Retry attempts exhausted: 6 out of 6") from cause
+    except RuntimeError as error:
+        assert _format_exception_summary(error) == "Retry attempts exhausted: 6 out of 6: connection refused"
+
+
 def test_format_exception_summary_falls_back_to_exception_type() -> None:
     """Completely empty exceptions should still have a useful cause label."""
     assert _format_exception_summary(EmptyMessageError()) == "EmptyMessageError"

@@ -226,10 +226,9 @@ class TestEvaluateBenchmarkOnline:
             assert b_scores[0].value == float(row.item["tag"] * 2)
 
     @pytest.mark.asyncio
-    async def test_ignore_request_failure_maps_row_to_nan(
+    async def test_ignore_request_failure_maps_row_to_nan_without_scoring_it(
         self, mocker: MockerFixture, online_params: RunConfigOnlineModel
     ) -> None:
-        """Online inference failures should propagate as NaN-eligible samples to every metric."""
         rows = [{"prompt": "ok"}, {"prompt": "bad"}]
         model = _make_model()
 
@@ -243,13 +242,8 @@ class TestEvaluateBenchmarkOnline:
             side_effect=_maybe_failing,
         )
 
-        def _score(item: dict, sample: dict) -> float:
-            if sample.get("inference_error"):
-                return float("nan")
-            return 1.0
-
-        metric_a = _ScriptedMetric("a", _score)
-        metric_b = _ScriptedMetric("b", _score)
+        metric_a = _ScriptedMetric("a", lambda item, sample: 1.0)
+        metric_b = _ScriptedMetric("b", lambda item, sample: 1.0)
 
         params = RunConfigOnlineModel(parallelism=2, ignore_request_failure=True)
 
@@ -261,15 +255,15 @@ class TestEvaluateBenchmarkOnline:
             prompt_template="{{prompt}}",
         )
 
-        # Both metric workers see two rows — the failing row just has a
-        # NaN-eligible sample rather than being skipped.
-        assert len(metric_a.calls) == 2
-        assert len(metric_b.calls) == 2
+        assert [item["prompt"] for item, _sample in metric_a.calls] == ["ok"]
+        assert [item["prompt"] for item, _sample in metric_b.calls] == ["ok"]
 
         bad_row = next(r for r in result.row_scores if r.item["prompt"] == "bad")
-        assert bad_row.sample.get("inference_error")
+        assert bad_row.sample["inference_error"] == "simulated inference failure"
         for metric_ref in ("a", "b"):
             assert math.isnan(bad_row.metrics[metric_ref][0].value)
+            scores = result.per_metric[metric_ref].aggregate_scores.scores
+            assert [(score.count, score.nan_count, score.mean) for score in scores] == [(1, 1, 1.0)]
 
     @pytest.mark.asyncio
     async def test_metric_failure_is_raised_without_ignore_flag(self, mocker: MockerFixture) -> None:
@@ -812,13 +806,7 @@ class TestEvaluateBenchmarkEdgeCases:
             side_effect=_maybe_failing_sample,
         )
 
-        def _score(_item: dict, sample: dict) -> float:
-            """Return NaN for ignored generation failure placeholders."""
-            if sample.get("inference_error"):
-                return float("nan")
-            return 1.0
-
-        metric = _CorpusMetric("corpus-metric", _score)
+        metric = _CorpusMetric("corpus-metric", lambda _item, _sample: 1.0)
 
         result = await evaluate_benchmark(
             metrics=[("custom.ref", metric)],

@@ -212,6 +212,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
         accessor((row) => row.evaluation?.aggregate_scores, {
           id: 'aggregate_scores',
           header: 'Scores',
+          size: 240,
           enableSorting: false,
           cell: ({ row }) => {
             const { evaluation } = row.original;
@@ -230,6 +231,11 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
                       {score.label}
                     </Text>
                     <Text kind="body/semibold/sm">{score.value}</Text>
+                    {score.failedCount > 0 ? (
+                      <Text className="text-secondary" kind="body/regular/sm">
+                        ({score.failedCount} failed)
+                      </Text>
+                    ) : null}
                   </Flex>
                 ))}
               </Flex>
@@ -239,6 +245,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
         accessor((row) => row.evaluation?.tokens?.mean, {
           id: 'tokens',
           header: 'Avg Tokens',
+          size: 110,
           enableSorting: false,
           cell: ({ row }) => {
             const mean = row.original.evaluation?.tokens?.mean;
@@ -248,6 +255,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
         accessor((row) => row.evaluation?.tokens?.sum, {
           id: 'total_tokens',
           header: 'Total Tokens',
+          size: 110,
           enableSorting: false,
           cell: ({ row }) => {
             const sum = row.original.evaluation?.tokens?.sum;
@@ -257,6 +265,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
         accessor((row) => evalDurationMs(row.evaluation?.metadata), {
           id: 'duration',
           header: 'Duration',
+          size: 110,
           enableSorting: false,
           // Keyed by job: an evaluation row outlives the job it shows, and `useLiveSeconds` locks
           // its start date once, so a rerun would otherwise tick from the previous job's start.
@@ -328,6 +337,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
       <StudioDataView<AgentEvalTableRow>
         dataViewState={dataViewState}
         makeColumns={makeColumns}
+        maxTwoLines={false}
         onRowClick={(row, _index, event) => {
           const destination = destinationFor(row);
           if (destination) openRow(event, destination);

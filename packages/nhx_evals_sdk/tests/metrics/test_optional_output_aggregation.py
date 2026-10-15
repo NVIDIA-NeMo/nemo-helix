@@ -169,3 +169,13 @@ def test_corpus_scores_reject_missing_required_output() -> None:
 
 def test_empty_aggregation_has_no_scores() -> None:
     assert aggregate_metrics([], _range_specs()).scores == []
+
+
+def test_nan_discrete_outputs_count_as_nan() -> None:
+    aggregate = aggregate_metrics(
+        [_result(("tool_call_count", 3)), _result(("tool_call_count", float("nan")))],
+        [MetricOutputSpec.discrete_score("tool_call_count")],
+    )
+
+    (score,) = aggregate.scores
+    assert (score.mean, score.count, score.nan_count) == (3.0, 1, 1)

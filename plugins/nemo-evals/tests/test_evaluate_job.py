@@ -401,6 +401,51 @@ def test_evaluate_job_fails_when_no_row_scored(tmp_path: Path, mocker: MockerFix
     assert report.call_args.args[0].failed
 
 
+def test_evaluate_job_fails_when_the_agent_never_answers(tmp_path: Path, mocker: MockerFixture) -> None:
+    mocker.patch(
+        "nhx_evals_sdk.execution.benchmark_execution.generate_online_sample_agent",
+        side_effect=RuntimeError("Retry attempts exhausted: 6 out of 6"),
+    )
+    mocker.patch("nemo_evals.jobs.evaluate.persist_evaluate_result")
+    mocker.patch.object(EvaluateJob, "_publish_result")
+    mocker.patch("nemo_evals.jobs.evaluate.report_run_outcome")
+    spec = {
+        **_exact_match_spec(),
+        "metrics": [
+            _bundle_payload(ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.model_output}}")),
+            _bundle_payload(F1Metric(reference="{{item.expected}}", candidate="{{item.model_output}}")),
+        ],
+        "target": GenericAgent(
+            url="http://agent.test",
+            name="test-agent",
+            format=AgentFormat.GENERIC,
+            body={"question": "{{item.expected}}"},
+            response_path="$.answer",
+        ).model_dump(mode="json"),
+        "params": RunConfigOnline(parallelism=2, ignore_request_failure=True).model_dump(mode="json"),
+        "prompt_template": {"question": "{{item.expected}}"},
+    }
+
+    result = _run_evaluate_job(spec, tmp_path)
+
+    assert result["status"] == "failed"
+    assert result["evaluation"] | {"message": None} == {
+        "unit": "rows",
+        "total": 2,
+        "errored": 2,
+        "scored": 0,
+        "first_error": "inference: Retry attempts exhausted: 6 out of 6",
+        "failed": True,
+        "message": None,
+    }
+    assert "First error: inference: Retry attempts exhausted: 6 out of 6." in result["reason"]
+    aggregate_scores = _load_artifact_payload(result)["aggregate_scores"]["scores"]
+    assert {score["name"]: (score["count"], score["nan_count"]) for score in aggregate_scores} == {
+        "exact-match.exact-match": (0, 2),
+        "f1.f1": (0, 2),
+    }
+
+
 @pytest.mark.usefixtures("allow_cloudpickle_metrics")
 def test_evaluate_job_applies_metric_job_params_once(tmp_path: Path) -> None:
     spec = {
