@@ -46,7 +46,7 @@ STRATEGY_COLUMNS = [Column("name", "Name"), Column("description", "Description")
 #:
 #: The group is shared with every installed contributor, so verb names must not collide:
 #: prefix the owning strategy's name onto anything that is not plainly generic.
-#: (The ``legacy`` strategy holds the generic ``prepare-fileset``.)
+#: (The ``config-tuning`` strategy holds the generic ``prepare-fileset``.)
 OPTIMIZE_CLI_GROUP = "nemo.cli.agents.optimize"
 
 

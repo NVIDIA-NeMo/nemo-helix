@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -19,7 +19,7 @@ THIRD_SHA = "3" * 40
 
 
 @contextmanager
-def _fileset_reporting(*revisions: str) -> Iterator[AsyncMock]:
+def _fileset_reporting(*revisions: str) -> Generator[AsyncMock, None, None]:
     """Serve each revision in turn for the agent's fileset, then the last one forever."""
     responses = [
         SimpleNamespace(

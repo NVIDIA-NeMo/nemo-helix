@@ -6,6 +6,9 @@
 #   "pyyaml>=6.0.2",
 #   "typer>=0.24.1,<0.25",
 # ]
+#
+# [tool.ty.environment]
+# extra-paths = [".."]
 # ///
 
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.

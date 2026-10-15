@@ -71,9 +71,9 @@ Every draft is checked against the builder's own rules before it can be loaded, 
 
 - **Valid job config** — plus a summary of the fileset name, record count, column and model counts, and each generated column with its type. **Continue** is now enabled.
 - **Errors** — the draft can't be loaded (for example, no columns the builder can edit, or an LLM column pointing at a `model_alias` no model defines). **Fix these errors** sends the draft and the error list back to the same model for a repair pass.
-- **Warnings** — the draft is loadable but something was adjusted: a model was substituted, a column type the builder can't edit was skipped, or a non-positive record count was defaulted to 100. **Fix these warnings** runs the same repair pass.
+- **Warnings** — the draft is loadable but something was adjusted: a column type the builder can't edit was skipped, or a non-positive record count was defaulted to 100. **Fix these warnings** runs the same repair pass.
 
-**View config** opens a side panel with the model's raw tool-call output, so you can inspect a draft before loading it — or work out why one was rejected. It shows exactly what the model returned, so it can differ from the config that lands on the canvas when a model had to be substituted.
+**View config** opens a side panel with the model's raw tool-call output, so you can inspect a draft before loading it — or work out why one was rejected. It shows exactly what the model returned, so its model configs can differ from the ones that land on the canvas, which all point at the model you picked.
 
 Once loaded, the generated config is fully editable in the builder like any other recipe — it is not opaque JSON.
 
@@ -160,7 +160,7 @@ Only **one Seed Dataset** column is supported per recipe. After you add one, the
 
 </Note>
 
-To remove a column, use the trash icon on its row in list view, or select its node and use **Remove** in the config pane (both views).
+To remove a column, use the trash icon on its row in list view, or select its node and use **Remove column** in the config pane (both views).
 
 ---
 
@@ -188,7 +188,7 @@ Empty required fields, invalid values, and duplicate or invalid names are all ca
 
 Generate columns (LLM-Text, LLM-Code, LLM-Structured, LLM-Judge, Image, Embedding) reference a model by **alias**. Switch the left palette to the **Models** tab to add and manage the models your recipe uses.
 
-- **Add a model** — pick a model from the workspace model groups and a provider; it's added with an editable alias.
+- **Add a model** — pick a workspace model from the **Add a model** select; it's added with an editable alias. The provider is set automatically from the model's first configured provider.
 - **Configure a model** — select it to open the model config pane, which has:
   - **Alias** — how LLM columns refer to this model. Must be unique. Changing the model re-derives the alias from the new model name and updates every column that referenced the old alias.
   - **Model** — the workspace model, along with its inference parameters.
@@ -333,10 +333,10 @@ That path applies the mapping in the browser and overwrites the file, so no job 
 
 ## Split the dataset
 
-Once a job has produced `.json`, `.jsonl`, or `.parquet` output, the **Split** button on the details page opens the **Create Split** modal, which carves the generated data into the training, validation, and test subsets you need to fine-tune and evaluate a model.
+Once a job has produced `.json`, `.jsonl`, or `.parquet` output, choose **Split** from the job actions menu on the details page to open the **Create Split** modal, which carves the generated data into the training, testing, and validation subsets you need to fine-tune and evaluate a model.
 
 - **Source file** — which output file to split.
-- **Split percentage** — 80/10/10 (recommended), 60/20/20, 80/20, 90/10, or a custom split.
+- **Split percentage** — Training / Testing / Validation presets of 80/10/10 (recommended) or 60/20/20, Training / Testing presets of 80/20 or 90/10, or a custom percentage.
 - **Distribution type** — **Random** when row order doesn't affect model performance, or **Sequential** for tasks with sequence dependencies. Advanced options let you set a seed or a sort key.
 
 The splits are written back into the job's output fileset.

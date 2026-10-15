@@ -79,9 +79,17 @@ for version in 1 2; do
     --show-only templates/postgres/postgres-statefulset.yaml \
     | sed -n '/^  volumeClaimTemplates:/,$p' > "${postgres_claim_tmp}/claim-${version}.yaml"
   test -s "${postgres_claim_tmp}/claim-${version}.yaml"
+
+  helm template "${HELM_RELEASE_NAME}" \
+    "${postgres_claim_tmp}/nemo-helix-0.0.0-claim-test.${version}.tgz" \
+    -f "${HELM_FOLDER}/ci/25-postgres-claim-template-labels.yaml" \
+    --show-only templates/postgres/postgres-statefulset.yaml \
+    | sed -n '/^  volumeClaimTemplates:/,$p' > "${postgres_claim_tmp}/claim-custom-${version}.yaml"
+  test -s "${postgres_claim_tmp}/claim-custom-${version}.yaml"
 done
 
 diff -u "${postgres_claim_tmp}/claim-1.yaml" "${postgres_claim_tmp}/claim-2.yaml"
+diff -u "${postgres_claim_tmp}/claim-custom-1.yaml" "${postgres_claim_tmp}/claim-custom-2.yaml"
 
 # Utilization-based autoscaling must reject missing CPU requests.
 api_autoscaling_output=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" \

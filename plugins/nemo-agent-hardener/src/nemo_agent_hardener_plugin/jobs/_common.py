@@ -10,6 +10,7 @@ TTY-aware subprocess execution. This module holds that shared logic so the jobs 
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
@@ -32,8 +33,11 @@ from nemo_agent_hardener_plugin.jobs.errors import (
 )
 from nemo_agent_hardener_plugin.model_config import ModelChoice, WarGameModels
 from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.entities.base import parse_qualified_name
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.secrets.client import SecretsClient
+
+logger = logging.getLogger(__name__)
 
 
 def require_provisioned(plugin_config: AgentHardenerConfig) -> None:
@@ -65,6 +69,28 @@ def build_subprocess_env(plugin_config: AgentHardenerConfig, extra_env: dict[str
     if extra_env:
         env.update(extra_env)
     return env
+
+
+def warn_shadowed_operator_env(plugin_config: AgentHardenerConfig) -> list[str]:
+    """Warn about operator-dotenv names the platform's own environment overrides with another value.
+
+    The shell that started the platform wins (see :func:`build_subprocess_env`), so a stale export such as a
+    different ``INFERENCE_API_KEY`` silently replaces the dotenv key and surfaces only as a 401 mid-run.
+    Returns the names; values are never logged.
+    """
+    shadowed = sorted(
+        key
+        for key, value in read_env_file(plugin_config.operator_env_file).items()
+        if key in os.environ and os.environ[key] != value
+    )
+    if shadowed:
+        logger.warning(
+            "the platform environment overrides %s from %s; unset them where the platform was started "
+            "to use the file's values",
+            ", ".join(shadowed),
+            plugin_config.operator_env_file,
+        )
+    return shadowed
 
 
 # Map each model group to agent-hardener's native env knobs. attack → garak's red-team + detector (name/uri
@@ -181,15 +207,54 @@ def materialize_victim_env_file(manifest: str, env: dict[str, str], dest_dir: Pa
     return str(dest)
 
 
+def resolve_secret_refs(sdk: Any, refs: dict[str, str], workspace: str) -> dict[str, str]:
+    """Read each ``ENV_VAR -> [workspace/]secret`` ref from the Secrets store; fail naming the ref, never the value."""
+    values: dict[str, str] = {}
+    for env_name, ref in refs.items():
+        secret_workspace, secret_name = parse_qualified_name(ref, default_workspace=workspace)
+        try:
+            value = _resolve_secret(sdk, secret_name, secret_workspace)
+        except Exception as exc:
+            raise AgentHardenerRunError(
+                CATEGORY_MISSING_CREDENTIAL,
+                f"could not read secret {secret_workspace}/{secret_name} for {env_name}: {type(exc).__name__}",
+            ) from exc
+        if not value:
+            raise AgentHardenerRunError(
+                CATEGORY_MISSING_CREDENTIAL, f"secret {secret_workspace}/{secret_name} for {env_name} is empty."
+            )
+        values[env_name] = value
+    return values
+
+
+def prepare_victim_env(
+    manifest: str, env: dict[str, str], user_env_file: str | None, secret_values: dict[str, str] | None = None
+) -> tuple[dict[str, str], str | None]:
+    """Write the victim ``.env`` from *env*, *secret_values* and the user's ``--env-file``; return ``(env, env_file)``.
+
+    The manifest's ``agent.secrets_file`` points at ``<manifest_dir>/.env``, so it must be written even
+    when the user supplies their own file. Precedence, lowest first: the operator env, values read from
+    the Secrets store, then the user's file, which is still what is passed on as ``--env-file``.
+    """
+    merged = {**env, **(secret_values or {})}
+    if user_env_file:
+        merged |= read_env_file(Path(user_env_file))
+    materialized = materialize_victim_env_file(manifest, merged, Path(manifest).parent)
+    return merged, user_env_file or materialized
+
+
 def check_victim_secrets(manifest: str, env: dict[str, str], env_file: str | None) -> None:
     """Fail fast if the manifest declares victim secrets no available source provides."""
     extra_env_files = [Path(env_file)] if env_file else []
     missing = missing_secrets(Path(manifest), env_files=extra_env_files, environ=env)
     if missing:
+        # Secrets-store names are lowercase kebab-case, so the store entry cannot share the env var's name.
+        refs = " ".join(f"--secrets {name}=<workspace>/{name.lower().replace('_', '-')}" for name in missing)
         raise AgentHardenerRunError(
             CATEGORY_MISSING_CREDENTIAL,
-            f"missing required secrets for the victim agent: {', '.join(missing)}. "
-            "Provide them via --env-file or the environment.",
+            f"missing required secrets for the victim agent: {', '.join(missing)}.",
+            remediation=f"Store each value in the Secrets store and map it on the manifest ({refs}), "
+            "or supply it with --env-file or the platform environment.",
         )
 
 

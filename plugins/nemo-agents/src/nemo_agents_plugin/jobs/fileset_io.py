@@ -21,7 +21,7 @@ import contextlib
 import logging
 import tempfile
 from pathlib import Path
-from typing import Iterator
+from typing import Generator
 
 from filesets import FilesetFileSystem
 from nemo_helix_plugin.client.client import NemoClient
@@ -70,7 +70,7 @@ def resolve_staged_config(
     ctx: JobContext,
     sdk: NemoClient | None,
     kind: str,
-) -> Iterator[Path]:
+) -> Generator[Path, None, None]:
     """Yield a local path to a config file, staging it from a fileset if requested.
 
     When ``fileset_ref`` is set, download the fileset into a tempdir under
@@ -121,7 +121,7 @@ def resolve_output(
     ctx: JobContext,
     sdk: NemoClient | None,
     kind: str,
-) -> Iterator[Path]:
+) -> Generator[Path, None, None]:
     """Yield a local base directory for job outputs, uploading to a fileset on success.
 
     Branches on the union shape:

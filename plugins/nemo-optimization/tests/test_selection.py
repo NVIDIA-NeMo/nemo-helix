@@ -31,6 +31,19 @@ def test_pick_trial_harmonic_selects_compromise_not_zero_cost_extreme() -> None:
     assert tuple(pick_trial(study, mode="harmonic").values) == (0.4, 0.4)
 
 
+@pytest.mark.parametrize("mode", ["sum", "weighted_sum", "WEIGHTED_SUM"])
+@pytest.mark.parametrize("weights, expected", [(None, (0.2, 0.2)), ([10.0, 1.0], (0.1, 0.9))])
+def test_pick_trial_weighted_sum_alias(mode: str, weights: list[float] | None, expected: tuple[float, float]) -> None:
+    study = _study_with_trials([(0.1, 0.9), (0.2, 0.2), (0.9, 0.1)])
+    assert tuple(pick_trial(study, mode=mode, weights=weights).values) == expected
+
+
+def test_pick_trial_weighted_sum_rejects_wrong_weight_count() -> None:
+    study = _study_with_trials([(0.1, 0.9)])
+    with pytest.raises(ValueError, match="length must equal"):
+        pick_trial(study, mode="weighted_sum", weights=[1.0])
+
+
 def test_pick_trial_harmonic_returns_pareto_member() -> None:
     study = _study_with_trials([(0.1, 0.9), (0.2, 0.2), (0.9, 0.1)])
     trial = pick_trial(study, mode="harmonic")

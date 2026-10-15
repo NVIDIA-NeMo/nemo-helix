@@ -754,8 +754,8 @@ def test_daemonize_services_bounds_probe_and_sleep_by_remaining_deadline(
         patch("nemo_helix_ext.local.services.require_services_extra"),
         patch("nemo_helix_ext.local.services.probe_status", side_effect=probe_status) as probe_status_mock,
         patch("nemo_helix_ext.local.services.subprocess.Popen", return_value=proc),
-        patch("nemo_helix_ext.local.services.time.monotonic", side_effect=monotonic),
-        patch("nemo_helix_ext.local.services.time.sleep", side_effect=sleep),
+        patch("nemo_helix_ext.local.services.monotonic", side_effect=monotonic),
+        patch("nemo_helix_ext.local.services.sleep", side_effect=sleep),
     ):
         with pytest.raises(services.ServicesStartupTimeoutError):
             services.daemonize_services(cfg)
@@ -837,7 +837,7 @@ def test_daemonize_services_terminates_child_on_sleep_interruption(
         patch("nemo_helix_ext.local.services._check_tcp_available"),
         patch("nemo_helix_ext.local.services.probe_status", return_value=False),
         patch("nemo_helix_ext.local.services.subprocess.Popen", return_value=proc),
-        patch("nemo_helix_ext.local.services.time.sleep", side_effect=KeyboardInterrupt),
+        patch("nemo_helix_ext.local.services.sleep", side_effect=KeyboardInterrupt),
     ):
         with pytest.raises(KeyboardInterrupt):
             services.daemonize_services(cfg)
@@ -880,7 +880,7 @@ async def test_daemonize_services_async_uses_thread(tmp_path: Path) -> None:
     cfg = ServiceRunConfig(scope="dev", state_dir=tmp_path / "state", runtime_dir=tmp_path / "run")
     handle = MagicMock()
 
-    with patch("nemo_helix_ext.local.services.asyncio.to_thread", new=AsyncMock(return_value=handle)) as to_thread:
+    with patch("nemo_helix_ext.local.services.to_thread", new=AsyncMock(return_value=handle)) as to_thread:
         result = await services.daemonize_services_async(cfg)
 
     assert result is handle

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared task-environment construction for evals plugin job compilers.
+"""Secret env vars for evals plugin jobs: injected at compile time, read back inside the job.
 
 Both ``compile_evaluate_job`` and ``compile_agent_eval_job`` turn a spec's metric/endpoint secret
 references into ``from_secret`` task environment variables. The per-job code differs only in *how*
@@ -20,7 +20,8 @@ from nemo_helix_plugin.config import NHX_PREFIX_BASE
 from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable, EnvironmentVariableFromSecret
 from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
-from nhx_evals_sdk.resolver_protocols import MissingSecretError
+from nhx_evals_sdk.resolver_protocols import MissingSecretError, SecretResolver
+from nhx_evals_sdk.resolvers import LocalSecretResolver
 from nhx_evals_sdk.values.common import SecretRef
 
 #: Step variable carrying the operator's sandbox decision to the job.
@@ -68,6 +69,28 @@ class JobEnvSecretSource:
             f"secret {secret_ref.root!r} was not injected into this job's environment. Check the secret exists "
             f"in workspace {workspace!r}: nemo secrets get {name} --workspace {workspace}"
         )
+
+
+class JobSecretResolver(SecretResolver):
+    """Resolve metric secrets inside a platform job from the env names its compiler injected them under.
+
+    Args:
+        secret_refs: The ``(env_name, secret_name)`` pairs passed to :func:`build_task_environment`.
+            A ref not among them falls back to its own workspace-prefixed names.
+    """
+
+    def __init__(self, secret_refs: Iterable[tuple[str, str]]) -> None:
+        self._env_names: dict[str, list[str]] = {}
+        for env_name, secret_name in secret_refs:
+            self._env_names.setdefault(secret_name, []).append(env_name)
+        self._fallback = LocalSecretResolver(bare_fallback=False)
+
+    async def resolve_secret(self, secret_ref: SecretRef) -> str | None:
+        """Return the secret's injected value, or ``None`` when no candidate variable is set."""
+        for env_name in self._env_names.get(secret_ref.root, ()):
+            if value := os.environ.get(env_name):
+                return value
+        return await self._fallback.resolve_secret(secret_ref)
 
 
 def build_task_environment(secret_refs: Iterable[tuple[str, str]]) -> list[EnvironmentVariable]:

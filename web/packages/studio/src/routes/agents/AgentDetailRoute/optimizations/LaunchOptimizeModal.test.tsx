@@ -161,7 +161,7 @@ describe('LaunchOptimizeModal', () => {
     expect(uploaded.sort()).toEqual(['dataset.json', 'optimize.yaml']);
     expect(submitted).toHaveLength(1);
     expect(submitted[0]?.spec).toMatchObject({
-      strategy: 'legacy',
+      strategy: 'config-tuning',
       optimize_config: 'optimize.yaml',
       optimize_config_fileset: expect.stringMatching(new RegExp(`^${workspace}/hermes-optimize-`)),
       agent: agentName,

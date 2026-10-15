@@ -34,6 +34,7 @@ import {
   outputDeploymentDefaults,
 } from '@studio/components/NewCustomizationForm/baseDeploymentForm';
 import { ComputeResourcesSection } from '@studio/components/NewCustomizationForm/ComputeResourcesSection';
+import { DeleteSavedTemplate } from '@studio/components/NewCustomizationForm/DeleteSavedTemplate';
 import { DeploymentSection } from '@studio/components/NewCustomizationForm/DeploymentSection';
 import { DpoParametersSection } from '@studio/components/NewCustomizationForm/DpoParametersSection';
 import { GeneralParametersSection } from '@studio/components/NewCustomizationForm/GeneralParametersSection';
@@ -59,7 +60,10 @@ import {
   ensureUnboundDeploymentConfig,
   ensureWorkspaceDeploymentConfig,
 } from '@studio/routes/NewDeploymentRoute/useCreateDeploymentBySource';
-import { getWorkspaceCustomizationJobDetailsRoute } from '@studio/routes/utils';
+import {
+  getNewCustomizationJobRoute,
+  getWorkspaceCustomizationJobDetailsRoute,
+} from '@studio/routes/utils';
 import {
   DATASET_FIELD_BY_BACKEND,
   FORM_DEFAULTS,
@@ -148,12 +152,15 @@ interface NewCustomizationFormProps {
   workspace: string;
   initialModel?: string;
   initialValues?: CustomizationFormFields;
+  /** The saved template `initialValues` came from, which the form offers to delete. */
+  savedTemplateName?: string;
 }
 
 export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
   workspace,
   initialModel,
   initialValues,
+  savedTemplateName,
 }) => {
   const navigate = useNavigate();
   const toast = useToast();
@@ -531,7 +538,22 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
     <AccessibleTitle title="Fine-tune a Model">
       <Stack className="h-full" gap="density-2xl" padding="density-2xl">
         <PageHeader
-          slotHeading="Fine-tune a Model"
+          slotHeading={
+            <Flex gap="density-sm" align="center" justify="between">
+              <span>Fine-tune a Model</span>
+              {savedTemplateName ? (
+                <DeleteSavedTemplate
+                  workspace={workspace}
+                  name={savedTemplateName}
+                  disabled={isSubmitting}
+                  onDeleted={() => {
+                    toast.success(`Deleted the template ${savedTemplateName}.`);
+                    navigate(getNewCustomizationJobRoute(workspace));
+                  }}
+                />
+              ) : null}
+            </Flex>
+          }
           slotDescription="Select a model, choose your data, set your parameters and start training in seconds."
         />
         <FormProvider {...form}>

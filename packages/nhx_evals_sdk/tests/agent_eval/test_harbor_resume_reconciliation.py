@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import inspect
 import json
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -53,7 +53,7 @@ def _write_harbor_result(trial_dir: Path, *, exception_type: str | None = None, 
 
 
 @contextmanager
-def _halt_harbor_cli_after_filter() -> Iterator[None]:
+def _halt_harbor_cli_after_filter() -> Generator[None, None, None]:
     """Let ``jobs resume`` delete matching trials, then stop before Docker/Job.run."""
     from unittest.mock import patch
 

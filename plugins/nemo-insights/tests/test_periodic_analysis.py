@@ -4,7 +4,7 @@
 """Tests for periodic insights analysis plumbing."""
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -218,7 +218,7 @@ async def _remote_backend_with_mirror(
     monkeypatch: pytest.MonkeyPatch,
     *,
     insights: _RecordingInsights | None = None,
-) -> AsyncIterator[tuple[RemoteAnalystBackend, _RecordingInsights]]:
+) -> AsyncGenerator[tuple[RemoteAnalystBackend, _RecordingInsights], None]:
     async with _async_platform() as sdk:
         insights_resource = sdk.insights.insights
         recording = insights or _RecordingInsights()
@@ -930,7 +930,7 @@ async def _controller(
     *,
     jobs: list[HelixJobResponse] | None = None,
     run_status: AnalysisRunStatus | None = None,
-) -> AsyncIterator[tuple[InsightsAnalysisController, _RecordingJobs]]:
+) -> AsyncGenerator[tuple[InsightsAnalysisController, _RecordingJobs], None]:
     controller = InsightsAnalysisController()
     controller._config = InsightsConfig(
         analyst=AnalystSchedulerConfig(

@@ -162,8 +162,10 @@ def run_numeric_study(
     base_config = copy.deepcopy(dict(payload))
     output_dir.mkdir(parents=True, exist_ok=True)
     trial_id_width = max(1, len(str(max(0, n_trials - 1))))
+    last_failure = ""
 
     def objective(trial: optuna.Trial) -> float | list[float]:
+        nonlocal last_failure
         suggestions = {name: spec.suggest(trial, name) for name, spec in config.search_space.items()}
         path_suggestions = suggestions_by_path(config.search_space, suggestions)
         trial_overlay = suggestions_to_profile_overlay(path_suggestions, trial.number)
@@ -174,20 +176,24 @@ def run_numeric_study(
             width=trial_id_width,
         )
 
-        rep_evaluations = [
-            evaluator.evaluate(
-                trial_number=trial.number,
-                suggestions=dict(path_suggestions),
-                trial_overlay=trial_overlay,
-                rep=rep,
-            )
-            for rep in range(config.reps_per_param_set)
-        ]
-        rep_scores = [evaluation.aggregate_metrics for evaluation in rep_evaluations]
-        for rep_index, rep_score in enumerate(rep_scores):
-            missing = [name for name in metric_names if name not in rep_score]
-            if missing:
-                raise StudyDriverError(f"Trial {trial.number} rep {rep_index} missing metric scores: {missing}")
+        try:
+            rep_evaluations = [
+                evaluator.evaluate(
+                    trial_number=trial.number,
+                    suggestions=dict(path_suggestions),
+                    trial_overlay=trial_overlay,
+                    rep=rep,
+                )
+                for rep in range(config.reps_per_param_set)
+            ]
+            rep_scores = [evaluation.aggregate_metrics for evaluation in rep_evaluations]
+            for rep_index, rep_score in enumerate(rep_scores):
+                missing = [name for name in metric_names if name not in rep_score]
+                if missing:
+                    raise StudyDriverError(f"Trial {trial.number} rep {rep_index} missing metric scores: {missing}")
+        except (StudyDriverError, CandidateEvaluationError) as exc:
+            last_failure = f"trial={trial.number}: {exc}"[:3_000]
+            raise
 
         trial.set_user_attr(
             "rep_scores",
@@ -215,7 +221,8 @@ def run_numeric_study(
         n_pruned = sum(1 for t in study.trials if t.state == optuna.trial.TrialState.PRUNED)
         raise StudyDriverError(
             f"Numeric study finished with no completed trials "
-            f"({n_failed} failed, {n_pruned} pruned, {len(study.trials)} total).",
+            f"({n_failed} failed, {n_pruned} pruned, {len(study.trials)} total)."
+            + (f" Last evaluation failure: {last_failure}" if last_failure else ""),
             trial_count=len(study.trials),
         )
 

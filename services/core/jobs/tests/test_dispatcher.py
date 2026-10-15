@@ -12,6 +12,7 @@ import gc
 import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from typing import TypeVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -46,6 +47,11 @@ from nhx.core.jobs.entities import (
     HelixJobStep,
     HelixJobTask,
 )
+
+WorkerResultT = TypeVar("WorkerResultT")
+
+# Upper bound for a worker to reach a patched checkpoint; it normally takes milliseconds.
+CHECKPOINT_TIMEOUT_SECONDS = 30
 
 
 async def create_job_with_attempt(dispatcher: JobDispatcher, job_request: CreateHelixJobRequest) -> HelixJobResponse:
@@ -124,6 +130,27 @@ async def create_test_job_data(
     saved_result = await store.add(result)
 
     return saved_job.id, saved_job.name, saved_attempt.id, saved_step.id, saved_task.id, saved_result.id
+
+
+async def wait_until_reached(checkpoint: asyncio.Event, worker: asyncio.Task[WorkerResultT]) -> None:
+    """Wait for ``worker`` to set ``checkpoint``, raising the worker's own error if it stops first.
+
+    The bound is generous on purpose: a one-second bound flaked on loaded CI runners and reported
+    a bare ``TimeoutError`` even when the worker had failed. It only catches a worker that stalls.
+    """
+    reached = asyncio.create_task(checkpoint.wait())
+    try:
+        await asyncio.wait({reached, worker}, timeout=CHECKPOINT_TIMEOUT_SECONDS, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        reached.cancel()
+    if checkpoint.is_set():
+        return
+    coro = worker.get_coro()
+    worker_name = coro.__qualname__ if coro is not None else worker.get_name()
+    if not worker.done():
+        raise AssertionError(f"{worker_name} did not reach its checkpoint within {CHECKPOINT_TIMEOUT_SECONDS}s")
+    worker.result()
+    raise AssertionError(f"{worker_name} finished without reaching its checkpoint")
 
 
 async def cancellation_test_data(
@@ -434,7 +461,7 @@ async def test_cancellation_serializes_with_late_task_creation(mock_dispatcher, 
         cancellation = asyncio.create_task(mock_dispatcher.update_job_status_from_step(step, HelixJobStatus.CANCELLED))
         late_report = None
         try:
-            await asyncio.wait_for(cleanup_started.wait(), timeout=1)
+            await wait_until_reached(cleanup_started, cancellation)
             late_report = asyncio.create_task(
                 other_dispatcher.create_or_update_task(
                     job_name, "late-task", step.workspace, HelixJobTaskUpdate(status=HelixJobStatus.ACTIVE), step
@@ -568,7 +595,7 @@ async def test_other_replica_task_write_after_final_sweep_rechecks_parent(
             )
         )
         try:
-            await asyncio.wait_for(creation_started.wait(), timeout=1)
+            await wait_until_reached(creation_started, late_report)
             await mock_dispatcher.update_job_status_from_step(step, final_status)
             allow_creation.set()
             assert (await late_report).status == final_status
@@ -813,7 +840,7 @@ async def test_delete_job_serializes_with_rerun_job(
         delete_task = asyncio.create_task(mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE))
         rerun_task = None
         try:
-            await asyncio.wait_for(delete_started.wait(), timeout=1.0)
+            await wait_until_reached(delete_started, delete_task)
 
             rerun_task = asyncio.create_task(other_dispatcher.rerun_job(job_name, DEFAULT_WORKSPACE))
             await asyncio.sleep(0.05)
@@ -856,7 +883,7 @@ async def test_delete_job_serializes_with_same_name_create(
         delete_task = asyncio.create_task(mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE))
         create_task = None
         try:
-            await asyncio.wait_for(delete_started.wait(), timeout=1.0)
+            await wait_until_reached(delete_started, delete_task)
 
             create_task = asyncio.create_task(other_dispatcher.create_job(create_request, DEFAULT_WORKSPACE))
             await asyncio.sleep(0.05)
@@ -902,7 +929,7 @@ async def test_delete_job_serializes_with_task_creation(
         delete_task = asyncio.create_task(mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE))
         task_create_task = None
         try:
-            await asyncio.wait_for(delete_started.wait(), timeout=1.0)
+            await wait_until_reached(delete_started, delete_task)
 
             task_create_task = asyncio.create_task(
                 other_dispatcher.create_or_update_task(
@@ -955,7 +982,7 @@ async def test_delete_job_serializes_with_result_creation(
         delete_task = asyncio.create_task(mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE))
         result_create_task = None
         try:
-            await asyncio.wait_for(delete_started.wait(), timeout=1.0)
+            await wait_until_reached(delete_started, delete_task)
 
             result_create_task = asyncio.create_task(
                 other_dispatcher.create_result(

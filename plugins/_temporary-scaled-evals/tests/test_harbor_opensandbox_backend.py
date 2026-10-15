@@ -89,14 +89,56 @@ def test_preflight_accepts_supported_evaluation() -> None:
     backend.preflight(_spec())
 
 
-@pytest.mark.parametrize("compose", ["environment/docker-compose.yaml", "compose.yml"])
-def test_staged_preflight_rejects_compose(tmp_path: Path, compose: str) -> None:
-    _write_task(tmp_path)
-    (tmp_path / compose).parent.mkdir(parents=True, exist_ok=True)
-    (tmp_path / compose).write_text("services: {}\n")
+COMPOSE_PROFILE = {"services": [{"name": "db", "image": "nvcr.io/org/postgres:16"}]}
 
-    with pytest.raises(ValueError, match="single-container"):
-        backend.preflight_staged_task(tmp_path, ["pypi.org"])
+
+def _write_compose_task(task_dir: Path) -> None:
+    """A task like ``_write_task``'s, plus a Compose file with one service, ``db``, next to ``main``."""
+    _write_task(task_dir)
+    (task_dir / "environment").mkdir()
+    (task_dir / "environment" / "docker-compose.yaml").write_text("services: {main: {}, db: {}}\n")
+
+
+def test_staged_preflight_runs_compose_task_with_matching_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_compose_task(tmp_path)
+    monkeypatch.setattr(settings, "task_image_allowed_registries", "nvcr.io")
+
+    backend.preflight_staged_task(tmp_path, ["pypi.org"], backend.parse_compose_services(COMPOSE_PROFILE))
+
+    # Service images run in the task's pod, so they get the task image registry policy.
+    monkeypatch.setattr(settings, "task_image_allowed_registries", "registry.example.com")
+    with pytest.raises(ValueError, match="compose service 'db'"):
+        backend.preflight_staged_task(tmp_path, ["pypi.org"], backend.parse_compose_services(COMPOSE_PROFILE))
+
+
+@pytest.mark.parametrize(
+    ("compose_file", "profile", "message"),
+    [
+        (True, None, "lists them under environment.kwargs.compose_services"),
+        (False, COMPOSE_PROFILE, "the task has no compose file"),
+        (True, {"services": [{"name": "cache", "image": "nvcr.io/org/redis:7"}]}, r"missing \['db'\].*\['cache'\]"),
+    ],
+)
+def test_staged_preflight_rejects_mismatched_compose(
+    tmp_path: Path, compose_file: bool, profile: dict[str, Any] | None, message: str
+) -> None:
+    _write_compose_task(tmp_path) if compose_file else _write_task(tmp_path)
+    services = backend.parse_compose_services(profile) if profile is not None else None
+
+    with pytest.raises(ValueError, match=message):
+        backend.preflight_staged_task(tmp_path, ["pypi.org"], services)
+
+
+def test_render_passes_profile_compose_services_to_the_environment(tmp_path: Path) -> None:
+    profile = {"harbor_config": yaml.safe_dump({"environment": {"kwargs": {"compose_services": COMPOSE_PROFILE}}})}
+
+    config = backend.render_harbor_config(
+        "agents: []\n", _spec(harbor_config=profile), task_path=tmp_path, jobs_dir="j", trusted_hosts=[]
+    )
+
+    assert config["environment"]["kwargs"]["compose_services"] == COMPOSE_PROFILE
 
 
 def test_staged_preflight_rejects_task_egress_outside_operator_allowlist(tmp_path: Path) -> None:
@@ -149,7 +191,7 @@ def test_staged_preflight_rejects_separate_verifier_without_pinned_image(
     _write_task(tmp_path, SEPARATE_VERIFIER)
 
     with pytest.raises(IncompatibleTaskError, match="verifier_image_digest"):
-        backend.preflight_staged_task(tmp_path, ["pypi.org"], **verifier)
+        backend.preflight_staged_task(tmp_path, ["pypi.org"], None, **verifier)
 
 
 def test_staged_preflight_rejects_multistep_separate_verifier(tmp_path: Path) -> None:

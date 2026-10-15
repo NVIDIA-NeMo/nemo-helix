@@ -16,8 +16,9 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
-import time
+from asyncio import sleep as async_sleep
 from pathlib import PurePosixPath
+from time import monotonic
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -536,6 +537,8 @@ def build_deployment_config(
     secrets: dict[str, str] | None = None,
     use_image_entrypoint: bool = False,
     workload_identity_enabled: bool = False,
+    readiness_probe_timeout_seconds: int = 1,
+    readiness_probe_failure_threshold: int = 12,
 ) -> DeploymentConfig:
     """Compile an agent into a long-running ``DeploymentConfig`` (Always).
 
@@ -653,7 +656,8 @@ def build_deployment_config(
                 httpGet=HTTPGetAction(path="/health", port=port),
                 initialDelaySeconds=2,
                 periodSeconds=5,
-                failureThreshold=12,
+                timeoutSeconds=readiness_probe_timeout_seconds,
+                failureThreshold=readiness_probe_failure_threshold,
             ),
         }
     )
@@ -883,6 +887,8 @@ class DeploymentsRunnerBackend(RunnerBackend):
                 secrets=secrets,
                 use_image_entrypoint=use_image_entrypoint,
                 workload_identity_enabled=auth_plan.workload_identity_enabled,
+                readiness_probe_timeout_seconds=self._config.readiness_probe_timeout_seconds,
+                readiness_probe_failure_threshold=self._config.readiness_probe_failure_threshold,
             )
         except (ReservedSecretEnvVarError, ImageEntrypointUnsupportedError) as exc:
             logger.error("Refusing to deploy agent %r: %s", name, exc)
@@ -979,13 +985,13 @@ class DeploymentsRunnerBackend(RunnerBackend):
     async def _wait_for_deployment_gone(self, workspace: str, dep_name: str) -> bool:
         """Return True if the Deployment entity disappears within the wait budget."""
         entities = self._entity_client()
-        deadline = time.monotonic() + _DELETE_CONFIG_WAIT_S
-        while time.monotonic() < deadline:
+        deadline = monotonic() + _DELETE_CONFIG_WAIT_S
+        while monotonic() < deadline:
             try:
                 await entities.get(Deployment, name=dep_name, workspace=workspace)
             except NemoEntityNotFoundError:
                 return True
-            await asyncio.sleep(_DELETE_CONFIG_POLL_S)
+            await async_sleep(_DELETE_CONFIG_POLL_S)
         return False
 
     async def list_deployments(self, workspace: str | None = None) -> list[DeploymentInfo]:

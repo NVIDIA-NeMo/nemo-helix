@@ -3,7 +3,7 @@
 
 import asyncio
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -14,14 +14,14 @@ from nhx.core.entities.controllers.workspace_cleanup import WorkspaceCleanup, Wo
 from nhx.core.entities.entities import Workspace, WorkspaceDeletionStage
 
 
-def _make_workspace(name: str = "test-workspace") -> Workspace:
+def _make_workspace(name: str = "test-workspace", *, updated_at: datetime | None = None) -> Workspace:
     now = datetime.now(tz=timezone.utc)
     return Workspace(
         id="ws-123",
         name=name,
         description="test",
         created_at=now,
-        updated_at=now,
+        updated_at=updated_at or now,
     )
 
 
@@ -173,7 +173,7 @@ class TestWorkspaceCleanupStep:
         assert controller._loop is loop
         controller.step()
         assert controller.is_healthy
-        repo.list_workspaces.assert_called_once()
+        assert repo.list_workspaces.await_count == 2
         loop.close()
 
     def test_step_sets_healthy_on_success(self):
@@ -285,6 +285,100 @@ class TestWorkspaceCleanupAsyncStep:
             deletion_stage=WorkspaceDeletionStage.FAILED,
         )
         repo.delete_workspace.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_retries_failed_workspace_after_backoff(self):
+        workspace = _make_workspace(updated_at=datetime.now(tz=timezone.utc) - timedelta(seconds=120))
+        repo = AsyncMock()
+        repo.list_workspaces.side_effect = [
+            ([], None),
+            ([workspace], None),
+        ]
+        repo.mark_workspace_for_deletion.return_value = True
+        controller = _make_controller(workspace_repo=repo)
+
+        with _patch_clients(_make_jobs_client([]), _make_mock_files_client([]), _make_models_client([])):
+            await controller._async_step()
+
+        failed_calls = [
+            call
+            for call in repo.list_workspaces.await_args_list
+            if call.kwargs["filter_op"].value == WorkspaceDeletionStage.FAILED
+        ]
+        assert len(failed_calls) == 1
+        assert failed_calls[0].kwargs["sort"] == "updated_at"
+        assert failed_calls[0].kwargs["page_size"] == 1
+        repo.mark_workspace_for_deletion.assert_any_call(
+            name="test-workspace",
+            deletion_stage=WorkspaceDeletionStage.DELETING,
+        )
+        repo.delete_workspace.assert_awaited_once_with(name="test-workspace")
+
+    @pytest.mark.asyncio
+    async def test_skips_failed_workspace_inside_backoff(self):
+        workspace = _make_workspace()
+        repo = AsyncMock()
+        repo.list_workspaces.side_effect = [
+            ([], None),
+            ([workspace], None),
+        ]
+        controller = _make_controller(workspace_repo=repo)
+
+        await controller._async_step()
+
+        repo.mark_workspace_for_deletion.assert_not_called()
+        repo.delete_workspace.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_pending_workspace_is_preferred_over_failed(self):
+        pending = _make_workspace(name="pending-workspace")
+        failed = _make_workspace(
+            name="failed-workspace",
+            updated_at=datetime.now(tz=timezone.utc) - timedelta(seconds=120),
+        )
+        repo = AsyncMock()
+
+        async def list_workspaces(**kwargs):
+            if kwargs["filter_op"].value == WorkspaceDeletionStage.PENDING:
+                return ([pending], None)
+            return ([failed], None)
+
+        repo.list_workspaces.side_effect = list_workspaces
+        repo.mark_workspace_for_deletion.return_value = True
+        controller = _make_controller(workspace_repo=repo)
+
+        with _patch_clients(_make_jobs_client([]), _make_mock_files_client([]), _make_models_client([])):
+            await controller._async_step()
+
+        queried_stages = [call.kwargs["filter_op"].value for call in repo.list_workspaces.await_args_list]
+        assert queried_stages == [WorkspaceDeletionStage.PENDING]
+        repo.delete_workspace.assert_awaited_once_with(name="pending-workspace")
+
+    @pytest.mark.asyncio
+    async def test_retries_after_model_list_503(self):
+        workspace = _make_workspace(updated_at=datetime.now(tz=timezone.utc) - timedelta(seconds=120))
+        repo = AsyncMock()
+        repo.list_workspaces.side_effect = [
+            ([workspace], None),
+            ([], None),
+            ([workspace], None),
+        ]
+        repo.mark_workspace_for_deletion.return_value = True
+        models_client = _make_models_client([])
+        models_client.list_models = AsyncMock(
+            side_effect=[Exception("HTTP 503: no healthy upstream"), _MockAsyncPaginatedResponse([])]
+        )
+        controller = _make_controller(workspace_repo=repo)
+
+        with _patch_clients(_make_jobs_client([]), _make_mock_files_client([]), models_client):
+            await controller._async_step()
+            await controller._async_step()
+
+        repo.mark_workspace_for_deletion.assert_any_call(
+            name="test-workspace",
+            deletion_stage=WorkspaceDeletionStage.FAILED,
+        )
+        repo.delete_workspace.assert_awaited_once_with(name="test-workspace")
 
     @pytest.mark.asyncio
     async def test_cleanup_failure_increments_error_counter(self):
@@ -399,7 +493,7 @@ class TestWorkspaceCleanupJobs:
 
         with (
             patch.object(controller, "emit_heartbeat") as emit_heartbeat,
-            patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=_mark_sleep),
+            patch("nhx.core.entities.controllers.workspace_cleanup.async_sleep", side_effect=_mark_sleep),
         ):
             await controller._wait_for_terminal_job(jobs_client, "test-workspace", "active-job")
 

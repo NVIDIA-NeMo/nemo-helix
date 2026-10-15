@@ -35,7 +35,7 @@ Example::
 
 import logging
 import os
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from typing import Any, Protocol, TypeVar, cast
 
@@ -154,7 +154,7 @@ def shared_cli_client_context(
     client_cls: type[TypedClientT],
     *,
     timeout: float | httpx.Timeout | None = None,
-) -> Iterator[TypedClientT]:
+) -> Generator[TypedClientT, None, None]:
     """Yield a CLI-owned shared client without taking ownership of its transport."""
     yield shared_cli_client(client_cls, timeout=timeout)
 

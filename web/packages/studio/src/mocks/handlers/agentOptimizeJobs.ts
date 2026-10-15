@@ -24,7 +24,11 @@ export const mockOptimizeJobs: RunStrategyJob[] = [
     status: 'completed',
     created_at: '2026-08-14T09:00:00Z',
     updated_at: '2026-08-14T11:00:00Z',
-    spec: { strategy: 'legacy', optimize_config: 'optimize-brevity.yaml', agent: 'react-agent' },
+    spec: {
+      strategy: 'config-tuning',
+      optimize_config: 'optimize-brevity.yaml',
+      agent: 'react-agent',
+    },
   },
   {
     id: 'opt-9a03',
@@ -35,7 +39,7 @@ export const mockOptimizeJobs: RunStrategyJob[] = [
     updated_at: '2026-08-13T09:30:00Z',
     // Workspace-qualified reference for the same agent — must still match.
     spec: {
-      strategy: 'legacy',
+      strategy: 'config-tuning',
       optimize_config: 'optimize-accuracy.yaml',
       agent: 'default/react-agent',
     },
@@ -46,7 +50,11 @@ export const mockOptimizeJobs: RunStrategyJob[] = [
     workspace: 'default',
     status: 'error',
     created_at: '2026-08-12T09:00:00Z',
-    spec: { strategy: 'legacy', optimize_config: 'optimize-other.yaml', agent: 'other-agent' },
+    spec: {
+      strategy: 'config-tuning',
+      optimize_config: 'optimize-other.yaml',
+      agent: 'other-agent',
+    },
   },
   {
     id: 'opt-7c15',
@@ -54,7 +62,11 @@ export const mockOptimizeJobs: RunStrategyJob[] = [
     workspace: 'staging',
     status: 'completed',
     created_at: '2026-08-11T09:00:00Z',
-    spec: { strategy: 'legacy', optimize_config: 'optimize-brevity.yaml', agent: 'react-agent' },
+    spec: {
+      strategy: 'config-tuning',
+      optimize_config: 'optimize-brevity.yaml',
+      agent: 'react-agent',
+    },
   },
 ];
 
@@ -120,9 +132,16 @@ const applyFilter = (jobs: RunStrategyJob[], filter: FilterQuery): RunStrategyJo
 /** What a platform with the Switchyard plugin installed reports, beside the built-in strategy. */
 export const mockOptimizationStrategies: OptimizationStrategyList = {
   data: [
-    { name: 'legacy', description: 'Run an optimize config against the agent.' },
+    {
+      name: 'config-tuning',
+      title: 'Hyper-parameter and prompt optimization',
+      description: 'Run an optimize config against the agent.',
+      requires_config: true,
+    },
     {
       name: 'switchyard',
+      title: 'Model routing using Switchyard',
+      requires_config: true,
       description:
         'Route the agent across pairs of acceptable models with Switchyard VirtualModels.',
     },

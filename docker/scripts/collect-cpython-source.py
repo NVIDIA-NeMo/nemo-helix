@@ -13,13 +13,13 @@ import os
 import re
 import subprocess
 import sys
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import zlib
 from html.parser import HTMLParser
 from pathlib import Path, PurePosixPath
+from time import sleep
 
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
@@ -152,7 +152,7 @@ def download(url: str, destination: Path) -> None:
             return
         except (OSError, RuntimeError, urllib.error.URLError) as error:
             last_error = error
-            time.sleep(2**attempt)
+            sleep(2**attempt)
     raise RuntimeError(str(last_error))
 
 

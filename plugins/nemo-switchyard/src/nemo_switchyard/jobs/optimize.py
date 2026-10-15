@@ -83,8 +83,10 @@ class SwitchyardOptimizeJob(NemoJob):
     name: ClassVar[str] = STRATEGY_NAME
     nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(
         name=STRATEGY_NAME,
+        title="Model routing using Switchyard",
         description="Route the agent across pairs of acceptable models with Switchyard VirtualModels, "
         "one agent config per model pair and routing strategy.",
+        requires_config=True,
     )
     description: ClassVar[str] = "Build Switchyard-routed variants of a platform agent."
     spec_schema: ClassVar[type[BaseModel]] = SwitchyardOptimizeSpec

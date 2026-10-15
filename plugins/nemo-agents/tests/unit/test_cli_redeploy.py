@@ -130,7 +130,7 @@ def test_redeploy_runs_steps_in_order(tmp_path: Path, make_cli_state) -> None:
     """undeploy -> delete -> create -> deploy, in that order."""
     rec = _Recorder(deployments=[{"name": "dep-1", "agent": "my-agent", "status": "running"}])
     app = AgentsCLI().get_cli()
-    with patch(f"{_PATCH_PREFIX}.time.sleep"):
+    with patch(f"{_PATCH_PREFIX}.sleep"):
         result = runner.invoke(
             app,
             [
@@ -179,7 +179,7 @@ def test_redeploy_prompts_and_proceeds_on_yes(tmp_path: Path, make_cli_state) ->
     """Without --yes, the user is prompted; 'y' proceeds through all steps."""
     rec = _Recorder(deployments=[{"name": "dep-1", "agent": "my-agent", "status": "running"}])
     app = AgentsCLI().get_cli()
-    with patch(f"{_PATCH_PREFIX}.time.sleep"):
+    with patch(f"{_PATCH_PREFIX}.sleep"):
         result = runner.invoke(
             app,
             [
@@ -229,7 +229,7 @@ def test_redeploy_skips_undeploy_when_no_live_deployments(tmp_path: Path, make_c
     """No live deployments -> no deployment DELETE, still deletes + recreates."""
     rec = _Recorder(deployments=[{"name": "dep-1", "agent": "my-agent", "status": "failed"}])
     app = AgentsCLI().get_cli()
-    with patch(f"{_PATCH_PREFIX}.time.sleep"):
+    with patch(f"{_PATCH_PREFIX}.sleep"):
         result = runner.invoke(
             app,
             [
@@ -266,7 +266,7 @@ def test_redeploy_skips_delete_when_agent_absent(tmp_path: Path, make_cli_state)
 
     rec = _AbsentRecorder(deployments=[])
     app = AgentsCLI().get_cli()
-    with patch(f"{_PATCH_PREFIX}.time.sleep"):
+    with patch(f"{_PATCH_PREFIX}.sleep"):
         result = runner.invoke(
             app,
             [
@@ -300,7 +300,7 @@ def test_redeploy_wait_exits_1_on_failed(tmp_path: Path, make_cli_state) -> None
         poll_statuses=["pending", "failed"],
     )
     app = AgentsCLI().get_cli()
-    with patch(f"{_PATCH_PREFIX}.time.sleep"):
+    with patch(f"{_PATCH_PREFIX}.sleep"):
         result = runner.invoke(
             app,
             [
@@ -364,7 +364,7 @@ def test_redeploy_autodetects_mode_from_existing_deployment(tmp_path: Path, make
         ]
     )
     app = AgentsCLI().get_cli()
-    with patch(f"{_PATCH_PREFIX}.time.sleep"):
+    with patch(f"{_PATCH_PREFIX}.sleep"):
         result = runner.invoke(
             app,
             [
@@ -400,7 +400,7 @@ def test_redeploy_explicit_flag_overrides_detection(tmp_path: Path, make_cli_sta
         deployments=[{"name": "dep-1", "agent": "my-agent", "status": "running", "deployment_mode": "docker"}]
     )
     app = AgentsCLI().get_cli()
-    with patch(f"{_PATCH_PREFIX}.time.sleep"):
+    with patch(f"{_PATCH_PREFIX}.sleep"):
         result = runner.invoke(
             app,
             [
@@ -460,7 +460,7 @@ def test_redeploy_recovery_hint_on_recreate_failure(tmp_path: Path, make_cli_sta
         create_agent_status=500,
     )
     app = AgentsCLI().get_cli()
-    with patch(f"{_PATCH_PREFIX}.time.sleep"):
+    with patch(f"{_PATCH_PREFIX}.sleep"):
         result = runner.invoke(
             app,
             [
@@ -514,7 +514,7 @@ def test_redeploy_autodetects_inline_dict_environment(tmp_path: Path, make_cli_s
         ]
     )
     app = AgentsCLI().get_cli()
-    with patch(f"{_PATCH_PREFIX}.time.sleep"):
+    with patch(f"{_PATCH_PREFIX}.sleep"):
         result = runner.invoke(
             app,
             [
@@ -556,7 +556,7 @@ def test_redeploy_surfaces_real_delete_failure(tmp_path: Path, make_cli_state) -
 
     rec = _DeleteFailsRecorder(deployments=[{"name": "dep-1", "agent": "my-agent", "status": "running"}])
     app = AgentsCLI().get_cli()
-    with patch(f"{_PATCH_PREFIX}.time.sleep"):
+    with patch(f"{_PATCH_PREFIX}.sleep"):
         result = runner.invoke(
             app,
             [

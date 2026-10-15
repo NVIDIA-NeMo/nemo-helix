@@ -413,7 +413,7 @@ class TestModelDiscoveryWire:
         )
         clients = make_clients(recorder)
 
-        with patch(f"{SETUP_MOD}.time.monotonic", side_effect=[0, 0, 0, 1, 2, 3]):
+        with patch(f"{SETUP_MOD}.monotonic", side_effect=[0, 0, 0, 1, 2, 3]):
             models = _wait_for_models(clients, "openai", "default", round_seconds=30, max_rounds=1)
 
         assert models == ["default/gpt"]
@@ -429,7 +429,7 @@ class TestModelDiscoveryWire:
         )
         clients = make_clients(recorder)
 
-        with patch(f"{SETUP_MOD}.time.monotonic", side_effect=[0, 0, 0, 0]):
+        with patch(f"{SETUP_MOD}.monotonic", side_effect=[0, 0, 0, 0]):
             assert _wait_for_models(clients, "bad", "default", round_seconds=30, max_rounds=2) == []
 
         assert len(recorder.requests) == 1

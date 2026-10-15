@@ -25,7 +25,7 @@ attaches a handler for the duration of one call and removes it afterwards.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 
 LogCallback = Callable[[str], None]
@@ -53,7 +53,7 @@ class _CallbackHandler(logging.Handler):
 
 
 @contextmanager
-def forward_engine_logs(on_log: LogCallback | None) -> Iterator[None]:
+def forward_engine_logs(on_log: LogCallback | None) -> Generator[None, None, None]:
     """Forward ``data_designer`` log records to ``on_log`` for the duration of the block.
 
     A ``None`` callback makes this a no-op, so callers that don't want engine

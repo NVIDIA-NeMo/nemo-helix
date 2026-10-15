@@ -27,12 +27,9 @@ DeploymentMode: TypeAlias = Literal["subprocess", "docker", "k8s", "openshell"]
 EndpointProtocol: TypeAlias = Literal["http", "https", "grpc", "tcp"]
 SessionLifecycleStatus: TypeAlias = Literal["active", "expired", "lost", "closed"]
 AgentJobCollection: TypeAlias = Literal[
-    "analyze",
     "evaluate",
-    "evaluate-suite",
     "execute",
     "optimize",
-    "optimize-skills",
     "package",
 ]
 

@@ -370,6 +370,16 @@ def fill_missing_start_times(resource_spans: list[ResourceSpans], *, start_time_
             span.start_time_unix_nano = start_time_unix_nano
 
 
+def fill_missing_root_end_time(resource_spans: list[ResourceSpans], *, duration_unix_nano: int) -> None:
+    """Give an untimed root span the trial's measured duration, so Intake's latency rollup is not 0.
+
+    Only a root with a start and no end is touched: a producer-recorded end always wins.
+    """
+    root = _root_span(resource_spans)
+    if root is not None and root.start_time_unix_nano and not root.end_time_unix_nano:
+        root.end_time_unix_nano = root.start_time_unix_nano + duration_unix_nano
+
+
 def _root_span(resource_spans: list[ResourceSpans]) -> Span | None:
     """The single parentless span of a trace, or ``None`` when there is not exactly one."""
     roots = [span for span in _spans(resource_spans) if not span.parent_span_id]

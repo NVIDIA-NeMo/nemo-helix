@@ -35,7 +35,7 @@ def _register_badly(group: typer.Typer) -> None:
     raise RuntimeError("this contribution is broken")
 
 
-_LISTING = {"data": [{"name": "legacy", "description": "Numeric HPO."}]}
+_LISTING = {"data": [{"name": "config-tuning", "title": "HPO", "description": "Numeric HPO."}]}
 
 
 def install(monkeypatch: pytest.MonkeyPatch, contributions: dict[str, Any] | None = None) -> None:
@@ -121,7 +121,7 @@ def test_a_contribution_that_fails_to_register_does_not_take_the_group_down(
     assert "'broken' failed to register" in caplog.text
 
 
-def _remote(monkeypatch: pytest.MonkeyPatch, strategies: list[dict[str, str]] | Exception) -> None:
+def _remote(monkeypatch: pytest.MonkeyPatch, strategies: list[dict[str, Any]] | Exception) -> None:
     """Stand in for the platform's `GET /strategies`, or make reaching it fail."""
 
     def _fake() -> tuple[list[OptimizationStrategy], str]:
@@ -133,8 +133,8 @@ def _remote(monkeypatch: pytest.MonkeyPatch, strategies: list[dict[str, str]] | 
 
 
 _STRATEGIES = [
-    {"name": "legacy", "description": "Numeric HPO."},
-    {"name": "acme", "description": "Prompt rewriting."},
+    {"name": "config-tuning", "title": "HPO", "description": "Numeric HPO.", "requires_config": True},
+    {"name": "acme", "title": "Acme", "description": "Prompt rewriting.", "requires_config": False},
 ]
 
 
@@ -169,7 +169,7 @@ def test_piped_list_strategies_is_json(monkeypatch: pytest.MonkeyPatch) -> None:
     result = CliRunner().invoke(AgentOptimizeCLI().get_cli(), ["list-strategies"])
 
     assert result.exit_code == 0, result.output
-    assert [s["name"] for s in json.loads(result.stdout)] == ["legacy", "acme"]
+    assert [s["name"] for s in json.loads(result.stdout)] == ["config-tuning", "acme"]
 
 
 def test_list_strategies_code_prints_the_client_call(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -258,7 +258,7 @@ def test_under_nemo_the_listing_uses_the_cli_shared_client(monkeypatch: pytest.M
     result = CliRunner().invoke(AgentOptimizeCLI().get_cli(), ["list-strategies", "-f", "json"], obj=_State())
 
     assert result.exit_code == 0, result.output
-    assert [s["name"] for s in json.loads(result.stdout)] == ["legacy"]
+    assert [s["name"] for s in json.loads(result.stdout)] == ["config-tuning"]
     assert requested == [cli_module.AgentOptimizationClient]
     assert "Targeting http://shared-platform" in result.stderr
 

@@ -40,4 +40,4 @@ def test_returned_classes_validate_required_fields() -> None:
     AuditTarget(name="ok", workspace="default", type="nim", model="meta/llama")
 
     with pytest.raises(ValidationError):
-        AuditTarget(name="bad", workspace="default", type="nim")  # missing 'model'
+        AuditTarget.model_validate({"name": "bad", "workspace": "default", "type": "nim"})  # missing 'model'

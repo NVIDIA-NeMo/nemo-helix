@@ -49,6 +49,7 @@ from nhx_evals_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskS
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, TrialMeasurements
 from nhx_evals_sdk.values.evidence import EVIDENCE_FORMAT_ATIF, EVIDENCE_FORMAT_OTLP, EVIDENCE_TRACE
 from nhx_evals_sdk.values.otlp import (
+    fill_missing_root_end_time,
     fill_missing_start_times,
     root_span_id,
     set_root_span_attributes,
@@ -97,13 +98,26 @@ def run_task_to_evaluation_context(trial: AgentEvalTrial, *, evaluation_name: st
     return {"evaluation_name": evaluation_name, "test_case_name": trial.task_id}
 
 
-async def atif_steps_from_trial(trial: AgentEvalTrial, *, started_at: datetime) -> list[AtifStepParam] | None:
-    """Return the trial's real ATIF steps, or None when it carries no ATIF trajectory.
+@dataclass(frozen=True)
+class RecordedSteps:
+    """A trial's recorded ATIF steps, and whether they carry a duration of their own.
+
+    Intake rolls the root span's window up from step timestamps and ``extra.invocation`` windows,
+    so a trajectory conveys a duration only through an invocation window or two producer-recorded
+    timestamps. The run start stamped onto untimed steps is not a producer timestamp.
+    """
+
+    steps: list[AtifStepParam]
+    timed: bool
+
+
+async def atif_steps_from_trial(trial: AgentEvalTrial, *, started_at: datetime) -> RecordedSteps | None:
+    """Return the trial's real ATIF steps, or None when it has no usable ATIF trajectory.
 
     Reads the ATIF view by name rather than the trial's primary trace, which may be an OTLP
     one. Only runners whose agent emits ATIF attach one; Harbor's
-    ``oracle`` and ``nop`` never do, and an unreadable or malformed trajectory is treated the
-    same as an absent one so a publish is never lost to bad evidence.
+    ``oracle`` and ``nop`` never do, and an unreadable, malformed, or empty trajectory is treated
+    the same as an absent one so a publish is never lost to bad evidence.
 
     The SDK's read model is deliberately more permissive than Intake's ingest schema, so steps that
     parse here can still be rejected there; :func:`nemo_evals.intake.publish.publish_to_intake`
@@ -124,16 +138,25 @@ async def atif_steps_from_trial(trial: AgentEvalTrial, *, started_at: datetime) 
         logger.warning("Ignoring unreadable ATIF trace for trial %s: %s", trial.id, error)
         return None
 
+    if not steps:
+        return None
+
     payload: list[AtifStepParam] = []
+    recorded_timestamps = 0
+    has_invocation_window = False
     for index, step in enumerate(steps):
         dumped: AtifStepParam = step.model_dump(mode="json", exclude_none=True)
         # Ingest requires one-based sequential ids, while the SDK read model leaves step_id optional.
         dumped["step_id"] = index + 1
+        if step.timestamp is not None:
+            recorded_timestamps += 1
+        if step.extra is not None and step.extra.get("invocation") is not None:
+            has_invocation_window = True
         # Intake keys spans on start_time and falls back to its own ingest clock for a step with
         # no timestamp, which would make re-publish duplicate instead of replace.
         dumped.setdefault("timestamp", started_at.isoformat())
         payload.append(dumped)
-    return payload
+    return RecordedSteps(payload, timed=has_invocation_window or recorded_timestamps >= 2)
 
 
 async def otlp_ingest_for_trial(
@@ -151,7 +174,9 @@ async def otlp_ingest_for_trial(
 
     ``started_at`` fills in any span that recorded no start time of its own, because Intake
     otherwise stores it against the ingest clock and start time is part of the key its spans
-    table replaces on — so a re-publish would insert rather than replace.
+    table replaces on — so a re-publish would insert rather than replace. A root span with no
+    end of its own gets the trial's measured runtime, as the ATIF path does, so Intake's latency
+    rollup does not read 0 for a run whose duration is known.
 
     Identity is written onto spans rather than resource attributes because Intake merges the
     layers as ``{**resource, **span}``. An agent that records its own ``gen_ai.conversation.id``
@@ -190,6 +215,8 @@ async def otlp_ingest_for_trial(
     if trial.error is not None:
         set_root_span_error(resource_spans, message=trial.error.message)
     fill_missing_start_times(resource_spans, start_time_unix_nano=int(started_at.timestamp() * 1_000_000_000))
+    if measurements.runtime_sec is not None:
+        fill_missing_root_end_time(resource_spans, duration_unix_nano=int(measurements.runtime_sec * 1_000_000_000))
     # The Export RPC envelope goes on only here, at the point these actually cross a wire.
     return ExportTraceServiceRequest(resource_spans=resource_spans).SerializeToString(), span_id
 
@@ -225,14 +252,15 @@ def trial_to_atif_ingest(
     model_name: str | None = None,
     final_metrics: AtifFinalMetricsParam | None = None,
     ended_at: datetime | None = None,
-    steps: Sequence[AtifStepParam] | None = None,
+    steps: RecordedSteps | None = None,
 ) -> AtifCreateParams:
     """Build the ATIF ingest params for a single Trial.
 
     ``steps`` carries the trial's real ATIF trajectory when it has one (see
     :func:`atif_steps_from_trial`). Without it this falls back to a minimal single-step
     trajectory holding the trial's final output text, which is all a runner that emits no
-    trajectory — Harbor's ``oracle``, for one — can offer.
+    trajectory — Harbor's ``oracle``, for one — can offer. ``ended_at`` gives a trajectory with
+    no duration of its own the trial's runtime as an invocation window on its final step.
 
     ``started_at`` (the run's start time) stamps any step that carries no timestamp of its own,
     because that is what makes re-ingest idempotent. Intake's ``spans`` table is a ``ReplacingMergeTree``
@@ -251,17 +279,20 @@ def trial_to_atif_ingest(
         "message": output_text or "",
         "timestamp": started_at,
     }
-    if ended_at is not None:
-        # Give the single-step trajectory a real duration so the root span's latency (end - start) is
-        # the trial's runtime instead of 0. Intake reads the window start/end from this NAT invocation
-        # block (epoch-second timestamps); ``started_at`` stays the start, so re-ingest is still idempotent.
-        step["extra"] = {
-            "invocation": {
-                "start_timestamp": started_at.timestamp(),
-                "end_timestamp": ended_at.timestamp(),
-            }
+    step_payload: list[AtifStepParam] = list(steps.steps) if steps is not None else [step]
+    timed = steps.timed if steps is not None else False
+    if ended_at is not None and not timed:
+        final_step = step_payload[-1]
+        step_payload[-1] = {
+            **final_step,
+            "extra": {
+                **(final_step.get("extra") or {}),
+                "invocation": {
+                    "start_timestamp": started_at.timestamp(),
+                    "end_timestamp": ended_at.timestamp(),
+                },
+            },
         }
-    step_payload: list[AtifStepParam] = list(steps) if steps else [step]
 
     body: AtifCreateParams = {
         "schema_version": ATIF_SCHEMA_VERSION,

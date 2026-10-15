@@ -1537,6 +1537,13 @@ components:
             \ created before targets were frozen; those re-resolve once, then store\
             \ a ref."
           default: ''
+        agent_updated_at:
+          type: string
+          title: Agent Updated At
+          description: The agent's own timestamp when this manifest froze it. A run
+            compares it with the agent's current one to warn that the frozen copy
+            is stale. Empty on manifests created before it was recorded.
+          default: ''
         dockerfile:
           type: string
           title: Dockerfile
@@ -1568,6 +1575,30 @@ components:
           type: array
           title: Secrets
           description: Secret names the victim agent requires.
+        secret_refs:
+          additionalProperties:
+            type: string
+          type: object
+          title: Secret Refs
+          description: Secret names whose value a run reads from the platform Secrets
+            store, as ``ENV_VAR -> workspace/secret``, set with ``--secrets NAME=workspace/secret``.
+            Win over ``deployed_secret_refs``. Names without a ref take their value
+            from the operator env or ``--env-file``.
+        declared_secrets:
+          items:
+            type: string
+          type: array
+          title: Declared Secrets
+          description: Secret names the operator passed with ``--secrets``. Refresh
+            keeps them even when the deployment they also came from drops them.
+        deployed_secret_refs:
+          additionalProperties:
+            type: string
+          type: object
+          title: Deployed Secret Refs
+          description: The agent's running-deployment secret refs (``ENV_VAR -> workspace/secret``)
+            when the manifest was resolved, so the victim gets the deployment's own
+            secrets. Re-read on refresh.
         egress:
           items:
             type: string
@@ -1583,9 +1614,7 @@ components:
           title: Env
           description: "Non-secret environment variables for the victim (agent-hardener's\
             \ agent.env) \u2014 a host-backend URL, a feature flag. Stored in plaintext\
-            \ on this entity, so never put credentials here: those belong in `secrets`,\
-            \ which names them and resolves the values from the platform Secrets store\
-            \ at run time."
+            \ on this entity, so never put credentials here: those belong in `secrets`."
         warnings:
           items:
             type: string
@@ -2429,8 +2458,11 @@ components:
           type: integer
         secrets:
           title: Secrets
-          description: Env-var names the victim requires. Derived from the agent's
-            own declarations (``models.*.api_key_env``, MCP server env) when omitted.
+          description: Secrets the victim requires, each `NAME` or `NAME=[workspace/]secret`.
+            A `NAME` takes its value from the operator env or `--env-file`; a ref
+            is read from the Secrets store at run time. Derived from the agent's own
+            declarations (``models.*.api_key_env``, MCP server env) and its running
+            deployment when omitted.
           items:
             type: string
           type: array
@@ -2446,8 +2478,8 @@ components:
           title: Env
           description: "Non-secret environment variables for the victim (agent-hardener's\
             \ `agent.env`). Stored in plaintext on the manifest \u2014 credentials\
-            \ belong in `secrets`, which names them and resolves the values from the\
-            \ Secrets store at run time."
+            \ belong in `secrets` as `NAME=workspace/secret`, read from the Secrets\
+            \ store at run time."
           additionalProperties:
             type: string
           type: object
@@ -2500,8 +2532,8 @@ components:
           title: Env
           description: "Non-secret environment variables for the victim (agent-hardener's\
             \ `agent.env`). Stored in plaintext on the manifest \u2014 credentials\
-            \ belong in `secrets`, which names them and resolves the values from the\
-            \ Secrets store at run time."
+            \ belong in `secrets` as `NAME=workspace/secret`, read from the Secrets\
+            \ store at run time."
           additionalProperties:
             type: string
           type: object

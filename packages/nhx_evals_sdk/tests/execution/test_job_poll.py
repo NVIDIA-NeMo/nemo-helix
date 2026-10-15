@@ -122,7 +122,7 @@ class TestAsyncPollUntilTerminal:
             fake_now[0] += 2.0
             return "running"
 
-        mocker.patch("nhx_evals_sdk.execution.job_poll.time.monotonic", side_effect=lambda: fake_now[0])
+        mocker.patch("nhx_evals_sdk.execution.job_poll.monotonic", side_effect=lambda: fake_now[0])
         pause_mock = mocker.patch("nhx_evals_sdk.execution.job_poll._async_pause", new=AsyncMock())
 
         with pytest.raises(TimeoutError, match=r"timed out after 1\.0s.*Status: running"):

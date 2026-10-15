@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import math
 import re
+from asyncio import sleep as async_sleep
 from dataclasses import dataclass
 from urllib.parse import urlparse, urlunparse
 
@@ -134,21 +134,21 @@ class NimRankingClient(BaseModel):
             except httpx.TransportError:
                 if attempt >= self.max_retries:
                     raise
-                await asyncio.sleep(backoff_seconds(attempt))
+                await async_sleep(backoff_seconds(attempt))
                 continue
             if response.is_error:
                 effective_status = _effective_status_code(response)
                 if effective_status in {400, 404, 405, 422}:
                     raise _UnsupportedRankingCandidate(candidate, effective_status)
                 if is_retryable_status(effective_status) and attempt < self.max_retries:
-                    await asyncio.sleep(backoff_seconds(attempt))
+                    await async_sleep(backoff_seconds(attempt))
                     continue
                 response.raise_for_status()
             ranked = _parse_rankings(response, expected_count=len(passages))
             if all(math.isfinite(score) for _, score in ranked):
                 return ranked
             if attempt < self.max_retries:
-                await asyncio.sleep(backoff_seconds(attempt))
+                await async_sleep(backoff_seconds(attempt))
         raise NimRankingError(f"{candidate.contract} returned non-finite values after {self.max_retries + 1} attempts")
 
 

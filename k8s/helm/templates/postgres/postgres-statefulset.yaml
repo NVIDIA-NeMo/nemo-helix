@@ -117,7 +117,7 @@ spec:
     - metadata:
         name: data
         labels:
-          app.kubernetes.io/component: postgres
+          {{- mergeOverwrite (dict "app.kubernetes.io/component" "postgres") (.Values.postgresql.persistence.claimTemplateLabels | default dict) | toYaml | nindent 10 }}
       spec:
         accessModes:
           - ReadWriteOnce

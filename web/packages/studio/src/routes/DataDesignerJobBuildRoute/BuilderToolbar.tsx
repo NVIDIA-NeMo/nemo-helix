@@ -106,6 +106,7 @@ export const BuilderToolbar: FC<BuilderToolbarProps> = memo(function BuilderTool
           </Text>
           <ControlledTextInput
             useControllerProps={{ name: 'rows' }}
+            disabled={isPreviewing}
             formFieldProps={{ className: 'w-[96px]' }}
             attributes={{
               Input: {

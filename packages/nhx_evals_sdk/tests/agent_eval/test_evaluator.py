@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import asyncio
 import json
 from collections.abc import Sequence
 from pathlib import Path
@@ -10,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from nhx_evals_sdk.agent_eval.evaluator import (
     AgentEvaluator,
+    _failed_generation_trial,
     _live_response_usage_measurements,
     _metric_row,
     _new_run_id,
@@ -194,6 +196,35 @@ def test_trial_from_sample_normalizes_live_usage(
     assert trial.measurements.total_tokens == expected.total_tokens
     assert trial.measurements.runtime_sec is None
     assert trial.measurements.cost_usd is None
+
+
+def test_trial_from_sample_records_generation_runtime_as_a_measurement() -> None:
+    task = AgentEvalTask(id="task-1", intent="Answer.", inputs={"instruction": "Q?"})
+    target = GenericAgent(
+        name="agent",
+        url="https://example/agent",
+        format=AgentFormat.GENERIC,
+        body={"input": "{{ instruction }}"},
+        response_path="$.answer",
+    )
+
+    trial = _trial_from_sample(
+        task,
+        target,
+        {"output_text": "answer", "response": {"usage": {"prompt_tokens": 8, "completion_tokens": 2}}},
+        runtime_sec=42.5,
+    )
+
+    assert trial.measurements == TrialMeasurements(prompt_tokens=8, completion_tokens=2, runtime_sec=42.5)
+
+
+def test_failed_generation_trial_keeps_the_runtime_spent_before_failing() -> None:
+    task = AgentEvalTask(id="task-1", intent="Answer.", inputs={"instruction": "Q?"})
+    target = Model(url="https://example.test/v1/chat/completions", name="model", format=ModelFormat.OPEN_AI)
+
+    trial = _failed_generation_trial(task, target, TimeoutError("timed out"), runtime_sec=60.0)
+
+    assert trial.measurements == TrialMeasurements(runtime_sec=60.0)
 
 
 def test_trial_from_sample_omits_ambiguous_prompt_cache_usage(
@@ -1028,10 +1059,13 @@ async def test_live_model_generation_with_mocked_inference() -> None:
     assert result.trials[0].metadata["model_id"] == "target-model"
     assert result.trials[0].output is not None
     assert result.trials[0].output.output_text == "Generated model answer"
-    assert result.trials[0].measurements == TrialMeasurements(
+    measurements = result.trials[0].measurements
+    assert measurements.runtime_sec is not None
+    assert measurements == TrialMeasurements(
         prompt_tokens=10,
         completion_tokens=2,
         cache_read_tokens=3,
+        runtime_sec=measurements.runtime_sec,
     )
     assert result.summary.score("constant_metric.score").mean == 0.75
 
@@ -1195,11 +1229,14 @@ async def test_live_agent_generation_preserves_trace_evidence_for_metrics() -> N
     assert result.trials[0].evidence.require("trace").kind == "trace"
     assert result.trials[0].output is not None
     assert result.trials[0].output.output_text == "Generated agent answer"
-    assert result.trials[0].measurements == TrialMeasurements(
+    measurements = result.trials[0].measurements
+    assert measurements.runtime_sec is not None
+    assert measurements == TrialMeasurements(
         prompt_tokens=10,
         completion_tokens=2,
         cache_creation_tokens=1,
         cache_read_tokens=4,
+        runtime_sec=measurements.runtime_sec,
     )
     assert metric.inputs[0].candidate.evidence == result.trials[0].evidence
 
@@ -1492,6 +1529,40 @@ async def test_live_generation_ignore_request_failure_records_failed_trial() -> 
             target=model,
             config=AgentEvalRunConfig(params=RunConfigOnlineModel(parallelism=1)),
         )
+
+
+@pytest.mark.asyncio
+async def test_live_generation_records_runtime_for_completed_and_failed_trials() -> None:
+    calls = 0
+
+    async def slow_model_inference(
+        model: Model,
+        request: dict[str, Any],
+        max_retries: int | None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.02)
+        if calls > 1:
+            raise RuntimeError("inference boom")
+        return {"choices": [{"message": {"content": "answer"}}]}
+
+    model = Model(url="https://model.test/v1/chat/completions", name="target-model", format=ModelFormat.OPEN_AI)
+
+    result = await AgentEvaluator(inference_fn=slow_model_inference).run(
+        tasks=[_task(task_id="ok"), _task(task_id="fail")],
+        target=model,
+        config=AgentEvalRunConfig(params=RunConfigOnlineModel(parallelism=1, ignore_request_failure=True)),
+    )
+
+    completed, failed = result.trials
+    assert completed.status is AgentEvalTrialStatus.COMPLETED
+    assert failed.status is AgentEvalTrialStatus.FAILED
+    for trial in (completed, failed):
+        assert trial.measurements.runtime_sec is not None and trial.measurements.runtime_sec >= 0.02
+    assert completed.output is not None
+    assert "runtime_sec" not in completed.output.metadata
 
 
 @pytest.mark.asyncio

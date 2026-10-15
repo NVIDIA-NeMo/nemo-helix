@@ -28,7 +28,12 @@ from nemo_helix_ext.cli.core.context import CLIContext
 from nemo_helix_ext.config.models import Cluster, Context, OAuthUser, Preferences
 from nemo_helix_plugin.cli_renderer import CLIRenderer
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_helix_plugin.commands import _post_function_submit, add_function_commands, add_job_commands
+from nemo_helix_plugin.commands import (
+    _post_function_submit,
+    _programmatic_submit,
+    add_function_commands,
+    add_job_commands,
+)
 from nemo_helix_plugin.discovery import discover, discover_manifests
 from nemo_helix_plugin.function import NemoFunction
 from nemo_helix_plugin.function_context import FunctionContext
@@ -280,6 +285,24 @@ class TestBareFormBreaks:
         assert "Usage:" in result.output
         assert "No such command" not in result.output
         assert submit_calls == []
+
+
+class TestProgrammaticSubmit:
+    def test_marker_is_set_inside_block_and_removed_after(self) -> None:
+        typer_ctx = cast(typer.Context, SimpleNamespace())
+
+        with _programmatic_submit(typer_ctx):
+            assert getattr(typer_ctx, "_nemo_programmatic_submit") is True
+
+        assert not hasattr(typer_ctx, "_nemo_programmatic_submit")
+
+    def test_existing_marker_is_restored_after_error(self) -> None:
+        typer_ctx = cast(typer.Context, SimpleNamespace(_nemo_programmatic_submit=False))
+
+        with pytest.raises(RuntimeError), _programmatic_submit(typer_ctx):
+            raise RuntimeError("submit failed")
+
+        assert getattr(typer_ctx, "_nemo_programmatic_submit") is False
 
 
 # ---------------------------------------------------------------------------
@@ -664,7 +687,7 @@ class _GreetResponse(BaseModel):
 class _GreetFunction(NemoFunction[_GreetSpec]):
     name: ClassVar[str] = "greet"
     description: ClassVar[str] = "Say hello to a name."
-    spec_schema: ClassVar[type[BaseModel]] = _GreetSpec
+    spec_schema: ClassVar[type[_GreetSpec]] = _GreetSpec
 
     async def run(self, spec: _GreetSpec) -> _GreetResponse:
         return _GreetResponse(message=f"Hello, {spec.name}!")
@@ -676,7 +699,7 @@ class _CountSpec(BaseModel):
 
 class _CountFunction(NemoFunction[_CountSpec]):
     name: ClassVar[str] = "count"
-    spec_schema: ClassVar[type[BaseModel]] = _CountSpec
+    spec_schema: ClassVar[type[_CountSpec]] = _CountSpec
 
     async def run(self, spec: _CountSpec) -> AsyncIterator[BaseModel]:
         for i in range(spec.upto):
@@ -691,7 +714,7 @@ class _WorkspaceSpec(BaseModel):
 
 class _WorkspaceFunction(NemoFunction[_WorkspaceSpec]):
     name: ClassVar[str] = "echo-workspace"
-    spec_schema: ClassVar[type[BaseModel]] = _WorkspaceSpec
+    spec_schema: ClassVar[type[_WorkspaceSpec]] = _WorkspaceSpec
 
     async def run(self, spec: _WorkspaceSpec, *, ctx: FunctionContext) -> dict:
         del spec
@@ -700,7 +723,7 @@ class _WorkspaceFunction(NemoFunction[_WorkspaceSpec]):
 
 class _LocalityFunction(NemoFunction[_WorkspaceSpec]):
     name: ClassVar[str] = "echo-locality"
-    spec_schema: ClassVar[type[BaseModel]] = _WorkspaceSpec
+    spec_schema: ClassVar[type[_WorkspaceSpec]] = _WorkspaceSpec
 
     async def run(self, spec: _WorkspaceSpec, *, is_local: bool) -> dict:
         del spec
@@ -1106,7 +1129,7 @@ class TestApiSegmentForFunction:
 
         class _Fn(NemoFunction[_Spec]):
             name: ClassVar[str] = "greet"
-            spec_schema: ClassVar[type[BaseModel]] = _Spec
+            spec_schema: ClassVar[type[_Spec]] = _Spec
 
             async def run(self, spec: _Spec) -> dict:
                 del spec
@@ -1132,7 +1155,7 @@ class TestApiSegmentForFunction:
 
         class _Fn(NemoFunction[_Spec]):
             name: ClassVar[str] = "greet"
-            spec_schema: ClassVar[type[BaseModel]] = _Spec
+            spec_schema: ClassVar[type[_Spec]] = _Spec
 
             async def run(self, spec: _Spec) -> dict:
                 del spec
@@ -1157,7 +1180,7 @@ class TestApiSegmentForFunction:
 
         class _Fn(NemoFunction[_Spec]):
             name: ClassVar[str] = "x"
-            spec_schema: ClassVar[type[BaseModel]] = _Spec
+            spec_schema: ClassVar[type[_Spec]] = _Spec
 
             async def run(self, spec: _Spec) -> dict:
                 del spec
@@ -1192,7 +1215,7 @@ class _NestedSpec(BaseModel):
 class _NestedFunction(NemoFunction[_NestedSpec]):
     name: ClassVar[str] = "ping"
     description: ClassVar[str] = "Ping a nested target."
-    spec_schema: ClassVar[type[BaseModel]] = _NestedSpec
+    spec_schema: ClassVar[type[_NestedSpec]] = _NestedSpec
 
     async def run(self, spec: _NestedSpec) -> dict:
         return {

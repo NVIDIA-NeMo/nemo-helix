@@ -530,6 +530,11 @@ class RowScore(BaseModel):
     sample: dict[str, Any] = Field(description="Sample output payload for the evaluated row.")
     metrics: dict[str, list[MetricOutput]] = Field(description="Metric-level row outputs by metric key.")
     requests: list[dict[str, Any]] = Field(description="Request details captured during evaluation.")
+    runtime_sec: float | None = Field(
+        default=None,
+        ge=0,
+        description="Seconds the target spent generating this row's sample; unset for offline rows.",
+    )
     metric_errors: dict[str, str] | None = Field(
         default=None,
         description="Full row-level error text keyed by metric for summary rendering.",
@@ -782,6 +787,8 @@ class EvaluationResult(BaseModel):
                 flatten_dict("sample", serialize_value(row_score.sample), record)
                 if error_text := row_error_text(row_score):
                     record["error"] = error_text
+                if row_score.runtime_sec is not None:
+                    record["runtime_sec"] = row_score.runtime_sec
                 for metric_scores in row_score.metrics.values():
                     for output in metric_scores:
                         record[f"output.{output.name}"] = serialize_value(output.value)

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar, Self
@@ -145,6 +145,16 @@ class RetrieveEvalSpec(BaseModel):
         return self
 
 
+def _secret_refs(spec: RetrieveEvalSpec) -> Iterator[tuple[str, str]]:
+    """Yield ``(env_name, secret_name)`` for each embeddings and reranker api key."""
+    for retrieval in (spec.target, spec.baseline):
+        if retrieval is None:
+            continue
+        for model in (retrieval.embeddings, retrieval.reranker):
+            if model is not None and model.api_key_secret is not None and model.api_key_env:
+                yield model.api_key_env, model.api_key_secret.root
+
+
 class _RetrieveEvalJobBase(NemoJob):
     """Score a BEIR fileset with a deployed embedding NIM and optional reranker."""
 
@@ -188,14 +198,7 @@ class _RetrieveEvalJobBase(NemoJob):
         """Compile a CPU task that calls the embedding target through IGW."""
         del workspace, entity_client, job_name, async_sdk, options
         canonical = RetrieveEvalSpec.model_validate(spec.model_dump())
-        secret_refs = [
-            (model.api_key_env, model.api_key_secret.root)
-            for retrieval in (canonical.target, canonical.baseline)
-            if retrieval is not None
-            for model in (retrieval.embeddings, retrieval.reranker)
-            if model is not None and model.api_key_secret is not None and model.api_key_env
-        ]
-        environment = build_task_environment(secret_refs)
+        environment = build_task_environment(_secret_refs(canonical))
         return HelixJobSpec(
             steps=[
                 HelixJobStep(
@@ -224,7 +227,7 @@ class _RetrieveEvalJobBase(NemoJob):
             RetrievalPrecisionMetric(k=cutoffs),
             RetrievalMAPMetric(k=cutoffs),
         ]
-        evaluator = job_evaluator()
+        evaluator = job_evaluator(_secret_refs(spec))
         started_at = datetime.now(UTC)
         result, baseline_result = _run_pipelines(evaluator, dataset, spec, metrics)
         result_files = EvaluateJob._write_result_files(

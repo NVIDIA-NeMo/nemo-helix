@@ -78,6 +78,8 @@ export const OTEL_PROXY_URL = `${normalizedBaseUrl}/telemetry`;
 export const OTEL_SERVICE_NAME = getEnvVar('VITE_OTEL_SERVICE_NAME');
 
 export const isLocalDevelopmentEnv = getEnvVar('VITE_IS_LOC_ENV')?.toLowerCase() === 'true';
+export const REACT_QUERY_DEVTOOLS_ENABLED =
+  getEnvVar('VITE_REACT_QUERY_DEVTOOLS_ENABLED')?.toLowerCase() === 'true';
 
 // Vars used by the oidc provider
 export const AUTH_CLIENT_ID = getEnvVar('VITE_AUTH_CLIENT_ID');

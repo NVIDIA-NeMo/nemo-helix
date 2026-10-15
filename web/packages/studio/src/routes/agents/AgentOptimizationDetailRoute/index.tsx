@@ -28,6 +28,7 @@ import { TrialsDataView } from '@studio/components/dataViews/OptimizationJobsDat
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
+import { SWITCHYARD_STRATEGY } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect/constants';
 import { DeployTrialModal } from '@studio/routes/agents/AgentOptimizationDetailRoute/DeployTrialModal';
 import { StudyInProgress } from '@studio/routes/agents/AgentOptimizationDetailRoute/StudyInProgress';
 import {
@@ -35,6 +36,8 @@ import {
   type Trial,
 } from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
 import { StudyStatTiles } from '@studio/routes/agents/AgentOptimizationDetailRoute/StudyStatTiles';
+import { fetchSwitchyardResults } from '@studio/routes/agents/AgentOptimizationDetailRoute/switchyard/switchyardResults';
+import { SwitchyardResultsView } from '@studio/routes/agents/AgentOptimizationDetailRoute/switchyard/SwitchyardResultsView';
 import { ArtifactFilesPanel } from '@studio/routes/JobDetailRoute/components/ArtifactFilesPanel';
 import {
   getAgentDetailRoute,
@@ -78,6 +81,8 @@ export const AgentOptimizationDetailRoute: FC = () => {
   const hasFailed = status ? FAILED_STATUSES.has(status) : false;
   const isQueued = status ? QUEUED_STATUSES.has(status) : false;
   const agentName = job?.spec?.agent?.split('/').pop() ?? undefined;
+  const isSwitchyard = job?.spec?.strategy === SWITCHYARD_STRATEGY;
+  const loadResults = !!workspace && !!jobName && isTerminal && !hasFailed;
 
   const { setBreadcrumbs } = useBreadcrumbs();
   useEffect(() => {
@@ -106,7 +111,19 @@ export const AgentOptimizationDetailRoute: FC = () => {
   } = useQuery({
     queryKey: ['optimize-study-results', workspace, jobName] as const,
     queryFn: ({ signal }) => fetchStudyResults(workspace, jobName, signal),
-    enabled: !!workspace && !!jobName && isTerminal && !hasFailed,
+    enabled: loadResults && !isSwitchyard,
+    refetchInterval: (query) => (query.state.data === undefined ? JOB_POLLING_INTERVAL_MS : false),
+  });
+
+  const {
+    data: switchyardResults,
+    isLoading: isLoadingSwitchyard,
+    isError: isSwitchyardError,
+    error: switchyardError,
+  } = useQuery({
+    queryKey: ['switchyard-results', workspace, jobName] as const,
+    queryFn: ({ signal }) => fetchSwitchyardResults(workspace, jobName, signal),
+    enabled: loadResults && isSwitchyard,
     refetchInterval: (query) => (query.state.data === undefined ? JOB_POLLING_INTERVAL_MS : false),
   });
 
@@ -192,6 +209,24 @@ export const AgentOptimizationDetailRoute: FC = () => {
           <ErrorPanel errorMessage={errorMessage} />
         ) : !isTerminal ? (
           <StudyInProgress workspace={workspace} job={job} isQueued={isQueued} />
+        ) : isSwitchyard ? (
+          isSwitchyardError ? (
+            <ErrorMessage
+              header="Could not load virtual models"
+              message={switchyardError.message}
+              height="auto"
+            />
+          ) : isLoadingSwitchyard ? (
+            <Flex align="center" justify="center" className="min-h-[200px] w-full">
+              <Spinner size="medium" aria-label="Loading virtual models..." />
+            </Flex>
+          ) : !switchyardResults ? (
+            <Text kind="body/regular/md" className="text-secondary">
+              This run did not register any virtual models.
+            </Text>
+          ) : (
+            <SwitchyardResultsView workspace={workspace} job={job} results={switchyardResults} />
+          )
         ) : isResultsError ? (
           <ErrorMessage
             header="Could not load trials"

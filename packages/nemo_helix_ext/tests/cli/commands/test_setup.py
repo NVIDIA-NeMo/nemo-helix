@@ -25,7 +25,6 @@ from nemo_helix_ext.cli.commands.setup import (
     _MODEL_DISCOVERY_POLL_INTERVAL,
     _POST_START_REACHABLE_DELAY,
     _POST_START_REACHABLE_RETRIES,
-    _PROBE_CONFIGS,
     _SERVICE_STARTUP_POLL_INTERVAL,
     _SERVICE_STARTUP_TIMEOUT_SECONDS,
     KNOWN_PROVIDERS,
@@ -2914,7 +2913,7 @@ class TestUsableModelPairSelection:
 
         _probe_post(client).side_effect = post
 
-        with patch(f"{SETUP_MOD}.time.monotonic", side_effect=lambda: clock["now"]):
+        with patch(f"{SETUP_MOD}.monotonic", side_effect=lambda: clock["now"]):
             assert _select_usable_model_pair(client, "default", [large, small]) == ModelPair(
                 default=small,
                 fast=small,
@@ -2929,7 +2928,7 @@ class TestUsableModelPairSelection:
         client = _client_answering({entity_id: _probe_timeout() for entity_id in entity_ids})
         clock = iter([0.0, 0.0, 0.0, 91.0])
 
-        with patch(f"{SETUP_MOD}.time.monotonic", side_effect=lambda: next(clock)):
+        with patch(f"{SETUP_MOD}.monotonic", side_effect=lambda: next(clock)):
             assert _select_usable_model_pair(client, "default", entity_ids) is None
 
         assert _probe_post(client).call_count == 1
@@ -3463,17 +3462,95 @@ class TestValidateApiKey:
         [
             ("nvidia-build", "k", httpx.TimeoutException("timeout"), KeyValidationStatus.INCONCLUSIVE),
             ("nvidia-build", "k", httpx.ConnectError("refused"), KeyValidationStatus.INCONCLUSIVE),
-            ("custom-thing", "k", None, KeyValidationStatus.INCONCLUSIVE),
             ("nvidia-build", None, None, KeyValidationStatus.VALID),
         ],
-        ids=["timeout", "connect-error", "unknown-provider", "no-api-key"],
+        ids=["timeout", "connect-error", "no-api-key"],
     )
     def test_skip_and_error_paths(self, provider_name, api_key, side_effect, expected_status):
         with patch(f"{self._MOD}.httpx.request", side_effect=side_effect) as mock_req:
             result = _validate_api_key(provider_name, "https://example.com", api_key)
         assert result.status is expected_status
-        if api_key is None or provider_name not in _PROBE_CONFIGS:
+        if api_key is None:
             mock_req.assert_not_called()
+
+    def test_custom_provider_probes_models_and_accepts(self):
+        """An unknown name probes GET {base}/models and does not follow up with chat."""
+        mock_resp = _http_response(200, {"data": [{"id": "meta/llama-3.1-8b-instruct"}]})
+        with patch(f"{self._MOD}.httpx.request", return_value=mock_resp) as mock_req:
+            result = _validate_api_key(
+                "nv-inference",
+                "https://inference-api.nvidia.com/v1/",
+                "test-key",
+            )
+        assert result.status is KeyValidationStatus.VALID
+        assert result.message == ""
+        mock_req.assert_called_once()
+        method, url = mock_req.call_args.args
+        assert method == "GET"
+        assert url == "https://inference-api.nvidia.com/v1/models"
+        assert mock_req.call_args.kwargs["headers"]["Authorization"] == "Bearer test-key"
+
+    def test_custom_name_on_nvidia_build_host_does_not_trust_the_catalog(self):
+        """integrate.api.nvidia.com lists models without a key, so chat must reject a bad one."""
+        catalog = _http_response(200, {"data": [{"id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"}]})
+        rejected = _http_response(401, {"message": "Invalid API key"})
+
+        def side_effect(method, url, **kwargs):
+            if method == "GET":
+                assert url == "https://integrate.api.nvidia.com/v1/models"
+                return catalog
+            assert method == "POST"
+            assert url == "https://integrate.api.nvidia.com/v1/chat/completions"
+            return rejected
+
+        with patch(f"{self._MOD}.httpx.request", side_effect=side_effect):
+            result = _validate_api_key("my-build", "https://integrate.api.nvidia.com/v1/", "bad-key")
+        assert result.status is KeyValidationStatus.REJECTED
+        assert "rejected the credentials" in result.message.lower()
+
+    def test_cleartext_remote_url_is_rejected_before_the_probe(self):
+        with patch(f"{self._MOD}.httpx.request") as mock_req:
+            result = _validate_api_key("nv-inference", "http://example.com/v1", "test-key")
+        assert result.status is KeyValidationStatus.REJECTED
+        assert "HTTPS" in result.message
+        mock_req.assert_not_called()
+
+    def test_cleartext_nvidia_build_url_is_rejected_before_the_probe(self):
+        with patch(f"{self._MOD}.httpx.request") as mock_req:
+            result = _validate_api_key("my-build", "http://integrate.api.nvidia.com/v1", "bad-key")
+        assert result.status is KeyValidationStatus.REJECTED
+        mock_req.assert_not_called()
+
+    def test_loopback_http_url_is_still_probed(self):
+        mock_resp = _http_response(200, {"data": [{"id": "local-model"}]})
+        with patch(f"{self._MOD}.httpx.request", return_value=mock_resp) as mock_req:
+            result = _validate_api_key("local-vllm", "http://127.0.0.1:8000/v1", "test-key")
+        assert result.status is KeyValidationStatus.VALID
+        assert mock_req.call_args.args[1] == "http://127.0.0.1:8000/v1/models"
+
+    def test_custom_provider_rejects_unauthorized_key(self):
+        mock_resp = _http_response(401, {"message": "Invalid proxy server token"})
+        with patch(f"{self._MOD}.httpx.request", return_value=mock_resp):
+            result = _validate_api_key("nv-inference", "https://example.com/v1", "bad-key")
+        assert result.status is KeyValidationStatus.REJECTED
+        assert result.passed is False
+        assert "rejected the credentials" in result.message.lower()
+
+    @pytest.mark.parametrize(
+        "side_effect,expected_fragment",
+        [
+            (httpx.TimeoutException("timeout"), "timed out"),
+            (httpx.ConnectError("refused"), "probe failed"),
+        ],
+        ids=["timeout", "connect-error"],
+    )
+    def test_custom_provider_network_errors_are_inconclusive(self, side_effect, expected_fragment):
+        with patch(f"{self._MOD}.httpx.request", side_effect=side_effect):
+            result = _validate_api_key("nv-inference", "https://example.com/v1", "test-key")
+        assert result.status is KeyValidationStatus.INCONCLUSIVE
+        assert result.passed is True
+        assert expected_fragment in result.message
+        assert "neither accepted nor rejected" in result.message
 
     def test_custom_auth_header_format(self):
         """Anthropic-style 'X-Api-Key: {{ auth_secret }}' header should be constructed."""
@@ -3733,7 +3810,7 @@ class TestWaitForHelixSpinner:
         mock_console, _ = spinner_console
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 0.5, 1, 1]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 0.5, 1, 1]),
             patch(f"{self._MOD}._check_platform_reachable", side_effect=[False, True]),
         ):
             result = _wait_for_platform("http://localhost:8080")
@@ -3746,7 +3823,7 @@ class TestWaitForHelixSpinner:
         _, mock_status = spinner_console
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 2, 4, 4, 6, 6]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 2, 4, 4, 6, 6]),
             patch(f"{self._MOD}._check_platform_reachable", side_effect=[False, False, True]),
         ):
             _wait_for_platform("http://localhost:8080")
@@ -3758,7 +3835,7 @@ class TestWaitForHelixSpinner:
         """Spinner exits cleanly and function returns False on timeout."""
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 0, 200, 200]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 0, 200, 200]),
             patch(f"{self._MOD}._check_platform_reachable", return_value=False),
         ):
             result = _wait_for_platform("http://localhost:8080", timeout=120)
@@ -3769,7 +3846,7 @@ class TestWaitForHelixSpinner:
         """Health check should use a short HTTP timeout (<=1.5s) for fast cycles."""
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 0.5, 1]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 0.5, 1]),
             patch(f"{self._MOD}._check_platform_reachable", side_effect=[True]) as mock_reachable,
         ):
             _wait_for_platform("http://localhost:8080")
@@ -3785,7 +3862,7 @@ class TestWaitForHelixSpinner:
 
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 5, 10, 10]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 5, 10, 10]),
             patch(f"{self._MOD}._check_platform_reachable", side_effect=[False, True]),
         ):
             result = _wait_for_platform("http://localhost:8080", log_path=log)
@@ -3799,7 +3876,7 @@ class TestWaitForHelixSpinner:
         _, mock_status = spinner_console
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 2, 4, 4]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 2, 4, 4]),
             patch(f"{self._MOD}._check_platform_reachable", side_effect=[False, True]),
         ):
             result = _wait_for_platform("http://localhost:8080", log_path=None)
@@ -3814,7 +3891,7 @@ class TestWaitForHelixSpinner:
         dead.poll.return_value = 3
         with (
             patch(f"{self._MOD}._pause") as pause,
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 1, 2]),
             patch(f"{self._MOD}._check_platform_reachable") as reachable,
         ):
             result = _wait_for_platform("http://localhost:8080", timeout=120, proc=dead)
@@ -3877,7 +3954,7 @@ class TestWaitForModelsSpinner:
 
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2, 100]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 1, 2, 100]),
         ):
             _wait_for_models(client, "nvidia-build", "default", round_seconds=5, max_rounds=1)
 
@@ -3897,7 +3974,7 @@ class TestWaitForModelsSpinner:
 
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 0, 1, 2, 3]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 0, 1, 2, 3]),
         ):
             result = _wait_for_models(client, "nvidia-build", "default", round_seconds=30, max_rounds=1)
 
@@ -3918,7 +3995,7 @@ class TestWaitForModelsSpinner:
 
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 0, 1, 2, 3]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 0, 1, 2, 3]),
         ):
             result = _wait_for_models(client, "nvidia-build", "default", round_seconds=30, max_rounds=1)
 
@@ -3945,7 +4022,7 @@ class TestWaitForModelsEarlyExit:
 
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 0, 0]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 0, 0]),
         ):
             result = _wait_for_models(
                 client,
@@ -3975,7 +4052,7 @@ class TestWaitForModelsEarlyExit:
 
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 0, 0]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 0, 0]),
         ):
             result = _wait_for_models(
                 client,
@@ -4000,7 +4077,7 @@ class TestWaitForModelsEarlyExit:
 
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 0, 0]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 0, 0]),
         ):
             result = _wait_for_models(client, "lost-provider", "default", round_seconds=30, max_rounds=2)
 
@@ -4018,7 +4095,7 @@ class TestWaitForModelsEarlyExit:
         # monotonic calls: start, deadline, while-check, elapsed, while-check, elapsed, while-check(exit)
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 1, 2, 2, 100]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 1, 1, 2, 2, 100]),
         ):
             result = _wait_for_models(client, "new-provider", "default", round_seconds=5, max_rounds=1)
 
@@ -4038,7 +4115,7 @@ class TestWaitForModelsEarlyExit:
 
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 0, 0]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 0, 0]),
         ):
             result = _wait_for_models(client, "good-provider", "default", round_seconds=30, max_rounds=1)
 
@@ -4056,7 +4133,7 @@ class TestWaitForModelsEarlyExit:
 
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 0, 0]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 0, 0]),
         ):
             _wait_for_models(client, "bad-provider", "default", round_seconds=30, max_rounds=1)
 

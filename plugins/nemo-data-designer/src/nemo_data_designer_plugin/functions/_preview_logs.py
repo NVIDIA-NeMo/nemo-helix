@@ -13,7 +13,7 @@ emit reads its own callback and pushes frames into its own stream.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 
@@ -61,7 +61,7 @@ def _ensure_handler_attached() -> None:
 
 
 @contextmanager
-def forward_data_designer_logs(callback: MessageCallback) -> Iterator[None]:
+def forward_data_designer_logs(callback: MessageCallback) -> Generator[None, None, None]:
     """Forward ``data_designer`` library logs through *callback* for the ``with`` block.
 
     Sets a per-task contextvar so concurrent requests don't cross-talk

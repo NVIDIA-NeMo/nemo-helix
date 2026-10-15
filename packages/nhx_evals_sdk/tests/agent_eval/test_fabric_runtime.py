@@ -666,7 +666,7 @@ async def test_fabric_runtime_maps_timeout_to_failed_trial(tmp_path: Path, monke
         )
         raise TimeoutError
 
-    monkeypatch.setattr(fabric_runtime.asyncio, "wait_for", fake_wait_for)
+    monkeypatch.setattr(fabric_runtime, "wait_for", fake_wait_for)
     runtime = fabric_runtime.FabricAgentRuntime(config=_CONFIG, work_root=tmp_path / "fabric")
 
     trials = await runtime.run_tasks([_TASK])
@@ -1490,7 +1490,7 @@ def test_codex_home_removal_retries_when_codex_writes_after_the_first_delete(
             (path / ".tmp" / "plugins-clone").mkdir(parents=True)
 
     monkeypatch.setattr(fabric_runtime.shutil, "rmtree", rmtree_then_codex_writes_once)
-    monkeypatch.setattr(fabric_runtime.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(fabric_runtime, "sleep", lambda _seconds: None)
 
     fabric_runtime._remove_codex_home(home)
 
