@@ -4,6 +4,7 @@
 import asyncio
 import logging
 import threading
+from asyncio import sleep as async_sleep
 from datetime import datetime, timezone
 
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -254,7 +255,7 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
                     f"last status was {last_status}"
                 )
             self.emit_heartbeat()
-            await asyncio.sleep(_JOB_TERMINAL_WAIT_POLL_SECONDS)
+            await async_sleep(_JOB_TERMINAL_WAIT_POLL_SECONDS)
 
     @tracer.start_as_current_span("workspace_cleanup/cleanup_deployments")
     async def _cleanup_deployments(self, workspace: Workspace) -> None:

@@ -493,7 +493,7 @@ class TestWorkspaceCleanupJobs:
 
         with (
             patch.object(controller, "emit_heartbeat") as emit_heartbeat,
-            patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=_mark_sleep),
+            patch("nhx.core.entities.controllers.workspace_cleanup.async_sleep", side_effect=_mark_sleep),
         ):
             await controller._wait_for_terminal_job(jobs_client, "test-workspace", "active-job")
 

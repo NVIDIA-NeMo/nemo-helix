@@ -16,14 +16,13 @@ responses.  The return type of :meth:`send` is determined by the endpoint's
 
 from __future__ import annotations
 
-import asyncio
 import copy
 import email.utils
 import inspect
 import json
 import logging
 import os
-import time
+from asyncio import sleep as async_sleep
 from collections.abc import (
     AsyncGenerator,
     AsyncIterable,
@@ -38,6 +37,8 @@ from datetime import timezone
 from functools import cache
 from ipaddress import ip_address
 from pathlib import Path
+from time import sleep
+from time import time as wall_time
 from typing import Any, Generic, Self, TypeVar, cast, get_args, get_origin, overload
 from urllib.parse import quote, urlsplit
 
@@ -285,7 +286,7 @@ def _retry_after(response: httpx.Response) -> float | None:
             if retry_date.tzinfo is None:
                 retry_date = retry_date.replace(tzinfo=timezone.utc)
             try:
-                delay = retry_date.timestamp() - time.time()
+                delay = retry_date.timestamp() - wall_time()
             except (OverflowError, OSError, ValueError):
                 return None
     return delay if 0 < delay <= 60 else None
@@ -1052,14 +1053,14 @@ class NemoClient(BaseNemoClient[httpx.Client]):
             except httpx.TransportError as exc:
                 backoff = _should_retry(request, None, exc, attempt, retry) if retry else None
                 if backoff is not None:
-                    time.sleep(backoff)
+                    sleep(backoff)
                     continue
                 raise NemoTransportError(exc) from exc
             if retry:
                 backoff = _should_retry(request, raw, None, attempt, retry)
                 if backoff is not None:
                     last_response = raw
-                    time.sleep(backoff)
+                    sleep(backoff)
                     continue
             return raw
 
@@ -1092,7 +1093,7 @@ class NemoClient(BaseNemoClient[httpx.Client]):
                 with self._http.stream(request.method, url, **kwargs) as raw:
                     backoff = _should_retry(request, raw, None, attempt, retry) if retry else None
                     if backoff is not None:
-                        time.sleep(backoff)
+                        sleep(backoff)
                         continue
                     yielded = True
                     yield raw
@@ -1102,7 +1103,7 @@ class NemoClient(BaseNemoClient[httpx.Client]):
                     raise NemoTransportError(exc) from exc
                 backoff = _should_retry(request, None, exc, attempt, retry) if retry else None
                 if backoff is not None:
-                    time.sleep(backoff)
+                    sleep(backoff)
                     continue
                 raise NemoTransportError(exc) from exc
 
@@ -1380,14 +1381,14 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
             except httpx.TransportError as exc:
                 backoff = _should_retry(request, None, exc, attempt, retry) if retry else None
                 if backoff is not None:
-                    await asyncio.sleep(backoff)
+                    await async_sleep(backoff)
                     continue
                 raise NemoTransportError(exc) from exc
             if retry:
                 backoff = _should_retry(request, raw, None, attempt, retry)
                 if backoff is not None:
                     last_response = raw
-                    await asyncio.sleep(backoff)
+                    await async_sleep(backoff)
                     continue
             return raw
 
@@ -1420,7 +1421,7 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
                 async with self._http.stream(request.method, url, **kwargs) as raw:
                     backoff = _should_retry(request, raw, None, attempt, retry) if retry else None
                     if backoff is not None:
-                        await asyncio.sleep(backoff)
+                        await async_sleep(backoff)
                         continue
                     yielded = True
                     yield raw
@@ -1430,7 +1431,7 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
                     raise NemoTransportError(exc) from exc
                 backoff = _should_retry(request, None, exc, attempt, retry) if retry else None
                 if backoff is not None:
-                    await asyncio.sleep(backoff)
+                    await async_sleep(backoff)
                     continue
                 raise NemoTransportError(exc) from exc
 

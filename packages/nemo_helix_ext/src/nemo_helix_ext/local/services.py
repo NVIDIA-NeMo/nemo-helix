@@ -5,18 +5,18 @@
 
 from __future__ import annotations
 
-import asyncio
 import importlib.util
 import json
 import os
 import subprocess
 import sys
 import tempfile
-import time
+from asyncio import to_thread
 from collections.abc import Callable, MutableMapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from time import monotonic, sleep
 from typing import Any, Literal, Protocol, Self, runtime_checkable
 
 from nemo_helix_ext.local import process
@@ -358,13 +358,13 @@ class DaemonServiceHandle:
         return process.stop_instance(self.scope, base_dir=state_root, timeout=timeout, force=force)
 
     async def stop_async(self, *, timeout: float = 30.0, force: bool = False) -> process.StopResult:
-        return await asyncio.to_thread(self.stop, timeout=timeout, force=force)
+        return await to_thread(self.stop, timeout=timeout, force=force)
 
     def start_services(self, service_names: Sequence[str]) -> StartServicesResult:
         raise ServicesError("Staged service start is not implemented for daemon mode yet")
 
     async def start_services_async(self, service_names: Sequence[str]) -> StartServicesResult:
-        return await asyncio.to_thread(self.start_services, service_names)
+        return await to_thread(self.start_services, service_names)
 
     def client(self, **kwargs: Any) -> NemoClient:
         if self.transport == "uds":
@@ -409,7 +409,7 @@ class EmbeddedServiceHandle:
         raise ServicesError("Staged service start is not implemented for embedded mode yet")
 
     async def start_services_async(self, service_names: Sequence[str]) -> StartServicesResult:
-        return await asyncio.to_thread(self.start_services, service_names)
+        return await to_thread(self.start_services, service_names)
 
     def stop(self, *, timeout: float = 30.0, force: bool = False) -> process.StopResult:
         return process.StopResult(stopped_pids=[], swept_children=[])
@@ -604,9 +604,9 @@ def daemonize_services(config: ServiceRunConfig | None = None) -> DaemonServiceH
             log_file.close()
         assert proc is not None
         handle = DaemonServiceHandle.from_config(cfg, pid=proc.pid)
-        deadline = time.monotonic() + cfg.readiness_timeout
+        deadline = monotonic() + cfg.readiness_timeout
         while True:
-            remaining = deadline - time.monotonic()
+            remaining = deadline - monotonic()
             if remaining <= 0:
                 break
             if proc.poll() is not None:
@@ -618,10 +618,10 @@ def daemonize_services(config: ServiceRunConfig | None = None) -> DaemonServiceH
             ):
                 ownership_transferred = True
                 return handle
-            remaining = deadline - time.monotonic()
+            remaining = deadline - monotonic()
             if remaining <= 0:
                 break
-            time.sleep(min(cfg.readiness_poll_interval, remaining))
+            sleep(min(cfg.readiness_poll_interval, remaining))
         raise ServicesStartupTimeoutError(f"Timed out waiting for services daemon {cfg.scope!r}; log: {log_path}")
     finally:
         if proc is not None and not ownership_transferred:
@@ -629,7 +629,7 @@ def daemonize_services(config: ServiceRunConfig | None = None) -> DaemonServiceH
 
 
 async def daemonize_services_async(config: ServiceRunConfig | None = None) -> DaemonServiceHandle:
-    return await asyncio.to_thread(daemonize_services, config)
+    return await to_thread(daemonize_services, config)
 
 
 def start_embedded_services(
@@ -757,4 +757,4 @@ async def stop_services_async(
     timeout: float = 30.0,
     force: bool = False,
 ) -> process.StopResult:
-    return await asyncio.to_thread(stop_services, config, timeout=timeout, force=force)
+    return await to_thread(stop_services, config, timeout=timeout, force=force)

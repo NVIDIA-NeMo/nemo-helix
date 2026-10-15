@@ -289,7 +289,7 @@ async def test_a_body_free_200_names_both_causes(tasks, tmp_path, monkeypatch) -
     runner = runner_against(host, monkeypatch)
     # The runner times its own POST; a MockTransport answers instantly, so stand in for the wait.
     monkeypatch.setattr(
-        "nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed.time.monotonic",
+        "nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed.monotonic",
         _clock_advancing_by(180.0),
     )
 
@@ -306,7 +306,7 @@ async def test_a_body_free_200_that_arrived_fast_blames_the_sandbox_alone(tasks,
     host = _FakeHost(content=b"")
     runner = runner_against(host, monkeypatch)
     monkeypatch.setattr(
-        "nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed.time.monotonic",
+        "nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed.monotonic",
         _clock_advancing_by(2.0),
     )
 

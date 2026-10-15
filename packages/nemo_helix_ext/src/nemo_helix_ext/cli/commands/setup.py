@@ -16,10 +16,11 @@ import os
 import re
 import subprocess
 import sys
-import time
 from dataclasses import dataclass
 from enum import Enum, StrEnum
 from pathlib import Path
+from time import monotonic, sleep
+from time import time as wall_time
 from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 
@@ -337,7 +338,7 @@ _LOCAL_CONTEXT_NAME = "local"
 
 
 def _pause(seconds: float) -> None:
-    time.sleep(seconds)
+    sleep(seconds)
 
 
 # Filesystem markers that indicate which coding agents are in use.
@@ -802,12 +803,12 @@ def _wait_for_models_impl(
     flagged as non-compliant or unhealthy, so the user isn't left waiting
     for models that will never arrive.
     """
-    start = time.monotonic()
+    start = monotonic()
     for attempt in range(max_rounds):
-        deadline = time.monotonic() + round_seconds
+        deadline = monotonic() + round_seconds
         with console.status("[bold cyan]Waiting for model discovery...") as status:
-            while time.monotonic() < deadline:
-                elapsed = int(time.monotonic() - start)
+            while monotonic() < deadline:
+                elapsed = int(monotonic() - start)
                 status.update(f"[bold cyan]Waiting for model discovery... ({elapsed}s)")
                 try:
                     provider = clients.models.get_provider(name=provider_name, workspace=workspace).data()
@@ -931,7 +932,7 @@ def _probe_model_entity(gateway: InferenceGatewayClient, workspace: str, entity_
 
     Retries route 404s; timeouts skip; connection errors raise.
     """
-    route_ready_deadline = time.monotonic() + _MODEL_ROUTE_READY_SECONDS
+    route_ready_deadline = monotonic() + _MODEL_ROUTE_READY_SECONDS
     retries = 0
     while True:
         try:
@@ -959,7 +960,7 @@ def _probe_model_entity(gateway: InferenceGatewayClient, workspace: str, entity_
                 exc.status_code == 404
                 and not entitlement_miss
                 and retries < _MODEL_ROUTE_MAX_RETRIES
-                and time.monotonic() < route_ready_deadline
+                and monotonic() < route_ready_deadline
             ):
                 retries += 1
                 _pause(_MODEL_ROUTE_RETRY_INTERVAL)
@@ -985,14 +986,14 @@ def _select_usable_model_pair(clients: SetupClients, workspace: str, entity_ids:
 
     usable: dict[str, bool] = {}
     probe_client = clients.gateway.with_options(retry=RetryPolicy(max_retries=0), timeout=_MODEL_PROBE_TIMEOUT)
-    started = time.monotonic()
+    started = monotonic()
     deadline = started + _MODEL_PROBE_BUDGET_SECONDS
 
     def first_usable(ordered: list[str]) -> str | None:
         attempts = 0
         for entity_id in ordered:
             if entity_id not in usable:
-                if attempts >= _MODEL_PROBE_MAX_ATTEMPTS or time.monotonic() >= deadline:
+                if attempts >= _MODEL_PROBE_MAX_ATTEMPTS or monotonic() >= deadline:
                     return None
                 attempts += 1
                 usable[entity_id] = _probe_model_entity(probe_client, workspace, entity_id)
@@ -1227,13 +1228,13 @@ def _wait_for_platform(
     When *proc* is provided, return False immediately if the service process
     exits before the platform becomes ready (avoid waiting the full timeout).
     """
-    start = time.monotonic()
+    start = monotonic()
     deadline = start + timeout
     with console.status("[bold cyan]Waiting for platform...") as status:
-        while time.monotonic() < deadline:
+        while monotonic() < deadline:
             if proc is not None and proc.poll() is not None:
                 return False
-            elapsed = int(time.monotonic() - start)
+            elapsed = int(monotonic() - start)
             svc = _last_startup_service(log_path)
             hint = f" — loaded {svc}" if svc else ""
             status.update(f"[bold cyan]Waiting for platform... ({elapsed}s){hint}")
@@ -1416,8 +1417,8 @@ def _maybe_start_services(
     if already_running:
         console.print("  Restarting Helix services...")
         _kill_existing_services(base_url)
-        deadline = time.time() + _KILL_WAIT_TIMEOUT
-        while time.time() < deadline and _check_platform_reachable(
+        deadline = wall_time() + _KILL_WAIT_TIMEOUT
+        while wall_time() < deadline and _check_platform_reachable(
             base_url,
             timeout=1.0,
             certificate_authority=certificate_authority,
@@ -1874,10 +1875,10 @@ def _print_sample_setup_complete(base_url: str, workspace: str, *, complete: boo
 def _wait_for_sample_deployment(agents_client: AgentsClient, sample: SampleAgentResponse, *, submitted: bool) -> bool:
     """Wait for the deployment returned by the sample-agent API to reach running."""
     status = sample.deployment_status
-    deadline = time.monotonic() + _AGENT_DEPLOY_TIMEOUT_SECONDS
+    deadline = monotonic() + _AGENT_DEPLOY_TIMEOUT_SECONDS
     activity = "Deploying" if submitted else "Waiting for"
     with console.status(f"[bold cyan]{activity} agent '{sample.agent}'..."):
-        while status not in {"running", "failed"} and time.monotonic() < deadline:
+        while status not in {"running", "failed"} and monotonic() < deadline:
             try:
                 status = agents_client.get_deployment(workspace=sample.workspace, name=sample.deployment).data().status
             except Exception:
@@ -2722,8 +2723,8 @@ def _run_auto_mode(
     console.print("\n  Waiting for model discovery...")
     entity_ids: list[str] = []
     for attempt in range(_MODEL_DISCOVERY_MAX_ROUNDS):
-        deadline = time.time() + _MODEL_DISCOVERY_ROUND_SECONDS
-        while time.time() < deadline:
+        deadline = wall_time() + _MODEL_DISCOVERY_ROUND_SECONDS
+        while wall_time() < deadline:
             entity_ids = _get_all_model_entity_ids(clients, workspace, provider_name=provider_name)
             if entity_ids:
                 break

@@ -450,7 +450,7 @@ def test_readiness_poll_suppresses_only_transient_driver_warning(
             raise ConnectionError("ClickHouse is still starting")
 
     monkeypatch.setattr("nhx.intake.local_clickhouse._ping_clickhouse", ping)
-    monkeypatch.setattr("nhx.intake.local_clickhouse.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("nhx.intake.local_clickhouse.sleep", lambda _seconds: None)
     caplog.set_level(logging.WARNING, logger=driver_logger.name)
 
     _wait_until_ready(settings)

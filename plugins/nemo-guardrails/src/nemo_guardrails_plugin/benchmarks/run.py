@@ -23,10 +23,10 @@ import argparse
 import logging
 import os
 import sys
-import time
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
+from time import sleep
 
 from nemo_guardrails_plugin.benchmarks.aiperf_runner import (
     SweepRunResult,
@@ -229,7 +229,7 @@ def _smoke_test(client: NemoClient, seeded: SeededResources) -> None:
         except NemoTransportError as exc:
             last_error = f"transport error: {str(exc)[:500]}"
             log.info("Smoke test attempt %d: %s; retrying", attempt + 1, last_error)
-        time.sleep(1.0)
+        sleep(1.0)
 
     raise RuntimeError(f"Smoke test failed after 60 attempts: {last_error}")
 

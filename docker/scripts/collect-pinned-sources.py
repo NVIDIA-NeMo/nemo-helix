@@ -16,12 +16,12 @@ import json
 import os
 import re
 import sys
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from time import sleep
 
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 ARCHIVE_SUFFIXES = (".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst", ".tgz", ".zip", ".crate")
@@ -100,7 +100,7 @@ def download(source: PinnedSource, destination: Path) -> None:
             return
         except (OSError, http.client.HTTPException) as error:
             last_error = error
-            time.sleep(2**attempt)
+            sleep(2**attempt)
     raise RuntimeError(f"could not download {source.name} {source.version} from {source.url}: {last_error}")
 
 

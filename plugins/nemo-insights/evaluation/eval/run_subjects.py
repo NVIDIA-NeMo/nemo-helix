@@ -10,9 +10,9 @@ names. (The analyze job doesn't use this script — it calls
 import json
 import os
 import subprocess
-import time
 from collections.abc import Mapping
 from pathlib import Path
+from time import sleep
 
 LOCAL_URL = "http://localhost:8080"  # the in-job CI stack
 PLATFORM_ROOT = Path(__file__).resolve().parents[4]
@@ -55,7 +55,7 @@ def analyze_with_retry(subject: str, summary: str, retries: int = 2, delay: floa
             if attempt == retries:
                 raise
             print(f"analyze failed (attempt {attempt + 1}/{retries + 1}); cooling down {int(delay)}s", flush=True)
-            time.sleep(delay)
+            sleep(delay)
 
 
 def main() -> None:

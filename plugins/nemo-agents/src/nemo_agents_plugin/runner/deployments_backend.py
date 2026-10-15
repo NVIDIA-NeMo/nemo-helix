@@ -16,8 +16,9 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
-import time
+from asyncio import sleep as async_sleep
 from pathlib import PurePosixPath
+from time import monotonic
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -984,13 +985,13 @@ class DeploymentsRunnerBackend(RunnerBackend):
     async def _wait_for_deployment_gone(self, workspace: str, dep_name: str) -> bool:
         """Return True if the Deployment entity disappears within the wait budget."""
         entities = self._entity_client()
-        deadline = time.monotonic() + _DELETE_CONFIG_WAIT_S
-        while time.monotonic() < deadline:
+        deadline = monotonic() + _DELETE_CONFIG_WAIT_S
+        while monotonic() < deadline:
             try:
                 await entities.get(Deployment, name=dep_name, workspace=workspace)
             except NemoEntityNotFoundError:
                 return True
-            await asyncio.sleep(_DELETE_CONFIG_POLL_S)
+            await async_sleep(_DELETE_CONFIG_POLL_S)
         return False
 
     async def list_deployments(self, workspace: str | None = None) -> list[DeploymentInfo]:

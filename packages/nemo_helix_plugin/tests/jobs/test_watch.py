@@ -159,7 +159,7 @@ def _completed() -> HelixJobStatusResponse:
 
 def test_watch_job_retries_foreign_transient_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     """Retry semantics hold for both error families without importing the generated SDK."""
-    monkeypatch.setattr(watch_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(watch_module, "sleep", lambda _: None)
     client = _StatusOnlyClient([_ForeignStatusError(503), _foreign_connection_error(), _completed()])
 
     events = list(watch_job(client, "job-a", include_logs=False, poll_interval=0))
@@ -173,7 +173,7 @@ def test_watch_job_retries_foreign_transient_errors(monkeypatch: pytest.MonkeyPa
 
 
 def test_watch_job_raises_foreign_non_transient_status_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(watch_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(watch_module, "sleep", lambda _: None)
     client = _StatusOnlyClient([_ForeignStatusError(404)])
 
     with pytest.raises(_ForeignStatusError):
@@ -181,7 +181,7 @@ def test_watch_job_raises_foreign_non_transient_status_errors(monkeypatch: pytes
 
 
 def test_watch_job_propagates_unclassified_exceptions(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(watch_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(watch_module, "sleep", lambda _: None)
     client = _StatusOnlyClient([RuntimeError("boom")])
 
     with pytest.raises(RuntimeError, match="boom"):

@@ -93,7 +93,7 @@ def test_checksum_mismatch_fails_without_writing(monkeypatch: pytest.MonkeyPatch
 def test_download_failure_fails_the_build(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     module = load_module()
     monkeypatch.setenv("NHX_COLLECT_SOURCES", "1")
-    monkeypatch.setattr(module.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(module, "sleep", lambda seconds: None)
 
     def unreachable(url: str, timeout: int) -> Response:
         raise module.urllib.error.URLError("TLS connect error")
