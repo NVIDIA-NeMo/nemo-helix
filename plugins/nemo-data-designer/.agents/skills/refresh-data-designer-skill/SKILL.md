@@ -22,7 +22,7 @@ Earlier versions of this playbook copied upstream wholesale and tried to teach a
 
 ## When to use
 
-- After bumping the `data-designer==X.Y.Z` pin in `plugins/nemo-data-designer/pyproject.toml`.
+- After bumping the `data-designer==X.Y.Z` pin. The repo-level `bump-data-designer` skill (`.agents/skills/bump-data-designer/`) runs this as its Step 8.
 - When upstream ships skill changes that should land here.
 - When auditing drift between the vendored copy and upstream.
 
@@ -53,7 +53,7 @@ For plugin-owned files, "review only" means: read upstream's version to see whet
 grep -E '"data-designer==' plugins/nemo-data-designer/pyproject.toml | head -1
 ```
 
-Capture the version string (e.g., `0.9.3`) — this is `$VERSION` for the rest of the procedure.
+Capture the version string (e.g., `X.Y.Z`); this is `$VERSION` for the rest of the procedure.
 
 ### Step 2 — Fetch the upstream bundle to a temp directory
 
