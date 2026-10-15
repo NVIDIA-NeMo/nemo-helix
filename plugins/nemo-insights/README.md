@@ -140,7 +140,6 @@ environment wins. All settings live under `analyst`, with the
 | — (see below) | `analyst.run_on_weekday` | `monday` | Day scheduled runs fire. Used only when frequency is `weekly`. |
 | — (see below) | `analyst.job_profile` | `default` | Jobs execution profile for scheduled analyst jobs. |
 | — (see below) | `analyst.base_url` | unset | NeMo Helix base URL passed to analyst jobs. When unset, jobs use their active platform context. |
-| — (see below) | `analyst.inference_api_key_secret_name` | unset | NeMo Helix secret whose value is exposed to analyst jobs as `INFERENCE_API_KEY`. Temporary until FP-202 moves analyst model execution to platform-registered models. |
 
 ```bash
 export NEMO_INSIGHTS_ANALYST_FREQUENCY=weekly
