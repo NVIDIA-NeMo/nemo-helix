@@ -3,7 +3,7 @@
 
 /**
  * Whether the agent has anything for Platform to run. An agent can exist without a config (today,
- * the "Traces" tab creates one with `config: {}` to anchor telemetry), and `{}` is truthy, so
+ * "Register from traces" creates one with `config: {}` to anchor telemetry), and `{}` is truthy, so
  * a bare `!!config` check lets it through to a deploy that always fails.
  */
 export const hasAgentConfig = (config: object | null | undefined): boolean =>

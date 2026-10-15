@@ -159,7 +159,7 @@ test.describe('Agent Evaluation', () => {
       const modal = page.getByRole('dialog', { name: 'Register an agent with NeMo Helix' });
       await expect(modal).toBeVisible();
 
-      await modal.getByRole('tab', { name: 'Code upload' }).click();
+      await modal.getByRole('tab', { name: 'Register with code upload' }).click();
       // A webkitdirectory input takes a directory path; the browser hands over every
       // descendant, and the modal filters __pycache__ and friends out client-side.
       await modal.getByTestId('agent-directory-input').setInputFiles(AGENT_DIR);
