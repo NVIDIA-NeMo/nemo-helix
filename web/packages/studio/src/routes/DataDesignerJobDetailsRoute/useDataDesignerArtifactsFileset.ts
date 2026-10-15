@@ -28,7 +28,7 @@ export const useDataDesignerArtifactsFileset = () => {
     isLoading: isResultsLoading,
     isError: isResultsError,
     error: resultsError,
-  } = useDataDesignerListCreateJobResults(workspace, jobName, {
+  } = useDataDesignerListCreateJobResults(workspace, jobName, undefined, {
     query: { refetchInterval: isTerminal ? false : 3000 },
   });
 

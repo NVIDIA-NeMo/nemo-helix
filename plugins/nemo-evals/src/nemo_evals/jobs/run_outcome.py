@@ -105,10 +105,18 @@ def report_run_outcome(outcome: RunOutcome, *, ctx: JobContext, async_client: As
     if ctx.job_id is None or async_client is None:
         return
     job_id = ctx.job_id
+    attempt_id = ctx.attempt_id
+    if attempt_id is None:
+        logger.warning("Cannot report the evaluation outcome for job %r without an attempt ID", job_id)
+        return
 
     async def _update(client: AsyncNemoClient) -> None:
-        await AsyncJobsClient.from_client(client).update_status_details(
-            job_id, workspace=ctx.workspace, body=outcome.status_details()
+        jobs = AsyncJobsClient.from_client(client)
+        await jobs.update_attempt_status_details(
+            job_id,
+            attempt_id,
+            workspace=ctx.workspace,
+            body=outcome.status_details(),
         )
 
     try:

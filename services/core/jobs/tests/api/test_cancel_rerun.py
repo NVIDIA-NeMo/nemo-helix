@@ -23,20 +23,23 @@ async def test_cancelled_job_has_no_active_public_child_tasks(test_client: Async
     assert response.status_code == 201
     response = await test_client.patch(f"{base}/steps/training/status", json={"status": "active"})
     assert response.status_code == 200
-    response = await test_client.put(f"{base}/steps/training/tasks/pod-task", json={"status": "active"})
+    response = await test_client.put(
+        f"{base}/attempts/current/steps/training/tasks/pod-task", json={"status": "active"}
+    )
     assert response.status_code == 200
 
     response = await test_client.post(f"{base}/cancel")
     assert response.status_code == 200
     assert response.json()["status"] == "cancelling"
-    response = await test_client.get(f"{base}/steps/training/tasks/pod-task")
+    response = await test_client.get(f"{base}/attempts/current/steps/training/tasks/pod-task")
     assert response.json()["status"] == "active"
     response = await test_client.patch(f"{base}/steps/training/status", json={"status": "cancelled"})
     assert response.status_code == 200
 
     for task_name in ["pod-task", "late-task"]:
         response = await test_client.put(
-            f"{base}/steps/training/tasks/{task_name}", json={"status": "active", "status_details": {"step": 100}}
+            f"{base}/attempts/current/steps/training/tasks/{task_name}",
+            json={"status": "active", "status_details": {"step": 100}},
         )
         assert response.status_code == 200
         assert response.json()["status"] == "cancelled"

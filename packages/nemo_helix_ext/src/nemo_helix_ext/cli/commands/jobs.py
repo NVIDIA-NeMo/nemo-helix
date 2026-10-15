@@ -18,10 +18,11 @@ from nemo_helix_plugin.jobs.types import (
     HelixJobTaskUpdate,
     JobControl,
     JobLogsQueryParams,
-    JobStatusDetailsUpdate,
+    ListAttemptsQueryParams,
     ListJobResultsQueryParams,
     ListJobsQueryParams,
     ListStepsQueryParams,
+    UpdateHelixJobRequest,
 )
 
 from nemo_helix_ext.cli.core.api import build_kwargs, merge_filter_dict
@@ -67,10 +68,12 @@ JobStatusValue = Literal[
 ]
 
 app = create_typer_app(name="jobs", help="Manage jobs.")
+attempts_app = create_typer_app(name="attempts", help="Inspect job attempts")
 results_app = create_typer_app(name="results", help="Manage results")
 steps_app = create_typer_app(name="steps", help="Manage steps")
 tasks_app = create_typer_app(name="tasks", help="Manage tasks")
 
+app.add_typer(attempts_app, name="attempts")
 app.add_typer(results_app, name="results")
 app.add_typer(steps_app, name="steps")
 app.add_typer(tasks_app, name="tasks")
@@ -114,6 +117,25 @@ def _list_steps_query_params(
     sort: str | None,
 ) -> ListStepsQueryParams | None:
     query_params: ListStepsQueryParams = {}
+    if filter_value is not None:
+        query_params["filter"] = filter_value
+    if page is not None:
+        query_params["page"] = page
+    if page_size is not None:
+        query_params["page_size"] = page_size
+    if sort is not None:
+        query_params["sort"] = sort
+    return query_params or None
+
+
+def _list_attempts_query_params(
+    *,
+    filter_value: str | None,
+    page: int | None,
+    page_size: int | None,
+    sort: str | None,
+) -> ListAttemptsQueryParams | None:
+    query_params: ListAttemptsQueryParams = {}
     if filter_value is not None:
         query_params["filter"] = filter_value
     if page is not None:
@@ -183,7 +205,7 @@ def _generate_jobs_python_code(
         "from nemo_helix_plugin.jobs.schemas import HelixJobResultCreateRequest",
         (
             "from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, "
-            "JobStatusDetailsUpdate, HelixJobStatusUpdateRequest, HelixJobTaskUpdate"
+            "HelixJobStatusUpdateRequest, HelixJobTaskUpdate, UpdateHelixJobRequest"
         ),
     ]
     if lifecycle_mode == "wait":
@@ -196,7 +218,7 @@ def _generate_jobs_python_code(
             else "jobs_client = JobsClient.from_config()",
             f"args = {_format_python_literal(args)}",
             "",
-            *_render_source_jobs_call(resource_path, method),
+            *_render_source_jobs_call(resource_path, method, args),
         ]
     )
 
@@ -216,7 +238,7 @@ def _generate_jobs_python_code(
     return "\n".join(lines)
 
 
-def _render_source_jobs_call(resource_path: list[str], method: str) -> list[str]:
+def _render_source_jobs_call(resource_path: list[str], method: str, args: dict[str, Any]) -> list[str]:
     operation = (tuple(resource_path), method)
     if operation == (("jobs",), "create"):
         return [
@@ -252,6 +274,16 @@ def _render_source_jobs_call(resource_path: list[str], method: str) -> list[str]
             "response = jobs_client.get_job(name=args['name'], workspace=args.get('workspace'))",
             "print(response.data())",
         ]
+    if operation == (("jobs",), "update"):
+        return [
+            "request = {key: value for key, value in args.items() if key not in {'workspace', 'name'}}",
+            "response = jobs_client.update_job(",
+            "    name=args['name'],",
+            "    workspace=args.get('workspace'),",
+            "    body=UpdateHelixJobRequest.model_validate(request),",
+            ")",
+            "print(response.data())",
+        ]
     if operation == (("jobs",), "delete"):
         return ["jobs_client.delete_job(name=args['name'], workspace=args.get('workspace'))"]
     if operation == (("jobs",), "cancel"):
@@ -284,12 +316,23 @@ def _render_source_jobs_call(resource_path: list[str], method: str) -> list[str]
             "response = jobs_client.get_job_status(name=args['name'], workspace=args.get('workspace'))",
             "print(response.data())",
         ]
-    if operation == (("jobs",), "update_status_details"):
+    if operation == (("jobs", "attempts"), "list"):
         return [
-            "response = jobs_client.update_job_status_details(",
-            "    name=args['name'],",
+            "query_params = {key: value for key, value in args.items() if key not in {'workspace', 'job'}}",
+            "response = jobs_client.list_job_attempts(",
             "    workspace=args.get('workspace'),",
-            "    body=JobStatusDetailsUpdate.model_validate(args['body']),",
+            "    job=args['job'],",
+            "    query_params=query_params or None,",
+            ")",
+            "for item in response.page().items:",
+            "    print(item)",
+        ]
+    if operation == (("jobs", "attempts"), "retrieve"):
+        return [
+            "response = jobs_client.get_job_attempt(",
+            "    workspace=args.get('workspace'),",
+            "    job=args['job'],",
+            "    attempt=args['attempt'],",
             ")",
             "print(response.data())",
         ]
@@ -337,31 +380,55 @@ def _render_source_jobs_call(resource_path: list[str], method: str) -> list[str]
             "            output.write(chunk)",
         ]
     if operation == (("jobs", "steps"), "list"):
+        has_attempt = args.get("attempt_id") is not None
+        method = "list_attempt_steps" if has_attempt else "list_steps"
+        selector_lines = (
+            ["    job=args['name'],", "    attempt=args['attempt_id'],"] if has_attempt else ["    name=args['name'],"]
+        )
+        query_line = (
+            "query_params = {key: value for key, value in args.items() if key not in "
+            "{'workspace', 'name', 'attempt_id'}}"
+            if has_attempt
+            else "query_params = {key: value for key, value in args.items() if key not in {'workspace', 'name'}}"
+        )
         return [
-            "query_params = {key: value for key, value in args.items() if key not in {'workspace', 'name'}}",
-            "response = jobs_client.list_steps(",
+            query_line,
+            f"response = jobs_client.{method}(",
             "    workspace=args.get('workspace'),",
-            "    name=args['name'],",
+            *selector_lines,
             "    query_params=query_params or None,",
             ")",
             "for item in response.page().items:",
             "    print(item)",
         ]
     if operation == (("jobs", "steps"), "retrieve"):
+        method = "get_attempt_step" if args.get("attempt_id") is not None else "get_job_step"
+        attempt_line = "    attempt=args['attempt_id']," if args.get("attempt_id") is not None else None
         return [
-            "response = jobs_client.get_job_step(",
+            f"response = jobs_client.{method}(",
             "    workspace=args.get('workspace'),",
             "    job=args['job'],",
+            *([attempt_line] if attempt_line else []),
             "    name=args['name'],",
             ")",
             "print(response.data())",
         ]
     if operation == (("jobs", "steps"), "update_status"):
+        has_attempt = args.get("attempt_id") is not None
+        method = "update_attempt_step_status" if has_attempt else "update_job_step_status"
+        attempt_line = "    attempt=args['attempt_id']," if has_attempt else None
+        request_line = (
+            "request = {key: value for key, value in args.items() if key not in "
+            "{'workspace', 'job', 'name', 'attempt_id'}}"
+            if has_attempt
+            else "request = {key: value for key, value in args.items() if key not in {'workspace', 'job', 'name'}}"
+        )
         return [
-            "request = {key: value for key, value in args.items() if key not in {'workspace', 'job', 'name'}}",
-            "response = jobs_client.update_job_step_status(",
+            request_line,
+            f"response = jobs_client.{method}(",
             "    workspace=args.get('workspace'),",
             "    job=args['job'],",
+            *([attempt_line] if attempt_line else []),
             "    name=args['name'],",
             "    body=HelixJobStatusUpdateRequest.model_validate(request),",
             ")",
@@ -369,10 +436,12 @@ def _render_source_jobs_call(resource_path: list[str], method: str) -> list[str]
         ]
     if operation == (("jobs", "tasks"), "create_or_update"):
         return [
-            "request = {key: value for key, value in args.items() if key not in {'workspace', 'job', 'step', 'name'}}",
-            "response = jobs_client.update_job_step_task(",
+            "request = {key: value for key, value in args.items() if key not in "
+            "{'workspace', 'job', 'step', 'name', 'attempt_id'}}",
+            "response = jobs_client.update_attempt_step_task(",
             "    workspace=args.get('workspace'),",
             "    job=args['job'],",
+            "    attempt=args['attempt_id'],",
             "    step=args['step'],",
             "    name=args['name'],",
             "    body=HelixJobTaskUpdate.model_validate(request),",
@@ -380,20 +449,26 @@ def _render_source_jobs_call(resource_path: list[str], method: str) -> list[str]
             "print(response.data())",
         ]
     if operation == (("jobs", "tasks"), "list"):
+        method = "list_attempt_step_tasks" if args.get("attempt_id") is not None else "list_job_step_tasks"
+        attempt_line = "    attempt=args['attempt_id']," if args.get("attempt_id") is not None else None
         return [
-            "response = jobs_client.list_job_step_tasks(",
+            f"response = jobs_client.{method}(",
             "    workspace=args.get('workspace'),",
             "    job=args['job'],",
-            "    name=args['name'],",
+            *([attempt_line] if attempt_line else []),
+            *(["    step=args['name'],"] if attempt_line else ["    name=args['name'],"]),
             ")",
             "for item in response.data().data:",
             "    print(item)",
         ]
     if operation == (("jobs", "tasks"), "retrieve"):
+        method = "get_attempt_step_task" if args.get("attempt_id") is not None else "get_job_step_task"
+        attempt_line = "    attempt=args['attempt_id']," if args.get("attempt_id") is not None else None
         return [
-            "response = jobs_client.get_job_step_task(",
+            f"response = jobs_client.{method}(",
             "    workspace=args.get('workspace'),",
             "    job=args['job'],",
+            *([attempt_line] if attempt_line else []),
             "    step=args['step'],",
             "    name=args['name'],",
             ")",
@@ -690,7 +765,9 @@ def get_logs_jobs(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
-    attempt_id: Annotated[int | None, typer.Option("--attempt-id", help="Filter logs by job attempt ID")] = None,
+    attempt_id: Annotated[
+        str | None, typer.Option("--attempt-id", help="Filter logs by attempt ID or 'current'")
+    ] = None,
     limit: Annotated[int | None, typer.Option("--limit", help="Maximum number of logs to return")] = None,
     page_cursor: Annotated[str | None, typer.Option("--page-cursor", help="Page cursor")] = None,
     step_id: Annotated[str | None, typer.Option("--step-id", help="Filter logs by step name")] = None,
@@ -1046,14 +1123,16 @@ def retrieve_jobs(
     )
 
 
-@app.command("update-status-details")
+@app.command("update")
 @collect_warnings
 @handle_errors
-def update_status_details_jobs(
+def update_jobs(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument()],
+    name: Annotated[str, typer.Argument(help="Job name or ID (both are accepted).")],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
-    body: Annotated[str | None, typer.Option("--body", help="JSON string (required)")] = None,
+    description: Annotated[str | None, typer.Option("--description")] = None,
+    spec: Annotated[str | None, typer.Option("--spec", help="JSON string")] = None,
+    platform_spec: Annotated[str | None, typer.Option("--platform-spec", help="JSON string")] = None,
     input_file: Annotated[
         str | None,
         typer.Option("--input-file", help="Path to JSON file (use '-' for stdin)", rich_help_panel="Input Options"),
@@ -1064,49 +1143,35 @@ def update_status_details_jobs(
     ] = None,
     output_format: EntityOutputFormatOption = None,
 ) -> None:
-    """Update the status details of a platform job.
-
-    [bold red]Required fields:[/] body
-
-    [green]Examples:[/]
-    nemo jobs update-status-details <name> --input-file config.json
-    nemo jobs update-status-details <name> --input-data '{"body": {}}'
-    echo '{"json": "data"}' | nemo jobs update-status-details <name> --input-file -
-    nemo jobs update-status-details <name> --<option> "value"
-    """
-    if input_file or input_data:
-        input_payload = read_data_input_with_flags(input_file=input_file, input_data=input_data)
-    else:
-        input_payload = {}
-
+    """Update a job description or the definition used by future attempts."""
+    input_payload = (
+        read_data_input_with_flags(input_file=input_file, input_data=input_data) if input_file or input_data else {}
+    )
     if workspace is not None:
         input_payload["workspace"] = workspace
-    if body is not None:
-        input_payload["body"] = read_payload("body", body)
+    if description is not None:
+        input_payload["description"] = description
+    if spec is not None:
+        input_payload["spec"] = read_payload("spec", spec)
+    if platform_spec is not None:
+        input_payload["platform_spec"] = read_payload("platform_spec", platform_spec)
 
-    validate_required_fields(
-        input_payload,
-        ["body"],
-        "jobs update-status-details",
-        {
-            "body": "JSON string (required)",
-        },
-    )
+    request_payload = _without_keys(input_payload, {"workspace"})
+    if not request_payload:
+        raise typer.BadParameter("At least one update field is required")
 
     all_kwargs = {"name": name, **input_payload}
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
-
-    if handle_code_generation(["jobs"], "update_status_details", all_kwargs, resolved_output_format, state):
+    if handle_code_generation(["jobs"], "update", all_kwargs, resolved_output_format, state):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
-    result = jobs_client.update_job_status_details(
+    result = jobs_client.update_job(
         name=name,
         workspace=cast(str | None, input_payload.get("workspace")),
-        body=JobStatusDetailsUpdate.model_validate(input_payload["body"]),
+        body=UpdateHelixJobRequest.model_validate(request_payload),
     ).data()
-
     format_output(
         result,
         is_list=False,
@@ -1123,7 +1188,9 @@ def watch_platform_job(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument(help="Name of the platform job to watch")],
     workspace: Annotated[str | None, typer.Option("--workspace", help="Workspace containing the job")] = None,
-    attempt_id: Annotated[int | None, typer.Option("--attempt-id", help="Filter logs to an attempt ID")] = None,
+    attempt_id: Annotated[
+        str | None, typer.Option("--attempt-id", help="Filter logs to an attempt ID or 'current'")
+    ] = None,
     step_id: Annotated[str | None, typer.Option("--step-id", help="Filter logs to a step ID")] = None,
     task_id: Annotated[str | None, typer.Option("--task-id", help="Filter logs to a task ID")] = None,
     limit: Annotated[int | None, typer.Option("--limit", min=1, help="Maximum logs to fetch per page")] = None,
@@ -1169,7 +1236,9 @@ def tail_platform_job(
     name: Annotated[str, typer.Argument(help="Name of the platform job whose logs to tail")],
     lines: Annotated[int, typer.Option("-n", "--lines", min=1, max=10_000, help="Number of lines to show")] = 100,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Workspace containing the job")] = None,
-    attempt_id: Annotated[int | None, typer.Option("--attempt-id", help="Filter logs to an attempt ID")] = None,
+    attempt_id: Annotated[
+        str | None, typer.Option("--attempt-id", help="Filter logs to an attempt ID or 'current'")
+    ] = None,
     step_id: Annotated[str | None, typer.Option("--step-id", help="Filter logs to a step ID")] = None,
     task_id: Annotated[str | None, typer.Option("--task-id", help="Filter logs to a task ID")] = None,
 ) -> None:
@@ -1191,6 +1260,98 @@ def tail_platform_job(
     render_job_logs(response.page().items)
 
 
+@attempts_app.command("list")
+@collect_warnings
+@handle_errors
+def list_attempts(
+    ctx: typer.Context,
+    job: Annotated[str, typer.Argument(help="Job name or ID.")],
+    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    filter: Annotated[str | None, typer.Option("--filter", metavar="FILTER_JSON")] = None,
+    page: Annotated[int | None, typer.Option("--page", min=1)] = None,
+    page_size: Annotated[int | None, typer.Option("--page-size", min=1)] = None,
+    sort: Annotated[Literal["seq", "-seq"] | None, typer.Option("--sort")] = None,
+    output_format: ListOutputFormatOption = None,
+    no_truncate: NoTruncateOption = None,
+    columns: OutputColumnsOption = None,
+    stream: StreamOutputOption = False,
+    all_pages: Annotated[bool, typer.Option("--all-pages", help="Fetch all pages")] = False,
+) -> None:
+    """List execution attempts for a job."""
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+    validate_stream_output_format(resolved_output_format, stream)
+    check_output_columns_with_format(columns, resolved_output_format)
+    output_columns: str | list[Column] | None = columns
+    if columns is None or str(columns).strip() == "default":
+        output_columns = [
+            Column("seq", None),
+            Column("id", None),
+            Column("status", None),
+            Column("is_current", None),
+            Column("created_at", None),
+        ]
+
+    query_params = _list_attempts_query_params(
+        filter_value=filter,
+        page=page,
+        page_size=page_size,
+        sort=sort,
+    )
+    kwargs = {"job": job, **build_kwargs(workspace=workspace, **(query_params or {}))}
+    if handle_code_generation(["jobs", "attempts"], "list", kwargs, resolved_output_format, state):
+        return
+
+    _, jobs_client = _jobs_client_from_state(state)
+    response = jobs_client.list_job_attempts(workspace=workspace, job=job, query_params=query_params)
+    items = collect_offset_pages(response, all_pages=all_pages)
+    format_output(
+        items,
+        is_list=True,
+        output_format=resolved_output_format,
+        output_columns=output_columns,
+        no_truncate=state.get_no_truncate(no_truncate),
+        timestamp_format=state.get_timestamp_format(),
+        stream=stream,
+    )
+    if not all_pages:
+        warn_if_more_pages(items, PaginationType.PAGE_NUMBER)
+
+
+@attempts_app.command("get")
+@collect_warnings
+@handle_errors
+def retrieve_attempt(
+    ctx: typer.Context,
+    attempt: Annotated[str, typer.Argument(help="Attempt ID or 'current'.")],
+    job: Annotated[str | None, typer.Option("--job", help="Job name or ID (required).")] = None,
+    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    output_format: EntityOutputFormatOption = None,
+) -> None:
+    """Get one execution attempt."""
+    if job is None:
+        raise typer.BadParameter("--job is required")
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+    kwargs = {"attempt": attempt, "job": job, **build_kwargs(workspace=workspace)}
+    if handle_code_generation(["jobs", "attempts"], "retrieve", kwargs, resolved_output_format, state):
+        return
+
+    _, jobs_client = _jobs_client_from_state(state)
+    result = jobs_client.get_job_attempt(
+        workspace=workspace,
+        job=job,
+        attempt=attempt,
+    ).data()
+    format_output(
+        result,
+        is_list=False,
+        output_format=resolved_output_format,
+        no_truncate=state.get_no_truncate(),
+        timestamp_format=state.get_timestamp_format(),
+    )
+
+
 @results_app.command("create")
 @collect_warnings
 @handle_errors
@@ -1199,6 +1360,7 @@ def create_results(
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     job: Annotated[str | None, typer.Option("--job", help="(required)")] = None,
+    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Producing attempt ID (required)")] = None,
     artifact_storage_type: Annotated[
         Literal["fileset"] | None, typer.Option("--artifact-storage-type", help="(required)")
     ] = None,
@@ -1215,11 +1377,11 @@ def create_results(
 ) -> None:
     """Create a new result for a job.
 
-    [bold red]Required fields:[/] job, artifact_storage_type, artifact_url
+    [bold red]Required fields:[/] job, attempt_id, artifact_storage_type, artifact_url
 
     [green]Examples:[/]
     nemo jobs results create <name> --input-file config.json
-    nemo jobs results create <name> --input-data '{"job": "value", "artifact_storage_type": "value", "artifact_url": "value"}'
+    nemo jobs results create <name> --input-data '{"job": "value", "attempt_id": "value", "artifact_storage_type": "value", "artifact_url": "value"}'
     echo '{"json": "data"}' | nemo jobs results create <name> --input-file -
     nemo jobs results create <name> --<option> "value"
     """
@@ -1232,6 +1394,8 @@ def create_results(
         input_payload["workspace"] = workspace
     if job is not None:
         input_payload["job"] = job
+    if attempt_id is not None:
+        input_payload["attempt_id"] = attempt_id
     if artifact_storage_type is not None:
         input_payload["artifact_storage_type"] = artifact_storage_type
     if artifact_url is not None:
@@ -1239,10 +1403,11 @@ def create_results(
 
     validate_required_fields(
         input_payload,
-        ["job", "artifact_storage_type", "artifact_url"],
+        ["job", "attempt_id", "artifact_storage_type", "artifact_url"],
         "jobs results create",
         {
             "job": "(required)",
+            "attempt_id": "(required)",
             "artifact_storage_type": "(required)",
             "artifact_url": "(required)",
         },
@@ -1256,13 +1421,12 @@ def create_results(
         return
 
     _, jobs_client = _jobs_client_from_state(state)
+    result_body = HelixJobResultCreateRequest.model_validate(_without_keys(input_payload, {"workspace", "job"}))
     result = jobs_client.create_job_result(
         workspace=cast(str | None, input_payload.get("workspace")),
         job=cast(str, input_payload["job"]),
         name=name,
-        body=HelixJobResultCreateRequest.model_validate(
-            _without_keys(input_payload, {"workspace", "job"}),
-        ),
+        body=result_body,
     ).data()
 
     format_output(
@@ -1292,7 +1456,11 @@ def download_results(
         raise typer.BadParameter("--output-file is required")
 
     state: CLIContext = ctx.obj
-    kwargs = {"name": name, **build_kwargs(workspace=workspace, job=job), "output_file": str(output_file)}
+    kwargs = {
+        "name": name,
+        **build_kwargs(workspace=workspace, job=job),
+        "output_file": str(output_file),
+    }
     if handle_code_generation(["jobs", "results"], "download", kwargs, "json", state):
         return
 
@@ -1312,6 +1480,7 @@ def list_results(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     sort: Annotated[
         Literal["created_at", "-created_at", "updated_at", "-updated_at"] | None,
         typer.Option("--sort", help="The field to sort by."),
@@ -1339,6 +1508,7 @@ def list_results(
 
     kwargs = build_kwargs(
         workspace=workspace,
+        attempt_id=attempt_id,
         sort=sort,
     )
     codegen_kwargs = {"name": name, **kwargs}
@@ -1367,13 +1537,11 @@ def list_results(
 def retrieve_results(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument()],
+    job: Annotated[str, typer.Option("--job", help="Job name or ID")],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
-    job: Annotated[str | None, typer.Option("--job", help="(required)")] = None,
     output_format: EntityOutputFormatOption = None,
 ) -> None:
-    """Get a specific job result."""
-    if job is None:
-        raise typer.BadParameter("--job is required")
+    """Get a result by its job-wide unique name."""
 
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
@@ -1383,7 +1551,11 @@ def retrieve_results(
         return
 
     _, jobs_client = _jobs_client_from_state(state)
-    result = jobs_client.get_job_result(workspace=workspace, job=job, name=name).data()
+    result = jobs_client.get_job_result(
+        workspace=workspace,
+        job=job,
+        name=name,
+    ).data()
 
     format_output(
         result,
@@ -1401,6 +1573,7 @@ def list_steps(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     filter: Annotated[
         str | None,
         typer.Option(
@@ -1446,6 +1619,7 @@ def list_steps(
     query_params = _list_steps_query_params(filter_value=filter_value, page=page, page_size=page_size, sort=sort)
     kwargs = build_kwargs(
         workspace=workspace,
+        attempt_id=attempt_id,
         **(query_params or {}),
     )
     codegen_kwargs = {"name": name, **kwargs}
@@ -1454,7 +1628,15 @@ def list_steps(
         return
 
     _, jobs_client = _jobs_client_from_state(state)
-    response = jobs_client.list_steps(workspace=workspace, name=name, query_params=query_params)
+    if attempt_id is not None:
+        response = jobs_client.list_attempt_steps(
+            workspace=workspace,
+            job=name,
+            attempt=attempt_id,
+            query_params=query_params,
+        )
+    else:
+        response = jobs_client.list_steps(workspace=workspace, name=name, query_params=query_params)
     pagination_type = PaginationType.PAGE_NUMBER
     items = collect_offset_pages(response, all_pages=all_pages)
 
@@ -1479,6 +1661,7 @@ def retrieve_steps(
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     job: Annotated[str | None, typer.Option("--job", help="(required)")] = None,
+    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     output_format: EntityOutputFormatOption = None,
 ) -> None:
     """Get a specific job step."""
@@ -1488,12 +1671,20 @@ def retrieve_steps(
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 
-    kwargs = {"name": name, **build_kwargs(workspace=workspace, job=job)}
+    kwargs = {"name": name, **build_kwargs(workspace=workspace, job=job, attempt_id=attempt_id)}
     if handle_code_generation(["jobs", "steps"], "retrieve", kwargs, resolved_output_format, state):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
-    result = jobs_client.get_job_step(workspace=workspace, job=job, name=name).data()
+    if attempt_id is not None:
+        result = jobs_client.get_attempt_step(
+            workspace=workspace,
+            job=job,
+            attempt=attempt_id,
+            name=name,
+        ).data()
+    else:
+        result = jobs_client.get_job_step(workspace=workspace, job=job, name=name).data()
 
     format_output(
         result,
@@ -1512,6 +1703,7 @@ def update_status_steps(
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     job: Annotated[str | None, typer.Option("--job", help="(required)")] = None,
+    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     status: Annotated[
         JobStatusValue | None,
         typer.Option(
@@ -1556,6 +1748,8 @@ def update_status_steps(
         input_payload["workspace"] = workspace
     if job is not None:
         input_payload["job"] = job
+    if attempt_id is not None:
+        input_payload["attempt_id"] = attempt_id
     if status is not None:
         input_payload["status"] = status
     if error_details is not None:
@@ -1581,14 +1775,25 @@ def update_status_steps(
         return
 
     _, jobs_client = _jobs_client_from_state(state)
-    result = jobs_client.update_job_step_status(
-        workspace=cast(str | None, input_payload.get("workspace")),
-        job=cast(str, input_payload["job"]),
-        name=name,
-        body=HelixJobStatusUpdateRequest.model_validate(
-            _without_keys(input_payload, {"workspace", "job"}),
-        ),
-    ).data()
+    update_body = HelixJobStatusUpdateRequest.model_validate(
+        _without_keys(input_payload, {"workspace", "job", "attempt_id"}),
+    )
+    selected_attempt = cast(str | None, input_payload.get("attempt_id"))
+    if selected_attempt is not None:
+        result = jobs_client.update_attempt_step_status(
+            workspace=cast(str | None, input_payload.get("workspace")),
+            job=cast(str, input_payload["job"]),
+            attempt=selected_attempt,
+            name=name,
+            body=update_body,
+        ).data()
+    else:
+        result = jobs_client.update_job_step_status(
+            workspace=cast(str | None, input_payload.get("workspace")),
+            job=cast(str, input_payload["job"]),
+            name=name,
+            body=update_body,
+        ).data()
 
     format_output(
         result,
@@ -1607,6 +1812,7 @@ def create_or_update_tasks(
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     job: Annotated[str | None, typer.Option("--job", help="(required)")] = None,
+    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     step: Annotated[str | None, typer.Option("--step", help="(required)")] = None,
     error_details: Annotated[str | None, typer.Option("--error-details", help="JSON string")] = None,
     error_stack: Annotated[str | None, typer.Option("--error-stack")] = None,
@@ -1647,6 +1853,8 @@ def create_or_update_tasks(
         input_payload["workspace"] = workspace
     if job is not None:
         input_payload["job"] = job
+    if attempt_id is not None:
+        input_payload["attempt_id"] = attempt_id
     if step is not None:
         input_payload["step"] = step
     if error_details is not None:
@@ -1657,6 +1865,8 @@ def create_or_update_tasks(
         input_payload["status"] = status
     if status_details is not None:
         input_payload["status_details"] = read_payload("status_details", status_details)
+
+    input_payload.setdefault("attempt_id", "current")
 
     validate_required_fields(
         input_payload,
@@ -1676,14 +1886,16 @@ def create_or_update_tasks(
         return
 
     _, jobs_client = _jobs_client_from_state(state)
-    result = jobs_client.update_job_step_task(
+    update_body = HelixJobTaskUpdate.model_validate(
+        _without_keys(input_payload, {"workspace", "job", "step", "attempt_id"}),
+    )
+    result = jobs_client.update_attempt_step_task(
         workspace=cast(str | None, input_payload.get("workspace")),
         job=cast(str, input_payload["job"]),
+        attempt=cast(str, input_payload["attempt_id"]),
         step=cast(str, input_payload["step"]),
         name=name,
-        body=HelixJobTaskUpdate.model_validate(
-            _without_keys(input_payload, {"workspace", "job", "step"}),
-        ),
+        body=update_body,
     ).data()
 
     format_output(
@@ -1703,6 +1915,7 @@ def list_tasks(
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     job: Annotated[str | None, typer.Option("--job", help="(required)")] = None,
+    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     output_format: ListOutputFormatOption = None,
     no_truncate: NoTruncateOption = None,
     columns: OutputColumnsOption = None,
@@ -1730,6 +1943,7 @@ def list_tasks(
     kwargs = build_kwargs(
         workspace=workspace,
         job=job,
+        attempt_id=attempt_id,
     )
     codegen_kwargs = {"name": name, **kwargs}
 
@@ -1737,7 +1951,15 @@ def list_tasks(
         return
 
     _, jobs_client = _jobs_client_from_state(state)
-    items = jobs_client.list_job_step_tasks(workspace=workspace, job=job, name=name).data()
+    if attempt_id is not None:
+        items = jobs_client.list_attempt_step_tasks(
+            workspace=workspace,
+            job=job,
+            attempt=attempt_id,
+            step=name,
+        ).data()
+    else:
+        items = jobs_client.list_job_step_tasks(workspace=workspace, job=job, name=name).data()
 
     format_output(
         items,
@@ -1758,6 +1980,7 @@ def retrieve_tasks(
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     job: Annotated[str | None, typer.Option("--job", help="(required)")] = None,
+    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     step: Annotated[str | None, typer.Option("--step", help="(required)")] = None,
     output_format: EntityOutputFormatOption = None,
 ) -> None:
@@ -1770,12 +1993,24 @@ def retrieve_tasks(
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 
-    kwargs = {"name": name, **build_kwargs(workspace=workspace, job=job, step=step)}
+    kwargs = {
+        "name": name,
+        **build_kwargs(workspace=workspace, job=job, attempt_id=attempt_id, step=step),
+    }
     if handle_code_generation(["jobs", "tasks"], "retrieve", kwargs, resolved_output_format, state):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
-    result = jobs_client.get_job_step_task(workspace=workspace, job=job, step=step, name=name).data()
+    if attempt_id is not None:
+        result = jobs_client.get_attempt_step_task(
+            workspace=workspace,
+            job=job,
+            attempt=attempt_id,
+            step=step,
+            name=name,
+        ).data()
+    else:
+        result = jobs_client.get_job_step_task(workspace=workspace, job=job, step=step, name=name).data()
 
     format_output(
         result,

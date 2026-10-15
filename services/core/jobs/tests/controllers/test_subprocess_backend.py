@@ -84,7 +84,7 @@ def test_schedule_starts_process_and_stages_environment(
     assert metadata.process.wait(timeout=5) == 0
     assert metadata.work_dir.is_relative_to(tmp_path)
     assert metadata.persistent_dir.is_relative_to(tmp_path)
-    mock_jobs_client.update_job_step_task.assert_called()
+    mock_jobs_client.update_attempt_step_task.assert_called()
 
 
 def test_created_step_does_not_ttl_before_backend_acceptance(
@@ -271,7 +271,7 @@ def test_sync_completed_closes_logs(
     assert update.status == HelixJobStatus.COMPLETED
     assert metadata.closed_logs is True
     assert "hello logs" in metadata.log_path.read_text(encoding="utf-8")
-    last_call = mock_jobs_client.update_job_step_task.call_args
+    last_call = mock_jobs_client.update_attempt_step_task.call_args
     assert last_call.kwargs["body"].status == HelixJobStatus.COMPLETED
 
 
@@ -607,3 +607,24 @@ def test_pending_step_missing_metadata_stale_check_accepts_typed_timestamp(test_
     step.created_at = None
 
     assert SubprocessJobBackend._pending_step_missing_metadata_is_stale(step) is False
+
+
+def test_cleanup_reads_step_from_registered_attempt(
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending
+):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "true"])
+    _schedule_without_otel_export(backend, step)
+    key = SubprocessProcessKey(step.workspace, step.job, str(step.attempt_id), step.name)
+    metadata = backend._process_registry.get(key)
+    assert metadata is not None
+    assert metadata.process.wait(timeout=5) == 0
+    with patch.object(backend, "get_step_safe", return_value=None) as get_step_safe:
+        backend.cleanup_steps()
+
+    get_step_safe.assert_called_once_with(
+        job=step.job,
+        step_name=step.name,
+        workspace=step.workspace,
+        attempt_id=str(step.attempt_id),
+    )

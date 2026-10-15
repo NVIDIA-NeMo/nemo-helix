@@ -75,13 +75,14 @@ class NHXJobContext:
         """True only when populated from real Job Controller env vars.
 
         ``from_env`` fills missing identifiers with non-empty placeholder
-        sentinels (``unknown-job-id`` / ``unknown-step`` / ``unknown-task``).
+        sentinels (``unknown-job-id`` / ``attempt-0`` / ``unknown-step`` / ``unknown-task``).
         Callers (e.g. progress reporting) must gate on this rather than a bare
         truthiness check, or they issue failing SDK calls / log spam when
         running outside a real platform job (local ``run`` paths, tests).
         """
         return (
             self.job_id not in ("", DEFAULT_JOB_ID)
+            and self.attempt_id not in ("", DEFAULT_ATTEMPT_ID)
             and self.step not in ("", DEFAULT_STEP)
             and self.task not in ("", DEFAULT_TASK)
         )

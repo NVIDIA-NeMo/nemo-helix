@@ -13,7 +13,7 @@ def test_progress_reporter_calls_sdk_create_or_update() -> None:
     ctx = NHXJobContext(
         workspace="ws-a",
         job_id="job-1",
-        attempt_id="attempt-0",
+        attempt_id="attempt-1",
         step="training",
         task="train-model",
         jobs_url="http://jobs.example.com",
@@ -34,11 +34,12 @@ def test_progress_reporter_calls_sdk_create_or_update() -> None:
 
     get_task_nemo_client.assert_called_once_with(SERVICE_NAME)
 
-    mock_jobs.update_job_step_task.assert_called_once()
-    call_kwargs = mock_jobs.update_job_step_task.call_args.kwargs
+    mock_jobs.update_attempt_step_task.assert_called_once()
+    call_kwargs = mock_jobs.update_attempt_step_task.call_args.kwargs
     assert call_kwargs["name"] == ctx.normalized_task
     assert call_kwargs["workspace"] == ctx.workspace
     assert call_kwargs["job"] == ctx.job_id
+    assert call_kwargs["attempt"] == ctx.attempt_id
     assert call_kwargs["step"] == ctx.step
     # status_details is now carried on the HelixJobTaskUpdate body object.
     body = call_kwargs["body"]

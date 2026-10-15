@@ -8,6 +8,7 @@ import os
 import tarfile
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum, auto
 from functools import partial
@@ -19,6 +20,7 @@ from typing import (
     Callable,
     Generic,
     Literal,
+    Self,
     Type,
     TypeVar,
     Union,
@@ -76,10 +78,14 @@ from nemo_helix_plugin.jobs.spec import (
 from nemo_helix_plugin.jobs.telemetry import stamp_job_telemetry_plugins
 from nemo_helix_plugin.jobs.types import (
     CreateHelixJobRequest,
+    HelixJobAttemptResponse,
     JobControl,
     JobLogsQueryParams,
     JobName,
+    ListAttemptsQueryParams,
+    ListJobResultsQueryParams,
     ListJobsQueryParams,
+    UpdateHelixJobRequest,
     validate_job_name_fits_derived_fileset,
     validate_output_location,
 )
@@ -116,6 +122,7 @@ _JOB_PERMISSION_DESCRIPTIONS: dict[str, str] = {
     "create": "Create {ns} jobs",
     "list": "List {ns} jobs",
     "read": "Read {ns} jobs, including status, logs, and results",
+    "update": "Update {ns} jobs",
     "delete": "Delete {ns} jobs",
     "cancel": "Cancel {ns} jobs",
     "pause": "Pause {ns} jobs",
@@ -151,6 +158,7 @@ class BaseJobRequest(BaseModel, Generic[JobConfigT]):
 
 class BaseJob(BaseModel, Generic[JobConfigT]):
     id: str | None = None
+    attempt_id: str | None = None
     name: str
     description: str | None = None
     project: str | None = None
@@ -164,6 +172,39 @@ class BaseJob(BaseModel, Generic[JobConfigT]):
     ownership: dict[str, object] | None = None
     custom_fields: dict[str, object] | None = None
     control: JobControl | None = None
+
+
+class BaseJobUpdate(BaseModel, Generic[JobConfigT]):
+    """Mutable plugin job description or definition."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: str | None = Field(default=None, json_schema_extra={"nullable": True})
+    spec: JobConfigT | None = None
+
+    @model_validator(mode="after")
+    def validate_update(self) -> Self:
+        if not self.model_fields_set:
+            raise ValueError("at least one mutable job field is required")
+        spec_supplied = "spec" in self.model_fields_set
+        if spec_supplied and self.spec is None:
+            raise ValueError("spec cannot be null")
+        return self
+
+
+class BaseJobAttempt(BaseModel, Generic[JobConfigT]):
+    id: str
+    name: str
+    job: str
+    workspace: str
+    seq: int
+    spec: JobConfigT
+    status: HelixJobStatus
+    status_details: dict[str, object] = Field(default_factory=dict)
+    error_details: dict[str, object] | None = None
+    created_at: datetime
+    updated_at: datetime
+    is_current: bool
 
 
 class BaseJobsListFilter(Filter):
@@ -521,6 +562,12 @@ HelixJobSpecCompilerAsync = Callable[
 ]
 
 
+@dataclass(frozen=True)
+class _SubmitControls:
+    profile: str | None
+    options: dict[str, Any] | None
+
+
 # Input-to-output transformer types: receives job_name to use for related fields (e.g., output)
 # Signature: (original_spec, workspace, entity_client, job_name, async_client) -> transformed_spec
 InputToOutputTransformer = Callable[[JobInputT, str, EntityClient, str | None, AsyncNemoClient], JobOutputT]
@@ -702,8 +749,8 @@ async def _compile_platform_spec(
     job_name: str | None,
     service_name: str,
     async_client: AsyncNemoClient,
-    profile: str | None,
-    options: dict[str, Any] | None,
+    *,
+    submit_controls: _SubmitControls | None = None,
 ) -> HelixJobSpec:
     """Compile input and output specs into a HelixJobSpec for execution.
 
@@ -720,7 +767,15 @@ async def _compile_platform_spec(
         PermissionError: If the compiler raises a PermissionError.
     """
     try:
-        submit_control_kwargs = _submit_control_kwargs(compiler, profile=profile, options=options)
+        submit_control_kwargs = (
+            _submit_control_kwargs(
+                compiler,
+                profile=submit_controls.profile,
+                options=submit_controls.options,
+            )
+            if submit_controls is not None
+            else {}
+        )
         compile_result: HelixJobSpecLike | Awaitable[HelixJobSpecLike]
         if inspect.iscoroutinefunction(compiler):
             compile_result = compiler(
@@ -942,6 +997,16 @@ def job_route_factory(
         (BaseJob[BaseModel],),
         {"__annotations__": {"spec": job_output}},
     )
+    TypedJobUpdate = type(
+        f"{job_type}JobUpdate",
+        (BaseJobUpdate[BaseModel],),
+        {"__annotations__": {"spec": job_input | None}, "spec": None},
+    )
+    TypedJobAttempt = type(
+        f"{job_type}JobAttempt",
+        (BaseJobAttempt[BaseModel],),
+        {"__annotations__": {"spec": job_output}},
+    )
     TypedJobsListFilter = jobs_list_filter or type(
         f"{job_type}JobsListFilter",
         (BaseJobsListFilter,),
@@ -957,9 +1022,10 @@ def job_route_factory(
         # Use job_output for deserialization (what's stored and returned)
         return TypedJobResponse(
             id=job_resp.id,
+            attempt_id=job_resp.attempt_id,
             name=job_resp.name,
             description=job_resp.description,
-            project=None,
+            project=job_resp.project,
             workspace=job_resp.workspace,
             created_at=job_resp.created_at,
             updated_at=job_resp.updated_at,
@@ -970,6 +1036,22 @@ def job_route_factory(
             ownership=job_resp.ownership,
             custom_fields=job_resp.custom_fields,
             control=job_resp.control,
+        )
+
+    def attempt_from_response(attempt: HelixJobAttemptResponse) -> TypedJobAttempt:
+        return TypedJobAttempt(
+            id=attempt.id,
+            name=attempt.name,
+            job=attempt.job,
+            workspace=attempt.workspace,
+            seq=attempt.seq,
+            spec=handle_job_spec_mismatch(job_output, attempt.spec),
+            status=attempt.status,
+            status_details=attempt.status_details,
+            error_details=attempt.error_details,
+            created_at=attempt.created_at,
+            updated_at=attempt.updated_at,
+            is_current=attempt.is_current,
         )
 
     # Core job routes
@@ -1006,8 +1088,10 @@ def job_route_factory(
                 job_name,
                 service_name,
                 async_client,
-                request.profile,
-                request.options,
+                submit_controls=_SubmitControls(
+                    profile=request.profile,
+                    options=request.options,
+                ),
             )
 
             # Create the job through the typed Jobs client.
@@ -1149,6 +1233,110 @@ def job_route_factory(
             job_resp = (await AsyncJobsClient.from_client(async_client).get_job(name=name, workspace=workspace)).data()
             return from_response(job_resp)
 
+        @router.patch(
+            "/jobs/{name}",
+        )
+        async def update_job(
+            workspace: str,
+            name: str,
+            request: TypedJobUpdate,
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
+            entity_client: EntityClient = Depends(get_entity_client),
+        ) -> TypedJobResponse:
+            f"""Update a job for the {service_name} microservice."""
+
+            update_fields: dict[str, Any] = {}
+            if "description" in request.model_fields_set:
+                update_fields["description"] = request.description
+            if "spec" in request.model_fields_set:
+                assert request.spec is not None
+                job_spec = await _transform_input_to_output(
+                    input_to_output,
+                    request.spec,
+                    workspace,
+                    entity_client,
+                    name,
+                    service_name,
+                    async_client,
+                )
+                platform_spec = await _compile_platform_spec(
+                    platform_job_config_compiler,
+                    workspace,
+                    request.spec,
+                    job_spec,
+                    entity_client,
+                    name,
+                    service_name,
+                    async_client,
+                )
+                update_fields["spec"] = (
+                    job_spec.model_dump(mode="json") if isinstance(job_spec, BaseModel) else job_spec
+                )
+                update_fields["platform_spec"] = platform_spec
+
+            response = (
+                await AsyncJobsClient.from_client(async_client).update_job(
+                    name=name,
+                    workspace=workspace,
+                    body=UpdateHelixJobRequest.model_validate(update_fields),
+                )
+            ).data()
+            return from_response(response)
+
+        async def list_job_attempts(
+            workspace: str,
+            name: str,
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
+            page: int = Query(default=1, gt=0),
+            page_size: int = Query(default=25, gt=0),
+            sort: Literal["seq", "-seq"] = Query(default="-seq"),
+            filter: str | None = Query(default=None),
+        ) -> Page[TypedJobAttempt]:
+            f"""List attempts for a {service_name} job."""
+            query: ListAttemptsQueryParams = {"page": page, "page_size": page_size, "sort": sort}
+            if filter is not None:
+                query["filter"] = filter
+            attempt_page = (
+                await AsyncJobsClient.from_client(async_client).list_job_attempts(
+                    workspace=workspace,
+                    job=name,
+                    query_params=query,
+                )
+            ).page()
+            return Page(
+                data=[attempt_from_response(attempt) for attempt in attempt_page.items],
+                pagination=PaginationData.model_validate(attempt_page.metadata),
+                sort=sort,
+                filter=None,
+            )
+
+        router.add_api_route(
+            "/jobs/{name}/attempts",
+            list_job_attempts,
+            methods=["GET"],
+            response_model=Page[TypedJobAttempt],
+            response_model_exclude_none=True,
+        )
+
+        @router.get(
+            "/jobs/{name}/attempts/{attempt}",
+        )
+        async def get_job_attempt(
+            workspace: str,
+            name: str,
+            attempt: str,
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
+        ) -> TypedJobAttempt:
+            f"""Get one attempt for a {service_name} job."""
+            response = (
+                await AsyncJobsClient.from_client(async_client).get_job_attempt(
+                    workspace=workspace,
+                    job=name,
+                    attempt=attempt,
+                )
+            ).data()
+            return attempt_from_response(response)
+
         # Status
         @router.get(
             "/jobs/{name}/status",
@@ -1211,6 +1399,9 @@ def job_route_factory(
             limit: int | None = Query(default=None),
             page_cursor: str | None = Query(default=None),
             tail: int | None = Query(default=None, gt=0, le=10_000),
+            attempt_id: str | None = Query(default=None),
+            step_id: str | None = Query(default=None),
+            task_id: str | None = Query(default=None),
         ) -> HelixJobLogPage:
             f"""Get the logs of a job by name for the {service_name} microservice."""
 
@@ -1221,6 +1412,12 @@ def job_route_factory(
                 logs_query["page_cursor"] = page_cursor
             if tail is not None:
                 logs_query["tail"] = tail
+            if attempt_id is not None:
+                logs_query["attempt_id"] = attempt_id
+            if step_id is not None:
+                logs_query["step_id"] = step_id
+            if task_id is not None:
+                logs_query["task_id"] = task_id
             logs_page = (
                 await AsyncJobsClient.from_client(async_client).list_job_logs(
                     workspace=workspace, name=name, query_params=logs_query
@@ -1231,29 +1428,39 @@ def job_route_factory(
         # Results
         @router.get(
             "/jobs/{name}/results",
+            response_model_exclude_none=True,
         )
         async def list_job_results(
             workspace: str,
             name: str,
             request: Request,
             async_client: AsyncNemoClient = Depends(get_nemo_client),
+            attempt_id: str | None = Query(default=None),
         ) -> HelixJobListResultResponse:
             f"""Get the results of a job by name for the {service_name} microservice."""
 
-            results = (
-                await AsyncJobsClient.from_client(async_client).list_job_results(name=name, workspace=workspace)
-            ).data()
+            jobs = AsyncJobsClient.from_client(async_client)
+            if attempt_id is not None:
+                query_params: ListJobResultsQueryParams = {"attempt_id": attempt_id}
+                results = (
+                    await jobs.list_job_results(name=name, workspace=workspace, query_params=query_params)
+                ).data()
+            else:
+                results = (await jobs.list_job_results(name=name, workspace=workspace)).data()
             result_dicts = [result.model_dump() for result in results.data]
             list_results = []
             for result_dict in result_dicts:
                 result_name = result_dict["name"]
-                result_dict["download_url"] = f"{request.url}/{result_name}/download"
+                result_dict["download_url"] = str(
+                    request.url.replace(path=f"{request.url.path}/{result_name}/download")
+                )
                 list_results.append(HelixJobResultResponse(**result_dict))
 
             return HelixJobListResultResponse(data=list_results)
 
         @router.get(
             "/jobs/{job}/results/{name}",
+            response_model_exclude_none=True,
         )
         async def get_job_result(
             workspace: str,
@@ -1262,15 +1469,20 @@ def job_route_factory(
             request: Request,
             async_client: AsyncNemoClient = Depends(get_nemo_client),
         ) -> HelixJobResultResponse:
-            f"""Get the result of a job by name for the {service_name} microservice."""
+            f"""Get a result by its job-wide unique name for the {service_name} microservice."""
 
+            jobs = AsyncJobsClient.from_client(async_client)
             result_obj = (
-                await AsyncJobsClient.from_client(async_client).get_job_result(name=name, job=job, workspace=workspace)
+                await jobs.get_job_result(
+                    name=name,
+                    job=job,
+                    workspace=workspace,
+                )
             ).data()
 
             # Construct the URL for downloading this result
             result_dict = result_obj.model_dump()
-            result_dict["download_url"] = f"{request.url}/download"
+            result_dict["download_url"] = str(request.url.replace(path=f"{request.url.path}/download"))
             return HelixJobResultResponse(**result_dict)
 
         # Stamp authorization rules on the generated routes. Reads use one shared
@@ -1278,6 +1490,9 @@ def job_route_factory(
         _stamp(create_job, perm="create", write=True)
         _stamp(list_jobs, perm="list", write=False)
         _stamp(get_job, perm="read", write=False)
+        _stamp(update_job, perm="update", write=True)
+        _stamp(list_job_attempts, perm="read", write=False)
+        _stamp(get_job_attempt, perm="read", write=False)
         _stamp(get_job_status, perm="read", write=False)
         _stamp(delete_job, perm="delete", write=True)
         _stamp(cancel_job, perm="cancel", write=True)
@@ -1310,8 +1525,13 @@ def job_route_factory(
             - Use the `result_serializer` to know how to properly serialize the output
             """
 
+            jobs = AsyncJobsClient.from_client(async_client)
             result_info = (
-                await AsyncJobsClient.from_client(async_client).get_job_result(name=name, job=job, workspace=workspace)
+                await jobs.get_job_result(
+                    name=name,
+                    job=job,
+                    workspace=workspace,
+                )
             ).data()
             _, tmp_dir_path = await download_from_result_info(
                 result_name=name,

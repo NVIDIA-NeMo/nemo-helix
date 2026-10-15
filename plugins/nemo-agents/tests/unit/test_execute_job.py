@@ -1316,8 +1316,10 @@ def test_execute_job_create_route_stores_canonical_step_config() -> None:
         response = MagicMock()
         response.data.return_value = SimpleNamespace(
             id="job-1",
+            attempt_id="attempt-1",
             name="execute-1",
             description=None,
+            project=None,
             workspace="default",
             created_at=None,
             updated_at=None,

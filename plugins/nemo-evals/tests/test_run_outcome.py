@@ -200,12 +200,16 @@ class TestRowEvalOutcome:
         assert not row_eval_outcome(_row_result([])).failed
 
 
-def _ctx(tmp_path: Path, job_id: str | None) -> JobContext:
+def _ctx(tmp_path: Path, job_id: str | None, attempt_id: str | None = None) -> JobContext:
     storage = StoragePaths(ephemeral=tmp_path / "e", persistent=tmp_path / "p")
     storage.ephemeral.mkdir()
     storage.persistent.mkdir()
     return JobContext(
-        workspace="dev", storage=storage, results=LocalJobResults(root=storage.persistent / "r"), job_id=job_id
+        workspace="dev",
+        storage=storage,
+        results=LocalJobResults(root=storage.persistent / "r"),
+        job_id=job_id,
+        attempt_id=attempt_id,
     )
 
 
@@ -215,27 +219,47 @@ def _async_client() -> AsyncNemoClient:
 
 class TestReportRunOutcome:
     def test_patches_the_job_status_details(self, tmp_path: Path, mocker: MockerFixture) -> None:
-        update = mocker.patch.object(AsyncJobsClient, "update_status_details", AsyncMock())
+        update = mocker.patch.object(AsyncJobsClient, "update_attempt_status_details", AsyncMock())
         outcome = RunOutcome(unit="trials", total=2, errored=2, scored=0)
 
-        report_run_outcome(outcome, ctx=_ctx(tmp_path, "job-1"), async_client=_async_client())
+        report_run_outcome(outcome, ctx=_ctx(tmp_path, "job-1", "attempt-1"), async_client=_async_client())
 
-        update.assert_awaited_once_with("job-1", workspace="dev", body=outcome.status_details())
+        update.assert_awaited_once_with("job-1", "attempt-1", workspace="dev", body=outcome.status_details())
 
     @pytest.mark.parametrize("job_id", [None, "job-1"])
     def test_skips_without_a_platform_job_or_client(self, tmp_path: Path, mocker: MockerFixture, job_id) -> None:
-        update = mocker.patch.object(AsyncJobsClient, "update_status_details", AsyncMock())
+        update = mocker.patch.object(AsyncJobsClient, "update_attempt_status_details", AsyncMock())
         outcome = RunOutcome(unit="rows", total=1, errored=0, scored=1)
 
         report_run_outcome(outcome, ctx=_ctx(tmp_path, job_id), async_client=None if job_id else _async_client())
 
         update.assert_not_awaited()
 
-    def test_is_best_effort(self, tmp_path: Path, mocker: MockerFixture) -> None:
-        mocker.patch.object(AsyncJobsClient, "update_status_details", AsyncMock(side_effect=RuntimeError("down")))
+    def test_skips_platform_reporting_without_an_attempt_id(self, tmp_path: Path, mocker: MockerFixture) -> None:
+        update = mocker.patch.object(AsyncJobsClient, "update_attempt_status_details", AsyncMock())
+        warning = mocker.patch("nemo_evals.jobs.run_outcome.logger.warning")
 
         report_run_outcome(
             RunOutcome(unit="rows", total=1, errored=0, scored=1),
             ctx=_ctx(tmp_path, "job-1"),
+            async_client=_async_client(),
+        )
+
+        update.assert_not_awaited()
+        warning.assert_called_once_with(
+            "Cannot report the evaluation outcome for job %r without an attempt ID",
+            "job-1",
+        )
+
+    def test_is_best_effort(self, tmp_path: Path, mocker: MockerFixture) -> None:
+        mocker.patch.object(
+            AsyncJobsClient,
+            "update_attempt_status_details",
+            AsyncMock(side_effect=RuntimeError("down")),
+        )
+
+        report_run_outcome(
+            RunOutcome(unit="rows", total=1, errored=0, scored=1),
+            ctx=_ctx(tmp_path, "job-1", "attempt-1"),
             async_client=_async_client(),
         )

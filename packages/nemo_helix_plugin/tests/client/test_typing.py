@@ -34,7 +34,7 @@ from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.files.types import FilesetOutput
 from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobLog
-from nemo_helix_plugin.jobs.types import HelixJobResponse, HelixJobStepWithContext
+from nemo_helix_plugin.jobs.types import HelixJobAttemptResponse, HelixJobResponse, HelixJobStepWithContext
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient, SecretsClient
 from nemo_helix_plugin.secrets.types import HelixSecretResponse
 from pydantic import BaseModel
@@ -138,6 +138,10 @@ def _check_offset_client_return_types(
     assert_type(job_pages, NemoPaginatedResponse[HelixJobResponse, OffsetPagination])
     assert_type(job_pages.page(), PageResult[HelixJobResponse, OffsetPaginationMetadata])
 
+    attempt_pages = jobs.list_job_attempts(job="job")
+    assert_type(attempt_pages, NemoPaginatedResponse[HelixJobAttemptResponse, OffsetPagination])
+    assert_type(attempt_pages.page(), PageResult[HelixJobAttemptResponse, OffsetPaginationMetadata])
+
     step_pages = jobs.list_steps(name="job")
     assert_type(step_pages, NemoPaginatedResponse[HelixJobStepWithContext, OffsetPagination])
     assert_type(step_pages.page(), PageResult[HelixJobStepWithContext, OffsetPaginationMetadata])
@@ -159,6 +163,10 @@ async def _check_async_offset_client_return_types(
     job_pages = await jobs.list_jobs()
     assert_type(job_pages, AsyncNemoPaginatedResponse[HelixJobResponse, OffsetPagination])
     assert_type(job_pages.page(), PageResult[HelixJobResponse, OffsetPaginationMetadata])
+
+    attempt_pages = await jobs.list_job_attempts(job="job")
+    assert_type(attempt_pages, AsyncNemoPaginatedResponse[HelixJobAttemptResponse, OffsetPagination])
+    assert_type(attempt_pages.page(), PageResult[HelixJobAttemptResponse, OffsetPaginationMetadata])
 
     step_pages = await jobs.list_steps(name="job")
     assert_type(step_pages, AsyncNemoPaginatedResponse[HelixJobStepWithContext, OffsetPagination])

@@ -205,10 +205,11 @@ class JobReconciler(HeartbeatMixin, Controller):
         if error_details is not None:
             update_fields["error_details"] = error_details
         try:
-            response = self._jobs.update_job_step_status(
+            response = self._jobs.update_attempt_step_status(
                 name=step.name,
                 workspace=step.workspace,
                 job=step.job,
+                attempt=step.attempt_id,
                 body=HelixJobStatusUpdateRequest(**update_fields),
             ).data()
         except Exception:

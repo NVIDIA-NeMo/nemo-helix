@@ -24,15 +24,23 @@ def test_progress_reporter_calls_sdk_create_or_update() -> None:
         storage_path=Path("/tmp/job"),
         config_path=Path("/tmp/job/config.json"),
     )
-    reporter = JobsServiceProgressReporter(mock_jobs, ctx.workspace, ctx.job_id, ctx.step, ctx.normalized_task)
+    reporter = JobsServiceProgressReporter(
+        mock_jobs,
+        ctx.workspace,
+        ctx.job_id,
+        ctx.step,
+        ctx.normalized_task,
+        ctx.attempt_id,
+    )
 
     reporter.update_progress(HelixJobStatus.ACTIVE, status_details={"phase": "training"})
 
-    mock_jobs.update_job_step_task.assert_called_once()
-    call_kwargs = mock_jobs.update_job_step_task.call_args.kwargs
+    mock_jobs.update_attempt_step_task.assert_called_once()
+    call_kwargs = mock_jobs.update_attempt_step_task.call_args.kwargs
     assert call_kwargs["name"] == ctx.normalized_task
     assert call_kwargs["workspace"] == ctx.workspace
     assert call_kwargs["job"] == ctx.job_id
+    assert call_kwargs["attempt"] == ctx.attempt_id
     assert call_kwargs["step"] == ctx.step
     # status + status_details now travel on the HelixJobTaskUpdate body; unset
     # fields (error_details/error_stack) are omitted, leaving their model defaults.

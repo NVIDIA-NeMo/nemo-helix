@@ -542,13 +542,19 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
                 continue
             workspace = labels.get(JOB_WORKSPACE_ID_LABEL)
             job = labels.get(JOB_ID_LABEL)
+            attempt_id = labels.get(JOB_ATTEMPT_ID_LABEL)
             step_name = labels.get(JOB_STEP_NAME_LABEL)
             if not workspace or not job or not step_name:
                 continue
 
             # Verify the step is terminal before cleaning up, so a resource that was
             # marked active is never reclaimed early and then reported as error.
-            step = self.get_step_safe(job=job, step_name=step_name, workspace=workspace)
+            step = self.get_step_safe(
+                job=job,
+                step_name=step_name,
+                workspace=workspace,
+                attempt_id=attempt_id,
+            )
             if step is not None and step.status not in ("cancelled", "error", "completed"):
                 continue
 

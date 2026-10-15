@@ -22,6 +22,7 @@ from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.jobs.telemetry import build_job_telemetry_custom_fields
 from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation, parse_json_filter
 from nhx.common.api.parsed_filter import ParsedFilter
+from nhx.common.auth import AuthContext
 from nhx.common.entities import (
     ALL_WORKSPACES,
     DEFAULT_WORKSPACE,
@@ -32,10 +33,12 @@ from nhx.common.entities import (
 from nhx.common.jobs.schemas import FileStorageType, HelixJobStatus
 from nhx.core.jobs.api.v2.jobs.schemas import (
     CreateHelixJobRequest,
+    HelixJobAttemptSortField,
     HelixJobResponse,
     HelixJobSortField,
     HelixJobStepsListFilter,
     HelixJobTaskUpdate,
+    UpdateHelixJobRequest,
 )
 from nhx.core.jobs.app.constants import JOB_TASK_CLEANUP_PENDING_KEY
 from nhx.core.jobs.app.dispatcher import (
@@ -975,7 +978,7 @@ async def test_delete_job_serializes_with_result_creation(
     mock_files_client,
 ):
     """A result create cannot recreate associated data after delete cleanup starts."""
-    job_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "delete-result-lock-test-job")
+    job_id, job_name, attempt_id, _, _, _ = await create_test_job_data(mock_store, "delete-result-lock-test-job")
     other_dispatcher = JobDispatcher(store=mock_store, files=mock_files_client, secrets=AsyncMock())
 
     delete_started = asyncio.Event()
@@ -1002,6 +1005,7 @@ async def test_delete_job_serializes_with_result_creation(
                     artifact_url="default/test-fileset#late",
                     artifact_storage_type=FileStorageType.FILESET,
                     workspace=DEFAULT_WORKSPACE,
+                    attempt_id=attempt_id,
                 )
             )
             await asyncio.sleep(0.05)
@@ -3100,3 +3104,277 @@ async def test_attempt_update_retries_after_a_concurrent_write(
     stored = await mock_store.get_by_id(HelixJobAttempt, job.attempt_id)
     assert stored.status == HelixJobStatus.ACTIVE
     assert stored.status_details["percentage_done"] == 40
+
+
+@pytest.mark.asyncio
+async def test_list_attempts_paginates_and_marks_current(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    for seq in (1, 2):
+        await mock_store.add(
+            HelixJobAttempt(
+                name=f"attempt-{seq}",
+                workspace=DEFAULT_WORKSPACE,
+                job=job.id,
+                seq=seq,
+                spec={"seq": seq},
+                platform_spec=TestConstants.PLATFORM_SPEC,
+            )
+        )
+
+    result = await mock_dispatcher.list_attempts(
+        job.name,
+        DEFAULT_WORKSPACE,
+        ParsedFilter(operation=None),
+        page=1,
+        page_size=2,
+        sort=HelixJobAttemptSortField.SEQ_DESC,
+    )
+
+    assert result is not None
+    attempts, total = result
+    assert total == 3
+    assert [attempt.seq for attempt in attempts] == [2, 1]
+    assert not any(attempt.is_current for attempt in attempts)
+
+    ascending = await mock_dispatcher.list_attempts(
+        job.id,
+        DEFAULT_WORKSPACE,
+        ParsedFilter(operation=None),
+        page=1,
+        page_size=3,
+        sort=HelixJobAttemptSortField.SEQ_ASC,
+    )
+    assert ascending is not None
+    assert [attempt.seq for attempt in ascending[0]] == [0, 1, 2]
+    assert ascending[0][0].is_current is True
+
+
+@pytest.mark.asyncio
+async def test_update_job_preserves_attempt_snapshot(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    created = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    original_attempt = await mock_store.get_by_id(HelixJobAttempt, created.attempt_id)
+    original_spec = dict(original_attempt.spec)
+
+    updated = await mock_dispatcher.update_job(
+        created.name,
+        DEFAULT_WORKSPACE,
+        UpdateHelixJobRequest(
+            description="updated description",
+            spec={"revision": 2},
+            platform_spec=TestConstants.PLATFORM_SPEC,
+        ),
+    )
+
+    assert updated is not None
+    assert updated.description == "updated description"
+    assert updated.spec == {"revision": 2}
+    stored_attempt = await mock_store.get_by_id(HelixJobAttempt, created.attempt_id)
+    assert stored_attempt.spec == original_spec
+
+
+@pytest.mark.asyncio
+async def test_update_job_returns_none_when_job_is_deleted_after_resolution(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    created = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    resolved = await mock_store.get(HelixJob, created.name, workspace=DEFAULT_WORKSPACE)
+
+    with (
+        patch.object(mock_dispatcher, "_resolve_job", new=AsyncMock(return_value=resolved)),
+        patch.object(mock_store, "get", new=AsyncMock(side_effect=EntityNotFoundError("deleted"))),
+    ):
+        updated = await mock_dispatcher.update_job(
+            created.name,
+            DEFAULT_WORKSPACE,
+            UpdateHelixJobRequest(description="updated description"),
+        )
+
+    assert updated is None
+
+
+@pytest.mark.asyncio
+async def test_update_job_restores_callers_auth_context_before_persisting(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    created = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    auth_context = AuthContext(principal_id="updater@example.com")
+    persisted_auth_contexts: list[AuthContext | None] = []
+    original_update = mock_store.update
+
+    async def capture_update(entity, *args, **kwargs):
+        if isinstance(entity, HelixJob):
+            persisted_auth_contexts.append(entity.auth_context)
+        return await original_update(entity, *args, **kwargs)
+
+    with patch.object(mock_store, "update", side_effect=capture_update):
+        updated = await mock_dispatcher.update_job(
+            created.name,
+            DEFAULT_WORKSPACE,
+            UpdateHelixJobRequest(description="updated description"),
+            auth_context=auth_context,
+        )
+
+    assert updated is not None
+    assert persisted_auth_contexts == [auth_context]
+
+
+@pytest.mark.asyncio
+async def test_results_remain_job_owned_and_filter_by_producing_attempt(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    second = await mock_store.add(
+        HelixJobAttempt(
+            name="attempt-2",
+            workspace=DEFAULT_WORKSPACE,
+            job=job.id,
+            seq=1,
+            spec=job.spec,
+            platform_spec=job.platform_spec,
+        )
+    )
+    first_result = await mock_dispatcher.create_result(
+        job.id,
+        job.name,
+        "metrics",
+        "default/results#first",
+        FileStorageType.FILESET,
+        DEFAULT_WORKSPACE,
+        attempt_id=job.attempt_id,
+    )
+    with pytest.raises(EntityConflictError):
+        await mock_dispatcher.create_result(
+            job.id,
+            job.name,
+            "metrics",
+            "default/results#duplicate",
+            FileStorageType.FILESET,
+            DEFAULT_WORKSPACE,
+            attempt_id=second.id,
+        )
+    second_result = await mock_dispatcher.create_result(
+        job.id,
+        job.name,
+        "summary",
+        "default/results#second",
+        FileStorageType.FILESET,
+        DEFAULT_WORKSPACE,
+        attempt_id=second.id,
+    )
+    legacy = await mock_store.add(
+        HelixJobResult(
+            name="legacy",
+            workspace=DEFAULT_WORKSPACE,
+            job=job.id,
+            artifact_url="default/results#legacy",
+            artifact_storage_type=FileStorageType.FILESET,
+        )
+    )
+
+    assert first_result.parent == job.id
+    assert second_result.parent == job.id
+    resolved_first = await mock_dispatcher.get_result(job.name, "metrics", DEFAULT_WORKSPACE)
+    resolved_second = await mock_dispatcher.get_result(job.name, "summary", DEFAULT_WORKSPACE)
+    resolved_legacy = await mock_dispatcher.get_result(job.name, "legacy", DEFAULT_WORKSPACE)
+    all_results, total = await mock_dispatcher.list_results(job.id, DEFAULT_WORKSPACE)
+    first_results, first_total = await mock_dispatcher.list_results(
+        job.id,
+        DEFAULT_WORKSPACE,
+        attempt_id=job.attempt_id,
+    )
+    second_results, second_total = await mock_dispatcher.list_results(
+        job.id,
+        DEFAULT_WORKSPACE,
+        attempt_id=second.id,
+    )
+
+    assert resolved_first is not None
+    assert resolved_second is not None
+    assert resolved_legacy is not None
+    assert resolved_first.id == first_result.id
+    assert resolved_second.id == second_result.id
+    assert resolved_legacy.id == legacy.id
+    assert {result.name for result in all_results} == {"metrics", "summary", "legacy"}
+    assert total == 3
+    assert [result.name for result in first_results] == ["metrics"]
+    assert first_total == 1
+    assert [result.name for result in second_results] == ["summary"]
+    assert second_total == 1
+
+
+@pytest.mark.asyncio
+async def test_attempt_step_lookup_rejects_cross_job_attempts(
+    mock_dispatcher: JobDispatcher,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    first = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    second = await mock_dispatcher.create_job(
+        sample_platform_job_request.model_copy(update={"name": "other-job"}),
+        DEFAULT_WORKSPACE,
+    )
+
+    assert await mock_dispatcher.resolve_attempt(first.name, second.attempt_id, DEFAULT_WORKSPACE) is None
+    assert (
+        await mock_dispatcher.get_attempt_step_by_name(
+            first.name,
+            second.attempt_id,
+            "basic",
+            DEFAULT_WORKSPACE,
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_current_attempt_uses_pointer_not_highest_sequence(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    original = await mock_store.get_by_id(HelixJobAttempt, job.attempt_id)
+    newer = await mock_store.add(
+        HelixJobAttempt(
+            name="detached-newer",
+            workspace=DEFAULT_WORKSPACE,
+            job=job.id,
+            seq=99,
+            spec={"detached": True},
+            platform_spec=TestConstants.PLATFORM_SPEC,
+        )
+    )
+
+    current = await mock_dispatcher.get_current_attempt(job.name, DEFAULT_WORKSPACE)
+    resolved = await mock_dispatcher.resolve_attempt(job.name, "current", DEFAULT_WORKSPACE)
+
+    assert current is not None
+    assert current.id == original.id
+    assert resolved is not None
+    assert resolved[1].id == original.id
+    assert resolved[1].id != newer.id
+
+
+@pytest.mark.asyncio
+async def test_resolve_attempt_rejects_internal_name(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    attempt = await mock_store.get_by_id(HelixJobAttempt, job.attempt_id)
+
+    assert await mock_dispatcher.resolve_attempt(job.name, attempt.name, DEFAULT_WORKSPACE) is None

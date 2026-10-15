@@ -253,10 +253,11 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         self._start_log_capture(step, metadata, "stderr")
 
         status_details = {"message": "Subprocess scheduled", **self._task_status_details(metadata)}
-        self._jobs.update_job_step_task(
+        self._jobs.update_attempt_step_task(
             name=metadata.task_id,
             workspace=step.workspace,
             job=step.job,
+            attempt=step.attempt_id,
             step=step.name,
             body=HelixJobTaskUpdate(
                 status=HelixJobStatus.PENDING,
@@ -340,7 +341,12 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             if metadata.process.poll() is None:
                 continue
 
-            step = self.get_step_safe(job=key.job, step_name=key.step, workspace=key.workspace)
+            step = self.get_step_safe(
+                job=key.job,
+                step_name=key.step,
+                workspace=key.workspace,
+                attempt_id=key.attempt_id,
+            )
             should_cleanup = step is None
             if step is not None and step.status in ("cancelled", "error", "completed"):
                 should_cleanup = self._execution_profile_config.cleanup_completed_jobs_immediately
@@ -359,9 +365,10 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
 
     def _get_task_fallback_update(self, step: HelixJobStepWithContext) -> JobUpdate | None:
         try:
-            tasks = self._jobs.list_job_step_tasks(
-                name=step.name,
+            tasks = self._jobs.list_attempt_step_tasks(
+                step=step.name,
                 job=step.job,
+                attempt=step.attempt_id,
                 workspace=step.workspace,
             ).data()
         except Exception:
@@ -597,10 +604,11 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         error_details: dict,
         error_stack: str = "",
     ) -> None:
-        self._jobs.update_job_step_task(
+        self._jobs.update_attempt_step_task(
             name=metadata.task_id,
             workspace=step.workspace,
             job=step.job,
+            attempt=step.attempt_id,
             step=step.name,
             body=HelixJobTaskUpdate(
                 status=status,

@@ -176,18 +176,21 @@ class HelixJobTask(EntityBase):
 class HelixJobResult(EntityBase):
     """Result/artifact from a completed job.
 
-    Parent-scoped: unique within (workspace, entity_type, parent=job).
+    Results remain parented to the job so names are unique across all attempts.
+    ``attempt_id`` records the attempt that produced newer results; existing
+    records without it remain valid.
     """
 
     __entity_type__: ClassVar[str] = "platform_job_result"
 
     job: str = Field(..., description="Parent job ID")
+    attempt_id: Optional[str] = Field(default=None, description="ID of the attempt that produced the result")
     artifact_url: str = Field(..., description="URL to the artifact")
     artifact_storage_type: FileStorageType = Field(..., description="Type of artifact storage")
 
     @model_validator(mode="after")
-    def set_parent_from_job(self):
-        """Set _parent to the job ID for parent-scoped uniqueness."""
+    def set_result_parent(self):
+        """Set the job parent for job-wide result-name uniqueness."""
         self._parent = self.job
         return self
 
@@ -197,6 +200,7 @@ class HelixJobResult(EntityBase):
             name=self.name,
             job=self.job,
             workspace=self.workspace,
+            attempt_id=self.attempt_id,
             created_at=self.created_at,  # type: ignore
             updated_at=self.updated_at,  # type: ignore
             artifact_url=self.artifact_url,
