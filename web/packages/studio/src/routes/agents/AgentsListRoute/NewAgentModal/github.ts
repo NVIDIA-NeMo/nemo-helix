@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { GithubStorageConfig } from '@nemo/sdk/generated/platform/schema';
+import { toAgentName } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
 
 const GITHUB_HOSTS = new Set(['github.com', 'www.github.com']);
 
@@ -160,8 +161,5 @@ export const githubStorageConfig = (
 /** A starting point for the agent name, which the user can still edit before submitting. */
 export const agentNameFromSource = (source: GitHubAgentSource): string => {
   const candidate = source.path ? (source.path.split('/').pop() ?? source.repo) : source.repo;
-  return candidate
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+  return toAgentName(candidate);
 };

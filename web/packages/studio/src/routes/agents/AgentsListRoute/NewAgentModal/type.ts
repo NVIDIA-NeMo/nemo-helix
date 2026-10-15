@@ -19,9 +19,21 @@ export interface UploadAgentEntry {
   readonly file: File;
 }
 
+/** What one source (a pick, a drop or an image read) currently contributes to the form. */
+export interface AgentSourceSelection {
+  readonly entries: UploadAgentEntry[];
+  /** Shown with the file count: the picked root folder or the image reference. */
+  readonly label: string;
+  readonly error?: string;
+  /** The image the entries were read from, so they stop counting once the reference changes. */
+  readonly image?: string;
+  /** The image reference pinned to the digest that was read, which is what gets deployed. */
+  readonly pinnedImage?: string;
+}
+
 /** Which route into a new agent the modal is showing: an agent already seen in ingested traces, a
- *  prompt to hand off, files to upload, or a repository to import. */
-export type NewAgentTab = 'imported-traces' | 'coding-agent-prompt' | 'upload' | 'github';
+ *  prompt to hand off, files to upload, a repository to import, or a packaged image to deploy. */
+export type NewAgentTab = 'imported-traces' | 'coding-agent-prompt' | 'upload' | 'github' | 'image';
 
 export interface NewAgentModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
   workspace: string;

@@ -207,3 +207,10 @@ export const parseAgentConfig = (text: string): CreateAgentRequestConfig => {
 
 export const agentNameFromConfig = (config: Record<string, unknown>): string | undefined =>
   typeof config.name === 'string' && config.name.trim() ? config.name.trim() : undefined;
+
+/** Coerces a repository, directory or image name into a valid agent name. */
+export const toAgentName = (candidate: string): string =>
+  candidate
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '');

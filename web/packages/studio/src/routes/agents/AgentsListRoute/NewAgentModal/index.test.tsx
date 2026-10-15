@@ -11,7 +11,7 @@ import { agentSpecFilesetName } from '@studio/routes/agents/AgentsListRoute/NewA
 import { getAgentsListRoute } from '@studio/routes/utils';
 import { mockExecutionProfiles } from '@studio/tests/util/mockAgentDeploymentCapabilities';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
-import { fireEvent, within } from '@testing-library/react';
+import { act, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { useLocation } from 'react-router';
@@ -145,7 +145,7 @@ const renderModal = () =>
   });
 
 const openUploadTab = async (dialog: HTMLElement) => {
-  fireEvent.click(within(dialog).getByRole('tab', { name: 'Register with code upload' }));
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'Code upload' }));
   await screen.findByTestId('agent-directory-input');
 };
 
@@ -154,7 +154,7 @@ const openPromptTab = (dialog: HTMLElement) => {
 };
 
 const openGitHubTab = async (dialog: HTMLElement) => {
-  fireEvent.click(within(dialog).getByRole('tab', { name: 'Register from GitHub' }));
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'GitHub' }));
   await within(dialog).findByRole('textbox', { name: 'Repository' });
 };
 
@@ -237,7 +237,7 @@ describe('NewAgentModal upload tab', () => {
     renderModal();
     const dialog = await screen.findByRole('dialog');
 
-    expect(within(dialog).getByRole('tab', { name: 'Register with code upload' })).toHaveAttribute(
+    expect(within(dialog).getByRole('tab', { name: 'Code upload' })).toHaveAttribute(
       'aria-selected',
       'true'
     );
@@ -639,7 +639,7 @@ describe('NewAgentModal imported traces tab', () => {
   };
 
   const openTracesTab = async (dialog: HTMLElement, user: ReturnType<typeof userEvent.setup>) => {
-    await user.click(within(dialog).getByRole('tab', { name: 'Register from traces' }));
+    await user.click(within(dialog).getByRole('tab', { name: 'Traces' }));
   };
 
   it('offers each distinct agent seen in the traces', async () => {
@@ -1007,5 +1007,347 @@ describe('NewAgentModal deploy after create', () => {
     expect(
       await screen.findByText(/was created, but deploying it failed: no executor/)
     ).toBeInTheDocument();
+  });
+});
+
+describe('NewAgentModal container image', () => {
+  const IMAGE = 'docker.io/sgavrilovic951/sample_agent:0.1';
+  const DIGEST = `sha256:${'c'.repeat(64)}`;
+  const PINNED_IMAGE = `${IMAGE}@${DIGEST}`;
+  const BUNDLE_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/agent-images/bundle`;
+  const encode = (text: string) => btoa(text);
+
+  const serveBundle = (
+    files: Record<string, string> = {
+      'agent.yaml': FABRIC_YAML,
+      'tools/search.py': 'print(1)\n',
+      '__pycache__/search.cpython-313.pyc': 'x',
+    },
+    gate?: Promise<void>
+  ) => {
+    const requested: string[] = [];
+    server.use(
+      http.post(BUNDLE_URL, async ({ request }) => {
+        const { image } = (await request.json()) as { image: string };
+        requested.push(image);
+        await gate;
+        return HttpResponse.json({
+          image,
+          digest: DIGEST,
+          pinned_image: `${image}@${DIGEST}`,
+          config_path: '/workspace/agent.yaml',
+          files: Object.entries(files).map(([path, content]) => ({
+            path,
+            content: encode(content),
+          })),
+        });
+      })
+    );
+    return requested;
+  };
+
+  const serveModeList = (modes: { mode: string; enabled: boolean; requires_image: boolean }[]) =>
+    server.use(http.get(DEPLOYMENT_MODES_URL, () => HttpResponse.json({ data: modes })));
+
+  const openImageTab = async (dialog: HTMLElement) => {
+    fireEvent.click(within(dialog).getByRole('tab', { name: 'Container image' }));
+    return within(dialog).findByRole('textbox', { name: 'Container image' });
+  };
+
+  const typeImage = async (
+    dialog: HTMLElement,
+    user: ReturnType<typeof userEvent.setup>,
+    image = IMAGE
+  ) => {
+    await user.type(await openImageTab(dialog), image);
+    await user.tab();
+  };
+
+  it("registers the image's agent.yaml and files like an upload, then deploys the image", async () => {
+    const user = userEvent.setup();
+    serveModeList([
+      { mode: 'subprocess', enabled: true, requires_image: false },
+      { mode: 'docker', enabled: true, requires_image: true },
+      { mode: 'k8s', enabled: true, requires_image: true },
+    ]);
+    const requested = serveBundle();
+    const { uploaded, created, deployments } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await typeImage(dialog, user);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
+    expect(within(dialog).getByText(new RegExp(`${IMAGE} — 2 files`))).toBeInTheDocument();
+    expect(await within(dialog).findByRole('combobox', { name: 'Runtime' })).toHaveTextContent(
+      'Docker'
+    );
+    await submit(dialog, user);
+
+    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
+    expect(requested).toEqual([IMAGE]);
+    expect(uploaded.sort()).toEqual(['agent.yaml', 'tools/search.py']);
+    expect(created).toHaveLength(1);
+    expect(created[0]).toMatchObject({
+      name: 'calc',
+      config: { config_format: 'nemo-agents-spec-v1', name: 'calc' },
+    });
+    await waitFor(() =>
+      expect(deployments).toEqual([
+        { agent: 'calc', deployment_mode: 'docker', image: PINNED_IMAGE },
+      ])
+    );
+    expect(screen.queryByText(/Build then deploy/)).not.toBeInTheDocument();
+  });
+
+  it('names the agent after the image when agent.yaml has no name', async () => {
+    const user = userEvent.setup();
+    serveBundle({ 'agent.yaml': 'config_format: nemo-agents-spec-v1\n' });
+    mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await typeImage(dialog, user);
+
+    await waitFor(() =>
+      expect(within(dialog).getByDisplayValue('sample-agent')).toBeInTheDocument()
+    );
+  });
+
+  it('deploys to Kubernetes when chosen', async () => {
+    const user = userEvent.setup();
+    serveModeList([
+      { mode: 'docker', enabled: true, requires_image: true },
+      { mode: 'k8s', enabled: true, requires_image: true },
+    ]);
+    serveBundle();
+    const { deployments } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await typeImage(dialog, user);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
+    await user.click(await within(dialog).findByRole('combobox', { name: 'Runtime' }));
+    await user.click(await screen.findByRole('option', { name: 'Kubernetes' }));
+    await submit(dialog, user);
+
+    await waitFor(() =>
+      expect(deployments).toEqual([{ agent: 'calc', deployment_mode: 'k8s', image: PINNED_IMAGE }])
+    );
+  });
+
+  it('offers only enabled container runtimes', async () => {
+    const user = userEvent.setup();
+    serveModeList([
+      { mode: 'subprocess', enabled: true, requires_image: false },
+      { mode: 'docker', enabled: true, requires_image: true },
+      { mode: 'k8s', enabled: false, requires_image: true },
+    ]);
+    serveBundle();
+    mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await typeImage(dialog, user);
+    await user.click(await within(dialog).findByRole('combobox', { name: 'Runtime' }));
+
+    expect(await screen.findByRole('option', { name: 'Docker' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Subprocess' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Kubernetes' })).not.toBeInTheDocument();
+  });
+
+  it('cannot register when no container runtime is enabled', async () => {
+    const user = userEvent.setup();
+    serveModeList([
+      { mode: 'subprocess', enabled: true, requires_image: false },
+      { mode: 'docker', enabled: false, requires_image: true },
+    ]);
+    serveBundle();
+    mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await typeImage(dialog, user);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
+
+    expect(within(dialog).getByText(/no container runtime enabled/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
+  });
+
+  it('shows why the image could not be read', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post(BUNDLE_URL, () =>
+        HttpResponse.json(
+          { detail: 'registry-1.docker.io/org/agent:1 is private.' },
+          { status: 403 }
+        )
+      )
+    );
+    const { created } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await typeImage(dialog, user, 'org/agent:1');
+
+    expect(await within(dialog).findByText(/is private/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
+    expect(created).toEqual([]);
+  });
+
+  it('applies upload validation to the bundle', async () => {
+    const user = userEvent.setup();
+    serveBundle({ 'agent.yaml': 'config_format: nat-workflow-v1\n' });
+    mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await typeImage(dialog, user);
+
+    expect(
+      await within(dialog).findByText(/must set config_format: nemo-agents-spec-v1/)
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
+  });
+
+  it('does not read the image until the reference is valid', async () => {
+    const user = userEvent.setup();
+    const requested = serveBundle();
+    mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await user.type(await openImageTab(dialog), 'https://docker.io/org/agent:1');
+
+    expect(within(dialog).queryByText(/Leave out the scheme/)).not.toBeInTheDocument();
+
+    await user.tab();
+
+    expect(await within(dialog).findByText(/Leave out the scheme/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
+    expect(requested).toEqual([]);
+  });
+
+  it('holds Register after the reference changes until the new image is read', async () => {
+    const user = userEvent.setup();
+    serveBundle();
+    mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await typeImage(dialog, user);
+    const register = within(dialog).getByRole('button', { name: 'Register' });
+    await waitFor(() => expect(register).toBeEnabled());
+
+    await user.type(within(dialog).getByRole('textbox', { name: 'Container image' }), '1');
+
+    expect(register).toBeDisabled();
+  });
+
+  it('leaves the upload runtime alone when the image tab is visited', async () => {
+    const user = userEvent.setup();
+    serveModeList([
+      { mode: 'subprocess', enabled: true, requires_image: false },
+      { mode: 'docker', enabled: true, requires_image: true },
+    ]);
+    const { deployments } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openImageTab(dialog);
+    expect(await within(dialog).findByRole('combobox', { name: 'Runtime' })).toHaveTextContent(
+      'Docker'
+    );
+    await openUploadTab(dialog);
+    pickDirectory(dialog);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
+    expect(within(dialog).getByRole('combobox', { name: 'Runtime' })).toHaveTextContent(
+      'Subprocess'
+    );
+    await submit(dialog, user);
+
+    await waitFor(() =>
+      expect(deployments).toEqual([{ agent: 'calc', deployment_mode: 'subprocess' }])
+    );
+  });
+
+  it('registers without deploying when the runtimes cannot be loaded', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(DEPLOYMENT_MODES_URL, () => HttpResponse.json({}, { status: 500 })));
+    serveBundle();
+    const { created, deployments } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await typeImage(dialog, user);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
+
+    expect(
+      await within(dialog).findByText(/runtimes could not be loaded/, undefined, {
+        timeout: 5000,
+      })
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByRole('combobox', { name: 'Runtime' })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: 'Register' })).toBeEnabled()
+    );
+    await submit(dialog, user);
+
+    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
+    expect(created).toHaveLength(1);
+    expect(deployments).toEqual([]);
+  });
+
+  it('keeps reading the image when files are picked meanwhile', async () => {
+    const user = userEvent.setup();
+    let release = () => {};
+    serveBundle(undefined, new Promise<void>((resolve) => (release = resolve)));
+    mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await typeImage(dialog, user);
+    await openUploadTab(dialog);
+    pickDirectory(dialog);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
+    release();
+    await openImageTab(dialog);
+
+    expect(await within(dialog).findByText(new RegExp(`${IMAGE} — 2 files`))).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: 'Register' })).toBeEnabled()
+    );
+  });
+
+  it('drops a read that finishes after the modal is cancelled', async () => {
+    const user = userEvent.setup();
+    let release = () => {};
+    serveBundle(undefined, new Promise<void>((resolve) => (release = resolve)));
+    mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await typeImage(dialog, user);
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await act(async () => {
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    await openUploadTab(dialog);
+    expect(within(dialog).getByRole('textbox', { name: 'Name' })).toHaveValue('');
+  });
+
+  it('keeps an upload pick out of the image tab', async () => {
+    mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openUploadTab(dialog);
+    pickDirectory(dialog);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
+
+    await openImageTab(dialog);
+
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
   });
 });
