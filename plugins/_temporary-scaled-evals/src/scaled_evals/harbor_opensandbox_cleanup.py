@@ -3,8 +3,8 @@
 
 """Ownership-scoped cleanup of OpenSandbox sandboxes created for one evaluation.
 
-Run with the Harbor 0.20 runner's interpreter, which is the only environment that carries the
-OpenSandbox SDK::
+Run with a Harbor runner's interpreter; the runner venvs that support ``harbor_opensandbox`` are the
+only environments that carry the OpenSandbox SDK::
 
     <harbor_dir>/.venv/bin/python -m scaled_evals.harbor_opensandbox_cleanup \\
         --selector nemo-scaled-evals-deployment=<id> --selector nemo-scaled-evals-evaluation=<id>
@@ -79,7 +79,7 @@ def connection_env(source: Mapping[str, str] | None = None) -> dict[str, str]:
 
 async def _manager(env: Mapping[str, str], protocol: str) -> Any:
     """Open an OpenSandbox ``SandboxManager``; the SDK is imported here because only Harbor's venv has it."""
-    from opensandbox.config import ConnectionConfig  # ty: ignore[unresolved-import]  # Harbor 0.20 venv only
+    from opensandbox.config import ConnectionConfig  # ty: ignore[unresolved-import]  # Harbor runner venvs only
     from opensandbox.manager import SandboxManager  # ty: ignore[unresolved-import]
 
     return await SandboxManager.create(

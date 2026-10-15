@@ -1206,6 +1206,27 @@ jobs:
         run: uv run --frozen --group scaled-evals pytest plugins/_temporary-scaled-evals/tests -v
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
+      # The workspace venv carries a single Harbor release, but NemoOpenSandboxEnvironment must run on
+      # every runner harbor_opensandbox accepts: those whose requirements pin the OpenSandbox SDK.
+      # Build each runner's venv from its own requirements, as the image does, and run the tests there.
+      - name: Run harbor_opensandbox environment tests on each supported Harbor runner
+        working-directory: plugins/_temporary-scaled-evals
+        run: |
+          set -eu
+          for requirements in harbor-runners/*.txt; do
+            grep -q '^opensandbox==' "$requirements" || continue
+            version="$(basename "$requirements" .txt)"
+            venv="$RUNNER_TEMP/harbor-$version"
+            uv venv --python 3.12 "$venv"
+            # --python, not VIRTUAL_ENV: setup-uv exports UV_PYTHON, which would otherwise send the
+            # install to the workspace .venv.
+            uv pip install --python "$venv/bin/python" -r "$requirements" ../../packages/nhx_sandbox pytest pytest-asyncio
+            echo "::group::Harbor $version"
+            "$venv/bin/python" -m pytest -p no:cacheprovider -v \
+              tests/test_harbor_opensandbox_environment.py tests/test_harbor_opensandbox_driver.py \
+              tests/test_harbor_opensandbox_compose_services.py
+            echo "::endgroup::"
+          done
 
   # WHY THIS JOB EXISTS (it looks redundant, it isn't): `--extra fabric` appears nowhere else in this
   # file and there is no `--all-extras`, so no other job installs nemo-fabric. Every other Fabric test

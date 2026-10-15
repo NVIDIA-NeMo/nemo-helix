@@ -70,7 +70,7 @@ def _write_task(task_dir: Path, environment: str = "") -> None:
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
-        ({"framework_version": "0.13.2"}, "requires Harbor 0.20.0"),
+        ({"framework_version": "0.6.4"}, "requires Harbor 0.13.2 or 0.20.0"),
         ({"network_policy": "unrestricted"}, "supports network_policy default_deny"),
         ({"network_policy": "scoped_egress"}, "supports network_policy default_deny"),
         ({"network_policy_config": {"allowed_hosts": ["x"]}}, "omit network_policy_config"),
@@ -85,8 +85,10 @@ def test_preflight_rejects_what_it_cannot_isolate(overrides: dict[str, Any], mes
         backend.preflight(_spec(**overrides))
 
 
-def test_preflight_accepts_supported_evaluation() -> None:
-    backend.preflight(_spec())
+@pytest.mark.parametrize("version", ["0.13.2", "0.20.0"])
+def test_preflight_accepts_supported_evaluation(version: str) -> None:
+    """Launch-time preflight accepts every Harbor runner the runtime supports."""
+    backend.preflight(_spec(framework_version=version))
 
 
 COMPOSE_PROFILE = {"services": [{"name": "db", "image": "nvcr.io/org/postgres:16"}]}
@@ -691,9 +693,15 @@ def test_enabled_backend_requires_config(monkeypatch: pytest.MonkeyPatch) -> Non
         backend.build_backend()
 
 
-def test_runtime_pins_harbor_020() -> None:
-    assert resolve_framework_runner("harbor", None, runtime="harbor_opensandbox").version == "0.20.0"
-    with pytest.raises(ValueError, match="supports only Harbor 0.20.0"):
-        resolve_framework_runner("harbor", "0.13.2", runtime="harbor_opensandbox")
+def test_runtime_accepts_the_supported_harbor_runners() -> None:
+    """Submission accepts 0.13.2 and 0.20.0, defaults this runtime to 0.20.0, and rejects other runners."""
+    # An omitted version gets this runtime's default, not the catalog's, and is still recorded as omitted.
+    omitted = resolve_framework_runner("harbor", None, runtime="harbor_opensandbox")
+    assert (omitted.version, omitted.requested_version) == ("0.20.0", None)
+    assert resolve_framework_runner("harbor", None).version == "0.13.2"
+    assert resolve_framework_runner("harbor", "stable", runtime="harbor_opensandbox").version == "0.13.2"
+    assert resolve_framework_runner("harbor", "0.20.0", runtime="harbor_opensandbox").version == "0.20.0"
+    with pytest.raises(ValueError, match="supports Harbor 0.13.2, 0.20.0, not 0.6.4"):
+        resolve_framework_runner("harbor", "0.6.4", runtime="harbor_opensandbox")
     with pytest.raises(ValueError, match="requires framework 'harbor'"):
         resolve_framework_runner("gym", None, runtime="harbor_opensandbox")
