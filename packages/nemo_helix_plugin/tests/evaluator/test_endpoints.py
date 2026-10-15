@@ -14,6 +14,7 @@ from nemo_helix_plugin.evals.types import (
     AgentEvalResult,
     BundledMetricOutputSpec,
     CreateMetricRequest,
+    CreateTaskImageBuildRequest,
     CreateTaskRequest,
     CreateTasksetRequest,
     EvalResult,
@@ -35,6 +36,7 @@ from nemo_helix_plugin.evals.types import (
     SubmitEvaluateJobRequest,
     SubmitRetrieveEvalJobRequest,
     Task,
+    TaskImageBuild,
     Taskset,
 )
 from nemo_helix_plugin.jobs.schemas import (
@@ -385,6 +387,21 @@ def test_task_endpoint_shapes() -> None:
     assert tagged.path_template.endswith("/tasks/{name}/tags/{tag}")
     assert tagged.query_params == {"revision": "sha"}
     assert endpoints.delete_task(workspace="team-a", name="task-1").response_type is None
+
+
+def test_task_image_build_endpoint_shapes() -> None:
+    created = endpoints.create_task_image_build(
+        workspace="team-a", name="task-1", revision="latest", body=CreateTaskImageBuildRequest()
+    )
+    listed = endpoints.list_task_image_builds(workspace="team-a", name="task-1", revision="latest")
+    one = endpoints.get_task_image_build(workspace="team-a", name="task-1", revision="latest", build_id="1")
+
+    assert created.method == "POST"
+    assert created.path_template.endswith("/tasks/{name}/revisions/{revision}/image-builds")
+    assert created.response_type is TaskImageBuild
+    _assert_paginated_model(listed.response_type, TaskImageBuild)
+    assert one.path_template.endswith("/image-builds/{build_id}")
+    assert one.response_type is TaskImageBuild
 
 
 def test_taskset_endpoint_shapes() -> None:

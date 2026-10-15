@@ -7,15 +7,17 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException, status
 from nemo_evals.api.service.metric_service import MetricService
 from nemo_evals.api.service.result_service import ResultService
 from nemo_evals.api.service.task_service import TaskService
 from nemo_evals.api.service.taskset_service import TasksetService
+from nemo_evals.image_builds.service import ImageBuildForbiddenError, ImageBuildService, JobsServiceBuildJobs
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import RequestAuthorizer, get_nemo_client, get_request_authorizer
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, get_entity_client
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
 
 
 def get_metric_service(
@@ -41,6 +43,34 @@ def get_task_service(
     """Provide a TaskService. It uses the MetricService to normalize inline task metrics into
     (derived) stored metrics, so a persisted task holds only references."""
     return TaskService(entity_client, metric_service, AsyncFilesClient.from_client(async_client))
+
+
+def get_image_build_service(
+    workspace: str,
+    entity_client: NemoEntitiesClient = Depends(get_entity_client),
+    async_client: AsyncNemoClient = Depends(get_nemo_client),
+    authorize: RequestAuthorizer = Depends(get_request_authorizer),
+) -> ImageBuildService:
+    """Provide an ImageBuildService whose task-builder Jobs are created as the caller.
+
+    Builder admits the task-builder Job on evals' own permissions, so the caller's permission to build is checked here.
+    """
+
+    async def authorize_builds(build_workspace: str) -> None:
+        try:
+            await authorize("POST", f"/apis/builder/v2/workspaces/{quote(build_workspace, safe='')}/builds")
+        except HTTPException as e:
+            if e.status_code != status.HTTP_403_FORBIDDEN:
+                raise
+            raise ImageBuildForbiddenError(
+                f"You may not submit container image builds in workspace {build_workspace}"
+            ) from e
+
+    return ImageBuildService(
+        entity_client,
+        JobsServiceBuildJobs(AsyncJobsClient.from_client(async_client), workspace=workspace),
+        authorize_builds,
+    )
 
 
 def get_taskset_service(
