@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-const CHARS_PER_TOKEN = 4;
+const AVG_CHARS_PER_TOKEN = 4;
 const MIN_GENERATION_WINDOW_MS = 100;
 
 interface CompletionMetricsInput {
@@ -52,7 +52,7 @@ export const computeCompletionMetrics = ({
   chunkCount,
 }: CompletionMetricsInput): CompletionMetrics => {
   const completionTokens =
-    usageTokens ?? Math.max(chunkCount, Math.round(outputChars / CHARS_PER_TOKEN));
+    usageTokens ?? Math.max(chunkCount, Math.round(outputChars / AVG_CHARS_PER_TOKEN));
   const generationMs = totalMs - firstTokenMs;
   const windowMs =
     firstTokenMs > 0 && generationMs >= MIN_GENERATION_WINDOW_MS ? generationMs : totalMs;
