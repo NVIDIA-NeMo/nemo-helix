@@ -17,6 +17,7 @@ from nemo_evals.entities import TasksetEntity, TasksetRevisionEntity
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.jobs.agent_spec import AgentEvalSpec, registered_agent_source
 from nemo_evals.revisions import RevisionNotFoundError, get_revision
+from nemo_evals.source_authorization import remember_allowed
 from nemo_evals.taskset_runs.entities import TasksetRunEntity
 from nemo_evals.taskset_runs.identifiers import derive_run_id
 from nemo_evals.taskset_runs.plan_storage import delete_fileset_ref
@@ -217,6 +218,8 @@ class TasksetRunService:
                 entity_client=self._entities,
                 async_sdk=self._async_client,
                 is_local=False,
+                # The resolver reads with service credentials; check each nested source as the caller first.
+                authorize=remember_allowed(self._authorizer),
             )
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -252,7 +255,8 @@ class TasksetRunService:
             workspace: Submission workspace for unqualified source references.
 
         Returns:
-            None after the taskset and any registered agent are authorized.
+            None after the taskset and any registered agent are authorized. Member tasks, metrics and
+            metric models are checked as the caller during resolution, before each one is read.
 
         Raises:
             HTTPException: A caller cannot read a referenced source.

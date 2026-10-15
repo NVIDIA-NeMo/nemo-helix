@@ -13,6 +13,7 @@ live in the entity record; there's no separate Files payload, unlike a metric bu
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Protocol, cast
 
 from nemo_evals.api.schemas import (
@@ -49,6 +50,9 @@ from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.schema import Page, PaginationData
 
 logger = logging.getLogger(__name__)
+
+# Caller-scoped check that the requester may read a stored metric, given ``(workspace, name)``.
+type MetricReadAuthorizer = Callable[[str, str], Awaitable[None]]
 
 
 class _MetricService(Protocol):
@@ -142,14 +146,22 @@ class TaskEntityStoreProtocol(EntityClientProtocol[TaskEntity], EntityUpdateClie
 
 
 class TaskService:
-    """Create/get/list/delete for persisted agent-eval task entities, exposed as the ``Task`` DTO."""
+    """Create/get/list/delete for persisted agent-eval task entities, exposed as the ``Task`` DTO.
+
+    The metric service may use service credentials, so it cannot establish whether the caller may
+    read a referenced metric. ``authorize_metric_read`` supplies that request-scoped check and is
+    invoked before a metric reference is looked up.
+    """
 
     def __init__(
         self,
         entity_client: TaskEntityStoreProtocol,
         metric_service: _MetricService,
         files_client: AsyncFilesClient | None = None,
+        *,
+        authorize_metric_read: MetricReadAuthorizer,
     ):
+        self.authorize_metric_read: MetricReadAuthorizer = authorize_metric_read
         self.entity_client = entity_client
         #: The same client, viewed at the revision type. Python has no intersection types, so a
         #: single annotation cannot say "serves TaskEntity *and* TaskRevisionEntity" — but the
@@ -167,6 +179,8 @@ class TaskService:
         for metric in metrics:
             if isinstance(metric, MetricRef):
                 ref_workspace, name = parse_metric_ref(metric.root, workspace)
+                # Authorize before the lookup so a denied caller cannot learn whether the metric exists.
+                await self.authorize_metric_read(ref_workspace, name)
                 if await self.metric_service.get_metric(ref_workspace, name) is None:
                     raise MetricRefNotFoundError(
                         f"Metric reference '{metric.root}' not found. "

@@ -567,7 +567,11 @@ paths:
       - Evals Plugin Taskset Run Routes
       summary: Submit Taskset Run
       description: "Freeze and accept a Harbor run, returning its original status\
-        \ on a keyed retry.\n\nArgs:\n    workspace: Workspace that owns the run.\n\
+        \ on a keyed retry.\n\nThe caller must be able to read every source: the taskset,\
+        \ its member tasks, their metrics and\nmetric models. Submission copies those\
+        \ definitions into a plan stored in this workspace, so\nanyone who can read\
+        \ this workspace's files or jobs can read the copy, even without access to\n\
+        the source workspaces.\n\nArgs:\n    workspace: Workspace that owns the run.\n\
         \    req: Validated stored Harbor taskset and execution inputs.\n    response:\
         \ HTTP response whose status distinguishes acceptance from replay.\n    caller:\
         \ Effective authenticated principal, supplied by the platform dependency.\n\

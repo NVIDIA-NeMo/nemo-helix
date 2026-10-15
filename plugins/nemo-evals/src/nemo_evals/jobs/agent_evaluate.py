@@ -65,6 +65,7 @@ from nemo_evals.jobs.run_outcome import STATUS_DETAILS_KEY, agent_eval_outcome, 
 from nemo_evals.jobs.secret_env import JobEnvSecretSource
 from nemo_evals.jobs.token_usage import capture_agent_evaluation_usage, capture_evaluator_request_logs
 from nemo_evals.jobs.utils import async_client_from_sync_client
+from nemo_evals.source_authorization import SourceReadAuthorizer
 from nemo_evals.task_refs import (
     groupby_kind,
     load_tasks,
@@ -209,8 +210,12 @@ class _AgentEvalJobBase(NemoJob):
         entity_client: object,
         async_sdk: AsyncHelixClient | None,
         is_local: bool,
+        authorize: SourceReadAuthorizer | None = None,
     ) -> BaseModel:
-        """Resolve each task's metric references into inline metrics for the canonical spec."""
+        """Resolve each task's metric references into inline metrics for the canonical spec.
+
+        ``authorize``, when set, checks each stored task, metric and model as the caller before it is read.
+        """
         del is_local
         submit_spec = (
             input_spec.model_copy(deep=True)
@@ -222,6 +227,7 @@ class _AgentEvalJobBase(NemoJob):
             entity_client=entity_client if isinstance(entity_client, EntityClient) else None,
             async_client=async_sdk,
             adapters=cls.adapters,
+            authorize=authorize,
         )
         loaded_tasks = await load_tasks(submit_spec.tasks, ctx)
         resolved_tasks = await map_with_limited_concurrency(lambda task: snapshot_task(task, ctx), loaded_tasks)

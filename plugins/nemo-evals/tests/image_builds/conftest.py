@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from nemo_evals.api.schemas import EvaluatorTaskDefinition, HarborTaskDefinition, MetricRef, TaskInput, TaskInputs
@@ -36,7 +36,7 @@ def store_task(entity_store, monkeypatch) -> StoreTask:
         return NativeTask("sort-task", spec.instruction, spec.config)
 
     monkeypatch.setattr("nemo_evals.api.service.task_service.verify_definition", verify)
-    service = TaskService(entity_store, _Metrics(), files_client=Mock())
+    service = TaskService(entity_store, _Metrics(), files_client=Mock(), authorize_metric_read=AsyncMock())
 
     async def store(name: str = "sort-task", *, config: dict | None = None, harbor: bool = True) -> str:
         spec = (

@@ -355,7 +355,7 @@ async def test_id_membership_uses_task_record_and_authorizes(entity_store):
     from nemo_evals.api.schemas import EvaluatorTaskDefinition, TaskInput
     from nemo_evals.api.service.task_service import TaskService
 
-    task_service = TaskService(entity_store, AsyncMock(), AsyncMock())
+    task_service = TaskService(entity_store, AsyncMock(), AsyncMock(), authorize_metric_read=AsyncMock())
     task, _ = await task_service.create_task(
         "by-id", TaskInput(spec=EvaluatorTaskDefinition(kind="evaluator", intent="test")), workspace="default"
     )
@@ -372,7 +372,7 @@ async def test_member_denial_prevents_taskset_write(entity_store, by_id):
     from nemo_evals.api.schemas import EvaluatorTaskDefinition, TaskInput
     from nemo_evals.api.service.task_service import TaskService
 
-    tasks = TaskService(entity_store, AsyncMock(), AsyncMock())
+    tasks = TaskService(entity_store, AsyncMock(), AsyncMock(), authorize_metric_read=AsyncMock())
     task, _ = await tasks.create_task(
         "member", TaskInput(spec=EvaluatorTaskDefinition(kind="evaluator", intent="test")), workspace="private"
     )
@@ -391,7 +391,7 @@ async def test_deleted_or_wrong_kind_id_is_not_a_member(entity_store):
     from nemo_evals.entities import TasksetEntity
 
     other = await entity_store.create(TasksetEntity(name="other", workspace="default"))
-    tasks = TaskService(entity_store, AsyncMock(), AsyncMock())
+    tasks = TaskService(entity_store, AsyncMock(), AsyncMock(), authorize_metric_read=AsyncMock())
     service = TasksetService(entity_store, tasks, authorize_task_read=AsyncMock())
     for identity in (other.id, "missing"):
         with pytest.raises(TaskRefNotFoundError):
@@ -403,7 +403,7 @@ async def test_id_membership_distinguishes_same_name_across_workspaces(entity_st
     from nemo_evals.api.service.task_service import TaskService
     from nemo_evals.entities import TaskRevisionEntity
 
-    tasks = TaskService(entity_store, AsyncMock(), AsyncMock())
+    tasks = TaskService(entity_store, AsyncMock(), AsyncMock(), authorize_metric_read=AsyncMock())
     heads = []
     for workspace in ("first", "second"):
         head, _ = await tasks.create_task(

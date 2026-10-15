@@ -26,6 +26,7 @@ from nemo_evals.shared.metric_bundles.bundles import (
     metric_bundle_packager_for_payload,
     unbundle_metric,
 )
+from nemo_evals.source_authorization import SourceReadAuthorizer, authorize_source_read
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
@@ -123,11 +124,17 @@ class HelixMetricModelResolver(ModelResolver):
     """Resolve evaluator metric ``ModelRef`` values through the typed Models client."""
 
     models_client: AsyncModelsClient
+    # Checks the submitting user may read the model. Needed when ``models_client`` is ``service:evals`` acting
+    # on behalf of the user: policy allows a read if either principal may which is always true for ``service:evals``.
+    # so we cannot rely on "on_behalf_of=caller" to guard the read.
+    # ``None`` skips the check.
+    authorize: SourceReadAuthorizer | None = None
 
     async def resolve_model(self, model_ref: ModelRef) -> Model:
         workspace, name = parse_workspace_name_ref(
             model_ref.root, label="ModelRef", expected_format="workspace/model_name"
         )
+        await authorize_source_read(self.authorize, "model", workspace, name)
         try:
             resolved = await self.models_client.resolve_model_reference(model_ref.root)
         except NotFoundError as exc:
@@ -169,6 +176,7 @@ async def resolve_metrics_to_inline(
     workspace: str,
     entity_client: EntityClient | None,
     async_client: AsyncHelixClient | None,
+    authorize: SourceReadAuthorizer | None = None,
 ) -> list[MetricInline]:
     """Resolve a wire metric list (inline + stored refs) into canonical inline metrics.
 
@@ -179,6 +187,7 @@ async def resolve_metrics_to_inline(
     derived from the platform client. Model-ref resolution uses the typed Models client.
     Both need ``async_client``; it is only optional so callers can pass through the
     job context's handle, and it must be set when any reference needs resolving.
+    When ``authorize`` is set, each stored metric and model is checked as the caller before it is read.
     """
     has_metric_ref = any(isinstance(metric, MetricRef) for metric in metrics)
     files_client = None
@@ -191,6 +200,7 @@ async def resolve_metrics_to_inline(
         workspace=workspace,
         entity_client=entity_client,
         files_client=files_client,
+        authorize=authorize,
     )
     runtime_metrics = [unbundle_metric(bundle) for bundle in resolved_bundles]
     final_bundles = resolved_bundles
@@ -199,7 +209,7 @@ async def resolve_metrics_to_inline(
         if async_client is None:
             raise ValueError("resolving metric model references requires a platform client")
         models_client = client_from_platform(async_client, AsyncModelsClient)
-        resolver: ModelResolver = HelixMetricModelResolver(models_client)
+        resolver: ModelResolver = HelixMetricModelResolver(models_client, authorize=authorize)
         await asyncio.gather(
             *(metric.resolve_models(resolver) for metric in runtime_metrics if isinstance(metric, MetricWithModels))
         )

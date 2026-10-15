@@ -55,6 +55,11 @@ async def submit_taskset_run(
 ) -> TasksetRunSubmitResponse:
     """Freeze and accept a Harbor run, returning its original status on a keyed retry.
 
+    The caller must be able to read every source: the taskset, its member tasks, their metrics and
+    metric models. Submission copies those definitions into a plan stored in this workspace, so
+    anyone who can read this workspace's files or jobs can read the copy, even without access to
+    the source workspaces.
+
     Args:
         workspace: Workspace that owns the run.
         req: Validated stored Harbor taskset and execution inputs.

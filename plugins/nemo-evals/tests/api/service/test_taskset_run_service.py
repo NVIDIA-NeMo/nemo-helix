@@ -14,7 +14,8 @@ from nemo_evals.api.taskset_run_schemas import TasksetRunInput
 from nemo_evals.entities import TasksetRevisionEntity
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.revisions import RevisionContentMismatchError, publish_revision
-from nemo_evals.taskset_runs.entities import ResultState, TasksetRunMemberEntity, TasksetRunPhase
+from nemo_evals.source_authorization import remember_allowed
+from nemo_evals.taskset_runs.entities import ResultState, TasksetRunEntity, TasksetRunMemberEntity, TasksetRunPhase
 from nemo_evals.taskset_runs.store import PlanStorageError, RunRequestConflict
 from nemo_evals.taskset_runs.submission import TimeoutAboveMaximumError
 
@@ -323,3 +324,98 @@ async def test_submit_percentage_uses_resolved_task_count(service, published, re
     run = await service._store.find("default", result.status.run_id)
     plan = await service._store.load_plan(run)
     assert plan.max_failed_tasks == 7 and len(plan.spec.tasks) == 74
+
+
+def _deny(*paths: str):
+    """Return an authorizer side effect that denies only the given nested source paths."""
+
+    async def check(method: str, path: str) -> None:
+        if path in paths:
+            raise HTTPException(status_code=403, detail=f"denied {path}")
+
+    return check
+
+
+async def _republish_task_metrics(entity_store, published, metrics) -> None:
+    """Give the published member task new metrics and republish the taskset to pin that revision."""
+    from nemo_evals.api.fields import TaskRef
+    from nemo_evals.entities import TaskEntity, TaskRevisionEntity
+
+    task = await entity_store.get(TaskEntity, "task-1", workspace="default")
+    task.spec.metrics = metrics
+    await entity_store.update(task)
+    revision, _, _ = await publish_revision(entity_store, entity_store, task, TaskRevisionEntity)
+    head, _ = published
+    head.tasks = [TaskRef(f"default/task-1#{revision.content_hash}")]
+    await entity_store.update(head)
+    await publish_revision(entity_store, entity_store, head, TasksetRevisionEntity)
+
+
+async def test_member_task_revoked_after_publication_is_rejected_before_snapshot_or_plan(
+    service, published, registered_agent, request_body, authorizer, entity_store, files_service
+):
+    """The publisher could read the task; the submitter cannot, so nothing is copied into the run."""
+    authorizer.side_effect = _deny("/apis/evals/v2/workspaces/default/tasks/task-1")
+    with pytest.raises(HTTPException) as exc:
+        await service.submit(TasksetRunInput.model_validate(request_body), workspace="default", caller="user:bob")
+    assert exc.value.status_code == 403
+    assert not files_service.filesets
+    assert not (await entity_store.list(TasksetRunEntity, workspace="default")).data
+
+
+async def test_unreadable_metric_is_rejected_before_lookup(service, published, request_body, authorizer, entity_store):
+    """A denied caller gets 403 even for a metric that does not exist, so existence is not revealed."""
+    from nemo_evals.api.fields import MetricRef
+
+    await _republish_task_metrics(entity_store, published, [MetricRef("private/judge")])
+    authorizer.side_effect = _deny("/apis/evals/v2/workspaces/private/metrics/judge")
+    with pytest.raises(HTTPException) as exc:
+        await service.submit(TasksetRunInput.model_validate(request_body), workspace="default", caller="user:bob")
+    assert exc.value.status_code == 403
+    assert not (await entity_store.list(TasksetRunEntity, workspace="default")).data
+
+
+async def test_unreadable_metric_model_is_rejected_before_resolution(
+    service, published, request_body, authorizer, entity_store
+):
+    from nemo_evals.api.fields import MetricInline
+    from nemo_evals.shared.metric_bundles.bundles import bundle_metric
+    from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
+    from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
+    from nhx_evals_sdk.values import ModelRef
+    from nhx_evals_sdk.values.scores import JSONScoreParser, RangeScore
+
+    judge = LLMJudgeMetric(
+        model=ModelRef("private/judge"),
+        scores=[RangeScore(name="quality", minimum=0, maximum=1, parser=JSONScoreParser(json_path="quality"))],
+    )
+    bundle = bundle_metric(judge, HybridMetricBundlePackager())
+    await _republish_task_metrics(entity_store, published, [MetricInline.model_validate_json(bundle.model_dump_json())])
+    authorizer.side_effect = _deny("/apis/models/v2/workspaces/private/models/judge")
+    with pytest.raises(HTTPException) as exc:
+        await service.submit(TasksetRunInput.model_validate(request_body), workspace="default", caller="user:bob")
+    assert exc.value.status_code == 403
+    assert not (await entity_store.list(TasksetRunEntity, workspace="default")).data
+
+
+async def test_readable_nested_sources_are_checked_as_caller(service, published, request_body, authorizer):
+    result = await service.submit(
+        TasksetRunInput.model_validate(request_body), workspace="default", caller="user:alice"
+    )
+    assert result.created is True
+    paths = [call.args[1] for call in authorizer.await_args_list]
+    assert "/apis/evals/v2/workspaces/default/tasks/task-1" in paths
+
+
+async def test_repeated_source_is_checked_once_but_denials_are_not_remembered():
+    """Tasks sharing one metric need one check; a denied path is checked again on the next request."""
+    authorize = AsyncMock()
+    check = remember_allowed(authorize)
+    await check("GET", "/metrics/judge")
+    await check("GET", "/metrics/judge")
+    assert authorize.await_count == 1
+    authorize.side_effect = HTTPException(status_code=403)
+    for _ in range(2):
+        with pytest.raises(HTTPException):
+            await check("GET", "/metrics/other")
+    assert authorize.await_count == 3
