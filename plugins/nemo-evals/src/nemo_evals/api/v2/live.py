@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any, Self
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -32,9 +34,11 @@ from nemo_evals.jobs.metric_resolution import (
     to_runtime_bundle,
 )
 from nemo_evals.shared.metric_bundles.bundles import unbundle_metric
+from nemo_helix_plugin.auth import current_auth_context
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entity_client import get_entity_client
@@ -75,6 +79,8 @@ MAX_MODEL_BACKED_METRICS = 4
 MAX_CONCURRENT = 4
 
 _SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT)
+
+_EVALS_SERVICE = "evals"
 
 
 def get_live_semaphore() -> asyncio.Semaphore:
@@ -169,6 +175,23 @@ class LiveScoreResponse(BaseModel):
 router = APIRouter()
 
 
+@asynccontextmanager
+async def _secrets_access_client(request_client: AsyncNemoClient) -> AsyncIterator[AsyncNemoClient]:
+    """Yield the client that reads metric secret values: the evals service, delegating the caller.
+
+    Without a request principal there is nobody to delegate, so the request-scoped client is used
+    rather than an undelegated service client.
+    """
+    caller = current_auth_context()
+    if caller is None:
+        yield request_client
+        return
+    async with get_async_nemo_client(
+        as_service=_EVALS_SERVICE, internal=True, on_behalf_of=caller.to_principal()
+    ) as service_client:
+        yield service_client
+
+
 @router.post(
     "/evaluate/live",
     summary="Run Live Evaluation",
@@ -229,10 +252,13 @@ async def run_live_evaluation(
                     request.metrics, workspace=workspace, entity_client=entity_client, async_client=async_client
                 )
                 params = _live_params(request.params, request.target)
-                secret_resolver = HelixMetricSecretResolver(
-                    client_from_platform(async_client, AsyncSecretsClient), workspace=workspace
-                )
-                output, results = await _score(metrics, request=request, params=params, secret_resolver=secret_resolver)
+                async with _secrets_access_client(async_client) as secrets_access_client:
+                    secret_resolver = HelixMetricSecretResolver(
+                        client_from_platform(secrets_access_client, AsyncSecretsClient), workspace=workspace
+                    )
+                    output, results = await _score(
+                        metrics, request=request, params=params, secret_resolver=secret_resolver
+                    )
         except HTTPException:
             raise
         except TimeoutError:
