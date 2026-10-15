@@ -229,7 +229,6 @@ class TestEvaluateBenchmarkOnline:
     async def test_ignore_request_failure_maps_row_to_nan_without_scoring_it(
         self, mocker: MockerFixture, online_params: RunConfigOnlineModel
     ) -> None:
-        """Ignored inference failures become NaN rows that no metric scores."""
         rows = [{"prompt": "ok"}, {"prompt": "bad"}]
         model = _make_model()
 
@@ -807,13 +806,7 @@ class TestEvaluateBenchmarkEdgeCases:
             side_effect=_maybe_failing_sample,
         )
 
-        def _score(_item: dict, sample: dict) -> float:
-            """Return NaN for ignored generation failure placeholders."""
-            if sample.get("inference_error"):
-                return float("nan")
-            return 1.0
-
-        metric = _CorpusMetric("corpus-metric", _score)
+        metric = _CorpusMetric("corpus-metric", lambda _item, _sample: 1.0)
 
         result = await evaluate_benchmark(
             metrics=[("custom.ref", metric)],

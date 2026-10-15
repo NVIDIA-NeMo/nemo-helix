@@ -25,10 +25,12 @@ from nhx_evals_sdk.agent_eval.scores import AgentEvalScoreStatus
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrialStatus
 from nhx_evals_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nhx_evals_sdk.values.protocol import MetricOutput
-from nhx_evals_sdk.values.results import EvaluationResult, RowScore
+from nhx_evals_sdk.values.results import EvaluationResult
 from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
+
+_FIRST_ERROR_MAX_CHARS = 500
 
 #: Key under which the outcome is merged into the job's ``status_details``.
 STATUS_DETAILS_KEY = "evaluation"
@@ -53,7 +55,7 @@ class RunOutcome(BaseModel):
     @property
     def message(self) -> str:
         if self.failed:
-            first_error = f" First error: {self.first_error}." if self.first_error else ""
+            first_error = f" First error: {self.first_error.rstrip('.')}." if self.first_error else ""
             return (
                 f"No usable scores across {self.total} {self.unit} ({self.errored} reported errors).{first_error} "
                 "See the job logs for the underlying request or metric failures."
@@ -88,17 +90,21 @@ def agent_eval_outcome(result: AgentEvalResult) -> RunOutcome:
 def row_eval_outcome(result: EvaluationResult | BenchmarkEvaluationResult) -> RunOutcome:
     """Rows count as errored when inference or any metric recorded an error for them."""
     rows = result.row_scores
-    errors = [error for row in rows if (error := _row_error(row)) is not None]
+    errors = [row.error for row in rows if row.error is not None]
     scored = sum(1 for row in rows if any(_has_usable_value(outputs) for outputs in row.metrics.values()))
     return RunOutcome(
-        unit="rows", total=len(rows), errored=len(errors), scored=scored, first_error=next(iter(errors), None)
+        unit="rows",
+        total=len(rows),
+        errored=len(errors),
+        scored=scored,
+        first_error=_truncate(errors[0]) if errors else None,
     )
 
 
-def _row_error(row: RowScore) -> str | None:
-    if "inference_error" in row.sample:
-        return str(row.sample["inference_error"])
-    return row.error
+def _truncate(text: str) -> str:
+    if len(text) <= _FIRST_ERROR_MAX_CHARS:
+        return text
+    return text[: _FIRST_ERROR_MAX_CHARS - 1] + "…"
 
 
 def _has_usable_value(outputs: Iterable[MetricOutput]) -> bool:

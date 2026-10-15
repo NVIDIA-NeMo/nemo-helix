@@ -32,6 +32,7 @@ import httpx
 from nhx_evals_sdk.agent_inference import AgentInferenceFn, new_agent_inference_client
 from nhx_evals_sdk.execution.config import fail_fast_from_params
 from nhx_evals_sdk.execution.metric_execution import (
+    _format_exception_summary,
     generate_online_sample,
     generate_online_sample_agent,
 )
@@ -382,7 +383,7 @@ async def _run_producer_workers(
                     "Online sample generation failed, marking row as NaN-eligible",
                     extra={"item_index": idx, "error": str(e)},
                 )
-                sample = {"output_text": None, "response": {}, "inference_error": str(e)}
+                sample = {"output_text": None, "response": {}, "inference_error": _format_exception_summary(e)}
             finally:
                 index_queue.task_done()
 

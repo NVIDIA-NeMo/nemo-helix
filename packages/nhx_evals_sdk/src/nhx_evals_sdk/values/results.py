@@ -549,6 +549,8 @@ class RowScore(BaseModel):
         """Derived row-level summary error text."""
         if self.metric_errors:
             return "; ".join(f"{metric_key}: {message}" for metric_key, message in self.metric_errors.items())
+        if "inference_error" in self.sample:
+            return f"inference: {self.sample['inference_error']}"
         return None
 
 

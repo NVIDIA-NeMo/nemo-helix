@@ -57,11 +57,7 @@ def _coerce_aggregate_output(output: MetricOutput, output_spec: MetricOutputSpec
     ``output_spec`` must be aggregateable; callers select those with
     :func:`is_aggregateable_output_spec` before they get here.
     """
-    if (
-        issubclass(output_spec.value_schema, BooleanValue)
-        and isinstance(output.value, float)
-        and math.isnan(output.value)
-    ):
+    if isinstance(output.value, float) and math.isnan(output.value):
         return MetricScore(name=output.name, value=output.value)
     coerced = cast(ContinuousScore | DiscreteScore | BooleanValue, output_spec.coerce_output(output))
     value = coerced.root

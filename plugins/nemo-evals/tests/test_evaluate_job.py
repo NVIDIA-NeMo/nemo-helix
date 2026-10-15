@@ -434,11 +434,11 @@ def test_evaluate_job_fails_when_the_agent_never_answers(tmp_path: Path, mocker:
         "total": 2,
         "errored": 2,
         "scored": 0,
-        "first_error": "Retry attempts exhausted: 6 out of 6",
+        "first_error": "inference: Retry attempts exhausted: 6 out of 6",
         "failed": True,
         "message": None,
     }
-    assert "First error: Retry attempts exhausted: 6 out of 6." in result["reason"]
+    assert "First error: inference: Retry attempts exhausted: 6 out of 6." in result["reason"]
     aggregate_scores = _load_artifact_payload(result)["aggregate_scores"]["scores"]
     assert {score["name"]: (score["count"], score["nan_count"]) for score in aggregate_scores} == {
         "exact-match.exact-match": (0, 2),

@@ -178,7 +178,7 @@ class TestRowEvalOutcome:
 
         outcome = row_eval_outcome(_row_result(rows))
 
-        assert outcome == RunOutcome(unit="rows", total=2, errored=2, scored=0, first_error="boom")
+        assert outcome == RunOutcome(unit="rows", total=2, errored=2, scored=0, first_error="m: boom")
         assert outcome.failed
 
     def test_an_inference_error_without_a_metric_error_is_errored(self) -> None:
@@ -187,12 +187,23 @@ class TestRowEvalOutcome:
         outcome = row_eval_outcome(_row_result(rows))
 
         assert outcome == RunOutcome(
-            unit="rows", total=3, errored=3, scored=0, first_error="Retry attempts exhausted: 6 out of 6"
+            unit="rows", total=3, errored=3, scored=0, first_error="inference: Retry attempts exhausted: 6 out of 6"
         )
         assert outcome.message == (
-            "No usable scores across 3 rows (3 reported errors). First error: Retry attempts exhausted: 6 out of 6. "
+            "No usable scores across 3 rows (3 reported errors). First error: inference: Retry attempts exhausted: 6 out of 6. "
             "See the job logs for the underlying request or metric failures."
         )
+
+    def test_first_error_is_truncated(self) -> None:
+        outcome = row_eval_outcome(_row_result([_row(value=float("nan"), inference_error="x" * 2000)]))
+
+        assert outcome.first_error is not None
+        assert len(outcome.first_error) == 500
+
+    def test_message_does_not_double_a_trailing_period(self) -> None:
+        outcome = RunOutcome(unit="rows", total=1, errored=1, scored=0, first_error="boom.")
+
+        assert "First error: boom. See" in outcome.message
 
     def test_a_row_with_a_finite_value_is_scored(self) -> None:
         rows = [_row(value=float("nan"), metric_error="boom"), _row(value=0.0)]

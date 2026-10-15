@@ -102,12 +102,13 @@ def _has_empty_prompt(row: dict[str, object]) -> bool:
 
 def _format_exception_summary(error: Exception) -> str:
     """Return a concise one-line cause summary for user-facing row errors."""
-    cause = str(error).strip()
-    if not cause and error.__cause__ is not None:
-        cause = str(error.__cause__).strip()
-    if not cause:
-        cause = type(error).__name__
-    return " ".join(cause.split())
+    message = str(error).strip()
+    cause = str(error.__cause__).strip() if error.__cause__ is not None else ""
+    if message and cause and cause != message:
+        summary = f"{message}: {cause}"
+    else:
+        summary = message or cause or type(error).__name__
+    return " ".join(summary.split())
 
 
 # ---------------------------------------------------------------------------
