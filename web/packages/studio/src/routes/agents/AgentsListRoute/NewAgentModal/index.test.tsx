@@ -1009,3 +1009,165 @@ describe('NewAgentModal deploy after create', () => {
     ).toBeInTheDocument();
   });
 });
+
+describe('NewAgentModal container image', () => {
+  const IMAGE = 'docker.io/sgavrilovic951/sample_agent:0.1';
+
+  const serveModeList = (modes: { mode: string; enabled: boolean; requires_image: boolean }[]) =>
+    server.use(http.get(DEPLOYMENT_MODES_URL, () => HttpResponse.json({ data: modes })));
+
+  const openImageTab = async (dialog: HTMLElement) => {
+    fireEvent.click(within(dialog).getByRole('tab', { name: 'Register from container image' }));
+    return within(dialog).findByRole('textbox', { name: 'Container image' });
+  };
+
+  const typeImage = async (
+    dialog: HTMLElement,
+    user: ReturnType<typeof userEvent.setup>,
+    image = IMAGE
+  ) => {
+    await user.type(await openImageTab(dialog), image);
+    await user.tab();
+  };
+
+  it('creates an agent with no config and deploys the image with its own entrypoint', async () => {
+    const user = userEvent.setup();
+    serveModeList([
+      { mode: 'subprocess', enabled: true, requires_image: false },
+      { mode: 'docker', enabled: true, requires_image: true },
+      { mode: 'k8s', enabled: true, requires_image: true },
+    ]);
+    const { created, deployments, filesets } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await typeImage(dialog, user);
+    await waitFor(() =>
+      expect(within(dialog).getByDisplayValue('sample-agent')).toBeInTheDocument()
+    );
+    expect(await within(dialog).findByRole('combobox', { name: 'Runtime' })).toHaveTextContent(
+      'Docker'
+    );
+    await submit(dialog, user);
+
+    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
+    expect(created).toEqual([{ name: 'sample-agent', config: {} }]);
+    expect(filesets).toEqual([]);
+    await waitFor(() =>
+      expect(deployments).toEqual([
+        {
+          agent: 'sample-agent',
+          deployment_mode: 'docker',
+          image: IMAGE,
+          use_image_entrypoint: true,
+        },
+      ])
+    );
+    expect(screen.queryByText(/Build then deploy/)).not.toBeInTheDocument();
+  });
+
+  it('deploys to Kubernetes when chosen', async () => {
+    const user = userEvent.setup();
+    serveModeList([
+      { mode: 'docker', enabled: true, requires_image: true },
+      { mode: 'k8s', enabled: true, requires_image: true },
+    ]);
+    const { deployments } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await typeImage(dialog, user);
+    await user.click(await within(dialog).findByRole('combobox', { name: 'Runtime' }));
+    await user.click(await screen.findByRole('option', { name: 'Kubernetes' }));
+    await submit(dialog, user);
+
+    await waitFor(() => expect(deployments).toHaveLength(1));
+    expect(deployments[0]).toMatchObject({ deployment_mode: 'k8s', image: IMAGE });
+  });
+
+  it('offers only enabled container runtimes', async () => {
+    const user = userEvent.setup();
+    serveModeList([
+      { mode: 'subprocess', enabled: true, requires_image: false },
+      { mode: 'docker', enabled: true, requires_image: true },
+      { mode: 'k8s', enabled: false, requires_image: true },
+    ]);
+    mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await typeImage(dialog, user);
+    await user.click(await within(dialog).findByRole('combobox', { name: 'Runtime' }));
+
+    expect(await screen.findByRole('option', { name: 'Docker' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Subprocess' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Kubernetes' })).not.toBeInTheDocument();
+  });
+
+  it('cannot register when no container runtime is enabled', async () => {
+    const user = userEvent.setup();
+    serveModeList([
+      { mode: 'subprocess', enabled: true, requires_image: false },
+      { mode: 'docker', enabled: false, requires_image: true },
+    ]);
+    mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await typeImage(dialog, user);
+
+    expect(await within(dialog).findByText(/no container runtime enabled/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
+  });
+
+  it('says why a reference it cannot use is not accepted, once the field is left', async () => {
+    const user = userEvent.setup();
+    const { created } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await user.type(await openImageTab(dialog), 'https://docker.io/org/agent:1');
+
+    expect(within(dialog).queryByText(/Leave out the scheme/)).not.toBeInTheDocument();
+
+    await user.tab();
+
+    expect(await within(dialog).findByText(/Leave out the scheme/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
+    expect(created).toEqual([]);
+  });
+
+  it('keeps a name the user already typed', async () => {
+    const user = userEvent.setup();
+    mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openImageTab(dialog);
+    await user.type(within(dialog).getByRole('textbox', { name: 'Name' }), 'triage');
+    await typeImage(dialog, user);
+
+    expect(within(dialog).getByDisplayValue('triage')).toBeInTheDocument();
+  });
+
+  it('shows why the agent could not be created, and deploys nothing', async () => {
+    const user = userEvent.setup();
+    const { deployments } = mockHelix();
+    server.use(
+      http.post(AGENTS_URL, () =>
+        HttpResponse.json({ detail: 'Agent sample-agent already exists' }, { status: 409 })
+      )
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await typeImage(dialog, user);
+    await waitFor(() =>
+      expect(within(dialog).getByDisplayValue('sample-agent')).toBeInTheDocument()
+    );
+    await submit(dialog, user);
+
+    expect(await within(dialog).findByText(/already exists/)).toBeInTheDocument();
+    expect(deployments).toEqual([]);
+  });
+});

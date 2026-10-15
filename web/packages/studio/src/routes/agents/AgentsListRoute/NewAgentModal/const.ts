@@ -49,6 +49,7 @@ export const uploadAgentFormSchema = z.object({
   name: agentNameSchema,
   repoUrl: z.string().trim().default(''),
   secretKey: z.string().default(''),
+  image: z.string().trim().default(''),
   deploy: z.boolean().default(true),
   deploymentMode: z.nativeEnum(DeploymentModeAvailabilityMode).default('subprocess'),
 });

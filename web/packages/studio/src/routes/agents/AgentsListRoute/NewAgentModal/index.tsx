@@ -37,6 +37,7 @@ import { useCreateAgentFromGitHub } from '@studio/api/agents/useCreateAgentFromG
 import { useCreateAgentFromUpload } from '@studio/api/agents/useCreateAgentFromUpload';
 import {
   type DeploymentMode,
+  enabledImageModes,
   IMAGE_DEPLOYMENT_MODES,
   useDeploymentModes,
 } from '@studio/api/agents/useDeploymentModes';
@@ -59,6 +60,10 @@ import {
   agentNameFromSource,
   parseGitHubSource,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/github';
+import {
+  agentNameFromImage,
+  imageReferenceProblem,
+} from '@studio/routes/agents/AgentsListRoute/NewAgentModal/image';
 import type {
   NewAgentModalProps,
   NewAgentTab,
@@ -122,9 +127,14 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const [tab, setTab] = useState<NewAgentTab>('upload');
   const [isSecretModalOpen, setSecretModalOpen] = useState(false);
   const [repoBlurred, setRepoBlurred] = useState(false);
+  const [imageBlurred, setImageBlurred] = useState(false);
   const [tracedAgent, setTracedAgent] = useState('');
   // Set on submit, so an agent created from traces, which has no config to run, is never deployed.
-  const deployAfterCreate = useRef<{ mode: DeploymentMode; buildImage: boolean } | null>(null);
+  const deployAfterCreate = useRef<{
+    mode: DeploymentMode;
+    buildImage: boolean;
+    image?: string;
+  } | null>(null);
 
   // Toasts live on the hook, not on mutate(): navigating to the new agent unmounts this modal.
   const { mutate: deployAgent } = useAgentsCreateDeployment({
@@ -154,7 +164,18 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
       navigate(...buildThenDeployNavigation(workspace, agent.name, { mode: deployment.mode }));
       return;
     }
-    if (deployment) {
+    if (deployment?.image) {
+      // The packaged image carries its own agent.yaml and entrypoint, so the platform's are not injected.
+      deployAgent({
+        workspace,
+        data: {
+          agent: agent.name,
+          deployment_mode: deployment.mode,
+          image: deployment.image,
+          use_image_entrypoint: true,
+        },
+      });
+    } else if (deployment) {
       deployAgent({ workspace, data: { agent: agent.name, deployment_mode: deployment.mode } });
     }
     navigate(getAgentDetailRoute(workspace, agent.name));
@@ -174,11 +195,19 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     reset: resetRepoMutation,
   } = useCreateAgentFromGitHub({ onSuccess: onAgentCreated });
 
-  const isPending = isUploading || isImporting;
+  const {
+    mutateAsync: createImageAgent,
+    error: imageCreateError,
+    isPending: isCreatingFromImage,
+    reset: resetImageMutation,
+  } = useAgentsCreateAgent({ mutation: { onSuccess: onAgentCreated } });
+
+  const isPending = isUploading || isImporting || isCreatingFromImage;
   const onUploadTab = tab === 'upload';
   const onGitHubTab = tab === 'github';
+  const onImageTab = tab === 'image';
   const onTracesTab = tab === 'imported-traces';
-  const onCreateTab = onUploadTab || onGitHubTab || onTracesTab;
+  const onCreateTab = onUploadTab || onGitHubTab || onImageTab || onTracesTab;
 
   const {
     control,
@@ -211,8 +240,14 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   );
   const modeNeedsImageBuild = (mode: DeploymentMode) =>
     deploymentModeState.status === 'ready' && !deploymentModeState.withoutImage.includes(mode);
+  // A packaged image needs no build, so every enabled container mode can run it.
+  const imageDeploymentModes = useMemo<readonly DeploymentMode[]>(
+    () => (deploymentModeState.status === 'ready' ? enabledImageModes(deploymentModeState) : []),
+    [deploymentModeState]
+  );
   const isModesLoading = deploymentModeState.status === 'loading';
   const canDeployOnCreate = deploymentModes.length > 0;
+  const offeredModes = onImageTab ? imageDeploymentModes : deploymentModes;
 
   const {
     mutateAsync: createTracedAgent,
@@ -231,15 +266,16 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const watchedName = useWatch({ control, name: 'name' });
   const watchedRepoUrl = useWatch({ control, name: 'repoUrl' });
   const watchedSecretKey = useWatch({ control, name: 'secretKey' });
+  const watchedImage = useWatch({ control, name: 'image' });
   const watchedDeploy = useWatch({ control, name: 'deploy' });
   const watchedDeploymentMode = useWatch({ control, name: 'deploymentMode' });
 
   useEffect(() => {
-    const firstMode = deploymentModes.at(0);
-    if (firstMode && !deploymentModes.includes(watchedDeploymentMode)) {
+    const firstMode = offeredModes.at(0);
+    if (firstMode && !offeredModes.includes(watchedDeploymentMode)) {
       setValue('deploymentMode', firstMode);
     }
-  }, [deploymentModes, watchedDeploymentMode, setValue]);
+  }, [offeredModes, watchedDeploymentMode, setValue]);
 
   // A repository is only a source once it parses; a half-typed URL must not enable submit.
   const parsedRepo = useMemo((): { source?: GitHubAgentSource; problem?: string } => {
@@ -257,9 +293,15 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   // disarms it in the same render rather than one render later.
   const replaceOrphan = replaceArmedFor !== null && replaceArmedFor === watchedName?.trim();
 
+  const imageProblem = imageReferenceProblem(watchedImage ?? '');
+  const imageReady = Boolean(watchedImage?.trim()) && !imageProblem;
+  const imageFieldError = errors.image?.message ?? (imageBlurred ? imageProblem : undefined);
+  const noImageModes = deploymentModeState.status === 'ready' && imageDeploymentModes.length === 0;
+
   const resetAndClose = () => {
     resetMutation();
     resetRepoMutation();
+    resetImageMutation();
     resetTracedMutation();
     resetForm({ ...UPLOAD_AGENT_FORM_DEFAULTS, name: initialName ?? '' });
     deployAfterCreate.current = null;
@@ -268,6 +310,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     setSelectionError(undefined);
     setReplaceArmedFor(null);
     setRepoBlurred(false);
+    setImageBlurred(false);
     setTab('upload');
     setTracedAgent('');
     onClose();
@@ -339,6 +382,14 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     setValue('name', agentNameFromSource(repoSource), { shouldValidate: true });
   };
 
+  const onImageBlur = () => {
+    setImageBlurred(true);
+    if (!imageReady || watchedName?.trim()) {
+      return;
+    }
+    setValue('name', agentNameFromImage(watchedImage), { shouldValidate: true });
+  };
+
   const rejectOversized = (count: number): boolean => {
     const oversized = tooManyPickedFiles(count);
     if (!oversized) return false;
@@ -388,6 +439,22 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   // Keyed on the active tab: the fileset has one source, and it is the one the user can see.
   const onSubmit: SubmitHandler<UploadAgentFormData> = async (formData) => {
     const name = formData.name.trim();
+    if (onImageTab) {
+      if (!imageReady) {
+        return;
+      }
+      // The image is the agent's only source, so it always deploys; an empty config leaves its
+      // baked agent.yaml in charge.
+      deployAfterCreate.current = {
+        mode: formData.deploymentMode,
+        buildImage: false,
+        image: formData.image,
+      };
+      await createImageAgent({ workspace, data: { name, config: {} } }).catch(() => {
+        // Rendered through errorText.
+      });
+      return;
+    }
     deployAfterCreate.current =
       formData.deploy && canDeployOnCreate
         ? {
@@ -428,9 +495,11 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   // No fallback argument: getErrorMessage prefers one over a plain Error's own message.
   const failure = onGitHubTab
     ? repoError
-    : onTracesTab
-      ? tracedCreateError
-      : (selectionError ?? createError);
+    : onImageTab
+      ? imageCreateError
+      : onTracesTab
+        ? tracedCreateError
+        : (selectionError ?? createError);
   const errorMessage =
     typeof failure === 'string'
       ? failure
@@ -440,6 +509,19 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
 
   const busy = isPending || isCreatingTraced;
   const awaitingDeployModes = Boolean(watchedDeploy) && isModesLoading;
+
+  const submitDisabled = (() => {
+    if (onGitHubTab) {
+      return !repoSource || awaitingDeployModes;
+    }
+    if (onImageTab) {
+      return !imageReady || imageDeploymentModes.length === 0;
+    }
+    if (onTracesTab) {
+      return !tracedAgent;
+    }
+    return entries.length === 0 || awaitingDeployModes;
+  })();
 
   const deployFields =
     canDeployOnCreate || isModesLoading ? (
@@ -481,13 +563,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
         }}
         disabled={busy}
         loading={busy}
-        submitDisabled={
-          onGitHubTab
-            ? !repoSource || awaitingDeployModes
-            : onTracesTab
-              ? !tracedAgent
-              : entries.length === 0 || awaitingDeployModes
-        }
+        submitDisabled={submitDisabled}
         errorText={onCreateTab ? errorMessage : undefined}
         slotFooterRight={
           onCreateTab ? undefined : (
@@ -501,6 +577,9 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
           <TabsList aria-label="Ways to register an agent">
             <TabsTrigger value="upload">Register with code upload</TabsTrigger>
             <TabsTrigger value="github">Register from GitHub</TabsTrigger>
+            {AGENT_CONTAINER_DEPLOYMENTS_ENABLED ? (
+              <TabsTrigger value="image">Register from container image</TabsTrigger>
+            ) : null}
             <TabsTrigger value="imported-traces">Register from traces</TabsTrigger>
             <TabsTrigger value="coding-agent-prompt">Coding agent prompt</TabsTrigger>
           </TabsList>
@@ -591,6 +670,43 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
               {deployFields}
             </Stack>
           </TabsContent>
+
+          {AGENT_CONTAINER_DEPLOYMENTS_ENABLED ? (
+            <TabsContent value="image" className="items-stretch p-0 pt-density-lg">
+              <Stack gap="density-md">
+                <ControlledTextInput
+                  label="Container image"
+                  disabled={isPending}
+                  useControllerProps={{ control, name: 'image' }}
+                  formFieldProps={{
+                    slotInfo:
+                      'An image packaged with nemo agents package, with agent.yaml and its files inside. It is deployed as is, without a build.',
+                    slotError: imageFieldError,
+                    status: imageFieldError ? 'error' : undefined,
+                  }}
+                  attributes={{
+                    Input: { onBlur: onImageBlur, placeholder: 'docker.io/org/agent:1.0' },
+                  }}
+                />
+                <ControlledTextInput
+                  useControllerProps={{ control, name: 'name' }}
+                  label="Name"
+                  formFieldProps={{ slotError: errors.name?.message }}
+                />
+                {noImageModes ? (
+                  <Text kind="body/regular/sm" color="subtle">
+                    This platform has no container runtime enabled, so an image cannot be deployed.
+                  </Text>
+                ) : (
+                  <DeploymentModeSelect
+                    useControllerProps={{ control, name: 'deploymentMode' }}
+                    modes={imageDeploymentModes}
+                    loading={isModesLoading}
+                  />
+                )}
+              </Stack>
+            </TabsContent>
+          ) : null}
 
           <TabsContent value="imported-traces" className="items-stretch p-0 pt-density-lg">
             {!tracedAgents.isLoading && tracedAgents.names.length === 0 ? (
