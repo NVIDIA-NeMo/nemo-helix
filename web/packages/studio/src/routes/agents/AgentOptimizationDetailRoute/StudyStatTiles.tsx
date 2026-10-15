@@ -2,12 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { StatTile } from '@nemo/common/src/components/StatTile';
+import { EM_DASH } from '@nemo/common/src/constants';
 import { formatDurationMs } from '@nemo/common/src/utils/date';
 import { Grid } from '@nvidia/foundations-react-core';
 import type { StudyResults } from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
 import type { FC } from 'react';
-
-const EM_DASH = '—';
 
 /** Optuna's `TrialState.COMPLETE`, as written to the `state` column. */
 const COMPLETE = 'COMPLETE';

@@ -16,11 +16,11 @@ Traces is enabled by default. An administrator can disable it by setting `studio
 
 ## Traces and Spans Tables
 
-The **Traces** and **Spans** tabs list ingested telemetry at different granularity:
+The **Trace runs** and **Spans** tabs list ingested telemetry at different granularity:
 
 | Tab | Columns |
 | --- | ------- |
-| Traces | Trace, input, output, duration, span count, errors, tokens, cost, started. |
+| Trace runs | Trace, agent, session, status, input, output, duration, span count, errors, tokens, cost, started. |
 | Spans | Status, kind, span, input, output, subject, trace, duration, tokens, cost, started. |
 
 Select a row in either table to open the session it belongs to.
@@ -28,6 +28,8 @@ Select a row in either table to open the session it belongs to.
 ## Session Detail
 
 The session detail page shows a summary header, then the selected trace's spans. Use the **Tree** / **List** toggle to switch between a nested span tree and a flat list, and **Collapse all** / **Expand all** to manage the tree view.
+
+The Graph view is disabled by default. When an administrator sets `studio.feature_flags.trace_graph_enabled: true` in the platform configuration and restarts Studio, a **Graph** option also appears in the toggle when a trace is selected, and draws the trace's spans as a connected graph.
 
 Selecting a span opens its detail body. Studio renders a specialized view for known span kinds — LLM, tool, agent, chain, embedding, reranker, retriever, guardrail, and evaluator — and falls back to a generic view for unrecognized kinds. Each span body includes metadata, an annotations panel, and a raw JSON view for debugging.
 

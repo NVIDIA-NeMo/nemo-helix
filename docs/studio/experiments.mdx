@@ -16,13 +16,24 @@ Experiments is enabled by default. An administrator can disable it by setting `s
 
 ## Create an Experiment
 
-Select **New experiment** from the Experiments list. In the **Create experiment** tab, provide a name, an optional description, and a default sort order for the experiment's evaluations, then select **Create**.
+Select **New experiment** from the Experiments list. In the **Create experiment** dialog, provide a name, an optional description, and a default sort order for the experiment's evaluations, then select **Create**.
+
+The dialog also has two optional switches:
+
+- **Evaluate over time** shows the experiment's **Over time** chart by default. Turn it on only when every evaluation in the experiment runs against the same dataset and evaluators, so the points are comparable.
+- **Favorite** pins the experiment above the rest of the Experiments list and features it in other areas of Studio, such as the agent page.
 
 ## Experiment Detail
 
-Select an experiment to open its detail page, which shows aggregate metrics across its evaluations and a table of the evaluations in the group. Toggle **Pareto view** to plot evaluations on a chart instead of the table, by default cost against latency. Change either axis to cost, latency, or any evaluator's score (`cost_usd`, `latency_ms`, or `evaluators.<name>`); the selection is saved per experiment.
+Select an experiment to open its detail page, which shows aggregate metrics across its evaluations and a table of the evaluations in the group. The chart toggles described below open their views above the table, which stays in place.
 
-Select **Edit** to update the experiment's name, description, or default sort order.
+Toggle **Over time** to plot one metric per evaluation by run date. The chart is on by default for experiments with **Evaluate over time** turned on.
+
+Toggle **Pareto view** to plot evaluations on a chart, by default cost against latency. Change either axis to cost, latency, tokens, or any evaluator's score (`cost_usd`, `latency_ms`, `tokens`, or `evaluators.<name>`), then select the save button next to the axis selectors to store the selection as the experiment's default, which everyone who opens the experiment sees. When the saved axes have no data to plot together, such as cost for a self-hosted model, the chart falls back to an evaluator's score against cost or tokens.
+
+Toggle **Scorecard** to see every evaluation in the experiment side by side in one table: each evaluator's score and its change against a baseline evaluation, average latency, average tokens, and run duration. The baseline defaults to the oldest evaluation in the experiment; pick another from **Baseline**. The best value in each column is highlighted in green and the worst in red. For scores, higher is better; for latency, tokens, and duration, lower is better. Values an evaluation did not record show as a dash.
+
+Select **Edit** to update the experiment's description, default sort order, and the **Evaluate over time** and **Favorite** switches. An experiment's name can't be changed after creation.
 
 If the experiment was created from an Optimizer insight, an **Insight description** card appears with a link back to that insight. See [NeMo Studio Insights](/documentation/studio/insights).
 
@@ -34,7 +45,7 @@ Select a session to open its detail page — the same trace and span view used b
 
 ## Compare Runs Side by Side
 
-From a session's detail page, select **Compare against…** and choose another run of the same test case. Studio splits the view into two columns — the current run on the left, the selected run on the right — so you can compare trace output side by side. Select **Clear** to return to the single-run view.
+From a session's detail page, select **Compare against evaluation run** and choose another run of the same test case. Studio splits the view into two columns — the current run on the left, the selected run on the right — so you can compare trace output side by side. Select **Clear** to return to the single-run view.
 
 ## Related Topics
 
