@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 
 import yaml
 from nemo_helix_plugin.config import NemoConfig
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 # Env var agent-hardener reads to locate the garak venv its agent_breaker attacker spawns. The plugin
 # exports it (to ``garak_python``) for both ``agent-hardener setup`` (provision) and ``agent-hardener run``.
@@ -227,6 +227,47 @@ class AgentHardenerConfig(NemoConfig):
         default="agent-hardener-inference-key",
         description="NeMo Secret name `setup` reads agent-hardener's own inference key from, if present.",
     )
+    openshell_gateway_endpoint: str | None = Field(
+        default=None,
+        description=(
+            "OpenShell gateway a war-game job registers before it runs, for jobs that run in a container "
+            "rather than on a host provisioned by `setup` (e.g. the in-cluster "
+            "`http://openshell.openshell.svc.cluster.local:8080` on Helm). An http:// endpoint is plaintext; "
+            "an https:// endpoint uses mTLS and needs the three openshell_*_secret fields. Unset keeps the "
+            "gateway `setup` registered on the host. Set NEMO_AGENT_HARDENER_OPENSHELL_GATEWAY_ENDPOINT to override."
+        ),
+    )
+    openshell_ca_secret: str | None = Field(
+        default=None,
+        description="NeMo Secret holding the PEM CA that verifies an https:// OpenShell gateway.",
+    )
+    openshell_client_cert_secret: str | None = Field(
+        default=None,
+        description="NeMo Secret holding the PEM client certificate for an https:// OpenShell gateway.",
+    )
+    openshell_client_key_secret: str | None = Field(
+        default=None,
+        description="NeMo Secret holding the PEM client key for an https:// OpenShell gateway.",
+    )
+
+    @field_validator("openshell_gateway_endpoint")
+    @classmethod
+    def _require_gateway_scheme(cls, value: str | None) -> str | None:
+        if value and urlsplit(value).scheme not in {"http", "https"}:
+            raise ValueError("NEMO_AGENT_HARDENER_OPENSHELL_GATEWAY_ENDPOINT must be an http:// or https:// URL.")
+        return value
+
+    @model_validator(mode="after")
+    def _require_mtls_secrets(self) -> AgentHardenerConfig:
+        endpoint = self.openshell_gateway_endpoint
+        if not endpoint or urlsplit(endpoint).scheme != "https":
+            return self
+        if not (self.openshell_ca_secret and self.openshell_client_cert_secret and self.openshell_client_key_secret):
+            raise ValueError(
+                "An https:// OpenShell gateway uses mTLS: set openshell_ca_secret, openshell_client_cert_secret "
+                "and openshell_client_key_secret, or use the gateway's http:// endpoint."
+            )
+        return self
 
     @property
     def state_dir(self) -> Path:

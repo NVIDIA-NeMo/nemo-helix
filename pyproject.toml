@@ -252,6 +252,7 @@ functional-services = [
   "nhx-intake",
   "nhx-hello-world",
   "nhx-platform-seed",
+  "nemo-agent-hardener-plugin",
 ]
 
 # nhx-api variant used only to deploy DeepAgents in container E2E tests.
@@ -279,6 +280,8 @@ cpu-tasks = [
   # Ships the switchyard strategy job the optimize task imports in the nhx-tasks image.
   "nemo-switchyard-plugin",
   "nhx-hello-world",
+  # Task modules for nhx-agent-hardener-tasks, which layers the agent-hardener and garak venvs on this image.
+  "nemo-agent-hardener-plugin",
 ]
 
 # GPU task dependencies (for nhx-gpu-tasks container)

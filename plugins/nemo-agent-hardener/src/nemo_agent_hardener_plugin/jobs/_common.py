@@ -15,7 +15,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 from nemo_agent_hardener_plugin.config import (
@@ -31,13 +31,43 @@ from nemo_agent_hardener_plugin.jobs.errors import (
     CATEGORY_PROVISIONING,
     AgentHardenerRunError,
 )
+from nemo_agent_hardener_plugin.jobs.openshell_gateway import register_openshell_gateway
 from nemo_agent_hardener_plugin.model_config import ModelChoice, WarGameModels
 from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.entities.base import parse_qualified_name
 from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable, ExecutorSpec, SubprocessExecutionProviderSpec
+from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_helix_plugin.jobs.executor import resolve_task_executor
 from nemo_helix_plugin.secrets.client import SecretsClient
 
 logger = logging.getLogger(__name__)
+
+TASK_IMAGE = "nhx-agent-hardener-tasks"
+# The subprocess executor forwards only PATH/VIRTUAL_ENV, but on the host `setup` provisioned, openshell reads
+# its gateway registration from $HOME/.config/openshell (or $XDG_CONFIG_HOME) and reaches Docker via $DOCKER_HOST.
+_HOST_ENVVARS = ("HOME", "DOCKER_HOST", "XDG_CONFIG_HOME")
+
+
+async def task_step_executor(
+    task_module: str, *, step: str, profile: str | None, async_sdk: object
+) -> tuple[ExecutorSpec, list[EnvironmentVariable]]:
+    """The executor and env for a job step: the provisioned host's venv locally, :data:`TASK_IMAGE` on Helm."""
+    executor = await resolve_task_executor(
+        profile=profile or "default",
+        async_sdk=cast(AsyncNemoClient, async_sdk),
+        image=TASK_IMAGE,
+        entrypoint=["python", "-m"],
+        command=[task_module],
+        step=step,
+    )
+    environment = [EnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value=DEFAULT_JOB_STORAGE_PATH)]
+    if isinstance(executor, SubprocessExecutionProviderSpec):
+        environment += [
+            EnvironmentVariable(name=name, value=value) for name in _HOST_ENVVARS if (value := os.environ.get(name))
+        ]
+    return executor, environment
 
 
 def require_provisioned(plugin_config: AgentHardenerConfig) -> None:
@@ -129,11 +159,32 @@ def resolve_model_key(sdk: Any, api_key_secret: str | None, *, workspace: str) -
         # Explicitly chosen: a failure here is the user's to see, so it is not swallowed.
         return _resolve_secret(sdk, api_key_secret, workspace)
     config = AgentHardenerConfig.get()
-    try:
-        provisioned = _resolve_secret(sdk, config.inference_secret_name, workspace)
-    except Exception:  # absent secret / unreachable store — expected, the dotenv is the fallback
-        provisioned = None
+    provisioned = _optional_secret(sdk, config.inference_secret_name, workspace)
     return provisioned or build_subprocess_env(config).get(INFERENCE_API_KEY_ENVVAR)
+
+
+def _optional_secret(sdk: Any, name: str, workspace: str) -> str | None:
+    try:
+        return _resolve_secret(sdk, name, workspace)
+    except Exception:  # absent secret / unreachable store — callers fall back or report it themselves
+        return None
+
+
+def job_runtime_env(plugin_config: AgentHardenerConfig, *, sdk: Any, workspace: str) -> dict[str, str]:
+    """Env a job adds for what `nemo agent-hardener setup` would otherwise have left on the host.
+
+    A container has no operator dotenv, so agent-hardener's own inference key comes from its Secret when
+    the process env doesn't carry one; and a configured OpenShell gateway is registered for the CLI.
+    """
+    env: dict[str, str] = {}
+    if not build_subprocess_env(plugin_config).get(INFERENCE_API_KEY_ENVVAR):
+        key = _optional_secret(sdk, plugin_config.inference_secret_name, workspace)
+        if key:
+            env[INFERENCE_API_KEY_ENVVAR] = key
+    env.update(
+        register_openshell_gateway(plugin_config, resolve_secret=lambda name: _optional_secret(sdk, name, workspace))
+    )
+    return env
 
 
 def build_model_env(models: WarGameModels | None, *, sdk: Any, workspace: str) -> dict[str, str]:
