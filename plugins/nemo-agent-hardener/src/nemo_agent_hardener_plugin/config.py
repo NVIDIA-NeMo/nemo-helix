@@ -84,7 +84,11 @@ def write_env_file(path: Path, values: Mapping[str, str]) -> None:
     default umask (typically 0644), leaving the credentials world-readable until the chmod lands.
     Every dotenv this plugin writes holds provider keys, so both call sites go through here.
     """
-    body = "".join(f"{key}={value}\n" for key, value in values.items())
+    write_private_file(path, "".join(f"{key}={value}\n" for key, value in values.items()))
+
+
+def write_private_file(path: Path, body: str) -> None:
+    """Write *body* to *path* readable only by its owner, whether or not the file already exists."""
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(body)
@@ -226,6 +230,15 @@ class AgentHardenerConfig(NemoConfig):
     inference_secret_name: str = Field(
         default="agent-hardener-inference-key",
         description="NeMo Secret name `setup` reads agent-hardener's own inference key from, if present.",
+    )
+    container_jobs: bool = Field(
+        default=False,
+        description=(
+            "Allow war-game and benign-suite jobs to run in the nhx-agent-hardener-tasks image when the "
+            "platform registers no subprocess profile (Helm). Off by default: OpenShell 0.1.0 and later "
+            "create sandboxes only from a registry image, and agent-hardener still builds the victim from a "
+            "Dockerfile, so these jobs cannot finish yet. Set NEMO_AGENT_HARDENER_CONTAINER_JOBS to override."
+        ),
     )
     openshell_gateway_endpoint: str | None = Field(
         default=None,

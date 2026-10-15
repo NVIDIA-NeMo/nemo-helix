@@ -11,17 +11,21 @@ ARG NHX_CPU_TASKS_BASE=nhx-tasks
 
 FROM ${NHX_PYTHON_BASE} AS builder
 ARG TARGETARCH
-ARG AGENT_HARDENER_SPEC=nvidia-agent-hardener==0.0.15
 ARG OPENSHELL_VERSION=0.1.2
 ARG OPENSHELL_SHA256_AMD64=7eb6917285331a09e3300266a0558616481a5e9927cae2612ea07c4045b6dd6f
 ARG OPENSHELL_SHA256_ARM64=9880c5776688231d5242deb046cdee361734f94901b9123949a0baf29fdadd9e
 ENV UV_PYTHON_INSTALL_DIR=/opt/agent-hardener/python \
     AGENT_HARDENER_GARAK_PYTHON=/opt/agent-hardener/garak-venv/bin/python
-# The same install `nemo agent-hardener setup` runs (cli/provisioning.py). The garak venv comes from
-# agent-hardener's own provisioner so its garak pin stays the single source of truth.
+COPY docker/locks/nhx-agent-hardener-tasks /opt/agent-hardener-lock
+# The agent-hardener venv installs from its committed lock. The garak venv comes from agent-hardener's own
+# provisioner, as on a host after `nemo agent-hardener setup`, so its garak pin stays the single source of truth.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv venv --python 3.12 /opt/agent-hardener/venv && \
-    uv pip install --prerelease allow --python /opt/agent-hardener/venv/bin/python "${AGENT_HARDENER_SPEC}" && \
+    UV_PROJECT_ENVIRONMENT=/opt/agent-hardener/venv uv sync \
+        --project /opt/agent-hardener-lock \
+        --locked \
+        --no-dev \
+        --no-install-project && \
     /opt/agent-hardener/venv/bin/python -c \
         "from agent_hardener.garak_venv import provision_garak_venv; provision_garak_venv()"
 RUN set -eux; \
@@ -62,12 +66,23 @@ WORKDIR /home/nvs
 
 FROM runtime AS smoke-test
 # The war-game fails minutes in, after the run record exists, when any of these is missing, so check
-# them at build time: the task entrypoints import, both venvs run, and the openshell CLI launches.
+# them at build time as the uid task pods run as: the task entrypoints import, both venvs run, the
+# openshell CLI accepts the plain and mTLS registrations the job makes (an unreachable endpoint only
+# warns), and the per-run state dir is writable.
+USER 1000
 RUN set -eux; \
     python -c "import nemo_agent_hardener_plugin.tasks.war_game.__main__, nemo_agent_hardener_plugin.tasks.synth_benign.__main__"; \
     /opt/agent-hardener/venv/bin/agent-hardener --help >/dev/null; \
     /opt/agent-hardener/garak-venv/bin/python -c "import garak"; \
-    openshell --version; \
+    cfg="$(mktemp -d)"; \
+    XDG_CONFIG_HOME="${cfg}/plain" openshell gateway add http://127.0.0.1:9 --name auto-defender; \
+    test -f "${cfg}/plain/openshell/gateways/auto-defender/metadata.json"; \
+    mtls="${cfg}/mtls/openshell/gateways/auto-defender/mtls"; \
+    mkdir -p "${mtls}"; \
+    for f in ca.crt tls.crt tls.key; do echo pem > "${mtls}/${f}"; done; \
+    XDG_CONFIG_HOME="${cfg}/mtls" openshell gateway add https://127.0.0.1:9 --name auto-defender --local; \
+    test -f "${cfg}/mtls/openshell/gateways/auto-defender/metadata.json"; \
+    rm -rf "${cfg}"; \
     echo ok > .w && rm .w
 
 FROM runtime
