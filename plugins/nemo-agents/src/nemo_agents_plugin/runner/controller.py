@@ -27,8 +27,9 @@ import asyncio
 import logging
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import ClassVar, cast
 
+import httpx
 from nemo_agents_plugin.config import ControllerConfig
 from nemo_agents_plugin.entities import (
     NEMO_AGENTS_SPEC_CONFIG_FORMAT,
@@ -46,9 +47,6 @@ from nemo_helix_plugin.entity_client import (
     NemoEntityConflictError,
     NemoEntityNotFoundError,
 )
-
-if TYPE_CHECKING:
-    import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -489,8 +487,6 @@ class AgentDeploymentController(NemoController):
     def _runtime_health_client(self, transport: EndpointTransport) -> httpx.AsyncClient:
         client = self._runtime_health_clients.get(transport)
         if client is None:
-            import httpx
-
             client = httpx.AsyncClient(
                 timeout=_RUNTIME_HEALTH_TIMEOUT_SECONDS,
                 follow_redirects=False,

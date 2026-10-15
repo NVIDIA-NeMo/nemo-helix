@@ -1,13 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""How platform components dial a deployment ``Endpoint``.
-
-An openshell endpoint is reached through its gateway, which routes exposed sandbox
-services by Host header: dial the gateway, send the advertised host as ``Host``, present
-the executor's TLS material. Docker and k8s endpoints are dialed as-is.
-"""
-
 from __future__ import annotations
 
 import ssl
@@ -23,12 +16,11 @@ class EndpointTransport:
     """Connection settings for reaching endpoints minted by one executor."""
 
     connect_base: str | None = None
-    """``scheme://host:port`` to dial in place of the URL's own. None dials the URL itself."""
     ca_cert: str | None = None
     client_cert: tuple[str, str] | None = field(default=None)
 
     def target(self, url: str) -> tuple[str, dict[str, str]]:
-        """The URL to dial for *url*, plus the headers that keep it routing."""
+        """The URL to dial, plus the headers that keep it routing."""
         if self.connect_base is None:
             return url, {}
         parsed = urlparse(url)
