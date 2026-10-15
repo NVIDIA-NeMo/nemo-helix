@@ -100,9 +100,10 @@ async def resolve_bearer_token(
         access_key_claims = await validate_access_key_token(config, token)
         if access_key_claims is not None:
             return ResolvedBearerToken(claims=access_key_claims, token_kind="access_key")
-        # A token that names itself an access key is never a workload or IdP token, so a failed
-        # check is final. Falling through would spend the IdP round-trips below on a key that can
-        # only be rejected.
+        # validate_access_key_token returns None both for tokens that are not access keys and for
+        # access keys that fail validation (bad signature, expired, wrong issuer). Only the former
+        # should fall through to the workload and OIDC resolvers; a failed access key is rejected
+        # here rather than spending their IdP round-trips on a token that can only be refused.
         if is_access_key_token_candidate(token):
             return None
 

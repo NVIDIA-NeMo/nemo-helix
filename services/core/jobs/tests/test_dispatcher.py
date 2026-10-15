@@ -50,6 +50,9 @@ from nhx.core.jobs.entities import (
 
 WorkerResultT = TypeVar("WorkerResultT")
 
+# Upper bound for a worker to reach a patched checkpoint; it normally takes milliseconds.
+CHECKPOINT_TIMEOUT_SECONDS = 30
+
 
 async def create_job_with_attempt(dispatcher: JobDispatcher, job_request: CreateHelixJobRequest) -> HelixJobResponse:
     """Helper to create a job through the dispatcher."""
@@ -132,17 +135,22 @@ async def create_test_job_data(
 async def wait_until_reached(checkpoint: asyncio.Event, worker: asyncio.Task[WorkerResultT]) -> None:
     """Wait for ``worker`` to set ``checkpoint``, raising the worker's own error if it stops first.
 
-    A fixed wall-clock bound here flaked on loaded CI runners and reported a bare ``TimeoutError``
-    even when the worker had failed. pytest's ``--timeout`` still bounds a worker that hangs.
+    The bound is generous on purpose: a one-second bound flaked on loaded CI runners and reported
+    a bare ``TimeoutError`` even when the worker had failed. It only catches a worker that stalls.
     """
     reached = asyncio.create_task(checkpoint.wait())
     try:
-        await asyncio.wait({reached, worker}, return_when=asyncio.FIRST_COMPLETED)
+        await asyncio.wait({reached, worker}, timeout=CHECKPOINT_TIMEOUT_SECONDS, return_when=asyncio.FIRST_COMPLETED)
     finally:
         reached.cancel()
-    if not checkpoint.is_set():
-        worker.result()
-        raise AssertionError("worker finished without reaching the checkpoint")
+    if checkpoint.is_set():
+        return
+    coro = worker.get_coro()
+    worker_name = coro.__qualname__ if coro is not None else worker.get_name()
+    if not worker.done():
+        raise AssertionError(f"{worker_name} did not reach its checkpoint within {CHECKPOINT_TIMEOUT_SECONDS}s")
+    worker.result()
+    raise AssertionError(f"{worker_name} finished without reaching its checkpoint")
 
 
 async def cancellation_test_data(
