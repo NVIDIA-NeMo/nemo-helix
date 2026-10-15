@@ -6,7 +6,7 @@
 Replaces ``nemo_gym.sandbox.providers.opensandbox.OpenSandboxProvider``. That class is 1541 lines
 covering PTY sessions, streaming, handle serialization and connect -- of which the episode backend
 used seven methods -- and depending on it meant depending on NeMo-Gym, which cannot be installed in
-this workspace at all (it floors at CPython 3.13.14 and pulls ``mlflow-skinny>=3.15.1``, which
+this workspace at all (it floors at CPython 3.13.15 and pulls ``mlflow-skinny>=3.15.1``, which
 ``services/unsloth`` contradicts). The SDK underneath it is a normal PyPI package with four light
 dependencies, and this package already called it directly for connection config and sandbox
 listing. Going straight there removes the last import of Gym from the broker path.
