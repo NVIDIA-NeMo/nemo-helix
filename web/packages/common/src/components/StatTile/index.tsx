@@ -20,7 +20,7 @@ export type StatTileVariant = 'default' | 'metric' | 'actionable';
 
 interface StatTileBaseProps {
   label: string;
-  value: string;
+  value: ReactNode;
   className?: string;
   /**
    * The tile's own health, independent of `trailingLabelStatus`/`hintStatus`: only this tints the
