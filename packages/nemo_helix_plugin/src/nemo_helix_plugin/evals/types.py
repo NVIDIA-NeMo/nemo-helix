@@ -327,6 +327,7 @@ class CreateTaskImageBuildRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     allowed_registries: list[str] = Field(default_factory=list)
+    platform: str | None = None
 
 
 # ---------------------------------------------------------------------------
