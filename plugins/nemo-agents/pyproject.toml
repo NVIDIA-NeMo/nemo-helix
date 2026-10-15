@@ -44,6 +44,8 @@ dependencies = [
     # Fabric's Hermes adapter intentionally excludes the harness. Platform manages
     # the compatible Hermes Agent installation separately.
     "nemo-fabric-adapters-hermes>=0.5.0,<0.6.0; python_version < '3.14'",
+    # The deepagents adapter caps langchain-mcp-adapters below 0.3, whose 0.2.x releases break on mcp 2.
+    "mcp>=1.28.1,<2",
 ]
 version = "0.0.0"
 
