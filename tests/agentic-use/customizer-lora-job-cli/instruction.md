@@ -60,7 +60,7 @@ cat > /tmp/job.json <<'EOF'
 }
 EOF
 
-nemo customization automodel submit /tmp/job.json --workspace lora-training-workspace
+nemo customization automodel --job-json /tmp/job.json --workspace lora-training-workspace
 ```
 
 Use `nemo customization automodel explain` if you need the live schema. List GPU execution profiles with `nemo jobs list-execution-profiles -f json` when choosing `training.execution_profile`.
@@ -84,7 +84,7 @@ Once the job completes (or if it fails), document:
 The task is complete when:
 
 - A fileset `sft-training-data` exists with training data uploaded
-- A customization job was submitted via `nemo customization automodel submit`
+- A customization job was submitted via `nemo customization automodel --job-json`
 - The agent polled for job status and reported the outcome
 - The job progressed beyond "created" status (indicating the jobs controller dispatched it)
 

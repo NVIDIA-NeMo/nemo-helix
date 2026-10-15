@@ -85,7 +85,7 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     heading: 'No custom models yet',
     subheading: 'Customize a model with fine-tuning to meet your specific needs.',
     createAction: { label: 'Customize Model' },
-    cliCommand: 'nemo customization automodel submit <job-spec>.json --workspace <workspace>',
+    cliCommand: 'nemo customization automodel --job-json <job-spec>.json --workspace <workspace>',
     skillPrompt: 'Help me create my first custom model with the nemo-customizer skill',
   },
   baseModels: {

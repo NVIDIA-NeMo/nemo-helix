@@ -77,7 +77,7 @@ separate training and eval filesets is optional.
 |---|---|---|
 | Previous | User corpus fileset or `hf://` URI | Raw docs |
 | This stage | `retrieval-generate` → `retrieval-prepare` (or `retrieval-run`) | `generation_result.json`; `eval_beir/corpus.jsonl`, `queries.jsonl`, `qrels/test.tsv`; `training.jsonl` |
-| Next | `nemo-retrieval-recipes`, or `nemo customization automodel submit` with `training.recipe: bi_encoder` (embed) or `cross_encoder` (rerank) | Stage 1 `artifacts` fileset as `dataset.training` and as the `retrieve-eval` dataset |
+| Next | `nemo-retrieval-recipes`, or `nemo customization automodel --job-json` with `training.recipe: bi_encoder` (embed) or `cross_encoder` (rerank) | Stage 1 `artifacts` fileset as `dataset.training` and as the `retrieve-eval` dataset |
 
 Do not regenerate `eval_beir` for base vs fine-tuned comparisons.
 

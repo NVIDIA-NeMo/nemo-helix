@@ -9,7 +9,7 @@ Tests the agent's ability to set up and submit a real LoRA fine-tuning job throu
 
 - Creating workspaces and filesets via NeMo Helix CLI
 - Preparing and uploading SFT training data in JSONL format
-- Submitting a LoRA job with `nemo customization automodel submit`
+- Submitting a LoRA job with `nemo customization automodel --job-json`
 - Monitoring job progress via the jobs API
 
 ## Prerequisites
