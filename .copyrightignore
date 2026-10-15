@@ -13,6 +13,7 @@ skills/
 docs/fern/openapi/
 plugins/*/openapi/
 web/packages/studio/src/generated/
+k8s/helm/files/opensandbox-ext/configmap.yaml
 web/vendor/
 packages/garak_api/garakapi/_config.py
 packages/garak_api/garakapi/_plugins.py

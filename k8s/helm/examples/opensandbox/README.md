@@ -152,25 +152,92 @@ services are ready, and the first one that failed, with its last log lines),
 and `POST /v1/nemo-ext/sandboxes/{id}/services/{service}/exec`, which runs a
 command in one service container (and only those).
 
+### Enable it with the chart
+
+The NeMo Helix chart ships the extension, so you don't need a checkout of the
+repository. Set these values on the platform release and run `helm upgrade`:
+
+```yaml
+sandboxClusterCapable: true
+opensandbox:
+  namespace: opensandbox-system      # where the server runs; the ConfigMap goes here
+  composeServices:
+    enabled: true
+    sandboxNamespace: ""             # [kubernetes] namespace in the server values; empty is the release namespace
+    serverServiceAccount: opensandbox-server
+    kataServerServiceAccount: ""     # opensandbox-server-kata, if you run the Kata server
+```
+
+The chart renders the `nemo-opensandbox-ext` ConfigMap into `opensandbox.namespace`,
+and a Role and RoleBinding for `pods/exec`, `pods/log` and `pods` into the sandbox
+namespace. It doesn't install or restart OpenSandbox, so install the server with
+the values in this directory first (they mount the ConfigMap as optional), then:
+
 ```bash
-EXT=plugins/_temporary-scaled-evals/opensandbox_ext
-kubectl create configmap nemo-opensandbox-ext -n opensandbox-system \
-  --from-file="${EXT}/sitecustomize.py" \
-  --from-file="${EXT}/nemo_ext_server.py" \
-  --from-file="${EXT}/nemo_ext_pod.py" \
-  --from-file=plugins/_temporary-scaled-evals/src/scaled_evals/harbor_opensandbox_services.py \
-  --dry-run=client -o yaml | kubectl apply -f -
+helm upgrade nemo-helix <chart> -n "${NHX_NAMESPACE}" --reuse-values -f compose-services.yaml
+kubectl rollout restart deploy/opensandbox-server -n opensandbox-system
+kubectl rollout status deploy/opensandbox-server -n opensandbox-system
+kubectl logs -n opensandbox-system deploy/opensandbox-server | grep nemo-ext
+```
+
+The log line is `nemo-ext: compose services extension loaded`. **The server
+reads the ConfigMap only when it starts**, so a new or changed ConfigMap has no
+effect until you restart it. If you deploy with GitOps, trigger a rollout of the
+server (for example, change a pod annotation) after the chart syncs.
+
+If you applied the ConfigMap and Role by hand before, read
+[Move a manual install to the chart](#move-a-manual-install-to-the-chart) first.
+
+### Enable it without Helm
+
+Apply the generated ConfigMap and the example Role yourself:
+
+```bash
+kubectl apply -n opensandbox-system -f k8s/helm/files/opensandbox-ext/configmap.yaml
 sed -i.bak "s/REPLACE_WITH_RELEASE_NAMESPACE/${NHX_NAMESPACE}/g" \
   "${EXAMPLES}/opensandbox-ext-rbac.yaml"
 kubectl apply -f "${EXAMPLES}/opensandbox-ext-rbac.yaml"
 kubectl rollout restart deploy/opensandbox-server -n opensandbox-system
-kubectl logs -n opensandbox-system deploy/opensandbox-server | grep nemo-ext
 ```
 
-The log shows the registered provider and routes. Repeat the ConfigMap apply
-and restart after changing those sources. The extension is tested against the
-server version in the values files (`v0.2.1`); upgrade the server and the
-extension together.
+`configmap.yaml` is generated from the extension's source files by
+`script/generate_opensandbox_ext_configmap.py`, and CI fails if the committed
+copy is out of date. Don't edit it by hand.
+
+### Move a manual install to the chart
+
+`helm upgrade` refuses to take over objects it didn't create, and stops with
+`exists and cannot be imported into the current release`. Before enabling
+`composeServices`, find the objects from the manual steps: the ConfigMap
+`nemo-opensandbox-ext` in the server's namespace, and the Role and RoleBinding
+of the same name in the sandbox namespace. Either delete them (the server keeps
+running the loaded extension until you restart it, and the upgrade recreates
+them), or hand them to the release:
+
+```bash
+# For each of the three objects: the ConfigMap in the server's namespace, the Role and RoleBinding in the sandbox namespace
+kubectl label <kind>/nemo-opensandbox-ext -n <namespace> app.kubernetes.io/managed-by=Helm
+kubectl annotate <kind>/nemo-opensandbox-ext -n <namespace> \
+  meta.helm.sh/release-name=<release> meta.helm.sh/release-namespace=<release namespace>
+```
+
+Then run the `helm upgrade` above and restart the server.
+
+### Upgrade, remove, troubleshoot
+
+The extension is tested against OpenSandbox server `v0.2.1` only. Upgrade the
+chart and the server together, then restart the server.
+
+To remove it, set `opensandbox.composeServices.enabled=false` (or delete the
+ConfigMap) and restart the server. It then runs stock, and scaled-evals fails a
+compose task at its first check, before any sandbox starts.
+
+| Symptom | Cause |
+| --- | --- |
+| The server crash-loops with `nemo-ext: not starting without the compose services extension` | The ConfigMap is present but the extension can't load: a changed file, or a server version other than `v0.2.1`. The log above the message has the reason. |
+| No `nemo-ext` line in the server log | The ConfigMap is missing, in the wrong namespace, or the server wasn't restarted since it was created. |
+| `GET /v1/nemo-ext/health` doesn't answer | The server runs stock. Same causes as the line above. A working server answers `{"status":"ok","extension":"nemo-compose-services"}`. |
+| A compose task fails reading service status or running a command in a service, with a permission error | The Role is missing in the sandbox namespace, or bound to the wrong ServiceAccount. Check `sandboxNamespace` and `serverServiceAccount`. |
 
 ## Verify
 

@@ -178,6 +178,13 @@ already installed server as an HTTP client (`OPEN_SANDBOX_DOMAIN`,
 namespace**. Control plane may stay in `opensandbox-system`. Copy the API-key
 Secret into the job namespace.
 
+To run benchmark tasks that ship a Docker Compose file, set
+`opensandbox.composeServices.enabled`. The chart then renders the compose
+services extension into the OpenSandbox server's namespace (`opensandbox.namespace`),
+and the RBAC it needs into the sandbox namespace. The server loads the extension
+only at start, so restart it after the upgrade. See
+[Compose services](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/k8s/helm/examples/opensandbox#compose-services).
+
 Example overlays: [k8s/helm/examples/opensandbox](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/k8s/helm/examples/opensandbox).
 Shared-kernel (cluster default OCI runtime): https://docs.nvidia.com/nemo-helix/latest/documentation/kubernetes-deployment/setup/helm/open-sandbox
 Kata QEMU: https://docs.nvidia.com/nemo-helix/latest/documentation/kubernetes-deployment/setup/helm/opensandbox-kata
