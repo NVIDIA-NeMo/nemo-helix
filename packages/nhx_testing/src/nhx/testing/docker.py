@@ -410,6 +410,10 @@ def remove_intake_clickhouse(
     platform process has exited. It also removes a container that is still running (e.g. after the
     platform was SIGKILLed).
 
+    Only the container for the throwaway ``<platform_data_dir>/intake-clickhouse`` is removed. A
+    configured ``NHX_INTAKE_CLICKHOUSE_DATA_DIR`` is the developer's persistent ClickHouse, shared
+    across runs, so it is deliberately left alone; in that case this call finds nothing to remove.
+
     Best effort: failures are reported as warnings, never raised, so teardown cannot mask a test
     failure.
 
