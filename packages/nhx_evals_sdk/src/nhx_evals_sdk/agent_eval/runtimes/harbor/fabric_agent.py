@@ -32,7 +32,8 @@ from collections.abc import Mapping
 from typing import Any
 
 from nemo_fabric import EnvironmentConfig, FabricConfig, RelayAtofFileSinkConfig
-from nemo_fabric.integrations.harbor.fabric_agent import HARBOR_ARTIFACT_ROOT, FabricAgent
+from nemo_fabric.integrations.harbor.fabric_agent import HARBOR_ARTIFACT_ROOT, FabricAgent, FabricAgentOptions
+from pydantic import Field, field_validator, model_validator
 
 #: build.nvidia.com's OpenAI-compatible endpoint, for configs that name an ``nvidia`` model directly.
 NVIDIA_MODEL_BASE_URL = "https://integrate.api.nvidia.com/v1"
@@ -70,12 +71,54 @@ PLATFORM_GATEWAY_API_KEY_ENV = "NEMO_AGENTS_IGW_API_KEY"
 PLATFORM_GATEWAY_API_KEY_PLACEHOLDER = "not-used"
 
 
+def _parse_fabric_config(fabric_config: Mapping[str, Any]) -> FabricConfig:
+    config = FabricConfig.from_mapping(fabric_config)
+    if config.harness is None or not config.harness.adapter_id.strip():
+        raise ValueError("fabric_config must select a harness: set `harness.adapter_id`")
+    return config
+
+
+def _refuse_flat_config_kwargs(kwargs: Mapping[str, Any]) -> None:
+    rejected = sorted(FLAT_CONFIG_KWARGS & kwargs.keys())
+    if rejected:
+        raise ValueError(
+            f"{', '.join(rejected)}: NemoFabricAgent runs the `fabric_config` it is given; describe the "
+            "agent there instead of through FabricAgent's flat keywords"
+        )
+
+
+class NemoFabricAgentOptions(FabricAgentOptions):
+    """Harbor-facing options: a complete ``fabric_config`` stands in for the flat agent keywords."""
+
+    fabric_config: dict[str, Any] = Field(description="Fabric agent config to run verbatim.")
+    fabric_default_max_turns: int | None = Field(
+        default=None, description="Maximum agent turns when fabric_config sets no runtime.max_turns."
+    )
+    fabric_adapter_id: str = Field(default="", description="Derived from fabric_config.harness.adapter_id.")
+
+    @field_validator("fabric_config")
+    @classmethod
+    def validate_fabric_config(cls, value: dict[str, Any]) -> dict[str, Any]:
+        _parse_fabric_config(value)
+        return value
+
+    @model_validator(mode="after")
+    def derive_adapter_id(self) -> NemoFabricAgentOptions:
+        harness = _parse_fabric_config(self.fabric_config).harness
+        assert harness is not None  # checked by validate_fabric_config
+        self.fabric_adapter_id = harness.adapter_id
+        return self
+
+
 class NemoFabricAgent(FabricAgent):  # ty: ignore[unsupported-base]
     """``FabricAgent`` that runs a complete ``fabric_config`` instead of building one from keywords.
 
     ``fabric_default_max_turns`` fills ``runtime.max_turns`` only when the config leaves it unset; an
     explicit ``null`` keeps Fabric's unbounded harness.
     """
+
+    options_model = NemoFabricAgentOptions
+    options: NemoFabricAgentOptions
 
     def __init__(
         self,
@@ -85,18 +128,24 @@ class NemoFabricAgent(FabricAgent):  # ty: ignore[unsupported-base]
         fabric_default_max_turns: int | None = None,
         **kwargs: Any,
     ) -> None:
-        rejected = sorted(FLAT_CONFIG_KWARGS & kwargs.keys())
-        if rejected:
-            raise ValueError(
-                f"{', '.join(rejected)}: NemoFabricAgent runs the `fabric_config` it is given; describe the "
-                "agent there instead of through FabricAgent's flat keywords"
-            )
-        config = FabricConfig.from_mapping(fabric_config)
-        if config.harness is None or not config.harness.adapter_id.strip():
-            raise ValueError("fabric_config must select a harness: set `harness.adapter_id`")
+        _refuse_flat_config_kwargs(kwargs)
+        config = _parse_fabric_config(fabric_config)
+        assert config.harness is not None  # checked by _parse_fabric_config
         self.fabric_config = config
         self.fabric_default_max_turns = fabric_default_max_turns
-        super().__init__(logs_dir, *args, fabric_adapter_id=config.harness.adapter_id, **kwargs)
+        super().__init__(
+            logs_dir,
+            *args,
+            fabric_adapter_id=config.harness.adapter_id,
+            fabric_config=dict(fabric_config),
+            fabric_default_max_turns=fabric_default_max_turns,
+            **kwargs,
+        )
+
+    @classmethod
+    def preflight(cls, kwargs: dict[str, Any] | None = None, env: Mapping[str, str] | None = None) -> None:
+        _refuse_flat_config_kwargs(kwargs or {})
+        super().preflight(kwargs, env)
 
     @staticmethod
     def name() -> str:

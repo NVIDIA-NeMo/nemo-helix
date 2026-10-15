@@ -201,6 +201,40 @@ def test_a_config_without_a_harness_is_refused_at_construction(tmp_path: Path) -
         NemoFabricAgent(logs_dir=tmp_path, fabric_config={"metadata": {"name": "no-harness"}})
 
 
+def test_harbor_preflight_accepts_the_agent_kwargs_a_target_carries() -> None:
+    NemoFabricAgent.preflight(
+        {
+            "fabric_config": _registered_agent_config(),
+            "fabric_default_max_turns": 20,
+            "fabric_package": "nemo-fabric[deepagents]==0.5.0",
+            "fabric_workspace": "/app",
+        }
+    )
+
+
+@pytest.mark.parametrize("keyword", sorted(FLAT_CONFIG_KWARGS))
+def test_harbor_preflight_refuses_flat_agent_description_keywords(keyword: str) -> None:
+    with pytest.raises(ValueError, match=keyword):
+        NemoFabricAgent.preflight({"fabric_config": _registered_agent_config(), keyword: "x"})
+
+
+def test_harbor_preflight_refuses_a_config_without_a_harness() -> None:
+    with pytest.raises(ValueError, match="harness.adapter_id"):
+        NemoFabricAgent.preflight({"fabric_config": {"metadata": {"name": "no-harness"}}})
+
+
+def test_harbor_preflight_requires_a_fabric_config() -> None:
+    with pytest.raises(ValueError, match="fabric_config"):
+        NemoFabricAgent.preflight({"fabric_workspace": "/app"})
+
+
+def test_parsed_options_carry_the_config_and_its_adapter(tmp_path: Path) -> None:
+    options = _agent(tmp_path, fabric_default_max_turns=7).options
+    assert options.fabric_adapter_id == _DEEPAGENTS
+    assert options.fabric_config == _registered_agent_config()
+    assert options.fabric_default_max_turns == 7
+
+
 def test_install_and_run_keywords_still_pass_through(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
     bundle.mkdir()
