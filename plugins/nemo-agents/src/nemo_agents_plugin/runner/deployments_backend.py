@@ -235,8 +235,10 @@ def rewrite_fabric_config_base_urls(agent_config: dict[str, Any], gateway_url: s
     Rewrites ``models.*.base_url`` and harness ``model.base_url`` when the URL
     points at the Inference Gateway. Legacy ``settings.base_url`` values are
     also supported. Loopback ATIF HTTP storage endpoints are rewritten so they
-    remain reachable from container deployments. Third-party URLs are left
-    unchanged.
+    remain reachable from container deployments. OpenTelemetry trace, log, and
+    metric endpoints that point at Intake are rewritten the same way, which
+    lands them on the loopback auth proxy when there is one. Third-party URLs
+    are left unchanged.
     """
     reachable = urlsplit(gateway_url.rstrip("/"))
     reachable_origin = f"{reachable.scheme}://{reachable.netloc}"
@@ -283,6 +285,21 @@ def rewrite_fabric_config_base_urls(agent_config: dict[str, Any], gateway_url: s
             continue
         scheme = "https" if "https" in (parts.scheme, reachable.scheme) else reachable.scheme
         storage_config["endpoint"] = parts._replace(scheme=scheme, netloc=reachable.netloc).geturl()
+
+    opentelemetry = telemetry.get("opentelemetry") if isinstance(telemetry, dict) else None
+    if isinstance(opentelemetry, dict):
+        signal_sections = [opentelemetry, opentelemetry.get("logs"), opentelemetry.get("metrics")]
+        for section in signal_sections:
+            endpoint_configs = section.get("endpoints") if isinstance(section, dict) else None
+            for endpoint_config in endpoint_configs if isinstance(endpoint_configs, list) else []:
+                if not isinstance(endpoint_config, dict):
+                    continue
+                endpoint = endpoint_config.get("endpoint")
+                if not isinstance(endpoint, str) or "/apis/intake/" not in endpoint:
+                    continue
+                parts = urlsplit(endpoint)
+                scheme = "https" if "https" in (parts.scheme, reachable.scheme) else reachable.scheme
+                endpoint_config["endpoint"] = parts._replace(scheme=scheme, netloc=reachable.netloc).geturl()
     return config
 
 
