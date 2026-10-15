@@ -164,7 +164,6 @@ def create_platform_job_response(job: HelixJob, attempt: HelixJobAttempt) -> Hel
         error_details=attempt.error_details,
         ownership=ownership,
         custom_fields=job.custom_fields,
-        db_version=job.db_version,
     )
 
 
@@ -186,7 +185,6 @@ def create_attempt_response(attempt: HelixJobAttempt, *, current_attempt_id: str
         error_details=attempt.error_details,
         created_at=attempt.created_at,
         updated_at=attempt.updated_at,
-        db_version=attempt.db_version,
         is_current=attempt.id == current_attempt_id,
     )
 
@@ -500,13 +498,8 @@ class JobDispatcher:
             job = await self.store.get(HelixJob, resolved.name, workspace=workspace)
             if job.id != resolved.id:
                 return None
-            if update.expected_db_version is not None and job.db_version != update.expected_db_version:
-                raise EntityConflictError(
-                    f"Job '{job.name}' was modified by another request. "
-                    f"Expected version {update.expected_db_version}, but current version is {job.db_version}."
-                )
 
-            fields = update.model_fields_set - {"expected_db_version"}
+            fields = update.model_fields_set
             if "platform_spec" in fields:
                 assert update.platform_spec is not None
                 await self.validate_job_secrets(update.platform_spec, workspace)
@@ -766,7 +759,7 @@ class JobDispatcher:
         attempt_identifier: str,
         workspace: str,
     ) -> tuple[HelixJob, HelixJobAttempt] | None:
-        """Resolve an attempt by name, ID, or the reserved current selector."""
+        """Resolve an attempt by ID or the reserved current selector."""
         job = await self._resolve_job(job_identifier, workspace)
         if job is None:
             return None
@@ -776,15 +769,7 @@ class JobDispatcher:
                 raise JobHasNoAttemptError(f"Job '{job.name}' has not run yet.")
             attempt = await self.get_attempt(job.current_attempt_id)
         else:
-            try:
-                attempt = await self.store.get(
-                    HelixJobAttempt,
-                    attempt_identifier,
-                    workspace=workspace,
-                    parent=job.id,
-                )
-            except EntityNotFoundError:
-                attempt = await self.get_attempt(attempt_identifier)
+            attempt = await self.get_attempt(attempt_identifier)
 
         if attempt is None or attempt.workspace != workspace or attempt.job != job.id:
             return None

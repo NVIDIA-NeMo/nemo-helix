@@ -5843,7 +5843,7 @@ paths:
       tags:
       - Jobs
       summary: Get Job Attempt
-      description: Get an attempt by name, ID, or the reserved current selector.
+      description: Get an attempt by ID or the reserved current selector.
       operationId: get_job_attempt_apis_jobs_v2_workspaces__workspace__jobs__job__attempts__attempt__get
       parameters:
       - name: job
@@ -7173,8 +7173,10 @@ paths:
       tags:
       - Jobs
       summary: Update Job Status Details
-      description: Update the status details of a platform job.
+      description: Update the current attempt's status details through a compatibility
+        route.
       operationId: update_job_status_details_apis_jobs_v2_workspaces__workspace__jobs__name__status_details_patch
+      deprecated: true
       parameters:
       - name: name
         in: path
@@ -15236,11 +15238,6 @@ components:
           type: string
           format: date-time
           title: Updated At
-        db_version:
-          type: integer
-          title: Db Version
-          description: Optimistic-lock version
-          default: 1
         is_current:
           type: boolean
           title: Is Current
@@ -15470,11 +15467,6 @@ components:
           description: Custom Fields
           additionalProperties: true
           type: object
-        db_version:
-          type: integer
-          title: Db Version
-          description: Optimistic-lock version
-          default: 1
       type: object
       required:
       - id
@@ -21778,10 +21770,6 @@ components:
           type: object
         platform_spec:
           $ref: '#/components/schemas/HelixJobSpec'
-        expected_db_version:
-          title: Expected Db Version
-          type: integer
-          minimum: 1.0
       type: object
       title: UpdateHelixJobRequest
       description: Validated partial update for mutable job definition and metadata

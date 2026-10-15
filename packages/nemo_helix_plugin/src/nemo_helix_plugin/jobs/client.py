@@ -161,11 +161,13 @@ class JobsClient(_JobsMethods, NemoClient):
         workspace: str | None = None,
         body: dict[str, object],
     ) -> None:
-        return self.update_job_status_details(
-            name=name,
+        """Compatibility alias for updating the current attempt."""
+        return self.update_attempt_status_details(
+            name,
+            "current",
             workspace=workspace,
-            body=JobStatusDetailsUpdate.model_validate(body),
-        ).data()
+            body=body,
+        )
 
     def update_attempt_status_details(
         self,
@@ -233,13 +235,13 @@ class AsyncJobsClient(_JobsMethods, AsyncNemoClient):
         workspace: str | None = None,
         body: dict[str, object],
     ) -> None:
-        return (
-            await self.update_job_status_details(
-                name=name,
-                workspace=workspace,
-                body=JobStatusDetailsUpdate.model_validate(body),
-            )
-        ).data()
+        """Compatibility alias for updating the current attempt."""
+        return await self.update_attempt_status_details(
+            name,
+            "current",
+            workspace=workspace,
+            body=body,
+        )
 
     async def update_attempt_status_details(
         self,

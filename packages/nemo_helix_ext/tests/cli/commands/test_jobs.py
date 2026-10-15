@@ -432,7 +432,7 @@ def test_retrieve_current_attempt_uses_selector() -> None:
     )
 
 
-def test_update_job_preserves_explicit_null_and_version() -> None:
+def test_update_job_preserves_explicit_null() -> None:
     platform_client = SimpleNamespace()
     jobs_client = MagicMock()
     updated_job = SimpleNamespace(name="job-a")
@@ -446,14 +446,13 @@ def test_update_job_preserves_explicit_null_and_version() -> None:
             _ctx(platform_client),
             name="job-a",
             workspace="test-workspace",
-            input_data='{"project": null, "expected_db_version": 4}',
+            input_data='{"project": null}',
         )
 
     call_kwargs = jobs_client.update_job.call_args.kwargs
     assert call_kwargs["workspace"] == "test-workspace"
     assert call_kwargs["body"].project is None
     assert "project" in call_kwargs["body"].model_fields_set
-    assert call_kwargs["body"].expected_db_version == 4
 
 
 def test_download_result_with_attempt_uses_canonical_route(tmp_path: Path) -> None:

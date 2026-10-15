@@ -162,7 +162,6 @@ class BaseJob(BaseModel, Generic[JobConfigT]):
     error_details: dict[str, object] | None = None
     ownership: dict[str, object] | None = None
     custom_fields: dict[str, object] | None = None
-    db_version: int | None = None
 
 
 class BaseJobUpdate(BaseModel, Generic[JobConfigT]):
@@ -175,11 +174,10 @@ class BaseJobUpdate(BaseModel, Generic[JobConfigT]):
     spec: JobConfigT | None = None
     profile: str | None = None
     options: dict[str, Any] | None = None
-    expected_db_version: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def validate_compilation_controls(self) -> Self:
-        if not self.model_fields_set - {"expected_db_version"}:
+        if not self.model_fields_set:
             raise ValueError("at least one mutable job field is required")
         spec_supplied = "spec" in self.model_fields_set
         if spec_supplied and self.spec is None:
@@ -202,7 +200,6 @@ class BaseJobAttempt(BaseModel, Generic[JobConfigT]):
     error_details: dict[str, object] | None = None
     created_at: datetime
     updated_at: datetime
-    db_version: int
     is_current: bool
 
 
@@ -1020,7 +1017,6 @@ def job_route_factory(
             error_details=job_resp.error_details,
             ownership=job_resp.ownership,
             custom_fields=job_resp.custom_fields,
-            db_version=getattr(job_resp, "db_version", None),
         )
 
     def attempt_from_response(attempt: HelixJobAttemptResponse) -> TypedJobAttempt:
@@ -1037,7 +1033,6 @@ def job_route_factory(
             error_details=attempt.error_details,
             created_at=attempt.created_at,
             updated_at=attempt.updated_at,
-            db_version=attempt.db_version,
             is_current=attempt.is_current,
         )
 

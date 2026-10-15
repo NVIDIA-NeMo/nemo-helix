@@ -28,6 +28,7 @@ from nhx.core.jobs.api.v2.jobs.endpoints import (
 )
 from nhx.core.jobs.api.v2.jobs.schemas import (
     CreateHelixJobRequest,
+    HelixJobAttemptResponse,
     HelixJobResponse,
     HelixJobSortField,
     HelixJobStepsListFilter,
@@ -137,7 +138,6 @@ async def test_attempt_and_update_api_roundtrip(
             body=UpdateHelixJobRequest(
                 description="updated",
                 project=None,
-                expected_db_version=created.db_version,
             ),
         )
     ).data()
@@ -147,11 +147,16 @@ async def test_attempt_and_update_api_roundtrip(
     assert current.is_current is True
     assert updated.description == "updated"
     assert updated.project is None
-    assert updated.db_version > created.db_version
+
+
+def test_jobs_api_models_hide_entity_store_versions() -> None:
+    assert "db_version" not in HelixJobResponse.model_fields
+    assert "db_version" not in HelixJobAttemptResponse.model_fields
+    assert "expected_db_version" not in UpdateHelixJobRequest.model_fields
 
 
 @pytest.mark.asyncio
-async def test_job_update_validation_and_conflict_statuses(
+async def test_job_update_validation_statuses(
     test_client: AsyncClient,
     sample_platform_job_request: CreateHelixJobRequest,
 ):
@@ -165,16 +170,9 @@ async def test_job_update_validation_and_conflict_statuses(
 
     updated = await test_client.patch(
         path,
-        json={"description": "updated", "expected_db_version": created["db_version"]},
+        json={"description": "updated"},
     )
     assert updated.status_code == 200
-
-    stale = await test_client.patch(
-        path,
-        json={"description": "stale", "expected_db_version": created["db_version"]},
-    )
-    assert stale.status_code == 409
-    assert "modified by another request" in stale.json()["detail"]
 
     one_sided_spec = await test_client.patch(path, json={"spec": {"changed": True}})
     assert one_sided_spec.status_code == 422

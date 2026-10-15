@@ -94,7 +94,6 @@ def _mock_create_response(spec: dict[str, object]) -> MagicMock:
         ownership=None,
         custom_fields=None,
         attempt_id="attempt-1",
-        db_version=2,
     )
     response = MagicMock()
     response.data.return_value = job
@@ -115,7 +114,6 @@ def _mock_attempt_response(spec: dict[str, object]) -> SimpleNamespace:
         error_details=None,
         created_at=datetime(2026, 1, 1),
         updated_at=datetime(2026, 1, 1),
-        db_version=1,
         is_current=True,
     )
 
@@ -261,7 +259,7 @@ def test_create_job_forwards_transformed_spec_in_json_mode() -> None:
     json.dumps({"spec": spec})
     assert response.json()["project"] == "project-a"
     assert response.json()["attempt_id"] == "attempt-1"
-    assert response.json()["db_version"] == 2
+    assert "db_version" not in response.json()
 
 
 def test_update_job_recompiles_typed_spec_and_sends_paired_core_specs() -> None:
@@ -286,7 +284,7 @@ def test_update_job_recompiles_typed_spec_and_sends_paired_core_specs() -> None:
     ):
         response = client.patch(
             "/apis/widgets/v2/workspaces/default/jobs/test-job",
-            json={"spec": {"label": "updated"}, "expected_db_version": 1},
+            json={"spec": {"label": "updated"}},
         )
 
     assert response.status_code == 200, response.text
@@ -294,7 +292,6 @@ def test_update_job_recompiles_typed_spec_and_sends_paired_core_specs() -> None:
     assert body is not None
     assert body.spec == {"blob": base64.b64encode(_PICKLE_BYTES).decode("ascii")}
     assert body.platform_spec is not None
-    assert body.expected_db_version == 1
 
 
 def test_factory_attempt_routes_preserve_typed_specs_and_current_selector() -> None:
@@ -332,7 +329,7 @@ def test_factory_attempt_routes_preserve_typed_specs_and_current_selector() -> N
     assert mock_jobs.get_attempt_call == {"workspace": "default", "job": "test-job", "attempt": "current"}
 
 
-def test_factory_update_rejects_expected_version_without_mutation() -> None:
+def test_factory_update_rejects_internal_version_without_mutation() -> None:
     router = job_route_factory(
         service_name="widgets",
         job_type="Widget",

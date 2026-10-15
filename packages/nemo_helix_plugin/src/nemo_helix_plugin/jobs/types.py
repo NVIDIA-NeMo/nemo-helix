@@ -204,7 +204,6 @@ class HelixJobResponse(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     ownership: Optional[dict[str, Any]] = None
     custom_fields: Optional[dict[str, Any]] = Field(default=None, description="Custom Fields")
-    db_version: int = Field(default=1, description="Optimistic-lock version")
 
 
 class HelixJobAttemptResponse(BaseModel):
@@ -223,7 +222,6 @@ class HelixJobAttemptResponse(BaseModel):
     error_details: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
-    db_version: int = Field(default=1, description="Optimistic-lock version")
     is_current: bool = False
 
 
@@ -358,11 +356,10 @@ class UpdateHelixJobRequest(BaseModel):
     custom_fields: dict[str, Any] | None = None
     spec: dict[str, Any] | None = None
     platform_spec: HelixJobSpec | None = None
-    expected_db_version: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def validate_paired_specs(self) -> Self:
-        if not self.model_fields_set - {"expected_db_version"}:
+        if not self.model_fields_set:
             raise ValueError("at least one mutable job field is required")
         spec_supplied = "spec" in self.model_fields_set
         platform_spec_supplied = "platform_spec" in self.model_fields_set

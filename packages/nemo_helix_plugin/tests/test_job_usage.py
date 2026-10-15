@@ -68,19 +68,6 @@ def test_platform_reporter_omits_unknown_dimension() -> None:
     )
 
 
-def test_platform_reporter_preserves_legacy_current_attempt_contract() -> None:
-    jobs_client = MagicMock()
-    reporter = HelixJobUsageReporter(job_name="job-a", workspace="ws", jobs_client=jobs_client)
-
-    reporter.report_totals(output_tokens=7)
-
-    jobs_client.update_status_details.assert_called_once_with(
-        "job-a",
-        workspace="ws",
-        body={"output_tokens": 7},
-    )
-
-
 def test_platform_reporter_does_not_fail_job_on_transport_error() -> None:
     jobs_client = MagicMock()
     jobs_client.update_attempt_status_details.side_effect = RuntimeError("unavailable")

@@ -11,7 +11,7 @@ This section describes how to configure jobs in NeMo Helix. The Jobs service is 
 
 ## Viewing Job Attempts
 
-Each job run creates an attempt. The job response includes `attempt_id` for the current attempt and `db_version` for optimistic updates. List the attempt history or retrieve the current attempt without first looking up its ID:
+Each job run creates an attempt. The job response includes `attempt_id` for the current attempt. List the attempt history or retrieve the current attempt without first looking up its ID:
 
 ```bash
 nemo jobs attempts list <job-name> --workspace default
@@ -27,11 +27,10 @@ Use `nemo jobs update` to change mutable metadata or the job definition used by 
 ```bash
 nemo jobs update <job-name> \
   --workspace default \
-  --description "Updated description" \
-  --expected-db-version 3
+  --description "Updated description"
 ```
 
-Read `db_version` from `nemo jobs get` and send it as `--expected-db-version` when concurrent writers are possible. The update returns HTTP 409 if the stored version changed. Definition updates must provide both `spec` and `platform_spec`; the Jobs Factory recompiles plugin job specs before forwarding the paired fields. To explicitly clear a nullable field such as `project`, use `--input-data '{"project": null}'`.
+Definition updates must provide both `spec` and `platform_spec`; the Jobs Factory recompiles plugin job specs before forwarding the paired fields. To explicitly clear a nullable field such as `project`, use `--input-data '{"project": null}'`.
 
 ## Viewing Job Logs
 

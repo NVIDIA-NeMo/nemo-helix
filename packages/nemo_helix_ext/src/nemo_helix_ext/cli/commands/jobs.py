@@ -801,7 +801,7 @@ def get_logs_jobs(
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     attempt_id: Annotated[
-        str | None, typer.Option("--attempt-id", help="Filter logs by attempt ID, name, or 'current'")
+        str | None, typer.Option("--attempt-id", help="Filter logs by attempt ID or 'current'")
     ] = None,
     limit: Annotated[int | None, typer.Option("--limit", help="Maximum number of logs to return")] = None,
     page_cursor: Annotated[str | None, typer.Option("--page-cursor", help="Page cursor")] = None,
@@ -1131,7 +1131,6 @@ def update_jobs(
     custom_fields: Annotated[str | None, typer.Option("--custom-fields", help="JSON string")] = None,
     spec: Annotated[str | None, typer.Option("--spec", help="JSON string")] = None,
     platform_spec: Annotated[str | None, typer.Option("--platform-spec", help="JSON string")] = None,
-    expected_db_version: Annotated[int | None, typer.Option("--expected-db-version", min=1)] = None,
     input_file: Annotated[
         str | None,
         typer.Option("--input-file", help="Path to JSON file (use '-' for stdin)", rich_help_panel="Input Options"),
@@ -1160,8 +1159,6 @@ def update_jobs(
         input_payload["spec"] = read_payload("spec", spec)
     if platform_spec is not None:
         input_payload["platform_spec"] = read_payload("platform_spec", platform_spec)
-    if expected_db_version is not None:
-        input_payload["expected_db_version"] = expected_db_version
 
     request_payload = _without_keys(input_payload, {"workspace"})
     if not request_payload:
@@ -1266,7 +1263,7 @@ def watch_platform_job(
     name: Annotated[str, typer.Argument(help="Name of the platform job to watch")],
     workspace: Annotated[str | None, typer.Option("--workspace", help="Workspace containing the job")] = None,
     attempt_id: Annotated[
-        str | None, typer.Option("--attempt-id", help="Filter logs to an attempt ID, name, or 'current'")
+        str | None, typer.Option("--attempt-id", help="Filter logs to an attempt ID or 'current'")
     ] = None,
     step_id: Annotated[str | None, typer.Option("--step-id", help="Filter logs to a step ID")] = None,
     task_id: Annotated[str | None, typer.Option("--task-id", help="Filter logs to a task ID")] = None,
@@ -1314,7 +1311,7 @@ def tail_platform_job(
     lines: Annotated[int, typer.Option("-n", "--lines", min=1, max=10_000, help="Number of lines to show")] = 100,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Workspace containing the job")] = None,
     attempt_id: Annotated[
-        str | None, typer.Option("--attempt-id", help="Filter logs to an attempt ID, name, or 'current'")
+        str | None, typer.Option("--attempt-id", help="Filter logs to an attempt ID or 'current'")
     ] = None,
     step_id: Annotated[str | None, typer.Option("--step-id", help="Filter logs to a step ID")] = None,
     task_id: Annotated[str | None, typer.Option("--task-id", help="Filter logs to a task ID")] = None,
@@ -1400,7 +1397,7 @@ def list_attempts(
 @handle_errors
 def retrieve_attempt(
     ctx: typer.Context,
-    attempt: Annotated[str, typer.Argument(help="Attempt name, ID, or 'current'.")],
+    attempt: Annotated[str, typer.Argument(help="Attempt ID or 'current'.")],
     job: Annotated[str | None, typer.Option("--job", help="Job name or ID (required).")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     output_format: EntityOutputFormatOption = None,
@@ -1437,7 +1434,7 @@ def create_results(
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     job: Annotated[str | None, typer.Option("--job", help="(required)")] = None,
-    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID, name, or 'current'")] = None,
+    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     artifact_storage_type: Annotated[
         Literal["fileset"] | None, typer.Option("--artifact-storage-type", help="(required)")
     ] = None,
@@ -1533,7 +1530,7 @@ def download_results(
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     job: Annotated[str | None, typer.Option("--job", help="(required)")] = None,
-    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID, name, or 'current'")] = None,
+    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     output_file: Annotated[
         Path | None, typer.Option("--output-file", "-o", help="Output file path (required).")
     ] = None,
@@ -1577,7 +1574,7 @@ def list_results(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
-    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID, name, or 'current'")] = None,
+    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     sort: Annotated[
         Literal["created_at", "-created_at", "updated_at", "-updated_at"] | None,
         typer.Option("--sort", help="The field to sort by."),
@@ -1644,7 +1641,7 @@ def retrieve_results(
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     job: Annotated[str | None, typer.Option("--job", help="(required)")] = None,
-    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID, name, or 'current'")] = None,
+    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     output_format: EntityOutputFormatOption = None,
 ) -> None:
     """Get a specific job result."""
@@ -1685,7 +1682,7 @@ def list_steps(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
-    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID, name, or 'current'")] = None,
+    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     filter: Annotated[
         str | None,
         typer.Option(
@@ -1773,7 +1770,7 @@ def retrieve_steps(
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     job: Annotated[str | None, typer.Option("--job", help="(required)")] = None,
-    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID, name, or 'current'")] = None,
+    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     output_format: EntityOutputFormatOption = None,
 ) -> None:
     """Get a specific job step."""
@@ -1815,7 +1812,7 @@ def update_status_steps(
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     job: Annotated[str | None, typer.Option("--job", help="(required)")] = None,
-    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID, name, or 'current'")] = None,
+    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     status: Annotated[
         JobStatusValue | None,
         typer.Option(
@@ -1924,7 +1921,7 @@ def create_or_update_tasks(
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     job: Annotated[str | None, typer.Option("--job", help="(required)")] = None,
-    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID, name, or 'current'")] = None,
+    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     step: Annotated[str | None, typer.Option("--step", help="(required)")] = None,
     error_details: Annotated[str | None, typer.Option("--error-details", help="JSON string")] = None,
     error_stack: Annotated[str | None, typer.Option("--error-stack")] = None,
@@ -2035,7 +2032,7 @@ def list_tasks(
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     job: Annotated[str | None, typer.Option("--job", help="(required)")] = None,
-    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID, name, or 'current'")] = None,
+    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     output_format: ListOutputFormatOption = None,
     no_truncate: NoTruncateOption = None,
     columns: OutputColumnsOption = None,
@@ -2100,7 +2097,7 @@ def retrieve_tasks(
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     job: Annotated[str | None, typer.Option("--job", help="(required)")] = None,
-    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID, name, or 'current'")] = None,
+    attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     step: Annotated[str | None, typer.Option("--step", help="(required)")] = None,
     output_format: EntityOutputFormatOption = None,
 ) -> None:

@@ -71,7 +71,7 @@ class HelixJobUsageReporter(JobUsageReporter):
         job_name: str,
         workspace: str,
         jobs_client: JobsClient,
-        attempt_id: str | None = None,
+        attempt_id: str,
     ) -> None:
         self._job_name = job_name
         self._attempt_id = attempt_id
@@ -80,16 +80,12 @@ class HelixJobUsageReporter(JobUsageReporter):
 
     def _report(self, usage: JobTokenUsage) -> None:
         try:
-            body = usage.model_dump(exclude_none=True)
-            if self._attempt_id is None:
-                self._jobs_client.update_status_details(self._job_name, workspace=self._workspace, body=body)
-            else:
-                self._jobs_client.update_attempt_status_details(
-                    self._job_name,
-                    self._attempt_id,
-                    workspace=self._workspace,
-                    body=body,
-                )
+            self._jobs_client.update_attempt_status_details(
+                self._job_name,
+                self._attempt_id,
+                workspace=self._workspace,
+                body=usage.model_dump(exclude_none=True),
+            )
         except Exception:
             # Usage reporting is observability, not job correctness. Preserve
             # the job result while retaining a diagnostic in task logs.

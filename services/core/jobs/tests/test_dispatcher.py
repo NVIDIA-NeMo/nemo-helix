@@ -2843,6 +2843,18 @@ async def test_current_attempt_uses_pointer_not_highest_sequence(
 
 
 @pytest.mark.asyncio
+async def test_resolve_attempt_rejects_internal_name(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    attempt = await mock_store.get_by_id(HelixJobAttempt, job.attempt_id)
+
+    assert await mock_dispatcher.resolve_attempt(job.name, attempt.name, DEFAULT_WORKSPACE) is None
+
+
+@pytest.mark.asyncio
 async def test_list_attempts_paginates_and_marks_current(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
@@ -2890,7 +2902,7 @@ async def test_list_attempts_paginates_and_marks_current(
 
 
 @pytest.mark.asyncio
-async def test_update_job_clears_project_checks_version_and_preserves_attempt_snapshot(
+async def test_update_job_clears_project_and_preserves_attempt_snapshot(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
     sample_platform_job_request: CreateHelixJobRequest,
@@ -2907,7 +2919,6 @@ async def test_update_job_clears_project_checks_version_and_preserves_attempt_sn
             project=None,
             spec={"revision": 2},
             platform_spec=TestConstants.PLATFORM_SPEC,
-            expected_db_version=created.db_version,
         ),
     )
 
@@ -2915,16 +2926,8 @@ async def test_update_job_clears_project_checks_version_and_preserves_attempt_sn
     assert updated.description == "updated description"
     assert updated.project is None
     assert updated.spec == {"revision": 2}
-    assert updated.db_version > created.db_version
     stored_attempt = await mock_store.get_by_id(HelixJobAttempt, created.attempt_id)
     assert stored_attempt.spec == original_spec
-
-    with pytest.raises(EntityConflictError, match="Expected version"):
-        await mock_dispatcher.update_job(
-            created.name,
-            DEFAULT_WORKSPACE,
-            UpdateHelixJobRequest(description="stale", expected_db_version=created.db_version),
-        )
 
 
 @pytest.mark.asyncio

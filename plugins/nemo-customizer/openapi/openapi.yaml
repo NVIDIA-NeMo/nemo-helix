@@ -2234,9 +2234,6 @@ components:
           title: Custom Fields
           additionalProperties: true
           type: object
-        db_version:
-          title: Db Version
-          type: integer
       type: object
       required:
       - name
@@ -2282,9 +2279,6 @@ components:
           type: string
           format: date-time
           title: Updated At
-        db_version:
-          type: integer
-          title: Db Version
         is_current:
           type: boolean
           title: Is Current
@@ -2299,7 +2293,6 @@ components:
       - status
       - created_at
       - updated_at
-      - db_version
       - is_current
       title: AutomodelJobsJobAttempt
     AutomodelJobsJobAttemptsPage:
@@ -2386,10 +2379,6 @@ components:
           title: Options
           additionalProperties: true
           type: object
-        expected_db_version:
-          title: Expected Db Version
-          type: integer
-          minimum: 1.0
       type: object
       required:
       - spec
@@ -4412,9 +4401,6 @@ components:
           title: Custom Fields
           additionalProperties: true
           type: object
-        db_version:
-          title: Db Version
-          type: integer
       type: object
       required:
       - name
@@ -4460,9 +4446,6 @@ components:
           type: string
           format: date-time
           title: Updated At
-        db_version:
-          type: integer
-          title: Db Version
         is_current:
           type: boolean
           title: Is Current
@@ -4477,7 +4460,6 @@ components:
       - status
       - created_at
       - updated_at
-      - db_version
       - is_current
       title: RlJobsJobAttempt
     RlJobsJobAttemptsPage:
@@ -4564,10 +4546,6 @@ components:
           title: Options
           additionalProperties: true
           type: object
-        expected_db_version:
-          title: Expected Db Version
-          type: integer
-          minimum: 1.0
       type: object
       required:
       - spec
@@ -5128,9 +5106,6 @@ components:
           title: Custom Fields
           additionalProperties: true
           type: object
-        db_version:
-          title: Db Version
-          type: integer
       type: object
       required:
       - name
@@ -5176,9 +5151,6 @@ components:
           type: string
           format: date-time
           title: Updated At
-        db_version:
-          type: integer
-          title: Db Version
         is_current:
           type: boolean
           title: Is Current
@@ -5193,7 +5165,6 @@ components:
       - status
       - created_at
       - updated_at
-      - db_version
       - is_current
       title: UnslothJobsJobAttempt
     UnslothJobsJobAttemptsPage:
@@ -5280,10 +5251,6 @@ components:
           title: Options
           additionalProperties: true
           type: object
-        expected_db_version:
-          title: Expected Db Version
-          type: integer
-          minimum: 1.0
       type: object
       required:
       - spec
