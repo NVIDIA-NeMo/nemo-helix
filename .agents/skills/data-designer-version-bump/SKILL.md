@@ -68,12 +68,12 @@ Do all of this first. It tells you whether the bump is mechanical or needs a dec
    ```
    Empty output means the Step 8 refresh only needs its verification pass.
 
-5. **Versioned docs.** Upstream doesn't always publish versioned docs for every release:
+5. **Versioned docs.** Confirm upstream published docs for `$NEW`:
    ```bash
    curl -s -o /dev/null -w '%{http_code}\n' -L -A 'Mozilla/5.0' \
      https://docs.nvidia.com/nemo/datadesigner/v$NEW/getting-started/welcome
    ```
-   A `404` means you keep the doc links on the newest version that returns `200` (Step 5).
+   Expect `200`. Step 5 covers what to do if it isn't.
 
 ## Step 2: Edit the pins
 
@@ -146,7 +146,15 @@ Constraints files can disagree with each other and with `uv.lock` before you sta
 git grep -n "datadesigner/v$OLD" -- docs/
 ```
 
-If Step 1.5 returned `200` for `$NEW`, replace `v$OLD` with `v$NEW` in those files. Otherwise leave the links on the newest published version, confirm each one returns `200`, and mention it in the PR description.
+If Step 1.5 returned `200` for `$NEW`, replace `v$OLD` with `v$NEW` in those files. Before committing, check every rewritten URL (not just `welcome`) and confirm the page actually contains `v$NEW`, so a "not found" page served with a 200 doesn't pass:
+
+```bash
+for u in $(git grep -h -oE "https://docs.nvidia.com/nemo/datadesigner/v$NEW/[a-z/-]+" -- docs/ | sort -u); do
+  curl -s -L -A 'Mozilla/5.0' "$u" | grep -q "v$NEW" && echo "OK   $u" || echo "FAIL $u"
+done
+```
+
+Any `404` is unexpected. Tell the user so they can review and potentially raise it with the DD team, leave the links on the newest version that resolves, and recheck before the PR merges.
 
 ## Step 6: Adopt upstream API changes
 
