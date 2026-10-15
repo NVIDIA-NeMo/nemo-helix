@@ -6,16 +6,16 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Generator, Mapping
+from collections.abc import Awaitable, Callable, Generator, Iterable, Mapping
 from contextlib import contextmanager
 from typing import TypeVar, cast
 
 import httpx
+from nemo_evals.jobs.secret_env import JobSecretResolver
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nhx_evals_sdk import Evaluator
 from nhx_evals_sdk.execution.backends.local.backend import LocalBackend
 from nhx_evals_sdk.execution.metric_execution import run_sync
-from nhx_evals_sdk.resolvers import LocalSecretResolver
 
 T = TypeVar("T")
 AsyncClientT = TypeVar("AsyncClientT", bound=AsyncNemoClient)
@@ -26,14 +26,14 @@ type _AsyncRequestHook = Callable[[httpx.Request], Awaitable[None]]
 type _AsyncResponseHook = Callable[[httpx.Response], Awaitable[None]]
 
 
-def job_evaluator() -> Evaluator:
+def job_evaluator(secret_refs: Iterable[tuple[str, str]]) -> Evaluator:
     """An SDK ``Evaluator`` for code running inside a job.
 
-    The service injects each secret under its own env name, and a bare name such as ``OPENAI_API_KEY`` may hold
-    another consumer's secret, so a workspace-qualified ref never falls back to it.
+    Args:
+        secret_refs: The ``(env_name, secret_name)`` pairs the job's compiler injected.
     """
     backend = LocalBackend()
-    backend.secret_resolver = LocalSecretResolver(bare_fallback=False)
+    backend.secret_resolver = JobSecretResolver(secret_refs)
     return Evaluator(backend)
 
 
