@@ -801,6 +801,18 @@ paths:
       responses:
         '204':
           description: Successful Response
+      x-codeSamples:
+      - lang: Python
+        source: "import requests\n\nresponse = requests.post(\n    \"http://localhost:8080/apis/auth/v2/logout\"\
+          ,\n    headers={\"X-Source\": \"NeMo Studio\"},\n    cookies={\"nhx_session\"\
+          : \"YOUR_SESSION_COOKIE\"},\n)\nresponse.raise_for_status()\nprint(response.status_code)\
+          \  # 204: no response body\n"
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/auth/v2/logout\"\
+          , {\n  method: \"POST\",\n  headers: {\"X-Source\": \"NeMo Studio\"},\n\
+          \  credentials: \"include\",\n});\nif (!response.ok) throw new Error(`Logout\
+          \ failed: ${response.status}`);\nconsole.log(response.status); // 204: no\
+          \ response body\n"
   /apis/auth/v2/session:
     get:
       tags:
@@ -833,6 +845,18 @@ paths:
                 mapping:
                   authorization_code: '#/components/schemas/AuthorizationCodeBrokerTokenRequest'
                   refresh_token: '#/components/schemas/RefreshTokenBrokerTokenRequest'
+            examples:
+              authorization_code:
+                summary: Exchange an authorization code using PKCE
+                value:
+                  grant_type: authorization_code
+                  code: YOUR_AUTHORIZATION_CODE
+                  code_verifier: YOUR_PKCE_CODE_VERIFIER_AT_LEAST_43_CHARACTERS_LONG
+              refresh_token:
+                summary: Refresh an access token
+                value:
+                  grant_type: refresh_token
+                  refresh_token: YOUR_REFRESH_TOKEN
         required: true
       responses:
         '200':
@@ -4073,6 +4097,13 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/AnnotationInput'
+            examples:
+              note:
+                summary: Annotate a session with a note
+                value:
+                  kind: note
+                  session_id: session-123
+                  text: Helpful response.
       responses:
         '201':
           description: Successful Response
@@ -4690,6 +4721,15 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/EvaluatorResultInput'
+            examples:
+              numeric:
+                summary: Record a numeric evaluator score
+                value:
+                  span_id: span-123
+                  session_id: session-123
+                  name: faithfulness/v1
+                  data_type: NUMERIC
+                  value: 0.95
       responses:
         '201':
           description: Successful Response
@@ -5679,7 +5719,8 @@ paths:
                 summary: Create a CPU container job
                 value:
                   name: hello-world
-                  spec: {}
+                  spec:
+                    message: Hello from NeMo Helix
                   source: api-reference
                   platform_spec:
                     steps:
@@ -5688,7 +5729,12 @@ paths:
                         provider: cpu
                         container:
                           image: python:3.11
-                      config: {}
+                          command:
+                          - python
+                          - -c
+                          - print('Hello from NeMo Helix')
+                      config:
+                        message: Hello from NeMo Helix
       responses:
         '201':
           description: Successful Response
@@ -6874,7 +6920,9 @@ paths:
                 value:
                   name: nim-config-v1
                   engine: nim
-                  model_spec: {}
+                  model_spec:
+                    model_namespace: meta
+                    model_name: llama-3.1-8b-instruct
                   executor_config:
                     gpu: 1
       responses:
@@ -7038,7 +7086,9 @@ paths:
                 summary: Update a NIM deployment config
                 value:
                   engine: nim
-                  model_spec: {}
+                  model_spec:
+                    model_namespace: meta
+                    model_name: llama-3.1-8b-instruct
                   executor_config:
                     gpu: 1
       responses:

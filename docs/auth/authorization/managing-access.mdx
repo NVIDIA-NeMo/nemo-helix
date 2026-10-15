@@ -398,26 +398,19 @@ For details on configuring the platform admin, refer to [Auth Configuration](/do
 
 ## Deleting Workspaces
 
-Admins can delete workspaces they manage. However, a workspace cannot be deleted if it contains resources (projects, datasets, models, and so on). The API returns a `409 Conflict` error listing which entity types exist:
+Admins can delete workspaces they manage. Deletion marks the workspace for asynchronous cleanup and returns immediately. The workspace becomes inaccessible through the API, and its role bindings are removed immediately to revoke access. The workspace cleanup controller then deletes its entities and external resources; you do not need to delete projects or dataset FileSets individually first.
 
-```json
-{
-  "detail": "Cannot delete workspace 'ml-team': workspace contains entities that must be deleted first: project (3), dataset (5)"
-}
-```
+<Warning>
 
-Delete all resources in the workspace before deleting the workspace itself:
+Deleting a workspace is destructive. Ensure that any data you need to retain has been copied elsewhere before requesting deletion. A successful response confirms that cleanup was requested, not that cleanup has finished.
+
+</Warning>
 
 <Tabs>
 
 <Tab title="CLI">
 
 ```bash
-# List and delete projects first
-nemo projects list --workspace ml-team
-nemo projects delete my-project --workspace ml-team
-
-# Then delete the workspace
 nemo workspaces delete ml-team
 ```
 
@@ -426,20 +419,10 @@ nemo workspaces delete ml-team
 
 ```python
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_helix_plugin.client.errors import ConflictError
 
 client = NemoClient.from_config()
 
-try:
-    client.workspaces.delete_workspace(name="ml-team").data()
-except ConflictError as e:
-    print(f"Cannot delete workspace: {e}")
-    # Delete resources first, then retry
-    projects = client.projects.list_projects(workspace="ml-team").items()
-    for project in projects:
-        client.projects.delete_project(name=project.name, workspace="ml-team")
-    # Now delete the workspace
-    client.workspaces.delete_workspace(name="ml-team").data()
+client.workspaces.delete_workspace(name="ml-team").data()
 ```
 
 </Tab>

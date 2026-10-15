@@ -17,38 +17,38 @@ To use standard Kubernetes [Ingress](https://kubernetes.io/docs/concepts/service
 
 1. **Enable Ingress and set the hostname** (recommended: use `defaultHost`):
 
- ```yaml
- ingress:
- enabled: true
- defaultHost: "nhx.example.com"
- # optional: use if your cluster has multiple ingress classes
- # className: "nginx"
- ```
+   ```yaml
+   ingress:
+     enabled: true
+     defaultHost: "nhx.example.com"
+     # optional: use if your cluster has multiple ingress classes
+     # className: "nginx"
+   ```
 
- By default you do not need to set path rules or backends, as the chart automatically configures paths to the deployed services.
+   By default you do not need to set path rules or backends, as the chart automatically configures paths to the deployed services.
 
 2. **Optional: TLS.** Add a TLS block and reference a secret that contains your certificate:
 
- ```yaml
- ingress:
- enabled: true
- defaultHost: "nhx.example.com"
- tls:
- - hosts:
- - nhx.example.com
- secretName: nhx-tls-secret
- ```
+   ```yaml
+   ingress:
+     enabled: true
+     defaultHost: "nhx.example.com"
+     tls:
+       - hosts:
+           - nhx.example.com
+         secretName: nhx-tls-secret
+   ```
 
 3. **Optional: Annotations.** Pass controller-specific options (e.g. for NGINX or cert-manager) via `ingress.annotations`:
 
- ```yaml
- ingress:
- enabled: true
- defaultHost: "nhx.example.com"
- annotations:
- cert-manager.io/cluster-issuer: "letsencrypt-prod"
- nginx.ingress.kubernetes.io/proxy-body-size: "0"
- ```
+   ```yaml
+   ingress:
+     enabled: true
+     defaultHost: "nhx.example.com"
+     annotations:
+       cert-manager.io/cluster-issuer: "letsencrypt-prod"
+       nginx.ingress.kubernetes.io/proxy-body-size: "0"
+   ```
 
 Install or upgrade with your values file so the Ingress resource is created. After installation, use the URL shown in the Helm notes (`helm status nemo-helix`) or the host you configured.
 
@@ -60,15 +60,15 @@ On clusters that use the [Gateway API](https://gateway-api.sigs.k8s.io/), you ca
 
 1. **Enable HTTPRoute** and set `parentRefs` to the Gateway(s) this route should attach to:
 
- ```yaml
- httpRoute:
- enabled: true
- parentRefs:
- - name: my-gateway
- namespace: gateway-namespace
- hostnames:
- - "nhx.example.com" # optional
- ```
+   ```yaml
+   httpRoute:
+     enabled: true
+     parentRefs:
+       - name: my-gateway
+         namespace: gateway-namespace
+     hostnames:
+       - "nhx.example.com" # optional
+   ```
 
 2. Install or upgrade with this values file. The HTTPRoute will be created and bound to the specified Gateway(s).
 
@@ -80,13 +80,13 @@ On Red Hat OpenShift you can expose the API using an [OpenShift Route](https://d
 
 1. **Enable the OpenShift Route** and set the hostname (optional):
 
- ```yaml
- openshiftRoute:
- enabled: true
- host: "nhx.example.com" # optional; if empty, the router may assign a default
- ```
+   ```yaml
+   openshiftRoute:
+     enabled: true
+     host: "nhx.example.com" # optional; if empty, the router may assign a default
+   ```
 
- The route targets the platform API service; you do not set the service name or port (the chart uses the API service by default).
+   The route targets the platform API service; you do not set the service name or port (the chart uses the API service by default).
 
 2. **Optional: TLS.** Configure `openshiftRoute.tls` (termination, certificate, key, etc.) per the [OpenShift Route TLS documentation](https://docs.redhat.com/en/documentation/openshift_container_platform/latest/html/ingress_and_load_balancing/routes#nw-ingress-creating-a-reencrypt-route-with-a-custom-certificate_securing-routes).
 
@@ -107,20 +107,20 @@ On AKS, use the [managed Application Routing add-on](https://learn.microsoft.com
 
 1. **Enable the add-on:**
 
- ```sh
- az aks approuting enable \
- --resource-group <ResourceGroupName> \
- --name <ClusterName>
- ```
+   ```sh
+   az aks approuting enable \
+     --resource-group <ResourceGroupName> \
+     --name <ClusterName>
+   ```
 
 2. **Set the IngressClass in your values file:**
 
- ```yaml
- ingress:
- enabled: true
- defaultHost: "nhx.example.com"
- className: webapprouting.kubernetes.azure.com
- ```
+   ```yaml
+   ingress:
+     enabled: true
+     defaultHost: "nhx.example.com"
+     className: webapprouting.kubernetes.azure.com
+   ```
 
 3. Install or upgrade with your values file. To verify, check that the controller is running in the `app-routing-system` namespace with `kubectl get pods -n app-routing-system`.
 
@@ -132,14 +132,14 @@ On EKS, use the [AWS Load Balancer Controller](https://kubernetes-sigs.github.io
 
 2. **Set the IngressClass and ALB annotations in your values file:**
 
- ```yaml
- ingress:
- enabled: true
- className: alb
- defaultHost: "nhx.example.com" # optional
- annotations:
- alb.ingress.kubernetes.io/target-type: ip
- ```
+   ```yaml
+   ingress:
+     enabled: true
+     className: alb
+     defaultHost: "nhx.example.com" # optional
+     annotations:
+       alb.ingress.kubernetes.io/target-type: ip
+   ```
 
 3. Install or upgrade with your values file. To verify, check that an ALB was provisioned with `kubectl get ingress -n <namespace>`.
 
@@ -151,11 +151,11 @@ On GKE, use the built-in [GCE Ingress controller](https://cloud.google.com/kuber
 
 2. **Set the IngressClass in your values file:**
 
- ```yaml
- ingress:
- enabled: true
- className: gce
- defaultHost: "nhx.example.com" # optional
- ```
+   ```yaml
+   ingress:
+     enabled: true
+     className: gce
+     defaultHost: "nhx.example.com" # optional
+   ```
 
 3. Install or upgrade with your values file. To verify, check that a load balancer was provisioned with `kubectl get ingress -n <namespace>`.
