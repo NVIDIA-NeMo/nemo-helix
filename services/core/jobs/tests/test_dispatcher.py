@@ -10,10 +10,13 @@ These tests verify that the JobDispatcher correctly manages job lifecycle operat
 import asyncio
 import gc
 import json
+import re
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from nemo_helix_plugin.entity_naming import NAME_PATTERN
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.jobs.telemetry import build_job_telemetry_custom_fields
 from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation, parse_json_filter
 from nhx.common.api.parsed_filter import ParsedFilter
@@ -33,7 +36,13 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
     HelixJobTaskUpdate,
 )
 from nhx.core.jobs.app.constants import JOB_TASK_CLEANUP_PENDING_KEY
-from nhx.core.jobs.app.dispatcher import JobDeletionConflictError, JobDispatcher, JobStatusUpdateSkippedError
+from nhx.core.jobs.app.dispatcher import (
+    JobDeletionConflictError,
+    JobDispatcher,
+    JobNameValidationError,
+    JobStatusUpdateSkippedError,
+    generate_job_name,
+)
 from nhx.core.jobs.app.schemas import (
     HelixJobStepSpec,
 )
@@ -2736,3 +2745,96 @@ async def test_list_jobs_filter_name_operator_and_project_like(
     assert "excluded-job" not in returned_names
     assert "no-project-job" not in returned_names
     assert len(returned_names) == 1
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "nemo-evals.retrieve-eval",
+        "nemo-evals.agent-eval",
+        "abcdefghijklmnopqrs-tail",
+        "abcdefghijklmnopqrst-tail",
+        "nemo--double-hyphen",
+        "nemo-evals.retrieve--",
+        "-leading-hyphen",
+        "123-starts-with-digit",
+        "Mixed Case/Path:Source",
+        "a" * 80,
+        "a",
+        "---",
+        "",
+    ],
+)
+def test_generate_job_name_yields_valid_job_and_fileset_names(source: str):
+    """The generated name and its derived ``job-fileset-`` name satisfy the entity name rule for any source."""
+    name = generate_job_name(source, "bfbbh5ui")
+
+    assert re.fullmatch(NAME_PATTERN, name)
+    assert name.endswith("-bfbbh5ui")
+    CreateFilesetRequest(name=f"job-fileset-{name}")
+
+
+def test_generate_job_name_keeps_truncated_source_prefix():
+    assert generate_job_name("nemo-evals.retrieve-eval", "bfbbh5ui") == "nemo-evals.retrieve-bfbbh5ui"
+
+
+@pytest.mark.asyncio
+async def test_create_job_without_name_derives_valid_fileset_from_source(
+    mock_dispatcher: JobDispatcher,
+    mock_files_client,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """NVBug 6912264: the 20-char prefix of ``nemo-evals.retrieve-eval`` ends in a hyphen."""
+    request = sample_platform_job_request.model_copy(update={"name": None, "source": "nemo-evals.retrieve-eval"})
+
+    job = await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE)
+
+    assert job.name.startswith("nemo-evals.retrieve-")
+    assert "--" not in job.name
+    fileset_request = mock_files_client.create_fileset.await_args.kwargs["body"]
+    assert fileset_request.name == f"job-fileset-{job.name}"
+
+
+@pytest.mark.parametrize("name", ["bad--name", "trailing-hyphen-", "Upper", "a" * 52])
+@pytest.mark.asyncio
+async def test_create_job_rejects_name_that_cannot_name_its_fileset(
+    mock_dispatcher: JobDispatcher,
+    mock_files_client,
+    sample_platform_job_request: CreateHelixJobRequest,
+    name: str,
+):
+    request = sample_platform_job_request.model_copy(update={"name": name})
+
+    with pytest.raises(JobNameValidationError):
+        await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE)
+
+    mock_files_client.create_fileset.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_job_accepts_longest_name_that_fits_its_fileset(
+    mock_dispatcher: JobDispatcher,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    request = sample_platform_job_request.model_copy(update={"name": "a" * 51})
+
+    job = await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE)
+
+    assert job.name == "a" * 51
+
+
+@pytest.mark.asyncio
+async def test_create_job_invalid_generated_name_is_not_a_client_error(
+    mock_dispatcher: JobDispatcher,
+    mock_files_client,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """A generator defect must surface as a server error, never as a client-facing ValueError (409/422)."""
+    request = sample_platform_job_request.model_copy(update={"name": None})
+
+    with patch("nhx.core.jobs.app.dispatcher.generate_job_name", return_value="bad--name"):
+        with pytest.raises(RuntimeError) as exc_info:
+            await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE)
+
+    assert not isinstance(exc_info.value, ValueError)
+    mock_files_client.create_fileset.assert_not_called()

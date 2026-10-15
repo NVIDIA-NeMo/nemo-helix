@@ -4,11 +4,13 @@
 import asyncio
 import json
 import logging
+import re
 import weakref
 from typing import Any, Dict, List, Optional, Tuple, TypeVar
 
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
+from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.refs import parse_entity_ref
@@ -51,6 +53,7 @@ from nhx.core.jobs.entities import (
 )
 from nhx.core.jobs.telemetry import build_job_run_telemetry, emit_job_run_event
 from opentelemetry import metrics, trace
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -79,6 +82,21 @@ class JobSecretValidationError(ValueError):
 
 class JobOutputLocationError(ValueError):
     """Exception raised when a job's output_location references a fileset that does not exist."""
+
+
+class JobNameValidationError(ValueError):
+    """Exception raised when a caller-supplied job name cannot name the job's artifact fileset."""
+
+
+_AUTO_NAME_SOURCE_MAX_LENGTH = 20
+_AUTO_NAME_FALLBACK_PREFIX = "job"
+
+
+def generate_job_name(source: str, short_id: str) -> str:
+    """Return ``{source prefix}-{short_id}``, valid both as a job name and inside ``job-fileset-{name}``."""
+    prefix = re.sub(r"[^a-z0-9@.+_]+", "-", source.lower())
+    prefix = re.sub(r"^[^a-z]+", "", prefix)[:_AUTO_NAME_SOURCE_MAX_LENGTH].rstrip("-")
+    return f"{prefix or _AUTO_NAME_FALLBACK_PREFIX}-{short_id}"
 
 
 operations_counter = create_counter(
@@ -342,14 +360,8 @@ class JobDispatcher:
 
             await self.validate_job_secrets(platform_spec, workspace)
 
-            # Generate a reference ID for naming (job entity ID is assigned by store)
-            # Generate auto-name if not provided, ensuring it fits 32 char limit
-            # Format: {source[:20]}-{short_id} where short_id is last 8 chars of job_ref_id
             if not job_name:
-                job_ref_id = get_model_id("job")
-                short_id = job_ref_id[-8:].lower()
-                source_prefix = job_req.source[:20]
-                job_name = f"{source_prefix}-{short_id}"
+                job_name = generate_job_name(job_req.source, get_model_id("job")[-8:])
 
             # Resolve the fileset for job artifacts (caller-supplied output_location or auto-created).
             if job_req.output_location is not None:
@@ -361,10 +373,18 @@ class JobDispatcher:
                     ) from exc
                 fileset_name = job_req.output_location
             else:
-                fileset_resp = await self.files.create_fileset(
-                    body=CreateFilesetRequest(name=f"job-fileset-{job_name}"),
-                    workspace=workspace,
-                )
+                try:
+                    fileset_request = CreateFilesetRequest(name=f"job-fileset-{job_name}")
+                except ValidationError as exc:
+                    if not job_req.name:
+                        raise RuntimeError(f"generated job name '{job_name}' is not a valid name") from exc
+                    raise JobNameValidationError(
+                        "Invalid job name. The job's artifact fileset is named 'job-fileset-<job name>', "
+                        "so the job name must be at most "
+                        f"{NAME_MAX_LENGTH - len('job-fileset-')} characters, use lowercase letters, digits, "
+                        "hyphens, and dots, contain no consecutive hyphens, and not end with a hyphen."
+                    ) from exc
+                fileset_resp = await self.files.create_fileset(body=fileset_request, workspace=workspace)
                 fileset_name = fileset_resp.data().name
 
             # Create job (ID is assigned by entity store)
