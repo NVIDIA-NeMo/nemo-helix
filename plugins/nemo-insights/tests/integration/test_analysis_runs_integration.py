@@ -19,7 +19,7 @@ plumbing around it.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
@@ -62,7 +62,9 @@ class _TestAgentsService(NemoServiceAdapter):
 
 
 @contextmanager
-def _platform(*, workspaces: list[str] | None = None, workspace: str = WORKSPACE) -> Iterator[ClientContext]:
+def _platform(
+    *, workspaces: list[str] | None = None, workspace: str = WORKSPACE
+) -> Generator[ClientContext, None, None]:
     """Insights in front of the Agents, Jobs and Models services it actually calls."""
     with (
         subprocess_job_executor_patch(),

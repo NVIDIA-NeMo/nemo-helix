@@ -4,6 +4,9 @@
 #   "pytest>=9.0.3,<10",
 #   "pyyaml>=6.0.2",
 # ]
+#
+# [tool.ty.environment]
+# extra-paths = [".."]
 # ///
 
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.

@@ -17,7 +17,7 @@ import socket
 import subprocess
 import time
 import urllib.request
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -123,7 +123,7 @@ def running_platform(
     base_url: str,
     env_vars: dict[str, str] | None = None,
     ready_timeout: float = 180.0,
-) -> Iterator[str]:
+) -> Generator[str, None, None]:
     """Run ``nemo services run`` bound to ``base_url``'s port, yield the URL, then tear it down.
 
     Fails loudly if the port is already taken: a stray platform would otherwise quietly serve the
@@ -331,7 +331,7 @@ def cloudpickle_toggle_platform(
     work_root = tmp_path_factory.mktemp("cloudpickle-toggle-platform")
 
     @contextmanager
-    def start(*, allow_cloudpickle_metrics: bool) -> Iterator[str]:
+    def start(*, allow_cloudpickle_metrics: bool) -> Generator[str, None, None]:
         config_path = _materialize_subprocess_config(
             work_root,
             base_url=CLOUDPICKLE_TOGGLE_PLATFORM_BASE_URL,

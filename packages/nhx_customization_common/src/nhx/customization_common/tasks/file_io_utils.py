@@ -6,7 +6,7 @@
 import json
 import logging
 import os
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -84,7 +84,7 @@ def filesystem_sdk_error_handler(
     error_class: type[FileDownloadError | FileUploadError | ProgressReportError],
     operation: str,
     passthrough: tuple[type[BaseException], ...] = (),
-) -> Iterator[None]:
+) -> Generator[None, None, None]:
     """Context manager for consistent FilesetFileSystem error handling.
 
     Catches FilesetFileSystem-specific exceptions and re-raises them as the
@@ -111,7 +111,7 @@ def sdk_error_handler(
     error_class: type[FileDownloadError | FileUploadError | ProgressReportError],
     operation: str,
     passthrough: tuple[type[BaseException], ...] = (),
-) -> Iterator[None]:
+) -> Generator[None, None, None]:
     """Context manager for consistent SDK error handling.
 
     Catches SDK-specific exceptions and re-raises them as the specified error

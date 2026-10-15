@@ -14,7 +14,7 @@ import contextlib
 import socket
 import subprocess
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
@@ -80,7 +80,7 @@ def _free_port() -> int:
 @contextlib.contextmanager
 def launch_synth_service(
     agent_hardener_bin: Path, env: dict[str, str], *, log_path: Path | None = None, ready_timeout: float = 90.0
-) -> Iterator[SynthClient]:
+) -> Generator[SynthClient, None, None]:
     """Spawn ``agent-hardener serve`` on a free localhost port, yield a connected client, tear it down.
 
     Raises ``AgentHardenerRunError`` if the server exits early or isn't healthy within *ready_timeout*.

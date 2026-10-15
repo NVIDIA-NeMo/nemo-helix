@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -59,7 +59,7 @@ _current_runtime: ContextVar[TargetRuntime | None] = ContextVar("resilience_targ
 
 
 @contextmanager
-def measure_target_runtime() -> Iterator[TargetRuntime]:
+def measure_target_runtime() -> Generator[TargetRuntime, None, None]:
     """Collect target timing for everything awaited inside the block, whether it succeeds or raises."""
     runtime = TargetRuntime()
     token = _current_runtime.set(runtime)
@@ -70,7 +70,7 @@ def measure_target_runtime() -> Iterator[TargetRuntime]:
 
 
 @contextmanager
-def timed_target_call() -> Iterator[None]:
+def timed_target_call() -> Generator[None, None, None]:
     """Record the wall-clock duration of one call into the target as the fallback runtime."""
     started = time.monotonic()
     try:
@@ -82,7 +82,7 @@ def timed_target_call() -> Iterator[None]:
 
 
 @contextmanager
-def untimed() -> Iterator[None]:
+def untimed() -> Generator[None, None, None]:
     """Keep calls inside the block out of the enclosing target runtime."""
     token = _current_runtime.set(None)
     try:

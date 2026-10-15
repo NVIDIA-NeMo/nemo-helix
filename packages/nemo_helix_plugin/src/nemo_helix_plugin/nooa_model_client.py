@@ -9,7 +9,7 @@ and client lifetime behavior without making Nooa a required dependency of the
 public plugin contract.
 """
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -318,7 +318,7 @@ async def resolve_model_clients(
 
 
 @contextmanager
-def activate_model_clients(model_clients: ConfiguredModelClients) -> Iterator[None]:
+def activate_model_clients(model_clients: ConfiguredModelClients) -> Generator[None, None, None]:
     """Expose a resolved pair to agents constructed within this run context."""
     token = _ACTIVE_MODEL_CLIENTS.set(model_clients)
     try:

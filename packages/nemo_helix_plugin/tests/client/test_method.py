@@ -137,7 +137,7 @@ def test_async_descriptor_unwraps_to_a_coroutine_function() -> None:
     """
     descriptor = _descriptor("delete_deployment")
 
-    assert asyncio.iscoroutinefunction(inspect.unwrap(descriptor))
+    assert inspect.iscoroutinefunction(inspect.unwrap(descriptor))
     assert descriptor.endpoint.__name__ == "delete_deployment"
 
 

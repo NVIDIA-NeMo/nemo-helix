@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -149,7 +149,7 @@ class InsightsAnalystRuntime:
 
 
 @contextmanager
-def _applied_environment(env: dict[str, str]) -> Iterator[None]:
+def _applied_environment(env: dict[str, str]) -> Generator[None, None, None]:
     """Apply *env* for the duration of one invocation, then put it back."""
     previous = {name: os.environ.get(name) for name in env}
     os.environ.update(env)

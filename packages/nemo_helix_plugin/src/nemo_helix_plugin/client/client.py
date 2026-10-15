@@ -24,7 +24,14 @@ import json
 import logging
 import os
 import time
-from collections.abc import AsyncIterable, AsyncIterator, Callable, Iterable, Iterator, Mapping
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterable,
+    Callable,
+    Generator,
+    Iterable,
+    Mapping,
+)
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, replace
 from datetime import timezone
@@ -1068,7 +1075,7 @@ class NemoClient(BaseNemoClient[httpx.Client]):
         headers: dict[str, str] | None,
         params: dict | None,
         retry: RetryPolicy | None,
-    ) -> Iterator[httpx.Response]:
+    ) -> Generator[httpx.Response, None, None]:
         """Open a stream, retrying failures before handing it to the caller."""
         for attempt in range(retry.max_retries + 1 if retry else 1):
             yielded = False
@@ -1396,7 +1403,7 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
         headers: dict[str, str] | None,
         params: dict | None,
         retry: RetryPolicy | None,
-    ) -> AsyncIterator[httpx.Response]:
+    ) -> AsyncGenerator[httpx.Response, None]:
         """Open an async stream, retrying failures before handing it to the caller."""
         for attempt in range(retry.max_retries + 1 if retry else 1):
             yielded = False

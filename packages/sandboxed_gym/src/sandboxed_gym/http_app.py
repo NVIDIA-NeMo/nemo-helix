@@ -16,7 +16,7 @@ import contextlib
 import hmac
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -152,7 +152,7 @@ class BodySizeLimitMiddleware:
 
 
 @contextlib.asynccontextmanager
-async def _backend_errors(operation: str) -> AsyncIterator[None]:
+async def _backend_errors(operation: str) -> AsyncGenerator[None, None]:
     """Translate backend failures into wire errors without disclosing backend internals.
 
     The full exception is logged on the trusted side; the caller gets a generic message. An

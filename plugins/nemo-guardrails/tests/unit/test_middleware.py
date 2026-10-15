@@ -14,7 +14,7 @@ Covers:
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager, contextmanager
 from types import SimpleNamespace
 from typing import Any, cast
@@ -322,7 +322,7 @@ def _patch_prepare_lease(rails: Any | None = None):
     rails = rails if rails is not None else MagicMock()
 
     @asynccontextmanager
-    async def _lease(*_args: Any, **_kwargs: Any) -> AsyncIterator[Any]:
+    async def _lease(*_args: Any, **_kwargs: Any) -> AsyncGenerator[Any, None]:
         yield rails
 
     cache = MagicMock()
@@ -1840,7 +1840,7 @@ class TestStreamingLeaseLifecycle:
         pool = Pool(stable=stable)
 
         @asynccontextmanager
-        async def cache_lease(*_args: Any, **_kwargs: Any) -> AsyncIterator[Any]:
+        async def cache_lease(*_args: Any, **_kwargs: Any) -> AsyncGenerator[Any, None]:
             async with pool.acquire(build) as r:
                 yield r
 
@@ -2155,7 +2155,7 @@ class TestStreamingLeaseLifecycle:
 
     async def test_lease_aenter_failure_yields_streaming_error_chunk(self, middleware: GuardrailsMiddleware) -> None:
         @asynccontextmanager
-        async def failing_lease(*_args: Any, **_kwargs: Any) -> AsyncIterator[Any]:
+        async def failing_lease(*_args: Any, **_kwargs: Any) -> AsyncGenerator[Any, None]:
             raise RuntimeError("KB build failed")
             yield  # pragma: no cover - unreachable, satisfies type checker
 

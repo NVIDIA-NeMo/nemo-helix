@@ -9,7 +9,7 @@ import shutil
 import stat
 import tomllib
 import unicodedata
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -182,7 +182,7 @@ def remove_owned_tree(root: Path) -> None:
 
 
 @contextmanager
-def private_directory(parent: Path | None = None) -> Iterator[Path]:
+def private_directory(parent: Path | None = None) -> Generator[Path, None, None]:
     """Yield a private temporary directory and remove its contents on exit, including on failure."""
     import tempfile
 

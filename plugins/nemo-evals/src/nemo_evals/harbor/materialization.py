@@ -5,7 +5,7 @@
 
 import tarfile
 import tempfile
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -94,7 +94,7 @@ async def _download_async(
 
 
 @contextmanager
-def _staging(members: Sequence[StoredHarborTask], destination: Path) -> Iterator[Path]:
+def _staging(members: Sequence[StoredHarborTask], destination: Path) -> Generator[Path, None, None]:
     """Allocate a dataset staging directory and remove all owned files if materialization fails."""
     if not members:
         raise ValueError("Expected at least one stored Harbor member")

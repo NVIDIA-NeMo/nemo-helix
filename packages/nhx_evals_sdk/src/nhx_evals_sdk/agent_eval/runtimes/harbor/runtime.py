@@ -49,7 +49,7 @@ import shutil
 import sys
 import threading
 import warnings
-from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Generator, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
@@ -1167,7 +1167,7 @@ def _truncated_repr(value: Any) -> str:
 @contextlib.contextmanager
 def scoped_harbor_agent_import(
     agent_dir: Path, import_path: str, *, exclude: frozenset[Path] = frozenset()
-) -> Iterator[str]:
+) -> Generator[str, None, None]:
     """Make ``agent_dir`` importable under a content-addressed package for the block.
 
     Args:

@@ -27,7 +27,7 @@ import logging
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import ClassVar, Iterator
+from typing import ClassVar, Generator
 
 from filesets import FilesetFileSystem
 from nemo_agents_plugin.refs import AgentRef, AgentTarget, classify_agent_target
@@ -330,7 +330,7 @@ class EvaluateAgentJob(NemoJob):
         *,
         ctx: JobContext,
         sdk: NemoClient | None,
-    ) -> Iterator[Path]:
+    ) -> Generator[Path, None, None]:
         """Yield a local path to the eval YAML.
 
         When ``cfg.eval_config_fileset`` is set, download the fileset into a
@@ -395,7 +395,7 @@ class EvaluateAgentJob(NemoJob):
         workspace: str,
         ctx: JobContext,
         sdk: NemoClient | None,
-    ) -> Iterator[Path]:
+    ) -> Generator[Path, None, None]:
         """Yield a local base directory for ``nat eval`` outputs.
 
         Branches on the union shape:

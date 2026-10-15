@@ -100,7 +100,7 @@ dev = [
   "papermill>=2.6.0",
   "aiohttp>=3.14.1",
   "ipykernel>=6.29.5",
-  "ty==0.0.56",
+  "ty==0.0.86",
   "hatchling>=1.26.3",
   "nhx-testing",
   "mlflow-skinny>=3.15.0,<3.16.0", # Optional dep for fine-tuning (shipped in training images); skinny variant to test API surface without bloating uv.lock

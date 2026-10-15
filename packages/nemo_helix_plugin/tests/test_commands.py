@@ -687,7 +687,7 @@ class _GreetResponse(BaseModel):
 class _GreetFunction(NemoFunction[_GreetSpec]):
     name: ClassVar[str] = "greet"
     description: ClassVar[str] = "Say hello to a name."
-    spec_schema: ClassVar[type[BaseModel]] = _GreetSpec
+    spec_schema: ClassVar[type[_GreetSpec]] = _GreetSpec
 
     async def run(self, spec: _GreetSpec) -> _GreetResponse:
         return _GreetResponse(message=f"Hello, {spec.name}!")
@@ -699,7 +699,7 @@ class _CountSpec(BaseModel):
 
 class _CountFunction(NemoFunction[_CountSpec]):
     name: ClassVar[str] = "count"
-    spec_schema: ClassVar[type[BaseModel]] = _CountSpec
+    spec_schema: ClassVar[type[_CountSpec]] = _CountSpec
 
     async def run(self, spec: _CountSpec) -> AsyncIterator[BaseModel]:
         for i in range(spec.upto):
@@ -714,7 +714,7 @@ class _WorkspaceSpec(BaseModel):
 
 class _WorkspaceFunction(NemoFunction[_WorkspaceSpec]):
     name: ClassVar[str] = "echo-workspace"
-    spec_schema: ClassVar[type[BaseModel]] = _WorkspaceSpec
+    spec_schema: ClassVar[type[_WorkspaceSpec]] = _WorkspaceSpec
 
     async def run(self, spec: _WorkspaceSpec, *, ctx: FunctionContext) -> dict:
         del spec
@@ -723,7 +723,7 @@ class _WorkspaceFunction(NemoFunction[_WorkspaceSpec]):
 
 class _LocalityFunction(NemoFunction[_WorkspaceSpec]):
     name: ClassVar[str] = "echo-locality"
-    spec_schema: ClassVar[type[BaseModel]] = _WorkspaceSpec
+    spec_schema: ClassVar[type[_WorkspaceSpec]] = _WorkspaceSpec
 
     async def run(self, spec: _WorkspaceSpec, *, is_local: bool) -> dict:
         del spec
@@ -1129,7 +1129,7 @@ class TestApiSegmentForFunction:
 
         class _Fn(NemoFunction[_Spec]):
             name: ClassVar[str] = "greet"
-            spec_schema: ClassVar[type[BaseModel]] = _Spec
+            spec_schema: ClassVar[type[_Spec]] = _Spec
 
             async def run(self, spec: _Spec) -> dict:
                 del spec
@@ -1155,7 +1155,7 @@ class TestApiSegmentForFunction:
 
         class _Fn(NemoFunction[_Spec]):
             name: ClassVar[str] = "greet"
-            spec_schema: ClassVar[type[BaseModel]] = _Spec
+            spec_schema: ClassVar[type[_Spec]] = _Spec
 
             async def run(self, spec: _Spec) -> dict:
                 del spec
@@ -1180,7 +1180,7 @@ class TestApiSegmentForFunction:
 
         class _Fn(NemoFunction[_Spec]):
             name: ClassVar[str] = "x"
-            spec_schema: ClassVar[type[BaseModel]] = _Spec
+            spec_schema: ClassVar[type[_Spec]] = _Spec
 
             async def run(self, spec: _Spec) -> dict:
                 del spec
@@ -1215,7 +1215,7 @@ class _NestedSpec(BaseModel):
 class _NestedFunction(NemoFunction[_NestedSpec]):
     name: ClassVar[str] = "ping"
     description: ClassVar[str] = "Ping a nested target."
-    spec_schema: ClassVar[type[BaseModel]] = _NestedSpec
+    spec_schema: ClassVar[type[_NestedSpec]] = _NestedSpec
 
     async def run(self, spec: _NestedSpec) -> dict:
         return {

@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import time
 import uuid
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -396,7 +396,7 @@ def grant_workspace_role(
 
 
 @contextmanager
-def igw_mock_provider_mode(prefix: str = "igw-mock-") -> Iterator[None]:
+def igw_mock_provider_mode(prefix: str = "igw-mock-") -> Generator[None, None, None]:
     """Enable IGW mock-provider mode in *this* process for the duration of the ``with`` block.
 
     Overrides ``InferenceGatewayConfig.mock_provider_prefix`` so :func:`add_mock_provider` can name

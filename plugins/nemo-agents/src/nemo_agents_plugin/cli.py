@@ -46,7 +46,7 @@ import shlex
 import sys
 import tempfile
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -2505,7 +2505,7 @@ class _HttpxStreamingResponse:
         return self._response
 
     @contextmanager
-    def stream(self) -> Iterator[Iterator[bytes]]:
+    def stream(self) -> Generator[Iterator[bytes], None, None]:
         try:
             yield self._response.iter_bytes()
         finally:

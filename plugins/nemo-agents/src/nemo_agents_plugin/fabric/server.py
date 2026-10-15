@@ -319,7 +319,7 @@ def create_fabric_serving_app(
     config_path = Path(agent_config_path).resolve()
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         agent_config = load_agent_config(config_path)
         runtime_base_dir = await asyncio.to_thread(resolve_runtime_base_dir, config_path)
         base_dir = runtime_base_dir.path

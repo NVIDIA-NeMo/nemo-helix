@@ -166,7 +166,7 @@ TEST_METRIC_KEY = MetricType.STRING_CHECK.value
 
 
 class _TestMetric:
-    type: ClassVar[MetricType] = MetricType.STRING_CHECK
+    type: ClassVar[str] = MetricType.STRING_CHECK
     compute_scores: AsyncMock
     compute_corpus_scores: AsyncMock
 

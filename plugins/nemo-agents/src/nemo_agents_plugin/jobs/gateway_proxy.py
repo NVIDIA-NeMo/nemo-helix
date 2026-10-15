@@ -23,7 +23,7 @@ import os
 import socket
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -80,7 +80,7 @@ def rewrite_gateway_models(config: AgentConfig, origin: str | None) -> AgentConf
 
 
 @contextmanager
-def platform_auth_proxy() -> Iterator[str | None]:
+def platform_auth_proxy() -> Generator[str | None, None, None]:
     """Serve a loopback origin that forwards to the platform as this job.
 
     Yields the origin to route platform calls through, or ``None`` when the job
@@ -165,7 +165,7 @@ def platform_auth_proxy() -> Iterator[str | None]:
 
 
 @contextmanager
-def optional_platform_auth_proxy() -> Iterator[str | None]:
+def optional_platform_auth_proxy() -> Generator[str | None, None, None]:
     """:func:`platform_auth_proxy`, yielding ``None`` rather than failing the run.
 
     For a job whose only reason to reach the platform is its trajectory export.

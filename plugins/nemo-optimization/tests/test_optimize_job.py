@@ -6,7 +6,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -58,7 +58,7 @@ def write_config(directory: Path, config: dict[str, Any], name: str = "optimize.
 
 
 @contextlib.contextmanager
-def profiles(*execution_profiles: Any) -> Iterator[None]:
+def profiles(*execution_profiles: Any) -> Generator[None, None, None]:
     """Patch the Jobs client so ``compile`` sees exactly *execution_profiles*."""
 
     async def _get_execution_profiles() -> Any:
@@ -382,7 +382,7 @@ def bundle_sdk(
     *,
     downloaded: dict[str, Any] | None = None,
     uploaded: dict[str, Any] | None = None,
-) -> Iterator[NemoClient]:
+) -> Generator[NemoClient, None, None]:
     """Patch fileset staging helpers so typed-manager calls materialize *bundle*."""
 
     bundle = bundle or {}

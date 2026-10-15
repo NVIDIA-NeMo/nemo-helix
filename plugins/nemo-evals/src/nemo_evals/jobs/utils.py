@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Iterator, Mapping
+from collections.abc import Awaitable, Callable, Generator, Mapping
 from contextlib import contextmanager
 from typing import TypeVar, cast
 
@@ -80,7 +80,7 @@ def _sync_event_hooks_as_async(client: NemoClient) -> dict[str, list[_AsyncReque
 
 
 @contextmanager
-def async_client_from_sync_client(client: NemoClient) -> Iterator[AsyncNemoClient]:
+def async_client_from_sync_client(client: NemoClient) -> Generator[AsyncNemoClient, None, None]:
     """Yield an async typed client with the sync client's auth, headers, and request hooks.
 
     Sync evaluator jobs still use their sync client for downloads and inference identity checks.
