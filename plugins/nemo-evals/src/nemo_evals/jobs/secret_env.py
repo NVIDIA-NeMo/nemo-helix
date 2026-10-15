@@ -20,7 +20,7 @@ from nemo_helix_plugin.config import NHX_PREFIX_BASE
 from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable, EnvironmentVariableFromSecret
 from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
-from nhx_evals_sdk.resolver_protocols import MissingSecretError
+from nhx_evals_sdk.resolver_protocols import MissingSecretError, SecretResolver
 from nhx_evals_sdk.resolvers import LocalSecretResolver
 from nhx_evals_sdk.values.common import SecretRef
 
@@ -71,7 +71,7 @@ class JobEnvSecretSource:
         )
 
 
-class JobSecretResolver:
+class JobSecretResolver(SecretResolver):
     """Resolve metric secrets inside a platform job from the env names its compiler injected them under.
 
     Args:
