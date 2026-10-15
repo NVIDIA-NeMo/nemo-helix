@@ -8,9 +8,12 @@ from nemo_helix_plugin.container_registry import (
     DOCKER_HUB_REGISTRY,
     ImageReference,
     ImageReferenceError,
+    normalize_registry,
     parse_challenges,
     parse_image_reference,
 )
+
+DIGEST = f"sha256:{'a' * 64}"
 
 
 class TestParseImageReference:
@@ -19,26 +22,64 @@ class TestParseImageReference:
         [
             ("docker.io/org/sample_agent:0.1", ImageReference(DOCKER_HUB_REGISTRY, "org/sample_agent", "0.1")),
             ("ubuntu", ImageReference(DOCKER_HUB_REGISTRY, "library/ubuntu", "latest")),
+            ("docker.io/ubuntu", ImageReference(DOCKER_HUB_REGISTRY, "library/ubuntu", "latest")),
             ("nvcr.io/nvidia/nemo/agent:1.0", ImageReference("nvcr.io", "nvidia/nemo/agent", "1.0")),
             (
                 "Registry.Example.com:5000/team/agent",
                 ImageReference("registry.example.com:5000", "team/agent", "latest"),
             ),
+            ("ghcr.io:443/org/agent", ImageReference("ghcr.io", "org/agent", "latest")),
             ("localhost:5000/agent", ImageReference("localhost:5000", "agent", "latest")),
             ("[::1]:5000/agent", ImageReference("[::1]:5000", "agent", "latest")),
-            (f"org/agent@sha256:{'a' * 64}", ImageReference(DOCKER_HUB_REGISTRY, "org/agent", f"sha256:{'a' * 64}")),
+            (f"org/agent@{DIGEST}", ImageReference(DOCKER_HUB_REGISTRY, "org/agent", DIGEST)),
+            (f"org/agent:1.0@{DIGEST}", ImageReference(DOCKER_HUB_REGISTRY, "org/agent", DIGEST)),
         ],
     )
     def test_resolves_registry_repository_and_reference(self, image: str, expected: ImageReference) -> None:
         assert parse_image_reference(image) == expected
 
-    @pytest.mark.parametrize("image", ["", "https://docker.io/org/agent", "org agent", "docker.io/"])
+    @pytest.mark.parametrize(
+        "image",
+        [
+            "",
+            "https://docker.io/org/agent",
+            "org agent",
+            "docker.io/",
+            "org//agent",
+            "Org/Agent",
+            "org/agent:",
+            "org/agent@",
+            "org/agent@sha256:../../x",
+            "org/agent:../x",
+            "bad_host!/org/agent",
+        ],
+    )
     def test_rejects_what_is_not_a_reference(self, image: str) -> None:
         with pytest.raises(ImageReferenceError, match="not an image reference"):
             parse_image_reference(image)
 
-    def test_prints_like_docker(self) -> None:
-        assert str(parse_image_reference("org/agent")) == "registry-1.docker.io/org/agent:latest"
+    @pytest.mark.parametrize(
+        ("image", "printed"),
+        [
+            ("org/agent", "registry-1.docker.io/org/agent:latest"),
+            (f"org/agent@{DIGEST}", f"registry-1.docker.io/org/agent@{DIGEST}"),
+        ],
+    )
+    def test_prints_a_valid_reference(self, image: str, printed: str) -> None:
+        assert str(parse_image_reference(image)) == printed
+
+
+@pytest.mark.parametrize(
+    ("registry", "normalized"),
+    [
+        ("docker.io", DOCKER_HUB_REGISTRY),
+        (" Index.Docker.io ", DOCKER_HUB_REGISTRY),
+        ("ghcr.io:443", "ghcr.io"),
+        ("harbor.corp:5000", "harbor.corp:5000"),
+    ],
+)
+def test_normalize_registry(registry: str, normalized: str) -> None:
+    assert normalize_registry(registry) == normalized
 
 
 class TestParseChallenges:

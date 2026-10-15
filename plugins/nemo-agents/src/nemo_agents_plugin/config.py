@@ -9,7 +9,18 @@ from pathlib import Path
 from typing import ClassVar
 
 from nemo_helix_plugin.config import NemoConfig, nhx_user_data_dir
+from nemo_helix_plugin.container_registry import DOCKER_HUB_REGISTRY
 from pydantic import BaseModel, Field, model_validator
+
+DEFAULT_AGENT_IMAGE_REGISTRIES = (
+    DOCKER_HUB_REGISTRY,
+    "ghcr.io",
+    "nvcr.io",
+    "quay.io",
+    "public.ecr.aws",
+    "gcr.io",
+    "mcr.microsoft.com",
+)
 
 
 class ControllerConfig(BaseModel):
@@ -77,6 +88,14 @@ class DeploymentsRunnerConfig(BaseModel):
     container_port: int = Field(
         default=8000,
         description="Container port the agent server listens on (and readiness probe target).",
+    )
+    image_registries: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_AGENT_IMAGE_REGISTRIES),
+        description=(
+            "Registries an agent can be registered from by reading its packaged image. Listed registries "
+            "are trusted, so a private one such as an on-premises Harbor may be added. '*' also allows "
+            "any other registry that resolves to a public address."
+        ),
     )
     readiness_probe_timeout_seconds: int = Field(
         default=1,

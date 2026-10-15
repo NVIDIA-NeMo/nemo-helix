@@ -11,6 +11,8 @@ from collections.abc import AsyncIterator
 
 import httpx
 from fastapi import Depends
+from nemo_agents_plugin.config import AgentsConfig
+from nemo_agents_plugin.container.image_bundle import RegistryPolicy
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entity_client import get_entity_client
@@ -23,12 +25,14 @@ def get_files_client(client: AsyncNemoClient = Depends(get_nemo_client)) -> Asyn
 
 
 async def get_registry_http_client() -> AsyncIterator[httpx.AsyncClient]:
-    """Provide an HTTP client for reading public container registries.
-
-    Redirects are followed by image_bundle itself so each hop can be checked.
-    """
+    """Provide an HTTP client for container registries; image_bundle follows redirects itself."""
     async with httpx.AsyncClient(follow_redirects=False, timeout=httpx.Timeout(30.0)) as http:
         yield http
 
 
-__all__ = ["get_entity_client", "get_files_client", "get_registry_http_client"]
+def get_image_registry_policy() -> RegistryPolicy:
+    """Provide the registries agents may be read from, per the plugin configuration."""
+    return RegistryPolicy.from_entries(AgentsConfig.get().deployments.image_registries)
+
+
+__all__ = ["get_entity_client", "get_files_client", "get_image_registry_policy", "get_registry_http_client"]

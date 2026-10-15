@@ -18,12 +18,18 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, validate_agent_config
 from nemo_agents_plugin.api.v2._perms import AgentPerms
-from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_registry_http_client
+from nemo_agents_plugin.api.v2.dependencies import (
+    get_entity_client,
+    get_image_registry_policy,
+    get_registry_http_client,
+)
 from nemo_agents_plugin.authz import scope
 from nemo_agents_plugin.container.image_bundle import (
-    ImageAccessDeniedError,
     ImageBundleError,
     ImageNotFoundError,
+    RegistryPolicy,
+    RegistryTimeoutError,
+    RegistryUnavailableError,
     read_agent_bundle,
 )
 from nemo_agents_plugin.entities import Agent, AgentDeployment
@@ -221,22 +227,24 @@ async def read_agent_image_bundle(
     workspace: str,
     body: ReadAgentImageBundleRequest,
     http: httpx.AsyncClient = Depends(get_registry_http_client),
+    policy: RegistryPolicy = Depends(get_image_registry_policy),
 ) -> AgentImageBundle:
-    """Read agent.yaml and the agent's files from an image built by ``nemo agents package``.
-
-    The image is read from its registry without pulling it, so an agent can be
-    registered from the same files that run inside the image.
-    """
+    """Read agent.yaml and the agent's files from an image built by ``nemo agents package``."""
     try:
-        bundle = await read_agent_bundle(body.image, http=http)
+        bundle = await read_agent_bundle(body.image, http=http, policy=policy)
     except ImageNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ImageAccessDeniedError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RegistryTimeoutError as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except RegistryUnavailableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except ImageBundleError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    image = body.image.strip()
     return AgentImageBundle(
-        image=body.image.strip(),
+        image=image,
+        digest=bundle.digest,
+        pinned_image=f"{image.partition('@')[0]}@{bundle.digest}",
         config_path=bundle.config_path,
         files=[
             AgentImageBundleFile(path=path, content=base64.b64encode(content).decode("ascii"))

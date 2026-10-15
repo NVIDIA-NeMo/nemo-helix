@@ -40,13 +40,8 @@ paths:
       tags:
       - Agents
       summary: Read Agent Image Bundle
-      description: 'Read agent.yaml and the agent''s files from an image built by
-        ``nemo agents package``.
-
-
-        The image is read from its registry without pulling it, so an agent can be
-
-        registered from the same files that run inside the image.'
+      description: Read agent.yaml and the agent's files from an image built by ``nemo
+        agents package``.
       operationId: read_agent_image_bundle_apis_agents_v2_workspaces__workspace__agent_images_bundle_post
       parameters:
       - name: workspace
@@ -2907,10 +2902,20 @@ components:
           type: string
           title: Image
           description: The image reference that was read.
+        digest:
+          type: string
+          title: Digest
+          description: Digest of the manifest the reference resolved to when it was
+            read.
+        pinned_image:
+          type: string
+          title: Pinned Image
+          description: The image pinned to that digest. Deploy it so the deployment
+            runs the files that were read.
         config_path:
           type: string
           title: Config Path
-          description: AGENT_CONFIG_PATH inside the image.
+          description: AGENT_CONFIG_PATH inside the image, resolved against its WorkingDir.
         files:
           items:
             $ref: '#/components/schemas/AgentImageBundleFile'
@@ -2920,6 +2925,8 @@ components:
       type: object
       required:
       - image
+      - digest
+      - pinned_image
       - config_path
       - files
       title: AgentImageBundle

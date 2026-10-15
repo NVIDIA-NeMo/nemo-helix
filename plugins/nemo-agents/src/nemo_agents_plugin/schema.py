@@ -132,7 +132,11 @@ class AgentImageBundle(BaseModel):
     """The agent directory that ``nemo agents package`` copied into an image."""
 
     image: str = Field(description="The image reference that was read.")
-    config_path: str = Field(description="AGENT_CONFIG_PATH inside the image.")
+    digest: str = Field(description="Digest of the manifest the reference resolved to when it was read.")
+    pinned_image: str = Field(
+        description="The image pinned to that digest. Deploy it so the deployment runs the files that were read."
+    )
+    config_path: str = Field(description="AGENT_CONFIG_PATH inside the image, resolved against its WorkingDir.")
     files: list[AgentImageBundleFile] = Field(description="Every file of the agent bundle, including agent.yaml.")
 
 
