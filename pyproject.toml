@@ -248,6 +248,8 @@ functional-services = [
   "nhx-intake",
   "nhx-hello-world",
   "nhx-platform-seed",
+  # nemo-agent-hardener-plugin is deliberately absent: war-games need host Docker, the OpenShell
+  # gateway, and per-machine venvs, which a pod lacks. It is local/source-only until that changes.
 ]
 
 # nhx-api variant used only to deploy DeepAgents in container E2E tests.
