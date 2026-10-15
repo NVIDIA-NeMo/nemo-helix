@@ -298,7 +298,7 @@ These are the names `--upload` would have used: it derives them from the hub slu
 
 ## Submit the job
 
-There is no `grpo` subcommand. GRPO submits through `nemo customization rl submit`, selected by `training.type`.
+There is no `grpo` subcommand. GRPO submits through `nemo customization rl --job-json`, selected by `training.type`.
 
 ```json
 {
@@ -321,12 +321,12 @@ There is no `grpo` subcommand. GRPO submits through `nemo customization rl submi
 ```
 
 ```bash
-nemo customization rl submit ./job.json --workspace default
+nemo customization rl --job-json ./job.json --workspace default
 ```
 
 `training.type` is required — it is the union discriminator, and omitting it fails with `union_tag_not_found` rather than defaulting to DPO. `model`, `dataset`, and `environment` are plain string references.
 
-Read the `rl-<hex>` job id from the `name` field of the submit response; `rl submit` has no `--name` flag.
+Read the `rl-<hex>` job id from the `name` field of the command's JSON output; `nemo customization rl` has no `--name` flag.
 
 ## Train an adapter instead of full weights
 

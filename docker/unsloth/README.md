@@ -266,8 +266,8 @@ cat unsloth-smoke.json | jq .
 
 # Submit. Captures the job id from the JSON response.
 JOB_ID=$(
-  nemo customization unsloth submit unsloth-smoke.json -w default --json \
-    | jq -r '.id'
+  nemo customization unsloth --job-json unsloth-smoke.json -w default \
+    | jq -r '.name'
 )
 echo "Submitted: $JOB_ID"
 
