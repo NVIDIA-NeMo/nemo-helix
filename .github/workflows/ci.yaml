@@ -1218,7 +1218,9 @@ jobs:
             version="$(basename "$requirements" .txt)"
             venv="$RUNNER_TEMP/harbor-$version"
             uv venv --python 3.12 "$venv"
-            VIRTUAL_ENV="$venv" uv pip install -r "$requirements" ../../packages/nhx_sandbox pytest pytest-asyncio
+            # --python, not VIRTUAL_ENV: setup-uv exports UV_PYTHON, which would otherwise send the
+            # install to the workspace .venv.
+            uv pip install --python "$venv/bin/python" -r "$requirements" ../../packages/nhx_sandbox pytest pytest-asyncio
             echo "::group::Harbor $version"
             "$venv/bin/python" -m pytest -p no:cacheprovider -v \
               tests/test_harbor_opensandbox_environment.py tests/test_harbor_opensandbox_driver.py \
