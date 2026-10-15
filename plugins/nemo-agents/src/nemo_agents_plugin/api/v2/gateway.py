@@ -48,7 +48,11 @@ from nemo_agents_plugin.api.v2.openai_errors import (
 )
 from nemo_agents_plugin.api.v2.session_access import get_owned_session_by_id
 from nemo_agents_plugin.authz import scope
-from nemo_agents_plugin.deployment_routing import get_deployment_endpoint, is_deployment_routable
+from nemo_agents_plugin.deployment_routing import (
+    get_deployment_endpoint,
+    get_deployment_transport,
+    is_deployment_routable,
+)
 from nemo_agents_plugin.entities import (
     NEMO_AGENTS_SPEC_CONFIG_FORMAT,
     Agent,
@@ -59,6 +63,7 @@ from nemo_agents_plugin.entities import (
 from nemo_agents_plugin.fabric.session_manager import DEFAULT_IDLE_SESSION_TIMEOUT_SECONDS
 from nemo_agents_plugin.session_lifecycle import session_expiration_is_due
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
+from nemo_deployments_plugin.endpoint_transport import DIRECT, EndpointTransport
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.dependencies import get_effective_principal_id
 from nemo_helix_plugin.entity_client import (
@@ -358,6 +363,7 @@ async def _proxy_deployment(
         trailing_uri,
         model_name=model_name,
         session_id=session.id if session is not None else None,
+        transport=get_deployment_transport(deployment),
         on_start=persist_start_activity if tracks_session_activity else None,
         on_complete=persist_finish_activity if tracks_session_activity else None,
         strip_request_model=_is_nat_deployment(deployment),
@@ -662,11 +668,15 @@ async def _proxy(
     *,
     model_name: str | None = None,
     session_id: str | None = None,
+    transport: EndpointTransport = DIRECT,
     on_start: Callable[[], Awaitable[None]] | None = None,
     on_complete: Callable[[], Awaitable[None]] | None = None,
     strip_request_model: bool = False,
 ) -> StreamingResponse:
     """Forward *request* to ``{endpoint}/{trailing_uri}`` and stream the response.
+
+    *transport* picks the address actually dialed for that URL; the origin guard below
+    runs on the advertised URL, before that swap.
 
     With ``strip_request_model`` set, an OpenAI-compatible request body loses its ``model``
     field before it is forwarded; see :func:`_strip_request_model`.
@@ -700,9 +710,11 @@ async def _proxy(
     )
     if request.url.query:
         target_url = f"{target_url}?{request.url.query}"
+    target_url, routing_headers = transport.target(target_url)
 
     # Build forwarded headers — strip hop-by-hop and platform-internal headers
     headers = {k: v for k, v in request.headers.items() if k.lower() not in _REQUEST_HEADERS_TO_STRIP}
+    headers.update(routing_headers)
     if session_id is not None:
         headers[SESSION_ID_HEADER] = session_id
 
@@ -742,6 +754,7 @@ async def _proxy(
             # SSRF defense in depth: never let an agent's 3xx response redirect
             # us off the validated origin.
             follow_redirects=False,
+            **transport.client_kwargs(),
         ) as client:
             async with client.stream(
                 method=request.method,
