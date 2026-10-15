@@ -1081,6 +1081,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Agents
+      summary: Update Job
+      operationId: update_job_apis_agents_v2_workspaces__workspace__jobs_evaluate__name__patch
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvaluateJobUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluateJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
     delete:
       tags:
       - Agents
@@ -1106,6 +1143,108 @@ paths:
           description: Job not Found
         '409':
           description: Job is not in a terminal state
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/jobs/evaluate/{name}/attempts:
+    get:
+      tags:
+      - Agents
+      summary: List Job Attempts
+      operationId: list_job_attempts_apis_agents_v2_workspaces__workspace__jobs_evaluate__name__attempts_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 25
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          enum:
+          - seq
+          - -seq
+          type: string
+          default: -seq
+          title: Sort
+      - name: filter
+        in: query
+        required: false
+        schema:
+          title: Filter
+          type: string
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluateJobAttemptsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/jobs/evaluate/{name}/attempts/{attempt}:
+    get:
+      tags:
+      - Agents
+      summary: Get Job Attempt
+      operationId: get_job_attempt_apis_agents_v2_workspaces__workspace__jobs_evaluate__name__attempts__attempt__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluateJobAttempt'
         '422':
           description: Validation Error
           content:
@@ -1183,6 +1322,24 @@ paths:
           type: integer
           maximum: 10000
           exclusiveMinimum: 0
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
+      - name: step_id
+        in: query
+        required: false
+        schema:
+          title: Step Id
+          type: string
+      - name: task_id
+        in: query
+        required: false
+        schema:
+          title: Task Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -1215,6 +1372,12 @@ paths:
         schema:
           type: string
           title: Name
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -1467,6 +1630,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Agents
+      summary: Update Job
+      operationId: update_job_apis_agents_v2_workspaces__workspace__jobs_execute__name__patch
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteJobUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecuteJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
     delete:
       tags:
       - Agents
@@ -1492,6 +1692,108 @@ paths:
           description: Job not Found
         '409':
           description: Job is not in a terminal state
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/jobs/execute/{name}/attempts:
+    get:
+      tags:
+      - Agents
+      summary: List Job Attempts
+      operationId: list_job_attempts_apis_agents_v2_workspaces__workspace__jobs_execute__name__attempts_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 25
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          enum:
+          - seq
+          - -seq
+          type: string
+          default: -seq
+          title: Sort
+      - name: filter
+        in: query
+        required: false
+        schema:
+          title: Filter
+          type: string
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecuteJobAttemptsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/jobs/execute/{name}/attempts/{attempt}:
+    get:
+      tags:
+      - Agents
+      summary: Get Job Attempt
+      operationId: get_job_attempt_apis_agents_v2_workspaces__workspace__jobs_execute__name__attempts__attempt__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecuteJobAttempt'
         '422':
           description: Validation Error
           content:
@@ -1569,6 +1871,24 @@ paths:
           type: integer
           maximum: 10000
           exclusiveMinimum: 0
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
+      - name: step_id
+        in: query
+        required: false
+        schema:
+          title: Step Id
+          type: string
+      - name: task_id
+        in: query
+        required: false
+        schema:
+          title: Task Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -1601,6 +1921,12 @@ paths:
         schema:
           type: string
           title: Name
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -1853,6 +2179,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Agents
+      summary: Update Job
+      operationId: update_job_apis_agents_v2_workspaces__workspace__jobs_package__name__patch
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PackageAgentJobUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PackageAgentJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
     delete:
       tags:
       - Agents
@@ -1878,6 +2241,108 @@ paths:
           description: Job not Found
         '409':
           description: Job is not in a terminal state
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/jobs/package/{name}/attempts:
+    get:
+      tags:
+      - Agents
+      summary: List Job Attempts
+      operationId: list_job_attempts_apis_agents_v2_workspaces__workspace__jobs_package__name__attempts_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 25
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          enum:
+          - seq
+          - -seq
+          type: string
+          default: -seq
+          title: Sort
+      - name: filter
+        in: query
+        required: false
+        schema:
+          title: Filter
+          type: string
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PackageAgentJobAttemptsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/jobs/package/{name}/attempts/{attempt}:
+    get:
+      tags:
+      - Agents
+      summary: Get Job Attempt
+      operationId: get_job_attempt_apis_agents_v2_workspaces__workspace__jobs_package__name__attempts__attempt__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PackageAgentJobAttempt'
         '422':
           description: Validation Error
           content:
@@ -1955,6 +2420,24 @@ paths:
           type: integer
           maximum: 10000
           exclusiveMinimum: 0
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
+      - name: step_id
+        in: query
+        required: false
+        schema:
+          title: Step Id
+          type: string
+      - name: task_id
+        in: query
+        required: false
+        schema:
+          title: Task Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -1987,6 +2470,12 @@ paths:
         schema:
           type: string
           title: Name
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -3615,6 +4104,9 @@ components:
         id:
           title: Id
           type: string
+        attempt_id:
+          title: Attempt Id
+          type: string
         name:
           type: string
           title: Name
@@ -3662,6 +4154,83 @@ components:
       - name
       - spec
       title: EvaluateJob
+    EvaluateJobAttempt:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        seq:
+          type: integer
+          title: Seq
+        spec:
+          $ref: '#/components/schemas/EvaluateAgentSpec'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        is_current:
+          type: boolean
+          title: Is Current
+      type: object
+      required:
+      - id
+      - name
+      - job
+      - workspace
+      - seq
+      - spec
+      - status
+      - created_at
+      - updated_at
+      - is_current
+      title: EvaluateJobAttempt
+    EvaluateJobAttemptsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/EvaluateJobAttempt'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: EvaluateJobAttemptsPage
     EvaluateJobRequest:
       properties:
         name:
@@ -3703,6 +4272,17 @@ components:
       required:
       - spec
       title: EvaluateJobRequest
+    EvaluateJobUpdate:
+      properties:
+        description:
+          title: Description
+          nullable: true
+          type: string
+        spec:
+          $ref: '#/components/schemas/EvaluateAgentSpec'
+      additionalProperties: false
+      type: object
+      title: EvaluateJobUpdate
     EvaluateJobsListFilter:
       additionalProperties: false
       properties:
@@ -3876,6 +4456,9 @@ components:
         id:
           title: Id
           type: string
+        attempt_id:
+          title: Attempt Id
+          type: string
         name:
           type: string
           title: Name
@@ -3923,6 +4506,83 @@ components:
       - name
       - spec
       title: ExecuteJob
+    ExecuteJobAttempt:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        seq:
+          type: integer
+          title: Seq
+        spec:
+          $ref: '#/components/schemas/ExecuteAgentStepConfig'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        is_current:
+          type: boolean
+          title: Is Current
+      type: object
+      required:
+      - id
+      - name
+      - job
+      - workspace
+      - seq
+      - spec
+      - status
+      - created_at
+      - updated_at
+      - is_current
+      title: ExecuteJobAttempt
+    ExecuteJobAttemptsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/ExecuteJobAttempt'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: ExecuteJobAttemptsPage
     ExecuteJobRequest:
       properties:
         name:
@@ -3964,6 +4624,17 @@ components:
       required:
       - spec
       title: ExecuteJobRequest
+    ExecuteJobUpdate:
+      properties:
+        description:
+          title: Description
+          nullable: true
+          type: string
+        spec:
+          $ref: '#/components/schemas/ExecuteAgentJobConfig'
+      additionalProperties: false
+      type: object
+      title: ExecuteJobUpdate
     ExecuteJobsListFilter:
       additionalProperties: false
       properties:
@@ -4119,6 +4790,9 @@ components:
           title: Workspace
         project:
           title: Project
+          type: string
+        attempt_id:
+          title: Attempt Id
           type: string
         created_at:
           type: string
@@ -4627,6 +5301,9 @@ components:
         id:
           title: Id
           type: string
+        attempt_id:
+          title: Attempt Id
+          type: string
         name:
           type: string
           title: Name
@@ -4674,6 +5351,83 @@ components:
       - name
       - spec
       title: PackageAgentJob
+    PackageAgentJobAttempt:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        seq:
+          type: integer
+          title: Seq
+        spec:
+          $ref: '#/components/schemas/PackageAgentSpec'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        is_current:
+          type: boolean
+          title: Is Current
+      type: object
+      required:
+      - id
+      - name
+      - job
+      - workspace
+      - seq
+      - spec
+      - status
+      - created_at
+      - updated_at
+      - is_current
+      title: PackageAgentJobAttempt
+    PackageAgentJobAttemptsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/PackageAgentJobAttempt'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: PackageAgentJobAttemptsPage
     PackageAgentJobRequest:
       properties:
         name:
@@ -4715,6 +5469,17 @@ components:
       required:
       - spec
       title: PackageAgentJobRequest
+    PackageAgentJobUpdate:
+      properties:
+        description:
+          title: Description
+          nullable: true
+          type: string
+        spec:
+          $ref: '#/components/schemas/PackageAgentInput'
+      additionalProperties: false
+      type: object
+      title: PackageAgentJobUpdate
     PackageAgentJobsListFilter:
       additionalProperties: false
       properties:

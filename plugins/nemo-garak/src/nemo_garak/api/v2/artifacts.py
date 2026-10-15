@@ -26,7 +26,7 @@ from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
-from nemo_helix_plugin.jobs.result_manager import async_result_manager_factory
+from nemo_helix_plugin.jobs.result_manager import download_artifact_from_url
 
 logger = logging.getLogger(__name__)
 
@@ -64,12 +64,6 @@ async def download_audit_artifacts(
     """Stream an aggregate tar.gz of all garak report artifacts for an audit job."""
     jobs_client = AsyncJobsClient.from_client(client)
     files_client = AsyncFilesClient.from_client(client)
-    result_manager = async_result_manager_factory(
-        job_name=job,
-        workspace=workspace,
-        files_client=files_client,
-        jobs_client=jobs_client,
-    )
 
     tmp_dir = tempfile.TemporaryDirectory()
     artifact_tmps = []
@@ -78,11 +72,23 @@ async def download_audit_artifacts(
 
         for result_name in _REPORT_RESULT_NAMES:
             try:
-                result_info = (await jobs_client.get_job_result(name=result_name, job=job, workspace=workspace)).data()
+                result_info = (
+                    await jobs_client.get_job_result(
+                        name=result_name,
+                        job=job,
+                        workspace=workspace,
+                    )
+                ).data()
             except NotFoundError:
                 continue
 
-            artifact_tmps.append(await result_manager.download_artifact(artifact_url=result_info.artifact_url))
+            artifact_tmps.append(
+                await download_artifact_from_url(
+                    result_info.artifact_url,
+                    workspace=workspace,
+                    files_client=files_client,
+                )
+            )
 
         if not artifact_tmps:
             raise HTTPException(

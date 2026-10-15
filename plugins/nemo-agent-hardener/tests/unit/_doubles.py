@@ -25,18 +25,20 @@ def make_job_context(
     *,
     workspace: str = "default",
     job_id: str = "job-123",
+    attempt_id: str = "attempt-123",
     on_save: Any = None,
 ) -> JobContext:
     """A :class:`JobContext` stand-in backed by *tmp_path* for persistent storage.
 
-    Covers the surface the jobs actually touch: ``workspace``, ``job_id``, ``storage.persistent`` and
-    ``results.save``. Pass *on_save* to capture saved artifacts.
+    Covers the surface the jobs actually touch: ``workspace``, ``job_id``, ``attempt_id``,
+    ``storage.persistent`` and ``results.save``. Pass *on_save* to capture saved artifacts.
     """
     return cast(
         JobContext,
         SimpleNamespace(
             workspace=workspace,
             job_id=job_id,
+            attempt_id=attempt_id,
             storage=SimpleNamespace(persistent=tmp_path),
             results=SimpleNamespace(save=on_save or (lambda *_a, **_k: None)),
         ),

@@ -106,6 +106,9 @@ def test_api_factory_routes():
         ("get", "/jobs"),
         ("post", "/jobs"),
         ("get", "/jobs/{name}"),
+        ("patch", "/jobs/{name}"),
+        ("get", "/jobs/{name}/attempts"),
+        ("get", "/jobs/{name}/attempts/{attempt}"),
         ("get", "/jobs/{name}/status"),
         ("delete", "/jobs/{name}"),
         ("post", "/jobs/{name}/cancel"),
@@ -1093,8 +1096,25 @@ def test_list_job_results_empty_list(mock_service_with_job_routes):
     mock_jobs.list_job_results.assert_called_once_with(name="test-job-456", workspace="default")
 
 
+def test_list_job_results_forwards_attempt_filter(mock_service_with_job_routes):
+    app, mock_jobs = mock_service_with_job_routes
+    mock_jobs.list_job_results = AsyncMock(return_value=_resp(HelixJobListResultResponse(data=[])))
+
+    response = TestClient(app).get(
+        "/v2/workspaces/default/test/jobs/test-job/results",
+        params={"attempt_id": "current"},
+    )
+
+    assert response.status_code == 200
+    mock_jobs.list_job_results.assert_awaited_once_with(
+        name="test-job",
+        workspace="default",
+        query_params={"attempt_id": "current"},
+    )
+
+
 def test_get_job_result_includes_download_url(mock_service_with_job_routes):
-    """Test that get_job_result includes download_url in the response."""
+    """Test that a job-owned result includes its download URL."""
     app, mock_jobs = mock_service_with_job_routes
     client = TestClient(app)
 
@@ -1131,7 +1151,7 @@ def test_get_job_result_includes_download_url(mock_service_with_job_routes):
     assert response_data["artifact_url"] == "default/test-fileset#test_result"
 
     # Verify the jobs client was called correctly
-    mock_jobs.get_job_result.assert_called_once_with(name="test_result", job="test-job-789", workspace="default")
+    mock_jobs.get_job_result.assert_awaited_once_with(name="test_result", job="test-job-789", workspace="default")
 
 
 def test_get_job_result_download_url_format(mock_service_with_job_routes):
@@ -1166,7 +1186,7 @@ def test_get_job_result_download_url_format(mock_service_with_job_routes):
     )
 
     # Verify the jobs client was called correctly
-    mock_jobs.get_job_result.assert_called_once_with(
+    mock_jobs.get_job_result.assert_awaited_once_with(
         name="evaluation_report_v1", job="test-job-abc", workspace="default"
     )
 
@@ -1207,7 +1227,7 @@ def test_list_job_results_download_url_different_job_ids(mock_service_with_job_r
 
 
 def test_get_job_result_not_found(mock_service_with_job_routes):
-    """Test that get_job_result handles not found errors correctly."""
+    """Test that job-owned result lookup handles not found errors correctly."""
     app, mock_jobs = mock_service_with_job_routes
     client = TestClient(app)
 
@@ -1223,9 +1243,26 @@ def test_get_job_result_not_found(mock_service_with_job_routes):
     assert "Result not found" in response_data["detail"]
 
     # Verify the jobs client was called
-    mock_jobs.get_job_result.assert_called_once_with(
+    mock_jobs.get_job_result.assert_awaited_once_with(
         name="nonexistent-result", job="nonexistent-job", workspace="default"
     )
+
+
+def test_get_job_result_needs_no_attempt_selector(mock_service_with_job_routes):
+    app, mock_jobs = mock_service_with_job_routes
+    mock_result = HelixJobResultResponse(
+        name="output",
+        job="test-job",
+        workspace="default",
+        artifact_storage_type=FileStorageType.FILESET,
+        artifact_url="default/test-fileset#output",
+    )
+    mock_jobs.get_job_result = AsyncMock(return_value=_resp(mock_result))
+
+    response = TestClient(app).get("/v2/workspaces/default/test/jobs/test-job/results/output")
+
+    assert response.status_code == 200
+    mock_jobs.get_job_result.assert_awaited_once_with(name="output", job="test-job", workspace="default")
 
 
 # Tests for entity_client injection
@@ -1773,9 +1810,7 @@ class TestCompileHelixSpec:
         def compiler(workspace, input_spec, output_spec, entity_client, job_name, sdk):
             return expected
 
-        result = await _compile_platform_spec(
-            compiler, "ws", spec, spec, MagicMock(), "name", "svc", MagicMock(), None, None
-        )
+        result = await _compile_platform_spec(compiler, "ws", spec, spec, MagicMock(), "name", "svc", MagicMock())
         assert result is expected
 
     @pytest.mark.anyio
@@ -1787,9 +1822,7 @@ class TestCompileHelixSpec:
         async def compiler(workspace, input_spec, output_spec, entity_client, job_name, sdk):
             return expected
 
-        result = await _compile_platform_spec(
-            compiler, "ws", spec, spec, MagicMock(), "name", "svc", MagicMock(), None, None
-        )
+        result = await _compile_platform_spec(compiler, "ws", spec, spec, MagicMock(), "name", "svc", MagicMock())
         assert result is expected
 
     @pytest.mark.anyio
@@ -1802,9 +1835,7 @@ class TestCompileHelixSpec:
 
         spec = FooJobConfig(foo="a", bar=1)
         with pytest.raises(HTTPException) as exc_info:
-            await _compile_platform_spec(
-                bad_compiler, "ws", spec, spec, MagicMock(), "name", "my_svc", MagicMock(), None, None
-            )
+            await _compile_platform_spec(bad_compiler, "ws", spec, spec, MagicMock(), "name", "my_svc", MagicMock())
         assert exc_info.value.status_code == 422
         assert "my_svc" in exc_info.value.detail
         assert "missing field" in exc_info.value.detail
@@ -1830,8 +1861,6 @@ class TestCompileHelixSpec:
                 "name",
                 "my_svc",
                 MagicMock(),
-                None,
-                None,
             )
         assert exc_info.value.status_code == 503
         assert "my_svc" in exc_info.value.detail
@@ -1861,9 +1890,7 @@ class TestCompileHelixSpec:
 
         spec = FooJobConfig(foo="a", bar=1)
         with pytest.raises(HTTPException) as exc_info:
-            await _compile_platform_spec(
-                compiler_bad_config, "ws", spec, spec, MagicMock(), "name", "svc", MagicMock(), None, None
-            )
+            await _compile_platform_spec(compiler_bad_config, "ws", spec, spec, MagicMock(), "name", "svc", MagicMock())
         assert exc_info.value.status_code == 422
         assert "not json serializable" in exc_info.value.detail.lower()
 
