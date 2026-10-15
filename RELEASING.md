@@ -10,8 +10,8 @@ workflow so contributors can see and validate every releasable artifact in one
 place.
 
 Anyone with permission to run repository workflows can start a release. A
-stable release requires a specific source commit and version; a nightly can use
-the default branch head.
+stable release requires a specific source commit and version; a nightly uses
+the latest `release/X.Y` branch unless pinned to a commit in that branch's history.
 
 ## Before starting a stable release
 
@@ -45,6 +45,14 @@ of truth for selection. Do not add a separate release manifest or configuration
 file. When changing the catalog, also update the matching `workflow_dispatch`
 input description in that workflow.
 
+Planning reads the wheel and container catalogs from `release.yaml` at the
+selected source SHA, for both nightly and stable releases. New artifacts on
+`main` do not enter nightlies until the release branch ships them. Custom IDs
+must also exist in the selected source's catalog; the workflow form may list
+newer IDs that are unavailable on that source. Keep these catalogs as JSON in
+folded (`>-`) environment blocks so the planner can read them without executing
+the selected workflow.
+
 | Type | IDs |
 | --- | --- |
 | Wheels | `nemo-helix`, `nemo-helix-plugin` |
@@ -65,7 +73,7 @@ and select **Run workflow**. The form shows the allowed custom artifact IDs.
 | Input | Use |
 | --- | --- |
 | `release-type` | `nightly` by default. Select `stable` for a versioned release. Every successful non-dry-run stable release creates or confirms its Git tag and GitHub Release. |
-| `source-sha` | Required for stable releases. Optional for nightlies; a normal nightly with no SHA uses the current default-branch head. A dry-run nightly with no SHA uses the workflow commit so a branch can be validated. |
+| `source-sha` | Required for stable releases. Optional for nightlies, including dry runs; without a SHA, the highest `release/X.Y` branch is selected. A pinned nightly SHA must belong to that branch's history. |
 | `version` | Required for stable releases. Enter the `MAJOR.MINOR.PATCH` release version. |
 | `release-scope` | `all` by default. Select `wheels`, `containers`, `helm`, or `custom` for a subset. Scope selects artifacts only; it does not control the stable tag or GitHub Release. |
 | `wheel-ids`, `container-ids` | Comma-separated IDs used only with `release-scope: custom`. Each ID must be in the catalog above; duplicates and empty entries fail validation. |
