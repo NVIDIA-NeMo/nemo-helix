@@ -2032,8 +2032,10 @@ run_host_contracts() {
     local context_file="$2"
     local junit_xml="$3"
 
+    run_in_repo uv run --frozen --group auth-idp-e2e playwright install chromium
     run_pytest_with_diagnostics "${diagnostics}" \
-        uv run --frozen pytest \
+        env "NHX_AUTH_IDP_BROWSER_ARTIFACTS_DIR=${diagnostics}/browser" \
+        uv run --frozen --group auth-idp-e2e pytest \
         -c pytest.ini \
         tests/auth_idp/contracts \
         -v \
