@@ -58,16 +58,37 @@ function selectArtifacts(value, allowedArtifacts, label, inputName) {
   return allowedArtifacts.filter((artifact) => requestedIds.has(artifact.id));
 }
 
+function readReleaseCatalog(workflow) {
+  // The catalog is JSON in folded env blocks, not executable workflow code.
+  const read = (name) => {
+    const block = workflow.match(
+      new RegExp(
+        `^  ${name}: >-\\r?\\n((?: {4}[^\\r\\n]*(?:\\r?\\n|$))+)`,
+        "m",
+      ),
+    );
+    if (!block) {
+      throw new Error(`Selected source release workflow is missing ${name}.`);
+    }
+    const artifacts = JSON.parse(block[1]);
+    if (!Array.isArray(artifacts)) {
+      throw new Error(`Selected source ${name} must be a JSON array.`);
+    }
+    return artifacts;
+  };
+  return {
+    wheels: read("RELEASE_WHEELS_JSON"),
+    containers: read("RELEASE_CONTAINERS_JSON"),
+  };
+}
+
 async function resolveReleasePlan({
-  env,
   context,
   listBranches,
   compareCommits,
+  loadSourceWorkflow,
   now = () => new Date(),
 }) {
-  const allWheels = JSON.parse(env.RELEASE_WHEELS_JSON);
-  const bulkWheels = allWheels.filter((wheel) => !wheel.independent);
-  const allContainers = JSON.parse(env.RELEASE_CONTAINERS_JSON);
   const inputs = context.payload.inputs ?? {};
   const isManual = context.eventName === "workflow_dispatch";
   const releaseType = isManual ? inputs["release-type"] : "nightly";
@@ -137,6 +158,10 @@ async function resolveReleasePlan({
   }
 
   sourceSha = sourceSha.toLowerCase();
+  const { wheels: allWheels, containers: allContainers } = readReleaseCatalog(
+    await loadSourceWorkflow(sourceSha),
+  );
+  const bulkWheels = allWheels.filter((wheel) => !wheel.independent);
   const presets = {
     all: { wheels: bulkWheels, containers: allContainers, includeHelm: true },
     wheels: { wheels: bulkWheels, containers: [], includeHelm: false },
@@ -255,4 +280,8 @@ async function resolveReleasePlan({
   };
 }
 
-module.exports = { resolveReleasePlan, resolveNightlyBaseVersion };
+module.exports = {
+  resolveReleasePlan,
+  resolveNightlyBaseVersion,
+  readReleaseCatalog,
+};
