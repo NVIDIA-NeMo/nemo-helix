@@ -52,7 +52,7 @@ vi.mock('@studio/components/CreateCustomizationStart', () => ({
   ),
 }));
 
-const renderRoute = () => {
+const mountRoute = () => {
   const router = createMemoryRouter(
     [
       { path: ROUTES.workspace.newCustomizationJob, element: <NewCustomizationRoute /> },
@@ -70,7 +70,7 @@ const renderRoute = () => {
 
 describe('NewCustomizationRoute hand-off', () => {
   it.each(['AI', 'Template'])('opens the form filled in from the %s values', async (way) => {
-    renderRoute();
+    mountRoute();
     await userEvent.click(screen.getByRole('button', { name: way }));
 
     expect(await screen.findByRole('radio', { name: /Unsloth/ })).toBeChecked();
@@ -78,7 +78,7 @@ describe('NewCustomizationRoute hand-off', () => {
   });
 
   it('names the saved template, so the form can offer to delete it', async () => {
-    const router = renderRoute();
+    const router = mountRoute();
     await userEvent.click(screen.getByRole('button', { name: 'Saved' }));
 
     await screen.findByRole('radio', { name: /Unsloth/ });
