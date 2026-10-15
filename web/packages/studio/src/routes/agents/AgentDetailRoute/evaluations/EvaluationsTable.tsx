@@ -230,6 +230,11 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
                       {score.label}
                     </Text>
                     <Text kind="body/semibold/sm">{score.value}</Text>
+                    {score.failedCount > 0 ? (
+                      <Text className="text-secondary" kind="body/regular/sm">
+                        ({score.failedCount} failed)
+                      </Text>
+                    ) : null}
                   </Flex>
                 ))}
               </Flex>

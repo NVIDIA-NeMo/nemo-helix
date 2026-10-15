@@ -10,7 +10,8 @@ const aggregateMetricTooltip = (
   label: string,
   count: number | null | undefined,
   runCount: number | null | undefined,
-  countsMissingAsZero: boolean
+  countsMissingAsZero: boolean,
+  failedCount: number
 ): string => {
   // `count` is the number of test cases the mean is taken over; `runCount` is the total attempts. The
   // rollup is test-case-weighted: each test case is averaged over its attempts first, then averaged
@@ -25,7 +26,13 @@ const aggregateMetricTooltip = (
       : `Mean ${label} over ${getTextWithCount('test case', testCases)} — each test case averaged over its attempts.`;
   // Scores use a fixed denominator: a run that produced no score counts as 0, so it's included above
   // rather than dropped. Measurement metrics (cost, latency) instead omit missing values.
-  return countsMissingAsZero ? `${base} Runs with no score count as 0.` : base;
+  if (!countsMissingAsZero) {
+    return base;
+  }
+  if (failedCount > 0) {
+    return `${base} ${getTextWithCount('run', failedCount)} failed to score and count as 0.`;
+  }
+  return `${base} Runs with no score count as 0.`;
 };
 
 interface MeanValueTooltipCellProps {
@@ -34,6 +41,7 @@ interface MeanValueTooltipCellProps {
   runCount: number | null | undefined;
   /** When true, note that errored runs with no score are counted as 0 (score metrics only). */
   readonly countsMissingAsZero?: boolean;
+  readonly failedCount?: number | null;
   children: ReactNode;
 }
 
@@ -42,6 +50,7 @@ export const MeanValueTooltipCell: FC<MeanValueTooltipCellProps> = ({
   count,
   runCount,
   countsMissingAsZero = false,
+  failedCount,
   children,
 }) => {
   if (count == null) {
@@ -51,7 +60,7 @@ export const MeanValueTooltipCell: FC<MeanValueTooltipCellProps> = ({
     <Tooltip
       slotContent={
         <Text kind="body/regular/sm">
-          {aggregateMetricTooltip(label, count, runCount, countsMissingAsZero)}
+          {aggregateMetricTooltip(label, count, runCount, countsMissingAsZero, failedCount ?? 0)}
         </Text>
       }
       className={tooltipClassName}

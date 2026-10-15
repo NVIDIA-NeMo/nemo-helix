@@ -52,6 +52,25 @@ describe('EvaluationsTable Duration column', () => {
   });
 });
 
+describe('EvaluationsTable Scores column', () => {
+  it('marks scores whose runs failed to score', async () => {
+    renderTable([
+      makeEval({
+        name: 'flaky-eval',
+        aggregate_scores: {
+          'exact-match.exact-match': { mean: 0.25, count: 4, failed_count: 3 },
+          'f1.f1': { mean: 0.5, count: 4, failed_count: 0 },
+        },
+      }),
+    ]);
+
+    expect(
+      (await screen.findAllByText('(3 failed)', undefined, { timeout: LG_SELECTOR_TIMEOUT })).length
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText('(0 failed)')).toBeNull();
+  });
+});
+
 describe('EvaluationsTable Job column', () => {
   it('links to the generic job detail route, not the evaluation result route', async () => {
     const job: EvalJobRow = {
