@@ -13,6 +13,16 @@ Agent Governance is released with _early access_ availability and is subject to 
 
 </Warning>
 
+<Warning>
+
+War-games do not complete locally in this release. The current Agent Hardener
+release, 0.0.15, is not compatible with any tested OpenShell version, including
+the 0.1.x line, and its sandbox policy blocks NeMo Helix Fabric victims from
+starting. Refer to
+[Known Issues in This Release](/documentation/agents/governance/troubleshooting#known-issues-in-this-release).
+
+</Warning>
+
 Use Agent Governance to attack an agent, harden it, and confirm the hardening
 worked before you promote it. A run probes a sandboxed copy of the agent with
 adversarial input, generates guardrail and sandbox-policy fixes for whatever got
@@ -102,7 +112,10 @@ Before running a war-game, make sure you have:
 1. Docker running on the host.
 1. The OpenShell gateway installed with its native installer. Installing
    OpenShell as a standalone CLI tool gives you the command without the gateway
-   service, and a war-game needs the gateway.
+   service, and a war-game needs the gateway. Agent Hardener 0.0.15 cannot
+   create its victim sandbox with OpenShell 0.1.0 or later, and earlier
+   releases fail at later steps. Refer to
+   [Known Issues in This Release](/documentation/agents/governance/troubleshooting#known-issues-in-this-release).
 1. Agent Hardener provisioned once per machine with `nemo agent-hardener setup`, which
    creates its virtual environments and the inference credential. Confirm
    everything with `nemo agent-hardener doctor`.

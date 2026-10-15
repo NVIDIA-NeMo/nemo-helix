@@ -126,6 +126,7 @@ If your automation imported the legacy generated `nemo_helix` SDK package direct
 - **Sandboxed Gym runtime.** Sandboxed Gym evaluation requires Kubernetes or a configured sandbox-capable environment, OpenSandbox setup for cluster runs, and task images that include the environment dependencies.
 - **GRPO runtime.** GRPO jobs require Kubernetes/Ray execution and sandboxed Gym configuration. They do not have a local Docker fallback.
 - **OpenShell and image builder scope.** OpenShell deployment support and image-builder capabilities are foundational platform paths and may require environment-specific administrator configuration.
+- **Agent Governance war-games.** Local war-games do not complete with Agent Hardener 0.0.15. It cannot create its victim sandbox with OpenShell 0.1.0 or later, earlier OpenShell releases fail at later steps, and its sandbox policy blocks NeMo Helix Fabric victims from starting. See [Known Issues in This Release](/documentation/agents/governance/troubleshooting#known-issues-in-this-release).
 
 ## Links
 

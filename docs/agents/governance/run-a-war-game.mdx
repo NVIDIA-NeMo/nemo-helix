@@ -13,6 +13,14 @@ Agent Governance is released with _early access_ availability and is subject to 
 
 </Warning>
 
+<Warning>
+
+The cycle on this page does not complete locally in this release: the victim
+sandbox fails to build or start with Agent Hardener 0.0.15. Refer to
+[Known Issues in This Release](/documentation/agents/governance/troubleshooting#known-issues-in-this-release).
+
+</Warning>
+
 This page runs a full attack, defend and validate cycle against an agent. It
 covers both starting points: an agent registered on the platform, and an agent
 project the platform does not manage at all, supplied as a directory or an
@@ -34,7 +42,9 @@ to the agent is covered in
 1. Docker running on the host.
 1. The OpenShell gateway installed with its native installer. Installing
    OpenShell as a standalone CLI tool gives you the command without the gateway
-   service.
+   service. No tested OpenShell release supports every step Agent Hardener
+   0.0.15 needs; refer to
+   [Known Issues in This Release](/documentation/agents/governance/troubleshooting#known-issues-in-this-release).
 1. At least one model provider registered in the workspace.
 
 Provision Agent Hardener once per machine, then confirm the prerequisites:

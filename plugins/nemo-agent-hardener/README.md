@@ -12,6 +12,25 @@ blocked *and* that ordinary requests still work. Your running deployment is neve
 Two ways to drive it — [the Studio UI](#run-it-in-the-ui) or [the CLI](#run-it-from-the-cli). Both
 need the same one-time setup below.
 
+> **Known issue: war-games don't complete locally in this release.** agent-hardener 0.0.15 (the
+> only published release) fails while building or starting the victim sandbox, whichever OpenShell
+> version you install:
+>
+> | OpenShell | Fails with |
+> |---|---|
+> | 0.1.0+ | `'--from' no longer builds local Dockerfiles or directories` — 0.1.0 dropped local Dockerfile builds |
+> | 0.0.111–0.0.116 | `the argument '--upload <UPLOAD>' cannot be used with '[COMMAND]...'` |
+> | 0.0.110 | the victim never gets `INFERENCE_API_KEY`; private-network model endpoints also hit `network endpoint ambiguity validation failed` |
+> | 0.0.101 | `tar: plugins.toml: Cannot open: Permission denied` on the guardrail upload |
+>
+> 0.0.102–0.0.109 are untested. Independently of OpenShell, agent-hardener's sandbox policy doesn't
+> allow `/opt/uv`, where Fabric images install Python, so a Fabric victim dies with
+> `env: '/workspace/.venv/bin/python': Permission denied`. Both bundled victims are affected too:
+> `react-agent` is a NAT config but agent-hardener builds a Fabric image that only loads
+> `nemo-agents-spec-v1`, and the `relay-victim` Dockerfile doesn't resolve (`nemo-fabric` 0.3.0 vs.
+> `nemo-relay>=0.9.3`, and `deepagents` is missing). Details in
+> [Known Issues in This Release](../../docs/agents/governance/troubleshooting.mdx#known-issues-in-this-release).
+
 ---
 
 ## Quickstart
@@ -164,7 +183,8 @@ brew install colima docker && colima start          # or Docker Desktop
 # Use the native installer — `uv tool install openshell` gives you the CLI
 # without the gateway service, and the war-game needs the gateway. Pinned to a
 # release tag so the script can't change under you; matches the openshell>=0.1.2
-# the deployments plugin requires.
+# the deployments plugin requires. agent-hardener 0.0.15 can't build its victim
+# on 0.1.x — see the known issue at the top of this README.
 curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/v0.1.2/install.sh | sh
 openshell status                                     # expect "Status: Connected"
 ```

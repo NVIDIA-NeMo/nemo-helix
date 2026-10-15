@@ -18,6 +18,47 @@ prerequisites: the agent-hardener virtual environment, the garak virtual
 environment, the inference credential, the Docker daemon and the OpenShell
 gateway.
 
+## Known Issues in This Release
+
+War-games do not complete locally with the current Agent Hardener release,
+0.0.15. `setup` and `doctor` succeed, but the run fails while building or
+starting the victim sandbox. The failures below were reproduced on a local
+platform with Docker.
+
+**No OpenShell release supports every step Agent Hardener 0.0.15 needs.** Each
+OpenShell range fails at a different point:
+
+| OpenShell | Where the run fails |
+|-----------|---------------------|
+| 0.1.0 and later | Sandbox creation fails with `'--from' no longer builds local Dockerfiles or directories`. OpenShell 0.1.0 removed local Dockerfile builds, and Agent Hardener builds the victim from one. |
+| 0.0.111 to 0.0.116 | Sandbox creation fails with `the argument '--upload <UPLOAD>' cannot be used with '[COMMAND]...'`. |
+| 0.0.110 | The sandbox starts, but the inference credential never reaches the victim, which fails with `the model-provider credential env var 'INFERENCE_API_KEY' is not set`. A model endpoint on a private network also fails with `network endpoint ambiguity validation failed`. |
+| 0.0.101 | The sandbox starts, but Agent Hardener cannot upload its guardrail configuration: `tar: plugins.toml: Cannot open: Permission denied`. |
+
+Releases 0.0.102 to 0.0.109 were not tested.
+
+**A Fabric victim cannot start its interpreter.** The victim's log shows
+`env: '/workspace/.venv/bin/python': Permission denied`. NeMo Helix Fabric images
+install Python under `/opt/uv`, and the sandbox policy Agent Hardener applies does
+not allow reading it.
+
+**The `react-agent` example does not run as a victim.** Agent Hardener builds a
+Fabric image for a registered agent, and that image loads only
+`config_format: nemo-agents-spec-v1` configurations. `react-agent` is a NeMo
+Agent Toolkit configuration, so the victim fails with
+`validation errors for AgentConfig` on `config_format`.
+
+**The `relay-victim` example image does not build.** Its Dockerfile pins
+`nemo-relay>=0.9.3,<0.10` without pinning `nemo-fabric`, and the resolver picks
+`nemo-fabric` 0.3.0, which requires `nemo-relay<0.8`. The image also omits the
+`deepagents` package that the DeepAgents adapter needs.
+
+**A model endpoint signed by a private certificate authority is not trusted.**
+Agent Hardener's Python processes and the victim image use their own certificate
+bundles, not the macOS keychain, so they fail with `CERTIFICATE_VERIFY_FAILED` even
+when `curl` succeeds. Add the authority to the bundle named by `SSL_CERT_FILE` and
+`REQUESTS_CA_BUNDLE`, and to the victim image's system trust store.
+
 ## Setup
 
 **`openshell status` reports "connection refused" or "no compute driver" on macOS.**
