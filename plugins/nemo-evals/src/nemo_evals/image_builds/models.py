@@ -30,7 +30,10 @@ class BuildImage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     role: str = Field(
-        description="What the image runs: `agent`, `verifier`, or `service:<name>` for a compose service."
+        description=(
+            "The container the image runs as, named as Harbor names it: `main`, the agent's container; a compose "
+            "service's own name; or `verifier`, for a separate verifier."
+        )
     )
     source: ImageSource = Field(
         description="`dockerfile` when built from the task archive, `prebuilt` when the task names an image."

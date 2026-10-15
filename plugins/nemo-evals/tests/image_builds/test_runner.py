@@ -120,7 +120,7 @@ async def _run(entity_store, spec: TaskImageBuildSpec, builder: _Builder, **kwar
     )
 
 
-async def test_agent_and_verifier_built_makes_the_build_ready(entity_store, store_task, archive) -> None:
+async def test_main_and_verifier_built_makes_the_build_ready(entity_store, store_task, archive) -> None:
     spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER)
     builder = _Builder({"sort-task/environment": "ready", "sort-task/tests": "ready"})
 
@@ -128,7 +128,7 @@ async def test_agent_and_verifier_built_makes_the_build_ready(entity_store, stor
 
     assert build.status == "ready"
     assert build.error is None
-    assert [(image.role, image.status) for image in build.images] == [("agent", "ready"), ("verifier", "ready")]
+    assert [(image.role, image.status) for image in build.images] == [("main", "ready"), ("verifier", "ready")]
     assert all(image.image_ref and image.builder_image and image.build_job for image in build.images)
     assert await _stored_build(entity_store, spec) == build
 
@@ -151,10 +151,10 @@ async def test_prebuilt_images_fail_the_build_without_submitting_anything(entity
     build = await _run(entity_store, spec, builder)
 
     assert build.status == "failed"
-    assert build.error == "prebuilt_import_unsupported: agent"
+    assert build.error == "prebuilt_import_unsupported: main"
     assert builder.submits == 0
     assert [(image.role, image.source, image.status, image.error) for image in build.images] == [
-        ("agent", "prebuilt", "failed", "copying prebuilt images into the platform registry isn't supported yet"),
+        ("main", "prebuilt", "failed", "copying prebuilt images into the platform registry isn't supported yet"),
         ("verifier", "dockerfile", "failed", "not built: another image of this task can't be built"),
     ]
 
@@ -206,7 +206,7 @@ async def test_a_build_that_never_finishes_times_out(entity_store, store_task, a
     build = await _run(entity_store, spec, _Stuck({}), timeout=250, clock=lambda: next(ticks))
 
     assert build.status == "failed"
-    assert build.error == "agent: no result from Builder within 250 seconds"
+    assert build.error == "main: no result from Builder within 250 seconds"
 
 
 async def test_a_finished_build_is_left_alone(entity_store, store_task, archive) -> None:

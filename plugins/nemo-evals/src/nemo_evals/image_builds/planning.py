@@ -78,12 +78,27 @@ def parse_task_config(config: Mapping[str, Any]) -> TaskConfig:
     return task_config
 
 
+#: Harbor's name for the agent's container, the one service every Docker task has.
+MAIN_SERVICE = "main"
+VERIFIER_ROLE = "verifier"
+
+
 def plan_images(config: Mapping[str, Any], archive: TaskArchive, *, allowed_registries: list[str]) -> list[BuildImage]:
-    """Every image the task needs, in the order agent (or compose services), then verifier."""
+    """Every image the task needs, in the order ``main``, its compose services, then a separate verifier.
+
+    Images are named as Harbor names the containers: ``main``, each compose service by its own name, and
+    ``verifier``.
+    """
     task_config = parse_task_config(config)
-    images = _agent_images(task_config.environment, archive)
+    services = _compose_services(archive)
+    images = [_main_image(task_config.environment, archive, services.get(MAIN_SERVICE) or {})]
+    images += [_service_image(name, service, archive) for name, service in services.items() if name != MAIN_SERVICE]
     verifier = resolve_effective_verifier_env_config(task_config, None)
     if verifier is not None:
+        if VERIFIER_ROLE in services:
+            raise ImagePlanError(
+                "invalid_compose_file", "a compose service named verifier can't run next to a separate verifier"
+            )
         images.append(_verifier_image(verifier, archive))
     for image in images:
         if image.image is not None and registry_host(image.image) not in allowed_registries:
@@ -95,53 +110,72 @@ def plan_images(config: Mapping[str, Any], archive: TaskArchive, *, allowed_regi
     return images
 
 
-def _agent_images(environment: EnvironmentConfig, archive: TaskArchive) -> list[BuildImage]:
+def _compose_services(archive: TaskArchive) -> dict[str, dict]:
+    """The task's compose services, by name. Harbor lays this file over its own, so it may leave out ``main``."""
+    if archive.compose is None:
+        return {}
+    try:
+        compose = yaml.safe_load(archive.compose)
+    except yaml.YAMLError as exc:
+        raise ImagePlanError("invalid_compose_file", str(exc)) from exc
+    if compose is None:
+        return {}
+    services = compose.get("services", {}) if isinstance(compose, dict) else None
+    if not isinstance(services, dict):
+        raise ImagePlanError("invalid_compose_file", "the environment's compose file has unreadable services")
+    for name, service in services.items():
+        if service is not None and not isinstance(service, dict):
+            raise ImagePlanError("invalid_compose_file", f"service {name} isn't a mapping")
+    return {str(name): service or {} for name, service in services.items()}
+
+
+def _main_image(environment: EnvironmentConfig, archive: TaskArchive, overlay: dict) -> BuildImage:
+    """``main`` as Harbor's base compose file makes it, with the task's compose file laid over it.
+
+    The base's ``main`` is the task's ``docker_image``, or a build of ``environment/`` with ``Dockerfile``. Over a
+    ``docker_image``, the task's ``main.image`` replaces it. Over a build, the task's ``main.build`` overrides the
+    fields it sets, and its ``main.image`` only names the image built.
+    """
     if environment.docker_image:
-        return [BuildImage(role="agent", source="prebuilt", image=environment.docker_image)]
-    if archive.compose is not None:
-        return _compose_images(archive)
-    if archive.has("environment/Dockerfile"):
-        return [_dockerfile_image("agent", archive, "environment", "Dockerfile")]
-    raise ImagePlanError("agent_dockerfile_missing", "the task names no image and has no environment/Dockerfile")
+        image = overlay.get("image") or environment.docker_image
+        return BuildImage(role=MAIN_SERVICE, source="prebuilt", image=str(image))
+    build = overlay.get("build")
+    if build is None:
+        if not archive.has("environment/Dockerfile"):
+            raise ImagePlanError("main_dockerfile_missing", "the task names no image and has no environment/Dockerfile")
+        return _dockerfile_image(MAIN_SERVICE, archive, "environment", "Dockerfile")
+    return _compose_build(MAIN_SERVICE, build, archive)
+
+
+def _service_image(name: str, service: dict, archive: TaskArchive) -> BuildImage:
+    build = service.get("build")
+    if build is not None:
+        return _compose_build(name, build, archive)
+    image = service.get("image")
+    if not isinstance(image, str) or not image:
+        raise ImagePlanError("invalid_compose_file", f"service {name} has neither build nor image")
+    return BuildImage(role=name, source="prebuilt", image=image)
+
+
+def _compose_build(name: str, build: object, archive: TaskArchive) -> BuildImage:
+    """A service built as its compose ``build`` says; relative paths are from ``environment/``, as in compose."""
+    context, dockerfile = (build, "Dockerfile") if isinstance(build, str) else _build_options(name, build)
+    if posixpath.isabs(dockerfile) or ".." in dockerfile.split("/"):
+        raise ImagePlanError("invalid_compose_file", f"service {name} names a dockerfile outside its context")
+    context_path = posixpath.normpath(posixpath.join("environment", context))
+    if context_path == ".." or context_path.startswith("../") or posixpath.isabs(context_path):
+        raise ImagePlanError("invalid_compose_file", f"service {name} builds from outside the task: {context}")
+    return _dockerfile_image(name, archive, context_path, dockerfile)
 
 
 def _verifier_image(environment: EnvironmentConfig, archive: TaskArchive) -> BuildImage:
     if environment.docker_image:
-        return BuildImage(role="verifier", source="prebuilt", image=environment.docker_image)
+        return BuildImage(role=VERIFIER_ROLE, source="prebuilt", image=environment.docker_image)
     if archive.has("tests/Dockerfile"):
-        return _dockerfile_image("verifier", archive, "tests", "Dockerfile")
+        return _dockerfile_image(VERIFIER_ROLE, archive, "tests", "Dockerfile")
     raise ImagePlanError(
         "verifier_dockerfile_missing", "the separate verifier names no image and the task has no tests/Dockerfile"
     )
-
-
-def _compose_images(archive: TaskArchive) -> list[BuildImage]:
-    try:
-        compose = yaml.safe_load(archive.compose or "")
-    except yaml.YAMLError as exc:
-        raise ImagePlanError("invalid_compose_file", str(exc)) from exc
-    services = compose.get("services") if isinstance(compose, dict) else None
-    if not isinstance(services, dict) or not services:
-        raise ImagePlanError("invalid_compose_file", "the environment's compose file has no services")
-    images: list[BuildImage] = []
-    for name, service in services.items():
-        role = f"service:{name}"
-        service = service if isinstance(service, dict) else {}
-        build = service.get("build")
-        if build is None:
-            image = service.get("image")
-            if not isinstance(image, str) or not image:
-                raise ImagePlanError("invalid_compose_file", f"service {name} has neither build nor image")
-            images.append(BuildImage(role=role, source="prebuilt", image=image))
-            continue
-        context, dockerfile = (build, "Dockerfile") if isinstance(build, str) else _build_options(name, build)
-        if posixpath.isabs(dockerfile) or ".." in dockerfile.split("/"):
-            raise ImagePlanError("invalid_compose_file", f"service {name} names a dockerfile outside its context")
-        context_path = posixpath.normpath(posixpath.join("environment", context))
-        if context_path == ".." or context_path.startswith("../") or posixpath.isabs(context_path):
-            raise ImagePlanError("invalid_compose_file", f"service {name} builds from outside the task: {context}")
-        images.append(_dockerfile_image(role, archive, context_path, dockerfile))
-    return images
 
 
 def _build_options(service: str, build: object) -> tuple[str, str]:

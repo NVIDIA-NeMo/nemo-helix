@@ -27,9 +27,9 @@ def _plan(config: dict, archive: TaskArchive, allowed: list[str] | None = None) 
     ]
 
 
-def test_dockerfile_agent_with_shared_verifier_needs_one_image() -> None:
+def test_dockerfile_main_with_shared_verifier_needs_one_image() -> None:
     assert _plan({}, _archive("environment/Dockerfile")) == [
-        ("agent", "dockerfile", "sort-task/environment", "Dockerfile", None)
+        ("main", "dockerfile", "sort-task/environment", "Dockerfile", None)
     ]
 
 
@@ -37,17 +37,17 @@ def test_separate_verifier_builds_from_tests() -> None:
     config = {"verifier": {"environment_mode": "separate"}}
 
     assert _plan(config, _archive("environment/Dockerfile", "tests/Dockerfile")) == [
-        ("agent", "dockerfile", "sort-task/environment", "Dockerfile", None),
+        ("main", "dockerfile", "sort-task/environment", "Dockerfile", None),
         ("verifier", "dockerfile", "sort-task/tests", "Dockerfile", None),
     ]
 
 
-def test_separate_verifier_without_its_own_environment_reuses_a_prebuilt_agent_image() -> None:
-    """Harbor 0.20 copies ``[environment]`` for the verifier, so a named agent image wins over tests/."""
+def test_separate_verifier_without_its_own_environment_reuses_a_prebuilt_main_image() -> None:
+    """Harbor 0.20 copies ``[environment]`` for the verifier, so a named main image wins over tests/."""
     config = {"environment": {"docker_image": "ghcr.io/org/sort:1"}, "verifier": {"environment_mode": "separate"}}
 
     assert _plan(config, _archive("tests/Dockerfile"), ["ghcr.io"]) == [
-        ("agent", "prebuilt", None, None, "ghcr.io/org/sort:1"),
+        ("main", "prebuilt", None, None, "ghcr.io/org/sort:1"),
         ("verifier", "prebuilt", None, None, "ghcr.io/org/sort:1"),
     ]
 
@@ -62,6 +62,11 @@ def test_explicit_verifier_environment_without_an_image_builds_tests() -> None:
         "Dockerfile",
         None,
     )
+
+
+# Harbor starts every Docker task from its own compose file, whose `main` is built from `environment/` with
+# `Dockerfile`, or is the task's `docker_image`, and lays the task's `docker-compose.yaml` over it. The task's file
+# adds services and adjusts `main`; it isn't the whole list.
 
 
 def test_compose_services_are_each_an_image() -> None:
@@ -79,17 +84,97 @@ services:
     archive = _archive("environment/Dockerfile", "environment/db/Dockerfile.db", compose=compose)
 
     assert _plan({}, archive, ["docker.io"]) == [
-        ("service:main", "dockerfile", "sort-task/environment", "Dockerfile", None),
-        ("service:db", "dockerfile", "sort-task/environment/db", "Dockerfile.db", None),
-        ("service:cache", "prebuilt", None, None, "redis:7"),
+        ("main", "dockerfile", "sort-task/environment", "Dockerfile", None),
+        ("db", "dockerfile", "sort-task/environment/db", "Dockerfile.db", None),
+        ("cache", "prebuilt", None, None, "redis:7"),
     ]
+
+
+def test_a_compose_main_that_only_adjusts_main_is_built_from_the_environment_dockerfile() -> None:
+    compose = "services:\n  main:\n    depends_on: [db]\n  db:\n    build: ./db\n"
+    archive = _archive("environment/Dockerfile", "environment/db/Dockerfile", compose=compose)
+
+    assert _plan({}, archive) == [
+        ("main", "dockerfile", "sort-task/environment", "Dockerfile", None),
+        ("db", "dockerfile", "sort-task/environment/db", "Dockerfile", None),
+    ]
+
+
+def test_a_compose_file_without_main_still_builds_main() -> None:
+    compose = "services:\n  cache:\n    image: redis:7\n"
+
+    assert _plan({}, _archive("environment/Dockerfile", compose=compose), ["docker.io"]) == [
+        ("main", "dockerfile", "sort-task/environment", "Dockerfile", None),
+        ("cache", "prebuilt", None, None, "redis:7"),
+    ]
+
+
+def test_a_compose_file_with_no_services_builds_main() -> None:
+    assert _plan({}, _archive("environment/Dockerfile", compose="services: {}\n")) == [
+        ("main", "dockerfile", "sort-task/environment", "Dockerfile", None),
+    ]
+
+
+def test_a_docker_image_task_still_plans_its_compose_services() -> None:
+    config = {"environment": {"docker_image": "ghcr.io/org/sort:1"}}
+    compose = "services:\n  main:\n    depends_on: [cache]\n  cache:\n    image: redis:7\n"
+
+    assert _plan(config, _archive(compose=compose), ["ghcr.io", "docker.io"]) == [
+        ("main", "prebuilt", None, None, "ghcr.io/org/sort:1"),
+        ("cache", "prebuilt", None, None, "redis:7"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("build", "context_path", "dockerfile"),
+    [
+        ("{dockerfile: Dockerfile.agent}", "sort-task/environment", "Dockerfile.agent"),
+        ("{context: ., dockerfile: Dockerfile.agent}", "sort-task/environment", "Dockerfile.agent"),
+        ("./app", "sort-task/environment/app", "Dockerfile"),
+    ],
+)
+def test_a_compose_main_build_overrides_the_environment_dockerfile(
+    build: str, context_path: str, dockerfile: str
+) -> None:
+    """Compose merges `main.build` over the base's, so a field it leaves out keeps the base's value."""
+    files = ("environment/Dockerfile.agent", "environment/app/Dockerfile")
+    archive = _archive(*files, compose=f"services:\n  main:\n    build: {build}\n")
+
+    assert _plan({}, archive) == [("main", "dockerfile", context_path, dockerfile, None)]
+
+
+def test_a_compose_main_image_only_names_main_when_main_is_built() -> None:
+    """Over the base's `build` and `pull_policy: build`, compose builds `main` and tags it with this name."""
+    archive = _archive("environment/Dockerfile", compose="services:\n  main:\n    image: sort-env:dev\n")
+
+    assert _plan({}, archive) == [("main", "dockerfile", "sort-task/environment", "Dockerfile", None)]
+
+
+def test_a_compose_main_image_replaces_the_docker_image() -> None:
+    config = {"environment": {"docker_image": "ghcr.io/org/sort:1"}}
+    archive = _archive(compose="services:\n  main:\n    image: ghcr.io/org/sort:2\n")
+
+    assert _plan(config, archive, ["ghcr.io"]) == [("main", "prebuilt", None, None, "ghcr.io/org/sort:2")]
+
+
+def test_a_compose_service_named_like_the_separate_verifier_is_refused() -> None:
+    config = {"verifier": {"environment_mode": "separate"}}
+    compose = "services:\n  verifier:\n    image: redis:7\n"
+
+    with pytest.raises(ImagePlanError) as error:
+        plan_images(
+            config, _archive("environment/Dockerfile", "tests/Dockerfile", compose=compose), allowed_registries=[]
+        )
+
+    assert error.value.code == "invalid_compose_file"
 
 
 @pytest.mark.parametrize(
     ("config", "archive", "code"),
     [
         ({"environment": {"os": "windows"}}, _archive("environment/Dockerfile"), "windows_unsupported"),
-        ({}, _archive("instruction.md"), "agent_dockerfile_missing"),
+        ({}, _archive("instruction.md"), "main_dockerfile_missing"),
+        ({}, _archive(compose="services:\n  cache:\n    image: redis:7\n"), "main_dockerfile_missing"),
         (
             {"verifier": {"environment_mode": "separate"}},
             _archive("environment/Dockerfile"),
@@ -97,7 +182,7 @@ services:
         ),
         ({"environment": {"docker_image": "quay.io/org/x:1"}}, _archive(), "registry_not_allowed"),
         ({}, _archive(compose="services:\n  main:\n    build: ../../elsewhere\n"), "invalid_compose_file"),
-        ({}, _archive(compose="services: {}\n"), "invalid_compose_file"),
+        ({}, _archive(compose="services: []\n"), "invalid_compose_file"),
         ({}, _archive(compose="services:\n  main:\n    build: ./missing\n"), "dockerfile_missing"),
         (
             {},

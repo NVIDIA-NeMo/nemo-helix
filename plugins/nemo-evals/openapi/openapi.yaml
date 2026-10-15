@@ -3696,8 +3696,9 @@ components:
         role:
           type: string
           title: Role
-          description: 'What the image runs: `agent`, `verifier`, or `service:<name>`
-            for a compose service.'
+          description: 'The container the image runs as, named as Harbor names it:
+            `main`, the agent''s container; a compose service''s own name; or `verifier`,
+            for a separate verifier.'
         source:
           type: string
           enum:
