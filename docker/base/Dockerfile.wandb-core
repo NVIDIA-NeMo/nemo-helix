@@ -6,7 +6,7 @@
 # No Go toolchain, module cache, or upstream source tree enters runtime images.
 FROM --platform=$BUILDPLATFORM golang:1.27.2-bookworm AS build
 ARG TARGETARCH
-ENV GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH}
+ENV GOTOOLCHAIN=local GOFLAGS=-trimpath CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH}
 RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 # W&B v0.30.0 (release tag resolves directly to this commit).

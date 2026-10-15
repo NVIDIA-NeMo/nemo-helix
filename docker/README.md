@@ -25,8 +25,10 @@ x/net v0.59.0, so a Python package upgrade alone is insufficient.
 build platform. It replaces only the vendored x/net module, preserving all
 other vendored files (including upstream's custom Arrow patches) and the
 upstream `disable_grpc_modules,parquet_read_only` tags. Do **not** regenerate
-the entire vendor tree. The artifact includes binary SHA-256, source commit,
-module checksum, architecture, and verified `go version -m` output.
+the entire vendor tree. Compilation delegates to the pinned release's
+`core/hatch.py`, including its linker flags and ELF metadata fixups. The artifact
+includes binary SHA-256, source commit, module checksum, architecture, and
+verified `go version -m` output.
 
 Consumers inherit `_with-wandb-core` in Bake and mount the artifact into a final
 build step. `docker/scripts/install-wandb-core.py` updates every discovered

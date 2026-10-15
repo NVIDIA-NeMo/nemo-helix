@@ -78,6 +78,20 @@ def test_installs_all_copies_and_retained_cache_without_modifying_build_cache(tm
     assert module.install(patch, [root]) == 3  # idempotent
 
 
+def test_failed_atomic_replace_keeps_original_and_cleans_temp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "wandb-core"
+    target.write_bytes(b"original core")
+
+    def fail_replace(*args) -> None:
+        raise OSError("simulated rename failure")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    with pytest.raises(OSError, match="simulated rename failure"):
+        installer().replace(target, b"patched core", 0o755)
+    assert target.read_bytes() == b"original core"
+    assert list(tmp_path.iterdir()) == [target]
+
+
 def test_mismatched_retained_version_fails_before_any_changes(tmp_path: Path) -> None:
     module = installer()
     patch = artifact(tmp_path)

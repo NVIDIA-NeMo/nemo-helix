@@ -43,9 +43,12 @@ x/net **v0.59.0**. There is no newer reviewed upstream wheel supplying this fix.
 - Replace only vendored **golang.org/x/net v0.60.0**, verified through Go's
   checksum database and pinned checksum
   `h1:79p50tfZlm0J9YfoDsSi639qSXNGVwEzOPLCxM2FsYU=`.
-  Preserve/hash-check **5,642 other vendor files**; do not regenerate vendor or
-  discard W&B's custom Arrow patches. Preserve upstream build tags
-  `disable_grpc_modules,parquet_read_only`, vendor mode, and commit ldflag.
+  Replace no other vendored module; do not regenerate vendor or discard W&B's
+  custom Arrow patches. Delegate compilation to the pinned release's
+  `core/hatch.py`, preserving its build tags, vendor mode, commit ldflag and ELF
+  fixups. `GOFLAGS=-trimpath` retains reproducible paths. The helper simplification
+  removes the redundant full-vendor snapshot and reduces the two Python scripts
+  from 229 to 197 lines, while retaining install/cache safety checks.
 - Shared install/verify helper runs after final dependency installs in API,
   CPU task, Garak, Gym task/host, Customizer, Safe Synthesizer, Automodel
   base/training, RL base/training, and Unsloth build paths. Bake wiring includes
@@ -88,12 +91,7 @@ uv run --no-project --with ruff ruff format --check \
   docker/scripts/{build,install}-wandb-core.py \
   tests/unit/test_{wandb_core_patch,docker_workspace_slices}.py
 
-uv run --no-project --with pytest --with pytest-asyncio --with pytest-env --with pytest-timeout \
-  pytest --confcutdir=tests/unit -o addopts='' \
-  tests/unit/test_wandb_core_patch.py tests/unit/test_docker_workspace_slices.py -q
-# 40 passed. Standalone harness avoids unrelated root conftest/platform dependencies.
-
-# Also passed after bootstrapping the isolated workspace environment (40 tests):
+# 41 passed, including atomic-replacement failure cleanup coverage:
 flox -q activate -- uv run --frozen pytest \
   tests/unit/test_wandb_core_patch.py tests/unit/test_docker_workspace_slices.py -v --no-cov
 flox -q activate -- uv run pre-commit run -a
@@ -112,7 +110,8 @@ git diff --check
 - Both exported ELF binaries independently inspected with host `go version -m`:
   **go1.27.2**, **golang.org/x/net v0.60.0**, correct GOARCH, **CGO_ENABLED=0**.
 - amd64 SHA-256:
-  `b048c29a712c02a4123b0afe65b5fbcb06169d29756bd31b7cee79f5793a9e4a`.
+  `789e9c25bed8aca7adb51cde7688c534dda3981dc82788e59da071cf5bea7578`
+  (updated after adopting upstream's ELF metadata fixup).
 - arm64 SHA-256:
   `bf8631b59c68b164e4d5a44bbb86e7fa998939026ddf0dbfd1ad9130e6fec4b8`.
 - Dedicated Bake smoke test exercises the real named artifact context and shared
@@ -137,13 +136,8 @@ git diff --check
 - GHCR image metadata requests returned `denied: denied`. The dedicated smoke
   image now uses the same official uv release from Docker Hub and passed; other
   existing Dockerfiles still require their normal registry access.
-- An initial standalone test invocation failed on root conftest's missing `nhx`
-  dependencies; the standalone targeted suite above passed. After bootstrapping
-  this isolated worktree, `flox -q activate -- uv run pre-commit run -a` passed,
-  including repository-wide ty checks. Initial bootstrap hit a transient Git
-  connection reset; retry succeeded. The UI lint-staged hook initially lacked
-  web dependencies; frozen pnpm installation resolved that prerequisite.
-  License generation was not run.
+- `flox -q activate -- uv run pre-commit run -a` passed, including repository-wide
+  ty checks. License generation was not run.
 - Retained extracted caches in the merged image are patched. Original binaries
   can remain in ancestor image layers and build-only download caches; this work
   does not claim to erase history. Future runtime dependency installs can fetch
