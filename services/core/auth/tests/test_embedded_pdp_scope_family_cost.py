@@ -19,6 +19,7 @@ import yaml
 from nhx.common.config import Configuration
 from nhx.core.auth.app.embedded_pdp import PolicyEngineError, evaluate, set_policy_data
 from nhx.core.auth.app.embedded_pdp import engine as embedded_pdp_engine
+from nhx.core.auth.app.embedded_pdp.engine import get_policy
 from nhx.core.auth.config import AuthServiceConfig
 
 # Defaults before PR #3012 raised them to 1500 / 256.
@@ -112,6 +113,27 @@ def test_unscoped_check_is_independent_of_table_size(static_authz_data, extra_ro
     result = evaluate("allow", _unscoped_request())
 
     assert result["allowed"] is True
+
+
+def _fuel_consumed(request: dict[str, Any]) -> int:
+    """Wasm fuel burned by one eval; deterministic, unlike wall-clock time."""
+    evaluate("allow", request)
+    return ORIGINAL_FUEL_LIMIT_M * 1_000_000 - get_policy().store.get_fuel()
+
+
+# Scoped minus unscoped isolates the scope-family check (route matching scales with table size either way).
+# Measured ~45k fuel at every table size with the O(1) lookup; a per-route scan would grow with the table.
+SCOPE_FAMILY_FUEL_BUDGET = 500_000
+
+
+@pytest.mark.parametrize("extra_routes", EXTRA_ROUTE_COUNTS)
+def test_scope_family_fuel_is_constant_in_table_size(static_authz_data, extra_routes):
+    """Fails on a regression to a per-route scan even while the table is too small to hit the caps."""
+    set_policy_data(_padded_data(static_authz_data, extra_routes))
+
+    extra = _fuel_consumed(_platform_scoped_request()) - _fuel_consumed(_unscoped_request())
+
+    assert extra < SCOPE_FAMILY_FUEL_BUDGET
 
 
 def test_report_cost_by_table_size(static_authz_data, capsys):
