@@ -298,8 +298,7 @@ def rewrite_fabric_config_base_urls(agent_config: dict[str, Any], gateway_url: s
                 if not isinstance(endpoint, str) or "/apis/intake/" not in endpoint:
                     continue
                 parts = urlsplit(endpoint)
-                scheme = "https" if "https" in (parts.scheme, reachable.scheme) else reachable.scheme
-                endpoint_config["endpoint"] = parts._replace(scheme=scheme, netloc=reachable.netloc).geturl()
+                endpoint_config["endpoint"] = parts._replace(scheme=reachable.scheme, netloc=reachable.netloc).geturl()
     return config
 
 

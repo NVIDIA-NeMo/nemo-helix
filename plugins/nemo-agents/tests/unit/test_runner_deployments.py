@@ -290,7 +290,9 @@ def test_rewrite_fabric_config_base_urls_rebases_platform_otlp_endpoints() -> No
     assert "localhost:8080" in config["telemetry"]["opentelemetry"]["endpoints"][0]["endpoint"]
 
 
-def test_rewrite_fabric_config_base_urls_preserves_https_otlp_endpoint() -> None:
+def test_rewrite_fabric_config_base_urls_takes_the_rewrite_targets_scheme_for_otlp_endpoints() -> None:
+    """The auth-proxy sidecar and the in-cluster API are plaintext; keeping the authored https would make
+    every export fail the TLS handshake against them."""
     config = {
         "telemetry": {
             "opentelemetry": {
@@ -304,10 +306,10 @@ def test_rewrite_fabric_config_base_urls_preserves_https_otlp_endpoint() -> None
         }
     }
 
-    result = rewrite_fabric_config_base_urls(config, "http://nhx-api:8080")
+    result = rewrite_fabric_config_base_urls(config, "http://127.0.0.1:9019")
 
     assert result["telemetry"]["opentelemetry"]["endpoints"][0]["endpoint"] == (
-        "https://nhx-api:8080/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces"
+        "http://127.0.0.1:9019/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces"
     )
 
 
