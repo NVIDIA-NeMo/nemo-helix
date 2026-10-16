@@ -5,7 +5,7 @@ import { type Span, SpanKind, SpanStatus } from '@nemo/sdk/generated/platform/sc
 import { getGetSpanQueryKey } from '@nemo/sdk/generated/platform/spans';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
-import { TestCaseTranscript } from '@studio/routes/EvaluationSessionDetailRoute/TestCaseTranscript';
+import { TestCaseTabs } from '@studio/routes/EvaluationSessionDetailRoute/TestCaseTabs';
 import { render, screen } from '@studio/tests/util/render';
 import { buildSpanTree, type SessionTrajectory } from '@studio/util/intakeTelemetry';
 import userEvent from '@testing-library/user-event';
@@ -43,7 +43,7 @@ const mockReply = (output: string | undefined) =>
     )
   );
 
-describe('TestCaseTranscript', () => {
+describe('TestCaseTabs', () => {
   it('shows the agent reply and each tool it called', async () => {
     mockReply('The plan is 61% above demand.');
     const spans = [
@@ -63,12 +63,21 @@ describe('TestCaseTranscript', () => {
     ];
 
     const user = userEvent.setup();
-    render(<TestCaseTranscript workspace="default" trajectories={trajectoryOf(spans)} />);
+    render(
+      <TestCaseTabs
+        workspace="default"
+        trajectories={trajectoryOf(spans)}
+        traceView={<div>Span tree</div>}
+      />
+    );
 
     expect(await screen.findByText('The plan is 61% above demand.')).toBeInTheDocument();
     await user.click(screen.getByRole('tab', { name: 'Tool calls (2)' }));
-    expect(await screen.findByRole('button', { name: /get_demand/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /score_schedule/ })).toBeInTheDocument();
+
+    await user.click(await screen.findByRole('button', { name: /get_demand/ }));
+    expect(screen.getByRole('tab', { name: 'Trace' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByText('Span tree')).toBeInTheDocument();
   });
 
   it('says when no reply or tool calls were recorded', async () => {
@@ -76,9 +85,10 @@ describe('TestCaseTranscript', () => {
     const user = userEvent.setup();
 
     render(
-      <TestCaseTranscript
+      <TestCaseTabs
         workspace="default"
         trajectories={trajectoryOf([span({ span_id: 'wrapper', kind: SpanKind.CHAIN })])}
+        traceView={null}
       />
     );
 

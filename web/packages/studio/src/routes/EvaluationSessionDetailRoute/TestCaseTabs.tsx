@@ -24,7 +24,7 @@ import {
 } from '@studio/routes/EvaluationSessionDetailRoute/transcriptSpans';
 import type { SessionTrajectory } from '@studio/util/intakeTelemetry';
 import { Wrench } from 'lucide-react';
-import { type FC, useCallback, useMemo } from 'react';
+import { type FC, type ReactNode, useCallback, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
 const spanDuration = (span: Span): string | undefined => {
@@ -65,22 +65,10 @@ const AgentReply: FC<{ workspace: string; replySpanId: string | undefined }> = (
   );
 };
 
-const ToolCalls: FC<{ toolSpans: readonly Span[] }> = ({ toolSpans }) => {
-  const [, setSearchParams] = useSearchParams();
-  const openSpan = useCallback(
-    (span: Span) => {
-      setSearchParams((previous) => {
-        const next = new URLSearchParams(previous);
-        if (span.trace_id) {
-          next.set(QUERY_PARAMETERS.traceId, span.trace_id);
-        }
-        next.set(QUERY_PARAMETERS.spanId, span.span_id);
-        return next;
-      });
-    },
-    [setSearchParams]
-  );
-
+const ToolCalls: FC<{ toolSpans: readonly Span[]; openSpan: (span: Span) => void }> = ({
+  toolSpans,
+  openSpan,
+}) => {
   if (toolSpans.length === 0) {
     return (
       <Text kind="body/regular/sm" className="text-secondary">
@@ -101,11 +89,20 @@ const ToolCalls: FC<{ toolSpans: readonly Span[] }> = ({ toolSpans }) => {
   );
 };
 
-/** The agent's final reply and the tools it called, pulled out of the span tree. */
-export const TestCaseTranscript: FC<{
+type TestCaseTab = 'reply' | 'tools' | 'trace';
+
+const PANEL_CLASS = 'rounded-sm border border-base bg-surface-raised p-density-lg';
+
+/** The agent's reply, the tools it called, and the full trace, one tab each. */
+export const TestCaseTabs: FC<{
   workspace: string;
   trajectories: readonly SessionTrajectory[];
-}> = ({ workspace, trajectories }) => {
+  traceView: ReactNode;
+}> = ({ workspace, trajectories, traceView }) => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [tab, setTab] = useState<TestCaseTab>(() =>
+    searchParams.has(QUERY_PARAMETERS.spanId) ? 'trace' : 'reply'
+  );
   const spans = useMemo(
     () => trajectories.flatMap((trajectory) => trajectory.spans),
     [trajectories]
@@ -113,23 +110,41 @@ export const TestCaseTranscript: FC<{
   const replySpanId = useMemo(() => findReplySpan(spans)?.span_id, [spans]);
   const toolSpans = useMemo(() => findToolCallSpans(spans), [spans]);
 
+  const openSpan = useCallback(
+    (span: Span) => {
+      setSearchParams((previous) => {
+        const next = new URLSearchParams(previous);
+        if (span.trace_id) {
+          next.set(QUERY_PARAMETERS.traceId, span.trace_id);
+        }
+        next.set(QUERY_PARAMETERS.spanId, span.span_id);
+        return next;
+      });
+      setTab('trace');
+    },
+    [setSearchParams]
+  );
+
   return (
-    <div
-      className="rounded-sm border border-base bg-surface-raised p-density-lg"
-      data-testid="test-case-transcript"
-    >
-      <TabsRoot defaultValue="reply">
-        <TabsList aria-label="Test transcript">
-          <TabsTrigger value="reply">Agent reply</TabsTrigger>
-          <TabsTrigger value="tools">Tool calls ({toolSpans.length})</TabsTrigger>
-        </TabsList>
-        <TabsContent value="reply" className="items-stretch p-0 pt-density-lg">
+    <TabsRoot value={tab} onValueChange={(value) => setTab(value as TestCaseTab)}>
+      <TabsList aria-label="Test case details">
+        <TabsTrigger value="reply">Agent reply</TabsTrigger>
+        <TabsTrigger value="tools">Tool calls ({toolSpans.length})</TabsTrigger>
+        <TabsTrigger value="trace">Trace</TabsTrigger>
+      </TabsList>
+      <TabsContent value="reply" className="items-stretch p-0 pt-density-lg">
+        <div className={PANEL_CLASS}>
           <AgentReply workspace={workspace} replySpanId={replySpanId} />
-        </TabsContent>
-        <TabsContent value="tools" className="items-stretch p-0 pt-density-lg">
-          <ToolCalls toolSpans={toolSpans} />
-        </TabsContent>
-      </TabsRoot>
-    </div>
+        </div>
+      </TabsContent>
+      <TabsContent value="tools" className="items-stretch p-0 pt-density-lg">
+        <div className={PANEL_CLASS}>
+          <ToolCalls toolSpans={toolSpans} openSpan={openSpan} />
+        </div>
+      </TabsContent>
+      <TabsContent value="trace" className="items-stretch p-0 pt-density-lg">
+        {traceView}
+      </TabsContent>
+    </TabsRoot>
   );
 };

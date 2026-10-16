@@ -9,7 +9,7 @@ import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { CompareRunSelect } from '@studio/routes/EvaluationSessionDetailRoute/CompareRunSelect';
 import { TestCaseCompare } from '@studio/routes/EvaluationSessionDetailRoute/TestCaseCompare';
 import { TestCaseResultSummary } from '@studio/routes/EvaluationSessionDetailRoute/TestCaseResultSummary';
-import { TestCaseTranscript } from '@studio/routes/EvaluationSessionDetailRoute/TestCaseTranscript';
+import { TestCaseTabs } from '@studio/routes/EvaluationSessionDetailRoute/TestCaseTabs';
 import { useSessionCompareRuns } from '@studio/routes/EvaluationSessionDetailRoute/useSessionCompareRuns';
 import { SessionDetailContent } from '@studio/routes/IntakeSessionDetailRoute';
 import {
@@ -93,10 +93,14 @@ const EvaluationSessionDetail: FC<{
       routeContext.kind === 'evaluation'
         ? {
             ...routeContext,
-            renderSummary: (trajectories) => (
+            renderBody: ({ trajectories, traceView }) => (
               <>
                 {currentRun ? <TestCaseResultSummary run={currentRun} /> : null}
-                <TestCaseTranscript workspace={workspace} trajectories={trajectories} />
+                <TestCaseTabs
+                  workspace={workspace}
+                  trajectories={trajectories}
+                  traceView={traceView}
+                />
               </>
             ),
             headerActions: (
