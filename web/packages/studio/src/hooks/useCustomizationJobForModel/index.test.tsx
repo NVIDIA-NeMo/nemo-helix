@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
+import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { useCustomizationJobForModel } from '@studio/hooks/useCustomizationJobForModel';
 import { server } from '@studio/mocks/node';
@@ -23,6 +23,16 @@ const buildModel = (overrides: Partial<ModelEntity> = {}): ModelEntity =>
     updated_at: '2025-01-01T00:00:00Z',
     ...overrides,
   }) as ModelEntity;
+
+const buildAdapter = (overrides: Partial<Adapter> = {}): Adapter =>
+  ({
+    name: 'grumpy-purple-gorilla',
+    workspace: 'ws',
+    fileset: 'ws/grumpy-purple-gorilla',
+    finetuning_type: 'lora',
+    created_at: '2025-01-02T00:00:00Z',
+    ...overrides,
+  }) as Adapter;
 
 const jobsResponse = (jobs: { id: string; name: string }[]) => ({
   data: jobs,
@@ -48,7 +58,7 @@ describe('useCustomizationJobForModel', () => {
       })
     );
 
-    const { result } = renderHook(() => useCustomizationJobForModel('ws', buildModel()), {
+    const { result } = renderHook(() => useCustomizationJobForModel(buildModel()), {
       wrapper: createWrapper(),
     });
 
@@ -62,7 +72,7 @@ describe('useCustomizationJobForModel', () => {
     const handler = vi.fn(() => HttpResponse.json(jobsResponse([])));
     server.use(http.get(JOBS_URL, handler));
 
-    const { result } = renderHook(() => useCustomizationJobForModel('ws', null), {
+    const { result } = renderHook(() => useCustomizationJobForModel(null), {
       wrapper: createWrapper(),
     });
 
@@ -74,11 +84,85 @@ describe('useCustomizationJobForModel', () => {
   it('returns undefined when no customization job produced the model', async () => {
     server.use(http.get(JOBS_URL, () => HttpResponse.json(jobsResponse([]))));
 
-    const { result } = renderHook(() => useCustomizationJobForModel('ws', buildModel()), {
+    const { result } = renderHook(() => useCustomizationJobForModel(buildModel()), {
       wrapper: createWrapper(),
     });
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.jobName).toBeUndefined();
+  });
+
+  it("queries the entity's own workspace, not the one the UI is showing", async () => {
+    let capturedWorkspace: string | undefined;
+    server.use(
+      http.get(JOBS_URL, ({ params }) => {
+        capturedWorkspace = params.workspace as string;
+        return HttpResponse.json(jobsResponse([{ id: 'j1', name: 'automodel-2a4c86bf' }]));
+      })
+    );
+
+    const { result } = renderHook(
+      () => useCustomizationJobForModel(buildModel({ workspace: 'other-ws' })),
+      { wrapper: createWrapper() }
+    );
+
+    await waitFor(() => expect(result.current.jobName).toBe('automodel-2a4c86bf'));
+    expect(capturedWorkspace).toBe('other-ws');
+  });
+
+  describe('when given an adapter', () => {
+    it("resolves the run by the adapter's name, in the adapter's workspace", async () => {
+      let capturedUrl: URL | undefined;
+      let capturedWorkspace: string | undefined;
+      server.use(
+        http.get(JOBS_URL, ({ request, params }) => {
+          capturedUrl = new URL(request.url);
+          capturedWorkspace = params.workspace as string;
+          return HttpResponse.json(jobsResponse([{ id: 'j2', name: 'lora-job-456' }]));
+        })
+      );
+
+      const { result } = renderHook(
+        () => useCustomizationJobForModel(buildAdapter({ workspace: 'adapter-ws' })),
+        { wrapper: createWrapper() }
+      );
+
+      await waitFor(() => expect(result.current.jobName).toBe('lora-job-456'));
+
+      // The lookup key is the adapter's name -- a LoRA run writes that to
+      // spec.output.name -- and is distinct from the name of the job it finds.
+      expect(capturedUrl?.searchParams.get('filter[spec.output.name]')).toBe(
+        'grumpy-purple-gorilla'
+      );
+      // An adapter may live in a different workspace from its base; the job lives where
+      // its output was registered.
+      expect(capturedWorkspace).toBe('adapter-ws');
+    });
+
+    it('does not query when the adapter has no name', async () => {
+      const handler = vi.fn(() => HttpResponse.json(jobsResponse([])));
+      server.use(http.get(JOBS_URL, handler));
+
+      const { result } = renderHook(() => useCustomizationJobForModel(buildAdapter({ name: '' })), {
+        wrapper: createWrapper(),
+      });
+
+      expect(result.current.jobName).toBeUndefined();
+      expect(result.current.isLoading).toBe(false);
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('does not query when the entity has no workspace', async () => {
+      const handler = vi.fn(() => HttpResponse.json(jobsResponse([])));
+      server.use(http.get(JOBS_URL, handler));
+
+      const { result } = renderHook(
+        () => useCustomizationJobForModel(buildAdapter({ workspace: '' })),
+        { wrapper: createWrapper() }
+      );
+
+      expect(result.current.jobName).toBeUndefined();
+      expect(handler).not.toHaveBeenCalled();
+    });
   });
 });
