@@ -120,7 +120,6 @@ def run_with_isolated_async_client(
         event_hooks = {event: list(hooks) for event, hooks in async_client._client.event_hooks.items()}
         # Generated SDK auth refresh is implemented as request hooks; preserve it on the
         # loop-local transport so isolation does not turn authenticated clients anonymous.
-        # Keep the timeout too: a bare httpx client would cut it to httpx's 5 s default.
         async with httpx.AsyncClient(timeout=async_client._client.timeout, event_hooks=event_hooks) as http_client:
             return await fn(async_client.with_http_client(http_client))
 
