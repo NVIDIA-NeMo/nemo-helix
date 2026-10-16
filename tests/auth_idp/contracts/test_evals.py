@@ -47,9 +47,10 @@ def test_evaluation_job_saves_its_result_record(
     submitter_client = auth_idp_runtime.workload_provider_client()
     spec = json.loads(_OFFLINE_EXACT_MATCH_SPEC.read_text())
     submit = endpoints.submit_evaluate_job(workspace=auth_idp_workspace, body=SubmitEvaluateJobRequest(spec=spec))
-    # The typed request has no ``profile``; the route takes one, and this runtime's only job profile is "workload".
-    submit_on_workload_profile = replace(submit, content=json.dumps({"spec": spec, "profile": "workload"}).encode())
-    job = submitter_client.send(submit_on_workload_profile).data()
+    if auth_idp_case.backend == "compose":
+        # Compose's only job profile is "workload". The typed request has no ``profile``; the route takes one.
+        submit = replace(submit, content=json.dumps({"spec": spec, "profile": "workload"}).encode())
+    job = submitter_client.send(submit).data()
     evals = EvaluatorClient.from_client(submitter_client)
 
     completed_job = wait_for_platform_job(e2e_setup_client, job.name, auth_idp_workspace, timeout=600)
