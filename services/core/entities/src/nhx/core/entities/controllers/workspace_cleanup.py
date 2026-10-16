@@ -283,16 +283,24 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
         return None
 
     async def _renew_deletion_lease(self, lease: _WorkspaceDeletionLease) -> None:
+        loop = asyncio.get_running_loop()
+        # Leave one renewal interval before expiry. A stalled database call must
+        # stop this cleaner before another controller can reclaim the workspace.
+        deadline = loop.time() + _DELETION_LEASE_TIMEOUT_SECONDS - _DELETION_LEASE_RENEW_INTERVAL_SECONDS
         try:
             while True:
                 await asyncio.sleep(_DELETION_LEASE_RENEW_INTERVAL_SECONDS)
-                renewed = await self._workspace_repository.renew_workspace_deletion_lease(
-                    name=lease.workspace_name,
-                    expected_updated_at=lease.updated_at,
+                renewed = await asyncio.wait_for(
+                    self._workspace_repository.renew_workspace_deletion_lease(
+                        name=lease.workspace_name,
+                        expected_updated_at=lease.updated_at,
+                    ),
+                    timeout=max(deadline - loop.time(), 0.0),
                 )
                 if renewed is None:
                     raise WorkspaceDeletionLeaseLost(lease.workspace_name)
                 lease.updated_at = renewed.updated_at
+                deadline = loop.time() + _DELETION_LEASE_TIMEOUT_SECONDS - _DELETION_LEASE_RENEW_INTERVAL_SECONDS
                 self.emit_heartbeat()
         except asyncio.CancelledError:
             raise

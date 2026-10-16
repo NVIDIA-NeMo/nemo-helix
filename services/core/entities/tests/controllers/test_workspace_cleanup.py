@@ -557,6 +557,59 @@ class TestWorkspaceCleanupAsyncStep:
         repo.delete_workspace_if_claimed.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_stalled_renewal_is_cancelled_before_the_lease_expires(self, monkeypatch: pytest.MonkeyPatch):
+        from nhx.core.entities.controllers import workspace_cleanup as workspace_cleanup_module
+
+        # Equal values leave no time after the renewal interval, so a call that
+        # does not return is cancelled instead of running past the lease.
+        monkeypatch.setattr(workspace_cleanup_module, "_DELETION_LEASE_TIMEOUT_SECONDS", 20.0)
+        monkeypatch.setattr(workspace_cleanup_module, "_DELETION_LEASE_RENEW_INTERVAL_SECONDS", 20.0)
+        pending = _make_workspace()
+        claimed = _make_workspace(deletion_stage=WorkspaceDeletionStage.DELETING)
+        cleanup_started = asyncio.Event()
+        cleanup_cancelled = asyncio.Event()
+        renewal_release = asyncio.Event()
+
+        async def block_cleanup(**_kwargs):
+            cleanup_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cleanup_cancelled.set()
+                raise
+
+        async def controlled_sleep(_delay: float) -> None:
+            await renewal_release.wait()
+
+        async def hang_renewal(**_kwargs):
+            await asyncio.Event().wait()
+
+        jobs_client = _make_jobs_client([])
+        jobs_client.list_jobs.side_effect = block_cleanup
+        repo = AsyncMock()
+        repo.list_workspaces.return_value = ([pending], None)
+        repo.claim_workspace_for_deletion.return_value = claimed
+        repo.renew_workspace_deletion_lease.side_effect = hang_renewal
+        repo.fail_workspace_deletion_if_claimed.return_value = True
+        controller = _make_controller(workspace_repo=repo)
+
+        with (
+            _patch_clients(jobs_client, _make_mock_files_client([]), _make_models_client([])),
+            patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=controlled_sleep),
+        ):
+            cleanup_task = asyncio.create_task(controller._async_step())
+            await cleanup_started.wait()
+            renewal_release.set()
+            await cleanup_task
+
+        assert cleanup_cancelled.is_set()
+        repo.fail_workspace_deletion_if_claimed.assert_awaited_once_with(
+            name=pending.name,
+            expected_updated_at=claimed.updated_at,
+        )
+        repo.delete_workspace_if_claimed.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_pending_workspace_is_preferred_over_failed(self):
         pending = _make_workspace(name="pending-workspace")
         failed = _make_workspace(
