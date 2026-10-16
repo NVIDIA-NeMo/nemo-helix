@@ -91,6 +91,9 @@ class _EvaluatorMethods:
     list_task_revisions = method(endpoints.list_task_revisions)
     get_task_revision = method(endpoints.get_task_revision)
     tag_task_revision = method(endpoints.tag_task_revision)
+    create_task_image_build = method(endpoints.create_task_image_build)
+    list_task_image_builds = method(endpoints.list_task_image_builds)
+    get_task_image_build = method(endpoints.get_task_image_build)
     delete_task = method(endpoints.delete_task)
 
     get_taskset = method(endpoints.get_taskset)

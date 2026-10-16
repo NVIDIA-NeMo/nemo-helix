@@ -9,7 +9,7 @@ import {
 } from '@studio/routes/DataDesignerJobBuildRoute/columns';
 import { SchemaRow } from '@studio/routes/DataDesignerJobBuildRoute/SchemaRow';
 import type { JobBuilderFormValues } from '@studio/routes/DataDesignerJobBuildRoute/useJobBuilder';
-import { type FC, useMemo } from 'react';
+import { type FC, memo, useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 export interface SchemaListProps {
@@ -24,7 +24,11 @@ export interface SchemaListProps {
  * inline as relationship tags rather than drawn as edges. Selecting a row opens the same
  * config pane the canvas uses, so the surrounding left/right panels are unchanged.
  */
-export const SchemaList: FC<SchemaListProps> = ({ selectedId, onSelect, onDelete }) => {
+export const SchemaList: FC<SchemaListProps> = memo(function SchemaList({
+  selectedId,
+  onSelect,
+  onDelete,
+}) {
   const { control } = useFormContext<JobBuilderFormValues>();
   const columnRecord = useWatch({ control, name: 'columns' });
   const columns = useMemo(() => topologicalSortColumns(columnRecord), [columnRecord]);
@@ -72,4 +76,4 @@ export const SchemaList: FC<SchemaListProps> = ({ selectedId, onSelect, onDelete
       )}
     </Stack>
   );
-};
+});

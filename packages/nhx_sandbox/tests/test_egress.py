@@ -8,6 +8,18 @@ from nhx_sandbox import egress
 from nhx_sandbox.egress import EgressAllowlist, _as_network, build_egress_policy, denied_cidrs
 
 
+@pytest.fixture(autouse=True)
+def _cluster_resolver(tmp_path, monkeypatch):
+    """Pin the default resolver so policies don't depend on the host running the tests.
+
+    ``resolver_addresses=None`` reads ``/etc/resolv.conf``, and some CI runners list a public
+    nameserver there, which then shows up as an allowed public address.
+    """
+    resolv_conf = tmp_path / "cluster-resolv.conf"
+    resolv_conf.write_text("nameserver 10.96.0.10\n")
+    monkeypatch.setattr(egress, "RESOLV_CONF_PATH", str(resolv_conf))
+
+
 def _denies(policy):
     return {rule.target for rule in policy.rules if rule.action == "deny"}
 

@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { JOB_LOGS_PREFIX } from '@studio/components/evaluation/consts';
+
 const PARQUET_EXTENSION = '.parquet';
 const GLOB_CHARS = /[*?[\]]/;
-/** Job filesets keep their log shards here, beside the job's actual output. */
-const JOB_LOGS_PREFIX = 'logs/';
 
 export interface ParquetBatches {
   /** Fileset-relative glob matching every Parquet file in the directory, as the evaluator resolves it. */

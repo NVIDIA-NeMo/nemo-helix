@@ -67,6 +67,10 @@ docker-build: ## Build Docker bake TARGET without pushing, default docker-cpu
 docker-load: ## Build and load single-platform Docker bake TARGET, default docker-cpu
 	docker buildx bake$(DOCKER_BAKE_ALLOW_FS_READ_FLAG) -f $(DOCKER_BAKE_FILE) $(DOCKER_TARGET) $(DOCKER_PLATFORM_SET) --load
 
+.PHONY: docker-check-sources
+docker-check-sources: ## Check a loaded IMAGE (e.g. nhx-kaniko), built with NHX_COLLECT_SOURCES=1, carries every component's source
+	docker/scripts/check-image-source-coverage.sh "$(or $(IMAGE_REGISTRY),my-registry)/$(IMAGE):$(or $(BAKE_TAG),local)" "$(IMAGE)"
+
 .PHONY: docker-push
 docker-push: ## Build and push Docker bake TARGET, default docker-cpu
 	docker buildx bake$(DOCKER_BAKE_ALLOW_FS_READ_FLAG) -f $(DOCKER_BAKE_FILE) $(DOCKER_TARGET) --push
@@ -536,6 +540,14 @@ endif
 	@echo "Running tests for package: $(PACKAGE)..."
 	$(UV) run --frozen pytest -v packages/$(PACKAGE)/tests/
 
+.PHONY: test-agents-mini-swe-agent
+test-agents-mini-swe-agent: ## Run Mini-SWE-Agent adapter integration tests with its optional harness installed
+	# Fail on missing harnesses instead of passing with every test skipped.
+	$(UV) run --frozen --package nemo-agents-plugin --extra mini-swe-agent --extra test \
+		python -c 'import minisweagent'
+	$(UV) run --frozen --package nemo-agents-plugin --extra mini-swe-agent --extra test \
+		pytest -v plugins/nemo-agents/tests/integration/test_fabric_mini_swe_agent.py
+
 .PHONY: test-agents-nooa
 test-agents-nooa: ## Run NOOA adapter integration tests with its optional harness installed
 	# Fail on missing harnesses instead of passing with every test skipped.
@@ -574,6 +586,12 @@ test-deployments-openshell: ## Run OpenShell deployment backend unit tests with 
 	# run the backend's tests for real (mirrors the nemo-guardrails --extra bench job).
 	$(UV) run --frozen --package nemo-deployments-plugin --extra openshell \
 		pytest -v plugins/nemo-deployments/tests/unit/backends/openshell/
+
+.PHONY: test-jobs-openshell
+test-jobs-openshell: ## Run OpenShell job backend unit + integration tests with the platform-restricted [openshell] extra installed
+	$(UV) run --frozen --all-packages --extra openshell \
+		pytest -v services/core/jobs/tests/controllers/test_openshell_backend.py \
+		services/core/jobs/tests/integration/test_openshell_job_integration.py
 
 .PHONY: test-service
 test-service: ## Run tests for a specific service (usage: make test-service SERVICE=evaluator)

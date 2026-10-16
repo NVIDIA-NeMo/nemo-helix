@@ -184,7 +184,7 @@ def test_analyze_with_retry_recovers_after_transient(monkeypatch):
             raise sp.CalledProcessError(1, args)
 
     monkeypatch.setattr(run_subjects, "_evaluation", flaky)
-    monkeypatch.setattr(run_subjects.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(run_subjects, "sleep", lambda _s: None)
     run_subjects.analyze_with_retry("tau2-airline", "evaluation/tmp/summary.md")
     assert calls["n"] == 3
 
@@ -198,6 +198,6 @@ def test_analyze_with_retry_exhausts_and_raises(monkeypatch):
         raise sp.CalledProcessError(1, args)
 
     monkeypatch.setattr(run_subjects, "_evaluation", always_fail)
-    monkeypatch.setattr(run_subjects.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(run_subjects, "sleep", lambda _s: None)
     with pytest.raises(sp.CalledProcessError):
         run_subjects.analyze_with_retry("tau2-airline", "evaluation/tmp/summary.md")

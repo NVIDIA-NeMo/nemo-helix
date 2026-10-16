@@ -637,7 +637,7 @@ def create_jobs(
             raise RuntimeError("Unable to determine created resource name for --wait/--watch")
         wait_workspace = getattr(result, "workspace", None) or request_workspace
         if wait_workspace is None:
-            wait_workspace = platform_client._get_workspace_path_param()
+            wait_workspace = platform_client.require_workspace()
         if wait:
             if not wait_for_platform_job(
                 jobs_client,
@@ -1141,7 +1141,7 @@ def watch_platform_job(
     state: CLIContext = ctx.obj
     platform_client, jobs_client = _jobs_client_from_state(state)
     if workspace is None:
-        workspace = platform_client._get_workspace_path_param()
+        workspace = platform_client.require_workspace()
 
     events = jobs_client.watch_job(
         name,
@@ -1177,7 +1177,7 @@ def tail_platform_job(
     state: CLIContext = ctx.obj
     platform_client, jobs_client = _jobs_client_from_state(state)
     if workspace is None:
-        workspace = platform_client._get_workspace_path_param()
+        workspace = platform_client.require_workspace()
 
     query_params: JobLogsQueryParams = {"tail": lines}
     if attempt_id is not None:

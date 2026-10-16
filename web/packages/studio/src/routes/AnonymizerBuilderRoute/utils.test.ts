@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { DataDesignerModelOption } from '@studio/components/NewDataDesignerJobForm/utils';
+import { BUILTIN_DETECTOR_VALUE } from '@studio/routes/AnonymizerBuilderRoute/constants';
 import {
   detectorOptions,
   isNerDetectorModel,
@@ -49,19 +50,22 @@ describe('detectorOptions', () => {
   ];
   const items = models.map((m) => option(m.id));
 
-  it('keeps every model selectable', () => {
-    expect(detectorOptions(items, models).map((item) => item.value)).toEqual(
+  it('always offers the built-in detector first, then keeps every model selectable', () => {
+    const grouped = detectorOptions(items, models);
+    expect(grouped[0]).toMatchObject({ value: BUILTIN_DETECTOR_VALUE, group: 'suggested' });
+    expect(grouped.map((item) => item.value)).toEqual(
       expect.arrayContaining(items.map((item) => item.value))
     );
   });
 
   it('suggests every known NER family, not only GLiNER', () => {
     const grouped = detectorOptions(items, models);
-    expect(grouped.slice(0, 2)).toMatchObject([
+    // Index 0 is the built-in sentinel; the workspace NER families follow.
+    expect(grouped.slice(1, 3)).toMatchObject([
       { value: 'nvidia-gliner-pii', group: 'suggested' },
       { value: 'privacy-filter', group: 'suggested' },
     ]);
-    expect(grouped[2]).toMatchObject({ value: 'nemotron-3-nano-30b-a3b', group: 'other' });
+    expect(grouped[3]).toMatchObject({ value: 'nemotron-3-nano-30b-a3b', group: 'other' });
   });
 
   it('preserves the incoming order within a group', () => {
@@ -71,16 +75,24 @@ describe('detectorOptions', () => {
         twoGliners.map((m) => option(m.id)),
         twoGliners
       ).map((item) => item.value)
-    ).toEqual(['nvidia-gliner-pii', 'privacy-filter', 'gliner-small', 'nemotron-3-nano-30b-a3b']);
+    ).toEqual([
+      BUILTIN_DETECTOR_VALUE,
+      'nvidia-gliner-pii',
+      'privacy-filter',
+      'gliner-small',
+      'nemotron-3-nano-30b-a3b',
+    ]);
   });
 
-  it('returns every model as Other when no known detector is registered', () => {
+  it('returns the built-in plus every model as Other when no known detector is registered', () => {
     const chatOnly = models.filter((m) => !isNerDetectorModel(m));
     const grouped = detectorOptions(
       chatOnly.map((m) => option(m.id)),
       chatOnly
     );
-    expect(grouped.map((item) => item.group)).toEqual(['other']);
+    // The built-in sentinel is suggested; the remaining workspace chat models are Other.
+    expect(grouped[0]).toMatchObject({ value: BUILTIN_DETECTOR_VALUE, group: 'suggested' });
+    expect(grouped.slice(1).map((item) => item.group)).toEqual(['other']);
   });
 });
 

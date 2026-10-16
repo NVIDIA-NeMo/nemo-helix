@@ -63,7 +63,7 @@ export const NewDataset: FC = () => {
       </FormField>
       {files.length === 0 ? (
         <Stack gap="density-md">
-          <Text kind="label/regular/md">File</Text>
+          <Text kind="label/bold/sm">File</Text>
           <FileUpload error={errors?.file} />
         </Stack>
       ) : (

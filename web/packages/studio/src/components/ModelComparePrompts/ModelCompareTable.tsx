@@ -6,7 +6,6 @@ import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import type { FileSampleMethod } from '@nemo/common/src/utils/sampleTextLines';
 import { Button, Flex, Select, Text } from '@nvidia/foundations-react-core';
 import { StatsBadge } from '@studio/components/chat/StatsBadge';
-import type { DatasetInputFileResult } from '@studio/components/DatasetInputFile';
 import { FileSamplingMethodSelect } from '@studio/components/FileSamplingSnippet/FileSamplingMethodSelect';
 import { ModelColumnSelect } from '@studio/components/ModelComparePrompts/ModelColumnSelect';
 import type {
@@ -20,6 +19,7 @@ import {
   PANEL_ROLE_LABELS,
   type SharedModelEntry,
 } from '@studio/routes/ModelCompareRoute/types';
+import type { DatasetInputFileResult } from '@studio/types/dataset';
 import { Trash2 } from 'lucide-react';
 import type { Dispatch, FC, SetStateAction } from 'react';
 

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -29,7 +29,7 @@ def _client_error(error_cls, status_code: int, detail: str):
 
 
 @contextmanager
-def _patch_jobs_client(jobs_client: MagicMock, files_client: MagicMock) -> Iterator[None]:
+def _patch_jobs_client(jobs_client: MagicMock, files_client: MagicMock) -> Generator[None, None, None]:
     """Patch the typed clients the compiler derives from the platform client.
 
     The compiler validates the ``data_source`` fileset via

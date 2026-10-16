@@ -20,6 +20,7 @@ export const NewCustomizationFormRoute = () => {
 
   const { state } = useLocation();
   const stateValues = useMemo(() => getInitialFormValuesFromState(state), [state]);
+  const savedTemplateName: unknown = state?.savedTemplateName;
 
   useBreadcrumbs({
     items: [
@@ -42,6 +43,7 @@ export const NewCustomizationFormRoute = () => {
       workspace={workspace}
       initialModel={initialModel}
       initialValues={stateValues}
+      savedTemplateName={typeof savedTemplateName === 'string' ? savedTemplateName : undefined}
     />
   );
 };

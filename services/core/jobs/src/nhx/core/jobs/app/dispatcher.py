@@ -38,6 +38,7 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
     get_model_id,
     job_artifact_base_path,
 )
+from nhx.core.jobs.app.constants import JOB_TASK_CLEANUP_PENDING_KEY
 from nhx.core.jobs.app.lifecycle import attempt_can_transition, with_lifecycle_timestamps
 from nhx.core.jobs.app.schemas import (
     HelixJobSpec,
@@ -65,7 +66,7 @@ class StateTransitionConflictError(Exception):
 
 
 class JobOperationConflictError(Exception):
-    """Exception raised when a pause or resume cannot proceed."""
+    """Exception raised when a job operation cannot proceed in the job's current state."""
 
     def __init__(self, detail: str):
         super().__init__(detail)
@@ -832,6 +833,11 @@ class JobDispatcher:
         filter_str: Optional[str] = None
         if filter.status:
             filter_str = json.dumps({"data.status": {"$in": filter.status}})
+        if filter.task_cleanup_pending is not None:
+            cleanup_filter = {"data.status_details." + JOB_TASK_CLEANUP_PENDING_KEY: filter.task_cleanup_pending}
+            filter_str = json.dumps(
+                {"$and": [json.loads(filter_str), cleanup_filter]} if filter_str else cleanup_filter
+            )
         sort_str = sort.value
 
         use_store_pagination = (not filter.job or filter.job == "-") and not filter.source
@@ -946,13 +952,7 @@ class JobDispatcher:
 
         step_statuses = []
         for step in steps_response.data:
-            # Get tasks for step
-            tasks_response = await self.store.list(
-                HelixJobTask,
-                workspace=workspace,
-                filter_obj={"step_id": step.id},
-                page_size=1000,
-            )
+            tasks = await self.list_tasks(step.id, workspace)
 
             task_statuses = [
                 HelixJobTaskStatusResponse(
@@ -965,7 +965,7 @@ class JobDispatcher:
                     created_at=task.created_at,
                     updated_at=task.updated_at,
                 )
-                for task in tasks_response.data
+                for task in tasks
             ]
 
             step_statuses.append(
@@ -1020,12 +1020,15 @@ class JobDispatcher:
         status: HelixJobStatus,
         status_details: Optional[Dict[str, Any]] = None,
         error_details: Optional[Dict[str, Any]] = None,
+        expected_step_id: str | None = None,
     ) -> tuple[HelixJobStep, HelixJobAttempt]:
         """Update a job's status based on the step's status.
 
         On EntityConflictError (e.g. reconciler updated the step concurrently), refetches
         the step and retries once if the requested transition is still valid.
         """
+        if expected_step_id is not None and expected_step_id != step.id:
+            raise StateTransitionConflictError("Job step was replaced by a new attempt")
         attempt = await self.get_attempt(step.attempt_id)
         if attempt is None:
             raise JobStatusUpdateSkippedError(f"Attempt does not exist: {step.attempt_id}")
@@ -1045,10 +1048,11 @@ class JobDispatcher:
         error_details: Optional[Dict[str, Any]] = None,
     ) -> tuple[HelixJobStep, HelixJobAttempt]:
         """Update a job from a step while holding the per-job mutation lock."""
-        step_to_save = step
+        step_to_save = await self.store.get_by_id(HelixJobStep, step.id)
         saved_step: HelixJobStep | None = None
         requested_details = status_details
         for attempt in range(2):
+            previous_step_status = step_to_save.status
             if not step_to_save.status.can_transition_to(status):
                 raise StateTransitionConflictError(
                     f"Invalid status transition from {step_to_save.status} to {status} for step {step_to_save.id}"
@@ -1057,6 +1061,15 @@ class JobDispatcher:
             # Stamp against the step as it is now, so a retry after a refetch does not carry
             # a clock stamped for a transition that another writer already made.
             status_details = with_lifecycle_timestamps(step_to_save, status, requested_details)
+            if status in (HelixJobStatus.CANCELLED, HelixJobStatus.ERROR):
+                await self._finalize_step_tasks(
+                    step_to_save.model_copy(
+                        update={"status": status, "error_details": error_details or step_to_save.error_details}
+                    )
+                )
+                if status != step_to_save.status or step_to_save.status_details.get(JOB_TASK_CLEANUP_PENDING_KEY):
+                    status_details = {**(status_details or {}), JOB_TASK_CLEANUP_PENDING_KEY: True}
+
             if self._step_update_would_be_noop(step_to_save, status, status_details, error_details):
                 saved_step = step_to_save
                 break
@@ -1087,6 +1100,9 @@ class JobDispatcher:
 
         if saved_step is None:
             raise RuntimeError("update_job_status_from_step did not produce a saved step")
+
+        if saved_step.status in (HelixJobStatus.CANCELLED, HelixJobStatus.ERROR):
+            await self._finalize_step_tasks(saved_step)
 
         # Update job / attempt status from step
         attempt = await self.get_attempt(saved_step.attempt_id)
@@ -1163,7 +1179,9 @@ class JobDispatcher:
                     )
                 # The step being paused finished before it saw the pause. The pause no
                 # longer applies and the pipeline moves on, so the job is running again.
-                if attempt.status == HelixJobStatus.PAUSING:
+                # Only that step's own pausing -> completed move counts: a replayed update
+                # for a step that had already completed must not undo a later step's pause.
+                if attempt.status == HelixJobStatus.PAUSING and previous_step_status == HelixJobStatus.PAUSING:
                     new_attempt_status = HelixJobStatus.ACTIVE
             else:
                 new_attempt_status = HelixJobStatus.COMPLETED
@@ -1212,6 +1230,24 @@ class JobDispatcher:
                         "workspace": attempt.workspace,
                     },
                 )
+
+        if saved_step.status_details.get(JOB_TASK_CLEANUP_PENDING_KEY):
+            for retry in range(2):
+                try:
+                    saved_step = await self.store.update(
+                        saved_step.model_copy(
+                            update={
+                                "status_details": {**saved_step.status_details, JOB_TASK_CLEANUP_PENDING_KEY: False}
+                            }
+                        )
+                    )
+                    break
+                except EntityConflictError:
+                    if retry:
+                        raise
+                    saved_step = await self.store.get_by_id(HelixJobStep, saved_step.id)
+                    if not saved_step.status_details.get(JOB_TASK_CLEANUP_PENDING_KEY):
+                        break
 
         operations_counter.add(1, attributes={"operation": "update_job_status_from_step"})
         return saved_step, attempt
@@ -1292,17 +1328,14 @@ class JobDispatcher:
         # Check if the job has any created steps, and if so, check if all of them are in created state.
         # If so, cancel the job immediately without going through the normal cancellation process.
         if job_entity.current_attempt_id:
-            response = await self.store.list(
+            steps = await self._list_all_entities(
                 HelixJobStep,
                 filter_obj={"attempt_id": job_entity.current_attempt_id},
                 workspace=workspace,
             )
-            steps = response.data
             if steps and all(s.status == HelixJobStatus.CREATED for s in steps):
-                _, attempt = await self.update_job_status_from_step(
-                    steps[0],
-                    HelixJobStatus.CANCELLED,
-                )
+                for step in steps:
+                    _, attempt = await self.update_job_status_from_step(step, HelixJobStatus.CANCELLED)
                 operations_counter.add(1, attributes={"operation": "cancel_job"})
                 return create_platform_job_response(job_entity, attempt)
 
@@ -1315,7 +1348,15 @@ class JobDispatcher:
         else:
             attempt = await self.get_current_attempt(job_entity.name, workspace=job_entity.workspace)
             if attempt is None:
-                raise Exception(f"Job Attempt with Job ID {job_entity.id} does not exist.")
+                raise JobOperationConflictError(f"Cannot cancel job '{job_entity.name}': it has no current attempt.")
+            steps = await self._list_all_entities(
+                HelixJobStep,
+                filter_obj={"attempt_id": attempt.id},
+                workspace=workspace,
+            )
+            for step in steps:
+                if step.status in (HelixJobStatus.CANCELLED, HelixJobStatus.ERROR):
+                    _, attempt = await self.update_job_status_from_step(step, step.status)
 
         operations_counter.add(1, attributes={"operation": "cancel_job"})
         return create_platform_job_response(job_entity, attempt)
@@ -1350,6 +1391,11 @@ class JobDispatcher:
 
         # Only allow re-run if the attempt is in a terminal state
         if attempt.status.is_terminal():
+            for step in await self._list_all_entities(
+                HelixJobStep, filter_obj={"attempt_id": attempt.id}, workspace=workspace
+            ):
+                if step.status_details.get(JOB_TASK_CLEANUP_PENDING_KEY):
+                    await self._update_job_status_from_step_locked(step, step.status)
             seq = attempt.seq + 1
             # Use short ID prefix to stay within 32 char name limit
             attempt_ref_id = get_model_id("att")
@@ -1391,7 +1437,7 @@ class JobDispatcher:
 
         attempt = await self.get_current_attempt(job_entity.name, workspace=job_entity.workspace)
         if attempt is None:
-            raise Exception(f"Job Attempt with Job ID {job_entity.id} does not exist.")
+            raise JobOperationConflictError(f"Cannot pause job '{job_entity.name}': it has no current attempt.")
 
         # A live step is paused even when another step is already pausing or paused.
         # The idempotent return applies only when nothing is still created, pending, or active.
@@ -1428,7 +1474,7 @@ class JobDispatcher:
 
         attempt = await self.get_current_attempt(job.name, workspace=job.workspace)
         if attempt is None:
-            raise Exception(f"Job Attempt with Job ID {job.id} does not exist.")
+            raise JobOperationConflictError(f"Cannot resume job '{job.name}': it has no current attempt.")
 
         if attempt.status in (HelixJobStatus.ACTIVE, HelixJobStatus.RESUMING):
             operations_counter.add(1, attributes={"operation": "resume_job"})
@@ -1480,7 +1526,7 @@ class JobDispatcher:
 
         attempt = await self.get_current_attempt(job.name, workspace=job.workspace)
         if attempt is None:
-            raise Exception(f"Job Attempt with Job ID {job.id} does not exist.")
+            raise JobOperationConflictError(f"Cannot update control for job '{job.name}': it has no current attempt.")
 
         job.control = job.control.model_copy(update=changes)
         # Restore auth context around the write. The store can sanitize it for
@@ -1514,13 +1560,39 @@ class JobDispatcher:
 
     async def list_tasks(self, step_id: str, workspace: str) -> list[HelixJobTask]:
         """List all platform job tasks for a specific step."""
-        response = await self.store.list(
+        return await self._list_all_entities(
             HelixJobTask,
             workspace=workspace,
             filter_obj={"step_id": step_id},
-            page_size=1000,
         )
-        return list(response.data)
+
+    async def _finalize_step_tasks(self, step: HelixJobStep) -> None:
+        """Finalize nonterminal children to match a cancelled or errored step."""
+        for task in await self.list_tasks(step.id, step.workspace):
+            await self._finalize_task(task, step)
+
+    async def _finalize_task(self, task: HelixJobTask, step: HelixJobStep) -> HelixJobTask:
+        """Preserve terminal winners and retry one conflicting task write."""
+        for retry in range(2):
+            if task.status.is_terminal():
+                break
+            updates = {
+                "status": step.status,
+                "status_details": {
+                    **task.status_details,
+                    "message": f"Task finalized because job step is {step.status.value}",
+                },
+            }
+            if step.status == HelixJobStatus.ERROR:
+                updates["error_details"] = task.error_details or step.error_details or {"message": "Job step failed"}
+            try:
+                task = await self.store.update(task.model_copy(update=updates))
+                break
+            except EntityConflictError:
+                if retry:
+                    raise
+                task = await self.store.get_by_id(HelixJobTask, task.id)
+        return task
 
     async def create_or_update_task(
         self, job_name: str, task_name: str, workspace: str, task_update: HelixJobTaskUpdate, step: HelixJobStep
@@ -1534,9 +1606,23 @@ class JobDispatcher:
     ) -> HelixJobTask:
         """Create or update a task while holding the per-job mutation lock."""
         await self.store.get(HelixJob, job_name, workspace=workspace)
-        await self.store.get_by_id(HelixJobStep, step.id)
+        step = await self.store.get_by_id(HelixJobStep, step.id)
 
         task = await self.get_task(step.id, task_name, workspace=workspace)
+
+        if step.status in (HelixJobStatus.CANCELLED, HelixJobStatus.ERROR):
+            if task is not None and task.status.is_terminal():
+                return task
+            if not task_update.status.is_terminal() or (
+                task is not None and not task.status.can_transition_to(task_update.status)
+            ):
+                if task is not None:
+                    return await self._finalize_task(task, step)
+                task_update = HelixJobTaskUpdate(
+                    status=step.status,
+                    status_details={"message": f"Task finalized because job step is {step.status.value}"},
+                    error_details=step.error_details if step.status == HelixJobStatus.ERROR else None,
+                )
 
         if not task:
             task = await self.store.create(
@@ -1603,6 +1689,12 @@ class JobDispatcher:
                     "status": task.status,
                 },
             )
+
+        current_step = await self.store.get_by_id(HelixJobStep, step.id)
+        if current_step.status in (HelixJobStatus.CANCELLED, HelixJobStatus.ERROR):
+            if not task.status.is_terminal():
+                task = await self._finalize_task(task, current_step)
+            return task
 
         # Propagate task status_details to parent job for progress tracking.
         # Training callbacks report progress (percentage_done, epoch, step, loss) at the task level,

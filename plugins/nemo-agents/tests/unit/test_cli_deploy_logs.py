@@ -74,7 +74,7 @@ def test_deploy_default_waits_and_returns_success_on_running(make_cli_state) -> 
         return httpx.Response(404)
 
     app = AgentsCLI().get_cli()
-    with patch("nemo_agents_plugin.cli.time.sleep"):
+    with patch("nemo_agents_plugin.cli.sleep"):
         result = CliRunner().invoke(
             app,
             ["deploy", "--agent", "calc", "--timeout", "10"],
@@ -112,7 +112,7 @@ def test_deploy_default_exits_failure_when_subprocess_dies(make_cli_state) -> No
         return httpx.Response(404)
 
     app = AgentsCLI().get_cli()
-    with patch("nemo_agents_plugin.cli.time.sleep"):
+    with patch("nemo_agents_plugin.cli.sleep"):
         result = CliRunner().invoke(
             app,
             ["deploy", "--agent", "calc", "--timeout", "10"],
@@ -150,7 +150,7 @@ def test_deploy_polls_through_multiple_pending_responses(make_cli_state) -> None
         return httpx.Response(404)
 
     app = AgentsCLI().get_cli()
-    with patch("nemo_agents_plugin.cli.time.sleep"):
+    with patch("nemo_agents_plugin.cli.sleep"):
         result = CliRunner().invoke(
             app,
             ["deploy", "--agent", "calc", "--timeout", "60"],
@@ -236,7 +236,7 @@ def test_deployments_wait_agent_resolves_latest_active_deployment_across_pages(m
         return httpx.Response(404)
 
     app = AgentsCLI().get_cli()
-    with patch("nemo_agents_plugin.cli.time.sleep"):
+    with patch("nemo_agents_plugin.cli.sleep"):
         result = CliRunner().invoke(
             app,
             ["deployments", "wait", "--agent", "calc", "--timeout", "10"],

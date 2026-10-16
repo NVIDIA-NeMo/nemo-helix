@@ -10,14 +10,22 @@ selection, port), and seeds the frozen validate-only baseline.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import yaml
-from nemo_agent_hardener_plugin.agent_resolver import gateway_backend, resolve_agent_to_manifest
+from nemo_agent_hardener_plugin.agent_resolver import (
+    current_agent_timestamp,
+    fabric_start_command,
+    gateway_backend,
+    parse_agent_ref,
+    resolve_agent_to_manifest,
+)
 from nemo_agent_hardener_plugin.cli.client import base_url
 from nemo_agent_hardener_plugin.entities import AGENT_HARDENER_MANIFEST_TYPE
 from nemo_agent_hardener_plugin.filesets import download_and_extract_project, upload_project_dir
+from nemo_agent_hardener_plugin.jobs import _common
 from nemo_agent_hardener_plugin.jobs.errors import CATEGORY_FILESET, CATEGORY_MANIFEST, AgentHardenerRunError
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.entities.client import EntitiesClient
@@ -106,7 +114,11 @@ def _apply_manifest_overrides(manifest: dict[str, Any], data: dict[str, Any]) ->
     # Apply an explicit victim port only when set (stored on the manifest or a per-run override); otherwise
     # leave the port the agent resolver derived from the running deployment.
     if data.get("port"):
-        manifest.setdefault("agent", {})["port"] = int(data["port"])
+        agent = manifest.setdefault("agent", {})
+        port = int(data["port"])
+        if agent.get("start_command") == fabric_start_command(agent.get("port", 8000)):
+            agent["start_command"] = fabric_start_command(port)
+        agent["port"] = port
     safety_model = _safety_model(data)
     enabled = [key for key in (data.get("defenders") or []) if key in DEFENDER_ENTRIES]
     if not enabled:
@@ -176,6 +188,51 @@ def _materialize_manifest(
     return str(manifest_path)
 
 
+def _manifest_secret_values(sdk: Any, manifest_id: str, ctx: JobContext) -> dict[str, str]:
+    """Read the manifest's Secrets-store refs (deployment's, then the operator's explicit ones) into values."""
+    record = (
+        client_from_platform(sdk, EntitiesClient)
+        .get_entity_by_name(name=manifest_id, entity_type=AGENT_HARDENER_MANIFEST_TYPE, workspace=ctx.workspace)
+        .data()
+    )
+    data = getattr(record, "data", {}) or {}
+    refs = {**(data.get("deployed_secret_refs") or {}), **(data.get("secret_refs") or {})}
+    return _common.resolve_secret_refs(sdk, refs, ctx.workspace)
+
+
+def _agent_staleness_warning(sdk: Any, manifest_id: str, ctx: JobContext) -> str | None:
+    """Warn when the agent changed after an agent-source manifest froze it; ``None`` when current or unknown.
+
+    A frozen copy keeps running the old files until the manifest is refreshed, with nothing to show
+    the results no longer describe the registered agent. Best-effort: a lookup failure must not fail
+    a run, and a manifest saved before the timestamp was recorded has nothing to compare against.
+    """
+    try:
+        record = (
+            client_from_platform(sdk, EntitiesClient)
+            .get_entity_by_name(name=manifest_id, entity_type=AGENT_HARDENER_MANIFEST_TYPE, workspace=ctx.workspace)
+            .data()
+        )
+        data = getattr(record, "data", {}) or {}
+        stored, agent_ref = data.get("agent_updated_at"), data.get("agent")
+        if (data.get("source_type") or "agent") != "agent" or not (stored and agent_ref and data.get("agent_fileset")):
+            return None
+        workspace, name = parse_agent_ref(agent_ref, ctx.workspace)
+        current = current_agent_timestamp(sdk, workspace, name)
+        if not current or datetime.fromisoformat(current) <= datetime.fromisoformat(stored):
+            return None
+    except Exception:  # advisory only
+        logger.debug("could not check manifest %s for a stale agent", manifest_id, exc_info=True)
+        return None
+    message = (
+        f"agent {agent_ref} changed after manifest {manifest_id!r} was saved, so this run uses the older "
+        f"copy. Refresh the manifest (Refresh Target in Studio, or POST .../manifests/{manifest_id}/refresh) "
+        "to test the current agent."
+    )
+    logger.warning(message)
+    return message
+
+
 def _materialize_from_bundle(
     sdk: Any, manifest_id: str, data: dict[str, Any], manifest_dir: Path, bundle: str
 ) -> dict[str, Any]:
@@ -224,6 +281,14 @@ def _materialize_from_bundle(
         agent["secrets"] = list(data["secrets"])
     if data.get("env"):
         agent["env"] = {**(agent.get("env") or {}), **data["env"]}
+    # `env` is plaintext and ends up in the victim image, so a secret set there would leak its value.
+    leaked = sorted(set(agent.get("env") or {}) & set(agent.get("secrets") or []))
+    if leaked:
+        raise AgentHardenerRunError(
+            CATEGORY_MANIFEST,
+            f"manifest {manifest_id!r} sets secret(s) {', '.join(leaked)} in plaintext env.",
+            remediation="Remove them from env; declare them with --secrets NAME=workspace/secret instead.",
+        )
     _apply_manifest_overrides(manifest, data)
     return manifest
 

@@ -288,6 +288,15 @@ class ExperimentResponse(BaseModel):
     evaluation_count: int = 0
 
 
+class EvaluationContext(BaseModel):
+    """Evaluation context hydrated on trace and span responses."""
+
+    evaluation_name: str | None = None
+    test_case_name: str | None = None
+    evaluation_id: str | None = None
+    test_case_id: str | None = None
+
+
 class Trace(BaseModel):
     """Trace summary returned by Intake trace listing."""
 
@@ -298,7 +307,7 @@ class Trace(BaseModel):
     name: str | None = None
     input: str | None = None
     output: str | None = None
-    evaluation_context: EvaluationContextParam | None = None
+    evaluation_context: EvaluationContext | None = None
     agent_name: str | None = None
     agent_version: str | None = None
     started_at: datetime
@@ -318,13 +327,8 @@ class Trace(BaseModel):
     error_count: int | None = Field(default=None, ge=0)
 
 
-class SpanEvaluationContext(BaseModel):
+class SpanEvaluationContext(EvaluationContext):
     model_config = ConfigDict(extra="forbid")
-
-    evaluation_name: str | None = None
-    test_case_name: str | None = None
-    evaluation_id: str | None = None
-    test_case_id: str | None = None
 
 
 class Span(BaseModel):

@@ -281,12 +281,11 @@ nemo-agents-plugin = [
   "pyyaml>=6.0",
   "jinja2>=3.1",
   "python-on-whales>=0.60",
-  "anthropic>=0.88.0",
-  "rich>=13.7.1",
   "nemo-fabric[relay,streaming]>=0.4.0,<0.5.0",
   "nemo-fabric-adapters-claude>=0.4.0,<0.5.0",
   "nemo-fabric-adapters-codex>=0.4.0,<0.5.0",
   "nemo-fabric-adapters-deepagents>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-mini-swe-agent>=0.4.0,<0.5.0",
   "nemo-fabric-adapters-nooa>=0.4.0,<0.5.0; python_version >= '3.12' and python_version < '3.14'",
   "nemo-fabric-adapters-remote-agent>=0.4.0,<0.5.0",
   "nemo-fabric-adapters-hermes>=0.4.0,<0.5.0; python_version < '3.14'",
@@ -308,6 +307,12 @@ nemo-agents-plugin-codex = [
 nemo-agents-plugin-deepagents = [
   "nemo-helix[nemo-agents-plugin]",
   "nemo-fabric-adapters-deepagents[harness]>=0.4.0,<0.5.0",
+]
+
+# Generated from [tool.bundle-package]; do not edit by hand.
+nemo-agents-plugin-mini-swe-agent = [
+  "nemo-helix[nemo-agents-plugin]",
+  "nemo-fabric-adapters-mini-swe-agent[harness]>=0.4.0,<0.5.0",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
@@ -336,6 +341,15 @@ nemo-automodel-plugin = [
   "pydantic>=2.10.6",
   "pydantic-settings>=2.6.1",
   "typer>=0.12.5",
+]
+
+# Generated from [tool.bundle-package]; do not edit by hand.
+nemo-builder-plugin = [
+  "nemo-helix-plugin",
+  "pydantic>=2.0.0",
+  "cryptography>=42.0.0",
+  "httpx>=0.27.0",
+  "kubernetes>=29.0.0",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
@@ -370,6 +384,7 @@ nemo-evals-plugin = [
   "cloudpickle>=3.1.1",
   "filesets",
   "nemo-agents-plugin",
+  "nemo-builder-plugin",
   "nhx-evals-sdk[harbor]",
   "nemo-helix-plugin",
   "pydantic>=2.12.0",
@@ -583,6 +598,7 @@ plugins = [
     "nemo-helix[nemo-agents-plugin]",
     "nemo-helix[nemo-anonymizer-plugin]",
     "nemo-helix[nemo-automodel-plugin]",
+    "nemo-helix[nemo-builder-plugin]",
     "nemo-helix[nemo-customizer-plugin]",
     "nemo-helix[nemo-data-designer-plugin]",
     "nemo-helix[nemo-deployments-plugin]",
@@ -728,9 +744,6 @@ nemo-switchyard = "nemo_switchyard.middleware:SwitchyardMiddleware"
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.jobs"]
 "agents.evaluate" = "nemo_agents_plugin.jobs.evaluate_agent:EvaluateAgentJob"
-"agents.evaluate-suite" = "nemo_agents_plugin.jobs.evaluate_suite:EvaluateSuiteJob"
-"agents.analyze" = "nemo_agents_plugin.jobs.analyze_batch:AnalyzeBatchJob"
-"agents.optimize-skills" = "nemo_agents_plugin.jobs.optimize_skills:OptimizeSkillsJob"
 "anonymizer.run" = "nemo_anonymizer_plugin.jobs.run:RunJob"
 "garak.audit" = "nemo_garak.jobs.audit:AuditJob"
 "data-designer.create" = "nemo_data_designer_plugin.jobs.create:CreateJob"
@@ -790,6 +803,7 @@ evals = "nemo_evals.service:EvaluatorPluginService"
 insights = "nemo_insights_plugin.service:InsightsService"
 deployments = "nemo_deployments_plugin.service:DeploymentsService"
 customization = "nemo_customizer.router:CustomizationRouterService"
+builder = "nemo_builder_plugin.service:BuilderService"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.skills"]
@@ -860,13 +874,15 @@ nhx-platform-runner = { source = "../../packages/nhx_platform_runner/src/nhx/pla
 garak-api = { source = "../../packages/garak_api/garakapi", module = "garakapi", deps_group = "garak-service" }
 
 # Default first-party plugins
-nemo-agents-plugin = { source = "../../plugins/nemo-agents/src/nemo_agents_plugin", module = "nemo_agents_plugin", optional-dependencies-prefix = "nemo-agents-plugin-", inherit = { "entry-points" = ["nemo.*", "nat.plugins", "nat.components"], "optional-dependencies" = ["claude", "codex", "deepagents", "nooa"] } }
+nemo-agents-plugin = { source = "../../plugins/nemo-agents/src/nemo_agents_plugin", module = "nemo_agents_plugin", optional-dependencies-prefix = "nemo-agents-plugin-", inherit = { "entry-points" = ["nemo.*", "nat.plugins", "nat.components"], "optional-dependencies" = ["claude", "codex", "deepagents", "mini-swe-agent", "nooa"] } }
 nemo-agent-optimization-plugin = { source = "../../plugins/nemo-agent-optimization/src/nemo_agent_optimization_plugin", module = "nemo_agent_optimization_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-anonymizer-plugin = { source = "../../plugins/nemo-anonymizer/src/nemo_anonymizer_plugin", module = "nemo_anonymizer_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-garak-plugin = { source = "../../plugins/nemo-garak/src/nemo_garak", module = "nemo_garak", inherit = { "entry-points" = ["nemo.*"] } }
 # Customization router plus its backend contributors. Heavy ML stacks stay in the
 # training images; these carry only compile-side deps, so they are safe to bundle.
 nemo-automodel-plugin = { source = "../../plugins/nemo-automodel/src/nemo_automodel_plugin", module = "nemo_automodel_plugin", inherit = { "entry-points" = ["nemo.*"] } }
+# The builder's service only. Its job steps run in the nhx-builder-tasks image, not from this wheel.
+nemo-builder-plugin = { source = "../../plugins/nemo-builder/src/nemo_builder_plugin", module = "nemo_builder_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-customizer-plugin = { source = "../../plugins/nemo-customizer/src/nemo_customizer", module = "nemo_customizer", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-data-designer-plugin = { source = "../../plugins/nemo-data-designer/src/nemo_data_designer_plugin", module = "nemo_data_designer_plugin", inherit = { "entry-points" = ["nemo.*", "data_designer.plugins"] } }
 nemo-deployments-plugin = { source = "../../plugins/nemo-deployments/src/nemo_deployments_plugin", module = "nemo_deployments_plugin", inherit = { "entry-points" = ["nemo.*"] } }

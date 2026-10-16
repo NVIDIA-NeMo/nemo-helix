@@ -15,7 +15,10 @@ ARG NHX_PYTHON_IMAGE=python:3.13.15-slim-trixie
 FROM ${NHX_PYTHON_IMAGE} AS nhx-python-base-builder
 
 COPY docker/scripts/collect-apt-sources.sh \
+    docker/scripts/collect-cargo-crate-sources.py \
     docker/scripts/collect-cpython-source.py \
+    docker/scripts/collect-go-module-sources.py \
+    docker/scripts/collect-pinned-sources.py \
     docker/scripts/collect-python-sdists.py \
     docker/scripts/collect-workspace-sdists.py \
     /usr/local/bin/

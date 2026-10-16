@@ -17,7 +17,7 @@ import socket
 import subprocess
 import time
 import urllib.request
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -26,6 +26,7 @@ import pytest
 import yaml
 from nemo_evals.shared.metric_bundles.cloudpickle import ALLOW_CLOUDPICKLE_METRICS_ENV_VAR
 from nhx.testing import igw_mock_provider_mode
+from nhx.testing.docker import remove_intake_clickhouse
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -122,7 +123,7 @@ def running_platform(
     base_url: str,
     env_vars: dict[str, str] | None = None,
     ready_timeout: float = 180.0,
-) -> Iterator[str]:
+) -> Generator[str, None, None]:
     """Run ``nemo services run`` bound to ``base_url``'s port, yield the URL, then tear it down.
 
     Fails loudly if the port is already taken: a stray platform would otherwise quietly serve the
@@ -150,6 +151,12 @@ def running_platform(
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait()
+        # Intake keeps its local ClickHouse container across shutdowns, keyed by data dir, so
+        # each per-run data dir would otherwise leave one behind. Only a data dir the caller passed
+        # in is throwaway: an NHX_DATA_DIR inherited from the shell is the developer's own platform,
+        # whose container must survive the test session.
+        if data_dir := (env_vars or {}).get(DATA_DIR_ENVVAR):
+            remove_intake_clickhouse(Path(data_dir))
 
 
 @pytest.fixture(autouse=True)
@@ -324,7 +331,7 @@ def cloudpickle_toggle_platform(
     work_root = tmp_path_factory.mktemp("cloudpickle-toggle-platform")
 
     @contextmanager
-    def start(*, allow_cloudpickle_metrics: bool) -> Iterator[str]:
+    def start(*, allow_cloudpickle_metrics: bool) -> Generator[str, None, None]:
         config_path = _materialize_subprocess_config(
             work_root,
             base_url=CLOUDPICKLE_TOGGLE_PLATFORM_BASE_URL,

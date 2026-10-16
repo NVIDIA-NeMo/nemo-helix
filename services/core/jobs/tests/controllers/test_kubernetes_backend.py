@@ -2937,24 +2937,7 @@ def _cancellation_step() -> HelixJobStepWithContext:
     )
 
 
-def _active_task_jobs_client() -> MagicMock:
-    active_task = MagicMock()
-    active_task.name = "test-task"
-    active_task.status = HelixJobStatus.ACTIVE
-    jobs = MagicMock()
-    jobs.list_job_step_tasks.return_value.data.return_value.data = [active_task]
-    return jobs
-
-
-def test_cancel_sweeps_active_task_when_kubernetes_job_still_exists(kubernetes_job):
-    """update_all_tasks only visits tasks that still have a pod, so an orphan stays ACTIVE.
-
-    Once this pass returns a terminal status the step is never reconciled again, so the
-    sweep has to happen here rather than on a later `job is None` pass.
-    """
-    from nhx.core.jobs.controllers.backends.base import JobUpdate
-
-    kubernetes_job._jobs = _active_task_jobs_client()
+def test_cancel_reports_teardown_completion_to_jobs_service(kubernetes_job):
     kubernetes_job.terminate_job = MagicMock()
     kubernetes_job.create_step_update = MagicMock(
         return_value=JobUpdate(status=HelixJobStatus.CANCELLED, status_details={})
@@ -2963,16 +2946,11 @@ def test_cancel_sweeps_active_task_when_kubernetes_job_still_exists(kubernetes_j
     update = kubernetes_job.sync_terminate_job(_cancellation_step(), MagicMock())
 
     assert update.status == HelixJobStatus.CANCELLED
-    kwargs = kubernetes_job._jobs.update_job_step_task.call_args.kwargs
-    assert kwargs["name"] == "test-task"
-    assert kwargs["body"].status == HelixJobStatus.CANCELLED
+    kubernetes_job._jobs.update_job_step_task.assert_not_called()
 
 
 def test_cancel_leaves_tasks_alone_while_step_is_still_cancelling(kubernetes_job):
     """A non-terminal pass gets reconciled again; cancelling its tasks now would be premature."""
-    from nhx.core.jobs.controllers.backends.base import JobUpdate
-
-    kubernetes_job._jobs = _active_task_jobs_client()
     kubernetes_job.terminate_job = MagicMock()
     kubernetes_job.create_step_update = MagicMock(
         return_value=JobUpdate(status=HelixJobStatus.CANCELLING, status_details={})
@@ -2983,28 +2961,14 @@ def test_cancel_leaves_tasks_alone_while_step_is_still_cancelling(kubernetes_job
     kubernetes_job._jobs.update_job_step_task.assert_not_called()
 
 
-def test_cancel_sweep_attempts_every_task_when_one_update_fails(kubernetes_job):
-    """One failed task update must not stop the remaining tasks from being cancelled."""
-    from nhx.core.jobs.controllers.backends.base import JobUpdate
+def test_cancel_missing_job_revokes_delegations(kubernetes_job, test_step_cancelling):
+    kubernetes_job.get_job_by_name = MagicMock(return_value=None)
 
-    first, second = MagicMock(), MagicMock()
-    first.name, first.status = "task-1", HelixJobStatus.ACTIVE
-    second.name, second.status = "task-2", HelixJobStatus.ACTIVE
+    with patch.object(kubernetes_job._workload_delegations, "revoke_by_key") as revoke:
+        update = kubernetes_job.sync(test_step_cancelling)
 
-    jobs = MagicMock()
-    jobs.list_job_step_tasks.return_value.data.return_value.data = [first, second]
-    jobs.update_job_step_task.side_effect = [RuntimeError("boom"), None]
-    kubernetes_job._jobs = jobs
-    kubernetes_job.terminate_job = MagicMock()
-    kubernetes_job.create_step_update = MagicMock(
-        return_value=JobUpdate(status=HelixJobStatus.CANCELLED, status_details={})
-    )
-
-    update = kubernetes_job.sync_terminate_job(_cancellation_step(), MagicMock())
-
-    assert [call.kwargs["name"] for call in jobs.update_job_step_task.call_args_list] == ["task-1", "task-2"]
-    # The pod is gone, so the step still reaches a terminal status and stays deletable.
     assert update.status == HelixJobStatus.CANCELLED
+    revoke.assert_called_once_with(namespace=kubernetes_job.namespace, name=name_for_step(test_step_cancelling))
 
 
 # ---------------------------------------------------------------------------

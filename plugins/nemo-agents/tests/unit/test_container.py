@@ -534,6 +534,8 @@ class TestRenderFabricDockerfile:
         ("kind", "extra"),
         [
             ("claude", "nemo-agents-plugin-claude"),
+            ("mini-swe-agent", "nemo-agents-plugin-mini-swe-agent"),
+            ("nvidia.fabric.mini-swe-agent", "nemo-agents-plugin-mini-swe-agent"),
             ("nooa-bench-agent", "nemo-agents-plugin-nooa"),
             ("nvidia.fabric.nooa.bench-agent", "nemo-agents-plugin-nooa"),
             ("remote-agent", "nemo-agents-plugin"),

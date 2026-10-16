@@ -481,7 +481,7 @@ class Settings(BaseSettings):
     # Named Docker volume shared by api and gym-runner containers (compose).
     gym_sandbox_opensandbox_docker_volume: str = "scaled-evals-gym-opensandbox-work"
 
-    # --- harbor_opensandbox (Harbor 0.20 + NemoOpenSandboxEnvironment) ------
+    # --- harbor_opensandbox (Harbor + NemoOpenSandboxEnvironment) -----------
     # Off by default. Harbor runs as a child process of the dispatcher and
     # creates one OpenSandbox sandbox per trial. OPENSANDBOX_DOMAIN and
     # OPENSANDBOX_API_KEY (or OPEN_SANDBOX_*) come from the process environment,

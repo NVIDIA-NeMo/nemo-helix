@@ -35,7 +35,7 @@ This section is needed when OIDC login tokens should carry NeMo Helix API scopes
 4. Go to **API permissions** > **Add a permission** > **My APIs** > select your app > add the scopes.
 5. Click **Grant admin consent** for the scopes, if your tenant requires it.
 
-Use short scope names in NeMo Helix configuration. Azure may require the fully qualified request form, such as `api://<client-id>/platform:read`; set `scope_prefix` so the CLI can send that form while users and docs keep referring to `platform:read`.
+Entra expects the OAuth request to use the Application ID URI, for example `api://<client-id>/platform:read`. Register the scopes under the short names, and set `public_client.scope_prefix` to `api://<client-id>/`. `default_scopes` and `nemo auth login --scope` use `platform:read`, and the CLI and Studio send `api://<client-id>/platform:read`. The access token `scp` claim contains the short name.
 
 ## Configure Group Claims
 
@@ -52,7 +52,7 @@ Azure OAuth scopes in `scope` or `scp` are not group principals and they do not 
 NeMo Helix uses Azure AD as an OIDC identity provider. The Azure token must be a signed JWT that NeMo Helix can validate, and its claims must contain the identity values you want to authorize:
 
 - `issuer`: the tenant issuer for the token version your application uses.
-- `client_id`: the Azure application client ID used by CLI and Studio login.
+- `public_client.client_id`: the Azure application client ID used by CLI and Studio login.
 - `audience`: the expected token `aud` claim, if you want audience validation. For Azure AD v2.0 access tokens, this is often the application client ID GUID; verify the token's actual `aud` claim.
 - `email_claim`: often `upn` for Azure AD access tokens.
 - `subject_claim`: often `oid` for Azure AD access tokens.
@@ -67,7 +67,6 @@ auth:
   oidc:
     enabled: true
     issuer: "https://login.microsoftonline.com/<tenant-id>/v2.0"
-    client_id: "<client-id>"
     audience: "<token-audience>"
     # Azure AD v1 tokens may have a different issuer.
     additional_issuers:
@@ -75,9 +74,11 @@ auth:
     email_claim: "upn"
     subject_claim: "oid"
     groups_claim: "groups"
-    # Required when Azure expects API scopes in resource-qualified form.
-    scope_prefix: "api://<client-id>/"
-    default_scopes: "platform:read platform:write openid profile email offline_access"
+    public_client:
+      client_id: "<client-id>"
+      default_scopes: "platform:read platform:write openid profile email offline_access"
+      # Application ID URI. Login requests api://<client-id>/platform:read.
+      scope_prefix: "api://<client-id>/"
 ```
 
 ## Verification

@@ -72,6 +72,14 @@ class TestPaginatedSync:
         # Only one request made (no additional page fetches)
         assert mock_http.request.call_count == 1
 
+    def test_response_iterates_items_directly(self) -> None:
+        mock_http = MagicMock(spec=httpx.Client)
+        mock_http.request.return_value = _page_response([{"id": 1, "name": "a"}], page=1, total_pages=1)
+
+        response = NemoClient(base_url=BASE, workspace="default", http_client=mock_http).send(LIST_ITEMS())
+
+        assert [item.name for item in response] == ["a"]
+
     def test_multi_page_iteration(self) -> None:
         """Iterating should automatically fetch all pages."""
         mock_http = MagicMock(spec=httpx.Client)
@@ -239,6 +247,15 @@ class TestPaginatedAsync:
         assert len(items) == 2
         assert items[0].name == "a"
         assert items[1].name == "b"
+
+    @pytest.mark.asyncio
+    async def test_async_response_iterates_items_directly(self) -> None:
+        mock_http = AsyncMock(spec=httpx.AsyncClient)
+        mock_http.request.return_value = _page_response([{"id": 1, "name": "a"}], page=1, total_pages=1)
+
+        response = await AsyncNemoClient(base_url=BASE, workspace="default", http_client=mock_http).send(LIST_ITEMS())
+
+        assert [item.name async for item in response] == ["a"]
 
     @pytest.mark.asyncio
     async def test_async_data_returns_page_result(self) -> None:

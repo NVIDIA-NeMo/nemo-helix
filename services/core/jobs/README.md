@@ -5,6 +5,36 @@
 
 A microservice for providing a generic job runner for NeMo Helix.
 
+## Cancellation lifecycle
+
+Execution controllers report a step as `cancelled` only after execution teardown
+finishes. The Jobs service finalizes every nonterminal public child task,
+across all task-list pages, both before and after persisting the terminal step.
+Cancelled steps cancel their children; errored steps error their children.
+The post-save sweep and task writers' parent-state recheck cover reports handled
+by other API replicas, whose process-local mutation locks are independent.
+Completed, errored, and already-cancelled tasks retain their terminal state.
+Pre-save cleanup failures leave the step nonterminal. Terminal steps persist a
+`task_cleanup_pending` status-detail marker until cleanup and attempt updates
+succeed, so crashes or post-save failures remain retryable by the reconciler.
+The step-list `filter[task_cleanup_pending]` query selects outstanding cleanup
+without continuously scanning every terminal step.
+This applies to Kubernetes, Volcano, Docker, and subprocess execution alike.
+
+Task writes use the stored parent step rather than the caller's cached step.
+Late reports cannot create or reactivate a nonterminal task under a cancelled
+or errored step. Genuine terminal reports, including errors received during
+cancellation, retain their status and diagnostics.
+Pause/resume behavior is unchanged.
+
+Repeating the existing cancel request on an already-cancelled or errored job repairs
+nonterminal child tasks in its current attempt. This repair is idempotent and
+does not modify earlier attempts or unrelated workspaces. Reruns complete any
+pending cleanup before archiving the current attempt. It does not scan or
+mutate existing jobs automatically.
+Controller status writes include `expected_step_id` so a delayed request for an
+old attempt cannot finalize a rerun's same-named step.
+
 - [Integrating a functional microservice with Jobs](#integrating-a-functional-microservice-with-jobs)
 - [Local Development](#local-development)
 

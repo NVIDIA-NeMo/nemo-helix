@@ -5,13 +5,14 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Self
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from nhx.intake.config import DEFAULT_SPAN_RETENTION_DAYS
 from nhx.intake.spans.api.dependencies import DenormalizerDep, SpansServiceDep, require_workspace_access
-from nhx.intake.spans.domain import IntakeSpan, SpanKind, SpanStatus, TraceBatch
+from nhx.intake.spans.domain import NEMO_STEP_ID_ATTRIBUTE, IntakeSpan, SpanKind, SpanStatus, TraceBatch
 from nhx.intake.spans.span_attribute_bags import DIRECT_INGEST_RAW_ATTRIBUTES_KEY
 from nhx.intake.spans.span_semantic_attributes import SpanSemanticAttributes
 from nhx.intake.spans.storage import json_dumps_preserve, utc_now
@@ -150,6 +151,11 @@ def direct_span_to_domain(
     semantic_attributes, consumed_keys = SpanSemanticAttributes.from_source_attributes(span.attributes)
     attribute_bags = semantic_attributes.to_bags()
     raw_attributes = {key: value for key, value in span.attributes.items() if key not in consumed_keys}
+    # Span lists break start-time ties by the number-bag nemo.step_id, which the ATIF route also writes.
+    step_id = raw_attributes.get(NEMO_STEP_ID_ATTRIBUTE)
+    if isinstance(step_id, int | float) and not isinstance(step_id, bool):
+        with suppress(OverflowError):
+            attribute_bags.number[NEMO_STEP_ID_ATTRIBUTE] = float(step_id)
     if raw_attributes:
         attribute_bags.put_json(DIRECT_INGEST_RAW_ATTRIBUTES_KEY, raw_attributes)
     intake_span = IntakeSpan(

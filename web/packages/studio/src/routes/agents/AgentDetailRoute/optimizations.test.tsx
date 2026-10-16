@@ -155,7 +155,7 @@ describe('AgentDetailRoute optimizations tab', () => {
   /** A study as Studio launches it: its marker names the bundle the study actually runs from. */
   const launchedByStudio = (bundle = BUNDLE) => ({
     spec: {
-      strategy: 'legacy',
+      strategy: 'config-tuning',
       optimize_config: 'optimize-brevity.yaml',
       agent: agentName,
       optimize_config_fileset: `${workspace}/${bundle}`,

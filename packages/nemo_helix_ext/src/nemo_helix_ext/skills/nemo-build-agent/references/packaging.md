@@ -1,7 +1,12 @@
+<!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # Package and deploy custom agent code
 
 Use this reference when the agent contains a local MCP server or another Python
 package that must run with the deployed agent.
+
+The commands below assume the installed `nemo` CLI is on `PATH`.
 
 ## Project layout
 
@@ -43,7 +48,7 @@ the image:
 
 ```bash
 IMAGE_TAG="$AGENT_NAME:local"
-.venv/bin/nemo agents package \
+nemo agents package \
   --agent "agents/$AGENT_NAME/agent.yaml" \
   --pyproject "agents/$AGENT_NAME/pyproject.toml" \
   --tag "$IMAGE_TAG"
@@ -54,7 +59,7 @@ Platform wheel and point packaging at it:
 
 ```bash
 uv build --package nemo-helix --wheel --out-dir dist
-NEMO_AGENTS_WHEEL=LATEST .venv/bin/nemo agents package \
+NEMO_AGENTS_WHEEL=LATEST nemo agents package \
   --agent "agents/$AGENT_NAME/agent.yaml" \
   --pyproject "agents/$AGENT_NAME/pyproject.toml" \
   --tag "$IMAGE_TAG"
@@ -72,7 +77,7 @@ earlier:
 ```bash
 WORKSPACE="<confirmed-workspace>"
 
-.venv/bin/nemo agents create \
+nemo agents create \
   --name "$AGENT_NAME" \
   --agent-config "agents/$AGENT_NAME/agent.yaml" \
   --workspace "$WORKSPACE"
@@ -84,7 +89,7 @@ reference:
 ```bash
 AGENT_ENVIRONMENT="$WORKSPACE/<confirmed-environment>"
 
-.venv/bin/nemo agents deploy \
+nemo agents deploy \
   --agent "$AGENT_NAME" \
   --name "$AGENT_NAME-deployment" \
   --mode docker \
@@ -97,7 +102,7 @@ AGENT_ENVIRONMENT="$WORKSPACE/<confirmed-environment>"
 If no AgentEnvironment was selected, omit both the assignment and option:
 
 ```bash
-.venv/bin/nemo agents deploy \
+nemo agents deploy \
   --agent "$AGENT_NAME" \
   --name "$AGENT_NAME-deployment" \
   --mode docker \
@@ -109,5 +114,28 @@ If no AgentEnvironment was selected, omit both the assignment and option:
 Docker is the supported local container path. Kubernetes requires a published
 image reachable by the configured executor and a separately verified runtime
 contract.
-<!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
-<!-- SPDX-License-Identifier: Apache-2.0 -->
+
+## Deploy through OpenShell
+
+Confirm the operator has configured `agents.deployments.openshell_executor`
+with a reachable gateway and platform egress.
+
+Package with the OpenShell image profile and publish to a registry the gateway
+can pull from:
+
+```bash
+nemo agents package \
+  --agent "agents/$AGENT_NAME/agent.yaml" \
+  --pyproject "agents/$AGENT_NAME/pyproject.toml" \
+  --sandbox-runtime openshell \
+  --tag "$IMAGE_TAG"
+docker push "$IMAGE_TAG"
+```
+
+Use a registry-qualified `IMAGE_TAG`; omit `--pyproject` for a config-only agent.
+Register as above, then deploy with `--mode openshell` in place of `--mode docker`.
+Keep any selected `--environment` and the confirmed `--workspace`. Verify the
+deployment reaches `running`, invocation returns usable output, and the expected
+network policy is enforced. Use the deploy-sandbox skill for that workflow.
+Do not remap `k8s_executor` to OpenShell or assume that a local image is available
+on remote gateway nodes.

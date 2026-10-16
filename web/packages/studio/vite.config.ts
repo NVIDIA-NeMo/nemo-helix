@@ -594,7 +594,7 @@ export default defineConfig(({ mode }) => {
                 changeOrigin: true,
                 secure: false,
               },
-              // Platform readiness probe used by HelixGuard. Trailing slash keeps
+              // Platform readiness probe used by PlatformGuard. Trailing slash keeps
               // Studio's own `/health` route from being proxied.
               '/health/': {
                 target: proxyDomain,

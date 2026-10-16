@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import io
 import tarfile
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -57,7 +57,7 @@ class FakeFiles:
                 return content
 
             @contextmanager
-            def stream(self, chunk_size: int | None = None) -> Iterator[Iterator[bytes]]:
+            def stream(self, chunk_size: int | None = None) -> Generator[Iterator[bytes], None, None]:
                 size = chunk_size or 7
                 yield iter([content[i : i + size] for i in range(0, len(content), size)])
 

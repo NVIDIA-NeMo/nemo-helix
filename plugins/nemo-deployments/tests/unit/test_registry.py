@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -74,7 +74,7 @@ def _patched_docker_init(
     *,
     mock_docker_client: MagicMock | None = None,
     mock_entities: AsyncMock | None = None,
-) -> Iterator[MagicMock]:
+) -> Generator[MagicMock, None, None]:
     client = mock_docker_client or MagicMock()
     entities = mock_entities or AsyncMock()
     with (

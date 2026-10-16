@@ -8,7 +8,7 @@ middleware returns ToolExecutionResult. Never patch Relay or NOOA globally.
 """
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 
 import nemo_relay
@@ -78,7 +78,7 @@ def install_nemo_relay_compat(event_manager: EventManager) -> Callable[[], None]
 
 
 @asynccontextmanager
-async def relay_scope(event_manager: EventManager, scope_name: str) -> AsyncIterator[ScopeHandle]:
+async def relay_scope(event_manager: EventManager, scope_name: str) -> AsyncGenerator[ScopeHandle, None]:
     """Keep NOOA's scope ownership and cleanup while using the local installer."""
     uninstall = install_nemo_relay_compat(event_manager)
     try:

@@ -3,7 +3,9 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import jwt
 import pytest
+from nhx.common.auth.access_keys import ACCESS_KEY_TOKEN_TYPE, ACCESS_KEY_TOKEN_TYPE_CLAIM
 from nhx.common.auth.token_claims import ActorClaims, TokenClaims
 from nhx.common.auth.token_resolver import ResolvedBearerToken, ResolvedTokenKind, resolve_bearer_token
 from nhx.common.config import AuthConfig
@@ -197,3 +199,44 @@ async def test_resolver_falls_back_to_oidc_validator() -> None:
 
     assert resolved == ResolvedBearerToken(claims=oidc_claims, token_kind="oidc_access_token")
     jwt_validator.validate_token.assert_awaited_once_with("oidc-token")
+
+
+@pytest.mark.asyncio
+async def test_resolver_rejects_an_invalid_access_key_without_trying_other_issuers() -> None:
+    """A token that names itself an access key is rejected outright when it fails validation.
+
+    Falling through costs the workload and OIDC resolvers' IdP round-trips, which pushed the
+    gateway's ext-authz callout past its timeout and turned a 401 into a 503.
+    """
+    config = AuthConfig(
+        enabled=True,
+        access_keys=AccessKeyConfig(enabled=True),
+        oidc=OIDCConfig(
+            enabled=True,
+            issuer="https://sso.example.com",
+            public_client=OIDCPublicClientConfig(client_id="nemo-helix-cli"),
+        ),
+    )
+    tampered_access_key = jwt.encode(
+        {ACCESS_KEY_TOKEN_TYPE_CLAIM: ACCESS_KEY_TOKEN_TYPE, "jti": "ak_" + "a" * 32, "sub": "alice@example.com"},
+        key="",
+        algorithm="none",
+    )
+    extra_resolver = AsyncMock(return_value=None)
+    jwt_validator = MagicMock()
+    jwt_validator.validate_token = AsyncMock(return_value=_claims())
+
+    with patch(
+        "nhx.common.auth.access_keys.validate_access_key_token",
+        new=AsyncMock(return_value=None),
+    ):
+        resolved = await resolve_bearer_token(
+            config,
+            tampered_access_key,
+            jwt_validator=jwt_validator,
+            extra_resolvers=[extra_resolver],
+        )
+
+    assert resolved is None
+    extra_resolver.assert_not_called()
+    jwt_validator.validate_token.assert_not_called()

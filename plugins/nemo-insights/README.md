@@ -77,6 +77,23 @@ The normalized `agent_name` on the agent's traces must match `--agent`.
 For OTLP, set `gen_ai.agent.name` on every span. Intake also normalizes
 `llm.agent.name` and `agent.name`; ATIF maps its required `agent.name` automatically.
 
+### Recurrence thresholds
+
+The analyst only files insights for tool failures that recur. A tool issue must
+appear in at least 3 independent cases, where a case is the evaluation test
+case name or, without one, the trace ID. A failure pattern must appear in at
+least 3 traces. Runs over a few sessions, such as runs scoped by `--since` or
+`--evaluation-id`, can find a real failure that is below these thresholds.
+
+When that happens, the run summary says some observations did not meet the
+thresholds. The `analysis-report` result lists the closest ones (up to 5) and
+any evidence streams that were skipped, with their reason:
+
+```text
+- below threshold: tool-issues knowledge_search explicit_tool_failure (2 of 3 independent cases)
+- skipped: ethos-divergence (No ethos document)
+```
+
 ### Periodic analysis
 
 ```bash

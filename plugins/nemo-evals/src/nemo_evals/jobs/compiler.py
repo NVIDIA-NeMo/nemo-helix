@@ -5,9 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-
-from nemo_evals.jobs.evaluate import EvaluateSpec
+from nemo_evals.jobs.evaluate import EvaluateSpec, evaluate_secret_refs
 from nemo_evals.jobs.secret_env import build_task_environment
 from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
@@ -42,20 +40,6 @@ def _validate_evaluate_spec(spec: EvaluateSpec) -> None:
         raise TypeError("offline evaluation requires RunConfig")
 
 
-def _secret_refs(spec: EvaluateSpec) -> Iterator[tuple[str, str]]:
-    """Yield ``(env_name, secret_name)`` for each metric secret and the endpoint target's api key."""
-    for bundle in spec.metrics:
-        for env_name, secret_ref in bundle.secrets.items():
-            yield env_name, secret_ref.root
-
-    if (
-        isinstance(spec.target, (Model, AgentBase))
-        and spec.target.api_key_secret is not None
-        and spec.target.api_key_env
-    ):
-        yield spec.target.api_key_env, spec.target.api_key_secret.root
-
-
 def _evaluate_step(spec: EvaluateSpec, profile: str | None) -> HelixJobStep:
     return HelixJobStep(
         name=EVALUATE_STEP_NAME,
@@ -69,5 +53,5 @@ def _evaluate_step(spec: EvaluateSpec, profile: str | None) -> HelixJobStep:
             ),
         ),
         config=spec.model_dump(mode="json"),
-        environment=build_task_environment(_secret_refs(spec)),
+        environment=build_task_environment(evaluate_secret_refs(spec)),
     )

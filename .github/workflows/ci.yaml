@@ -63,6 +63,7 @@ jobs:
       cpu-smoke: ${{ steps.changes.outputs.cpu-smoke }}
       guardrails-benchmark: ${{ steps.changes.outputs.guardrails-benchmark }}
       deployments-openshell: ${{ steps.changes.outputs.deployments-openshell }}
+      jobs-openshell: ${{ steps.changes.outputs.jobs-openshell }}
       ngc-metadata: ${{ steps.changes.outputs.ngc-metadata }}
       auth-idp: ${{ steps.changes.outputs.auth-idp }}
       customization-auth: ${{ steps.changes.outputs.customization-auth }}
@@ -1205,6 +1206,27 @@ jobs:
         run: uv run --frozen --group scaled-evals pytest plugins/_temporary-scaled-evals/tests -v
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
+      # The workspace venv carries a single Harbor release, but NemoOpenSandboxEnvironment must run on
+      # every runner harbor_opensandbox accepts: those whose requirements pin the OpenSandbox SDK.
+      # Build each runner's venv from its own requirements, as the image does, and run the tests there.
+      - name: Run harbor_opensandbox environment tests on each supported Harbor runner
+        working-directory: plugins/_temporary-scaled-evals
+        run: |
+          set -eu
+          for requirements in harbor-runners/*.txt; do
+            grep -q '^opensandbox==' "$requirements" || continue
+            version="$(basename "$requirements" .txt)"
+            venv="$RUNNER_TEMP/harbor-$version"
+            uv venv --python 3.12 "$venv"
+            # --python, not VIRTUAL_ENV: setup-uv exports UV_PYTHON, which would otherwise send the
+            # install to the workspace .venv.
+            uv pip install --python "$venv/bin/python" -r "$requirements" ../../packages/nhx_sandbox pytest pytest-asyncio
+            echo "::group::Harbor $version"
+            "$venv/bin/python" -m pytest -p no:cacheprovider -v \
+              tests/test_harbor_opensandbox_environment.py tests/test_harbor_opensandbox_driver.py \
+              tests/test_harbor_opensandbox_compose_services.py
+            echo "::endgroup::"
+          done
 
   # WHY THIS JOB EXISTS (it looks redundant, it isn't): `--extra fabric` appears nowhere else in this
   # file and there is no `--all-extras`, so no other job installs nemo-fabric. Every other Fabric test
@@ -2246,6 +2268,36 @@ jobs:
           retention-days: 7
           path: web/packages/studio/playwright-report/
 
+  agents-mini-swe-agent-tests:
+    name: Mini-SWE-Agent adapter integration tests
+    needs: [changes]
+    if: >
+      !cancelled() && (
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.deps == 'true' ||
+        needs.changes.outputs.agents-harnesses == 'true'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Run Mini-SWE-Agent integration tests
+        run: make test-agents-mini-swe-agent
+        env:
+          _TYPER_FORCE_DISABLE_TERMINAL: "1"
+
   agents-nooa-tests:
     name: NOOA adapter integration tests
     needs: [changes]
@@ -2401,6 +2453,35 @@ jobs:
           cache-dependency-glob: uv.lock
       - name: Run OpenShell backend unit tests
         run: make test-deployments-openshell
+        env:
+          _TYPER_FORCE_DISABLE_TERMINAL: "1"
+
+  jobs-openshell-tests:
+    name: Jobs OpenShell backend tests
+    needs: [changes]
+    if: >
+      !cancelled() && (
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.deps == 'true' ||
+        needs.changes.outputs.jobs-openshell == 'true'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Run OpenShell job backend unit tests
+        run: make test-jobs-openshell
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
 
@@ -2628,6 +2709,7 @@ jobs:
       - python-unit-test-tools
       - python-unit-test
       - python-unit-test-scaled-evals
+      - agents-mini-swe-agent-tests
       - agents-nooa-tests
       - agents-claude-tests
       - agents-codex-tests

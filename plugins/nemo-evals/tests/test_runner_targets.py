@@ -128,6 +128,30 @@ def test_every_harbor_runtime_field_has_a_submission_policy():
     )
 
 
+def test_harbor_unset_trial_concurrency_stays_optional_on_the_wire():
+    target = runner_to_target(HarborAgentTaskRunner(config=HarborRuntimeConfig(agent_name="oracle")))
+    assert isinstance(target, HarborRunnerTarget)
+    assert target.n_concurrent_trials is None
+    assert target.model_dump(mode="json")["n_concurrent_trials"] is None
+
+
+def test_harbor_config_dump_round_trip_makes_trial_concurrency_explicit():
+    config = HarborRuntimeConfig.model_validate(HarborRuntimeConfig(agent_name="oracle").model_dump())
+    target = runner_to_target(HarborAgentTaskRunner(config=config))
+    assert isinstance(target, HarborRunnerTarget)
+    assert target.n_concurrent_trials == 4
+
+
+def test_harbor_trial_concurrency_still_rejects_zero():
+    with pytest.raises(ValidationError):
+        HarborRunnerTarget(n_concurrent_trials=0)
+
+
+def test_harbor_optional_trial_concurrency_keeps_the_openapi_nullable_marker():
+    schema = HarborRunnerTarget.model_json_schema()["properties"]["n_concurrent_trials"]
+    assert schema["nullable"] is True
+
+
 @pytest.mark.parametrize("field,value", HARBOR_REJECTED_VALUES.items())
 def test_harbor_rejects_settings_the_job_cannot_preserve(tmp_path, monkeypatch, field, value):
     config = HarborRuntimeConfig(jobs_dir=tmp_path, agent_import_path="custom_agent:Agent", **{field: value})

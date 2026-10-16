@@ -8,6 +8,7 @@ import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import {
   customizationJob1,
+  customizationJobSteps,
   failedGrpoCustomizationJob,
 } from '@studio/mocks/customizer/customization-jobs';
 import { dataset } from '@studio/mocks/datasets';
@@ -204,5 +205,97 @@ describe('CustomizationJobDetailsRoute', () => {
 
       expect(await screen.findByRole('tab', { name: /Logs/, selected: true })).toBeInTheDocument();
     });
+  });
+
+  describe('a job that has finished training and is uploading its model', () => {
+    const uploadingSteps = [
+      { ...customizationJobSteps[0], status: 'completed' },
+      { ...customizationJobSteps[1], status: 'completed' },
+      {
+        ...customizationJobSteps[2],
+        status: 'active',
+        tasks: [
+          {
+            id: 'task-upload',
+            name: 'task-upload',
+            status: 'active',
+            status_details: { uploaded_files: 4, total_files: 9, total_size: 63174389156 },
+            error_details: {},
+            created_at: '2025-06-25T21:42:02.100000',
+            updated_at: '2025-06-25T21:42:02.100000',
+          },
+        ],
+      },
+      { ...customizationJobSteps[3], status: 'pending' },
+    ];
+
+    beforeEach(() => {
+      server.use(
+        http.get(`${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs/:name`, () =>
+          HttpResponse.json({ ...customizationJob1, status: HelixJobStatus.active })
+        ),
+        http.get(
+          `${PLATFORM_BASE_URL}/apis/customization/v2/workspaces/:workspace/:backend/jobs/:name/status`,
+          () =>
+            HttpResponse.json({
+              id: 'job-status',
+              name: customizationJob1.name,
+              status: 'active',
+              status_details: {},
+              error_details: {},
+              steps: uploadingSteps,
+              created_at: '2025-06-25T21:41:02.067430',
+              updated_at: '2025-06-25T21:41:02.147000',
+            })
+        )
+      );
+    });
+
+    it('says training is done and shows how many files have been uploaded', async () => {
+      render(
+        <TestProviders>
+          <CustomizationJobDetailsRoute />
+        </TestProviders>
+      );
+
+      const banner = await screen.findByTestId('customization-transfer-banner', undefined, {
+        timeout: XL_SELECTOR_TIMEOUT,
+      });
+
+      expect(banner).toHaveTextContent('Training has completed');
+      expect(banner).toHaveTextContent('4 of 9 files uploaded');
+      expect(screen.queryByTestId('customization-error-banner')).not.toBeInTheDocument();
+    });
+
+    it('opens the logs tab from the banner', async () => {
+      const user = userEvent.setup();
+
+      render(
+        <TestProviders>
+          <CustomizationJobDetailsRoute />
+        </TestProviders>
+      );
+
+      await user.click(
+        await screen.findByRole(
+          'button',
+          { name: /View model upload logs/ },
+          { timeout: XL_SELECTOR_TIMEOUT }
+        )
+      );
+
+      expect(await screen.findByRole('tab', { name: /Logs/, selected: true })).toBeInTheDocument();
+    });
+  });
+
+  it('shows no transfer banner for a completed job', async () => {
+    render(
+      <TestProviders>
+        <CustomizationJobDetailsRoute />
+      </TestProviders>
+    );
+
+    await screen.findAllByText(customizationJob1.id!, {}, { timeout: XL_SELECTOR_TIMEOUT });
+    expect(screen.queryByTestId('customization-transfer-banner')).not.toBeInTheDocument();
   });
 });

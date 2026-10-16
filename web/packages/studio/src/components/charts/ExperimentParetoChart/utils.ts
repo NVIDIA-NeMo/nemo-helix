@@ -33,14 +33,14 @@ const COST_METRIC: ParetoMetric = {
   accessor: (row) => row.cost_usd?.mean,
 };
 
-const LATENCY_METRIC: ParetoMetric = {
+export const LATENCY_METRIC: ParetoMetric = {
   id: 'latency_ms',
   label: metricLabel('latency_ms'),
   direction: 'min',
   accessor: (row) => row.latency_ms?.mean,
 };
 
-const TOKENS_METRIC: ParetoMetric = {
+export const TOKENS_METRIC: ParetoMetric = {
   id: 'tokens',
   label: metricLabel('tokens'),
   direction: 'min',
@@ -50,16 +50,20 @@ const TOKENS_METRIC: ParetoMetric = {
 /** Metrics selectable on either axis: cost, latency and tokens (minimized) plus one per evaluator seen
  * in the data (maximized). Evaluator names are dynamic, so they're derived from the rows. */
 export function deriveParetoMetrics(rows: readonly EvaluationRow[]): ParetoMetric[] {
+  return [COST_METRIC, LATENCY_METRIC, TOKENS_METRIC, ...deriveEvaluatorMetrics(rows)];
+}
+
+/** One maximized metric per evaluator seen in the rows, sorted by name. */
+export function deriveEvaluatorMetrics(rows: readonly EvaluationRow[]): ParetoMetric[] {
   const evaluatorNames = [
     ...new Set(rows.flatMap((row) => Object.keys(row.aggregate_scores ?? {}))),
   ].sort();
-  const evaluatorMetrics = evaluatorNames.map<ParetoMetric>((name) => ({
+  return evaluatorNames.map<ParetoMetric>((name) => ({
     id: `evaluators.${name}`,
     label: metricLabel(`evaluators.${name}`),
     direction: 'max',
     accessor: (row) => row.aggregate_scores?.[name]?.mean,
   }));
-  return [COST_METRIC, LATENCY_METRIC, TOKENS_METRIC, ...evaluatorMetrics];
 }
 
 export interface ParetoPlotPoint {

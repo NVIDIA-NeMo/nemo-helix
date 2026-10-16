@@ -172,10 +172,12 @@ class TestLoadHelixSkills:
         skill = load_skills()["nemo-build-agent"]
         assert skill.source_dir is not None
         packaging = (skill.source_dir / "references" / "packaging.md").read_text()
-        create_command, deployments = packaging.split(".venv/bin/nemo agents deploy", maxsplit=1)
+        create_command, deployments = packaging.split("## Deploy through OpenShell", maxsplit=1)[0].split(
+            "nemo agents deploy", maxsplit=1
+        )
         selected_environment, no_environment = deployments.split("If no AgentEnvironment was selected", maxsplit=1)
 
-        assert packaging.count(".venv/bin/nemo agents deploy") == 2
+        assert packaging.count("nemo agents deploy") == 2
         assert "If an AgentEnvironment was selected" in packaging
         assert '--workspace "$WORKSPACE"' in create_command
         assert '--workspace "$WORKSPACE"' in selected_environment

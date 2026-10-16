@@ -42,6 +42,8 @@ navigation:
         contents:
           - page: Deploy Agents
             path: ../../agents/deploy-agents.mdx
+          - page: Sandboxed Deployments
+            path: ../../agents/sandboxed-deployments.mdx
           - page: Add Guardrails
             path: ../../agents/add-guardrails.mdx
             slug: add-guardrails
@@ -436,6 +438,9 @@ navigation:
                   - page: OpenSandbox
                     slug: open-sandbox
                     path: ../../set-up/helm/opensandbox.mdx
+                  - page: OpenShell
+                    slug: openshell
+                    path: ../../set-up/helm/openshell.mdx
                   - page: OpenSandbox with Kata
                     slug: opensandbox-kata
                     path: ../../set-up/helm/opensandbox-kata.mdx
@@ -512,10 +517,14 @@ navigation:
             contents:
               - page: Configuration
                 path: ../../auth/deployment/configuration.mdx
+              - page: Deployment Secrets
+                path: ../../auth/deployment/deployment-secrets.mdx
               - page: Credential Propagation
                 path: ../../auth/deployment/credential-propagation.mdx
               - page: Gateway Integration
                 path: ../../auth/deployment/gateway.mdx
+              - page: Scoped Intake Tokens
+                path: ../../auth/deployment/scoped-intake-tokens.mdx
               - page: Production Hardening
                 path: ../../auth/deployment/hardening.mdx
           - page: Security Model

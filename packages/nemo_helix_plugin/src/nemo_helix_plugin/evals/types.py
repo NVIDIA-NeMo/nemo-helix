@@ -306,6 +306,29 @@ class Revision(BaseModel):
 RevisionPage = Page[Revision]
 
 
+class TaskImageBuild(BaseModel):
+    """Container image build of a stored task revision."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str = ""
+    task: str = ""
+    revision: str = ""
+    status: str = ""
+    job: str = ""
+
+
+TaskImageBuildPage = Page[TaskImageBuild]
+
+
+class CreateTaskImageBuildRequest(BaseModel):
+    """Request body for building a task revision's container images."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    allowed_registries: list[str] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Request types
 # ---------------------------------------------------------------------------
@@ -499,6 +522,11 @@ class EvaluatorJobLogsQueryParams(TypedDict, total=False):
 
 
 class ListRevisionsQueryParams(TypedDict, total=False):
+    page: NotRequired[int]
+    page_size: NotRequired[int]
+
+
+class ListTaskImageBuildsQueryParams(TypedDict, total=False):
     page: NotRequired[int]
     page_size: NotRequired[int]
 

@@ -12,11 +12,12 @@ import shutil
 import socket
 import subprocess
 import tempfile
-import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
+from time import monotonic
+from time import sleep as pause
 from typing import TypeVar
 from urllib.parse import urlparse
 
@@ -951,10 +952,10 @@ def _retry_until_timeout(
     timeout_message: str,
     raise_last_retry_error: bool = True,
 ) -> T:
-    deadline = time.monotonic() + timeout
+    deadline = monotonic() + timeout
     last_error: Exception | None = None
     while True:
-        remaining = deadline - time.monotonic()
+        remaining = deadline - monotonic()
         if remaining <= 0:
             break
         try:
@@ -963,10 +964,10 @@ def _retry_until_timeout(
                 return result
         except retry_exceptions as exc:
             last_error = exc
-        remaining = deadline - time.monotonic()
+        remaining = deadline - monotonic()
         if remaining <= 0:
             break
-        time.sleep(min(sleep, remaining))
+        pause(min(sleep, remaining))
     if last_error is not None:
         if raise_last_retry_error:
             raise last_error

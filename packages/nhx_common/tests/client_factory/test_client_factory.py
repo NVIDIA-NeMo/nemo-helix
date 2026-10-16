@@ -666,7 +666,7 @@ class TestDefaultRetryPolicy:
         assert client._retry is cf.DEFAULT_RETRY_POLICY
 
     def test_retries_rate_limit_then_succeeds(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setattr("nemo_helix_plugin.client.client.time.sleep", lambda _: None)
+        monkeypatch.setattr("nemo_helix_plugin.client.client.sleep", lambda _: None)
         sink, http_client = _retry_sink([429, 429])
 
         client = cf.get_nemo_client(http_client=http_client)
@@ -676,7 +676,7 @@ class TestDefaultRetryPolicy:
         assert len(sink) == 3
 
     def test_retries_server_error_then_succeeds(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setattr("nemo_helix_plugin.client.client.time.sleep", lambda _: None)
+        monkeypatch.setattr("nemo_helix_plugin.client.client.sleep", lambda _: None)
         sink, http_client = _retry_sink([503, 503])
 
         client = cf.get_nemo_client(http_client=http_client)
@@ -686,7 +686,7 @@ class TestDefaultRetryPolicy:
         assert len(sink) == 3
 
     def test_retries_request_timeout_and_conflict(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setattr("nemo_helix_plugin.client.client.time.sleep", lambda _: None)
+        monkeypatch.setattr("nemo_helix_plugin.client.client.sleep", lambda _: None)
         sink, http_client = _retry_sink([408, 409])
 
         client = cf.get_nemo_client(http_client=http_client)
@@ -696,7 +696,7 @@ class TestDefaultRetryPolicy:
         assert len(sink) == 3
 
     def test_does_not_retry_other_4xx(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setattr("nemo_helix_plugin.client.client.time.sleep", lambda _: None)
+        monkeypatch.setattr("nemo_helix_plugin.client.client.sleep", lambda _: None)
         sink, http_client = _retry_sink([400])
 
         client = cf.get_nemo_client(http_client=http_client)
@@ -706,7 +706,7 @@ class TestDefaultRetryPolicy:
         assert len(sink) == 1
 
     def test_gives_up_after_two_retries(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setattr("nemo_helix_plugin.client.client.time.sleep", lambda _: None)
+        monkeypatch.setattr("nemo_helix_plugin.client.client.sleep", lambda _: None)
         sink, http_client = _retry_sink([503, 503, 503, 503])
 
         client = cf.get_nemo_client(http_client=http_client)
@@ -717,7 +717,7 @@ class TestDefaultRetryPolicy:
 
     def test_retry_after_header_honored(self, monkeypatch: pytest.MonkeyPatch):
         sleeps: list[float] = []
-        monkeypatch.setattr("nemo_helix_plugin.client.client.time.sleep", sleeps.append)
+        monkeypatch.setattr("nemo_helix_plugin.client.client.sleep", sleeps.append)
         sink: list[httpx.Request] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -734,7 +734,7 @@ class TestDefaultRetryPolicy:
         assert sleeps == [0.001, 0.001]
 
     def test_x_should_retry_false_stops_retry(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setattr("nemo_helix_plugin.client.client.time.sleep", lambda _: None)
+        monkeypatch.setattr("nemo_helix_plugin.client.client.sleep", lambda _: None)
         sink: list[httpx.Request] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -748,7 +748,7 @@ class TestDefaultRetryPolicy:
         assert len(sink) == 1
 
     def test_with_retry_override_disables_retries(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setattr("nemo_helix_plugin.client.client.time.sleep", lambda _: None)
+        monkeypatch.setattr("nemo_helix_plugin.client.client.sleep", lambda _: None)
         sink, http_client = _retry_sink([429, 429])
 
         client = cf.get_nemo_client(http_client=http_client).with_retry(RetryPolicy(max_retries=0))
@@ -761,7 +761,7 @@ class TestDefaultRetryPolicy:
         async def _no_sleep(_: float) -> None:
             return None
 
-        monkeypatch.setattr("nemo_helix_plugin.client.client.asyncio.sleep", _no_sleep)
+        monkeypatch.setattr("nemo_helix_plugin.client.client.async_sleep", _no_sleep)
         sink, http_client = _async_retry_sink([429, 429])
 
         client = cf.get_async_nemo_client(http_client=http_client)
@@ -774,7 +774,7 @@ class TestDefaultRetryPolicy:
         async def _no_sleep(_: float) -> None:
             return None
 
-        monkeypatch.setattr("nemo_helix_plugin.client.client.asyncio.sleep", _no_sleep)
+        monkeypatch.setattr("nemo_helix_plugin.client.client.async_sleep", _no_sleep)
         sink, http_client = _async_retry_sink([503, 503, 503])
 
         client = cf.get_async_nemo_client(http_client=http_client)

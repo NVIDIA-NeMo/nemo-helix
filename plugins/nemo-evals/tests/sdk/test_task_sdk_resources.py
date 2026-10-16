@@ -425,3 +425,45 @@ def test_sync_list_sends_harbor_id_intent_metric_and_tag_filters() -> None:
         "metrics": "default/judge",
         "tags": "v1.2",
     }
+
+
+def _image_build_payload(build_id: str, status: str = "pending") -> dict[str, Any]:
+    return {
+        "id": build_id,
+        "task": "default/task-1",
+        "revision": "a" * 64,
+        "status": status,
+        "job": f"task-image-build-0123456789abcdef-{build_id}",
+        "allowed_registries": [],
+        "images": [],
+    }
+
+
+def test_sync_build_images_posts_to_the_revision_and_parses_the_build() -> None:
+    resource, recorder = _sync_resource(_image_build_payload("1"))
+
+    build = resource.build_images("task-1", revision="a" * 64, allowed_registries=["docker.io"])
+
+    request = recorder.requests[0]
+    assert request.method == "POST"
+    assert _request_url(request) == f"{_BASE}/tasks/task-1/revisions/{'a' * 64}/image-builds"
+    assert _request_body(request) == {"allowed_registries": ["docker.io"]}
+    assert (build.id, build.status) == ("1", "pending")
+
+
+def test_sync_image_builds_default_to_the_latest_revision() -> None:
+    resource, recorder = _sync_resource(_page([_image_build_payload("2"), _image_build_payload("1", "failed")]))
+
+    page = resource.list_image_builds("task-1")
+
+    assert _request_url(recorder.requests[0]) == f"{_BASE}/tasks/task-1/revisions/latest/image-builds"
+    assert [build.id for build in page.data] == ["2", "1"]
+
+
+async def test_async_get_image_build_reads_one_build() -> None:
+    resource, recorder = _async_resource(_image_build_payload("2", "ready"))
+
+    build = await resource.get_image_build("task-1", "2", revision="blessed")
+
+    assert _request_url(recorder.requests[0]) == f"{_BASE}/tasks/task-1/revisions/blessed/image-builds/2"
+    assert build.status == "ready"

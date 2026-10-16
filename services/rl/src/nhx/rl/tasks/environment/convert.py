@@ -19,7 +19,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Iterator
+from typing import Any, Generator
 
 from nhx.customization_common.service.constants import SANDBOX_DATASET_PATH
 from nhx.rl.tasks.environment.allowlist import DEFAULT_ADAPTER_AGENT
@@ -659,7 +659,7 @@ def _sandbox_hub_dataset_path(filename: str = HUB_ENV_DATASET_FILENAME) -> str:
 
 
 @contextmanager
-def _isolated_hf_home(hf_home: Path) -> Iterator[Path]:
+def _isolated_hf_home(hf_home: Path) -> Generator[Path, None, None]:
     """Point Hugging Face cache settings at ``hf_home`` for the duration of the block.
 
     Conversion must not copy the developer's ``~/.cache/huggingface``; loaders

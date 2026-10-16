@@ -52,12 +52,6 @@ export interface FilesetTemplate {
   models?: TemplateModelSpec[];
 }
 
-export interface DetailPoint {
-  icon: LucideIcon;
-  title: string;
-  description: string;
-}
-
 export interface DescribeWithAiPanelProps {
   /** Workspace whose models are offered, and against which the draft is validated. */
   workspace: string;
@@ -91,23 +85,15 @@ export interface GeneratedConfigPanelProps {
   description?: string;
 }
 
-/** What the user confirmed via the Continue footer, carrying that option's payload. */
+/** How the user chose to start, carrying that option's payload. */
 export type StartSelection =
   | { optionId: 'scratch' }
   | { optionId: 'template'; templateId: string }
   | { optionId: 'ai'; jobRequest: DataDesignerJobRequest };
 
-export interface StartOptionDetailProps {
-  option: StartOption;
-  selectedTemplateId: string | null;
-  onSelectTemplate: (templateId: string) => void;
-  workspace: string;
-  onValidConfig: (jobRequest: DataDesignerJobRequest | null) => void;
-}
-
 export interface CreateFilesetStartProps {
   /** Workspace whose models the "Describe with AI" option draws from. */
   workspace: string;
-  /** Fired when the user confirms a selected start option via the Continue footer. */
+  /** Fired once a way in is chosen and, for AI, its config has validated. */
   onContinue: (selection: StartSelection) => void;
 }

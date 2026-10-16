@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import math
+from asyncio import sleep as async_sleep
 from urllib.parse import urlparse, urlunparse
 
 import httpx
@@ -75,7 +75,7 @@ class NimEmbeddingClient(BaseModel):
                         raise NimEmbeddingError(
                             f"embedding HTTP {error.response.status_code} after {attempt + 1} attempts: {body or error}"
                         ) from error
-                    await asyncio.sleep(backoff_seconds(attempt))
+                    await async_sleep(backoff_seconds(attempt))
                     continue
                 except httpx.TransportError as error:
                     logger.warning(
@@ -84,7 +84,7 @@ class NimEmbeddingClient(BaseModel):
                     )
                     if attempt >= self.max_retries:
                         raise
-                    await asyncio.sleep(backoff_seconds(attempt))
+                    await async_sleep(backoff_seconds(attempt))
                     continue
                 embeddings = _parse_embeddings(response, expected_count=len(inputs), dimensions=self.dimensions)
                 if embeddings and self.dimensions is None:
@@ -92,7 +92,7 @@ class NimEmbeddingClient(BaseModel):
                 if all(math.isfinite(value) for embedding in embeddings for value in embedding):
                     return embeddings
                 if attempt < self.max_retries:
-                    await asyncio.sleep(backoff_seconds(attempt))
+                    await async_sleep(backoff_seconds(attempt))
         finally:
             if owns_client:
                 await client.aclose()

@@ -184,3 +184,52 @@ def test_authentik_blueprint_declares_e2e_setup_identity_as_test_only() -> None:
 def test_authentik_blueprint_has_single_canonical_source() -> None:
     assert BLUEPRINT.exists()
     assert not LEGACY_BLUEPRINT.exists()
+
+
+# The authentik default blueprint that creates each object nemo.yaml looks up with !Find.
+_DEFAULT_BLUEPRINT_PROVIDING = {
+    ("authentik_flows.flow", "default-authentication-flow"): "Default - Authentication flow",
+    (
+        "authentik_flows.flow",
+        "default-provider-authorization-implicit-consent",
+    ): "Default - Provider authorization flow (implicit consent)",
+    ("authentik_flows.flow", "default-provider-invalidation-flow"): "Default - Provider invalidation flow",
+    ("authentik_providers_oauth2.scopemapping", "openid"): "System - OAuth2 Provider - Scopes",
+    ("authentik_providers_oauth2.scopemapping", "email"): "System - OAuth2 Provider - Scopes",
+    ("authentik_providers_oauth2.scopemapping", "offline_access"): "System - OAuth2 Provider - Scopes",
+}
+
+
+def _found_defaults(value: object) -> set[tuple[str, str]]:
+    if isinstance(value, TaggedYamlValue):
+        if value.tag != "!Find":
+            return set()
+        model, (_, key) = value.value
+        return {(model, key)} if model in {"authentik_flows.flow", "authentik_providers_oauth2.scopemapping"} else set()
+    if isinstance(value, Mapping):
+        return set().union(*(_found_defaults(item) for item in value.values()))
+    if isinstance(value, list):
+        return set().union(*(_found_defaults(item) for item in value))
+    return set()
+
+
+def test_authentik_blueprint_applies_the_defaults_it_finds_before_using_them() -> None:
+    """A !Find that runs before the worker applies a default blueprint resolves to nothing.
+
+    Required fields then fail the apply, but an optional one such as the brand's
+    flow_device_code is left empty and /device answers 404. Applying the default blueprint
+    first, as a required meta entry, makes the lookup independent of worker timing.
+    """
+    entries = _entries(_load_blueprint())
+    required_meta_positions = {
+        _attrs(entry)["identifiers"]["name"]: position
+        for position, entry in enumerate(entries)
+        if entry.get("model") == "authentik_blueprints.metaapplyblueprint" and _attrs(entry).get("required") is True
+    }
+
+    for position, entry in enumerate(entries):
+        for found in _found_defaults(entry.get("attrs")):
+            assert found in _DEFAULT_BLUEPRINT_PROVIDING, f"map {found} to the default blueprint that creates it"
+            providing = _DEFAULT_BLUEPRINT_PROVIDING[found]
+            assert providing in required_meta_positions, f"apply {providing!r} as a required meta entry"
+            assert required_meta_positions[providing] < position, f"apply {providing!r} before entry {position}"

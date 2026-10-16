@@ -20,7 +20,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
-from collections.abc import Sequence
 from datetime import timedelta
 from typing import cast
 
@@ -31,7 +30,6 @@ from nemo_helix_plugin.intake.types import (
     AtifCreateParams,
     AtifCreateRequest,
     AtifFinalMetricsParam,
-    AtifStepParam,
     EvaluatorResultCreateRequest,
     TraceFilterParam,
 )
@@ -245,7 +243,7 @@ async def publish_to_intake(
             started_at + timedelta(seconds=measurements.runtime_sec) if measurements.runtime_sec is not None else None
         )
 
-        def build_body(steps: Sequence[AtifStepParam] | None) -> AtifCreateParams:
+        def build_body(steps: mapping.RecordedSteps | None) -> AtifCreateParams:
             body = mapping.trial_to_atif_ingest(
                 trial,
                 run_id=result.run_id,
@@ -271,9 +269,9 @@ async def publish_to_intake(
             # The SDK's ATIF read model accepts shapes ingest does not, so a trajectory that
             # parsed locally can still be refused. Losing the trial's scores over a trace
             # detail is the wrong trade — fall back to the single-step trajectory a runner
-            # with no trace would have sent. Guard on emptiness rather than ``is None``: with no
-            # steps to drop, the retry would resend the body ingest just refused.
-            if not recorded_steps:
+            # with no trace would have sent. With no steps to drop, the retry would resend the
+            # body ingest just refused.
+            if recorded_steps is None:
                 raise
             logger.warning(
                 "Intake rejected the recorded trajectory for trial %s (%s); publishing its final output instead.",

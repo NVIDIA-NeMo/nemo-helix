@@ -25,9 +25,12 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_agent_hardener_plugin._perms import AgentHardenerManifestPerms
 from nemo_agent_hardener_plugin.agent_resolver import (
+    GATEWAY_BACKEND_NAME,
     AgentResolutionError,
     ResolvedManifest,
     inspect_agent,
+    parse_backends,
+    parse_secret_specs,
     resolve_agent_to_manifest,
 )
 from nemo_agent_hardener_plugin.api.v2._filters import make_filter_dep
@@ -257,6 +260,36 @@ def _yaml_with_agent_settings(manifest_yaml: str, manifest: AgentHardenerManifes
     return yaml.safe_dump(data, sort_keys=False)
 
 
+def _backends_or_422(specs: list[str] | None) -> list[dict[str, Any]]:
+    try:
+        return parse_backends(specs)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _secrets_or_422(specs: list[str] | None) -> tuple[list[str] | None, dict[str, str]]:
+    try:
+        return parse_secret_specs(specs)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _stored_user_backends(manifest_yaml: str) -> list[dict[str, Any]]:
+    """The non-gateway backends in a saved manifest, which refresh must not drop.
+
+    The gateway entry is left out because resolution derives it from the platform URL again.
+    """
+    try:
+        data = yaml.safe_load(manifest_yaml) or {}
+    except yaml.YAMLError:
+        logger.warning("Saved manifest YAML is invalid; its backends are not carried over on refresh", exc_info=True)
+        return []
+    entries = data.get("backends") if isinstance(data, dict) else None
+    if not isinstance(entries, list):
+        return []
+    return [b for b in entries if isinstance(b, dict) and b.get("name") != GATEWAY_BACKEND_NAME]
+
+
 @router.post("/manifests", response_model=AgentHardenerManifest, status_code=201, tags=["Agent Hardener Manifests"])
 @scope.write
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[AgentHardenerManifestPerms.WRITE])
@@ -299,6 +332,7 @@ async def _resolve_and_store_scaffold(
     egress: list[str] | None,
     port: int | None,
     secrets: list[str] | None,
+    backends: list[dict[str, Any]],
 ) -> tuple[ResolvedManifest, str]:
     """Resolve *agent_ref* and persist its scaffold as a fileset; return the resolution and the ref.
 
@@ -322,6 +356,7 @@ async def _resolve_and_store_scaffold(
                 egress=egress,
                 port=port,
                 secrets=secrets,
+                backends=backends,
             )
             return resolved, upload_project_dir(client, resolved.project_dir, workspace=workspace)
 
@@ -339,8 +374,14 @@ async def _build_agent_manifest(workspace: str, body: ManifestInit) -> AgentHard
     # ManifestInit's validator guarantees this for the agent source; the annotation is Optional
     # because the project source has no agent, and the type system cannot see the validator.
     agent_ref = body.agent or ""
+    secret_names, secret_refs = _secrets_or_422(body.secrets)
     resolved, fileset = await _resolve_and_store_scaffold(
-        workspace, agent_ref, egress=body.egress, port=body.port, secrets=body.secrets
+        workspace,
+        agent_ref,
+        egress=body.egress,
+        port=body.port,
+        secrets=secret_names,
+        backends=_backends_or_422(body.backends),
     )
 
     manifest = AgentHardenerManifest.from_agent_resolution(
@@ -355,6 +396,10 @@ async def _build_agent_manifest(workspace: str, body: ManifestInit) -> AgentHard
         env=body.env or {},
         warnings=resolved.warnings,
         models=body.models or WarGameModels(),
+        agent_updated_at=resolved.agent_updated_at,
+        secret_refs=secret_refs,
+        declared_secrets=secret_names or [],
+        deployed_secret_refs=resolved.deployed_secret_refs,
     )
     # resolve_agent_to_manifest has no `env` parameter, so it is absent from the YAML it produced.
     manifest.manifest_yaml = _yaml_with_agent_settings(manifest.manifest_yaml, manifest)
@@ -368,6 +413,8 @@ async def _build_project_manifest(workspace: str, body: ManifestInit) -> AgentHa
     nothing to freeze — the upload *is* the frozen target. Caller-supplied values win over derived
     ones: they were asked for precisely because the project could not state them.
     """
+    backends = _backends_or_422(body.backends)
+    secret_names, secret_refs = _secrets_or_422(body.secrets)
     client = get_nemo_client(as_service="agent-hardener", internal=True)
 
     def _inspect() -> dict[str, Any]:
@@ -409,8 +456,9 @@ async def _build_project_manifest(workspace: str, body: ManifestInit) -> AgentHa
         start_command=start_command,
         binaries=list(binaries),
         port=body.port or derived.get("port", 8000),
-        secrets=body.secrets if body.secrets is not None else derived.get("secrets", []),
+        secrets=secret_names if secret_names is not None else derived.get("secrets", []),
         egress=body.egress if body.egress is not None else derived.get("egress", []),
+        backends=backends,
         harness=body.harness,
         relay_integration_confirmed=body.relay_integration_confirmed,
         env=body.env or derived.get("env", {}),
@@ -428,6 +476,7 @@ async def _build_project_manifest(workspace: str, body: ManifestInit) -> AgentHa
         env=body.env or {},
         warnings=derived.get("warnings", []),
         models=body.models or WarGameModels(),
+        secret_refs=secret_refs,
     )
     manifest.manifest_yaml = _yaml_with_agent_settings(manifest.manifest_yaml, manifest)
     return manifest
@@ -499,19 +548,26 @@ async def refresh_manifest(
             detail=f"manifest '{name}' names no agent to refresh from; recreate it against a registered agent.",
         )
 
+    # Names that only came from the old deployment are re-derived, so a secret it dropped is not still required.
+    kept_secrets = [
+        n for n in existing.secrets if n in existing.declared_secrets or n not in existing.deployed_secret_refs
+    ]
     resolved, fileset = await _resolve_and_store_scaffold(
         workspace,
         existing.agent,
         egress=existing.egress or None,
         port=existing.port or None,
-        secrets=existing.secrets or None,
+        secrets=kept_secrets or None,
+        backends=_stored_user_backends(existing.manifest_yaml),
     )
     stale = existing.agent_fileset
 
     existing.agent_fileset = fileset
     existing.port = resolved.port
     existing.secrets = resolved.secrets
+    existing.deployed_secret_refs = resolved.deployed_secret_refs
     existing.warnings = resolved.warnings
+    existing.agent_updated_at = resolved.agent_updated_at
     existing.manifest_yaml = _yaml_with_agent_settings(yaml.safe_dump(resolved.manifest, sort_keys=False), existing)
     updated = await entity_client.update(existing)
 

@@ -105,6 +105,22 @@ def test_direct_span_ingest_round_trips_batch_and_raw_json(client: TestClient):
     assert json.loads(child["raw_attributes"])["provider.raw"]["events"][0]["value"] is None
 
 
+def test_direct_span_ingest_orders_equal_timestamps_by_step_id(client: TestClient):
+    started_at = _timestamp()
+    spans = [
+        _span(span_id=span_id, started_at=started_at, attributes={"nemo.step_id": step_id})
+        for span_id, step_id in {"step-3": 3, "step-1": 1, "too-large": 2**1024}.items()
+    ]
+
+    response = client.post(INGEST_URL, json={"source": "provider-store", "spans": spans})
+    assert response.status_code == 201, response.text
+
+    listed = client.get(SPANS_URL, params={"filter[session_id]": "provider-trace", "sort": "started_at"})
+    assert listed.status_code == 200, listed.text
+    assert [span["span_id"] for span in listed.json()["data"]] == ["step-1", "step-3", "too-large"]
+    assert listed.json()["data"][0]["raw_attributes"] == '{"nemo.step_id":1}'
+
+
 def test_direct_span_ingest_replay_upserts(client: TestClient):
     body = {"source": "replay-source", "spans": [_span(trace_id="replay-trace", output={"version": 1})]}
     first = client.post(INGEST_URL, json=body)

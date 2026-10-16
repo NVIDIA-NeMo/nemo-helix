@@ -22,6 +22,7 @@ class GeneratedSampleEvent:
     item: MappingProxyType
     sample: MappingProxyType
     requests_log: list[dict[str, Any]]
+    runtime_sec: float | None = None
 
 
 class GeneratedSampleScoringPipeline(Protocol):
@@ -40,6 +41,7 @@ class GeneratedSampleScoringPipeline(Protocol):
         row: dict[str, Any],
         error: Exception,
         generation_requests: list[dict[str, Any]],
+        runtime_sec: float | None = None,
     ) -> tuple[int, MetricResult | None, RowScore]:
         """Convert a generation failure into a completed row result or raise."""
         ...
@@ -50,6 +52,7 @@ class GeneratedSampleScoringPipeline(Protocol):
         row: dict[str, Any],
         sample: dict[str, Any],
         generation_requests: list[dict[str, Any]],
+        runtime_sec: float | None = None,
     ) -> tuple[int, MetricResult | None, RowScore]:
         """Score one prepared sample and return the completed row result."""
         ...

@@ -214,8 +214,13 @@ def test_synth_benign_job_execute_happy_path(tmp_path: Path, monkeypatch: pytest
     monkeypatch.setattr(job_mod._common, "materialize_victim_env_file", lambda *a, **k: None)
     monkeypatch.setattr(job_mod._common, "check_victim_secrets", lambda *a, **k: None)
     monkeypatch.setattr(job_mod, "_materialize_manifest", lambda sdk, mid, ctx: str(manifest))
+    monkeypatch.setattr(job_mod, "_manifest_secret_values", lambda *_a: {})
     monkeypatch.setattr(
-        job_mod.AgentHardenerConfig, "get", classmethod(lambda _cls: SimpleNamespace(agent_hardener_bin="bin"))
+        job_mod.AgentHardenerConfig,
+        "get",
+        classmethod(
+            lambda _cls: SimpleNamespace(agent_hardener_bin="bin", operator_env_file=tmp_path / "operator.env")
+        ),
     )
     seen: dict[str, Any] = {}
 
@@ -234,13 +239,92 @@ def test_synth_benign_job_execute_happy_path(tmp_path: Path, monkeypatch: pytest
     assert seen["interview"] == "auto"
 
 
+def test_synth_benign_cli_path_uses_the_manifests_models(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agent_hardener_plugin.jobs import synth_benign as job_mod
+
+    manifest = _write_manifest(tmp_path)
+    monkeypatch.setattr(job_mod._common, "require_provisioned", lambda _c: None)
+    monkeypatch.setattr(job_mod._common, "build_subprocess_env", lambda _c: {})
+    monkeypatch.setattr(job_mod._common, "check_victim_secrets", lambda *a, **k: None)
+    monkeypatch.setattr(job_mod, "_materialize_manifest", lambda *_a: str(manifest))
+    monkeypatch.setattr(job_mod, "_manifest_secret_values", lambda *_a: {})
+    monkeypatch.setattr(job_mod, "_effective_models", lambda *_a: object())
+    monkeypatch.setattr(
+        job_mod._common, "build_model_env", lambda *_a, **_k: {"AGENT_HARDENER_BASE_URL": "https://models.test/v1"}
+    )
+    monkeypatch.setattr(
+        job_mod.AgentHardenerConfig,
+        "get",
+        classmethod(
+            lambda _cls: SimpleNamespace(agent_hardener_bin="bin", operator_env_file=tmp_path / "operator.env")
+        ),
+    )
+    seen: dict[str, str] = {}
+
+    def _fake_run_synth(bin_path, mani, env_file, env, ctx, *, interview):
+        seen.update(env)
+        return tmp_path / "requests.csv"
+
+    monkeypatch.setattr(job_mod, "run_synth_benign", _fake_run_synth)
+    monkeypatch.setattr(job_mod, "read_and_persist_suite", lambda *_a: [])
+    job = job_mod.AgentHardenerSynthBenignJob()
+    monkeypatch.setattr(job, "report_progress", lambda *a, **k: None)
+
+    job.run({"manifest_id": "m1"}, ctx=_ctx(tmp_path), sdk=object())
+
+    assert seen["AGENT_HARDENER_BASE_URL"] == "https://models.test/v1"
+
+
+def test_synth_generated_victim_env_cannot_reload_platform_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nemo_agent_hardener_plugin.config import AgentHardenerConfig
+    from nemo_agent_hardener_plugin.jobs import synth_benign as job_mod
+
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text(
+        "agent:\n  name: a\n  port: 1\n  secrets:\n    - OPENAI_API_KEY\n    - NHX_ACCESS_TOKEN\n",
+        encoding="utf-8",
+    )
+    cfg = AgentHardenerConfig(
+        venv_path=tmp_path / "venv",
+        garak_venv_path=tmp_path / "garak-venv",
+        operator_env_file=tmp_path / "operator.env",
+    )
+    cfg.agent_hardener_bin.parent.mkdir(parents=True, exist_ok=True)
+    cfg.agent_hardener_bin.touch()
+    cfg.garak_python.parent.mkdir(parents=True, exist_ok=True)
+    cfg.garak_python.touch()
+    monkeypatch.setattr(job_mod.AgentHardenerConfig, "get", classmethod(lambda _cls: cfg))
+    monkeypatch.setattr(job_mod, "_materialize_manifest", lambda *_a, **_k: str(manifest))
+    monkeypatch.setattr(job_mod, "_manifest_secret_values", lambda *_a: {})
+    monkeypatch.setenv("OPENAI_API_KEY", "victim-model-key")
+    monkeypatch.setenv("NHX_ACCESS_TOKEN", "platform-access-token")
+    job = job_mod.AgentHardenerSynthBenignJob()
+
+    result = job.run({"manifest_id": "m1"}, ctx=_ctx(tmp_path), sdk=object())
+
+    assert result["status"] == "failed"
+    assert result["error"]["category"] == "manifest"
+    assert "reserved Platform environment variables: NHX_ACCESS_TOKEN" in result["error"]["message"]
+    dotenv = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "OPENAI_API_KEY" in dotenv
+    assert "victim-model-key" in dotenv
+    assert "NHX_ACCESS_TOKEN" not in dotenv
+    assert "platform-access-token" not in dotenv
+
+
 def test_synth_benign_job_classifies_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from nemo_agent_hardener_plugin.jobs import synth_benign as job_mod
     from nemo_agent_hardener_plugin.jobs.errors import AgentHardenerRunError
 
     monkeypatch.setattr(job_mod._common, "require_provisioned", lambda _c: None)
     monkeypatch.setattr(
-        job_mod.AgentHardenerConfig, "get", classmethod(lambda _cls: SimpleNamespace(agent_hardener_bin="bin"))
+        job_mod.AgentHardenerConfig,
+        "get",
+        classmethod(
+            lambda _cls: SimpleNamespace(agent_hardener_bin="bin", operator_env_file=tmp_path / "operator.env")
+        ),
     )
 
     def _boom(sdk, mid, ctx):
@@ -269,11 +353,16 @@ def test_synth_benign_job_service_driver_runs_serve_and_finalizes(
     monkeypatch.setattr(job_mod._common, "check_victim_secrets", lambda *a, **k: None)
     monkeypatch.setattr(job_mod._common, "build_model_env", lambda *a, **k: {})
     monkeypatch.setattr(job_mod, "_materialize_manifest", lambda sdk, mid, ctx: str(manifest))
+    monkeypatch.setattr(job_mod, "_manifest_secret_values", lambda *_a: {})
     monkeypatch.setattr(job_mod, "_effective_models", lambda sdk, config, ctx: None)
     monkeypatch.setattr(job_mod, "_manifest_facts", lambda mani: ("agent-x", 8000))
     monkeypatch.setattr(job_mod, "_save_events_fileset", lambda *a, **k: "")
     monkeypatch.setattr(
-        job_mod.AgentHardenerConfig, "get", classmethod(lambda _cls: SimpleNamespace(agent_hardener_bin="bin"))
+        job_mod.AgentHardenerConfig,
+        "get",
+        classmethod(
+            lambda _cls: SimpleNamespace(agent_hardener_bin="bin", operator_env_file=tmp_path / "operator.env")
+        ),
     )
 
     seen: dict[str, Any] = {}
@@ -576,3 +665,42 @@ def test_cli_init_rejects_a_malformed_env_pair(tmp_path: Path, monkeypatch: pyte
 
     assert result.exit_code == 1
     assert "KEY=VALUE" in result.output
+
+
+def test_synth_benign_writes_the_victim_dotenv_when_env_file_is_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The manifest's secrets_file is <manifest_dir>/.env; --env-file must not leave it unwritten."""
+    from nemo_agent_hardener_plugin.jobs import synth_benign as job_mod
+
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text("agent:\n  name: a\n  secrets: [REMOTE_TOKEN]\n", encoding="utf-8")
+    user_env = tmp_path / "user.env"
+    user_env.write_text("REMOTE_TOKEN=from-user\n", encoding="utf-8")
+    monkeypatch.setattr(job_mod._common, "require_provisioned", lambda _c: None)
+    monkeypatch.setattr(job_mod._common, "build_subprocess_env", lambda _c: {})
+    monkeypatch.setattr(job_mod, "_materialize_manifest", lambda sdk, mid, ctx: str(manifest))
+    monkeypatch.setattr(job_mod, "_manifest_secret_values", lambda *_a: {})
+    monkeypatch.setattr(
+        job_mod.AgentHardenerConfig,
+        "get",
+        classmethod(
+            lambda _cls: SimpleNamespace(agent_hardener_bin="bin", operator_env_file=tmp_path / "operator.env")
+        ),
+    )
+    seen: dict[str, Any] = {}
+
+    def _fake_run_synth(bin_path, mani, env_file, env, ctx, *, interview):
+        seen["env_file"] = env_file
+        return tmp_path / "requests.csv"
+
+    monkeypatch.setattr(job_mod, "run_synth_benign", _fake_run_synth)
+    monkeypatch.setattr(job_mod, "read_and_persist_suite", lambda sdk, ctx, mid, csv: [])
+
+    job = job_mod.AgentHardenerSynthBenignJob()
+    monkeypatch.setattr(job, "report_progress", lambda *a, **k: None)
+    out = job.run({"manifest_id": "m1", "env_file": str(user_env)}, ctx=_ctx(tmp_path), sdk=object())
+
+    assert out["status"] == "completed"
+    assert seen["env_file"] == str(user_env)
+    assert "REMOTE_TOKEN=from-user" in (tmp_path / ".env").read_text(encoding="utf-8")

@@ -523,7 +523,7 @@ def test_watch_job_retries_transient_http_status_error(monkeypatch: pytest.Monke
         ],
         log_results=[AssertionError("logs should not be fetched")],
     )
-    monkeypatch.setattr(watch_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(watch_module, "sleep", lambda _: None)
 
     events = list(watch_job(client, "job-a", include_logs=False, poll_interval=0))
 
@@ -553,7 +553,7 @@ def test_watch_job_backs_off_and_deduplicates_consecutive_transient_status_error
         log_results=[AssertionError("logs should not be fetched")],
     )
     sleeps: list[float] = []
-    monkeypatch.setattr(watch_module.time, "sleep", sleeps.append)
+    monkeypatch.setattr(watch_module, "sleep", sleeps.append)
 
     events = list(watch_job(client, "job-a", include_logs=False, poll_interval=1))
 
@@ -583,7 +583,7 @@ def test_watch_job_suppresses_unread_history_after_partial_history_drain_failure
             _PageResponse([_log("old"), _log("also-old")]),
         ],
     )
-    monkeypatch.setattr(watch_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(watch_module, "sleep", lambda _: None)
 
     events = list(watch_job(client, "job-a", include_history=False, poll_interval=0))
 
@@ -604,7 +604,7 @@ def test_watch_job_continues_status_polling_after_non_retryable_log_http_error(
             _PageResponse([_log("done")]),
         ],
     )
-    monkeypatch.setattr(watch_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(watch_module, "sleep", lambda _: None)
 
     events = list(watch_job(client, "job-a", poll_interval=0))
 
@@ -626,7 +626,7 @@ def test_watch_job_retries_terminal_status_until_logs_drain_after_transient_fail
             _PageResponse([_log("done")]),
         ],
     )
-    monkeypatch.setattr(watch_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(watch_module, "sleep", lambda _: None)
 
     events = list(watch_job(client, "job-a", poll_interval=0))
 
@@ -644,7 +644,7 @@ def test_watch_job_stops_after_terminal_log_drain_retry_cap(monkeypatch: pytest.
             NemoTransportError(httpx.TransportError(f"temporary log failure {attempt}")) for attempt in range(retry_cap)
         ],
     )
-    monkeypatch.setattr(watch_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(watch_module, "sleep", lambda _: None)
 
     events = list(watch_job(client, "job-a", poll_interval=0))
 
@@ -706,7 +706,7 @@ def test_watch_job_enforces_timeout_between_log_pages(monkeypatch: pytest.Monkey
         ],
     )
     monotonic_values = iter([0.0, 0.0, 1.0, 10.0])
-    monkeypatch.setattr(watch_module.time, "monotonic", lambda: next(monotonic_values, 10.0))
+    monkeypatch.setattr(watch_module, "monotonic", lambda: next(monotonic_values, 10.0))
 
     with pytest.raises(JobWatchTimeoutError, match="job-a"):
         list(watch_job(client, "job-a", timeout=5, poll_interval=0))
@@ -725,7 +725,7 @@ async def test_async_watch_job_suppresses_unread_history_after_partial_history_d
             _PageResponse([_log("old"), _log("also-old")]),
         ],
     )
-    monkeypatch.setattr(watch_module.asyncio, "sleep", _fake_async_sleep)
+    monkeypatch.setattr(watch_module, "async_sleep", _fake_async_sleep)
 
     events = [event async for event in async_watch_job(client, "job-a", include_history=False, poll_interval=0)]
 
@@ -752,7 +752,7 @@ async def test_async_watch_job_backs_off_and_deduplicates_consecutive_transient_
     async def fake_sleep(sleep_for: float) -> None:
         sleeps.append(sleep_for)
 
-    monkeypatch.setattr(watch_module.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(watch_module, "async_sleep", fake_sleep)
 
     events = [event async for event in async_watch_job(client, "job-a", poll_interval=1)]
 
@@ -775,7 +775,7 @@ async def test_async_watch_job_continues_status_polling_after_non_retryable_log_
             _PageResponse([_log("done")]),
         ],
     )
-    monkeypatch.setattr(watch_module.asyncio, "sleep", _fake_async_sleep)
+    monkeypatch.setattr(watch_module, "async_sleep", _fake_async_sleep)
 
     events = [event async for event in async_watch_job(client, "job-a", poll_interval=0)]
 
@@ -872,7 +872,7 @@ async def test_async_watch_job_enforces_timeout_between_log_pages(monkeypatch: p
         ],
     )
     monotonic_values = iter([0.0, 0.0, 1.0, 10.0])
-    monkeypatch.setattr(watch_module.time, "monotonic", lambda: next(monotonic_values, 10.0))
+    monkeypatch.setattr(watch_module, "monotonic", lambda: next(monotonic_values, 10.0))
 
     with pytest.raises(JobWatchTimeoutError, match="job-a"):
         [event async for event in async_watch_job(client, "job-a", timeout=5, poll_interval=0)]
@@ -888,7 +888,7 @@ async def test_async_watch_job_stops_after_terminal_log_drain_retry_cap(monkeypa
             NemoTransportError(httpx.TransportError(f"temporary log failure {attempt}")) for attempt in range(retry_cap)
         ],
     )
-    monkeypatch.setattr(watch_module.asyncio, "sleep", _fake_async_sleep)
+    monkeypatch.setattr(watch_module, "async_sleep", _fake_async_sleep)
 
     events = [event async for event in async_watch_job(client, "job-a", poll_interval=0)]
 
@@ -906,7 +906,7 @@ async def test_async_watch_job_stops_after_terminal_log_drain_retry_cap(monkeypa
 def test_watch_job_raises_timeout_with_job_name(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _SyncJobsClient(statuses=[_status("active")], log_results=[_PageResponse([])])
     monotonic_values = iter([0.0, 0.0, 10.0])
-    monkeypatch.setattr(watch_module.time, "monotonic", lambda: next(monotonic_values, 10.0))
+    monkeypatch.setattr(watch_module, "monotonic", lambda: next(monotonic_values, 10.0))
 
     with pytest.raises(JobWatchTimeoutError, match="job-a"):
         list(watch_job(client, "job-a", timeout=5, poll_interval=1))

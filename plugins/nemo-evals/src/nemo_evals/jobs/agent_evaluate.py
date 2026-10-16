@@ -472,24 +472,26 @@ class _AgentEvalJobBase(NemoJob):
             staged = _staged_agent_files(target, ctx)
             if staged is not None:
                 agent_kwargs["fabric_config_bundle"] = str(staged)
+            harbor_config = HarborRuntimeConfig(
+                jobs_dir=ctx.storage.persistent / AGENT_BUNDLE_DIR / "evidence" / "harbor",
+                agent_name=target.agent_name,
+                agent_import_path=target.agent_import_path,
+                agent_model_name=target.agent_model_name,
+                agent_kwargs=agent_kwargs,
+                env_secrets=target.env_secrets,
+                env_vars=target.env_vars,
+                n_attempts=target.n_attempts,
+                max_retries=target.max_retries,
+                artifacts=target.artifacts,
+                trace_dir=target.trace_dir,
+                reward_key=target.reward_key,
+                agent_setup_timeout_multiplier=target.agent_setup_timeout_multiplier,
+                agent_timeout_multiplier=target.agent_timeout_multiplier,
+            )
+            if target.n_concurrent_trials is not None:
+                harbor_config.n_concurrent_trials = target.n_concurrent_trials
             harbor_runtime = HarborAgentTaskRunner(
-                config=HarborRuntimeConfig(
-                    jobs_dir=ctx.storage.persistent / AGENT_BUNDLE_DIR / "evidence" / "harbor",
-                    agent_name=target.agent_name,
-                    agent_import_path=target.agent_import_path,
-                    agent_model_name=target.agent_model_name,
-                    agent_kwargs=agent_kwargs,
-                    env_secrets=target.env_secrets,
-                    env_vars=target.env_vars,
-                    n_attempts=target.n_attempts,
-                    n_concurrent_trials=target.n_concurrent_trials,
-                    max_retries=target.max_retries,
-                    artifacts=target.artifacts,
-                    trace_dir=target.trace_dir,
-                    reward_key=target.reward_key,
-                    agent_setup_timeout_multiplier=target.agent_setup_timeout_multiplier,
-                    agent_timeout_multiplier=target.agent_timeout_multiplier,
-                ),
+                config=harbor_config,
                 secret_resolver=JobEnvSecretSource(workspace=ctx.workspace),
             )
             return harbor_runtime, None, None

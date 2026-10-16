@@ -582,7 +582,7 @@ class TestRetryPolicy:
         ]
         client = NemoClient(base_url=BASE, http_client=mock_http, retry=PLATFORM_RETRY)
 
-        with patch("nemo_helix_plugin.client.client.time.sleep"):
+        with patch("nemo_helix_plugin.client.client.sleep"):
             response = client.send(GET_ITEM(name="alice"))
 
         assert response.body.name == "alice"
@@ -605,7 +605,7 @@ class TestRetryPolicy:
         ]
         client = NemoClient(base_url=BASE, http_client=mock_http, retry=PLATFORM_RETRY)
 
-        with patch("nemo_helix_plugin.client.client.time.sleep"):
+        with patch("nemo_helix_plugin.client.client.sleep"):
             response = client.send(GET_ITEM(name="alice"))
 
         assert response.body.name == "alice"
@@ -669,8 +669,8 @@ class TestRetryPolicy:
         client = NemoClient(base_url=BASE, http_client=mock_http, retry=PLATFORM_RETRY)
 
         with (
-            patch("nemo_helix_plugin.client.client.time.time", return_value=1_000_000),
-            patch("nemo_helix_plugin.client.client.time.sleep") as sleep,
+            patch("nemo_helix_plugin.client.client.wall_time", return_value=1_000_000),
+            patch("nemo_helix_plugin.client.client.sleep") as sleep,
         ):
             client.send(GET_ITEM(name="alice"))
 
@@ -705,8 +705,8 @@ class TestRetryPolicy:
         client = NemoClient(base_url=BASE, http_client=mock_http, retry=PLATFORM_RETRY)
 
         with (
-            patch("nemo_helix_plugin.client.client.time.time", return_value=1_000_000),
-            patch("nemo_helix_plugin.client.client.time.sleep") as sleep,
+            patch("nemo_helix_plugin.client.client.wall_time", return_value=1_000_000),
+            patch("nemo_helix_plugin.client.client.sleep") as sleep,
         ):
             client.send(GET_ITEM(name="alice"))
 
@@ -838,7 +838,7 @@ class TestAsyncRetryPolicy:
         ]
         client = AsyncNemoClient(base_url=BASE, http_client=mock_http, retry=PLATFORM_RETRY)
 
-        with patch("nemo_helix_plugin.client.client.asyncio.sleep", new_callable=AsyncMock):
+        with patch("nemo_helix_plugin.client.client.async_sleep", new_callable=AsyncMock):
             response = await client.send(GET_ITEM(name="alice"))
 
         assert response.body.name == "alice"
@@ -862,7 +862,7 @@ class TestAsyncRetryPolicy:
         ]
         client = AsyncNemoClient(base_url=BASE, http_client=mock_http, retry=PLATFORM_RETRY)
 
-        with patch("nemo_helix_plugin.client.client.asyncio.sleep", new_callable=AsyncMock):
+        with patch("nemo_helix_plugin.client.client.async_sleep", new_callable=AsyncMock):
             response = await client.send(GET_ITEM(name="alice"))
 
         assert response.body.name == "alice"

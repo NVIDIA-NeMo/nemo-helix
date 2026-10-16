@@ -17,7 +17,7 @@ The Anonymizer page lists the anonymizer jobs in the current workspace and polls
 | Action | Where | Result |
 |--------|-------|--------|
 | Start a new job | **Anonymize Data** | Opens the builder. |
-| View details | Row actions > **View Details** | Opens the job detail page. |
+| View details | Row actions > **View details** | Opens the job detail page. |
 | Search | Name search bar | Filters the list to jobs whose names match the query. |
 | Filter | **Status**, **Created At**, and **Updated At** filters | Narrows the list by job status or date range. |
 | Cancel a job | Row actions > **Cancel** | Available while the job is in a cancellable state. |
@@ -45,7 +45,7 @@ Choose the anonymization strategy. Each strategy exposes its own parameters.
 | Substitute | Replaces detected entities with LLM-generated synthetic values. | None. |
 | Redact | Replaces entities with a label-based marker, removing the original text. | Format template (default `[REDACTED_{label}]`), label normalization. |
 | Annotate | Tags entities with their label but keeps the original text. | Format template (default `<{text}, {label}>`; requires `{text}` and `{label}`). |
-| Hash | Replaces entities with a deterministic digest, so the same text always hashes the same way. | Algorithm (SHA-256, SHA-1, MD5), digest length (6–64), format template (requires `{digest}`). |
+| Hash | Replaces entities with a deterministic digest, so the same text always hashes the same way. | Algorithm (SHA-256 (default), SHA-1, MD5), digest length (6–64, default 8), format template (default `<{label}_{digest}>`; requires `{digest}`). |
 | Rewrite | Rewrites the whole text into a privacy-safe version that reduces explicit and inferable identifiers. | Privacy goal, LLM instructions, risk tolerance, max repair rounds, strict entity protection. |
 
 **Preview Rows** sets how many records a preview run anonymizes (1–10, default 1). It does not affect a full run.
@@ -66,11 +66,11 @@ Rewrite-specific parameters:
 
 ### Entities
 
-**Auto-detect** covers the default entity labels and lets the augmenter add more labels it finds. **Custom** restricts the output to the labels you select; the picker groups the labels the platform reports by category and accepts a typed-in label of your own. In Custom mode, **Also include all N default entities** adds the defaults to your selection. Custom mode requires at least one label or the defaults.
+**Auto-detect** covers all available entity labels and lets the augmenter add more labels it finds. **Custom** restricts the output to the labels you select; the picker groups the labels the platform reports by category and accepts a typed-in label of your own. In Custom mode, **Also include all N available entities** adds the available entity labels to your selection. Custom mode requires at least one label or the available entities.
 
 ### Model Settings
 
-The **Model Settings** tab assigns a workspace model to each role the selected strategy uses, with an inference-parameter dropdown per role.
+The **Model Settings** tab assigns a model to each role the selected strategy uses, with an inference-parameter dropdown per role. The model choices are the models served by the workspace's inference providers.
 
 | Strategy | Roles |
 |----------|-------|
@@ -78,7 +78,7 @@ The **Model Settings** tab assigns a workspace model to each role the selected s
 | Substitute | The detection roles, plus Replacement Generator. |
 | Rewrite | The detection roles, Replacement Generator, and Domain Classifier, Disposition Analyzer, Meaning Extractor, QA Generator, Rewriter, Repairer, Evaluator. |
 
-**Entity Detector** runs a token-classification NER model rather than a general chat model, so it takes no sampling parameters. The NER families Studio recognizes — GLiNER models and privacy filters — are grouped under **Suggested**, and any other model in the workspace remains selectable under **Other models**.
+**Entity Detector** runs a token-classification NER model rather than a general chat model, so it takes no sampling parameters. It defaults to **Built-in GLiNER2 (in-process)**, which runs the platform's built-in GLiNER2 detector inside the anonymizer and needs no model selection. To use your own detector instead, select a workspace NER model: the NER families Studio recognizes — GLiNER models and privacy filters — are grouped under **Suggested** with the built-in option, and any other model remains selectable under **Other models**.
 
 ### Preview
 

@@ -368,6 +368,29 @@ snapshot-pinned Gym runner image, set `GYM_RUNNER_MODE=process`, or mount
 the Job pod has no Docker daemon. Gym evaluations are still accepted, so leave
 `GYM_SANDBOX_OPENSANDBOX_ENABLED` off on hosted deployments until AALGO-906 lands.
 
+## Harbor runners for `harbor_opensandbox`
+
+The `harbor_opensandbox` runtime runs Harbor **0.13.2** and **0.20.0**. An
+evaluation that omits `framework_version` gets 0.20.0, not the catalog default:
+Harbor 0.13.2 accepts task files written for 0.20 but silently ignores the
+features 0.20 added, such as `[[verifier.collect]]` hooks, so pick 0.13.2 only for
+tasks that don't use them. Other selectable runners are rejected at submission
+with `422 unsupported_framework_version`.
+
+Harbor loads `NemoOpenSandboxEnvironment` through `environment.import_path`. It
+is a plain Harbor `BaseEnvironment` written on the OpenSandbox SDK
+(`scaled_evals.harbor_opensandbox_driver`), not a subclass of Harbor's own
+OpenSandbox environment, so it uses only the environment API both releases share.
+Harbor's task model sets one difference: a task's `allowlist` may name hostnames
+and `*.` wildcards on 0.13.2, and also IP addresses and CIDRs on 0.20.0. The
+operator allowlist accepts all of them on both.
+
+To support another runner, pin `opensandbox==0.1.16` in its
+`harbor-runners/<version>.txt` and list `opensandbox` under that release's
+`packages` in `data/harbor_runner_qualifications.json` (the image then installs the
+environment into that venv, and CI runs the environment tests against it), then
+add the version to `HARBOR_OPENSANDBOX_HARBOR_VERSIONS`.
+
 ## Licensing
 
 Every `.py`, `.sql`, `.sh`, `.yaml`, `.yml`, and `.toml` file carries the

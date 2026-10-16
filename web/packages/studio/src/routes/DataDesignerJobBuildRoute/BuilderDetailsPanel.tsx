@@ -1,37 +1,28 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useStickToBottom } from '@nemo/common/src/hooks/useStickToBottom';
-import { Banner, Button, CodeSnippet, Flex, Stack } from '@nvidia/foundations-react-core';
-import { formatPreviewLogsForDisplay } from '@studio/components/NewDataDesignerJobForm/previewApi';
+import { Banner, Button, Flex, Stack } from '@nvidia/foundations-react-core';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { type FC, memo } from 'react';
 
 export interface BuilderDetailsPanelProps {
   validationErrors: string[];
   submitError: string | null;
-  previewLogs: string;
   isOpen: boolean;
   onToggle: () => void;
 }
 export const BuilderDetailsPanel: FC<BuilderDetailsPanelProps> = memo(function BuilderDetailsPanel({
   validationErrors,
   submitError,
-  previewLogs,
   isOpen,
   onToggle,
 }) {
-  const { ref: logsScrollRef } = useStickToBottom<HTMLDivElement>({
-    enabled: isOpen && !!previewLogs,
-  });
-
-  const hasDetails = validationErrors.length > 0 || !!submitError || !!previewLogs;
+  const hasDetails = validationErrors.length > 0 || !!submitError;
   if (!hasDetails) return null;
 
   const summary = [
     validationErrors.length > 0 && `${validationErrors.length} validation issue(s)`,
     submitError && 'Job creation error',
-    previewLogs && 'Preview logs',
   ]
     .filter(Boolean)
     .join(' · ');
@@ -67,14 +58,6 @@ export const BuilderDetailsPanel: FC<BuilderDetailsPanelProps> = memo(function B
             <Banner kind="inline" status="error">
               There was an error creating this job: {submitError}
             </Banner>
-          )}
-          {previewLogs && (
-            <CodeSnippet
-              value={formatPreviewLogsForDisplay(previewLogs)}
-              language="json"
-              kind="block"
-              attributes={{ CodeSnippetCode: { ref: logsScrollRef, className: 'max-h-[240px]' } }}
-            />
           )}
         </Stack>
       )}

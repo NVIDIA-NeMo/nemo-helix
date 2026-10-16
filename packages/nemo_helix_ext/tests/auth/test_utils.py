@@ -46,6 +46,47 @@ def _discover_with_client(base_url: str) -> NHXOIDCConfig:
         return discover_nhx_config(base_url, http_client=http_client)
 
 
+def test_discovery_normalizes_legacy_flat_oidc_response(httpserver: HTTPServer) -> None:
+    httpserver.expect_request("/apis/auth/discovery").respond_with_json(
+        {
+            "auth_enabled": True,
+            "oidc": {
+                "issuer": "https://stg.login.nvidia.com",
+                "authorization_endpoint": "https://stg.login.nvidia.com/authorize",
+                "token_endpoint": "https://stg.login.nvidia.com/token",
+                "device_authorization_endpoint": "https://stg.login.nvidia.com/device/authorize",
+                "client_id": "browser-client",
+                "cli_client_id": "cli-client",
+                "bearer_token_source": "id_token",
+                "device_authorization_requires_device_id": True,
+                "device_authorization_display_name": "NeMo Helix CLI",
+                "device_token_request_includes_scope": False,
+                "default_scopes": "openid profile email offline_access roles",
+                "scope_prefix": None,
+            },
+        }
+    )
+
+    result = _discover_with_client(httpserver.url_for(""))
+
+    assert result.clients == (
+        AdvertisedOidcClient(
+            name="public",
+            client_id="cli-client",
+            client_authentication="public",
+            default=True,
+            authorization_endpoint="https://stg.login.nvidia.com/authorize",
+            token_endpoint="https://stg.login.nvidia.com/token",
+            device_authorization_endpoint="https://stg.login.nvidia.com/device/authorize",
+            device_authorization_requires_device_id=True,
+            device_authorization_display_name="NeMo Helix CLI",
+            device_token_request_includes_scope=False,
+            default_scopes="openid profile email offline_access roles",
+            bearer_token_source="id_token",
+        ),
+    )
+
+
 class TestDecodeJwtClaims:
     def test_decodes_valid_jwt(self):
         token = _make_jwt({"sub": "user-1", "exp": 9999999999})

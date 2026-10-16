@@ -1,0 +1,24 @@
+{
+  "first_party": {
+    "python": [
+      {"name": "filesets", "reason": "NeMo Helix workspace package"},
+      {"name": "nemo-*", "reason": "NVIDIA NeMo packages, including Helix workspace packages and NeMo Fabric, Relay, Guardrails, Anonymizer and Safe Synthesizer"},
+      {"name": "nemoguardrails", "reason": "NVIDIA NeMo Guardrails"},
+      {"name": "nhx-*", "reason": "NeMo Helix workspace packages"},
+      {"name": "ngcsdk", "reason": "NVIDIA NGC SDK"},
+      {"name": "openshell", "reason": "NVIDIA OpenShell"},
+      {"name": "trace-ingest", "reason": "NVIDIA NeMo labs package"},
+      {"name": "insight-agent", "reason": "NVIDIA NeMo labs package"},
+      {"name": "data-designer-nemo", "reason": "NeMo Helix workspace package"},
+      {"name": "sandboxed-gym", "reason": "NeMo Helix workspace package"}
+    ],
+    "npm": [
+      {"name": "nemo-oo-agents-viewer", "reason": "NVIDIA nooa viewer, shipped inside the nemo-oo-agents wheel"}
+    ]
+  },
+  "vendored": [
+    {"path": "/site-packages/pip/_vendor/", "covered_by": "pip"},
+    {"path": "/site-packages/setuptools/_vendor/", "covered_by": "setuptools"},
+    {"path": "/site-packages/pkg_resources/_vendor/", "covered_by": "setuptools"}
+  ]
+}

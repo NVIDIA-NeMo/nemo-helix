@@ -5,15 +5,25 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
+from nemo_builder_plugin import execution
 from nemo_builder_plugin.backend import Backend, BackendRejectedError
 from nemo_builder_plugin.backends import load_backend
 from nemo_builder_plugin.config import BuilderConfig
-from nemo_builder_plugin.execution import ExecutionBackend
+from nemo_builder_plugin.execution import SANDBOX_IMAGE, STEP_IMAGE, ExecutionBackend
 from nemo_builder_plugin.plan import BuildPlan
 from nemo_builder_plugin.schema import BuildOutput, BuildSet, BuildSpec, FileSetSource
+from nemo_builder_plugin.steps import SuperviseStepConfig
 from nemo_helix_plugin.jobs.endpoints import ExecutionProfile
-from nemo_helix_plugin.jobs.execution_profiles import DockerJobExecutionProfile, KubernetesJobExecutionProfile
+from nemo_helix_plugin.jobs.execution_profiles import (
+    DockerJobExecutionProfile,
+    ImagePullSecret,
+    KubernetesJobExecutionProfile,
+)
+from nemo_helix_plugin.jobs.image import get_qualified_image
+from nemo_helix_plugin.jobs.providers import CPUExecutionProvider
 
 
 def _config(**overrides: object) -> BuilderConfig:
@@ -49,16 +59,9 @@ def test_the_deployment_runs_the_execution_backend() -> None:
 
 
 class TestADeploymentThatCannotBuild:
-    @pytest.mark.parametrize(
-        ("unset", "named"),
-        [
-            ({"registry": None}, "builder.registry"),
-            ({"sandbox": {"image": None}}, "builder.sandbox.image"),
-        ],
-    )
-    def test_a_setting_nothing_can_default(self, unset: dict[str, object], named: str) -> None:
-        with pytest.raises(BackendRejectedError, match=named):
-            ExecutionBackend(_config(**unset), PROFILES).check(_plan())
+    def test_a_setting_nothing_can_default(self) -> None:
+        with pytest.raises(BackendRejectedError, match="builder.registry"):
+            ExecutionBackend(_config(registry=None), PROFILES).check(_plan())
 
     def test_a_configured_deployment_honors_every_request(self) -> None:
         ExecutionBackend(_config(), PROFILES).check(_plan(_spec("a"), _spec("b", repository=None)))
@@ -146,3 +149,50 @@ class TestDestination:
         backend = ExecutionBackend(_config(), PROFILES)
         plan = _plan(_spec("a", repository=None), _spec("b", repository=None)).with_destinations(backend.destination)
         assert [image.placed.system_tag for image in plan.images] == ["default--demo-2.a", "default--demo-2.b"]
+
+
+class TestTheReleasesImages:
+    """Unless the deployment names another, the steps and the sandbox run the images this release publishes."""
+
+    def _compiled(self, config: BuilderConfig) -> tuple[list[str | None], str]:
+        backend = ExecutionBackend(config, PROFILES)
+        plan = _plan()
+        backend.check(plan)
+        steps = backend.compile(plan.with_destinations(backend.destination)).steps
+        images = [step.executor.container.image for step in steps if isinstance(step.executor, CPUExecutionProvider)]
+        sandbox = SuperviseStepConfig.model_validate(steps[1].config).sandbox.image
+        return images, sandbox
+
+    def test_by_default(self) -> None:
+        images, sandbox = self._compiled(_config(sandbox={}))
+        assert images == [get_qualified_image(STEP_IMAGE)] * 3
+        assert sandbox == get_qualified_image(SANDBOX_IMAGE)
+
+    def test_a_deployment_names_its_own_sandbox_image(self) -> None:
+        _, sandbox = self._compiled(_config())
+        assert sandbox == "kaniko.example.com/executor:debug"
+
+
+class TestTheSandboxPullsAsTheBuildStepDoes:
+    """Jobs gives the build step's pod the platform's pull secrets and its profile's. The sandbox, a pod the build step
+    creates, gets the same, or it couldn't pull a release's `nhx-kaniko` from a private registry."""
+
+    def _sandbox_secrets(self, monkeypatch: pytest.MonkeyPatch, *profiles: KubernetesJobExecutionProfile) -> list[str]:
+        platform = SimpleNamespace(
+            image_pull_secrets=[ImagePullSecret(name="platform"), ImagePullSecret(name="shared")]
+        )
+        monkeypatch.setattr(execution, "get_platform_config", lambda: platform)
+        backend = ExecutionBackend(_config(), list(profiles))
+        plan = _plan()
+        backend.check(plan)
+        steps = backend.compile(plan.with_destinations(backend.destination)).steps
+        return SuperviseStepConfig.model_validate(steps[1].config).sandbox.image_pull_secrets
+
+    def test_the_platforms_then_the_build_steps_profiles_once_each(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        control = _profile("build-control", image_pull_secrets=[{"name": "shared"}, {"name": "control"}])
+        fetch = _profile("build-fetch", image_pull_secrets=[{"name": "fetch-only"}])
+        secrets = self._sandbox_secrets(monkeypatch, fetch, control, PROFILES[2])
+        assert secrets == ["platform", "shared", "control"]
+
+    def test_only_the_platforms_when_the_profile_names_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert self._sandbox_secrets(monkeypatch, *PROFILES) == ["platform", "shared"]

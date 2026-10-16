@@ -3,8 +3,7 @@
 
 import { useUploadModalContext } from '@nemo/common/src/components/UploadModal/Context/useUploadModalContext';
 import { formatFileSize } from '@nemo/common/src/components/UploadModal/utils';
-import { Upload, Text, Flex, Stack } from '@nvidia/foundations-react-core';
-import { CircleAlert } from 'lucide-react';
+import { Upload, Text, Stack } from '@nvidia/foundations-react-core';
 import { FC } from 'react';
 
 export interface FileUploadProps {
@@ -52,7 +51,7 @@ export const FileUpload: FC<FileUploadProps> = ({
   };
 
   return (
-    <Stack className="w-full">
+    <Stack className="w-full" gap="density-xs">
       <Upload
         className="w-full"
         accept={acceptedFileTypes?.join(',') ?? acceptableFileTypesState.join(',')}
@@ -62,12 +61,9 @@ export const FileUpload: FC<FileUploadProps> = ({
         Up to {formatFileSize(acceptableFileSize ?? 0)}
       </Upload>
       {error && (
-        <Flex gap="density-md" align="center">
-          <CircleAlert className="text-feedback-danger" />
-          <Text kind="label/regular/sm" className="text-feedback-danger">
-            {error}
-          </Text>
-        </Flex>
+        <Text kind="label/regular/sm" className="text-feedback-danger">
+          {error}
+        </Text>
       )}
     </Stack>
   );

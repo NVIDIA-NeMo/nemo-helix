@@ -23,8 +23,8 @@ so build this resource explicitly: ``garak = GarakPluginResource(client)`` (or
 
 from __future__ import annotations
 
-import asyncio
 import tempfile
+from asyncio import to_thread
 from pathlib import Path
 
 from nemo_garak.entities import AuditConfig, AuditTarget
@@ -270,7 +270,7 @@ class AsyncGarakPluginResource:
         resolved_config = await self._resolve_config(config, default_workspace=ws)
         resolved_target = await self._resolve_target(target, default_workspace=ws)
         spec = AuditInputSpec(config=resolved_config, target=resolved_target)
-        return await asyncio.to_thread(
+        return await to_thread(
             AuditJob().run,
             spec.model_dump(mode="json"),
             ctx=_local_job_context(workspace=ws, job_name=AuditJob.name),

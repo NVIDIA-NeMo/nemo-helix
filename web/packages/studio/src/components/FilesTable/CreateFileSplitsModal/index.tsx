@@ -21,7 +21,7 @@ import {
   CreateFileSplitsFormFields,
   createFileSplitsSchema,
 } from '@studio/components/FilesTable/CreateFileSplitsModal/types';
-import { LeftTruncatedText } from '@studio/components/LeftTruncatedText';
+import { MiddleTruncatedPath } from '@studio/components/MiddleTruncatedPath';
 import { ValueWithLabel } from '@studio/components/ValueWithLabel';
 import { useSelectedDatasetId } from '@studio/hooks/useSelectedDatasetId';
 import { tooltipClassName } from '@studio/styles/common';
@@ -165,9 +165,9 @@ export const CreateFileSplitsModal: FC<Props> = ({
             <ControlledSelect
               items={fileOptions.map((path) => ({
                 value: path,
-                children: <LeftTruncatedText>{path}</LeftTruncatedText>,
+                children: <MiddleTruncatedPath>{path}</MiddleTruncatedPath>,
               }))}
-              renderValue={(value) => <LeftTruncatedText>{value}</LeftTruncatedText>}
+              renderValue={(value) => <MiddleTruncatedPath>{value}</MiddleTruncatedPath>}
               formFieldProps={{
                 attributes: { Popover: { className: tooltipClassName } },
                 slotLabel: <Label className="font-bold">Source File</Label>,

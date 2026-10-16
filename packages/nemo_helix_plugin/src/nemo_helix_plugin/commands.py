@@ -65,14 +65,15 @@ The platform generates::
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 import json
 import logging
 import os
-from collections.abc import AsyncIterator, Callable, Iterable, Mapping
+from collections.abc import AsyncIterator, Callable, Generator, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Optional, cast
+from typing import Any, Literal, Optional, Protocol, cast
 
 import click
 import httpx
@@ -145,6 +146,10 @@ _JOB_SUBMIT_RESERVED_FLAGS: frozenset[str] = (
     | frozenset({"options", "options_file", "profile", "workspace"})
     | _RETIRED_ROUTING_FLAGS
 )
+
+# Set on the Typer context by :func:`_programmatic_submit` so the job submit
+# callback skips its no-input help fallback for wrapper-supplied specs.
+_PROGRAMMATIC_SUBMIT_ATTR = "_nemo_programmatic_submit"
 
 
 # ---------------------------------------------------------------------------
@@ -445,8 +450,8 @@ def _add_submit_command(
             typer.echo(f"Error: invalid options — {exc}", err=True)
             raise typer.Exit(code=1) from exc
 
-        programmatic_submit = bool(getattr(typer_ctx, "_nemo_programmatic_submit", False))
-        if as_callback and not programmatic_submit and not spec_source_provided and not field_flag_provided:
+        is_programmatic = bool(getattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR, False))
+        if as_callback and not is_programmatic and not spec_source_provided and not field_flag_provided:
             typer.echo(typer_ctx.get_help())
             raise typer.Exit(code=1)
 
@@ -978,6 +983,153 @@ def resolve_submit_base_url(typer_ctx: typer.Context) -> str:
             return cast(str, resolved)
 
     return os.environ.get(_DEFAULT_BASE_URL_ENV_VAR) or _DEFAULT_BASE_URL
+
+
+@contextlib.contextmanager
+def _programmatic_submit(typer_ctx: typer.Context) -> Generator[None, None, None]:
+    """Mark a job submit callback call as carrying a caller-built spec.
+
+    Without it, a callback called from a replacement command inspects the
+    replacement's Click parameter sources, finds no spec flag, and prints
+    help instead of submitting. Overrides get this through
+    :func:`take_job_submit` rather than calling it directly.
+    """
+    had_marker = hasattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR)
+    previous = getattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR, False)
+    setattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR, True)
+    try:
+        yield
+    finally:
+        if had_marker:
+            setattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR, previous)
+        else:
+            delattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR)
+
+
+def _generated_param_names(callback: Callable[..., object]) -> frozenset[str]:
+    """Names a generated submit callback binds itself: ``typer_ctx``, static flags, and spec leaves."""
+    variadic = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+    return frozenset(
+        name for name, param in inspect.signature(callback).parameters.items() if param.kind not in variadic
+    )
+
+
+def _checked_renderer_kwargs(
+    renderer_kwargs: Mapping[str, object] | None,
+    generated_names: frozenset[str],
+    label: str,
+) -> dict[str, object]:
+    """Return *renderer_kwargs* as a dict, rejecting names the generated callback would treat as its own."""
+    extra = dict(renderer_kwargs or {})
+    collisions = sorted(generated_names.intersection(extra))
+    if collisions:
+        raise ValueError(f"renderer_kwargs collide with generated {label} flags: {', '.join(collisions)}")
+    return extra
+
+
+class JobSubmit(Protocol):
+    """A generated job submit callback detached by :func:`take_job_submit`."""
+
+    def __call__(
+        self,
+        typer_ctx: typer.Context,
+        *,
+        spec: str,
+        workspace: str | None,
+        profile: str | None = None,
+        options: list[str] | None = None,
+        options_file: Path | None = None,
+        renderer_kwargs: Mapping[str, object] | None = None,
+    ) -> SubmittedJob | None: ...
+
+
+def take_job_submit(group: typer.Typer) -> JobSubmit:
+    """Detach the generated submit callback from *group* for a replacement to delegate to.
+
+    Call this from a CLI override before registering the replacement
+    callback on *group*. The returned callable submits *spec* (JSON) as
+    ``--spec`` would, inside :func:`_programmatic_submit`, so the generated
+    callback never mistakes the call for one without input. *renderer_kwargs*
+    reach the job renderer as ``RendererContext.cli_kwargs`` and never the
+    spec, so their names must not collide with a generated flag.
+    """
+    callback_info = group.registered_callback
+    original = callback_info.callback if callback_info is not None else None
+    if original is None:
+        raise RuntimeError("missing generated job submit callback to override")
+    group.registered_callback = None
+    generated_names = _generated_param_names(original)
+
+    def submit(
+        typer_ctx: typer.Context,
+        *,
+        spec: str,
+        workspace: str | None,
+        profile: str | None = None,
+        options: list[str] | None = None,
+        options_file: Path | None = None,
+        renderer_kwargs: Mapping[str, object] | None = None,
+    ) -> SubmittedJob | None:
+        extra = _checked_renderer_kwargs(renderer_kwargs, generated_names, "job submit")
+        with _programmatic_submit(typer_ctx):
+            return original(
+                typer_ctx,
+                spec=spec,
+                spec_file=None,
+                options=options or [],
+                options_file=options_file,
+                profile=profile,
+                workspace=workspace,
+                config=None,
+                config_file=None,
+                **extra,
+            )
+
+    return submit
+
+
+class FunctionSubmit(Protocol):
+    """A generated function submit command detached by :func:`take_function_submit`."""
+
+    def __call__(
+        self,
+        typer_ctx: typer.Context,
+        *,
+        spec: str,
+        workspace: str | None,
+        request_id: str | None = None,
+        renderer_kwargs: Mapping[str, object] | None = None,
+    ) -> None: ...
+
+
+def take_function_submit(app: typer.Typer, fn_cls: type[NemoFunction]) -> FunctionSubmit:
+    """Detach *fn_cls*'s generated submit command from *app* for a replacement to delegate to.
+
+    Call this from :meth:`~nemo_helix_plugin.cli.NemoCLI.update_function_cli`
+    before registering the replacement command. The returned callable submits
+    *spec* (JSON) as ``--spec`` would. *renderer_kwargs* reach the function
+    renderer as ``RendererContext.cli_kwargs`` and never the spec, so their
+    names must not collide with a generated flag.
+    """
+    command = next((c for c in app.registered_commands if c.name == fn_cls.name), None)
+    original = command.callback if command is not None else None
+    if original is None:
+        raise RuntimeError(f"missing generated submit command for function {fn_cls.name!r} to override")
+    app.registered_commands = [c for c in app.registered_commands if c is not command]
+    generated_names = _generated_param_names(original)
+
+    def submit(
+        typer_ctx: typer.Context,
+        *,
+        spec: str,
+        workspace: str | None,
+        request_id: str | None = None,
+        renderer_kwargs: Mapping[str, object] | None = None,
+    ) -> None:
+        extra = _checked_renderer_kwargs(renderer_kwargs, generated_names, repr(fn_cls.name))
+        original(typer_ctx, spec=spec, spec_file=None, workspace=workspace, request_id=request_id, **extra)
+
+    return submit
 
 
 def _build_function_submit_url(

@@ -27,8 +27,9 @@ import asyncio
 import logging
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import ClassVar, cast
 
+import httpx
 from nemo_agents_plugin.config import ControllerConfig
 from nemo_agents_plugin.entities import (
     NEMO_AGENTS_SPEC_CONFIG_FORMAT,
@@ -39,15 +40,13 @@ from nemo_agents_plugin.entities import (
 )
 from nemo_agents_plugin.runner.backend import RunnerBackend
 from nemo_agents_plugin.runner.registry import RunnerBackendRegistry
+from nemo_deployments_plugin.endpoint_transport import EndpointTransport
 from nemo_helix_plugin.controller import NemoController
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
     NemoEntityNotFoundError,
 )
-
-if TYPE_CHECKING:
-    import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +88,7 @@ class AgentDeploymentController(NemoController):
         self._runtime_instance_ids: dict[tuple[str, str], str] = {}
         self._pending_restart_reconciliations: dict[str, datetime] = {}
         self._runtime_cleanup_tasks: set[asyncio.Task[None]] = set()
-        self._runtime_health_client: httpx.AsyncClient | None = None
+        self._runtime_health_clients: dict[EndpointTransport, httpx.AsyncClient] = {}
         self._startup_sessions_reconciled = False
         self._startup_session_reconciliation_at: datetime | None = None
         self._interval_seconds: float = 5.0  # default; overwritten in on_startup
@@ -175,9 +174,9 @@ class AgentDeploymentController(NemoController):
             task.cancel()
         if cleanup_tasks:
             await asyncio.gather(*cleanup_tasks, return_exceptions=True)
-        if self._runtime_health_client is not None:
-            await self._runtime_health_client.aclose()
-            self._runtime_health_client = None
+        for client in self._runtime_health_clients.values():
+            await client.aclose()
+        self._runtime_health_clients.clear()
         if self._registry is not None:
             await self._registry.shutdown()
         logger.info("AgentDeploymentController shut down.")
@@ -458,20 +457,15 @@ class AgentDeploymentController(NemoController):
 
     async def _read_runtime_instance(self, dep: AgentDeployment) -> tuple[str, datetime] | None:
         """Read the current Fabric server process identity without persisting it."""
-        from nemo_agents_plugin.deployment_routing import get_deployment_endpoint
+        from nemo_agents_plugin.deployment_routing import get_deployment_endpoint, get_deployment_transport
 
         endpoint = get_deployment_endpoint(dep)
         if endpoint is None:
             return None
-        if self._runtime_health_client is None:
-            import httpx
-
-            self._runtime_health_client = httpx.AsyncClient(
-                timeout=_RUNTIME_HEALTH_TIMEOUT_SECONDS,
-                follow_redirects=False,
-            )
         try:
-            response = await self._runtime_health_client.get(f"{endpoint.rstrip('/')}/health")
+            transport = get_deployment_transport(dep)
+            health_url, routing_headers = transport.target(f"{endpoint.rstrip('/')}/health")
+            response = await self._runtime_health_client(transport).get(health_url, headers=routing_headers)
             response.raise_for_status()
             health = response.json()
             runtime_instance_id = health.get("runtime_instance_id")
@@ -489,6 +483,17 @@ class AgentDeploymentController(NemoController):
         if runtime_started_at.tzinfo is None or runtime_started_at.utcoffset() is None:
             return None
         return runtime_instance_id, runtime_started_at.astimezone(UTC)
+
+    def _runtime_health_client(self, transport: EndpointTransport) -> httpx.AsyncClient:
+        client = self._runtime_health_clients.get(transport)
+        if client is None:
+            client = httpx.AsyncClient(
+                timeout=_RUNTIME_HEALTH_TIMEOUT_SECONDS,
+                follow_redirects=False,
+                **transport.client_kwargs(),
+            )
+            self._runtime_health_clients[transport] = client
+        return client
 
     async def _expire_session_if_due(
         self,

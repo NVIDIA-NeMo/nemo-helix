@@ -35,8 +35,11 @@ from __future__ import annotations
 
 import io
 import os
+import subprocess
+import sys
 import tarfile
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pytest
 from docker.errors import APIError, BuildError, DockerException, ImageNotFound, NotFound
@@ -387,6 +390,56 @@ def cleanup_model_deployment_containers(
             print(f"Warning: Cleanup error for {container.name}: {e}")
 
     return removed
+
+
+# Subdirectory of NHX_DATA_DIR that Intake bind-mounts into its local ClickHouse.
+INTAKE_CLICKHOUSE_DATA_SUBDIR = "intake-clickhouse"
+INTAKE_CLICKHOUSE_REMOVE_TIMEOUT_SECONDS = 120.0
+
+
+def remove_intake_clickhouse(
+    platform_data_dir: Path,
+    *,
+    timeout: float = INTAKE_CLICKHOUSE_REMOVE_TIMEOUT_SECONDS,
+) -> None:
+    """Remove the local ClickHouse container Intake provisioned for a platform data directory.
+
+    Intake keeps one container per data directory and only stops it on shutdown, so every
+    ``nemo services run`` started with a throwaway ``NHX_DATA_DIR`` leaves a new
+    ``nhx-intake-clickhouse-<hash>`` container behind. Call this from test teardown after the
+    platform process has exited. It also removes a container that is still running (e.g. after the
+    platform was SIGKILLed).
+
+    Only the container for the throwaway ``<platform_data_dir>/intake-clickhouse`` is removed. A
+    configured ``NHX_INTAKE_CLICKHOUSE_DATA_DIR`` is the developer's persistent ClickHouse, shared
+    across runs, so it is deliberately left alone; in that case this call finds nothing to remove.
+
+    Best effort: failures are reported as warnings, never raised, so teardown cannot mask a test
+    failure.
+
+    Args:
+        platform_data_dir: The ``NHX_DATA_DIR`` the platform ran with.
+        timeout: Seconds to wait for the removal command.
+    """
+    command = [
+        sys.executable,
+        "-m",
+        "nhx.intake.local_clickhouse",
+        "--remove",
+        "--data-dir",
+        str(platform_data_dir / INTAKE_CLICKHOUSE_DATA_SUBDIR),
+    ]
+    # Without NHX_DATA_DIR the tmp data dir is outside the user data dir, so the removal skips
+    # handing the files back to the host user. That step restarts ClickHouse and waits for it to
+    # stop again (~30s per container), which pushed the e2e job past its timeout.
+    removal_env = {key: value for key, value in os.environ.items() if key != "NHX_DATA_DIR"}
+    try:
+        result = subprocess.run(command, env=removal_env, capture_output=True, text=True, timeout=timeout, check=False)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print(f"Warning: Could not remove Intake ClickHouse for {platform_data_dir}: {e}")
+        return
+    if result.returncode != 0:
+        print(f"Warning: Could not remove Intake ClickHouse for {platform_data_dir}: {result.stderr.strip()}")
 
 
 # =============================================================================

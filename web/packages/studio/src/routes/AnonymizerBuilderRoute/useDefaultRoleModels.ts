@@ -3,6 +3,7 @@
 
 import {
   activeRolesForStrategy,
+  BUILTIN_DETECTOR_VALUE,
   DETECTOR_ROLE,
 } from '@studio/routes/AnonymizerBuilderRoute/constants';
 import type { AnonymizerFormData } from '@studio/routes/AnonymizerBuilderRoute/schema';
@@ -19,6 +20,18 @@ export const useDefaultRoleModels = (): { isLoading: boolean } => {
 
   const roles = useMemo(() => activeRolesForStrategy(strategy), [strategy]);
 
+  // The entity detector defaults to the platform's built-in in-process GLiNER2 (a UI-only sentinel
+  // that makes the request omit entity_detector). This runs independently of the workspace model
+  // list — the built-in needs none — so it also covers an empty workspace. applyModel fills in the
+  // (empty) model/provider the role schema requires, matching the picker's own onChange path.
+  useEffect(() => {
+    if (roles.includes(DETECTOR_ROLE) && !getValues(`roleModels.${DETECTOR_ROLE}.modelId`)) {
+      setValue(`roleModels.${DETECTOR_ROLE}.modelId`, BUILTIN_DETECTOR_VALUE);
+      applyModel(DETECTOR_ROLE, BUILTIN_DETECTOR_VALUE);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roles, getValues, setValue]);
+
   useEffect(() => {
     if (!models.length) return;
     const chatModels = models.filter((model) => !isNerDetectorModel(model));
@@ -28,14 +41,13 @@ export const useDefaultRoleModels = (): { isLoading: boolean } => {
     const llm =
       chatModels.find((model) => (model.served_model_name ?? model.name) === suggestedName) ??
       chatModels[0];
-    const detector = models.find(isNerDetectorModel);
+    if (!llm) return;
+    // The detector is handled above; every other role auto-picks a chat model.
     for (const role of roles) {
-      const current = getValues(`roleModels.${role}.modelId`);
-      if (current) continue;
-      const pick = role === DETECTOR_ROLE ? detector : llm;
-      if (!pick) continue;
-      setValue(`roleModels.${role}.modelId`, pick.id);
-      applyModel(role, pick.id);
+      if (role === DETECTOR_ROLE) continue;
+      if (getValues(`roleModels.${role}.modelId`)) continue;
+      setValue(`roleModels.${role}.modelId`, llm.id);
+      applyModel(role, llm.id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [models, roles, getValues, setValue]);

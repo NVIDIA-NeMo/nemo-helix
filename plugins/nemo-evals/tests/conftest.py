@@ -10,18 +10,15 @@ import pickle
 import tempfile
 from datetime import datetime, timedelta, timezone
 
-import httpx
 import pytest
 from nemo_evals.api.schemas import MetricInline
 from nemo_evals.config import get_config
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager, CloudpickleMetricPayload
-from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entities import EntityBase, EntityClient, ListResponse, PaginationInfo
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.in_memory_filter import InMemoryFilterRepository
-from nemo_helix_plugin.secrets.client import AsyncSecretsClient
-from nemo_helix_plugin.secrets.types import HelixSecretAccessResponse
+from nhx.testing.secrets import InMemorySecretsService
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 
 
@@ -39,6 +36,7 @@ def matches_filter(entity, operation) -> bool:
         "workspace": entity.workspace,
         "project": entity.project,
         "parent": entity.parent,
+        "created_by": entity.created_by,
         "data": entity.model_dump(mode="json", exclude=set(entity.__base_fields__)),
     }
     return operation.apply(InMemoryFilterRepository(row))
@@ -69,6 +67,8 @@ class FakeEntityStore(EntityClient):
         # The job transformer now accepts only the concrete typed-client boundary. This fake
         # implements that boundary directly while keeping all storage in memory.
         self.entities: dict[tuple[str, str, str, str | None], EntityBase] = {}
+        #: Principal stamped as ``created_by``, as the real store does from the request identity.
+        self.caller = "user:alice"
         #: Monotonic tick for creation timestamps. Wall-clock ``now()`` can repeat within a test,
         #: which would make ``-created_at`` ordering non-deterministic — the real store's inserts
         #: are genuinely ordered, so the fake must be too.
@@ -88,6 +88,7 @@ class FakeEntityStore(EntityClient):
         now = self._now()
         entity._id = f"{entity.__entity_type__}-{self._tick}"
         entity._created_at = now
+        entity._created_by = self.caller
         entity._updated_at = now
         entity._db_version = 0
         self.entities[key] = entity.model_copy(deep=True)
@@ -188,32 +189,6 @@ def entity_store() -> FakeEntityStore:
 # ---- judge secret resolution ----------------------------------------------
 
 
-class FakeAccessResponse:
-    """Stands in for the typed client's response wrapper, whose `data()` yields the payload."""
-
-    def __init__(self, payload: HelixSecretAccessResponse) -> None:
-        self._payload = payload
-
-    def data(self) -> HelixSecretAccessResponse:
-        return self._payload
-
-
-class FakeSecretsClient(AsyncSecretsClient):
-    """Answers secret lookups from a dict and records every (workspace, name) it was asked for."""
-
-    def __init__(self, secrets: dict[tuple[str, str], str] | None = None) -> None:
-        super().__init__(base_url="http://secrets.invalid", workspace="default")
-        self._secrets = secrets or {}
-        self.lookups: list[tuple[str, str]] = []
-
-    async def access_secret(self, *, workspace: str | None = None, name: str) -> FakeAccessResponse:
-        key = (workspace or "default", name)
-        self.lookups.append(key)
-        if key not in self._secrets:
-            raise NotFoundError(httpx.Response(404, json={"detail": "not found"}, request=httpx.Request("GET", "/")))
-        return FakeAccessResponse(HelixSecretAccessResponse(name=name, workspace=key[0], value=self._secrets[key]))
-
-
 @pytest.fixture
 def allow_cloudpickle_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run as a deployment whose operator has enabled cloudpickle metrics."""
@@ -235,9 +210,9 @@ def detonating_cloudpickle_metric() -> dict:
 
 
 @pytest.fixture
-def make_secrets_client():
-    """Return a factory for Secrets clients seeded with ``(workspace, name) -> value``."""
-    return FakeSecretsClient
+def make_secrets_service() -> type[InMemorySecretsService]:
+    """Return a factory for in-memory Secrets services seeded with ``(workspace, name) -> value``."""
+    return InMemorySecretsService
 
 
 @pytest.fixture(autouse=True)

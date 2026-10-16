@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from threading import Lock
 from uuid import uuid4
@@ -46,7 +46,7 @@ class _TokenUsageAccumulator:
 
 
 @contextmanager
-def capture_data_designer_token_usage(reporter: JobUsageReporter) -> Iterator[None]:
+def capture_data_designer_token_usage(reporter: JobUsageReporter) -> Generator[None, None, None]:
     """Capture Data Designer model-token events and report them on exit.
 
     This adapter owns Data Designer's source-specific event subscription,

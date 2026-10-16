@@ -34,9 +34,9 @@ import copy
 import json
 import logging
 import tempfile
-import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
+from time import monotonic
 from typing import Any
 
 import httpx
@@ -268,14 +268,14 @@ class SandboxedGymAgentTaskRunner:
 
     async def _collect(self, examples: list[dict[str, Any]]) -> list[Any]:
         """POST the examples and return the host's rollout records."""
-        started = time.monotonic()
+        started = monotonic()
         async with httpx.AsyncClient(timeout=self._config.timeout_s) as client:
             response = await client.post(
                 self._config.rollout_url,
                 json={"examples": examples},
                 headers=self._request_headers(),
             )
-        elapsed = time.monotonic() - started
+        elapsed = monotonic() - started
         if response.status_code >= 400:
             # A bootstrap failure arrives here as a 503 carrying the same envelope a 200 would, so
             # render it the same way. Truncating the raw body instead cuts the output tail short.

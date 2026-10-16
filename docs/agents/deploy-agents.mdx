@@ -8,8 +8,8 @@ description: ""
 <a id="deploy-agents"></a>
 
 Deploy a registered agent as a running service and invoke it through the
-Agents gateway. An agent can run in one of three modes — as a local
-subprocess (the default), or as a durable container on Docker or Kubernetes.
+Agents gateway. An agent can run as a local subprocess (the default), a durable
+container on Docker or Kubernetes, or an OpenShell sandbox.
 
 <Note>
 
@@ -38,14 +38,19 @@ agents = AgentsResource(client)
 ## Deployment Modes
 
 `nemo agents deploy --mode <mode>` selects the runtime backend for a
-deployment. The default is `subprocess`; `docker` and `k8s` run the agent as a
-durable container through the deployments plugin.
+deployment. The default is `subprocess`; `docker`, `k8s`, and `openshell` run the
+agent through the deployments plugin.
 
 | Mode | Runs as | Survives a control plane restart | Requires |
 | ------ | --------- | ----------------------------- | ---------- |
 | `subprocess` (default) | A local FastAPI server on the control plane host | No | Nothing extra for the agent process |
 | `docker` | A Docker container | Yes | A container image and a configured `docker` executor |
 | `k8s` | A Kubernetes Deployment + Service | Yes | A container image and a configured `k8s` executor |
+| `openshell` | A policy-governed OpenShell sandbox | Yes | An image packaged for OpenShell, a reachable gateway, and an `openshell` executor |
+
+`--mode openshell` uses `agents.deployments.openshell_executor` with either
+gateway compute driver. See [Sandboxed Deployments](/documentation/agents/sandboxed-deployments)
+for deployment and network policy examples.
 
 <Note>
 
@@ -418,6 +423,10 @@ agents:
     default_image: ""
     # Container port the packaged agent runtime binds (and the readiness probe target)
     container_port: 8000
+    # Optional: readiness probe settings
+    # Restart the platform and redeploy agents to apply changes.
+    readiness_probe_timeout_seconds: 1
+    readiness_probe_failure_threshold: 12
 
 deployments:
   default_executor: local-docker

@@ -13,7 +13,7 @@ Usage in conftest.py:
     blockbuster = blockbuster_fixture(autouse=True)
 """
 
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 
 import pytest
@@ -50,7 +50,7 @@ ENABLED_FUNCTIONS = [
 
 
 @contextmanager
-def blockbuster_ctx() -> Iterator[BlockBuster]:
+def blockbuster_ctx() -> Generator[BlockBuster, None, None]:
     """Context manager for BlockBuster configured for NeMo Helix.
 
     Creates a BlockBuster that scans all paths in the nhx namespace package,
