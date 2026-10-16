@@ -68,6 +68,11 @@ def GET_ITEMS_WITH_PARAMS(*, query_params: dict | None = None) -> ItemResponse:
     raise NotImplementedError
 
 
+@get("/apis/test/v2/items/{name}/-/{path:path}")
+def GET_ITEM_FILE(*, name: str, path: str) -> ItemResponse:
+    raise NotImplementedError
+
+
 # ---------------------------------------------------------------------------
 # Sync client
 # ---------------------------------------------------------------------------
@@ -131,6 +136,26 @@ def test_send_url_encodes_path_params() -> None:
     client.send(GET_ITEM(name="name with ?#/"))
 
     assert mock_http.request.call_args.args[1] == f"{BASE}/apis/test/v2/items/name%20with%20%3F%23%2F"
+
+
+def test_send_keeps_slashes_literal_in_path_placeholders() -> None:
+    """``{path:path}`` spans segments: ``/`` stays literal, everything else is encoded.
+
+    An encoded slash (``%2F``) in the request-target is rejected by proxies that
+    refuse encoded slashes (the OpenShell sandbox supervisor drops the connection),
+    while the server route's ``{path:path}`` converter accepts the literal form.
+    """
+    mock_http = MagicMock(spec=httpx.Client)
+    mock_http.request.return_value = httpx.Response(
+        200,
+        request=httpx.Request("GET", f"{BASE}/apis/test/v2/items/a%2Fb/-/dir/sub%20dir/file%3F.txt"),
+        json={"id": 1, "name": "file"},
+    )
+
+    client = NemoClient(base_url=BASE, http_client=mock_http)
+    client.send(GET_ITEM_FILE(name="a/b", path="dir/sub dir/file?.txt"))
+
+    assert mock_http.request.call_args.args[1] == f"{BASE}/apis/test/v2/items/a%2Fb/-/dir/sub%20dir/file%3F.txt"
 
 
 def test_send_url_encodes_default_workspace() -> None:

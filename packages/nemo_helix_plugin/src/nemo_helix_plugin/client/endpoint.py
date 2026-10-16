@@ -26,6 +26,10 @@ Parameter conventions:
 - ``query_params`` — query parameters (dict or TypedDict)
 - Blessed client options (e.g. ``exist_ok``) — client-side behavior (stripped before sending)
 - All other keyword parameters — path parameters (matched to ``{placeholders}`` in the path template)
+
+A ``{name}`` placeholder is one URL segment and its value is fully percent-encoded.
+A ``{name:path}`` placeholder spans segments, mirroring Starlette's ``{name:path}``
+route converter: ``/`` in its value is sent literally rather than as ``%2F``.
 """
 
 from __future__ import annotations

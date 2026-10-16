@@ -22,6 +22,7 @@ import inspect
 import json
 import logging
 import os
+import string
 from asyncio import sleep as async_sleep
 from collections.abc import (
     AsyncGenerator,
@@ -292,6 +293,29 @@ def _retry_after(response: httpx.Response) -> float | None:
     return delay if 0 < delay <= 60 else None
 
 
+# Path placeholders are ``{name}`` or ``{name:path}``. A plain placeholder is one
+# URL segment, so every reserved character in its value is percent-encoded,
+# ``/`` included. A ``:path`` placeholder spans segments (the server declares it
+# with Starlette's ``{name:path}`` converter), so ``/`` stays literal: a
+# percent-encoded ``/`` (``%2F``) in a request-target is rejected by HTTP
+# proxies that refuse encoded slashes, such as the OpenShell sandbox supervisor.
+_PATH_SPEC = "path"
+
+
+def _format_path(template: str, params: Mapping[str, str]) -> str:
+    """Fill a path template, percent-encoding each value per its placeholder kind."""
+    parts: list[str] = []
+    for literal, field_name, format_spec, _conversion in string.Formatter().parse(template):
+        parts.append(literal)
+        if field_name is None:
+            continue
+        if format_spec not in ("", _PATH_SPEC):
+            raise ValueError(f"Unsupported path placeholder {{{field_name}:{format_spec}}} in {template}")
+        value = params[field_name]
+        parts.append(quote(str(value), safe="/" if format_spec == _PATH_SPEC else ""))
+    return "".join(parts)
+
+
 # Transport failures httpx raises before it starts reading the request body: the
 # connection has to exist before any body byte can be written. A one-shot body is
 # therefore still untouched when one of these surfaces, so the request can be sent
@@ -539,9 +563,8 @@ class BaseNemoClient(NemoClientRuntimeSource, Generic[HttpClientT]):
         if self._workspace:
             params["workspace"] = self._workspace
         params.update(request.path_params)
-        encoded_params = {name: quote(str(value), safe="") for name, value in params.items()}
         try:
-            path = request.path_template.format_map(encoded_params)
+            path = _format_path(request.path_template, params)
         except KeyError as exc:
             raise ValueError(f"Missing path parameter {exc} for {request.method} {request.path_template}") from exc
         return self._base_url + path
