@@ -4,14 +4,14 @@
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { Button, PageHeader, Stack } from '@nvidia/foundations-react-core';
 import { DocumentationButton } from '@studio/components/DocumentationButton';
-import { Loading } from '@studio/components/Layouts/Loading';
+import { SuspenseOutlet } from '@studio/components/Layouts/SuspenseOutlet';
 import { LINK_EVAL_DOCS_BENCHMARKS_INDUSTRY } from '@studio/constants/links';
 import { ROUTES } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getNewEvaluationMetricRoute } from '@studio/routes/utils';
-import { FC, Suspense, useEffect, useMemo } from 'react';
-import { matchPath, Outlet, useLocation, useNavigate } from 'react-router';
+import { FC, useEffect, useMemo } from 'react';
+import { matchPath, useLocation, useNavigate } from 'react-router';
 
 export const EvaluationLayout: FC = () => {
   const workspace = useWorkspaceFromPath();
@@ -66,9 +66,7 @@ export const EvaluationLayout: FC = () => {
             ) : undefined
           }
         />
-        <Suspense fallback={<Loading description="Loading..." />}>
-          <Outlet />
-        </Suspense>
+        <SuspenseOutlet />
       </Stack>
     </AccessibleTitle>
   );

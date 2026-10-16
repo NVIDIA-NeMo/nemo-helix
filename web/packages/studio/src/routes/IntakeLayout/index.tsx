@@ -5,14 +5,14 @@ import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { Button, PageHeader, Stack, Tabs } from '@nvidia/foundations-react-core';
 import { FeatureFlagBadge } from '@studio/components/FeatureFlagBadge';
 import { ImportTracesModal } from '@studio/components/ImportTracesModal';
-import { Loading } from '@studio/components/Layouts/Loading';
+import { SuspenseOutlet } from '@studio/components/Layouts/SuspenseOutlet';
 import { ROUTES } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { INTAKE_FILTER_ACTION_TARGET_ID } from '@studio/routes/IntakeLayout/const';
 import { getIntakeSpansRoute, getIntakeTracesRoute } from '@studio/routes/utils';
-import { FC, Suspense, useState } from 'react';
-import { Link, Outlet, matchPath, useLocation } from 'react-router';
+import { FC, useState } from 'react';
+import { Link, matchPath, useLocation } from 'react-router';
 
 /**
  * Layout component for the Intake section.
@@ -75,9 +75,7 @@ export const IntakeLayout: FC = () => {
             className="flex shrink-0 items-center justify-end gap-density-xl"
           />
         </div>
-        <Suspense fallback={<Loading description="Loading..." />}>
-          <Outlet />
-        </Suspense>
+        <SuspenseOutlet />
         <ImportTracesModal
           open={importOpen}
           onClose={() => setImportOpen(false)}
