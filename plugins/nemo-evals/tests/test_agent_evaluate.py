@@ -2546,3 +2546,29 @@ async def test_compile_registered_gym_agent_stages_its_package_before_evaluation
     assert package["requirements"][0].startswith("nemo-fabric[deepagents,relay]==")
     assert "constraints" not in package  # the host image's pins ship with the plugin, not with the spec
     assert package["requirements"] == [package["requirements"][0]]  # the extra alone; the host lock pins companions
+
+
+def test_resolve_target_raises_a_relay_version_persisted_under_an_older_fabric(tmp_path: Path) -> None:
+    """Fabric 0.5 accepts only Relay observability version 4; a job submitted under 0.4 persisted 3."""
+    ctx = _job_context(tmp_path)
+    persisted = {
+        "metadata": {"name": "a"},
+        "harness": {"adapter_id": "nvidia.fabric.codex"},
+        "relay": {"observability": {"version": 3, "atif": {"enabled": True}}},
+    }
+
+    fabric_target = FabricRunnerTarget(
+        source=RegisteredAgentSource(agent=AgentRef(root="dev/a")), resolved_config=persisted
+    )
+    runtime, _, _ = AgentEvalJob._resolve_target(fabric_target, ctx)
+    assert isinstance(runtime, FabricAgentRuntime)
+    assert runtime._config["relay"]["observability"]["version"] == 4
+
+    harbor_target = HarborRunnerTarget(
+        source=RegisteredAgentSource(agent=AgentRef(root="dev/a")),
+        agent_kwargs={"fabric_config": persisted, "fabric_package": "nemo-fabric[codex]==0.5.0"},
+    )
+    runner, _, _ = AgentEvalJob._resolve_target(harbor_target, ctx)
+    assert isinstance(runner, HarborAgentTaskRunner)
+    assert runner._config is not None
+    assert runner._config.agent_kwargs["fabric_config"]["relay"]["observability"]["version"] == 4

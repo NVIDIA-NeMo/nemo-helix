@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import copy
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -43,9 +45,29 @@ PLATFORM_RUNTIME_ENV_VARS = ("NEMO_BASE_URL", "NHX_BASE_URL", "NHX_WORKSPACE")
 # Relay-enabled Pi agent defaults to the staged copy unless the config set a path.
 PI_RELAY_EXTENSION_PATH = "/opt/pi-relay-extension"
 
+RELAY_OBSERVABILITY_VERSION = 4
+# Fabric 0.4 stamped this same shape as version 3; a config persisted under it only needs the number raised.
+_SUPERSEDED_RELAY_OBSERVABILITY_VERSIONS = frozenset({3})
+
 
 class FabricTranslationError(ValueError):
     """Raised when Platform agent config cannot be translated to Fabric config."""
+
+
+def upgrade_relay_observability_version(config: dict[str, Any]) -> dict[str, Any]:
+    """A copy of a translated config with a superseded Relay observability version raised to the current one.
+
+    Returns ``config`` itself when there is nothing to raise.
+    """
+    relay = config.get("relay")
+    observability = relay.get("observability") if isinstance(relay, Mapping) else None
+    if not isinstance(observability, Mapping):
+        return config
+    if observability.get("version") not in _SUPERSEDED_RELAY_OBSERVABILITY_VERSIONS:
+        return config
+    upgraded = copy.deepcopy(config)
+    upgraded["relay"]["observability"]["version"] = RELAY_OBSERVABILITY_VERSION
+    return upgraded
 
 
 def translate_agent_config(config: AgentConfig, harness_name: str | None = None) -> fabric.FabricConfig:
@@ -336,7 +358,7 @@ def _telemetry_agent_name(config: AgentConfig) -> str:
 def _relay_observability_config(config: AgentConfig, model: ModelConfig) -> dict[str, Any]:
     telemetry = config.telemetry
     agent_name = _telemetry_agent_name(config)
-    observability: dict[str, Any] = {"version": 4}
+    observability: dict[str, Any] = {"version": RELAY_OBSERVABILITY_VERSION}
 
     if telemetry.atif is not None:
         atif = dict(telemetry.atif)

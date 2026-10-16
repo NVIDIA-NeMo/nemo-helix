@@ -294,6 +294,38 @@ async def test_inline_targets_pass_through_untouched() -> None:
     assert await resolve_registered_agent(None, workspace="dev", async_sdk=None) is None
 
 
+def _config_resolved_under_fabric_0_4() -> dict[str, Any]:
+    return {"harness": {"adapter_id": "x"}, "relay": {"observability": {"version": 3, "atif": {"enabled": True}}}}
+
+
+async def test_a_config_resolved_under_an_older_fabric_is_raised_to_the_running_ones_relay_version() -> None:
+    """A pending job re-parses the config it persisted at submit under whatever Fabric now runs the platform."""
+    fabric = await resolve_registered_agent(
+        _by_agent(AgentRef(root="dev/calc"), resolved_config=_config_resolved_under_fabric_0_4()),
+        workspace="dev",
+        async_sdk=None,
+    )
+    assert fabric.resolved_config["relay"]["observability"] == {"version": 4, "atif": {"enabled": True}}
+
+    harbor = await resolve_registered_agent(
+        HarborRunnerTarget(
+            source=RegisteredAgentSource(agent=AgentRef(root="dev/calc")),
+            agent_kwargs={"fabric_config": _config_resolved_under_fabric_0_4(), "fabric_workspace": "/app"},
+        ),
+        workspace="dev",
+        async_sdk=None,
+    )
+    assert harbor.agent_kwargs["fabric_config"]["relay"]["observability"]["version"] == 4
+    assert harbor.agent_kwargs["fabric_workspace"] == "/app"
+
+    gym = await resolve_registered_agent(
+        _gym_by_agent(AgentRef(root="dev/calc"), resolved_config=_config_resolved_under_fabric_0_4()),
+        workspace="dev",
+        async_sdk=None,
+    )
+    assert gym.resolved_config["relay"]["observability"]["version"] == 4
+
+
 # --- Environment overlay ------------------------------------------------------------------------------
 
 
