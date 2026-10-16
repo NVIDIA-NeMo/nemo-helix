@@ -4,7 +4,16 @@
 import { formatDurationMs } from '@nemo/common/src/utils/date';
 import { type Span } from '@nemo/sdk/generated/platform/schema';
 import { useGetSpan } from '@nemo/sdk/generated/platform/spans';
-import { Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
+import {
+  Button,
+  Flex,
+  Stack,
+  TabsContent,
+  TabsList,
+  TabsRoot,
+  TabsTrigger,
+  Text,
+} from '@nvidia/foundations-react-core';
 import { SpanPayloadFormatToggle } from '@studio/components/IntakeDetail/IntakeComponents/SpanPayloadFormatToggle';
 import { SpanPayloadView } from '@studio/components/IntakeDetail/IntakeComponents/SpanPayloadView';
 import { useSpanPayloadFormat } from '@studio/components/IntakeDetail/IntakeComponents/useSpanPayloadFormat';
@@ -36,8 +45,7 @@ const AgentReply: FC<{ workspace: string; replySpanId: string | undefined }> = (
 
   return (
     <Stack gap="density-sm" className="min-w-0">
-      <Flex align="center" justify="between" gap="density-sm">
-        <Text kind="label/semibold/md">Agent reply</Text>
+      <Flex justify="end">
         <SpanPayloadFormatToggle state={outputFormat} payloadLabel="reply" />
       </Flex>
       {isLoading ? (
@@ -73,27 +81,23 @@ const ToolCalls: FC<{ toolSpans: readonly Span[] }> = ({ toolSpans }) => {
     [setSearchParams]
   );
 
+  if (toolSpans.length === 0) {
+    return (
+      <Text kind="body/regular/sm" className="text-secondary">
+        No tool calls were recorded for this test.
+      </Text>
+    );
+  }
   return (
-    <Stack gap="density-sm" className="min-w-0">
-      <Text kind="label/semibold/md">Tool calls ({toolSpans.length})</Text>
-      {toolSpans.length === 0 ? (
-        <Text kind="body/regular/sm" className="text-secondary">
-          No tool calls were recorded for this test.
-        </Text>
-      ) : (
-        <Flex gap="density-sm" className="flex-wrap">
-          {toolSpans.map((span) => (
-            <Button key={span.span_id} kind="secondary" size="small" onClick={() => openSpan(span)}>
-              <Wrench size={14} aria-hidden />
-              {span.tool_name ?? span.name ?? 'tool'}
-              {spanDuration(span) ? (
-                <span className="text-secondary">{spanDuration(span)}</span>
-              ) : null}
-            </Button>
-          ))}
-        </Flex>
-      )}
-    </Stack>
+    <Flex gap="density-sm" className="flex-wrap">
+      {toolSpans.map((span) => (
+        <Button key={span.span_id} kind="secondary" size="small" onClick={() => openSpan(span)}>
+          <Wrench size={14} aria-hidden />
+          {span.tool_name ?? span.name ?? 'tool'}
+          {spanDuration(span) ? <span className="text-secondary">{spanDuration(span)}</span> : null}
+        </Button>
+      ))}
+    </Flex>
   );
 };
 
@@ -110,13 +114,22 @@ export const TestCaseTranscript: FC<{
   const toolSpans = useMemo(() => findToolCallSpans(spans), [spans]);
 
   return (
-    <Stack
-      gap="density-lg"
+    <div
       className="rounded-sm border border-base bg-surface-raised p-density-lg"
       data-testid="test-case-transcript"
     >
-      <AgentReply workspace={workspace} replySpanId={replySpanId} />
-      <ToolCalls toolSpans={toolSpans} />
-    </Stack>
+      <TabsRoot defaultValue="reply">
+        <TabsList aria-label="Test transcript">
+          <TabsTrigger value="reply">Agent reply</TabsTrigger>
+          <TabsTrigger value="tools">Tool calls ({toolSpans.length})</TabsTrigger>
+        </TabsList>
+        <TabsContent value="reply" className="items-stretch p-0 pt-density-lg">
+          <AgentReply workspace={workspace} replySpanId={replySpanId} />
+        </TabsContent>
+        <TabsContent value="tools" className="items-stretch p-0 pt-density-lg">
+          <ToolCalls toolSpans={toolSpans} />
+        </TabsContent>
+      </TabsRoot>
+    </div>
   );
 };

@@ -8,6 +8,7 @@ import { server } from '@studio/mocks/node';
 import { TestCaseTranscript } from '@studio/routes/EvaluationSessionDetailRoute/TestCaseTranscript';
 import { render, screen } from '@studio/tests/util/render';
 import { buildSpanTree, type SessionTrajectory } from '@studio/util/intakeTelemetry';
+import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
 const span = (overrides: Partial<Span> & Pick<Span, 'span_id' | 'kind'>): Span => ({
@@ -61,16 +62,18 @@ describe('TestCaseTranscript', () => {
       }),
     ];
 
+    const user = userEvent.setup();
     render(<TestCaseTranscript workspace="default" trajectories={trajectoryOf(spans)} />);
 
     expect(await screen.findByText('The plan is 61% above demand.')).toBeInTheDocument();
-    expect(screen.getByText('Tool calls (2)')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /get_demand/ })).toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: 'Tool calls (2)' }));
+    expect(await screen.findByRole('button', { name: /get_demand/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /score_schedule/ })).toBeInTheDocument();
   });
 
   it('says when no reply or tool calls were recorded', async () => {
     mockReply(undefined);
+    const user = userEvent.setup();
 
     render(
       <TestCaseTranscript
@@ -80,6 +83,9 @@ describe('TestCaseTranscript', () => {
     );
 
     expect(await screen.findByText('No reply was recorded for this test.')).toBeInTheDocument();
-    expect(screen.getByText('No tool calls were recorded for this test.')).toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: 'Tool calls (0)' }));
+    expect(
+      await screen.findByText('No tool calls were recorded for this test.')
+    ).toBeInTheDocument();
   });
 });
