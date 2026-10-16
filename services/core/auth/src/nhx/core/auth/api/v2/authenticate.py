@@ -7,6 +7,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
+from enum import Enum
 from typing import Annotated, Any
 
 import httpx
@@ -58,47 +59,62 @@ _AUTHENTICATE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
 }
 
 
-# How long an issuer-boundary verdict is reused before the IdP is consulted again. A consistent
-# verdict lasts as long as the validator's cached JWKS, so a key the IdP adds later is still caught.
-# A misconfigured or unverifiable verdict is retried sooner: the first so a fix on the IdP side is
-# picked up, the second so a slow IdP costs one request a timeout rather than every request.
-_ISSUER_BOUNDARY_CONSISTENT_SECONDS = 3600.0
-_ISSUER_BOUNDARY_RETRY_SECONDS = 30.0
+class _Verdict(Enum):
+    """The outcome of the last issuer-boundary check."""
+
+    CONSISTENT = "consistent"  # Checked: IdP and NeMo-issued tokens cannot be confused.
+    UNVERIFIED = "unverified"  # The IdP or the signing key could not be read; allowed, as before.
+    MISCONFIGURED = "misconfigured"  # They overlap; authentication fails closed.
+
+
+# How long each verdict is reused before the boundary is checked again. A consistent verdict lasts
+# as long as the validator's cached JWKS, so a key the IdP adds later is still caught. The others
+# are rechecked sooner: a misconfiguration so a fix on the IdP side is picked up, an unverified
+# check so a slow IdP costs one request a timeout rather than every request.
+_REUSE_VERDICT_SECONDS: dict[_Verdict, float] = {
+    _Verdict.CONSISTENT: 3600.0,
+    _Verdict.UNVERIFIED: 30.0,
+    _Verdict.MISCONFIGURED: 30.0,
+}
 
 
 class _IssuerBoundary:
-    """One auth config's shared JWT validator and its memoized issuer-boundary verdict.
+    """One auth config's shared JWT validator and its reused issuer-boundary verdict.
 
     The ext-authz callout runs on every gateway request under Envoy's timeout, so it must not pay
     for IdP discovery and JWKS fetches each time. Sharing the validator keeps its discovery and
-    JWKS caches; the verdict cache keeps the boundary check from re-fetching between them.
+    JWKS caches; reusing the verdict keeps the boundary check from re-fetching between them.
     """
 
     def __init__(self, config: AuthConfig) -> None:
         self.config = config
         self.jwt_validator = JWTValidator(config)
         self._lock = asyncio.Lock()
+        self._verdict: _Verdict | None = None
+        # The error to raise again while the verdict is MISCONFIGURED; None otherwise.
         self._misconfiguration: TokenIssuerBoundaryMisconfigurationError | None = None
-        self._recheck_at = 0.0
+        self._reuse_verdict_until = 0.0
 
     async def check(self, workload_token_exchange_service: WorkloadTokenExchangeService) -> None:
+        """Raise if IdP and NeMo-issued tokens could be confused, reusing a recent verdict."""
         # Concurrent requests wait for one in-flight check instead of each fetching from the IdP.
         async with self._lock:
-            if time.monotonic() < self._recheck_at:
-                if self._misconfiguration is not None:
-                    raise self._misconfiguration
-                return
-            try:
-                finished = await _validate_token_issuer_boundary(
-                    self.config, workload_token_exchange_service, self.jwt_validator
-                )
-            except TokenIssuerBoundaryMisconfigurationError as exc:
-                self._misconfiguration = exc
-                self._recheck_at = time.monotonic() + _ISSUER_BOUNDARY_RETRY_SECONDS
-                raise
-            self._misconfiguration = None
-            reuse_for = _ISSUER_BOUNDARY_CONSISTENT_SECONDS if finished else _ISSUER_BOUNDARY_RETRY_SECONDS
-            self._recheck_at = time.monotonic() + reuse_for
+            if self._verdict is None or time.monotonic() >= self._reuse_verdict_until:
+                self._verdict, self._misconfiguration = await self._evaluate(workload_token_exchange_service)
+                self._reuse_verdict_until = time.monotonic() + _REUSE_VERDICT_SECONDS[self._verdict]
+            if self._misconfiguration is not None:
+                raise self._misconfiguration
+
+    async def _evaluate(
+        self, workload_token_exchange_service: WorkloadTokenExchangeService
+    ) -> tuple[_Verdict, TokenIssuerBoundaryMisconfigurationError | None]:
+        try:
+            finished = await _validate_token_issuer_boundary(
+                self.config, workload_token_exchange_service, self.jwt_validator
+            )
+        except TokenIssuerBoundaryMisconfigurationError as exc:
+            return _Verdict.MISCONFIGURED, exc
+        return (_Verdict.CONSISTENT if finished else _Verdict.UNVERIFIED), None
 
 
 _ISSUER_BOUNDARY_STATE_KEY = "issuer_boundary"
