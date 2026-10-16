@@ -4,6 +4,7 @@
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
+import type { OptimizationStrategy } from '@nemo/sdk/generated/agent-optimization/schema/OptimizationStrategy';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import {
   Badge,
@@ -83,6 +84,7 @@ export const AgentDetailRoute: FC = () => {
   const [submitEvalOpen, setSubmitEvalOpen] = useState(false);
   const [importTracesOpen, setImportTracesOpen] = useState(false);
   const [launchOptimizeOpen, setLaunchOptimizeOpen] = useState(false);
+  const [launchStrategy, setLaunchStrategy] = useState<OptimizationStrategy | undefined>();
   const [deleteDeploymentTarget, setDeleteDeploymentTarget] = useState<AgentDeployment | null>(
     null
   );
@@ -341,6 +343,7 @@ export const AgentDetailRoute: FC = () => {
                 onOptimize={openOptimize}
                 onViewChange={setOptimizationView}
                 onUploadConfig={() => setLaunchOptimizeOpen(true)}
+                onRunStrategy={setLaunchStrategy}
               />
             </TabsContent>
           )}
@@ -428,6 +431,16 @@ export const AgentDetailRoute: FC = () => {
           onClose={() => setLaunchOptimizeOpen(false)}
           workspace={workspace}
           agentName={agentName}
+        />
+      )}
+      {agentName && launchStrategy && (
+        <LaunchOptimizeModal
+          key={launchStrategy.name}
+          open
+          onClose={() => setLaunchStrategy(undefined)}
+          workspace={workspace}
+          agentName={agentName}
+          strategy={launchStrategy}
         />
       )}
       {agentName && AGENT_CONTAINER_DEPLOYMENTS_ENABLED ? (
