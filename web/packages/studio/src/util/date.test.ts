@@ -44,27 +44,31 @@ describe('formatElapsedTime', () => {
   });
 });
 
+const day = (year: number, month: number, date: number) =>
+  new Date(Date.UTC(year, month - 1, date)).toLocaleDateString(undefined, { timeZone: 'UTC' });
+
 describe('formatDateRange', () => {
   describe('Given both start and end dates', () => {
     it('Returns the date range with em dash separator', () => {
+      const expected = `${day(2023, 10, 6)} — ${day(2023, 10, 10)}`;
       expect(formatDateRange('2023-10-06T20:14:00.690Z', '2023-10-10T15:30:00.000Z')).toBe(
-        '10/6/2023 — 10/10/2023'
+        expected
       );
-      expect(formatDateRange(1696623240690, 1696958400000)).toBe('10/6/2023 — 10/10/2023');
+      expect(formatDateRange(1696623240690, 1696958400000)).toBe(expected);
     });
   });
 
   describe('Given only start date', () => {
     it('Returns only the start date formatted', () => {
-      expect(formatDateRange('2023-10-06T20:14:00.690Z')).toBe('10/6/2023');
-      expect(formatDateRange(1696623240690)).toBe('10/6/2023');
+      expect(formatDateRange('2023-10-06T20:14:00.690Z')).toBe(day(2023, 10, 6));
+      expect(formatDateRange(1696623240690)).toBe(day(2023, 10, 6));
     });
   });
 
   describe('Given only end date', () => {
     it('Returns only the end date formatted', () => {
-      expect(formatDateRange(undefined, '2023-10-10T15:30:00.000Z')).toBe('10/10/2023');
-      expect(formatDateRange(undefined, 1696958400000)).toBe('10/10/2023');
+      expect(formatDateRange(undefined, '2023-10-10T15:30:00.000Z')).toBe(day(2023, 10, 10));
+      expect(formatDateRange(undefined, 1696958400000)).toBe(day(2023, 10, 10));
     });
   });
 

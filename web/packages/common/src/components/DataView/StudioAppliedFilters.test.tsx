@@ -159,8 +159,13 @@ describe('StudioAppliedFilters', () => {
     render(<StudioAppliedFilters />);
 
     expect(screen.getByText('Created At:')).toBeInTheDocument();
-    // formatDateRange produces locale-dependent output; verify the tag container includes a date
-    expect(screen.getByRole('button', { name: /Created At:.*1\/1\/2024/ })).toBeInTheDocument();
+    const tag = screen.getByRole('button', { name: /Created At:/ });
+    const [start, end] = (tag.textContent ?? '').split('—');
+    expect(start).toMatch(/\b0?1\b/);
+    expect(start).toContain('2024');
+    expect(end).toMatch(/\b31\b/);
+    expect(end).toContain('2024');
+    expect(tag).not.toHaveTextContent('2023');
   });
 
   it('renders a tag for a numeric range filter with formatted bounds', () => {

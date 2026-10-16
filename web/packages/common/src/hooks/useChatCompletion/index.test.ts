@@ -83,4 +83,19 @@ describe('createChatCompletion', () => {
 
     expect(result).toBe(stream);
   });
+  it('sends extra headers without leaking them into the request body', async () => {
+    mocks.create.mockReturnValue(Promise.resolve(completion));
+
+    await createChatCompletion({
+      baseURL: 'http://localhost/v1',
+      accessToken: 'test-token',
+      model: 'default/guarded-model',
+      messages: [{ role: 'user', content: 'Tell me about the sea.' }],
+      extraHeaders: { 'X-Nemo-Session-Id': 'session-1' },
+    });
+
+    const [body, options] = mocks.create.mock.calls[0];
+    expect(options.headers).toMatchObject({ 'X-Nemo-Session-Id': 'session-1' });
+    expect(body).not.toHaveProperty('extraHeaders');
+  });
 });
