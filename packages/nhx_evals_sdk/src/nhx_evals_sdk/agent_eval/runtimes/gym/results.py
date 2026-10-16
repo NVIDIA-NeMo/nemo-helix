@@ -83,6 +83,15 @@ _FAILURE_MESSAGE_KEYS = (
 _FAILURE_TYPE_KEYS = ("_ng_failure_type", "_ng_failure_class")
 
 
+def _first_text(record: Mapping[str, Any], keys: Sequence[str]) -> str | None:
+    """The first of ``keys`` holding a non-blank string, or ``None``.
+
+    Strings only, because ``TrialError`` takes nothing else and an odd record must not sink the run.
+    A non-string under an earlier key is skipped, so it cannot hide a usable value under a later one.
+    """
+    return next((value for value in map(record.get, keys) if isinstance(value, str) and value.strip()), None)
+
+
 def _agent_never_ran(record: Mapping[str, Any]) -> bool:
     """True when a result record shows the agent produced nothing *and* never called the model.
 
@@ -701,10 +710,9 @@ def trials_from_rollouts(
                     kind="filesystem", format="file", ref=str(capture_path)
                 )
             failure = next((value for value in map(record.get, _FAILURE_MESSAGE_KEYS) if value), None)
-            # TrialError takes strings only, and an odd record must not sink the run.
-            failure_type = next(
-                (value for value in map(record.get, _FAILURE_TYPE_KEYS) if isinstance(value, str) and value.strip()),
-                UNKNOWN_ERROR_TYPE,
+            error = TrialError(
+                type=_first_text(record, _FAILURE_TYPE_KEYS) or UNKNOWN_ERROR_TYPE,
+                message=_first_text(record, _FAILURE_MESSAGE_KEYS),
             )
             trials.append(
                 AgentEvalTrial(
@@ -721,7 +729,7 @@ def trials_from_rollouts(
                         response=record.get("response"), metadata={"agent_ref": record.get("agent_ref")}
                     ),
                     evidence=CandidateEvidence(descriptors=descriptors),
-                    error=TrialError(type=failure_type, message=failure if isinstance(failure, str) else None),
+                    error=error,
                     measurements=_usage_measurements(record),
                     metadata={
                         "reward": None,

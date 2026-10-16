@@ -433,6 +433,11 @@ def test_failures_sidecar_yields_failed_trials(tmp_path: Path) -> None:
             TrialError(type=UNKNOWN_ERROR_TYPE),
             id="odd-diagnostic",
         ),
+        pytest.param(
+            {"error": {"status": 503}, "_ng_failure_type": "ClientResponseError", "_ng_failure_message": "503"},
+            TrialError(type="ClientResponseError", message="503"),
+            id="odd-agent-error-gym-message-kept",
+        ),
     ],
 )
 def test_a_failed_attempt_keeps_its_diagnostic_and_model_calls(
@@ -453,8 +458,8 @@ def test_a_failed_attempt_keeps_its_diagnostic_and_model_calls(
     (trial,) = trials_from_rollouts(bundle, tasks, index_map, capture_dir=captures)
 
     assert trial.error == error
-    # gym_failure keeps the raw diagnostic, including one too odd for the error message.
-    assert trial.metadata["gym_failure"] == (error.message or failure.get("error"))
+    # gym_failure keeps the raw diagnostic, an agent's own first, including one too odd for the error message.
+    assert trial.metadata["gym_failure"] == (failure.get("error") or error.message)
     assert trial.evidence is not None
     # No OTLP trace: that would move publication off the ATIF fallback, which records the agent identity.
     assert trial.evidence.descriptors.keys() == {"rollout_failures", "ng_trajectory"}
