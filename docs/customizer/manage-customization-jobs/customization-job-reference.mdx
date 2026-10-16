@@ -56,7 +56,7 @@ nemo inference deployment-configs create customizer-vllm --workspace default \
 
 Then set `"deployment_config": "default/customizer-vllm"` on the job. `lora_enabled: true` lets the same template serve LoRA adapters as well as full-weight and merged outputs.
 
-Inline parameters also work. They deploy with NIM by default; set `"engine": "vllm"` to deploy with vLLM. `tool_call_config` is only accepted with `"engine": "nim"`. A NIM deployment that omits `image_name` or `image_tag` uses the platform default, `nvcr.io/nim/nvidia/model-free-nim:2.0.13`.
+Inline parameters also work. They deploy with NIM by default; we recommend setting `"engine": "vllm"` to deploy with vLLM. `tool_call_config` is only accepted with `"engine": "nim"`. A NIM deployment that omits `image_name` or `image_tag` uses the platform default, the multi-LLM NIM `nvcr.io/nim/nvidia/llm-nim:1.15.5`. It uses transformers 4 and cannot load merged LoRA models (`"finetuning_type": "lora_merged"`), which Customizer saves with transformers 5; deploy those with vLLM, or with the [model-free NIM](https://docs.nvidia.com/nim/large-language-models/latest/deployment/model-free-nim.html) (the NIM 2.x successor to the multi-LLM NIM) by setting `"image_name": "nvcr.io/nim/nvidia/model-free-nim"` and `"image_tag": "2.0.13"`. The model-free NIM loads LoRA adapters up to rank 16 by default; for a higher `spec.training.lora.rank`, add `"additional_envs": {"NIM_PASSTHROUGH_ARGS": "--max-lora-rank 32"}` with the rank you train.
 
 ---
 

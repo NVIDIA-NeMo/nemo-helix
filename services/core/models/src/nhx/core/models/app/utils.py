@@ -114,13 +114,31 @@ def parse_model_name_revision(
     return parsed_namespace, parsed_name, parsed_revision
 
 
+def _image_basename(image_name: str) -> str:
+    """Last path segment of an image reference, without its tag or digest."""
+    basename = image_name.split("/")[-1]
+    return basename.split("@", 1)[0].split(":", 1)[0]
+
+
 def is_multi_llm_image(image_name: Optional[str]) -> bool:
-    # Default is nvcr.io/nim/nvidia/llm-nim but we support other prefixes, as long as the image ends in `llm-nim`
-    if not image_name:
-        return True
-    multi_llm_name = "llm-nim"
-    split_image_name = image_name.split("/")
-    return split_image_name[-1] == multi_llm_name
+    """Whether the image is the NIM 1.x multi-LLM NIM (any registry, as long as the image is named ``llm-nim``)."""
+    return bool(image_name) and _image_basename(image_name) == "llm-nim"
+
+
+def is_model_free_nim_image(image_name: Optional[str]) -> bool:
+    """Whether the image is the NIM 2.x model-free NIM, the successor to the multi-LLM NIM.
+
+    Accepts any registry, as long as the image is named ``model-free-nim``.
+    """
+    return bool(image_name) and _image_basename(image_name) == "model-free-nim"
+
+
+def is_generic_nim_image(image_name: Optional[str]) -> bool:
+    """Whether the NIM loads whatever weights it is given rather than serving baked-in weights.
+
+    An unset image uses the platform default, which is the multi-LLM NIM.
+    """
+    return not image_name or is_multi_llm_image(image_name) or is_model_free_nim_image(image_name)
 
 
 def get_model_weights_type(
@@ -171,12 +189,12 @@ def get_model_weights_type(
     image_name = executor_cfg.image_name if executor_cfg else None
     model_name = model_spec_cfg.model_name if model_spec_cfg else None
 
-    # If the model is a multi-LLM, we have already ruled out HF weights, so we download from Files service
-    if is_multi_llm_image(image_name) and model_name:
-        logger.debug("Detected Files service weights via multi-LLM: downloading from NeMo Helix Files service")
+    # A multi-LLM or model-free NIM has no weights of its own, so we download from Files service
+    if is_generic_nim_image(image_name) and model_name:
+        logger.debug("Detected Files service weights via generic NIM: downloading from NeMo Helix Files service")
         return ModelWeightsType.FILES_SERVICE
     # Baked container weights are the default assumed case for model-specific NIM images
-    if not is_multi_llm_image(image_name):
+    if not is_generic_nim_image(image_name):
         logger.debug("Detected baked container weights: model-specific NIM image with model_name")
         return ModelWeightsType.BAKED_CONTAINER
 
