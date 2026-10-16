@@ -20,15 +20,22 @@ from nhx.core.entities.controllers.workspace_cleanup import (
 from nhx.core.entities.entities import Workspace, WorkspaceDeletionStage
 
 
-def _make_workspace(name: str = "test-workspace", *, updated_at: datetime | None = None) -> Workspace:
+def _make_workspace(
+    name: str = "test-workspace",
+    *,
+    updated_at: datetime | None = None,
+    deletion_stage: WorkspaceDeletionStage = WorkspaceDeletionStage.PENDING,
+) -> Workspace:
     now = datetime.now(tz=timezone.utc)
-    return Workspace(
+    workspace = Workspace(
         id="ws-123",
         name=name,
         description="test",
         created_at=now,
         updated_at=updated_at or now,
     )
+    workspace._deletion_stage = deletion_stage
+    return workspace
 
 
 class _MockAsyncPaginatedResponse:
@@ -189,7 +196,7 @@ class TestWorkspaceCleanupStep:
         assert controller._loop is loop
         controller.step()
         assert controller.is_healthy
-        assert repo.list_workspaces.await_count == 2
+        assert repo.list_workspaces.await_count == 3
         loop.close()
 
     def test_step_sets_healthy_on_success(self):
@@ -219,14 +226,15 @@ class TestWorkspaceCleanupAsyncStep:
 
         await controller._async_step()
 
-        repo.mark_workspace_for_deletion.assert_not_called()
+        repo.claim_workspace_for_deletion.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_successful_workspace_deletion(self):
         workspace = _make_workspace()
         repo = AsyncMock()
         repo.list_workspaces.return_value = ([workspace], None)
-        repo.mark_workspace_for_deletion.return_value = True
+        repo.claim_workspace_for_deletion.return_value = workspace
+        repo.delete_workspace_if_claimed.return_value = True
 
         sdk = MagicMock()
         mock_files = _make_mock_files_client([])
@@ -235,18 +243,24 @@ class TestWorkspaceCleanupAsyncStep:
         with _patch_clients(_make_jobs_client([]), mock_files, _make_models_client([])):
             await controller._async_step()
 
-        repo.mark_workspace_for_deletion.assert_any_call(
+        repo.claim_workspace_for_deletion.assert_awaited_once_with(
             name="test-workspace",
-            deletion_stage=WorkspaceDeletionStage.DELETING,
+            expected_stage=WorkspaceDeletionStage.PENDING,
+            expected_updated_at=workspace.updated_at,
+            lease_expired_before=None,
         )
-        repo.delete_workspace.assert_awaited_once_with(name="test-workspace")
+        repo.delete_workspace_if_claimed.assert_awaited_once_with(
+            name="test-workspace",
+            expected_updated_at=workspace.updated_at,
+        )
 
     @pytest.mark.asyncio
     async def test_deletes_models_and_adapters_before_filesets(self):
         workspace = _make_workspace()
         repo = AsyncMock()
         repo.list_workspaces.return_value = ([workspace], None)
-        repo.mark_workspace_for_deletion.return_value = True
+        repo.claim_workspace_for_deletion.return_value = workspace
+        repo.delete_workspace_if_claimed.return_value = True
 
         adapter = MagicMock()
         adapter.name = "adapter"
@@ -266,27 +280,28 @@ class TestWorkspaceCleanupAsyncStep:
             await controller._async_step()
 
         assert call_order == ["adapter", "model", "fileset"]
-        repo.delete_workspace.assert_awaited_once_with(name="test-workspace")
+        repo.delete_workspace_if_claimed.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_workspace_already_being_processed(self):
         workspace = _make_workspace()
         repo = AsyncMock()
         repo.list_workspaces.return_value = ([workspace], None)
-        repo.mark_workspace_for_deletion.return_value = False
+        repo.claim_workspace_for_deletion.return_value = None
 
         controller = _make_controller(workspace_repo=repo)
 
         await controller._async_step()
 
-        repo.delete_workspace.assert_not_called()
+        repo.delete_workspace_if_claimed.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_cleanup_failure_marks_workspace_failed(self):
         workspace = _make_workspace()
         repo = AsyncMock()
         repo.list_workspaces.return_value = ([workspace], None)
-        repo.mark_workspace_for_deletion.return_value = True
+        repo.claim_workspace_for_deletion.return_value = workspace
+        repo.fail_workspace_deletion_if_claimed.return_value = True
 
         jobs_client = MagicMock()
         jobs_client.list_jobs = AsyncMock(side_effect=Exception("jobs service down"))
@@ -296,21 +311,25 @@ class TestWorkspaceCleanupAsyncStep:
         with _patch_jobs_client(jobs_client):
             await controller._async_step()
 
-        repo.mark_workspace_for_deletion.assert_any_call(
+        repo.fail_workspace_deletion_if_claimed.assert_awaited_once_with(
             name="test-workspace",
-            deletion_stage=WorkspaceDeletionStage.FAILED,
+            expected_updated_at=workspace.updated_at,
         )
-        repo.delete_workspace.assert_not_called()
+        repo.delete_workspace_if_claimed.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_retries_failed_workspace_after_backoff(self):
-        workspace = _make_workspace(updated_at=datetime.now(tz=timezone.utc) - timedelta(seconds=120))
+        workspace = _make_workspace(
+            updated_at=datetime.now(tz=timezone.utc) - timedelta(seconds=120),
+            deletion_stage=WorkspaceDeletionStage.FAILED,
+        )
         repo = AsyncMock()
         repo.list_workspaces.side_effect = [
             ([], None),
             ([workspace], None),
         ]
-        repo.mark_workspace_for_deletion.return_value = True
+        repo.claim_workspace_for_deletion.return_value = workspace
+        repo.delete_workspace_if_claimed.return_value = True
         controller = _make_controller(workspace_repo=repo)
 
         with _patch_clients(_make_jobs_client([]), _make_mock_files_client([]), _make_models_client([])):
@@ -324,26 +343,287 @@ class TestWorkspaceCleanupAsyncStep:
         assert len(failed_calls) == 1
         assert failed_calls[0].kwargs["sort"] == "updated_at"
         assert failed_calls[0].kwargs["page_size"] == 1
-        repo.mark_workspace_for_deletion.assert_any_call(
+        repo.claim_workspace_for_deletion.assert_awaited_once_with(
             name="test-workspace",
-            deletion_stage=WorkspaceDeletionStage.DELETING,
+            expected_stage=WorkspaceDeletionStage.FAILED,
+            expected_updated_at=workspace.updated_at,
+            lease_expired_before=None,
         )
-        repo.delete_workspace.assert_awaited_once_with(name="test-workspace")
+        repo.delete_workspace_if_claimed.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_skips_failed_workspace_inside_backoff(self):
-        workspace = _make_workspace()
+        workspace = _make_workspace(deletion_stage=WorkspaceDeletionStage.FAILED)
         repo = AsyncMock()
         repo.list_workspaces.side_effect = [
             ([], None),
             ([workspace], None),
+            ([], None),
         ]
         controller = _make_controller(workspace_repo=repo)
 
         await controller._async_step()
 
-        repo.mark_workspace_for_deletion.assert_not_called()
-        repo.delete_workspace.assert_not_called()
+        repo.claim_workspace_for_deletion.assert_not_called()
+        repo.delete_workspace_if_claimed.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_reclaims_deleting_workspace_after_lease_expires(self):
+        stale_timestamp = datetime.now(tz=timezone.utc) - timedelta(seconds=120)
+        stale = _make_workspace(
+            updated_at=stale_timestamp,
+            deletion_stage=WorkspaceDeletionStage.DELETING,
+        )
+        claimed = _make_workspace(deletion_stage=WorkspaceDeletionStage.DELETING)
+        repo = AsyncMock()
+        repo.list_workspaces.side_effect = [
+            ([], None),
+            ([], None),
+            ([stale], None),
+        ]
+        repo.claim_workspace_for_deletion.return_value = claimed
+        repo.delete_workspace_if_claimed.return_value = True
+        controller = _make_controller(workspace_repo=repo)
+
+        with _patch_clients(_make_jobs_client([]), _make_mock_files_client([]), _make_models_client([])):
+            await controller._async_step()
+
+        claim = repo.claim_workspace_for_deletion.await_args
+        assert claim.kwargs["expected_stage"] == WorkspaceDeletionStage.DELETING
+        assert claim.kwargs["expected_updated_at"] == stale_timestamp
+        assert claim.kwargs["lease_expired_before"] < claimed.updated_at.replace(tzinfo=None)
+        repo.delete_workspace_if_claimed.assert_awaited_once_with(
+            name=stale.name,
+            expected_updated_at=claimed.updated_at,
+        )
+
+    @pytest.mark.asyncio
+    async def test_leaves_recent_deleting_workspace_alone(self):
+        recent = _make_workspace(deletion_stage=WorkspaceDeletionStage.DELETING)
+        repo = AsyncMock()
+        repo.list_workspaces.side_effect = [
+            ([], None),
+            ([], None),
+            ([recent], None),
+        ]
+        controller = _make_controller(workspace_repo=repo)
+
+        await controller._async_step()
+
+        repo.claim_workspace_for_deletion.assert_not_called()
+        repo.delete_workspace_if_claimed.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_only_known_deletion_stages_are_queried(self):
+        repo = AsyncMock()
+        repo.list_workspaces.return_value = ([], None)
+        controller = _make_controller(workspace_repo=repo)
+
+        await controller._async_step()
+
+        queried_stages = [call.kwargs["filter_op"].value for call in repo.list_workspaces.await_args_list]
+        assert queried_stages == [
+            WorkspaceDeletionStage.PENDING,
+            WorkspaceDeletionStage.FAILED,
+            WorkspaceDeletionStage.DELETING,
+        ]
+
+    @pytest.mark.asyncio
+    async def test_renews_lease_while_cleanup_is_in_progress(self):
+        pending = _make_workspace()
+        claimed = _make_workspace(deletion_stage=WorkspaceDeletionStage.DELETING)
+        renewed = _make_workspace(deletion_stage=WorkspaceDeletionStage.DELETING)
+        cleanup_release = asyncio.Event()
+        renewal_release = asyncio.Event()
+        renewal_completed = asyncio.Event()
+        renewal_sleep_count = 0
+
+        async def block_cleanup(**_kwargs):
+            await cleanup_release.wait()
+            return _MockAsyncPaginatedResponse([])
+
+        async def controlled_sleep(_delay: float) -> None:
+            nonlocal renewal_sleep_count
+            renewal_sleep_count += 1
+            if renewal_sleep_count == 1:
+                await renewal_release.wait()
+            else:
+                await asyncio.Event().wait()
+
+        async def renew(**_kwargs):
+            renewal_completed.set()
+            return renewed
+
+        jobs_client = _make_jobs_client([])
+        jobs_client.list_jobs.side_effect = block_cleanup
+        repo = AsyncMock()
+        repo.list_workspaces.return_value = ([pending], None)
+        repo.claim_workspace_for_deletion.return_value = claimed
+        repo.renew_workspace_deletion_lease.side_effect = renew
+        repo.delete_workspace_if_claimed.return_value = True
+        controller = _make_controller(workspace_repo=repo)
+
+        with (
+            _patch_clients(jobs_client, _make_mock_files_client([]), _make_models_client([])),
+            patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=controlled_sleep),
+        ):
+            cleanup_task = asyncio.create_task(controller._async_step())
+            renewal_release.set()
+            await renewal_completed.wait()
+            cleanup_release.set()
+            await cleanup_task
+
+        repo.renew_workspace_deletion_lease.assert_awaited_once_with(
+            name=pending.name,
+            expected_updated_at=claimed.updated_at,
+        )
+        repo.delete_workspace_if_claimed.assert_awaited_once_with(
+            name=pending.name,
+            expected_updated_at=renewed.updated_at,
+        )
+
+    @pytest.mark.asyncio
+    async def test_lost_lease_prevents_final_state_changes(self):
+        pending = _make_workspace()
+        claimed = _make_workspace(deletion_stage=WorkspaceDeletionStage.DELETING)
+        cleanup_started = asyncio.Event()
+        cleanup_cancelled = asyncio.Event()
+        renewal_release = asyncio.Event()
+        renewal_completed = asyncio.Event()
+
+        async def block_cleanup(**_kwargs):
+            cleanup_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cleanup_cancelled.set()
+                raise
+
+        async def controlled_sleep(_delay: float) -> None:
+            await renewal_release.wait()
+
+        async def lose_lease(**_kwargs):
+            renewal_completed.set()
+            return None
+
+        jobs_client = _make_jobs_client([])
+        jobs_client.list_jobs.side_effect = block_cleanup
+        repo = AsyncMock()
+        repo.list_workspaces.return_value = ([pending], None)
+        repo.claim_workspace_for_deletion.return_value = claimed
+        repo.renew_workspace_deletion_lease.side_effect = lose_lease
+        controller = _make_controller(workspace_repo=repo)
+
+        with (
+            _patch_clients(jobs_client, _make_mock_files_client([]), _make_models_client([])),
+            patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=controlled_sleep),
+        ):
+            cleanup_task = asyncio.create_task(controller._async_step())
+            await cleanup_started.wait()
+            renewal_release.set()
+            await renewal_completed.wait()
+            await cleanup_task
+
+        assert cleanup_cancelled.is_set()
+        repo.fail_workspace_deletion_if_claimed.assert_not_called()
+        repo.delete_workspace_if_claimed.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_renewal_error_cancels_cleanup_and_fails_current_claim(self):
+        pending = _make_workspace()
+        claimed = _make_workspace(deletion_stage=WorkspaceDeletionStage.DELETING)
+        cleanup_started = asyncio.Event()
+        cleanup_cancelled = asyncio.Event()
+        renewal_release = asyncio.Event()
+
+        async def block_cleanup(**_kwargs):
+            cleanup_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cleanup_cancelled.set()
+                raise
+
+        async def controlled_sleep(_delay: float) -> None:
+            await renewal_release.wait()
+
+        jobs_client = _make_jobs_client([])
+        jobs_client.list_jobs.side_effect = block_cleanup
+        repo = AsyncMock()
+        repo.list_workspaces.return_value = ([pending], None)
+        repo.claim_workspace_for_deletion.return_value = claimed
+        repo.renew_workspace_deletion_lease.side_effect = RuntimeError("database unavailable")
+        repo.fail_workspace_deletion_if_claimed.return_value = True
+        controller = _make_controller(workspace_repo=repo)
+
+        with (
+            _patch_clients(jobs_client, _make_mock_files_client([]), _make_models_client([])),
+            patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=controlled_sleep),
+        ):
+            cleanup_task = asyncio.create_task(controller._async_step())
+            await cleanup_started.wait()
+            renewal_release.set()
+            await cleanup_task
+
+        assert cleanup_cancelled.is_set()
+        repo.fail_workspace_deletion_if_claimed.assert_awaited_once_with(
+            name=pending.name,
+            expected_updated_at=claimed.updated_at,
+        )
+        repo.delete_workspace_if_claimed.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_stalled_renewal_is_cancelled_before_the_lease_expires(self, monkeypatch: pytest.MonkeyPatch):
+        from nhx.core.entities.controllers import workspace_cleanup as workspace_cleanup_module
+
+        # Equal values leave no time after the renewal interval, so a call that
+        # does not return is cancelled instead of running past the lease.
+        monkeypatch.setattr(workspace_cleanup_module, "_DELETION_LEASE_TIMEOUT_SECONDS", 20.0)
+        monkeypatch.setattr(workspace_cleanup_module, "_DELETION_LEASE_RENEW_INTERVAL_SECONDS", 20.0)
+        pending = _make_workspace()
+        claimed = _make_workspace(deletion_stage=WorkspaceDeletionStage.DELETING)
+        cleanup_started = asyncio.Event()
+        cleanup_cancelled = asyncio.Event()
+        renewal_release = asyncio.Event()
+
+        async def block_cleanup(**_kwargs):
+            cleanup_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cleanup_cancelled.set()
+                raise
+
+        async def controlled_sleep(_delay: float) -> None:
+            await renewal_release.wait()
+
+        async def hang_renewal(**_kwargs):
+            await asyncio.Event().wait()
+
+        jobs_client = _make_jobs_client([])
+        jobs_client.list_jobs.side_effect = block_cleanup
+        repo = AsyncMock()
+        repo.list_workspaces.return_value = ([pending], None)
+        repo.claim_workspace_for_deletion.return_value = claimed
+        repo.renew_workspace_deletion_lease.side_effect = hang_renewal
+        repo.fail_workspace_deletion_if_claimed.return_value = True
+        controller = _make_controller(workspace_repo=repo)
+
+        with (
+            _patch_clients(jobs_client, _make_mock_files_client([]), _make_models_client([])),
+            patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=controlled_sleep),
+        ):
+            cleanup_task = asyncio.create_task(controller._async_step())
+            await cleanup_started.wait()
+            renewal_release.set()
+            await cleanup_task
+
+        assert cleanup_cancelled.is_set()
+        repo.fail_workspace_deletion_if_claimed.assert_awaited_once_with(
+            name=pending.name,
+            expected_updated_at=claimed.updated_at,
+        )
+        repo.delete_workspace_if_claimed.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_pending_workspace_is_preferred_over_failed(self):
@@ -360,7 +640,8 @@ class TestWorkspaceCleanupAsyncStep:
             return ([failed], None)
 
         repo.list_workspaces.side_effect = list_workspaces
-        repo.mark_workspace_for_deletion.return_value = True
+        repo.claim_workspace_for_deletion.return_value = pending
+        repo.delete_workspace_if_claimed.return_value = True
         controller = _make_controller(workspace_repo=repo)
 
         with _patch_clients(_make_jobs_client([]), _make_mock_files_client([]), _make_models_client([])):
@@ -368,18 +649,24 @@ class TestWorkspaceCleanupAsyncStep:
 
         queried_stages = [call.kwargs["filter_op"].value for call in repo.list_workspaces.await_args_list]
         assert queried_stages == [WorkspaceDeletionStage.PENDING]
-        repo.delete_workspace.assert_awaited_once_with(name="pending-workspace")
+        repo.delete_workspace_if_claimed.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_retries_after_model_list_503(self):
-        workspace = _make_workspace(updated_at=datetime.now(tz=timezone.utc) - timedelta(seconds=120))
+        pending = _make_workspace()
+        failed = _make_workspace(
+            updated_at=datetime.now(tz=timezone.utc) - timedelta(seconds=120),
+            deletion_stage=WorkspaceDeletionStage.FAILED,
+        )
         repo = AsyncMock()
         repo.list_workspaces.side_effect = [
-            ([workspace], None),
+            ([pending], None),
             ([], None),
-            ([workspace], None),
+            ([failed], None),
         ]
-        repo.mark_workspace_for_deletion.return_value = True
+        repo.claim_workspace_for_deletion.side_effect = [pending, failed]
+        repo.fail_workspace_deletion_if_claimed.return_value = True
+        repo.delete_workspace_if_claimed.return_value = True
         models_client = _make_models_client([])
         models_client.list_models = AsyncMock(
             side_effect=[Exception("HTTP 503: no healthy upstream"), _MockAsyncPaginatedResponse([])]
@@ -390,19 +677,18 @@ class TestWorkspaceCleanupAsyncStep:
             await controller._async_step()
             await controller._async_step()
 
-        repo.mark_workspace_for_deletion.assert_any_call(
-            name="test-workspace",
-            deletion_stage=WorkspaceDeletionStage.FAILED,
-        )
-        repo.delete_workspace.assert_awaited_once_with(name="test-workspace")
+        repo.fail_workspace_deletion_if_claimed.assert_awaited_once()
+        repo.delete_workspace_if_claimed.assert_awaited_once()
 
     @pytest.mark.parametrize("kind", ["deployment", "model", "adapter", "fileset"])
     @pytest.mark.asyncio
     async def test_item_delete_failure_keeps_the_workspace(self, kind: str):
         workspace = _make_workspace()
+        claimed = _make_workspace(deletion_stage=WorkspaceDeletionStage.DELETING)
         repo = AsyncMock()
         repo.list_workspaces.return_value = ([workspace], None)
-        repo.mark_workspace_for_deletion.return_value = True
+        repo.claim_workspace_for_deletion.return_value = claimed
+        repo.fail_workspace_deletion_if_claimed.return_value = True
         first = _named("first")
         second = _named("second")
         model = _named("model")
@@ -443,19 +729,21 @@ class TestWorkspaceCleanupAsyncStep:
             models_client.delete_adapter.assert_awaited_once_with(name="adapter", workspace="test-workspace")
         if kind != "fileset":
             files_client.delete_fileset.assert_not_called()
-        repo.delete_workspace.assert_not_called()
-        repo.mark_workspace_for_deletion.assert_any_call(
-            name="test-workspace",
-            deletion_stage=WorkspaceDeletionStage.FAILED,
+        repo.delete_workspace_if_claimed.assert_not_called()
+        repo.fail_workspace_deletion_if_claimed.assert_awaited_once_with(
+            name=workspace.name,
+            expected_updated_at=claimed.updated_at,
         )
 
     @pytest.mark.parametrize("kind", ["deployment", "model", "adapter", "fileset"])
     @pytest.mark.asyncio
     async def test_not_found_item_delete_still_deletes_the_workspace(self, kind: str):
         workspace = _make_workspace()
+        claimed = _make_workspace(deletion_stage=WorkspaceDeletionStage.DELETING)
         repo = AsyncMock()
         repo.list_workspaces.return_value = ([workspace], None)
-        repo.mark_workspace_for_deletion.return_value = True
+        repo.claim_workspace_for_deletion.return_value = claimed
+        repo.delete_workspace_if_claimed.return_value = True
         item = _named("already-gone")
         models_client = _make_models_client()
         files_client = _make_mock_files_client()
@@ -477,26 +765,32 @@ class TestWorkspaceCleanupAsyncStep:
         with _patch_clients(_make_jobs_client([]), files_client, models_client):
             await controller._async_step()
 
-        repo.delete_workspace.assert_awaited_once_with(name="test-workspace")
-        failed_marks = [
-            call
-            for call in repo.mark_workspace_for_deletion.await_args_list
-            if call.kwargs["deletion_stage"] == WorkspaceDeletionStage.FAILED
-        ]
-        assert failed_marks == []
+        repo.delete_workspace_if_claimed.assert_awaited_once_with(
+            name=workspace.name,
+            expected_updated_at=claimed.updated_at,
+        )
+        repo.fail_workspace_deletion_if_claimed.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_retry_deletes_the_deployment_that_survived_the_failed_attempt(self):
-        workspace = _make_workspace(updated_at=datetime.now(tz=timezone.utc) - timedelta(seconds=120))
+        pending = _make_workspace()
+        failed = _make_workspace(
+            updated_at=datetime.now(tz=timezone.utc) - timedelta(seconds=120),
+            deletion_stage=WorkspaceDeletionStage.FAILED,
+        )
+        claimed_pending = _make_workspace(deletion_stage=WorkspaceDeletionStage.DELETING)
+        claimed_retry = _make_workspace(deletion_stage=WorkspaceDeletionStage.DELETING)
         removed = _named("removed")
         remaining = _named("remaining")
         repo = AsyncMock()
         repo.list_workspaces.side_effect = [
-            ([workspace], None),
+            ([pending], None),
             ([], None),
-            ([workspace], None),
+            ([failed], None),
         ]
-        repo.mark_workspace_for_deletion.return_value = True
+        repo.claim_workspace_for_deletion.side_effect = [claimed_pending, claimed_retry]
+        repo.fail_workspace_deletion_if_claimed.return_value = True
+        repo.delete_workspace_if_claimed.return_value = True
         models_client = _make_models_client()
         models_client.list_deployments = AsyncMock(
             side_effect=[
@@ -511,7 +805,7 @@ class TestWorkspaceCleanupAsyncStep:
 
         with _patch_clients(_make_jobs_client([]), _make_mock_files_client([]), models_client):
             await controller._async_step()
-            repo.delete_workspace.assert_not_called()
+            repo.delete_workspace_if_claimed.assert_not_called()
             await controller._async_step()
 
         assert [call.kwargs["name"] for call in models_client.delete_deployment.await_args_list] == [
@@ -519,18 +813,22 @@ class TestWorkspaceCleanupAsyncStep:
             "remaining",
             "remaining",
         ]
-        repo.mark_workspace_for_deletion.assert_any_call(
-            name="test-workspace",
-            deletion_stage=WorkspaceDeletionStage.FAILED,
+        repo.fail_workspace_deletion_if_claimed.assert_awaited_once_with(
+            name=pending.name,
+            expected_updated_at=claimed_pending.updated_at,
         )
-        repo.delete_workspace.assert_awaited_once_with(name="test-workspace")
+        repo.delete_workspace_if_claimed.assert_awaited_once_with(
+            name=pending.name,
+            expected_updated_at=claimed_retry.updated_at,
+        )
 
     @pytest.mark.asyncio
     async def test_cleanup_failure_increments_error_counter(self):
         workspace = _make_workspace()
         repo = AsyncMock()
         repo.list_workspaces.return_value = ([workspace], None)
-        repo.mark_workspace_for_deletion.return_value = True
+        repo.claim_workspace_for_deletion.return_value = workspace
+        repo.fail_workspace_deletion_if_claimed.return_value = True
 
         jobs_client = MagicMock()
         jobs_client.list_jobs = AsyncMock(side_effect=Exception("boom"))
