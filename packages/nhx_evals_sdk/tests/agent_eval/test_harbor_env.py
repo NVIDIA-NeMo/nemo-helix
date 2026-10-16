@@ -50,6 +50,8 @@ def test_missing_secret_is_named_with_its_key() -> None:
         ({"TOKENIZERS_PARALLELISM": "false"}, "Harbor treats keys containing"),
         ({"AUTH_ENABLED": "1"}, "Harbor treats keys containing"),
         ({"MODEL_CREDS": "sk-not-a-real-key-0123456789"}, "look like plaintext credentials"),
+        # Harbor's own scrubber exempts every *TOKENS key, so a credential under one would persist in plaintext.
+        ({"API_TOKENS": "an-opaque-bearer-value-0123456789"}, "look like plaintext credentials"),
         ({"LLM_API_KEY": "x"}, "appear in both env_vars and env_secrets"),
     ],
 )

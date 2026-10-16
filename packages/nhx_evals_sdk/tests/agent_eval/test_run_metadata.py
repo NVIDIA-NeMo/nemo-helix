@@ -256,8 +256,15 @@ def test_gym_redacts_credential_looking_hydra_params() -> None:
         ({"region": "ASIA-SOUTHEAST-1-ZONE"}, []),
         ({"author": "AIzawaBenchmarkResults2026"}, []),
         ({"tokenizer": "o200k_base"}, []),
-        ({"max_tokens": "4096"}, []),
         ({"auth": "basic"}, []),
+        # A segment that counts tokens is a budget, not a credential; the plural alone gets no pass.
+        ({"max_tokens": "4096"}, []),
+        ({"model": {"max_output_tokens": "4096"}}, []),
+        ({"env": {"MAX_COMPLETION_TOKENS": "4096"}}, []),
+        ({"env": {"API_TOKENS": "an-opaque-bearer-value-0123456789"}}, ["env.API_TOKENS"]),
+        ({"env": {"GITHUB_TOKENS": "not-a-real-token-value"}}, ["env.GITHUB_TOKENS"]),
+        ({"auth": {"tokens": "not-a-real-token-value"}}, ["auth.tokens"]),
+        ({"api_key": {"max_tokens": "sits under a credential key"}}, ["api_key.max_tokens"]),
     ],
 )
 def test_credential_shaped_settings_covers_the_credentials_a_caller_can_forward(
