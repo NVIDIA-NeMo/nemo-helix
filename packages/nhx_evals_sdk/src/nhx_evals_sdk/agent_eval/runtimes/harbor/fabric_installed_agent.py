@@ -39,10 +39,12 @@ manylinux wheels only, and this is not something the agent can work around.
 from __future__ import annotations
 
 import shlex
+from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from harbor.agents.installed.base import BaseInstalledAgent
+from harbor.agents.options import InstalledAgentOptions
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from harbor.models.task.config import MCPServerConfig
@@ -68,6 +70,14 @@ DEFAULT_FABRIC_MAX_TURNS = 50
 #: at execution time. Pass ``fabric_uv_version`` to move it.
 DEFAULT_UV_VERSION = "0.12.17"
 _UV_INSTALLER_URL_TEMPLATE = "https://astral.sh/uv/{version}/install.sh"
+_FABRIC_PACKAGE_REQUIRED = (
+    "fabric_package is required: name the Fabric distribution and harness extra to "
+    'install into the task container, e.g. "nemo-fabric[deepagents,relay]==0.5.0"'
+)
+#: Versions this class resolves itself; everything else in ``agent_kwargs`` is the wrapped agent's.
+_VERSION_KWARGS = ("fabric_python_version", "fabric_uv_version")
+#: Keywords consumed here or by Harbor's installed-agent base before the rest reach ``NemoFabricAgent``.
+_INSTALLED_AGENT_KWARGS = frozenset({*_VERSION_KWARGS, *InstalledAgentOptions.model_fields})
 #: Attempts allowed for the package-manager step, which is the install's most fragile network call:
 #: an archive mirror that rate-limits or blips takes the whole trial with it, and Harbor's own retry
 #: works at trial granularity. Backoff between attempts is ``attempt * _RETRY_BACKOFF_SEC``.
@@ -184,10 +194,23 @@ class FabricInstalledAgent(BaseInstalledAgent):
             **fabric_kwargs,
         )
         if not self.fabric.fabric_package:
-            raise ValueError(
-                "fabric_package is required: name the Fabric distribution and harness extra to "
-                'install into the task container, e.g. "nemo-fabric[deepagents,relay]==0.5.0"'
-            )
+            raise ValueError(_FABRIC_PACKAGE_REQUIRED)
+
+    @classmethod
+    def preflight(cls, kwargs: dict[str, Any] | None = None, env: Mapping[str, str] | None = None) -> None:
+        """The wrapped agent's checks, on the keywords it will be handed, plus this class's own.
+
+        Without an ``options_model`` Harbor's ``Job.create`` would validate nothing here, and every
+        error ``NemoFabricAgent`` raises at construction would surface from the first ``Trial.create``
+        as a job-aborting traceback instead of Harbor's preflight error.
+        """
+        kwargs = dict(kwargs or {})
+        for name in _VERSION_KWARGS:
+            if name in kwargs:
+                _version_string(name, kwargs[name])
+        NemoFabricAgent.preflight({k: v for k, v in kwargs.items() if k not in _INSTALLED_AGENT_KWARGS}, env)
+        if not kwargs.get("fabric_package"):
+            raise ValueError(_FABRIC_PACKAGE_REQUIRED)
 
     @staticmethod
     def name() -> str:

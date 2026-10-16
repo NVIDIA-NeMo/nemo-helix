@@ -306,6 +306,33 @@ def test_an_explicit_turn_budget_wins_including_unbounded(tmp_path: Path) -> Non
     assert _agent(tmp_path, fabric_default_max_turns=None).fabric._build_config().runtime.max_turns is None
 
 
+def test_preflight_runs_the_wrapped_agents_checks_on_the_keywords_it_will_be_handed() -> None:
+    """Without an ``options_model`` Harbor validates nothing for this class; every error below would
+    otherwise surface from the first ``Trial.create`` as a job-aborting traceback."""
+    FabricInstalledAgent.preflight(
+        {
+            "fabric_config": _CONFIG,
+            "fabric_package": _PACKAGE,
+            "fabric_workspace": "/app",
+            "fabric_python_version": "3.12",
+            "fabric_uv_version": DEFAULT_UV_VERSION,
+            "version": None,
+            "prompt_template_path": None,
+        }
+    )
+
+    with pytest.raises(ValueError, match="harness.adapter_id"):
+        FabricInstalledAgent.preflight({"fabric_config": {"metadata": {"name": "x"}}, "fabric_package": _PACKAGE})
+    with pytest.raises(ValueError, match="fabric_max_turns"):
+        FabricInstalledAgent.preflight({"fabric_config": _CONFIG, "fabric_package": _PACKAGE, "fabric_max_turns": 3})
+    with pytest.raises(ValueError, match="fabric_package is required"):
+        FabricInstalledAgent.preflight({"fabric_config": _CONFIG})
+    with pytest.raises(ValueError, match="quote it as '3.1'"):
+        FabricInstalledAgent.preflight(
+            {"fabric_config": _CONFIG, "fabric_package": _PACKAGE, "fabric_python_version": 3.1}
+        )
+
+
 def test_the_version_probe_reads_the_venv_not_the_host(tmp_path: Path) -> None:
     command = _agent(tmp_path).get_version_command()
 
