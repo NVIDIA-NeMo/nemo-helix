@@ -1325,6 +1325,13 @@ authz:
         scopes:
         - jobs:write
         - platform:write
+    /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/control:
+      patch:
+        permissions:
+        - jobs.update
+        scopes:
+        - jobs:write
+        - platform:write
     /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/results:
       get:
         permissions:

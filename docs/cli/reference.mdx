@@ -4128,6 +4128,7 @@ nemo jobs [OPTIONS] COMMAND [ARGS]...
 * `list-execution-profiles`: Get all currently configured execution profiles.
 * `pause`: Pause a platform job by name or ID.
 * `resume`: Resume a paused platform job by name or ID.
+* `control`: Change mutable job behavior, such as how long a pause...
 * `get`: Get a platform job by name or ID.
 * `update-status-details`: Update the status details of a platform job.
 * `watch`: Watch a platform job until it reaches a terminal status.
@@ -4414,6 +4415,33 @@ nemo jobs resume [OPTIONS] NAME
 
 **Options:**
 
+* `--workspace`
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+#### nemo jobs control
+
+Change mutable job behavior, such as how long a pause keeps storage.
+
+**Usage:**
+
+```shell
+nemo jobs control [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Job name or ID (both are accepted).
+
+**Options:**
+
+* `--pause-ttl-seconds <INTEGER>`: How long to keep storage after a pause, measured from the pause. Cannot exceed the platform maximum.
 * `--workspace`
 
 **Help:**
