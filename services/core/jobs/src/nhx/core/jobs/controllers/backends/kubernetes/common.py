@@ -1031,18 +1031,12 @@ def load_from_dict(data: dict, klass: str):
 # ``to_k8s()`` is available on nested volumes.
 
 
-class KubernetesKeyToPath(PluginKubernetesKeyToPath):
-    """Kubernetes volume key-to-path mapping."""
-
-    def to_k8s(self) -> client.V1KeyToPath:
-        """Convert to Kubernetes V1KeyToPath object."""
-        return client.V1KeyToPath(key=self.key, path=self.path, mode=self.mode)
+def _key_to_path(item: PluginKubernetesKeyToPath) -> client.V1KeyToPath:
+    return client.V1KeyToPath(key=item.key, path=item.path, mode=item.mode)
 
 
 class KubernetesSecretVolume(PluginKubernetesSecretVolume):
     """Kubernetes Secret volume definition."""
-
-    items: list[KubernetesKeyToPath] = Field(default_factory=list, description="Optional Secret keys to project")
 
     def to_k8s(self) -> client.V1SecretVolumeSource:
         """Convert to Kubernetes V1SecretVolumeSource object."""
@@ -1050,14 +1044,12 @@ class KubernetesSecretVolume(PluginKubernetesSecretVolume):
             secret_name=self.secret_name,
             default_mode=self.default_mode,
             optional=self.optional,
-            items=[item.to_k8s() for item in self.items] or None,
+            items=[_key_to_path(item) for item in self.items] or None,
         )
 
 
 class KubernetesConfigMapVolume(PluginKubernetesConfigMapVolume):
     """Kubernetes ConfigMap volume definition."""
-
-    items: list[KubernetesKeyToPath] = Field(default_factory=list, description="Optional ConfigMap keys to project")
 
     def to_k8s(self) -> client.V1ConfigMapVolumeSource:
         """Convert to Kubernetes V1ConfigMapVolumeSource object."""
@@ -1065,7 +1057,7 @@ class KubernetesConfigMapVolume(PluginKubernetesConfigMapVolume):
             name=self.name,
             default_mode=self.default_mode,
             optional=self.optional,
-            items=[item.to_k8s() for item in self.items] or None,
+            items=[_key_to_path(item) for item in self.items] or None,
         )
 
 
