@@ -24,8 +24,6 @@ import type {
   ListEvaluationSessionsParams,
 } from '@nemo/sdk/generated/platform/schema';
 import { Text, Tooltip } from '@nvidia/foundations-react-core';
-import { getTestCaseVerdict } from '@studio/components/evaluation/testCaseVerdict';
-import { TestCaseVerdictBadge } from '@studio/components/evaluation/TestCaseVerdictBadge';
 import { IntakePayloadPreviewCell } from '@studio/components/IntakeLists/IntakePayloadPreviewCell';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getEvaluationSessionTraceDetailRoute } from '@studio/routes/utils';
@@ -195,12 +193,6 @@ export const EvaluationSessionsDataView: FC<EvaluationSessionsDataViewProps> = (
           </Tooltip>
         );
       },
-    }),
-    accessor((original) => getTestCaseVerdict(original), {
-      id: 'result',
-      header: 'Result',
-      enableSorting: false,
-      cell: ({ row }) => <TestCaseVerdictBadge verdict={getTestCaseVerdict(row.original)} />,
     }),
     ...evaluatorNames.map((name, index) =>
       accessor((original) => original.evaluator_scores?.[name], {

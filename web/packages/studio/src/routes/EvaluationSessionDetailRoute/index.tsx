@@ -8,7 +8,7 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { CompareRunSelect } from '@studio/routes/EvaluationSessionDetailRoute/CompareRunSelect';
 import { TestCaseCompare } from '@studio/routes/EvaluationSessionDetailRoute/TestCaseCompare';
-import { TestCaseResultSummary } from '@studio/routes/EvaluationSessionDetailRoute/TestCaseResultSummary';
+import { TestCaseScores } from '@studio/routes/EvaluationSessionDetailRoute/TestCaseScores';
 import { TestCaseTabs } from '@studio/routes/EvaluationSessionDetailRoute/TestCaseTabs';
 import { useSessionCompareRuns } from '@studio/routes/EvaluationSessionDetailRoute/useSessionCompareRuns';
 import { SessionDetailContent } from '@studio/routes/IntakeSessionDetailRoute';
@@ -95,7 +95,7 @@ const EvaluationSessionDetail: FC<{
             ...routeContext,
             renderBody: ({ trajectories, traceView }) => (
               <>
-                {currentRun ? <TestCaseResultSummary run={currentRun} /> : null}
+                {currentRun ? <TestCaseScores run={currentRun} /> : null}
                 <TestCaseTabs
                   workspace={workspace}
                   trajectories={trajectories}
