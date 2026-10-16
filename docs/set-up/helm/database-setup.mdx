@@ -12,6 +12,34 @@ NeMo Helix uses a SQL-based database to store entities such as workspaces, jobs,
 
 By default, the NeMo Helix Helm chart deploys an embedded PostgreSQL instance (a StatefulSet using the official Postgres image) with simplified authentication to enable quick installation. This should not be used for production use, and an external PostgreSQL instance is recommended.
 
+## Preserve embedded PostgreSQL claim-template labels on upgrade
+
+Starting with chart v0.7.3, `postgresql.persistence.claimTemplateLabels` lets
+existing installations retain the labels on the embedded PostgreSQL
+StatefulSet's `data` volume claim template. Kubernetes treats this template as
+immutable, so changing its labels during a Helm upgrade can cause the upgrade
+to fail.
+
+Before upgrading an older installation, inspect the existing StatefulSet:
+
+```bash
+kubectl get statefulset <postgres-statefulset> --namespace <namespace> -o yaml
+```
+
+Copy the complete label map from the `data` entry under
+`spec.volumeClaimTemplates[].metadata.labels` into
+`postgresql.persistence.claimTemplateLabels` in your Helm values. Copy the
+claim-template labels, not the StatefulSet or Pod labels. Retain those exact
+values on every future upgrade, including any old chart or application version
+labels; do not replace them with the new release version. Supplied labels
+override the default `app.kubernetes.io/component: postgres` label.
+
+The default `{}` keeps the existing chart behavior for fresh installations.
+This setting addresses claim-template labels only. Preserve your existing
+release name, resource names, storage configuration, and secrets encryption key
+and its Secret reference as well. External PostgreSQL installations are not
+affected by this embedded-storage setting.
+
 ## External PostgreSQL Database
 
 To use an external PostgreSQL database in the Helm chart:

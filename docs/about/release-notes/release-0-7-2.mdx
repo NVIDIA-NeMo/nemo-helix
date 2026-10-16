@@ -1,0 +1,33 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "v0.7.2 - 2026-10-14"
+description: ""
+---
+NeMo Helix v0.7.2 is a patch release for the 0.7 release line that improves
+deployment readiness recovery and adds configurable agent readiness probes.
+
+## What's fixed
+
+- **Deployment startup-timeout tracking.** Deployments that lose readiness
+  after being ready get a fresh startup-timeout window, rather than failing
+  immediately based on their original startup time. Status-message updates
+  during an uninterrupted `STARTING` period no longer reset its timeout.
+- **Configurable agent readiness probes.** Operators can set
+  `agents.deployments.readiness_probe_timeout_seconds` and
+  `agents.deployments.readiness_probe_failure_threshold` to tune readiness
+  checks for newly created agent containers. Defaults remain one second and
+  twelve consecutive failures. Restart the platform and redeploy agents to
+  apply changes. See [Readiness and startup timeouts](/documentation/agents/deploy-agents#readiness-and-startup-timeouts).
+
+## Known issues
+
+- **DPO jobs fail before the first training step with `KeyError: 'checkpoint'`.**
+  The generated DPO configuration still omits the
+  `policy.dtensor_cfg.checkpoint` section required by the pinned NeMo-RL
+  version. There is no workaround in the 0.7 release line. DPO jobs run on
+  v0.6.0; GRPO jobs are not affected. See
+  [Customizer troubleshooting](/documentation/reference/troubleshooting/customizer).
+- **Hermes trials can omit the `relay_atif` evidence descriptor.** Use the
+  `trace:atif` descriptor instead; it points at the same ATIF file.
