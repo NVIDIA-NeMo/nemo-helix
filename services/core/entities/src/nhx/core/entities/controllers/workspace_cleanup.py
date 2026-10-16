@@ -5,6 +5,7 @@ import asyncio
 import logging
 import threading
 from asyncio import sleep as async_sleep
+from collections.abc import Awaitable, Callable, Iterable
 from datetime import datetime, timezone
 
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -35,6 +36,10 @@ _FAILED_CLEANUP_RETRY_BACKOFF_SECONDS = 60.0
 
 class WorkspaceJobCleanupError(RuntimeError):
     """Raised when workspace cleanup cannot delete every job."""
+
+
+class WorkspaceResourceCleanupError(RuntimeError):
+    """Raised when workspace cleanup cannot delete every deployment, model, adapter, or fileset."""
 
 
 def _job_status_value(status: object) -> HelixJobStatus | str:
@@ -257,28 +262,50 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
             self.emit_heartbeat()
             await async_sleep(_JOB_TERMINAL_WAIT_POLL_SECONDS)
 
+    async def _delete_resources(
+        self,
+        names: Iterable[str],
+        delete: Callable[[str], Awaitable[object]],
+        *,
+        kind: str,
+    ) -> list[Exception]:
+        """Delete each resource. A missing resource is success; other errors are returned."""
+        cleanup_errors: list[Exception] = []
+        for name in names:
+            try:
+                logger.info(f"Deleting {kind}: {name}")
+                await delete(name)
+            except NotFoundError:
+                logger.info(f"{kind} already deleted: {name}")
+            except Exception as e:
+                logger.warning(f"Failed to delete {kind} {name}: {e}")
+                cleanup_errors.append(e)
+            finally:
+                self.emit_heartbeat()
+        return cleanup_errors
+
+    def _raise_if_resource_deletes_failed(self, workspace_name: str, errors: list[Exception], kind: str) -> None:
+        if errors:
+            raise WorkspaceResourceCleanupError(
+                f"Failed to delete {len(errors)} {kind} while cleaning workspace {workspace_name}"
+            )
+
     @tracer.start_as_current_span("workspace_cleanup/cleanup_deployments")
     async def _cleanup_deployments(self, workspace: Workspace) -> None:
         logger.info(f"Cleaning up deployments for workspace: {workspace.name}")
         try:
             models_client = AsyncModelsClient.from_client(self._client)
             deployments_response = await models_client.list_deployments(workspace=workspace.name)
-            deployments = [deployment async for deployment in deployments_response.items()]
-
-            for deployment in deployments:
-                try:
-                    logger.info(f"Deleting deployment: {deployment.name}")
-                    await models_client.delete_deployment(
-                        name=deployment.name,
-                        workspace=workspace.name,
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to delete deployment {deployment.name}: {e}")
-                finally:
-                    self.emit_heartbeat()
+            deployments = [deployment.name async for deployment in deployments_response.items()]
+            errors = await self._delete_resources(
+                deployments,
+                lambda name: models_client.delete_deployment(name=name, workspace=workspace.name),
+                kind="deployment",
+            )
+            self._raise_if_resource_deletes_failed(workspace.name, errors, "deployment(s)")
 
         except Exception as e:
-            logger.error(f"Failed to list deployments for workspace {workspace.name}: {e}")
+            logger.error(f"Failed to cleanup deployments for workspace {workspace.name}: {e}")
             raise
 
     @tracer.start_as_current_span("workspace_cleanup/cleanup_models_and_adapters")
@@ -287,36 +314,25 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
         try:
             models_client = AsyncModelsClient.from_client(self._client)
             adapters_response = await models_client.list_adapters(workspace=workspace.name)
-            adapters = [adapter async for adapter in adapters_response.items()]
+            adapters = [adapter.name async for adapter in adapters_response.items()]
             models_response = await models_client.list_models(workspace=workspace.name)
-            models = [model async for model in models_response.items()]
-
-            for adapter in adapters:
-                try:
-                    logger.info(f"Deleting adapter: {adapter.name}")
-                    await models_client.delete_adapter(
-                        name=adapter.name,
-                        workspace=workspace.name,
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to delete adapter {adapter.name}: {e}")
-                finally:
-                    self.emit_heartbeat()
-
-            for model in models:
-                try:
-                    logger.info(f"Deleting model: {model.name}")
-                    await models_client.delete_model(
-                        name=model.name,
-                        workspace=workspace.name,
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to delete model {model.name}: {e}")
-                finally:
-                    self.emit_heartbeat()
+            models = [model.name async for model in models_response.items()]
+            errors = await self._delete_resources(
+                adapters,
+                lambda name: models_client.delete_adapter(name=name, workspace=workspace.name),
+                kind="adapter",
+            )
+            errors.extend(
+                await self._delete_resources(
+                    models,
+                    lambda name: models_client.delete_model(name=name, workspace=workspace.name),
+                    kind="model",
+                )
+            )
+            self._raise_if_resource_deletes_failed(workspace.name, errors, "model(s) or adapter(s)")
 
         except Exception as e:
-            logger.error(f"Failed to list models or adapters for workspace {workspace.name}: {e}")
+            logger.error(f"Failed to cleanup models and adapters for workspace {workspace.name}: {e}")
             raise
 
     @tracer.start_as_current_span("workspace_cleanup/cleanup_filesets")
@@ -325,19 +341,14 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
         try:
             files = AsyncFilesClient.from_client(self._client)
             filesets_response = await files.list_filesets(workspace=workspace.name)
-
-            async for fileset in filesets_response.items():
-                try:
-                    logger.info(f"Deleting fileset: {fileset.name}")
-                    await files.delete_fileset(
-                        name=fileset.name,
-                        workspace=workspace.name,
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to delete fileset {fileset.name}: {e}")
-                finally:
-                    self.emit_heartbeat()
+            filesets = [fileset.name async for fileset in filesets_response.items()]
+            errors = await self._delete_resources(
+                filesets,
+                lambda name: files.delete_fileset(name=name, workspace=workspace.name),
+                kind="fileset",
+            )
+            self._raise_if_resource_deletes_failed(workspace.name, errors, "fileset(s)")
 
         except Exception as e:
-            logger.error(f"Failed to list filesets for workspace {workspace.name}: {e}")
+            logger.error(f"Failed to cleanup filesets for workspace {workspace.name}: {e}")
             raise
