@@ -158,13 +158,13 @@ describe('AgentEvaluationWizard parallel requests', () => {
     await user.click(screen.getByRole('button', { name: 'Next' }));
 
     await user.upload(
-      screen.getByLabelText('Add Dataset'),
+      screen.getByLabelText('Dataset file'),
       new File(['{"prompt": "hi", "expected": "hi"}\n'], 'dataset.jsonl', {
         type: 'application/json',
       })
     );
     await user.upload(
-      screen.getByLabelText('Select Evaluator Config'),
+      screen.getByLabelText('Eval configuration file'),
       new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
     );
     await setParallelism(user, '2');

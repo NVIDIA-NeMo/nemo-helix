@@ -152,15 +152,14 @@ describe('AgentEvaluationWizard', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Next' }));
 
-    // The run is named on the last step, past the dataset and eval config.
     await user.upload(
-      await screen.findByLabelText('Add Dataset'),
+      await screen.findByLabelText('Dataset file'),
       new File(['{"prompt": "hi", "expected": "hi"}\n'], 'dataset.jsonl', {
         type: 'application/json',
       })
     );
     await user.upload(
-      screen.getByLabelText('Select Evaluator Config'),
+      screen.getByLabelText('Eval configuration file'),
       new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
     );
     await waitFor(async () => {
@@ -172,7 +171,7 @@ describe('AgentEvaluationWizard', () => {
     expect(screen.getByLabelText<HTMLInputElement>('Evaluation Name')).toHaveValue('');
   });
 
-  it('offers a parallel-requests setting that defaults to 4', async () => {
+  it('offers a parallel-requests setting that defaults to 1', async () => {
     mockLists();
     const user = userEvent.setup();
     renderWizard();
@@ -183,7 +182,7 @@ describe('AgentEvaluationWizard', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Next' }));
 
-    expect(await screen.findByRole('spinbutton', { name: 'Parallel requests' })).toHaveValue(4);
+    expect(await screen.findByRole('spinbutton', { name: 'Parallel requests' })).toHaveValue(1);
   });
 
   it('will not advance past the experiment step without a name', async () => {

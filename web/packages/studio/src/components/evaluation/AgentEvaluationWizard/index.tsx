@@ -609,7 +609,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     activeConfigPick?.error ??
     (isConfigFromFileset ? configFilesetFile.error?.message : undefined) ??
     (submitAttempted && !activeConfigPick && !isLoadingFilesetConfig
-      ? 'Select an evaluator config'
+      ? 'Select an eval configuration'
       : undefined);
 
   const experimentNameStatus = nameCheckStatus(
@@ -844,8 +844,6 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   };
   const blocker = stepBlocker();
 
-  // The configuration step's files are checked here rather than at Submit: once past it, their
-  // errors would land on a step that is no longer on screen.
   const goNext = async () => {
     if (blocker) return;
     if (step === 'configuration') {
@@ -883,7 +881,6 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     }
   };
 
-  // Fields that live on the configuration step report there, not on the step that submitted.
   const onInvalid: SubmitErrorHandler<SubmitEvaluationFormData> = (invalid) => {
     if (steps.includes('configuration') && ('judgeModel' in invalid || 'parallelism' in invalid)) {
       setStep('configuration');
@@ -1025,7 +1022,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
 
           {step === 'configuration' && (
             <>
-              <Text kind="label/bold/xl">Configuration</Text>
+              <Text kind="label/bold/xl">Dataset File</Text>
               <SegmentedControl
                 aria-label="Dataset source"
                 size="tiny"
@@ -1054,6 +1051,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
                 />
               ) : (
                 <Upload
+                  attributes={{ UploadInputElement: { 'aria-label': 'Dataset file' } }}
                   accept={DATASET_FILE_ACCEPT}
                   multiple
                   onValueChange={handleDatasetPicked}
@@ -1061,7 +1059,6 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
                   renderInput={(slotInput) => (
                     <FormField
                       name="dataset"
-                      slotLabel="Add Dataset"
                       slotHelp="JSONL, a JSON array of objects, CSV, or Parquet. Select several Parquet files to combine them."
                       slotError={datasetError}
                       status={datasetError ? 'error' : undefined}
@@ -1072,6 +1069,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
                 />
               )}
 
+              <Text kind="label/bold/xl">Eval Configuration File</Text>
               <SegmentedControl
                 aria-label="Evaluator config source"
                 size="tiny"
@@ -1094,6 +1092,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
                 />
               ) : (
                 <Upload
+                  attributes={{ UploadInputElement: { 'aria-label': 'Eval configuration file' } }}
                   accept={EVAL_CONFIG_FILE_ACCEPT}
                   onValueChange={handleConfigPicked}
                   onFileRemove={clearConfigPick}
@@ -1101,7 +1100,6 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
                   renderInput={(slotInput) => (
                     <FormField
                       name="evalConfig"
-                      slotLabel="Select Evaluator Config"
                       slotHelp="Select a JSON or YAML config."
                       slotError={configError}
                       status={configError ? 'error' : undefined}
@@ -1163,7 +1161,6 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
             </>
           )}
 
-          {/* The experiment step's blockers already show under its Name field. */}
           {blocker && step === 'evaluation' && (
             <Text className="text-secondary" kind="body/regular/sm">
               {blocker}

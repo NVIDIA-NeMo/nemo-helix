@@ -61,14 +61,14 @@ export function FilesetConfigPicker<T extends FieldValues>({
     .map((path) => ({ value: path, children: path }));
 
   const noConfigFiles = !!fileset && filesQuery.isSuccess && fileItems.length === 0;
-  const placeholder = filesQuery.isLoading || loading ? 'Loading files...' : 'Select a config';
+  const placeholder = filesQuery.isLoading || loading ? 'Loading files...' : 'Select a file';
 
   return (
-    <Stack gap="density-sm">
+    <Stack gap="density-sm" role="group" aria-label="Eval configuration fileset">
       <FilesetSearchableSelect<T>
         workspace={workspace}
         useControllerProps={{ control, name: filesetName }}
-        formFieldProps={{ slotLabel: 'Config Fileset' }}
+        formFieldProps={{ slotLabel: 'Fileset' }}
         renderOption={filesetNameOption}
         onChange={clearFile}
         disabled={disabled}
@@ -76,7 +76,7 @@ export function FilesetConfigPicker<T extends FieldValues>({
       <ControlledSelect
         useControllerProps={{ control, name: fileName }}
         formFieldProps={{
-          slotLabel: 'Config File',
+          slotLabel: 'File',
           slotHelp: noConfigFiles
             ? 'This fileset has no JSON or YAML files.'
             : 'A JSON or YAML config.',

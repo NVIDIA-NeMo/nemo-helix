@@ -65,7 +65,6 @@ export const EvalWizard: FC<EvalWizardProps> = ({
   // Back to wherever the wizard was opened from, so a cancelled form is not left in history.
   const cancel = () =>
     location.key === 'default' ? navigate(cancelTo, { replace: true }) : navigate(-1);
-  // Enter in a field submits the form even while Continue is disabled, so it gets the same gate.
   const submit = (event: FormEvent<HTMLFormElement>) => {
     if (continueLoading || !canContinue) {
       event.preventDefault();

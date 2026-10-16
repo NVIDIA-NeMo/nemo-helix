@@ -193,7 +193,7 @@ describe('AgentEvaluationWizard dataset from a fileset', () => {
     await openDatasetStep(user);
     await pickFilesetFile(user);
     await user.upload(
-      screen.getByLabelText('Select Evaluator Config'),
+      screen.getByLabelText('Eval configuration file'),
       new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
     );
 
@@ -233,7 +233,7 @@ describe('AgentEvaluationWizard dataset from a fileset', () => {
     await user.click(await screen.findByRole('combobox', { name: 'File' }));
     await user.click(await screen.findByRole('option', { name: 'All 2 Parquet files in output/' }));
     await user.upload(
-      screen.getByLabelText('Select Evaluator Config'),
+      screen.getByLabelText('Eval configuration file'),
       new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
     );
 
@@ -257,12 +257,12 @@ describe('AgentEvaluationWizard dataset from a fileset', () => {
     await pickFilesetFile(user);
     await user.click(datasetSource().getByRole('radio', { name: 'Upload a file' }));
     await user.upload(
-      screen.getByLabelText('Select Evaluator Config'),
+      screen.getByLabelText('Eval configuration file'),
       new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
     );
     await user.click(screen.getByRole('button', { name: 'Next' }));
 
-    expect(screen.getByLabelText('Add Dataset')).toBeInTheDocument();
+    expect(screen.getByLabelText('Dataset file')).toBeInTheDocument();
     expect(await screen.findByText('Add a dataset')).toBeVisible();
     expect(evalsCreateEvaluateJob).not.toHaveBeenCalled();
   });
@@ -311,9 +311,9 @@ describe('AgentEvaluationWizard uploaded Parquet dataset', () => {
     renderWizard();
 
     await openDatasetStep(user);
-    await user.upload(screen.getByLabelText('Add Dataset'), parquetFile(PARQUET.twoRows));
+    await user.upload(screen.getByLabelText('Dataset file'), parquetFile(PARQUET.twoRows));
     await user.upload(
-      screen.getByLabelText('Select Evaluator Config'),
+      screen.getByLabelText('Eval configuration file'),
       new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
     );
 
@@ -336,12 +336,12 @@ describe('AgentEvaluationWizard uploaded Parquet dataset', () => {
     renderWizard();
 
     await openDatasetStep(user);
-    await user.upload(screen.getByLabelText('Add Dataset'), [
+    await user.upload(screen.getByLabelText('Dataset file'), [
       parquetFile(PARQUET.twoRows, 'a.parquet'),
       parquetFile(PARQUET.twoRows, 'b.parquet'),
     ]);
     await user.upload(
-      screen.getByLabelText('Select Evaluator Config'),
+      screen.getByLabelText('Eval configuration file'),
       new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
     );
 
@@ -366,7 +366,7 @@ describe('AgentEvaluationWizard uploaded Parquet dataset', () => {
     renderWizard();
 
     await openDatasetStep(user);
-    await user.upload(screen.getByLabelText('Add Dataset'), [
+    await user.upload(screen.getByLabelText('Dataset file'), [
       parquetFile(PARQUET.twoRows, 'a.parquet'),
       new File(['prompt,expected\nhi,hi\n'], 'b.csv'),
     ]);
@@ -381,7 +381,7 @@ describe('AgentEvaluationWizard uploaded Parquet dataset', () => {
     await openDatasetStep(user);
     await user.click(datasetSource().getByRole('radio', { name: 'Choose from a fileset' }));
     await user.upload(
-      screen.getByLabelText('Select Evaluator Config'),
+      screen.getByLabelText('Eval configuration file'),
       new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
     );
     await user.click(screen.getByRole('button', { name: 'Next' }));
@@ -391,11 +391,14 @@ describe('AgentEvaluationWizard uploaded Parquet dataset', () => {
   });
 });
 
+const configPicker = () =>
+  within(screen.getByRole('group', { name: 'Eval configuration fileset' }));
+
 const pickFilesetConfig = async (user: ReturnType<typeof userEvent.setup>, path: string) => {
   await user.click(configSource().getByRole('radio', { name: 'Choose from a fileset' }));
-  await user.click(await screen.findByRole('combobox', { name: 'Config Fileset' }));
+  await user.click(await configPicker().findByRole('combobox', { name: 'Fileset' }));
   await user.click(await screen.findByRole('option', { name: CONFIG_FILESET }));
-  await user.click(await screen.findByRole('combobox', { name: 'Config File' }));
+  await user.click(await configPicker().findByRole('combobox', { name: 'File' }));
   await user.click(await screen.findByRole('option', { name: path }));
 };
 
@@ -406,9 +409,9 @@ describe('AgentEvaluationWizard evaluator config from a fileset', () => {
 
     await openDatasetStep(user);
     await user.click(configSource().getByRole('radio', { name: 'Choose from a fileset' }));
-    await user.click(await screen.findByRole('combobox', { name: 'Config Fileset' }));
+    await user.click(await configPicker().findByRole('combobox', { name: 'Fileset' }));
     await user.click(await screen.findByRole('option', { name: CONFIG_FILESET }));
-    await user.click(await screen.findByRole('combobox', { name: 'Config File' }));
+    await user.click(await configPicker().findByRole('combobox', { name: 'File' }));
 
     const options = await screen.findAllByRole('option');
     expect(options.map((option) => option.textContent)).toEqual([
@@ -455,8 +458,8 @@ describe('AgentEvaluationWizard evaluator config from a fileset', () => {
     await user.click(configSource().getByRole('radio', { name: 'Upload a file' }));
     await user.click(screen.getByRole('button', { name: 'Next' }));
 
-    expect(screen.getByLabelText('Select Evaluator Config')).toBeInTheDocument();
-    expect(await screen.findByText('Select an evaluator config')).toBeVisible();
+    expect(screen.getByLabelText('Eval configuration file')).toBeInTheDocument();
+    expect(await screen.findByText('Select an eval configuration')).toBeVisible();
     expect(evalsCreateEvaluateJob).not.toHaveBeenCalled();
   });
 });
