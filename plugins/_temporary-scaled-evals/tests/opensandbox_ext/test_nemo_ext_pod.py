@@ -21,8 +21,8 @@ from kubernetes.client import (
     V1Pod,
     V1PodStatus,
 )
-from nemo_ext_pod import add_services, service_states
-from scaled_evals.harbor_opensandbox_services import ComposeServices, parse_compose_services
+from nemo_ext_pod import add_agent_bundle, add_services, agent_bundle_state, service_states
+from scaled_evals.harbor_opensandbox_services import ComposeServices, SandboxAgentBundle, parse_compose_services
 
 SERVICES = parse_compose_services(
     {
@@ -226,3 +226,100 @@ def test_crash_looping_sidecar_fails_after_three_restarts(restarts: int, failed:
     )
 
     assert _states(crashing)[0] == (("db", "exited with code 1 (Error)") if failed else None)
+
+
+BUNDLE = SandboxAgentBundle(
+    image="registry.example.com/bundles/claude@sha256:" + "a" * 64,
+    installer="/opt/agent-bundle/copy-agent",
+    entrypoint="bin/claude",
+)
+
+
+def _with_template_mount(pod_spec: dict[str, Any]) -> dict[str, Any]:
+    """``pod_spec`` with the Harbor template's writable ``/installed-agent`` emptyDir on ``sandbox``."""
+    pod_spec["volumes"].append({"name": "harbor-installed-agent", "emptyDir": {"sizeLimit": "2Gi"}})
+    pod_spec["containers"][0]["volumeMounts"] = [{"name": "harbor-installed-agent", "mountPath": "/installed-agent"}]
+    return pod_spec
+
+
+def test_bundle_installs_after_egress_into_the_template_volume_mounted_read_only() -> None:
+    pod_spec = _with_template_mount(stock_pod_spec())
+
+    add_agent_bundle(pod_spec, BUNDLE, "IfNotPresent")
+
+    assert [c["name"] for c in pod_spec["initContainers"]] == ["execd-installer", "egress", "agent-bundle"]
+    bundle = pod_spec["initContainers"][-1]
+    assert bundle["image"] == BUNDLE.image
+    assert bundle["command"] == ["/opt/agent-bundle/copy-agent", "/installed-agent"]
+    assert "env" not in bundle
+    assert bundle["volumeMounts"] == [{"name": "harbor-installed-agent", "mountPath": "/installed-agent"}]
+    assert bundle["securityContext"]["capabilities"]["drop"] == ["NET_ADMIN", "NET_RAW"]
+    # A plain init container: main starts only once it exited 0.
+    assert not {"restartPolicy", "startupProbe", "readinessProbe"} & bundle.keys()
+    assert pod_spec["containers"][0]["volumeMounts"] == [
+        {"name": "harbor-installed-agent", "mountPath": "/installed-agent", "readOnly": True}
+    ]
+    # The template's volume is reused, not duplicated.
+    assert [v["name"] for v in pod_spec["volumes"]] == ["opensandbox-bin", "harbor-installed-agent"]
+
+
+def test_bundle_brings_its_own_volume_without_the_template_mount() -> None:
+    pod_spec = stock_pod_spec()
+
+    add_agent_bundle(pod_spec, BUNDLE, "IfNotPresent")
+
+    assert pod_spec["volumes"][-1] == {"name": "nemo-installed-agent", "emptyDir": {}}
+    assert pod_spec["containers"][0]["volumeMounts"] == [
+        {"name": "nemo-installed-agent", "mountPath": "/installed-agent", "readOnly": True}
+    ]
+    assert pod_spec["initContainers"][-1]["volumeMounts"][0]["name"] == "nemo-installed-agent"
+
+
+def test_bundle_installs_before_the_services() -> None:
+    pod_spec = stock_pod_spec()
+
+    add_agent_bundle(pod_spec, BUNDLE, "IfNotPresent")
+    add_services(pod_spec, SERVICES, "IfNotPresent")
+
+    assert [c["name"] for c in pod_spec["initContainers"]] == [
+        "execd-installer",
+        "egress",
+        "agent-bundle",
+        "db",
+        "migrate",
+        "cache",
+    ]
+
+
+def test_bundle_without_network_policy_has_no_egress_to_move() -> None:
+    pod_spec = stock_pod_spec(egress=False)
+
+    add_agent_bundle(pod_spec, BUNDLE, "IfNotPresent")
+
+    assert [c["name"] for c in pod_spec["initContainers"]] == ["execd-installer", "agent-bundle"]
+
+
+def test_bundle_name_clash_is_rejected() -> None:
+    pod_spec = stock_pod_spec()
+    pod_spec["initContainers"].append({"name": "agent-bundle"})
+
+    with pytest.raises(ValueError, match="already has a container named 'agent-bundle'"):
+        add_agent_bundle(pod_spec, BUNDLE, "IfNotPresent")
+
+
+@pytest.mark.parametrize(
+    ("statuses", "state"),
+    [
+        ((), (None, False)),
+        ((_status("agent-bundle", running=V1ContainerStateRunning()),), (None, False)),
+        ((_exited("agent-bundle", 0),), (None, True)),
+        ((_exited("agent-bundle", 3),), ("exited with code 3 (Error)", False)),
+        (
+            (_status("agent-bundle", waiting=V1ContainerStateWaiting(reason="ErrImagePull", message="denied")),),
+            ("ErrImagePull: denied", False),
+        ),
+        ((_status("agent-bundle", waiting=V1ContainerStateWaiting(reason="PodInitializing")),), (None, False)),
+    ],
+)
+def test_bundle_state(statuses: tuple[V1ContainerStatus, ...], state: tuple[str | None, bool]) -> None:
+    assert agent_bundle_state(_pod(*statuses)) == state

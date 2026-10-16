@@ -7,7 +7,12 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from scaled_evals.api.schemas.common import validate_scoped_egress_config
-from scaled_evals.api.schemas.evaluations import EvaluationStatus, Framework, NetworkPolicyMode
+from scaled_evals.api.schemas.evaluations import (
+    AGENT_BUNDLE_RUNTIMES,
+    EvaluationStatus,
+    Framework,
+    NetworkPolicyMode,
+)
 from scaled_evals.api.schemas.tasks import Visibility
 
 
@@ -74,8 +79,12 @@ class CreateBenchmarkRunRequest(BaseModel):
 
     @model_validator(mode="after")
     def _resolve_framework_profile_alias(self) -> "CreateBenchmarkRunRequest":
-        if self.agent_bundle_id is not None and (self.framework != "harbor" or self.runtime != "sandbox_k8s"):
-            raise ValueError("agent_bundle currently requires framework='harbor' and runtime='sandbox_k8s'")
+        if self.agent_bundle_id is not None and (
+            self.framework != "harbor" or self.runtime not in AGENT_BUNDLE_RUNTIMES
+        ):
+            raise ValueError(
+                "agent_bundle currently requires framework='harbor' and runtime='sandbox_k8s' or 'harbor_opensandbox'"
+            )
         if self.agent_bundle_id is not None and self.framework_profile_id is None:
             raise ValueError("agent_bundle_id requires a Harbor framework_profile_id")
         if self.initial_user_turns and self.framework != "harbor":

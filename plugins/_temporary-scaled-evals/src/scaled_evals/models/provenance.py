@@ -564,6 +564,9 @@ def _opensandbox_sandbox(row: Mapping[str, Any]) -> dict[str, str]:
         # The verifier image bound into task.toml; absent when the verifier shared the agent sandbox.
         "verifier_image_ref": launch.get("verifier_image_ref"),
         "verifier_image_digest": launch.get("verifier_image_digest"),
+        # The agent bundle image the agent sandbox's init container installed; absent without a bundle.
+        "agent_bundle_image": launch.get("agent_bundle_image"),
+        "agent_bundle_delivery": launch.get("agent_bundle_delivery"),
         "egress_allowed_hosts": ",".join(str(host) for host in launch.get("trusted_allowed_hosts") or []),
         "egress_verification": launch.get("egress_verification"),
         "ownership_labels": json.dumps(dict(ownership), sort_keys=True) if ownership else None,

@@ -39,18 +39,23 @@ data:
     """NeMo Compose services extension for the OpenSandbox server's Kubernetes BatchSandbox runtime.
 
     A create request whose ``extensions`` carry ``EXTENSION_KEY`` (a JSON ``ComposeServices``) gets
-    those services as extra containers in its pod. The stock server copies that extension onto the
-    pod as the ``POD_ANNOTATION`` annotation, so the spec travels with the manifest:
+    those services as extra containers in its pod. One that carries ``AGENT_BUNDLE_EXTENSION_KEY`` (a
+    JSON ``SandboxAgentBundle``) gets an init container that installs the agent into ``/installed-agent``.
+    The stock server copies each extension onto the pod as an annotation (``POD_ANNOTATION``,
+    ``AGENT_BUNDLE_POD_ANNOTATION``), so the spec travels with the manifest:
 
     * ``NemoComposeProvider._merge_pod_spec_extras`` runs on the finished manifest, just before the
-      stock code creates it, and adds the services (``nemo_ext_pod.add_services``). An invalid spec
-      raises ``ValueError``, which the stock server returns as a 400.
-    * The routes below read the same annotation from the pod, so they work for any sandbox and
+      stock code creates it, and adds the bundle (``nemo_ext_pod.add_agent_bundle``) and the services
+      (``nemo_ext_pod.add_services``). An invalid spec raises ``ValueError``, which the stock server
+      returns as a 400.
+    * The routes below read the same annotations from the pod, so they work for any sandbox and
       survive server restarts. They sit behind the server's API-key middleware:
 
-      * ``GET /v1/nemo-ext/health``: lets clients check the extension is loaded, because a stock
-        server ignores unknown extensions and would create the sandbox without the services.
-      * ``GET /v1/nemo-ext/sandboxes/{id}/services``: which services failed or aren't ready yet.
+      * ``GET /v1/nemo-ext/health``: lets clients check the extension is loaded, and which features
+        it has, because a stock server ignores unknown extensions and would create the sandbox
+        without the services or the bundle.
+      * ``GET /v1/nemo-ext/sandboxes/{id}/services``: whether the bundle or a service failed, and
+        which aren't ready yet.
       * ``POST /v1/nemo-ext/sandboxes/{id}/services/{name}/exec``: runs a command in one service.
 
     ``NemoComposeProvider.get_status`` reports such a sandbox ``Allocated`` once its pod has an IP,
@@ -72,13 +77,22 @@ data:
     from fastapi import APIRouter, HTTPException
     from kubernetes import client as k8s
     from kubernetes.stream import stream
-    from nemo_ext_pod import add_services, service_states
+    from nemo_ext_pod import add_agent_bundle, add_services, agent_bundle_state, service_states
     from opensandbox_server.config import CONFIG_ENV_VAR
     from opensandbox_server.services.constants import SANDBOX_ID_LABEL
     from opensandbox_server.services.k8s import provider_factory
     from opensandbox_server.services.k8s.batchsandbox_provider import BatchSandboxProvider
     from pydantic import BaseModel, ConfigDict, Field
-    from scaled_evals.harbor_opensandbox_services import EXTENSION_KEY, POD_ANNOTATION, ComposeServices
+    from scaled_evals.harbor_opensandbox_services import (
+        AGENT_BUNDLE_CONTAINER,
+        AGENT_BUNDLE_EXTENSION_KEY,
+        AGENT_BUNDLE_POD_ANNOTATION,
+        EXTENSION_FEATURES,
+        EXTENSION_KEY,
+        POD_ANNOTATION,
+        ComposeServices,
+        SandboxAgentBundle,
+    )
 
     # Under the server's logger tree, which is the only one its logging config enables.
     logger = logging.getLogger("opensandbox_server.nemo_ext")
@@ -114,11 +128,17 @@ data:
             """
             super()._merge_pod_spec_extras(batchsandbox, *args, **kwargs)
             template = batchsandbox["spec"]["template"]
-            raw = (template.get("metadata") or {}).get("annotations", {}).get(POD_ANNOTATION)
+            annotations = (template.get("metadata") or {}).get("annotations", {})
+            pull_policy = self.image_pull_policy or "IfNotPresent"
+            # pydantic's ValidationError is a ValueError, so the client gets a 400 with every problem listed.
+            # The bundle goes first, so the agent is installed before any service starts.
+            raw_bundle = annotations.get(AGENT_BUNDLE_POD_ANNOTATION)
+            if raw_bundle is not None:
+                add_agent_bundle(template["spec"], SandboxAgentBundle.model_validate_json(raw_bundle), pull_policy)
+            raw = annotations.get(POD_ANNOTATION)
             if raw is not None:
-                # pydantic's ValidationError is a ValueError, so the client gets a 400 with every problem listed.
                 services = ComposeServices.model_validate_json(raw)
-                add_services(template["spec"], services, self.image_pull_policy or "IfNotPresent")
+                add_services(template["spec"], services, pull_policy)
 
         def get_status(self, workload: dict[str, Any]) -> dict[str, Any]:
             """The stock status, except a sandbox with services counts as ``Allocated`` once its pod has an IP.
@@ -148,37 +168,63 @@ data:
 
             A pooled pod already exists, so there is no pod spec to add services to.
             """
-            if POD_ANNOTATION in (kwargs.get("annotations") or {}):
+            annotations = kwargs.get("annotations") or {}
+            if POD_ANNOTATION in annotations:
                 raise ValueError(f"extensions[{EXTENSION_KEY!r}] can't be combined with poolRef")
+            if AGENT_BUNDLE_POD_ANNOTATION in annotations:
+                raise ValueError(f"extensions[{AGENT_BUNDLE_EXTENSION_KEY!r}] can't be combined with poolRef")
             return super()._create_workload_from_pool(*args, **kwargs)
 
-        def find_pod(self, sandbox_id: str) -> tuple[Any, ComposeServices]:
-            """The sandbox's pod and its services; 404 if it has no pod or no services."""
+        def find_pod(self, sandbox_id: str) -> tuple[Any, ComposeServices | None, SandboxAgentBundle | None]:
+            """The sandbox's pod, its services and its agent bundle; 404 if it has no pod or neither."""
             pods = self.k8s_client.list_pods(namespace=self.namespace, label_selector=f"{SANDBOX_ID_LABEL}={sandbox_id}")
-            raw = (pods[0].metadata.annotations or {}).get(POD_ANNOTATION) if pods else None
-            if raw is None:
-                raise _error(404, "NOT_FOUND", f"sandbox {sandbox_id} has no pod with compose services")
-            return pods[0], ComposeServices.model_validate_json(raw)
+            annotations = (pods[0].metadata.annotations or {}) if pods else {}
+            raw_services = annotations.get(POD_ANNOTATION)
+            raw_bundle = annotations.get(AGENT_BUNDLE_POD_ANNOTATION)
+            if raw_services is None and raw_bundle is None:
+                raise _error(404, "NOT_FOUND", f"sandbox {sandbox_id} has no pod with compose services or an agent bundle")
+            return (
+                pods[0],
+                ComposeServices.model_validate_json(raw_services) if raw_services is not None else None,
+                SandboxAgentBundle.model_validate_json(raw_bundle) if raw_bundle is not None else None,
+            )
 
         def services_status(self, sandbox_id: str) -> dict[str, Any]:
-            """``{"failure": str | None, "not_ready": [names]}`` for the sandbox's services.
+            """``{"failure": str | None, "not_ready": [names]}`` for the sandbox's agent bundle and services.
 
-            A failure names the first service that can't come up and includes its last log lines,
-            so the client can fail the trial with the cause instead of a timeout.
+            A failure names the first container that can't come up, in start order, and includes its
+            last log lines, so the client can fail the trial with the cause instead of a timeout. The
+            bundle's init container is listed in ``not_ready`` as ``agent-bundle`` until it exits 0.
             """
-            pod, services = self.find_pod(sandbox_id)
-            failure, not_ready = service_states(pod, services)
-            if failure is None:
-                return {"failure": None, "not_ready": not_ready}
-            name, why = failure
+            pod, services, bundle = self.find_pod(sandbox_id)
+            not_ready: list[str] = []
+            if bundle is not None:
+                bundle_failure, installed = agent_bundle_state(pod)
+                if bundle_failure is not None:
+                    return {
+                        "failure": self._failure(pod, AGENT_BUNDLE_CONTAINER, "agent bundle", bundle_failure),
+                        "not_ready": [],
+                    }
+                if not installed:
+                    not_ready.append(AGENT_BUNDLE_CONTAINER)
+            if services is not None:
+                failure, services_not_ready = service_states(pod, services)
+                not_ready.extend(services_not_ready)
+                if failure is not None:
+                    name, why = failure
+                    return {"failure": self._failure(pod, name, f"service {name!r}", why), "not_ready": not_ready}
+            return {"failure": None, "not_ready": not_ready}
+
+        def _failure(self, pod: Any, container: str, label: str, reason: str) -> str:
+            """``"<label> <reason>"`` for a container that can't come up, with its last log lines."""
             # A container that never started has no logs; report the failure anyway.
             try:
                 tail = self.k8s_client.get_core_v1_api().read_namespaced_pod_log(
-                    pod.metadata.name, pod.metadata.namespace, container=name, tail_lines=LOG_TAIL_LINES
+                    pod.metadata.name, pod.metadata.namespace, container=container, tail_lines=LOG_TAIL_LINES
                 )
             except Exception as exc:
                 tail = f"<logs unavailable: {exc.__class__.__name__}>"
-            return {"failure": f"service {name!r} {why}. Last log lines:\n{tail}", "not_ready": not_ready}
+            return f"{label} {reason}. Last log lines:\n{tail}"
 
         def exec(self, sandbox_id: str, service: str, req: ExecRequest) -> ExecResponse:
             """Run ``req.command`` in one of the sandbox's services through the Kubernetes exec API.
@@ -186,9 +232,9 @@ data:
             Blocking; the route runs it on the extension's thread pool. 404 if ``service`` isn't one of
             the sandbox's services, 504 on timeout, 413 if the output passes the limit.
             """
-            pod, services = self.find_pod(sandbox_id)
-            # Only the task's services, never sandbox, egress or execd.
-            if service not in services.names():
+            pod, services, _ = self.find_pod(sandbox_id)
+            # Only the task's services, never sandbox, egress, execd or the agent bundle.
+            if services is None or service not in services.names():
                 raise _error(404, "NOT_FOUND", f"{service!r} is not a compose service of sandbox {sandbox_id}")
 
             # stream() patches the ApiClient it runs on, so each exec gets its own.
@@ -272,10 +318,10 @@ data:
 
 
     @router.get("/health")
-    async def health() -> dict[str, str]:
+    async def health() -> dict[str, Any]:
         """200 when the extension is loaded and its provider is active; clients check this before create."""
         _require_provider()
-        return {"status": "ok", "extension": "nemo-compose-services"}
+        return {"status": "ok", "extension": "nemo-compose-services", "features": list(EXTENSION_FEATURES)}
 
 
     @router.get("/sandboxes/{sandbox_id}/services")
@@ -319,17 +365,18 @@ data:
     # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
     # SPDX-License-Identifier: Apache-2.0
 
-    """Adds a task's Compose services to the BatchSandbox pod the stock server built, and reads their state back.
+    """Adds a task's Compose services and agent bundle to the BatchSandbox pod the stock server built, and reads their state back.
 
     The stock pod has the task container (``sandbox``), an ``egress`` container that enforces the
     network policy, and an ``execd-installer`` init container. Kubernetes does all the ordering:
 
+    * ``egress`` moves to the front of the init containers, so its rules cover everything after it.
+    * The agent bundle becomes a plain init container that copies the agent into ``/installed-agent``.
     * ``sidecar`` services become native sidecars (init containers with ``restartPolicy: Always``).
       Init containers start one at a time, and a sidecar's startup probe (its ``readiness`` command)
       holds the next one, and ``sandbox``, until it passes.
     * ``run_once`` services become plain init containers, which must exit 0 before the next starts.
     * ``after_main`` services become regular containers that start next to ``sandbox``.
-    * ``egress`` moves to the front of the init containers, so its rules cover every service.
     * Host aliases resolve every service name, and ``main``, to 127.0.0.1.
 
     Pure functions over manifest dicts and kubernetes ``V1Pod`` objects; no API calls.
@@ -339,10 +386,20 @@ data:
 
     from typing import Any
 
-    from scaled_evals.harbor_opensandbox_services import ComposeServices, Readiness, Service, VolumeMount
+    from scaled_evals.harbor_opensandbox_services import (
+        AGENT_BUNDLE_CONTAINER,
+        INSTALLED_AGENT_DIR,
+        ComposeServices,
+        Readiness,
+        SandboxAgentBundle,
+        Service,
+        VolumeMount,
+    )
 
     SANDBOX_CONTAINER = "sandbox"
     EGRESS_CONTAINER = "egress"
+    # The volume the bundle is installed into when the template doesn't already mount /installed-agent.
+    INSTALLED_AGENT_VOLUME = "nemo-installed-agent"
 
     # Probes run every second, so failure thresholds are roughly seconds: a service gets ~10 minutes
     # to become ready once it runs, egress 2 minutes.
@@ -415,31 +472,107 @@ data:
         return container
 
 
+    def _pod_containers(pod_spec: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """The pod's ``(containers, initContainers)``; ``ValueError`` if the stock pod isn't shaped as expected.
+
+        The ordering the callers rely on means nothing on a pod of another shape.
+        """
+        containers: list[dict[str, Any]] = pod_spec["containers"]
+        init: list[dict[str, Any]] = pod_spec.setdefault("initContainers", [])
+
+        if not containers or containers[0].get("name") != SANDBOX_CONTAINER:
+            raise ValueError(f"unexpected BatchSandbox pod: the first container is not {SANDBOX_CONTAINER!r}")
+
+        return containers, init
+
+
+    def _egress_first(containers: list[dict[str, Any]], init: list[dict[str, Any]]) -> None:
+        """Make ``egress`` the next init container, as a sidecar gated on its own readiness probe.
+
+        Every init container added after it then starts only once the egress rules are in place.
+        A no-op when it already moved, and for a sandbox without a network policy, which has none.
+        """
+        egress = next((c for c in containers if c.get("name") == EGRESS_CONTAINER), None)
+        if egress is None:
+            return
+        containers.remove(egress)
+        egress["restartPolicy"] = "Always"
+        if egress.get("readinessProbe"):
+            egress["startupProbe"] = {**egress["readinessProbe"], "failureThreshold": EGRESS_STARTUP_PROBE_FAILURES}
+        init.append(egress)
+
+
+    def add_agent_bundle(pod_spec: dict[str, Any], bundle: SandboxAgentBundle, image_pull_policy: str) -> None:
+        """Add the init container that installs ``bundle`` into ``/installed-agent``; ``ValueError`` on an unexpected pod.
+
+        It runs after ``egress``, so the installer gets the sandbox's egress rules, and before any
+        Compose service, which ``add_services`` appends after it. ``main`` starts only once it
+        exits 0, and mounts ``/installed-agent`` read-only, so the agent can't change its own
+        installation. The template's ``/installed-agent`` volume is reused when it has one.
+        """
+        containers, init = _pod_containers(pod_spec)
+        if AGENT_BUNDLE_CONTAINER in {c.get("name") for c in [*containers, *init]}:
+            raise ValueError(f"the sandbox pod already has a container named {AGENT_BUNDLE_CONTAINER!r}")
+        _egress_first(containers, init)
+
+        sandbox = containers[0]
+        mounts: list[dict[str, Any]] = sandbox.setdefault("volumeMounts", [])
+        installed_agent_mount: dict[str, Any] | None = next(
+            (m for m in mounts if m.get("mountPath") == INSTALLED_AGENT_DIR), None
+        )
+        if installed_agent_mount is None:
+            installed_agent_mount = {"name": INSTALLED_AGENT_VOLUME, "mountPath": INSTALLED_AGENT_DIR}
+            mounts.append(installed_agent_mount)
+            pod_spec.setdefault("volumes", []).append({"name": INSTALLED_AGENT_VOLUME, "emptyDir": {}})
+        installed_agent_mount["readOnly"] = True
+
+        bundle_container: dict[str, Any] = {
+            "name": AGENT_BUNDLE_CONTAINER,
+            "image": bundle.image,
+            # Pinned by digest, so a cached copy is the same image.
+            "imagePullPolicy": image_pull_policy,
+            "command": [bundle.installer, INSTALLED_AGENT_DIR],
+            "volumeMounts": [{"name": installed_agent_mount["name"], "mountPath": INSTALLED_AGENT_DIR}],
+            # It shares the pod network with egress; without these it could rewrite egress's rules.
+            "securityContext": {"privileged": False, "capabilities": {"drop": ["NET_ADMIN", "NET_RAW"]}},
+        }
+        init.append(bundle_container)
+
+
+    def agent_bundle_state(pod: Any) -> tuple[str | None, bool]:
+        """``(failure, installed)`` for the bundle's init container: why it can't finish, and whether it exited 0."""
+        statuses = pod.status.init_container_statuses or []
+        st = next((s for s in statuses if s.name == AGENT_BUNDLE_CONTAINER), None)
+        # Kubernetes hasn't reached it yet.
+        if st is None or st.state is None:
+            return None, False
+        waiting, term = st.state.waiting, st.state.terminated
+        # An image that can't be pulled never clears on its own.
+        if waiting is not None and waiting.reason in FATAL_WAITING_REASONS:
+            return f"{waiting.reason}: {waiting.message or ''}".strip(), False
+        if term is None:
+            return None, False
+        # A BatchSandbox pod never restarts its containers, so a non-zero exit is final.
+        if term.exit_code != 0:
+            return f"exited with code {term.exit_code} ({term.reason})", False
+        return None, True
+
+
     def add_services(pod_spec: dict[str, Any], services: ComposeServices, image_pull_policy: str) -> None:
         """Add ``services`` to the BatchSandbox pod spec in place; ``ValueError`` if the pod isn't shaped as expected.
 
         Init containers start in list order, after the stock ones (``execd-installer``), so the final
-        order is: stock init containers, ``egress``, then the services in spec order. ``after_main``
-        services join ``sandbox`` as regular containers.
+        order is: stock init containers, ``egress``, the agent bundle if any, then the services in
+        spec order. ``after_main`` services join ``sandbox`` as regular containers.
         """
-        # The stock pod must look as expected, or the ordering below means nothing.
-        containers: list[dict[str, Any]] = pod_spec["containers"]
-        init: list[dict[str, Any]] = pod_spec.setdefault("initContainers", [])
-        if not containers or containers[0].get("name") != SANDBOX_CONTAINER:
-            raise ValueError(f"unexpected BatchSandbox pod: the first container is not {SANDBOX_CONTAINER!r}")
-        clashes = {c.get("name") for c in [*containers, *init]}.intersection(services.names())
-        if clashes:
-            raise ValueError(f"service names clash with sandbox pod containers: {sorted(clashes)}")
+        containers, init = _pod_containers(pod_spec)
+        # Service names the pod's own containers already use.
+        conflicting_names = set(services.names()).intersection(c.get("name") for c in [*containers, *init])
+        if conflicting_names:
+            raise ValueError(f"service names clash with sandbox pod containers: {sorted(conflicting_names)}")
 
-        # egress becomes the first sidecar, gated on its own readiness probe, so no service starts
-        # before its rules are in place. A sandbox without a network policy has no egress container.
-        egress = next((c for c in containers if c.get("name") == EGRESS_CONTAINER), None)
-        if egress is not None:
-            containers.remove(egress)
-            egress["restartPolicy"] = "Always"
-            if egress.get("readinessProbe"):
-                egress["startupProbe"] = {**egress["readinessProbe"], "failureThreshold": EGRESS_STARTUP_PROBE_FAILURES}
-            init.append(egress)
+        # egress becomes the first sidecar, so no service starts before its rules are in place.
+        _egress_first(containers, init)
 
         # Services in spec order: init containers start one at a time, which gives depends_on order.
         for svc in services.services:
@@ -543,6 +676,10 @@ data:
     on 127.0.0.1. The same model is used by the dispatch backend, by ``NemoOpenSandboxEnvironment``
     inside the Harbor runner, and by the server extension, which re-validates what it receives. It
     only depends on pydantic and must stay importable on Python 3.10 (the server image's version).
+
+    The extension also delivers agent bundles (``SandboxAgentBundle``): an init container from the bundle
+    image copies a prebuilt agent into ``/installed-agent`` before ``main`` starts, so agents run on
+    images that can't install them, such as images with a non-root ``USER``.
     """
 
     from __future__ import annotations
@@ -561,9 +698,22 @@ data:
     # File names, in the task's environment/ directory, that mark a Compose task.
     COMPOSE_FILENAMES = ("docker-compose.yaml", "docker-compose.yml", "compose.yaml", "compose.yml")
 
-    # Names the sandbox pod already uses: its containers (sandbox, egress, execd-installer), and
-    # ``main``, which every container resolves to 127.0.0.1.
-    RESERVED_NAMES = frozenset({MAIN_SERVICE, "sandbox", "egress", "execd-installer"})
+    # What the server extension can do, as its health route reports it. Clients check for the feature
+    # they need, since an older extension would ignore a key it doesn't know.
+    COMPOSE_SERVICES_FEATURE = "compose-services"
+    AGENT_BUNDLE_FEATURE = "agent-bundle"
+    EXTENSION_FEATURES = (COMPOSE_SERVICES_FEATURE, AGENT_BUNDLE_FEATURE)
+
+    # The agent bundle's extensions key and pod annotation, copied the same way as the services'.
+    AGENT_BUNDLE_EXTENSION_KEY = "opensandbox.extensions.nemo-agent-bundle"
+    AGENT_BUNDLE_POD_ANNOTATION = "opensandbox.io/extensions.nemo-agent-bundle"
+    # The init container that installs the bundle, and where it puts the agent in ``main``.
+    AGENT_BUNDLE_CONTAINER = "agent-bundle"
+    INSTALLED_AGENT_DIR = "/installed-agent"
+
+    # Names the sandbox pod already uses: its containers (sandbox, egress, execd-installer, and the
+    # agent bundle's), and ``main``, which every container resolves to 127.0.0.1.
+    RESERVED_NAMES = frozenset({MAIN_SERVICE, "sandbox", "egress", "execd-installer", AGENT_BUNDLE_CONTAINER})
     # Ports the sandbox pod already listens on: execd (44772), the egress DNS proxy (15353) and the
     # egress policy API (18080). Every container shares the pod network, so a service can't use them.
     RESERVED_PORTS = frozenset({44772, 15353, 18080})
@@ -746,6 +896,39 @@ data:
         def to_json(self) -> str:
             """The value sent in ``extensions[EXTENSION_KEY]``."""
             return self.model_dump_json(by_alias=True, exclude_defaults=True)
+
+
+    class SandboxAgentBundle(_Strict):
+        """An agent bundle for one sandbox: the image, its installer, and the agent's executable.
+
+        The extension runs ``installer /installed-agent`` from ``image`` in an init container, so the
+        agent is in place before ``main`` starts; ``main`` mounts it read-only.
+        """
+
+        # Pinned by digest, since a tag could move under a run; like services, it must name its registry.
+        image: str = Field(
+            pattern=r"^([a-z0-9-]+(\.[a-z0-9-]+)+(:[0-9]+)?|localhost(:[0-9]+)?)/[^\s@]+@sha256:[0-9a-f]{64}$",
+            max_length=512,
+        )
+        installer: AbsolutePath
+        # Relative to /installed-agent, e.g. ``bin/claude``.
+        entrypoint: str = Field(pattern=r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$", max_length=300)
+
+        @model_validator(mode="after")
+        def _check(self) -> SandboxAgentBundle:
+            """Keep the executable inside ``/installed-agent``."""
+            if ".." in self.entrypoint.split("/"):
+                raise ValueError("entrypoint must not contain '..'")
+            return self
+
+        @property
+        def executable(self) -> str:
+            """The agent's executable in ``main``."""
+            return f"{INSTALLED_AGENT_DIR}/{self.entrypoint}"
+
+        def to_json(self) -> str:
+            """The value sent in ``extensions[AGENT_BUNDLE_EXTENSION_KEY]``."""
+            return self.model_dump_json(exclude_defaults=True)
 
 
     def parse_compose_services(raw: object) -> ComposeServices:

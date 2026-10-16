@@ -24,6 +24,9 @@ shares, so the same class runs on Harbor 0.13.2 and 0.20.0. What it adds over a 
   the sandbox pod, and Kubernetes starts them before ``main``. This class gives ``main`` its
   entrypoint and env, fails the create early when a service can't start, waits for ``main``'s and
   the services' readiness, and runs per-service operations through the extension's exec route.
+* An agent bundle, when the runner passes ``agent_bundle``, is installed into the agent's sandbox
+  by the same extension, before ``main`` starts. This class puts it on ``PATH`` and checks it runs,
+  so Harbor's installed agents skip their root install and work on non-root images too.
 
 Loaded by Harbor through ``environment.import_path``; see ``NEMO_OPENSANDBOX_IMPORT_PATH`` in
 ``scaled_evals.dispatch.harbor_opensandbox``. This is the interim home until ``nhx-sandbox`` owns
@@ -73,10 +76,13 @@ from scaled_evals.harbor_opensandbox_driver import (
     sandbox_id,
 )
 from scaled_evals.harbor_opensandbox_services import (
+    AGENT_BUNDLE_EXTENSION_KEY,
+    AGENT_BUNDLE_FEATURE,
     COMPOSE_FILENAMES,
     EXTENSION_KEY,
     MAIN_SERVICE,
     ComposeServices,
+    SandboxAgentBundle,
     parse_compose_services,
 )
 
@@ -133,6 +139,10 @@ SERVER_RETRY_BASE_SEC = 0.5
 SERVER_RETRY_MAX_SEC = 8.0
 # The readiness wait polls the services status on every poll, so each read gets only this long.
 PROVISIONING_STATUS_BUDGET_SEC = 30
+# The image's PATH when it can't be read; the usual Debian/Ubuntu default.
+DEFAULT_IMAGE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+# How long each command that activates the agent bundle may take: reading PATH, then ``--version``.
+AGENT_BUNDLE_EXEC_TIMEOUT_SEC = 60
 
 
 def sandbox_role(session_id: str, trial_name: str) -> str:
@@ -177,6 +187,11 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         compose_services: The evaluation profile's ``compose_services``. Applied only when the
             environment directory has a Compose file, so a separate verifier environment (built
             from the task's ``tests/``) gets a plain sandbox.
+        agent_bundle: The evaluation's agent bundle, as a ``SandboxAgentBundle``. Only the agent's
+            sandbox gets it, never a separate verifier's. The server extension installs it into
+            ``/installed-agent`` before the sandbox starts; ``start`` then puts its executable on
+            ``PATH``, so Harbor finds the agent already installed and skips its own install,
+            which needs root.
 
     Any other keyword argument is Harbor's and goes to ``BaseEnvironment`` unchanged.
     """
@@ -202,6 +217,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         resolver_addresses: list[str] | None = None,
         egress_verification: EgressVerificationMode = "default_action",
         compose_services: dict[str, Any] | None = None,
+        agent_bundle: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         """Store this environment's settings, then let ``BaseEnvironment`` validate the task against them."""
@@ -211,6 +227,13 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         self._services: ComposeServices | None = (
             parse_compose_services(compose_services) if compose_services is not None and has_compose_file else None
         )
+
+        # The bundle is the agent's alone; a separate verifier's sandbox runs the task image as is.
+        is_agent = sandbox_role(session_id, trial_paths.trial_dir.name) == "agent"
+        self._agent_bundle: SandboxAgentBundle | None = (
+            SandboxAgentBundle.model_validate(agent_bundle) if agent_bundle is not None and is_agent else None
+        )
+
         self._connection = Connection(
             domain=domain if domain is not None else os.environ.get("OPENSANDBOX_DOMAIN"),
             api_key=api_key if api_key is not None else os.environ.get("OPENSANDBOX_API_KEY"),
@@ -351,18 +374,23 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         return resource
 
     def _extensions(self) -> dict[str, str]:
-        """Server extensions: the task's GPU types, under the key Harbor 0.20 used, and the compose services."""
+        """Server extensions: the task's GPU types, under the key Harbor 0.20 used, the agent bundle, and the compose services."""
         extensions: dict[str, str] = {}
         if self.task_env_config.gpu_types:
             extensions["harbor.gpu_types"] = ",".join(self.task_env_config.gpu_types)
+        # The NeMo extension reads these two and adds the bundle's init container and the services to the pod.
+        if self._agent_bundle is not None:
+            extensions[AGENT_BUNDLE_EXTENSION_KEY] = self._agent_bundle.to_json()
         if self._services is not None:
             extensions[EXTENSION_KEY] = self._services.to_json()
         return extensions
 
     async def _create_sandbox(self) -> Any:
         """Create the sandbox, then verify its egress; it is killed if the policy can't be read or doesn't match."""
-        if self._services is not None:
-            await self._require_compose_extension()
+        uses_extension = self._services is not None or self._agent_bundle is not None
+        if uses_extension:
+            await self._require_extension()
+
         egress_policy = self.egress_policy()
         sandbox = await self._driver.create(
             CreateRequest(
@@ -383,9 +411,10 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 health_check_poll_interval_sec=self._health_check_poll_interval_sec,
                 entrypoint=self._services.sandbox_entrypoint() if self._services is not None else None,
             ),
-            # Kubernetes starts main only after the services, so without this a crashing service
-            # would leave the create waiting for main until its ready timeout.
-            failure_check=self._services_failure if self._services is not None else None,
+            # Kubernetes starts main only after the bundle and services, so without this a bundle that
+            # can't install, or a crashing service, would leave the create waiting for main until its
+            # ready timeout.
+            failure_check=self._provisioning_failure if uses_extension else None,
         )
         try:
             await verify_applied_egress(
@@ -429,7 +458,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
     async def start(self, force_build: bool) -> None:
         """Create the sandbox, prepare the log directories, and upload the task's environment directory.
 
-        With compose services, also wait for ``main``'s readiness check and every service.
+        With an agent bundle, also put it on ``PATH``. With compose services, also wait for
+        ``main``'s readiness check and every service.
         """
         if force_build:
             self.logger.warning("NemoOpenSandboxEnvironment ignores force_build; it runs prebuilt images only.")
@@ -456,6 +486,10 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         # Supplementary files (scripts, data, configs) for prebuilt-image tasks go into the workdir.
         await self._upload_environment_dir_after_start()
 
+        # Harbor installs the agent after start returns, so the bundle must be on PATH by then.
+        if self._agent_bundle is not None:
+            await self._activate_agent_bundle(self._agent_bundle)
+
         if self._services is None:
             return
         # One deadline covers both waits, like a Compose healthcheck's overall start period.
@@ -466,14 +500,39 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         # after_main services start with main, so they may still be coming up.
         await self._wait_for_services(deadline)
 
+    async def _activate_agent_bundle(self, bundle: SandboxAgentBundle) -> None:
+        """Put the bundle's executable first on ``PATH`` for every command, then check it runs.
+
+        Harbor's installed agents skip their install when they find the agent on ``PATH``. The
+        image's own ``PATH`` is read as the default user and kept after the bundle's directory;
+        ``PATH`` set at create would replace it.
+        """
+        path_probe = await self.exec('printf %s "$PATH"', cwd="/", timeout_sec=AGENT_BUNDLE_EXEC_TIMEOUT_SEC)
+        image_path = (path_probe.stdout or "") if path_probe.return_code == 0 else ""
+        entries = [entry for entry in image_path.split(":") if entry] or DEFAULT_IMAGE_PATH.split(":")
+        bundle_dir = bundle.executable.rsplit("/", 1)[0]
+        self._persistent_env["PATH"] = ":".join([bundle_dir, *(entry for entry in entries if entry != bundle_dir)])
+
+        version_check = await self.exec(
+            f"{shlex.quote(bundle.executable)} --version", cwd="/", timeout_sec=AGENT_BUNDLE_EXEC_TIMEOUT_SEC
+        )
+        output = ((version_check.stdout or "") + (version_check.stderr or "")).strip()
+        if version_check.return_code != 0:
+            raise RuntimeError(
+                f"Agent bundle check failed: {bundle.executable} --version exited {version_check.return_code}: "
+                f"{output[-2000:]}. The bundle may not match this image (it needs glibc on linux/amd64)."
+            )
+        self.logger.info("Agent bundle ready: %s --version: %s", bundle.executable, output[:200])
+
     def _server(self) -> _ServerClient:
         """A client for the extension's routes, on the same server and API key as the driver's SDK calls."""
         return _ServerClient.from_connection_config(self._driver.connection_config())
 
-    async def _require_compose_extension(self) -> None:
-        """Fail before creating anything if the server can't run Compose services.
+    async def _require_extension(self) -> None:
+        """Fail before creating anything if the server can't run this sandbox's services or agent bundle.
 
-        A stock server ignores unknown extensions and would create a sandbox without the services.
+        A stock server ignores unknown extensions and would create a sandbox without them. So would
+        an extension from before agent bundles, which reports no ``features``.
         """
         try:
             response = await self._server().get("/nemo-ext/health", timeout=30)
@@ -484,6 +543,11 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 "The OpenSandbox server does not run the NeMo compose services extension; "
                 f"GET /v1/nemo-ext/health returned {response.status_code}. See "
                 "k8s/helm/examples/opensandbox/README.md, 'Compose services'."
+            )
+        if self._agent_bundle is not None and AGENT_BUNDLE_FEATURE not in (response.json().get("features") or []):
+            raise RuntimeError(
+                "The OpenSandbox server's NeMo compose services extension doesn't support agent bundles; upgrade it to "
+                "the version in plugins/_temporary-scaled-evals/opensandbox_ext."
             )
 
     async def _services_status(self, sandbox_id: str, deadline: float) -> dict[str, Any]:
@@ -496,8 +560,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             raise RuntimeError(f"reading compose services failed ({response.status_code}): {_error_text(response)}")
         return response.json()
 
-    async def _services_failure(self, sandbox: Any) -> str | None:
-        """The driver's ``failure_check``: a compose service that can't start fails the create now, with its logs."""
+    async def _provisioning_failure(self, sandbox: Any) -> str | None:
+        """The driver's ``failure_check``: an agent bundle or compose service that can't start fails the create now, with its logs."""
         try:
             status = await self._services_status(
                 str(sandbox_id(sandbox)), deadline=time.monotonic() + PROVISIONING_STATUS_BUDGET_SEC

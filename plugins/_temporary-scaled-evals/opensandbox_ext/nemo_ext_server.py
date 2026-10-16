@@ -4,18 +4,23 @@
 """NeMo Compose services extension for the OpenSandbox server's Kubernetes BatchSandbox runtime.
 
 A create request whose ``extensions`` carry ``EXTENSION_KEY`` (a JSON ``ComposeServices``) gets
-those services as extra containers in its pod. The stock server copies that extension onto the
-pod as the ``POD_ANNOTATION`` annotation, so the spec travels with the manifest:
+those services as extra containers in its pod. One that carries ``AGENT_BUNDLE_EXTENSION_KEY`` (a
+JSON ``SandboxAgentBundle``) gets an init container that installs the agent into ``/installed-agent``.
+The stock server copies each extension onto the pod as an annotation (``POD_ANNOTATION``,
+``AGENT_BUNDLE_POD_ANNOTATION``), so the spec travels with the manifest:
 
 * ``NemoComposeProvider._merge_pod_spec_extras`` runs on the finished manifest, just before the
-  stock code creates it, and adds the services (``nemo_ext_pod.add_services``). An invalid spec
-  raises ``ValueError``, which the stock server returns as a 400.
-* The routes below read the same annotation from the pod, so they work for any sandbox and
+  stock code creates it, and adds the bundle (``nemo_ext_pod.add_agent_bundle``) and the services
+  (``nemo_ext_pod.add_services``). An invalid spec raises ``ValueError``, which the stock server
+  returns as a 400.
+* The routes below read the same annotations from the pod, so they work for any sandbox and
   survive server restarts. They sit behind the server's API-key middleware:
 
-  * ``GET /v1/nemo-ext/health``: lets clients check the extension is loaded, because a stock
-    server ignores unknown extensions and would create the sandbox without the services.
-  * ``GET /v1/nemo-ext/sandboxes/{id}/services``: which services failed or aren't ready yet.
+  * ``GET /v1/nemo-ext/health``: lets clients check the extension is loaded, and which features
+    it has, because a stock server ignores unknown extensions and would create the sandbox
+    without the services or the bundle.
+  * ``GET /v1/nemo-ext/sandboxes/{id}/services``: whether the bundle or a service failed, and
+    which aren't ready yet.
   * ``POST /v1/nemo-ext/sandboxes/{id}/services/{name}/exec``: runs a command in one service.
 
 ``NemoComposeProvider.get_status`` reports such a sandbox ``Allocated`` once its pod has an IP,
@@ -37,13 +42,22 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from kubernetes import client as k8s
 from kubernetes.stream import stream
-from nemo_ext_pod import add_services, service_states
+from nemo_ext_pod import add_agent_bundle, add_services, agent_bundle_state, service_states
 from opensandbox_server.config import CONFIG_ENV_VAR
 from opensandbox_server.services.constants import SANDBOX_ID_LABEL
 from opensandbox_server.services.k8s import provider_factory
 from opensandbox_server.services.k8s.batchsandbox_provider import BatchSandboxProvider
 from pydantic import BaseModel, ConfigDict, Field
-from scaled_evals.harbor_opensandbox_services import EXTENSION_KEY, POD_ANNOTATION, ComposeServices
+from scaled_evals.harbor_opensandbox_services import (
+    AGENT_BUNDLE_CONTAINER,
+    AGENT_BUNDLE_EXTENSION_KEY,
+    AGENT_BUNDLE_POD_ANNOTATION,
+    EXTENSION_FEATURES,
+    EXTENSION_KEY,
+    POD_ANNOTATION,
+    ComposeServices,
+    SandboxAgentBundle,
+)
 
 # Under the server's logger tree, which is the only one its logging config enables.
 logger = logging.getLogger("opensandbox_server.nemo_ext")
@@ -79,11 +93,17 @@ class NemoComposeProvider(BatchSandboxProvider):
         """
         super()._merge_pod_spec_extras(batchsandbox, *args, **kwargs)
         template = batchsandbox["spec"]["template"]
-        raw = (template.get("metadata") or {}).get("annotations", {}).get(POD_ANNOTATION)
+        annotations = (template.get("metadata") or {}).get("annotations", {})
+        pull_policy = self.image_pull_policy or "IfNotPresent"
+        # pydantic's ValidationError is a ValueError, so the client gets a 400 with every problem listed.
+        # The bundle goes first, so the agent is installed before any service starts.
+        raw_bundle = annotations.get(AGENT_BUNDLE_POD_ANNOTATION)
+        if raw_bundle is not None:
+            add_agent_bundle(template["spec"], SandboxAgentBundle.model_validate_json(raw_bundle), pull_policy)
+        raw = annotations.get(POD_ANNOTATION)
         if raw is not None:
-            # pydantic's ValidationError is a ValueError, so the client gets a 400 with every problem listed.
             services = ComposeServices.model_validate_json(raw)
-            add_services(template["spec"], services, self.image_pull_policy or "IfNotPresent")
+            add_services(template["spec"], services, pull_policy)
 
     def get_status(self, workload: dict[str, Any]) -> dict[str, Any]:
         """The stock status, except a sandbox with services counts as ``Allocated`` once its pod has an IP.
@@ -113,37 +133,63 @@ class NemoComposeProvider(BatchSandboxProvider):
 
         A pooled pod already exists, so there is no pod spec to add services to.
         """
-        if POD_ANNOTATION in (kwargs.get("annotations") or {}):
+        annotations = kwargs.get("annotations") or {}
+        if POD_ANNOTATION in annotations:
             raise ValueError(f"extensions[{EXTENSION_KEY!r}] can't be combined with poolRef")
+        if AGENT_BUNDLE_POD_ANNOTATION in annotations:
+            raise ValueError(f"extensions[{AGENT_BUNDLE_EXTENSION_KEY!r}] can't be combined with poolRef")
         return super()._create_workload_from_pool(*args, **kwargs)
 
-    def find_pod(self, sandbox_id: str) -> tuple[Any, ComposeServices]:
-        """The sandbox's pod and its services; 404 if it has no pod or no services."""
+    def find_pod(self, sandbox_id: str) -> tuple[Any, ComposeServices | None, SandboxAgentBundle | None]:
+        """The sandbox's pod, its services and its agent bundle; 404 if it has no pod or neither."""
         pods = self.k8s_client.list_pods(namespace=self.namespace, label_selector=f"{SANDBOX_ID_LABEL}={sandbox_id}")
-        raw = (pods[0].metadata.annotations or {}).get(POD_ANNOTATION) if pods else None
-        if raw is None:
-            raise _error(404, "NOT_FOUND", f"sandbox {sandbox_id} has no pod with compose services")
-        return pods[0], ComposeServices.model_validate_json(raw)
+        annotations = (pods[0].metadata.annotations or {}) if pods else {}
+        raw_services = annotations.get(POD_ANNOTATION)
+        raw_bundle = annotations.get(AGENT_BUNDLE_POD_ANNOTATION)
+        if raw_services is None and raw_bundle is None:
+            raise _error(404, "NOT_FOUND", f"sandbox {sandbox_id} has no pod with compose services or an agent bundle")
+        return (
+            pods[0],
+            ComposeServices.model_validate_json(raw_services) if raw_services is not None else None,
+            SandboxAgentBundle.model_validate_json(raw_bundle) if raw_bundle is not None else None,
+        )
 
     def services_status(self, sandbox_id: str) -> dict[str, Any]:
-        """``{"failure": str | None, "not_ready": [names]}`` for the sandbox's services.
+        """``{"failure": str | None, "not_ready": [names]}`` for the sandbox's agent bundle and services.
 
-        A failure names the first service that can't come up and includes its last log lines,
-        so the client can fail the trial with the cause instead of a timeout.
+        A failure names the first container that can't come up, in start order, and includes its
+        last log lines, so the client can fail the trial with the cause instead of a timeout. The
+        bundle's init container is listed in ``not_ready`` as ``agent-bundle`` until it exits 0.
         """
-        pod, services = self.find_pod(sandbox_id)
-        failure, not_ready = service_states(pod, services)
-        if failure is None:
-            return {"failure": None, "not_ready": not_ready}
-        name, why = failure
+        pod, services, bundle = self.find_pod(sandbox_id)
+        not_ready: list[str] = []
+        if bundle is not None:
+            bundle_failure, installed = agent_bundle_state(pod)
+            if bundle_failure is not None:
+                return {
+                    "failure": self._failure(pod, AGENT_BUNDLE_CONTAINER, "agent bundle", bundle_failure),
+                    "not_ready": [],
+                }
+            if not installed:
+                not_ready.append(AGENT_BUNDLE_CONTAINER)
+        if services is not None:
+            failure, services_not_ready = service_states(pod, services)
+            not_ready.extend(services_not_ready)
+            if failure is not None:
+                name, why = failure
+                return {"failure": self._failure(pod, name, f"service {name!r}", why), "not_ready": not_ready}
+        return {"failure": None, "not_ready": not_ready}
+
+    def _failure(self, pod: Any, container: str, label: str, reason: str) -> str:
+        """``"<label> <reason>"`` for a container that can't come up, with its last log lines."""
         # A container that never started has no logs; report the failure anyway.
         try:
             tail = self.k8s_client.get_core_v1_api().read_namespaced_pod_log(
-                pod.metadata.name, pod.metadata.namespace, container=name, tail_lines=LOG_TAIL_LINES
+                pod.metadata.name, pod.metadata.namespace, container=container, tail_lines=LOG_TAIL_LINES
             )
         except Exception as exc:
             tail = f"<logs unavailable: {exc.__class__.__name__}>"
-        return {"failure": f"service {name!r} {why}. Last log lines:\n{tail}", "not_ready": not_ready}
+        return f"{label} {reason}. Last log lines:\n{tail}"
 
     def exec(self, sandbox_id: str, service: str, req: ExecRequest) -> ExecResponse:
         """Run ``req.command`` in one of the sandbox's services through the Kubernetes exec API.
@@ -151,9 +197,9 @@ class NemoComposeProvider(BatchSandboxProvider):
         Blocking; the route runs it on the extension's thread pool. 404 if ``service`` isn't one of
         the sandbox's services, 504 on timeout, 413 if the output passes the limit.
         """
-        pod, services = self.find_pod(sandbox_id)
-        # Only the task's services, never sandbox, egress or execd.
-        if service not in services.names():
+        pod, services, _ = self.find_pod(sandbox_id)
+        # Only the task's services, never sandbox, egress, execd or the agent bundle.
+        if services is None or service not in services.names():
             raise _error(404, "NOT_FOUND", f"{service!r} is not a compose service of sandbox {sandbox_id}")
 
         # stream() patches the ApiClient it runs on, so each exec gets its own.
@@ -237,10 +283,10 @@ router = APIRouter(prefix="/v1/nemo-ext")
 
 
 @router.get("/health")
-async def health() -> dict[str, str]:
+async def health() -> dict[str, Any]:
     """200 when the extension is loaded and its provider is active; clients check this before create."""
     _require_provider()
-    return {"status": "ok", "extension": "nemo-compose-services"}
+    return {"status": "ok", "extension": "nemo-compose-services", "features": list(EXTENSION_FEATURES)}
 
 
 @router.get("/sandboxes/{sandbox_id}/services")

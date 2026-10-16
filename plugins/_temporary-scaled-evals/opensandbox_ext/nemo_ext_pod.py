@@ -1,17 +1,18 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Adds a task's Compose services to the BatchSandbox pod the stock server built, and reads their state back.
+"""Adds a task's Compose services and agent bundle to the BatchSandbox pod the stock server built, and reads their state back.
 
 The stock pod has the task container (``sandbox``), an ``egress`` container that enforces the
 network policy, and an ``execd-installer`` init container. Kubernetes does all the ordering:
 
+* ``egress`` moves to the front of the init containers, so its rules cover everything after it.
+* The agent bundle becomes a plain init container that copies the agent into ``/installed-agent``.
 * ``sidecar`` services become native sidecars (init containers with ``restartPolicy: Always``).
   Init containers start one at a time, and a sidecar's startup probe (its ``readiness`` command)
   holds the next one, and ``sandbox``, until it passes.
 * ``run_once`` services become plain init containers, which must exit 0 before the next starts.
 * ``after_main`` services become regular containers that start next to ``sandbox``.
-* ``egress`` moves to the front of the init containers, so its rules cover every service.
 * Host aliases resolve every service name, and ``main``, to 127.0.0.1.
 
 Pure functions over manifest dicts and kubernetes ``V1Pod`` objects; no API calls.
@@ -21,10 +22,20 @@ from __future__ import annotations
 
 from typing import Any
 
-from scaled_evals.harbor_opensandbox_services import ComposeServices, Readiness, Service, VolumeMount
+from scaled_evals.harbor_opensandbox_services import (
+    AGENT_BUNDLE_CONTAINER,
+    INSTALLED_AGENT_DIR,
+    ComposeServices,
+    Readiness,
+    SandboxAgentBundle,
+    Service,
+    VolumeMount,
+)
 
 SANDBOX_CONTAINER = "sandbox"
 EGRESS_CONTAINER = "egress"
+# The volume the bundle is installed into when the template doesn't already mount /installed-agent.
+INSTALLED_AGENT_VOLUME = "nemo-installed-agent"
 
 # Probes run every second, so failure thresholds are roughly seconds: a service gets ~10 minutes
 # to become ready once it runs, egress 2 minutes.
@@ -97,31 +108,107 @@ def service_container(svc: Service, image_pull_policy: str) -> dict[str, Any]:
     return container
 
 
+def _pod_containers(pod_spec: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The pod's ``(containers, initContainers)``; ``ValueError`` if the stock pod isn't shaped as expected.
+
+    The ordering the callers rely on means nothing on a pod of another shape.
+    """
+    containers: list[dict[str, Any]] = pod_spec["containers"]
+    init: list[dict[str, Any]] = pod_spec.setdefault("initContainers", [])
+
+    if not containers or containers[0].get("name") != SANDBOX_CONTAINER:
+        raise ValueError(f"unexpected BatchSandbox pod: the first container is not {SANDBOX_CONTAINER!r}")
+
+    return containers, init
+
+
+def _egress_first(containers: list[dict[str, Any]], init: list[dict[str, Any]]) -> None:
+    """Make ``egress`` the next init container, as a sidecar gated on its own readiness probe.
+
+    Every init container added after it then starts only once the egress rules are in place.
+    A no-op when it already moved, and for a sandbox without a network policy, which has none.
+    """
+    egress = next((c for c in containers if c.get("name") == EGRESS_CONTAINER), None)
+    if egress is None:
+        return
+    containers.remove(egress)
+    egress["restartPolicy"] = "Always"
+    if egress.get("readinessProbe"):
+        egress["startupProbe"] = {**egress["readinessProbe"], "failureThreshold": EGRESS_STARTUP_PROBE_FAILURES}
+    init.append(egress)
+
+
+def add_agent_bundle(pod_spec: dict[str, Any], bundle: SandboxAgentBundle, image_pull_policy: str) -> None:
+    """Add the init container that installs ``bundle`` into ``/installed-agent``; ``ValueError`` on an unexpected pod.
+
+    It runs after ``egress``, so the installer gets the sandbox's egress rules, and before any
+    Compose service, which ``add_services`` appends after it. ``main`` starts only once it
+    exits 0, and mounts ``/installed-agent`` read-only, so the agent can't change its own
+    installation. The template's ``/installed-agent`` volume is reused when it has one.
+    """
+    containers, init = _pod_containers(pod_spec)
+    if AGENT_BUNDLE_CONTAINER in {c.get("name") for c in [*containers, *init]}:
+        raise ValueError(f"the sandbox pod already has a container named {AGENT_BUNDLE_CONTAINER!r}")
+    _egress_first(containers, init)
+
+    sandbox = containers[0]
+    mounts: list[dict[str, Any]] = sandbox.setdefault("volumeMounts", [])
+    installed_agent_mount: dict[str, Any] | None = next(
+        (m for m in mounts if m.get("mountPath") == INSTALLED_AGENT_DIR), None
+    )
+    if installed_agent_mount is None:
+        installed_agent_mount = {"name": INSTALLED_AGENT_VOLUME, "mountPath": INSTALLED_AGENT_DIR}
+        mounts.append(installed_agent_mount)
+        pod_spec.setdefault("volumes", []).append({"name": INSTALLED_AGENT_VOLUME, "emptyDir": {}})
+    installed_agent_mount["readOnly"] = True
+
+    bundle_container: dict[str, Any] = {
+        "name": AGENT_BUNDLE_CONTAINER,
+        "image": bundle.image,
+        # Pinned by digest, so a cached copy is the same image.
+        "imagePullPolicy": image_pull_policy,
+        "command": [bundle.installer, INSTALLED_AGENT_DIR],
+        "volumeMounts": [{"name": installed_agent_mount["name"], "mountPath": INSTALLED_AGENT_DIR}],
+        # It shares the pod network with egress; without these it could rewrite egress's rules.
+        "securityContext": {"privileged": False, "capabilities": {"drop": ["NET_ADMIN", "NET_RAW"]}},
+    }
+    init.append(bundle_container)
+
+
+def agent_bundle_state(pod: Any) -> tuple[str | None, bool]:
+    """``(failure, installed)`` for the bundle's init container: why it can't finish, and whether it exited 0."""
+    statuses = pod.status.init_container_statuses or []
+    st = next((s for s in statuses if s.name == AGENT_BUNDLE_CONTAINER), None)
+    # Kubernetes hasn't reached it yet.
+    if st is None or st.state is None:
+        return None, False
+    waiting, term = st.state.waiting, st.state.terminated
+    # An image that can't be pulled never clears on its own.
+    if waiting is not None and waiting.reason in FATAL_WAITING_REASONS:
+        return f"{waiting.reason}: {waiting.message or ''}".strip(), False
+    if term is None:
+        return None, False
+    # A BatchSandbox pod never restarts its containers, so a non-zero exit is final.
+    if term.exit_code != 0:
+        return f"exited with code {term.exit_code} ({term.reason})", False
+    return None, True
+
+
 def add_services(pod_spec: dict[str, Any], services: ComposeServices, image_pull_policy: str) -> None:
     """Add ``services`` to the BatchSandbox pod spec in place; ``ValueError`` if the pod isn't shaped as expected.
 
     Init containers start in list order, after the stock ones (``execd-installer``), so the final
-    order is: stock init containers, ``egress``, then the services in spec order. ``after_main``
-    services join ``sandbox`` as regular containers.
+    order is: stock init containers, ``egress``, the agent bundle if any, then the services in
+    spec order. ``after_main`` services join ``sandbox`` as regular containers.
     """
-    # The stock pod must look as expected, or the ordering below means nothing.
-    containers: list[dict[str, Any]] = pod_spec["containers"]
-    init: list[dict[str, Any]] = pod_spec.setdefault("initContainers", [])
-    if not containers or containers[0].get("name") != SANDBOX_CONTAINER:
-        raise ValueError(f"unexpected BatchSandbox pod: the first container is not {SANDBOX_CONTAINER!r}")
-    clashes = {c.get("name") for c in [*containers, *init]}.intersection(services.names())
-    if clashes:
-        raise ValueError(f"service names clash with sandbox pod containers: {sorted(clashes)}")
+    containers, init = _pod_containers(pod_spec)
+    # Service names the pod's own containers already use.
+    conflicting_names = set(services.names()).intersection(c.get("name") for c in [*containers, *init])
+    if conflicting_names:
+        raise ValueError(f"service names clash with sandbox pod containers: {sorted(conflicting_names)}")
 
-    # egress becomes the first sidecar, gated on its own readiness probe, so no service starts
-    # before its rules are in place. A sandbox without a network policy has no egress container.
-    egress = next((c for c in containers if c.get("name") == EGRESS_CONTAINER), None)
-    if egress is not None:
-        containers.remove(egress)
-        egress["restartPolicy"] = "Always"
-        if egress.get("readinessProbe"):
-            egress["startupProbe"] = {**egress["readinessProbe"], "failureThreshold": EGRESS_STARTUP_PROBE_FAILURES}
-        init.append(egress)
+    # egress becomes the first sidecar, so no service starts before its rules are in place.
+    _egress_first(containers, init)
 
     # Services in spec order: init containers start one at a time, which gives depends_on order.
     for svc in services.services:

@@ -223,6 +223,27 @@ def test_opensandbox_provenance_records_separate_verifier_image(tmp_path) -> Non
     assert manifest.runtime.sandbox["verifier_image_digest"] == verifier_digest
 
 
+def test_opensandbox_provenance_records_the_agent_bundle_and_its_delivery(tmp_path) -> None:  # noqa: ANN001
+    bundle_image = "registry.example/claude@sha256:" + "d" * 64
+    row = _opensandbox_row()
+    row["backend_handle"]["raw"]["provenance"].update(
+        agent_bundle_image=bundle_image, agent_bundle_delivery="init_container"
+    )
+
+    manifest = build_run_provenance_manifest(
+        row,
+        status="succeeded",
+        artifact_prefix="evaluations/ev_test123/artifacts/",
+        artifact_root=tmp_path,
+    )
+
+    assert manifest.config.agent_bundle is not None
+    assert manifest.config.agent_bundle.bundle_id == "ab_claude"
+    assert manifest.config.agent_bundle.image_digest == bundle_image
+    assert manifest.runtime.sandbox["agent_bundle_image"] == bundle_image
+    assert manifest.runtime.sandbox["agent_bundle_delivery"] == "init_container"
+
+
 def test_opensandbox_provenance_omits_verifier_image_for_shared_verifier(tmp_path) -> None:  # noqa: ANN001
     manifest = build_run_provenance_manifest(
         _opensandbox_row(),

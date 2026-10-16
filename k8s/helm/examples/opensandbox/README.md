@@ -152,6 +152,31 @@ services are ready, and the first one that failed, with its last log lines),
 and `POST /v1/nemo-ext/sandboxes/{id}/services/{service}/exec`, which runs a
 command in one service container (and only those).
 
+### Agent bundles
+
+The same extension delivers scaled-evals agent bundles. A bundle is a
+prebuilt, digest-pinned image holding an agent (for example Claude Code) and
+an installer. Harbor's installed agents need root to install themselves
+(`apt-get`), which fails on task images with a non-root `USER`, and they
+download the agent on every trial. With a bundle, a create request carries
+`extensions["opensandbox.extensions.nemo-agent-bundle"]`, and the extension
+adds an `agent-bundle` init container that runs the bundle's installer into
+`/installed-agent`:
+
+- It runs after `egress`, so the copy is under the sandbox's egress policy,
+  and before any Compose service.
+- It reuses the template's `/installed-agent` volume (see
+  [Harbor directories](#harbor-directories)), or adds an `emptyDir` if the
+  template has none, and mounts it read-only into the sandbox container.
+- If it can't pull the image or exits non-zero, the services route reports
+  `agent bundle ...` with its last log lines, and the create fails.
+
+Only the agent's sandbox gets the bundle, never a separate verifier's. The
+client checks that `GET /v1/nemo-ext/health` lists `agent-bundle` under
+`features` before it creates a sandbox, so an older extension fails the trial
+instead of starting a sandbox without the agent. The bundle image must be
+pullable with the template's `imagePullSecrets`.
+
 ### Enable it with the chart
 
 The NeMo Helix chart ships the extension, so you don't need a checkout of the
@@ -236,7 +261,9 @@ compose task at its first check, before any sandbox starts.
 | --- | --- |
 | The server crash-loops with `nemo-ext: not starting without the compose services extension` | The ConfigMap is present but the extension can't load: a changed file, or a server version other than `v0.2.1`. The log above the message has the reason. |
 | No `nemo-ext` line in the server log | The ConfigMap is missing, in the wrong namespace, or the server wasn't restarted since it was created. |
-| `GET /v1/nemo-ext/health` doesn't answer | The server runs stock. Same causes as the line above. A working server answers `{"status":"ok","extension":"nemo-compose-services"}`. |
+| `GET /v1/nemo-ext/health` doesn't answer | The server runs stock. Same causes as the line above. A working server answers `{"status":"ok","extension":"nemo-compose-services","features":["compose-services","agent-bundle"]}`. |
+| A trial with an agent bundle fails with `doesn't support agent bundles` | The extension predates agent bundles: its health answer has no `features`. Upgrade the chart and restart the server. |
+| A trial fails with `agent bundle ErrImagePull` or `ImagePullBackOff` | The bundle's registry isn't covered by the template's `imagePullSecrets`. |
 | A compose task fails reading service status or running a command in a service, with a permission error | The Role is missing in the sandbox namespace, or bound to the wrong ServiceAccount. Check `sandboxNamespace` and `serverServiceAccount`. |
 
 ## Verify

@@ -83,6 +83,7 @@ from scaled_evals.harbor_opensandbox_services import (
     COMPOSE_FILENAMES,
     MAIN_SERVICE,
     ComposeServices,
+    SandboxAgentBundle,
     parse_compose_services,
 )
 from scaled_evals.models.runtime import LaunchHandle, LaunchSpec, RuntimeStatus
@@ -180,9 +181,9 @@ def preflight(spec: LaunchSpec) -> None:
             "omit network_policy_config"
         )
 
-    # sandbox_k8s features this runtime hasn't implemented.
+    # A bundle the environment can't install fails here, not in every trial.
     if spec.agent_bundle:
-        raise ValueError(f"{HARBOR_OPENSANDBOX_RUNTIME} does not support agent bundles yet")
+        environment_agent_bundle(spec.agent_bundle)
 
     # The task must be an uploaded pack with a prebuilt image: submit stages the pack, and
     # OpenSandbox can only run existing images.
@@ -441,6 +442,40 @@ def profile_compose_services(profile_config: Mapping[str, Any]) -> ComposeServic
     return _profile_overrides(profile_config)[1]
 
 
+def environment_agent_bundle(bundle: Mapping[str, Any]) -> SandboxAgentBundle:
+    """The environment's ``agent_bundle`` kwarg for a registered bundle; ``ValueError`` if it can't be used.
+
+    The API validated the record at registration. ``SandboxAgentBundle`` checks again what the sandbox
+    relies on: an image pinned by digest, so the trial runs exactly the registered bundle, and an
+    entrypoint inside ``/installed-agent``.
+    """
+    return SandboxAgentBundle(
+        image=str(bundle.get("image_digest") or ""),
+        # The installer path belongs to the bundle image's layout, so it comes from configuration.
+        installer=settings.agent_bundle_installer_path,
+        entrypoint=str(bundle.get("entrypoint") or ""),
+    )
+
+
+def _check_agent_version_pins(config: Mapping[str, Any], bundle: Mapping[str, Any]) -> None:
+    """Reject an agent the config pins to a version other than the bundle's.
+
+    Harbor's installed agents skip their install only when the agent they find has the version
+    they were given, so a different pin would ignore the bundle and attempt the root install.
+    """
+    agent_name, agent_version = bundle.get("agent_name"), str(bundle.get("agent_version") or "")
+    for agent in config.get("agents") or []:
+        if not isinstance(agent, Mapping) or agent.get("name") != agent_name:
+            continue
+        kwargs = agent.get("kwargs") if isinstance(agent.get("kwargs"), Mapping) else {}
+        pinned = kwargs.get("version")
+        if pinned is not None and str(pinned) != agent_version:
+            raise ValueError(
+                f"agent {agent_name!r} is pinned to version {pinned!r}, but the agent bundle "
+                f"provides {agent_version!r}; remove the pin or choose a matching bundle"
+            )
+
+
 def ownership_metadata(spec: LaunchSpec) -> dict[str, str]:
     """Labels every sandbox of this evaluation carries: the cleanup selector, plus the benchmark run if any."""
     metadata = ownership_selector(
@@ -506,6 +541,11 @@ def render_harbor_config(
     if compose_services is not None:
         config["environment"]["kwargs"]["compose_services"] = compose_services.model_dump(
             mode="json", by_alias=True, exclude_defaults=True
+        )
+    if spec.agent_bundle:
+        _check_agent_version_pins(config, spec.agent_bundle)
+        config["environment"]["kwargs"]["agent_bundle"] = environment_agent_bundle(spec.agent_bundle).model_dump(
+            mode="json", exclude_defaults=True
         )
     return config
 
@@ -666,6 +706,9 @@ def make_harbor_opensandbox_submitter(
             "compose_services": (
                 {s.name: s.image for s in compose_services.services} if compose_services is not None else None
             ),
+            # The bundle's identity is recorded from the evaluation; this is how it reached the sandbox.
+            "agent_bundle_image": config["environment"]["kwargs"].get("agent_bundle", {}).get("image"),
+            "agent_bundle_delivery": "init_container" if spec.agent_bundle else None,
             "network_policy": spec.network_policy,
             "trusted_allowed_hosts": trusted_hosts,
             "egress_verification": settings.harbor_opensandbox_egress_verification,

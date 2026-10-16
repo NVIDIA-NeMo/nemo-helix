@@ -354,6 +354,28 @@ def test_benchmark_request_supports_full_member_execution_contract() -> None:
     assert request.initial_user_turns == ["Initialize", "/review"]
 
 
+@pytest.mark.parametrize(
+    ("runtime", "accepted"), [("sandbox_k8s", True), ("harbor_opensandbox", True), ("docker", False)]
+)
+def test_benchmark_request_agent_bundle_runtimes(runtime: str, accepted: bool) -> None:
+    from scaled_evals.api.schemas.benchmark_runs import CreateBenchmarkRunRequest
+
+    def build() -> CreateBenchmarkRunRequest:
+        return CreateBenchmarkRunRequest(
+            name="bundle",
+            benchmark_id="bm_test",
+            framework_profile_id="cfg_h",
+            agent_bundle_id="ab_claude",
+            runtime=runtime,
+        )
+
+    if accepted:
+        assert build().agent_bundle_id == "ab_claude"
+    else:
+        with pytest.raises(ValueError, match="agent_bundle currently requires"):
+            build()
+
+
 # ---- POST /benchmark-runs: spawn run + member evaluations -----------------
 
 

@@ -74,7 +74,7 @@ def _write_task(task_dir: Path, environment: str = "") -> None:
         ({"network_policy": "unrestricted"}, "supports network_policy default_deny"),
         ({"network_policy": "scoped_egress"}, "supports network_policy default_deny"),
         ({"network_policy_config": {"allowed_hosts": ["x"]}}, "omit network_policy_config"),
-        ({"agent_bundle": {"object_key": "b"}}, "agent bundles"),
+        ({"agent_bundle": {"object_key": "b"}}, "validation errors? for SandboxAgentBundle"),
         ({"image_digest": None}, "recorded digest"),
         ({"tarball_object_key": None}, "uploaded task pack"),
         ({"framework": "gym"}, "Harbor evaluations only"),
@@ -458,6 +458,81 @@ def test_submit_stages_binds_renders_and_spawns(tmp_path: Path, monkeypatch: pyt
     assert handle.raw["provenance"]["task_image_digest"] == DIGEST
     assert handle.raw["provenance"]["verifier_image_ref"] is None
     assert handle.raw["provenance"]["verifier_image_digest"] is None
+    assert handle.raw["provenance"]["agent_bundle_image"] is None
+    assert handle.raw["provenance"]["agent_bundle_delivery"] is None
+
+
+AGENT_BUNDLE = {
+    "bundle_id": "ab_claude",
+    "bundle_name": "claude-code-native",
+    "agent_name": "claude-code",
+    "agent_version": "2.1.301",
+    "image_ref": "nvcr.io/org/agent-bundles/claude-code:2.1.301",
+    "image_digest": f"nvcr.io/org/agent-bundles/claude-code@{DIGEST}",
+    "entrypoint": "bin/claude",
+    "platform": "linux/amd64",
+    "runtime_abi": "glibc",
+    "bundle_layout_version": 1,
+    "builder_profile": "claude-native-v1",
+    "source_lock_digest": VERIFIER_DIGEST,
+    "fingerprint": VERIFIER_DIGEST,
+}
+
+
+def test_preflight_accepts_a_registered_bundle() -> None:
+    backend.preflight(_spec(agent_bundle=AGENT_BUNDLE))
+
+
+def test_render_passes_the_bundle_pinned_by_digest(tmp_path: Path) -> None:
+    config = backend.render_harbor_config(
+        "agents: [{name: claude-code}]\n",
+        _spec(agent_bundle=AGENT_BUNDLE),
+        task_path=tmp_path,
+        jobs_dir="j",
+        trusted_hosts=[],
+    )
+
+    bundle = config["environment"]["kwargs"]["agent_bundle"]
+    assert bundle["image"] == f"nvcr.io/org/agent-bundles/claude-code@{DIGEST}"
+    assert bundle["installer"] == settings.agent_bundle_installer_path
+    assert bundle["entrypoint"] == "bin/claude"
+    assert "env" not in bundle
+
+
+def test_render_without_a_bundle_sends_none(tmp_path: Path) -> None:
+    config = backend.render_harbor_config("agents: []\n", _spec(), task_path=tmp_path, jobs_dir="j", trusted_hosts=[])
+
+    assert "agent_bundle" not in config["environment"]["kwargs"]
+
+
+@pytest.mark.parametrize(
+    ("agents", "rejected"),
+    [
+        ("[{name: claude-code, kwargs: {version: 2.0.0}}]", True),
+        ("[{name: claude-code, kwargs: {version: 2.1.301}}]", False),
+        ("[{name: claude-code}]", False),
+        # Only the bundle's own agent is checked.
+        ("[{name: codex, kwargs: {version: 0.1.0}}]", False),
+    ],
+)
+def test_render_rejects_a_version_pin_the_bundle_does_not_provide(tmp_path: Path, agents: str, rejected: bool) -> None:
+    def render() -> None:
+        backend.render_harbor_config(
+            f"agents: {agents}\n", _spec(agent_bundle=AGENT_BUNDLE), task_path=tmp_path, jobs_dir="j", trusted_hosts=[]
+        )
+
+    if rejected:
+        with pytest.raises(ValueError, match="pinned to version '2.0.0', but the agent bundle provides '2.1.301'"):
+            render()
+    else:
+        render()
+
+
+def test_submit_records_the_bundle_delivery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    handle, _ = _submit(tmp_path, monkeypatch, spec=_spec(agent_bundle=AGENT_BUNDLE))
+
+    assert handle.raw["provenance"]["agent_bundle_image"] == f"nvcr.io/org/agent-bundles/claude-code@{DIGEST}"
+    assert handle.raw["provenance"]["agent_bundle_delivery"] == "init_container"
 
 
 def test_submit_binds_pinned_verifier_image_and_records_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
