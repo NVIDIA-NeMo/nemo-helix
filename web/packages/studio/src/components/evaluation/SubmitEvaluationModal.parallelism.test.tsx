@@ -3,11 +3,7 @@
 
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import { evalsCreateEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
-import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
-import {
-  createExperiment,
-  getListExperimentsQueryKey,
-} from '@nemo/sdk/generated/platform/experiments';
+import { createExperiment } from '@nemo/sdk/generated/platform/experiments';
 import { filesDownloadFile } from '@nemo/sdk/generated/platform/files';
 import type { EvaluationResponse } from '@nemo/sdk/generated/platform/schema';
 import {
@@ -18,11 +14,11 @@ import {
 } from '@studio/components/evaluation/experimentEvalConfig';
 import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
 import { ROUTES } from '@studio/constants/routes';
-import { mockApiUrl } from '@studio/mocks/mockApiUrl';
+import { evaluationSourcesHandlers } from '@studio/mocks/handlers/evaluationSources';
 import { server } from '@studio/mocks/node';
+import { experimentFixture } from '@studio/tests/util/evaluationFixtures';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
 
 vi.mock('@nemo/sdk/generated/evals/evals-plugin-jobs-routes', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@nemo/sdk/generated/evals/evals-plugin-jobs-routes')>()),
@@ -88,22 +84,9 @@ const SOURCE: EvaluationResponse = {
 
 const mockLists = () => {
   server.use(
-    http.get(mockApiUrl(getListExperimentsQueryKey, ':workspace'), ({ request }) => {
-      const name = new URL(request.url).searchParams.get('filter[name]');
-      const experiments = [
-        {
-          id: 'grp_primary',
-          name: 'primary-use-cases-benchmark',
-          workspace: DEFAULT_WORKSPACE,
-          default_sort: '-created_at',
-          evaluation_count: 1,
-        },
-      ];
-      return HttpResponse.json({ data: name ? [] : experiments });
-    }),
-    http.get(mockApiUrl(getListEvaluationsQueryKey, ':workspace'), ({ request }) => {
-      const name = new URL(request.url).searchParams.get('filter[name]');
-      return HttpResponse.json({ data: name ? [] : [SOURCE] });
+    ...evaluationSourcesHandlers({
+      experiments: [experimentFixture('grp_primary', 'primary-use-cases-benchmark')],
+      evaluations: [SOURCE],
     })
   );
 };

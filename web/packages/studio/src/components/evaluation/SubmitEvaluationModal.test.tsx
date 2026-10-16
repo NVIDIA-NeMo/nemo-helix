@@ -2,75 +2,43 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
-import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
-import { getListExperimentsQueryKey } from '@nemo/sdk/generated/platform/experiments';
-import type { EvaluationResponse, ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
-import { EVAL_CONFIG_FILESET_KEY } from '@studio/components/evaluation/experimentEvalConfig';
+import { getFilesListFilesetFilesQueryKey } from '@nemo/sdk/generated/platform/files';
 import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
+import { evaluationSourcesHandlers } from '@studio/mocks/handlers/evaluationSources';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
+import {
+  experimentFixture,
+  reusableEvaluationFixture,
+} from '@studio/tests/util/evaluationFixtures';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
 const AGENT = 'my-agent';
-
-const emptyPage = { data: [], pagination: { total: 0, page: 1, page_size: 100 } };
-
-const experiment = (id: string, name: string): ExperimentResponse => ({
-  id,
-  name,
-  workspace: DEFAULT_WORKSPACE,
-  default_sort: '-created_at',
-  evaluation_count: 1,
-});
-
-const evaluation = (name: string, experimentId: string): EvaluationResponse => ({
-  id: `eval_${name}`,
-  name,
-  workspace: DEFAULT_WORKSPACE,
-  experiment_ids: [experimentId],
-  experiment_group_id: experimentId,
-  dataset_name: 'ds',
-  agent_names: [AGENT],
-  metadata: { [EVAL_CONFIG_FILESET_KEY]: `${name}-data` },
-});
+const OTHER_AGENT = 'baseline-agent';
 
 /** Two experiments that both contain a run called "baseline", which is what makes the grouped
  *  picker's typeahead worth testing: one term has to reach across sections. */
 const EXPERIMENTS = [
-  experiment('grp_primary', 'primary-use-cases-benchmark'),
-  experiment('grp_regression', 'regression-sweep'),
+  experimentFixture('grp_primary', 'primary-use-cases-benchmark'),
+  experimentFixture('grp_regression', 'regression-sweep'),
 ];
 
 const EVALUATIONS = [
-  evaluation('baseline', 'grp_primary'),
-  evaluation('nemotron-super-3-temp-point5', 'grp_primary'),
-  evaluation('baseline-regression', 'grp_regression'),
+  reusableEvaluationFixture('baseline', 'grp_primary', AGENT),
+  reusableEvaluationFixture('nemotron-super-3-temp-point5', 'grp_primary', AGENT),
+  reusableEvaluationFixture('baseline-regression', 'grp_regression', AGENT),
 ];
 
-const mockLists = () => {
-  server.use(
-    http.get(mockApiUrl(getListExperimentsQueryKey, ':workspace'), ({ request }) => {
-      // The name-conflict probe asks for one exact name; everything else is the group lookup.
-      const name = new URL(request.url).searchParams.get('filter[name]');
-      return HttpResponse.json({
-        data: name ? EXPERIMENTS.filter((item) => item.name === name) : EXPERIMENTS,
-      });
-    }),
-    http.get(mockApiUrl(getListEvaluationsQueryKey, ':workspace'), ({ request }) => {
-      const url = new URL(request.url);
-      // The name-conflict probe asks for one exact name; everything else is the picker's list.
-      const name = url.searchParams.get('filter[name]');
-      if (name) {
-        return HttpResponse.json({
-          ...emptyPage,
-          data: EVALUATIONS.filter((item) => item.name === name),
-        });
-      }
-      return HttpResponse.json({ data: EVALUATIONS });
-    })
-  );
+const OTHER_AGENT_EVALUATION = reusableEvaluationFixture(
+  'other-agent-baseline',
+  'grp_regression',
+  OTHER_AGENT
+);
+
+const mockLists = (evaluations = EVALUATIONS) => {
+  server.use(...evaluationSourcesHandlers({ experiments: EXPERIMENTS, evaluations }));
 };
 
 const renderModal = (props: Partial<React.ComponentProps<typeof SubmitEvaluationModal>> = {}) =>
@@ -255,5 +223,79 @@ describe('SubmitEvaluationModal', () => {
     await user.click(screen.getByRole('button', { name: 'Back' }));
 
     expect(await screen.findByText('How do you want to start?')).toBeInTheDocument();
+  });
+
+  describe("other agents' evaluations", () => {
+    const INCLUDE_OTHERS = /include other agents' evaluations/i;
+
+    const openRerunStep = async (user: ReturnType<typeof userEvent.setup>) => {
+      await user.click(await screen.findByRole('radio', { name: /Re-run an existing evaluation/ }));
+      await user.click(screen.getByRole('button', { name: 'Next' }));
+      return screen.findByRole('checkbox', { name: INCLUDE_OTHERS });
+    };
+
+    it('keeps them out of the picker until asked for', async () => {
+      mockLists([...EVALUATIONS, OTHER_AGENT_EVALUATION]);
+      const user = userEvent.setup();
+      renderModal();
+
+      const includeOthers = await openRerunStep(user);
+      expect(includeOthers).not.toBeChecked();
+      await user.click(screen.getByRole('combobox', { name: /evaluation to re-run/i }));
+      expect(await screen.findByRole('option', { name: 'baseline' })).toBeInTheDocument();
+      expect(
+        screen.queryByRole('option', { name: 'other-agent-baseline' })
+      ).not.toBeInTheDocument();
+      await user.keyboard('{Escape}');
+
+      await user.click(includeOthers);
+      await user.click(screen.getByRole('combobox', { name: /evaluation to re-run/i }));
+      expect(
+        await screen.findByRole('option', { name: 'other-agent-baseline' })
+      ).toBeInTheDocument();
+    });
+
+    it('offers them by default to an agent with no evaluations of its own', async () => {
+      mockLists([OTHER_AGENT_EVALUATION]);
+      server.use(
+        http.get(mockApiUrl(getFilesListFilesetFilesQueryKey, ':workspace', ':name'), () =>
+          HttpResponse.json({ data: [{ path: 'eval-config.yaml' }] })
+        )
+      );
+      const user = userEvent.setup();
+      renderModal();
+
+      await waitFor(() =>
+        expect(screen.getByRole('radio', { name: /Re-run an existing evaluation/ })).toBeEnabled()
+      );
+      const includeOthers = await openRerunStep(user);
+      await waitFor(() => expect(includeOthers).toBeChecked());
+
+      const picker = screen.getByRole('combobox', { name: /evaluation to re-run/i });
+      await user.click(picker);
+      await user.click(await screen.findByRole('option', { name: 'other-agent-baseline' }));
+      await waitFor(() =>
+        expect(picker).toHaveAccessibleDescription(
+          /Experiment: regression-sweep · Agent: baseline-agent/
+        )
+      );
+    });
+
+    it('drops a picked run of another agent once they are hidden again', async () => {
+      mockLists([...EVALUATIONS, OTHER_AGENT_EVALUATION]);
+      const user = userEvent.setup();
+      renderModal();
+
+      const includeOthers = await openRerunStep(user);
+      await user.click(includeOthers);
+      await user.click(screen.getByRole('combobox', { name: /evaluation to re-run/i }));
+      await user.click(await screen.findByRole('option', { name: 'other-agent-baseline' }));
+      await waitFor(() =>
+        expect(screen.queryByText('Pick an evaluation to re-run.')).not.toBeInTheDocument()
+      );
+
+      await user.click(includeOthers);
+      expect(await screen.findByText('Pick an evaluation to re-run.')).toBeInTheDocument();
+    });
   });
 });
