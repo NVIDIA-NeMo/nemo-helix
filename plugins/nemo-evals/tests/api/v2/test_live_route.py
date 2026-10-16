@@ -425,7 +425,7 @@ def _delegated_service_client(monkeypatch: pytest.MonkeyPatch, service_secrets_c
 
 
 def test_judge_secret_is_read_by_evals_on_behalf_of_the_caller(
-    monkeypatch: pytest.MonkeyPatch, make_secrets_client
+    monkeypatch: pytest.MonkeyPatch, make_secrets_service
 ) -> None:
     """Secrets serves values only to service principals, so the caller's own client must never read one.
 
@@ -441,12 +441,12 @@ def test_judge_secret_is_read_by_evals_on_behalf_of_the_caller(
         return _chat_response('{"helpfulness": 4}')
 
     monkeypatch.setattr(sdk_inference, "make_inference_request", fake_judge_inference)
-    service_secrets = make_secrets_client({("default", "judge-key"): "sk-judge-secret"})
-    calls = _delegated_service_client(monkeypatch, service_secrets)
+    service_secrets = make_secrets_service({("default", "judge-key"): "sk-judge-secret"})
+    calls = _delegated_service_client(monkeypatch, service_secrets.client())
 
-    request_secrets = make_secrets_client({("default", "judge-key"): "sk-judge-secret"})
+    request_secrets = make_secrets_service({("default", "judge-key"): "sk-judge-secret"})
     app = _build_app()
-    app.dependency_overrides[get_nemo_client] = lambda: request_secrets
+    app.dependency_overrides[get_nemo_client] = request_secrets.client
     with TestClient(app) as client:
         resp = client.post(
             _BASE,
@@ -484,7 +484,7 @@ class _DenyingSecretsClient(AsyncSecretsClient):
 
 
 def test_cross_workspace_secret_denied_to_the_caller_fails_before_inference(
-    monkeypatch: pytest.MonkeyPatch, make_secrets_client
+    monkeypatch: pytest.MonkeyPatch, make_secrets_service
 ) -> None:
     """A ref into a workspace the caller cannot read is asked for there, refused, and never reaches a judge.
 
@@ -500,9 +500,9 @@ def test_cross_workspace_secret_denied_to_the_caller_fails_before_inference(
     service_secrets = _DenyingSecretsClient()
     _delegated_service_client(monkeypatch, service_secrets)
 
-    request_secrets = make_secrets_client({("team-b", "judge-key"): "sk-team-b"})
+    request_secrets = make_secrets_service({("team-b", "judge-key"): "sk-team-b"})
     app = _build_app()
-    app.dependency_overrides[get_nemo_client] = lambda: request_secrets
+    app.dependency_overrides[get_nemo_client] = request_secrets.client
     with TestClient(app) as client:
         resp = client.post(
             _BASE,
