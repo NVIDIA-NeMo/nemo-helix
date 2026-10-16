@@ -16,7 +16,7 @@ from typing import Literal, cast
 import pytest
 from nemo_builder_plugin.run import fetch
 from nemo_builder_plugin.run.fetch import ArchiveRefused, clear_earlier_attempts, fetch_source
-from nemo_builder_plugin.run.supervise import _volume_mounts
+from nemo_builder_plugin.run.sandbox import mounts
 from nemo_builder_plugin.steps import ContextSource, SandboxGroup, SandboxImage, WorkLayout
 from nemo_helix_plugin.files.client import FilesClient
 
@@ -77,7 +77,7 @@ def _sandbox_context(tmp_path: Path, source: ContextSource) -> Path:
     group = SandboxGroup(
         source=source, images=[SandboxImage(image="demo-1-0", platform="linux/amd64", dockerfile="Dockerfile")]
     )
-    context_mount = _volume_mounts(group, JOB_SLICE)[0]
+    context_mount = mounts(group, JOB_SLICE)[0]
     return tmp_path / PurePosixPath(context_mount.sub_path).relative_to(JOB_SLICE)
 
 

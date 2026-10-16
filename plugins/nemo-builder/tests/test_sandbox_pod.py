@@ -13,19 +13,25 @@ from typing import cast
 import pytest
 from kubernetes import client as k8s
 from kubernetes.client.exceptions import ApiException
-from nemo_builder_plugin.run import supervise
-from nemo_builder_plugin.run.supervise import (
+from nemo_builder_plugin.run import pod_sandbox, sandbox
+from nemo_builder_plugin.run.pod_sandbox import (
     KANIKO_CAPABILITIES,
-    KANIKO_FEATURE_FLAGS,
     RESULT_MARKER,
-    SANDBOX_ROOT,
-    _build_group,
+    KubernetesPodProvider,
     _build_script,
-    _exit_code,
     _pod_manifest,
     _results_from_log,
     sandbox_pod_name,
 )
+from nemo_builder_plugin.run.sandbox import (
+    BUILD_TIMEOUT_SECONDS,
+    JOB_LABEL,
+    KANIKO_FEATURE_FLAGS,
+    SANDBOX_ROOT,
+    job_key,
+    sandbox_labels,
+)
+from nemo_builder_plugin.run.supervise import _build_group, _exit_code
 from nemo_builder_plugin.steps import ContextSource, SandboxGroup, SandboxImage, SandboxSpec, WorkLayout
 
 
@@ -56,7 +62,7 @@ def _pod():
         namespace="nhx-builds",
         group=_group(),
         sandbox=_sandbox(),
-        pvc="nhx-build-work",
+        labels=sandbox_labels("default", "abc"),
         job_sub_path="jobs/default/abc",
     )
 
@@ -73,7 +79,7 @@ class TestOneDockerfileCannotTakeTheNode:
             namespace="nhx-builds",
             group=_group(),
             sandbox=_sandbox(ephemeral_storage=None),
-            pvc="nhx-build-work",
+            labels=sandbox_labels("default", "abc"),
             job_sub_path="jobs/default/abc",
         )
         resources = pod.spec.containers[0].resources
@@ -87,7 +93,7 @@ class TestTheSandboxPullsItsImage:
             namespace="nhx-builds",
             group=_group(),
             sandbox=_sandbox(image_pull_secrets=["nvcr", "mirror"]),
-            pvc="nhx-build-work",
+            labels=sandbox_labels("default", "abc"),
             job_sub_path="jobs/default/abc",
         )
         assert pod.spec.image_pull_secrets == [
@@ -114,11 +120,17 @@ class TestTheSandboxHoldsNothing:
         assert _pod().spec.volumes[0].persistent_volume_claim is not None
 
     def test_it_ends_even_if_its_supervisor_does_not(self) -> None:
-        assert _pod().spec.active_deadline_seconds > supervise._POD_TIMEOUT_SECONDS
+        assert _pod().spec.active_deadline_seconds > BUILD_TIMEOUT_SECONDS
 
     def test_it_wears_the_sandbox_label(self) -> None:
         """What a NetworkPolicy selects on; without it the policy silently does not apply."""
         assert _pod().metadata.labels["nhx.nvidia.com/sandbox"] == "true"
+
+    def test_it_names_its_job_for_a_later_attempt_to_find(self) -> None:
+        assert _pod().metadata.labels[JOB_LABEL] == job_key("default", "abc")
+
+    def test_the_same_job_name_in_two_workspaces_is_two_jobs(self) -> None:
+        assert job_key("team-a", "demo-1") != job_key("team-b", "demo-1")
 
 
 class TestThePostureTheNamespaceAdmits:
@@ -163,7 +175,7 @@ class TestMounts:
             namespace="nhx-builds",
             group=_group(source=ContextSource(fileset="ws/fs-a", context_path="env/tests")),
             sandbox=_sandbox(),
-            pvc="nhx-build-work",
+            labels=sandbox_labels("default", "abc"),
             job_sub_path="jobs/default/abc",
         )
         for mount in pod.spec.containers[0].volume_mounts:
@@ -171,7 +183,7 @@ class TestMounts:
             assert PurePosixPath(mount.mount_path) == SANDBOX_ROOT / relative
 
     def test_the_script_builds_from_and_writes_to_the_mounted_paths(self) -> None:
-        script = _build_script(_group(1), _sandbox())
+        script = _build_script(_group(1))
         mounts = {m.mount_path for m in _pod().spec.containers[0].volume_mounts}
         assert f"--context=dir://{WorkLayout(SANDBOX_ROOT).context(ContextSource(fileset='ws/fs-a'))}" in script
         assert "--oci-layout-path=/nhx-work/out/demo-1-0" in script
@@ -197,12 +209,12 @@ class TestDns:
 
 class TestTheBuildScript:
     def test_it_never_pushes(self) -> None:
-        script = _build_script(_group(), _sandbox())
+        script = _build_script(_group())
         assert "--no-push" in script
         assert "crane" not in script and "cosign" not in script
 
     def test_reproducible_with_kanikos_credential_helpers_off(self) -> None:
-        script = _build_script(_group(2), _sandbox())
+        script = _build_script(_group(2))
         assert script.count("--reproducible") == 2
         # An empty value turns them all off; without the flag, all of them are on.
         assert script.count("--credential-helpers= ") == 2
@@ -213,7 +225,7 @@ class TestTheBuildScript:
         assert KANIKO_FEATURE_FLAGS["FF_KANIKO_REPRODUCIBLE_PRESERVE_BASE_LAYERS"] == "true"
 
     def test_one_invocation_per_image_with_cleanup_between(self) -> None:
-        script = _build_script(_group(3), _sandbox())
+        script = _build_script(_group(3))
         assert script.count("/kaniko/executor") == 3
         assert script.count("--cleanup") == 3
 
@@ -231,9 +243,9 @@ class TestTheBuildScriptRuns:
             "esac; done\nexit 0\n"
         )
         executor.chmod(0o755)
-        monkeypatch.setattr(supervise, "KANIKO_EXECUTOR", str(executor))
+        monkeypatch.setattr(sandbox, "KANIKO_EXECUTOR", str(executor))
         # The script empties each image's output directory; point it somewhere of the test's own.
-        monkeypatch.setattr(supervise, "SANDBOX_ROOT", PurePosixPath(tmp_path))
+        monkeypatch.setattr(sandbox, "SANDBOX_ROOT", PurePosixPath(tmp_path))
 
         group = SandboxGroup(
             source=ContextSource(fileset="ws/fs-a"),
@@ -242,9 +254,7 @@ class TestTheBuildScriptRuns:
                 for i, dockerfile in enumerate(dockerfiles)
             ],
         )
-        result = subprocess.run(
-            ["sh", "-c", _build_script(group, _sandbox())], capture_output=True, text=True, check=False
-        )
+        result = subprocess.run(["sh", "-c", _build_script(group)], capture_output=True, text=True, check=False)
         return _results_from_log(result.stdout)
 
     def test_each_marker_records_kanikos_own_exit_status(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -275,12 +285,20 @@ class TestTheBuildScriptRuns:
 
 
 class _Api:
-    """The pod calls a sandbox makes, failing where told to."""
+    """The pod calls a sandbox makes, failing where told to. Deleted pods are gone at once."""
 
-    def __init__(self, *, create: Exception | None = None, delete: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        create: Exception | None = None,
+        delete: Exception | None = None,
+        existing: dict[str, str] | None = None,
+    ) -> None:
         self.created: list[str] = []
         self.deleted: list[str] = []
         self._create, self._delete = create, delete
+        #: Pod name -> its job label.
+        self.pods = dict(existing or {})
 
     def create_namespaced_pod(self, *, namespace: str, body: k8s.V1Pod) -> None:
         if self._create:
@@ -291,10 +309,28 @@ class _Api:
         self.deleted.append(name)
         if self._delete:
             raise self._delete
+        self.pods.pop(name, None)
+
+    def list_namespaced_pod(self, *, namespace: str, label_selector: str) -> k8s.V1PodList:
+        key, _, value = label_selector.partition("=")
+        assert key == JOB_LABEL
+        items = [k8s.V1Pod(metadata=k8s.V1ObjectMeta(name=n)) for n, job in self.pods.items() if job == value]
+        return k8s.V1PodList(items=items)
+
+
+def _provider(api: _Api) -> KubernetesPodProvider:
+    return KubernetesPodProvider(
+        cast(k8s.CoreV1Api, api),
+        namespace="nhx-builds",
+        sandbox=_sandbox(),
+        workspace="default",
+        job_id="abc",
+        job_sub_path="jobs/default/abc",
+    )
 
 
 class TestEachSandboxFailsAlone:
-    NAME = "nhx-sbx-abc-g0"
+    NAME = sandbox_pod_name("default", "abc", 0)
     BUILT = f"{RESULT_MARKER} demo-1-0 0\n{RESULT_MARKER} demo-1-1 0\n"
 
     def _build(
@@ -305,11 +341,9 @@ class TestEachSandboxFailsAlone:
                 raise read
             return log
 
-        monkeypatch.setattr(supervise, "_await_pod", lambda api, *, name, namespace: "Succeeded")
-        monkeypatch.setattr(supervise, "_read_pod_log", read_log)
-        return _build_group(
-            cast(k8s.CoreV1Api, api), name=self.NAME, manifest=_pod(), group=_group(2), namespace="nhx-builds"
-        )
+        monkeypatch.setattr(pod_sandbox, "_await_pod", lambda api, *, name, namespace: "Succeeded")
+        monkeypatch.setattr(pod_sandbox, "_read_pod_log", read_log)
+        return _build_group(_provider(api), 0, _group(2))
 
     def test_a_sandbox_that_cannot_be_created_fails_only_its_own_images(self, monkeypatch: pytest.MonkeyPatch) -> None:
         api = _Api(create=ApiException(status=403, reason="exceeded quota"))
@@ -331,10 +365,31 @@ class TestEachSandboxFailsAlone:
     def test_the_log_is_logged_a_line_at_a_time(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
-        with caplog.at_level(logging.INFO, logger=supervise.__name__):
+        with caplog.at_level(logging.INFO, logger=pod_sandbox.__name__):
             self._build(monkeypatch, _Api(), log="STEP 1/2\nSTEP 2/2\n" + self.BUILT)
         messages = [record.getMessage() for record in caplog.records]
         assert "  STEP 1/2" in messages and "  STEP 2/2" in messages
+
+
+class TestTheSweep:
+    """A retried step's pods have the earlier attempt's names, so it must not start until those are gone."""
+
+    def test_an_earlier_attempts_pods_are_deleted(self) -> None:
+        api = _Api(existing={"left-g0": job_key("default", "abc"), "other-g0": job_key("default", "other")})
+        _provider(api).sweep()
+        assert api.deleted == ["left-g0"]
+        assert list(api.pods) == ["other-g0"]
+
+    def test_nothing_to_sweep_deletes_nothing(self) -> None:
+        api = _Api()
+        _provider(api).sweep()
+        assert api.deleted == []
+
+    def test_a_pod_that_will_not_go_stops_the_step(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        api = _Api(existing={"left-g0": job_key("default", "abc")}, delete=ApiException(status=500))
+        monkeypatch.setattr(pod_sandbox, "SWEEP_TIMEOUT_SECONDS", 0)
+        with pytest.raises(RuntimeError, match="still there: left-g0"):
+            _provider(api).sweep()
 
 
 class TestResultParsing:

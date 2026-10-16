@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import PurePosixPath
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -94,9 +95,10 @@ class FetchStepConfig(BaseModel):
 
 
 class SandboxSpec(BaseModel):
-    """How ``supervise`` builds the sandbox pod. All of it comes from operator config."""
+    """How ``supervise`` runs the sandboxes. All of it comes from operator config."""
 
     image: str = Field(description="The kaniko image.")
+    provider: Literal["kubernetes_pod"] = "kubernetes_pod"
     work_pvc: str
     node_selector: dict[str, str]
     dns_nameservers: list[str]
