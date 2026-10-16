@@ -436,6 +436,25 @@ run in the core controller, whose Role already grants those permissions.
 
 </Note>
 
+### Readiness and startup timeouts
+
+Agent containers expose `/health` for readiness checks. Configure
+`agents.deployments.readiness_probe_timeout_seconds` (default `1`) and
+`agents.deployments.readiness_probe_failure_threshold` (default `12`) to tune
+probe behavior. Both settings require positive integers. Restart the platform
+and redeploy agents after changing them; existing containers are not updated.
+
+Starting with v0.7.2, the deployments controller measures the startup timeout
+from the beginning of the current uninterrupted `STARTING` period. A deployment
+that loses readiness after being `READY` gets a fresh timeout window instead of
+being failed immediately because its original startup happened long ago.
+Status-message updates while it remains `STARTING` do not reset that window.
+If readiness recovers, the period ends; a later readiness loss starts a new one.
+
+The overall timeout is configured separately with
+`deployments.controller.starting_timeout_seconds`; `0` disables it. Increasing
+probe tolerances does not extend that overall timeout.
+
 ### Deploy on Docker
 
 <Tabs>

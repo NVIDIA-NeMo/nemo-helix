@@ -1,0 +1,37 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "v0.7.1 - 2026-10-09"
+description: ""
+---
+NeMo Helix v0.7.1 is a patch release for the 0.7 release line. It republishes the v0.7.0 artifacts after selected 0.7.0 container tags were removed from NGC during container malware-scanning review.
+
+## What's fixed
+
+- The NeMo Helix 0.7 container set was republished as `0.7.1` so users can install and deploy from available NGC image tags. Use `nvcr.io/nvidia/nemo-helix/nhx-*:0.7.1` image tags, the `nemo-helix` Helm chart `0.7.1`, and the `nemo-helix` / `nemo-helix-plugin` Python packages `0.7.1` for 0.7-line deployments.
+- v0.7.1 otherwise preserves the v0.7.0 product behavior and compatibility target. The release exists so deployments can reference the republished artifacts consistently after the affected 0.7.0 NGC container tags became unavailable.
+
+## Upgrade from v0.7.0
+
+Update pinned container image tags, Helm chart versions, and Python package versions from `0.7.0` to `0.7.1`. Restart local services or redeploy Kubernetes workloads so they pull the republished images.
+
+## Compatibility
+
+v0.7.1 has the same compatibility target as v0.7.0.
+
+## Known issues
+
+v0.7.1 carries the [v0.7.0 known issues](/documentation/reference/release-notes/release-0-7-0#known-issues), including:
+
+- **DPO jobs fail before the first training step with `KeyError: 'checkpoint'`.**
+  Customizer `rl` DPO jobs submitted from Studio, the CLI, or the API fail
+  shortly after the training pod starts. The generated DPO configuration omits
+  the `policy.dtensor_cfg.checkpoint` section that the pinned NeMo-RL version
+  requires. There is no workaround in the 0.7 release line. DPO jobs run on
+  v0.6.0. GRPO jobs are not affected.
+
+## Links
+
+- Repository: [https://github.com/NVIDIA-NeMo/nemo-helix](https://github.com/NVIDIA-NeMo/nemo-helix)
+- Issues: [https://github.com/NVIDIA-NeMo/nemo-helix/issues](https://github.com/NVIDIA-NeMo/nemo-helix/issues)

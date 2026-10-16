@@ -2,36 +2,41 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "v0.7.1 - 2026-10-09"
+title: "v0.7.3 - 2026-10-16"
 description: ""
 ---
-NeMo Helix v0.7.1 is a patch release for the 0.7 release line. It republishes the v0.7.0 artifacts after selected 0.7.0 container tags were removed from NGC during container malware-scanning review.
+NeMo Helix v0.7.3 is a patch release for the 0.7 release line that helps existing
+Helm installations preserve embedded PostgreSQL storage metadata during
+upgrades. It also includes the deployment readiness fixes in
+[v0.7.2](/documentation/reference/release-notes/release-0-7-2).
 
 ## What's fixed
 
-- The NeMo Helix 0.7 container set was republished as `0.7.1` so users can install and deploy from available NGC image tags. Use `nvcr.io/nvidia/nemo-helix/nhx-*:0.7.1` image tags, the `nemo-helix` Helm chart `0.7.1`, and the `nemo-helix` / `nemo-helix-plugin` Python packages `0.7.1` for 0.7-line deployments.
-- v0.7.1 otherwise preserves the v0.7.0 product behavior and compatibility target. The release exists so deployments can reference the republished artifacts consistently after the affected 0.7.0 NGC container tags became unavailable.
+- **Preserve PostgreSQL claim-template labels.** The Helm chart adds
+  `postgresql.persistence.claimTemplateLabels` so older installations can
+  retain the exact labels on the embedded PostgreSQL StatefulSet's `data`
+  volume claim template. This avoids upgrade failures caused by changes to
+  immutable claim-template labels. The default `{}` preserves existing chart
+  behavior; operators must supply their existing labels when needed.
 
-## Upgrade from v0.7.0
+## Upgrade from v0.7.2
 
-Update pinned container image tags, Helm chart versions, and Python package versions from `0.7.0` to `0.7.1`. Restart local services or redeploy Kubernetes workloads so they pull the republished images.
-
-## Compatibility
-
-v0.7.1 has the same compatibility target as v0.7.0.
+If you use embedded PostgreSQL, copy the complete label map from the existing
+StatefulSet's `data` claim template into
+`postgresql.persistence.claimTemplateLabels` before upgrading. Keep those exact
+values on subsequent upgrades, including old chart and application version
+labels. This setting only addresses claim-template labels; preserve existing
+release and resource names, storage configuration, and the secrets encryption
+key and its Secret reference as well. See
+[Database Setup](/documentation/kubernetes-deployment/setup/helm/database-setup#preserve-embedded-postgresql-claim-template-labels-on-upgrade).
 
 ## Known issues
 
-v0.7.1 carries the [v0.7.0 known issues](/documentation/reference/release-notes/release-0-7-0#known-issues), including:
-
 - **DPO jobs fail before the first training step with `KeyError: 'checkpoint'`.**
-  Customizer `rl` DPO jobs submitted from Studio, the CLI, or the API fail
-  shortly after the training pod starts. The generated DPO configuration omits
-  the `policy.dtensor_cfg.checkpoint` section that the pinned NeMo-RL version
-  requires. There is no workaround in the 0.7 release line. DPO jobs run on
-  v0.6.0. GRPO jobs are not affected.
-
-## Links
-
-- Repository: [https://github.com/NVIDIA-NeMo/nemo-helix](https://github.com/NVIDIA-NeMo/nemo-helix)
-- Issues: [https://github.com/NVIDIA-NeMo/nemo-helix/issues](https://github.com/NVIDIA-NeMo/nemo-helix/issues)
+  The generated DPO configuration still omits the
+  `policy.dtensor_cfg.checkpoint` section required by the pinned NeMo-RL
+  version. There is no workaround in the 0.7 release line. DPO jobs run on
+  v0.6.0; GRPO jobs are not affected. See
+  [Customizer troubleshooting](/documentation/reference/troubleshooting/customizer).
+- **Hermes trials can omit the `relay_atif` evidence descriptor.** Use the
+  `trace:atif` descriptor instead; it points at the same ATIF file.
