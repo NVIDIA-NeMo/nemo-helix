@@ -22,7 +22,6 @@ import { type EvalJobRow, evalDurationMs } from '@studio/api/evaluation/utils';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { EvalRunOutcomeBadge } from '@studio/components/evaluation/EvalRunOutcomeBanner';
 import { evaluationFilesetName } from '@studio/components/evaluation/experimentEvalConfig';
-import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
 import {
   type EvaluatorScore,
   evaluatorScores,
@@ -31,7 +30,11 @@ import {
   type AgentEvaluationRow,
   primaryExperimentName,
 } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
-import { getEvaluationDetailRoute, getWorkspaceJobDetailRoute } from '@studio/routes/utils';
+import {
+  getAgentRunEvaluationRoute,
+  getEvaluationDetailRoute,
+  getWorkspaceJobDetailRoute,
+} from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
 import { FlaskConical, Trash } from 'lucide-react';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
@@ -150,7 +153,6 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
   const [deleteRows, setDeleteRows] = useState<AgentEvaluationRow[]>([]);
   // The evaluation a "New evaluation from this configuration" click is re-running, or null when
   // the form is closed.
-  const [rerunSource, setRerunSource] = useState<AgentEvaluationRow | null>(null);
   const rows = useMemo(() => mergeRows(evaluations, jobs), [evaluations, jobs]);
   // StudioDataView is `dataMode="manual"`, so it renders exactly the rows it is handed and leaves
   // paging to the caller. Both source lists are already in memory, so slice here rather than
@@ -352,14 +354,18 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
         rowActionsColumn({
           rowActions: (row) => {
             const { evaluation, job } = row;
+            const rerunAgent = agentName ?? evaluation?.agent_names?.[0];
             const actions = [
               // Only offered for a row that carries a reusable eval config; without one the form
               // would open on an evaluation it has to reject.
-              ...(evaluation && evaluationFilesetName(evaluation)
+              ...(evaluation && evaluationFilesetName(evaluation) && rerunAgent
                 ? [
                     {
                       children: 'New evaluation from this configuration',
-                      onSelect: () => setRerunSource(evaluation),
+                      onSelect: () =>
+                        navigate(
+                          getAgentRunEvaluationRoute(workspace, rerunAgent, evaluation.name)
+                        ),
                     },
                   ]
                 : []),
@@ -376,7 +382,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
           },
         }),
       ],
-      [navigate, workspace]
+      [agentName, navigate, workspace]
     );
 
   return (
@@ -419,16 +425,6 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
           },
         }}
       />
-
-      {rerunSource && (
-        <SubmitEvaluationModal
-          open
-          onClose={() => setRerunSource(null)}
-          workspace={workspace}
-          agent={agentName ?? rerunSource.agent_names?.[0]}
-          sourceEvaluation={rerunSource.name}
-        />
-      )}
 
       <BulkDeleteModal
         items={deleteRows}

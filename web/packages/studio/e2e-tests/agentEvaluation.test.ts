@@ -210,16 +210,18 @@ test.describe('Agent Evaluation', () => {
     await test.step('Submit an evaluation over the sample CSV', async () => {
       await page.getByRole('button', { name: 'Run evaluation' }).click();
 
-      const modal = page.getByRole('dialog', { name: 'Run Agent Evaluation' });
-      await expect(modal).toBeVisible();
+      const wizard = page.locator('form', {
+        has: page.getByRole('heading', { name: 'Run Agent Evaluation' }),
+      });
+      await expect(wizard).toBeVisible();
 
-      await modal.getByRole('textbox', { name: 'Experiment Name' }).fill(experimentName);
-      await modal.getByRole('textbox', { name: 'Evaluation Name' }).fill(evaluationName);
+      await wizard.getByRole('textbox', { name: 'Experiment Name' }).fill(experimentName);
+      await wizard.getByRole('textbox', { name: 'Evaluation Name' }).fill(evaluationName);
 
       // Both pickers render the same upload input, and each unmounts its own once a file is
       // picked. Taking the config (the second) first leaves exactly one input behind, so
       // neither pick depends on an index that shifts underneath it.
-      const fileInputs = modal.getByTestId('nv-upload-input-element');
+      const fileInputs = wizard.getByTestId('nv-upload-input-element');
       await expect(fileInputs).toHaveCount(2);
       await fileInputs.nth(1).setInputFiles(EVAL_CONFIG);
       await expect(fileInputs).toHaveCount(1);
@@ -237,7 +239,7 @@ test.describe('Agent Evaluation', () => {
           response.request().method() === 'POST' &&
           /\/evaluator\/.*\/evaluate\/jobs$/.test(new URL(response.url()).pathname)
       );
-      await modal.getByRole('button', { name: 'Submit' }).click();
+      await wizard.getByRole('button', { name: 'Run Evaluation' }).click();
 
       // Read as `unknown` and narrowed: asserting the shape would let a null payload throw a
       // bare TypeError here, and a non-string `name` through to fail later as a puzzling 404
@@ -251,7 +253,7 @@ test.describe('Agent Evaluation', () => {
       }
       jobName = submittedName;
 
-      await expect(modal).toBeHidden({ timeout: VERY_LONG_OPERATION_TIMEOUT });
+      await expect(wizard).toBeHidden({ timeout: VERY_LONG_OPERATION_TIMEOUT });
     });
 
     await test.step('See the run listed against the agent', async () => {

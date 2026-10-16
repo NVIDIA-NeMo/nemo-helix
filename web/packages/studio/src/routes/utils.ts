@@ -684,9 +684,14 @@ export const getAgentOptimizationsTabRoute = (workspace: string, agentName: stri
   return `${getAgentDetailRoute(workspace, agentName)}?tab=optimizations`;
 };
 
-/** The Evaluations tab with the Run Evaluation modal open on arrival. */
-export const getAgentRunEvaluationRoute = (workspace: string, agentName: string) => {
-  return `${getAgentEvaluationsTabRoute(workspace, agentName)}&${ACTION_SEARCH_PARAM}=run-evaluation`;
+/** The Run Agent Evaluation wizard, opened on its last step when re-running `sourceEvaluation`. */
+export const getAgentRunEvaluationRoute = (
+  workspace: string,
+  agentName: string,
+  sourceEvaluation?: string
+) => {
+  const path = generatePath(ROUTES.workspace.agentEvaluationNew, { workspace, agentName });
+  return sourceEvaluation ? `${path}?${new URLSearchParams({ source: sourceEvaluation })}` : path;
 };
 
 /** The Optimizations tab with the Optimize agent modal open on arrival. */
