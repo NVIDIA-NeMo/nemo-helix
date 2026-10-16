@@ -236,9 +236,11 @@ def rewrite_fabric_config_base_urls(agent_config: dict[str, Any], gateway_url: s
     points at the Inference Gateway. Legacy ``settings.base_url`` values are
     also supported. Loopback ATIF HTTP storage endpoints are rewritten so they
     remain reachable from container deployments. OpenTelemetry trace, log, and
-    metric endpoints that point at Intake are rewritten the same way, which
-    lands them on the loopback auth proxy when there is one. Third-party URLs
-    are left unchanged.
+    metric endpoints whose path points at Intake are rewritten the same way,
+    whatever host they name, which lands them on the loopback auth proxy when
+    there is one. Every rewrite takes *gateway_url*'s scheme as well as its
+    host. URLs that point elsewhere -- a third-party model API, a collector the
+    agent chose for itself -- are left unchanged.
     """
     reachable = urlsplit(gateway_url.rstrip("/"))
     reachable_origin = f"{reachable.scheme}://{reachable.netloc}"
@@ -283,8 +285,7 @@ def rewrite_fabric_config_base_urls(agent_config: dict[str, Any], gateway_url: s
         parts = urlsplit(endpoint)
         if parts.hostname not in LOOPBACK_ADDRESSES:
             continue
-        scheme = "https" if "https" in (parts.scheme, reachable.scheme) else reachable.scheme
-        storage_config["endpoint"] = parts._replace(scheme=scheme, netloc=reachable.netloc).geturl()
+        storage_config["endpoint"] = parts._replace(scheme=reachable.scheme, netloc=reachable.netloc).geturl()
 
     opentelemetry = telemetry.get("opentelemetry") if isinstance(telemetry, dict) else None
     if isinstance(opentelemetry, dict):

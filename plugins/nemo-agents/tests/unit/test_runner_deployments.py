@@ -215,7 +215,7 @@ def test_rewrite_fabric_config_base_urls_leaves_third_party_base_url() -> None:
     assert result["models"]["default"]["base_url"] == "https://api.openai.com/v1"
 
 
-def test_rewrite_fabric_config_base_urls_preserves_https_atif_endpoint() -> None:
+def test_rewrite_fabric_config_base_urls_takes_the_rewrite_targets_scheme_for_atif_endpoints() -> None:
     config = {
         "telemetry": {
             "atif": {
@@ -234,7 +234,7 @@ def test_rewrite_fabric_config_base_urls_preserves_https_atif_endpoint() -> None
 
     assert result["telemetry"]["atif"]["storage"][0] == {
         "type": "http",
-        "endpoint": "https://nhx-api:8080/apis/intake/v2/workspaces/default/ingest/atif",
+        "endpoint": "http://nhx-api:8080/apis/intake/v2/workspaces/default/ingest/atif",
         "header_env": {"Authorization": "ATIF_AUTHORIZATION"},
     }
 
