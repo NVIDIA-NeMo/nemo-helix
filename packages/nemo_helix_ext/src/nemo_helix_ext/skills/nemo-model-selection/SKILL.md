@@ -166,21 +166,7 @@ write a config is not confirmation for these calls. For native-provider
 harnesses, use the provider's native validation path instead of forcing the
 request through Platform IGW.
 
-For a Platform-routed OpenAI-compatible candidate, use the context-aware CLI
-rather than a hardcoded URL. Preserve the exact model name returned by
-`nemo models list`:
-
-```bash
-MODEL_NAME="<exact-platform-model-name>"
-
-# Codex
-nemo inference gateway model post v1/responses "$MODEL_NAME" \
-  --body "{\"model\":\"$MODEL_NAME\",\"input\":\"Reply with exactly: compatibility check\"}"
-
-# Hermes or an OpenAI-compatible DeepAgents configuration
-nemo inference gateway model post v1/chat/completions "$MODEL_NAME" \
-  --body "{\"model\":\"$MODEL_NAME\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: compatibility check\"}]}"
-```
+For a Platform-routed candidate, use the context-aware CLI (`nemo inference gateway model post v1/responses` for Codex, `v1/chat/completions` for Hermes or an OpenAI-compatible DeepAgents setup) with the exact model name returned by `nemo models list`. Copy-paste commands: `references/harness-compat-check.md`.
 
 A successful model list lookup, schema validation, Fabric planning, deployment
 readiness, empty request, or `GET` does not establish compatibility for a
@@ -223,26 +209,7 @@ If 3+ candidates have similar profiles and similar evidence-quality:
 
 **Hard rule: when the primary candidate's evidence is anything other than `direct`, the model name does NOT appear in your response until the user has resolved the trade-off.** This is the anchoring guard. Without it, users default to the first model named regardless of caveats.
 
-Structure:
-
-1. State that there's a trade-off to settle before naming a model.
-2. Present exactly two candidates labeled A and B (NOT named):
-   - **A. The matched specialist** — the candidate that best fits the profile by name/intent, with its inferred/missing-data caveat.
-   - **B. The measured generalist** — the model with the strongest *direct* score on the same primary axis, even if less specialized.
-3. For each, summarize the `plain` text from the cache (which already carries the editorial caveat for inferred entries) in your own words.
-4. Recommend a 5–10 prompt eval from the user's spec on both as the "real answer."
-5. If the user can't run an eval, ask: which framing of your priority is right — A's specialist intent or B's measured discipline?
-6. **Only after the user picks** — name the chosen model and proceed to Step 2's recommendation template (skipping the model-selection paragraph since it's resolved).
-
-Example output for a code-heavy agent where the natural pick has inferred BFCL data:
-
-> "Before I name a model — one thing to settle. Your profile (code-focused, three tools, cloud) has two reasonable candidates with different evidence quality:
->
-> **A. The specialist.** Built for this exact job. Arena's coding-category Elo (1418, strong) IS measured for this exact model. *But BFCL hasn't measured its tool-calling discipline — only its base model (Qwen3-30B-A3B at 37%) and we're inferring from there.*
->
-> **B. The measured generalist.** Best directly-measured tool-calling in our NIM set (BFCL 52%, mid). Not code-specialized, but disciplined.
->
-> If you can run a 5–10 prompt eval from your spec on both, that's the real answer. If you need to commit now: which matters more — specialist intent (A) or measured discipline (B)?"
+Present exactly two unnamed candidates, **A (matched specialist, with its caveat)** and **B (measured generalist, strongest *direct* score on the same axis)**, recommend a 5–10 prompt eval on both, and name a model only after the user resolves the trade-off. Full step list and an example output (code-heavy agent whose natural pick has inferred BFCL data): `references/pattern-b-example.md`.
 
 ### Pattern C — shortlist (rare)
 
@@ -274,48 +241,7 @@ Lead with the *capability that matters most for this agent*, then name the model
 
 ### What each model is strong at
 
-If `benchmark_cache.json` is present, read each model's `strong_at` and `watch_out_for` from the cache — those are kept in sync with the script. The text below is the fallback when the cache is missing.
-
-**qwen/qwen3-235b-a22b**
-- Correctly calls multiple tools in a single turn without mixing up arguments
-- Handles parallel tool invocation where call order matters
-- Recovers gracefully when a tool returns an error instead of hallucinating a result
-- Watch out for: heavy VRAM footprint for self-hosting; overkill for single-tool agents
-
-**qwen/qwen3-30b-a3b**
-- High-throughput tool calling at low inference cost (sparse MoE, ~3B active params)
-- Good baseline before you know whether you need the larger model
-- Watch out for: lower ceiling on complex nested tool chains
-
-**qwen/qwen3-coder-30b-a3b-instruct**
-- Navigates unfamiliar codebases and makes targeted edits
-- Agents that interact with git, CI, or code-review workflows
-- Watch out for: general reasoning suffers from the specialization
-
-**nvidia/llama-3.1-nemotron-ultra-253b**
-- Follows threads across very long documents without losing context
-- Multi-step reasoning over dense technical material
-- Watch out for: slower inference; cloud API is the practical deployment path
-
-**nvidia/llama-3.3-nemotron-super-49b-v1**
-- The platform's curated default for cloud agents — well-tested across the build path
-- Balanced: solid tool-calling, solid prose, no glaring weakness
-- Watch out for: a specialist will beat it on heavy tool chains or hard code tasks
-
-**meta/llama-3.3-70b-instruct**
-- Reliable across a wide range of tasks with well-characterized behavior
-- Good starting point when you don't yet know where the bottleneck will be
-- Watch out for: not a specialist — pick one if tool-calling or code quality is critical
-
-**microsoft/phi-4-mini-instruct**
-- Fast, cheap inference for latency-sensitive agents or high-volume loops
-- Fits on small hardware for edge or resource-constrained deployments
-- Watch out for: lower ceiling for complex multi-tool orchestration
-
-**qwen/qwen3-8b**
-- Tool calling on a single consumer GPU (fits in 12–16 GB VRAM)
-- Best choice for local development and prototyping
-- Watch out for: not competitive on complex reasoning; context reliability drops faster
+Read each model's `strong_at` and `watch_out_for` from `benchmark_cache.json` when present. Fallback text when the cache is missing: `references/model-strengths.md`.
 
 ## Step 3 — Mention the evidence only after the plain-English case
 
@@ -374,60 +300,7 @@ harnesses:
 Do not emit raw Fabric SDK model objects. `nemo-agent-config` owns final YAML
 placement and validation.
 
-If they are explicitly maintaining a legacy NAT workflow YAML, emit the NAT
-compatibility block:
-
-```yaml
-llms:
-  primary_llm:
-    _type: <nat-type>
-    model_name: <model-string>
-    # Chosen because: <one plain-English sentence — same words you used above>
-    # Evidence: <direct | inferred from <ancestor-id> | name-intent only — eval recommended>
-    max_tokens: 4096
-
-workflow:
-  _type: <agent_type>
-  llm_name: primary_llm
-  tool_names: []
-```
-
-### Picking the right legacy NAT `_type`
-
-Only for NAT workflow output, match the chosen model's namespace prefix against
-`namespace_to_type[]` from the cache:
-
-```txt
-For each rule in cache.namespace_to_type:
-  if model_string.startswith(rule.prefix):
-    use rule.nat_type for the YAML _type field
-    if rule.note is present, surface it once to the user
-    stop
-If no rule matches:
-  Tell the user the namespace is unrecognized. Run this to confirm the right type:
-    uv run nat info components -t llm_provider
-  Until the user provides the type, leave _type as <TBD-verify> in the emitted YAML
-  rather than guessing.
-```
-
-Common mappings the cache carries today: `nim/*`, `openai/*`, `anthropic/*`, `bedrock/*`, plus vendor-published NIM names (`qwen/*`, `meta/*`, `nvidia/*`, `microsoft/*`, `mistralai/*`) that route through the NIM provider when served by the platform. Ollama's local endpoint maps to `_type: openai` since it exposes an OpenAI-compatible API.
-
-For Platform `agent.yaml`, represent credentials with `api_key_env` and put
-`base_url` directly in the model block. For a legacy NAT workflow, use the
-provider fields required by that NAT LLM component.
-
-### Pair a legacy NAT model with the right workflow type
-
-Use this table only when maintaining NAT workflow YAML. Harness selection for
-`nemo-agents-spec-v1` belongs to `nemo-agent-config` and must not be inferred
-from a NAT workflow type.
-
-| What the agent needs to do | Use |
-|---|---|
-| Call tools in a loop, observe results, adjust | `react_agent` |
-| Dispatch tools directly without intermediate reasoning | `tool_calling_agent` |
-| Reason through a problem before acting | `reasoning_agent` |
-| Follow a fixed plan with no dynamic re-planning | `rewoo_agent` |
+If they are explicitly maintaining a legacy NAT workflow YAML, emit the NAT compatibility block, pick the NAT `_type` from `namespace_to_type[]`, and pair the model with a workflow type. All of that is in `references/legacy-nat-output.md`. For Platform `agent.yaml`, represent credentials with `api_key_env` and put `base_url` directly in the model block.
 
 ## Step 5 — Staleness notice
 
@@ -453,15 +326,7 @@ Use `nemo-agent-config` when the user wants to apply the selected model to `agen
 
 ## If verification fails
 
-| Symptom | Cause | Recovery |
-|---|---|---|
-| User says "wrong recommendation" | One of the three profile answers was misread | Re-ask just that question; do not restart |
-| User wants a model not in the table | The table is curated, not exhaustive | Tell them honestly; describe the capability gap their choice would have vs the closest recommended model |
-| `cache_missing` and user wants fresh data | Cache has never been refreshed in this checkout | Tell them the refresh command and note that the static table is still usable |
-| User picks self-hosted but the recommended model needs cloud | Hard constraint conflict | Drop the recommendation; pick the closest self-hosted-compatible model from the table |
-| Available model's harness API support is unknown | Availability was mistaken for harness compatibility | Ask permission to run a valid request through the harness's required model path |
-| Compatibility request fails | The exact harness/provider/model/endpoint combination is incompatible in the current environment | Exclude that combination, surface the error, and test the next ranked candidate after the user-approved probe set |
-| No candidate passes | No live model satisfies the selected harness contract | Stop without emitting a model block; ask the user to configure a compatible provider or explicitly choose another harness |
+Wrong recommendation: re-ask only the misread profile question, do not restart. Model not in the table: say so and describe the capability gap versus the closest recommended model. Compatibility probe fails: exclude that combination and test the next ranked candidate; if none pass, stop without emitting a model block. Full symptom/cause/recovery table: `references/recovery.md`.
 
 ## Hard rules
 

@@ -1,6 +1,8 @@
 ---
 name: studio-dev
 description: Switch into Studio development mode for working on the NeMo Studio frontend in web/. Use when starting frontend work, building UI features, or working on React components.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Studio Development Mode

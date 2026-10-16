@@ -4,8 +4,10 @@
 
 name: evals
 description: NeMo Helix evaluator playbook covering metrics, synchronous metric runs, and asynchronous metric jobs through the platform SDK.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
-Evaluator tasks
+# Evaluator tasks
 
 - Typical flow for simple metric jobs:
   1) Use the active request workspace; create a new workspace only when the task explicitly requires it
