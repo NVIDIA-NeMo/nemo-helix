@@ -59,7 +59,7 @@ def _original_pass_rates(run_dir: Path) -> dict[str, float | None]:
     if scores.is_file():
         for row in _read_jsonl(scores):
             outputs = {o["name"]: o["value"] for o in row.get("outputs") or []}
-            rates[row.get("task_id")] = outputs.get("criteria_pass_rate")
+            rates[row["task_id"]] = outputs.get("criteria_pass_rate")
     return rates
 
 

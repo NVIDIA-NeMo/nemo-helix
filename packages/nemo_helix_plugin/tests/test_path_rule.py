@@ -45,7 +45,7 @@ def test_permission_id_is_joined_from_structured_parts() -> None:
     assert permission.namespace == "agents.deployments"
     assert str(permission) == "agents.deployments.read"
     with pytest.raises(Exception):  # frozen dataclass: FrozenInstanceError
-        permission.id = "other"  # type: ignore[misc]
+        setattr(permission, "id", "other")  # a runtime write the type already forbids
 
 
 def test_service_level_permission_has_no_resource_segment() -> None:

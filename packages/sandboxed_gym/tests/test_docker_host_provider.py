@@ -11,6 +11,7 @@ thing rather than failing.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import pytest
@@ -97,6 +98,29 @@ def test_egress_is_recorded_rather_than_applied(tmp_path: Path) -> None:
     assert provider._egress["stub"] == (("model.example", 443),)
 
 
+class _ScriptedDockerProvider(DockerGymHostProvider):
+    """A Docker provider whose ``docker`` CLI calls are answered by the test instead of run."""
+
+    def __init__(
+        self,
+        tmp_path: Path,
+        *,
+        run: Callable[..., Awaitable[str]],
+        force_remove: Callable[[str], Awaitable[bool]] | None = None,
+    ) -> None:
+        super().__init__(root_dir=str(tmp_path))
+        self._scripted_run = run
+        self._scripted_force_remove = force_remove
+
+    async def _run(self, *argv: str, timeout_s: float = 120.0) -> str:
+        return await self._scripted_run(*argv, timeout_s=timeout_s)
+
+    async def _force_remove(self, name: str) -> bool:
+        if self._scripted_force_remove is None:
+            return await super()._force_remove(name)
+        return await self._scripted_force_remove(name)
+
+
 @pytest.mark.parametrize("network", [None, "nhx-gym-net"])
 def test_the_network_option_is_optional(tmp_path: Path, network: str | None) -> None:
     provider = DockerGymHostProvider(root_dir=str(tmp_path), network=network)
@@ -108,7 +132,6 @@ def test_the_network_option_is_optional(tmp_path: Path, network: str | None) -> 
 async def test_an_unpublished_port_fails_loudly_and_removes_the_container(tmp_path: Path) -> None:
     """`docker port` exits 0 and prints nothing for an unpublished port, and a container that is
     not reachable has to be torn down rather than left running."""
-    provider = DockerGymHostProvider(root_dir=str(tmp_path))
     removed: list[str] = []
 
     async def fake_run(*argv: str, timeout_s: float = 120.0) -> str:
@@ -118,8 +141,7 @@ async def test_an_unpublished_port_fails_loudly_and_removes_the_container(tmp_pa
         removed.append(name)
         return True
 
-    provider._run = fake_run
-    provider._force_remove = fake_force_remove
+    provider = _ScriptedDockerProvider(tmp_path, run=fake_run, force_remove=fake_force_remove)
 
     with pytest.raises(DockerHostError):
         await provider.create_host(spec())
@@ -130,14 +152,13 @@ async def test_an_unpublished_port_fails_loudly_and_removes_the_container(tmp_pa
 @pytest.mark.asyncio
 async def test_create_labels_the_container_with_the_job_id(tmp_path: Path) -> None:
     """A later sweep has to find the container after this process has forgotten its name."""
-    provider = DockerGymHostProvider(root_dir=str(tmp_path))
     seen: list[tuple[str, ...]] = []
 
     async def fake_run(*argv: str, timeout_s: float = 120.0) -> str:
         seen.append(argv)
         return "0.0.0.0:9" if argv[0] == "port" else "container-id"
 
-    provider._run = fake_run
+    provider = _ScriptedDockerProvider(tmp_path, run=fake_run)
 
     await provider.create_host(spec())
 
@@ -148,7 +169,6 @@ async def test_create_labels_the_container_with_the_job_id(tmp_path: Path) -> No
 
 @pytest.mark.asyncio
 async def test_destroy_job_sandboxes_removes_containers_for_that_job(tmp_path: Path) -> None:
-    provider = DockerGymHostProvider(root_dir=str(tmp_path))
     removed: list[str] = []
 
     async def fake_run(*argv: str, timeout_s: float = 120.0) -> str:
@@ -160,8 +180,7 @@ async def test_destroy_job_sandboxes_removes_containers_for_that_job(tmp_path: P
         removed.append(name)
         return name != "c2"
 
-    provider._run = fake_run
-    provider._force_remove = fake_force_remove
+    provider = _ScriptedDockerProvider(tmp_path, run=fake_run, force_remove=fake_force_remove)
 
     assert await provider.destroy_job_sandboxes("job-1") == ("c1",)
     assert removed == ["c1", "c2"]
