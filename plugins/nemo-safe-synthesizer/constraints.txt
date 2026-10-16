@@ -35,3 +35,5 @@ urllib3>=2.7.0
 boto3>=1.40.46,<1.40.62
 botocore>=1.40.46,<1.40.62
 gliner<0.2.27
+opacus==1.5.4
+transformers==5.12.0
