@@ -247,6 +247,16 @@
         },
         {
           "package": {
+            "name": "backports-zstd",
+            "version": "1.8.0",
+            "ecosystem": "PyPI"
+          },
+          "licenses": [
+            "PSF-2.0"
+          ]
+        },
+        {
+          "package": {
             "name": "base58",
             "version": "2.1.1",
             "ecosystem": "PyPI"
@@ -398,7 +408,7 @@
         {
           "package": {
             "name": "clickhouse-connect",
-            "version": "0.15.1",
+            "version": "1.10.1",
             "ecosystem": "PyPI"
           },
           "licenses": [

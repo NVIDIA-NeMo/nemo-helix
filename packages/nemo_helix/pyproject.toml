@@ -212,7 +212,7 @@ intake-service = [
   "pydantic-settings>=2.6.1, <3.0.0",
   "nhx-common",
   "nemo-helix-plugin",
-  "clickhouse-connect>=0.7,<1.0",
+  "clickhouse-connect[async]>=1.10.0,<2",
   "docker>=7.1.0",
   "opentelemetry-proto>=1.27.0",
 ]

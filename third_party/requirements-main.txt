@@ -18,16 +18,12 @@
     #   nemo-garak-plugin
     #   nemo-helix
     #   nemohelix
--e ./packages/nhx_evals_sdk ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via
-    #   nemo-evals-plugin
-    #   nemo-helix
-    #   nemo-optimization-plugin
 -e ./packages/nemo_helix ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
     #   nemo-agent-optimization-plugin
     #   nemo-agents-plugin
     #   nemo-anonymizer-plugin
+    #   nemo-builder-plugin
     #   nemo-garak-plugin
     #   nemo-guardrails-plugin
     #   nemo-insights-plugin
@@ -47,12 +43,13 @@
     #   nemo-agent-optimization-plugin
     #   nemo-agents-plugin
     #   nemo-anonymizer-plugin
-    #   nemo-garak-plugin
     #   nemo-automodel-plugin
+    #   nemo-builder-plugin
     #   nemo-customizer-plugin
     #   nemo-data-designer-plugin
     #   nemo-deployments-plugin
     #   nemo-evals-plugin
+    #   nemo-garak-plugin
     #   nemo-guardrails-plugin
     #   nemo-helix
     #   nemo-helix-ext
@@ -106,6 +103,11 @@
     #   nhx-automodel
     #   nhx-rl
     #   nhx-unsloth
+-e ./packages/nhx_evals_sdk ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+    # via
+    #   nemo-evals-plugin
+    #   nemo-helix
+    #   nemo-optimization-plugin
 -e ./packages/nhx_platform ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via nemohelix
 -e ./packages/nhx_platform_runner ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
@@ -118,6 +120,7 @@
     # via
     #   nemo-helix
     #   nemo-optimization-plugin
+    #   nemo-switchyard-plugin
 -e ./plugins/nemo-agents ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
     #   nemo-evals-plugin
@@ -128,11 +131,11 @@
     #   nemo-agents-plugin
     #   nemo-helix
 -e ./plugins/nemo-anonymizer ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
--e ./plugins/nemo-garak ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via
-    #   nemo-helix
-    #   nhx-platform-seed
 -e ./plugins/nemo-automodel ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+-e ./plugins/nemo-builder ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+    # via
+    #   nemo-evals-plugin
+    #   nemo-helix
 -e ./plugins/nemo-customizer ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-data-designer ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-deployments ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
@@ -140,6 +143,10 @@
     #   nemo-agents-plugin
     #   nemo-helix
 -e ./plugins/nemo-evals ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+-e ./plugins/nemo-garak ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+    # via
+    #   nemo-helix
+    #   nhx-platform-seed
 -e ./plugins/nemo-guardrails ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-insights ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-optimization ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
@@ -284,6 +291,7 @@ aiohttp==3.14.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or 
     # via
     #   aiobotocore
     #   aiohttp-retry
+    #   clickhouse-connect
     #   fsspec
     #   garak-api
     #   instructor
@@ -314,6 +322,7 @@ aiosqlite==0.22.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') o
     # via
     #   langgraph-checkpoint-sqlite
     #   nemo-helix
+    #   nhx-entities
     #   nhx-jobs
 alembic==1.19.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:6487c612fc719dcfa22b17d2dd5b2b458929641e6aa2f0b65b135727f5e6d501 \
@@ -338,8 +347,6 @@ anthropic==0.120.2 ; (platform_machine == 'arm64' and sys_platform == 'darwin') 
     --hash=sha256:9722efc10c27a30a69f5338ddacdb35bc6a64297a4e4ba729bf83af873d5fb3a
     # via
     #   langchain-anthropic
-    #   nemo-agents-plugin
-    #   nemo-helix
     #   nemo-helix-plugin
 anyascii==0.3.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:c94e9dd9d47b3d9494eca305fef9447d00b4bf1a32aff85aa746fa3ec7fb95c3 \
@@ -418,6 +425,25 @@ authlib==1.7.2 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (
     # via
     #   fastmcp-slim
     #   nvidia-nat-core
+backports-zstd==1.8.0 ; (python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:163b5c36321bf5652b6e4aeb04d3644ddbf9c1881a82322e376e5be3532af26b \
+    --hash=sha256:1a808ba1371231c00a2b71f03840a727088e287d0ee1dfb3230958950f21f421 \
+    --hash=sha256:1fe4b06a019aa4cdf87af320eef56a4bdbdb924ead36a7a918645d72edece966 \
+    --hash=sha256:2b11fb8b9c798657c97ad3165893f146c300e2f7f800e9c54c0d2143052c1486 \
+    --hash=sha256:44a9004f9e809ea56910d326d21946650369db59eb86edc0c76840f21530704c \
+    --hash=sha256:4e6f8483b795a09c0e0fbacca4fa844242bc6d5fc64b8a6ee99f88ad8af27b08 \
+    --hash=sha256:4fa862d24b7fb392279a95bc9acc1f0ede8a25de9efbed03fb305ceac2f6abb0 \
+    --hash=sha256:6283c90997038abf46c8a0bb75afb4dc6cbf061421802fda0afc382fe4b348b3 \
+    --hash=sha256:63ae348b629121eeb967244fecd254f41b4b3a63d074c252f4d7777f5d17c71c \
+    --hash=sha256:6aa762cf369d9bfca1e013eaad562f8e129d71b7a82f0c459870d6d21651bcb3 \
+    --hash=sha256:6c8572e27c5f0b9d11020d3f597bf3c35fe0f5ae6f99156dc52b0bd937ba8908 \
+    --hash=sha256:915d3e7e57194b5cee33f10cf2d9f5c4f7658c8a167236f9ba5501520cf133e8 \
+    --hash=sha256:9dae4f4c481716e3db473d667457b4f508ff7459c0931b567a5c9677fb3db316 \
+    --hash=sha256:ab77a2e6e21c57e8341bb7656c71d1a1653151ebe787b3f092ce86a02543eb52 \
+    --hash=sha256:d810d83c8a703f424ed2a49aa271078c91b530da2d8c104bd88207e68d116de8 \
+    --hash=sha256:e0431230a67e8f07210efe654abda9844a55c3bf57d74e60425d9d65770b1de4 \
+    --hash=sha256:f9e9aa28a44db1897fb637f037175566f3b75890d4bae6cae7ba34f1df1e0804
+    # via clickhouse-connect
 base58==2.1.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:11a36f4d3ce51dfc1043f3218591ac4eb1ceb172919cebe05b52a5bcc8d245c2 \
     --hash=sha256:c5d0cb3f5b6e81e8e35da5754388ddcc6d0d14b6c6a132cb93d69ed580a7278c
@@ -590,28 +616,28 @@ click==8.4.2 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (pl
     #   unsloth
     #   uvicorn
     #   wandb
-clickhouse-connect==0.15.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
-    --hash=sha256:158325a06978f91a182967341188502a0761447d1e13ffa775cf017def1a3d9e \
-    --hash=sha256:24cdfe9b486c8f2e66f5f51b1f322d89d9eb4df29d9ebb2fa19b553065651e85 \
-    --hash=sha256:3b456d469db994b188bb0b5afa373e8f2e5e2bf41a70a736b9ed2485a976e9ae \
-    --hash=sha256:4bf70933ab860bd2f0a872db624603706bed400c915c7aeef382956cf8ebbdf3 \
-    --hash=sha256:5462bad97d97919a4ed230e2ef28d0b76bec0354a343218647830aac7744a43b \
-    --hash=sha256:60aa8c9c775d22db324260265f4c656f803fbc71de9193ef83cf8d8d0ef6ab9a \
-    --hash=sha256:82e60e108d78e32d58a0f21570b02d3baad67ccbad6482eeb79d74a616d8a5ad \
-    --hash=sha256:873d8f74eaec141f40ae060318c32353da94fdd4601f925bfd52426f3ddcd689 \
-    --hash=sha256:a9d1e12bf86cd96626f74d21e3ac237abcda105f55cd2e78d139197d35f86209 \
-    --hash=sha256:aa9890507aac52a8a5363813bb315b6867e86a97ffa08576cb934603f5bc0216 \
-    --hash=sha256:aeb09a6f8585f3bd4d8c5bead38f3821c076e0bca08c474a7b9039732a6e2e9a \
-    --hash=sha256:b6d107b5f964af97f25a0d1bfd59fe3510f2a646c87ad4f9ab9014bb0c66aa1c \
-    --hash=sha256:b8236c7dd675ed13d5e96f1f9126eeb711e8c266e4a0476ebc32be8a17decb32 \
-    --hash=sha256:c12d9f2b2fc57adaf5ea267804f00e520771794641227ed5285e38fdf36557a6 \
-    --hash=sha256:d3fca3e0781b664556690decc788e7d25691043bf67a0d241e9c29233a2990d5 \
-    --hash=sha256:d6e98c0cf53db3b24dc0ff9f522fcf13205b1d191c632567d1744fbd4671741f \
-    --hash=sha256:df93fa024d6ed46dbc3182b6202180be4cf2bbe9c331dcb21f85963b1b3fd1e5 \
-    --hash=sha256:e702b77720ae6fd501e5a52262518dddb6c705fbc122bca4567694fb0bab401f \
-    --hash=sha256:e88a31bbd9da7f4b49de39d21e8c93c8fbb5cf487071e935af0eba884681df00 \
-    --hash=sha256:f2aaf5fc0bb3098c24f0d8ca7e4ecbe605a26957481dfca2c8cef9d1fad7b7ca \
-    --hash=sha256:fa01fdb92db6bf72cb9509eecd0a0057a4558a4f40c02eebffbc2d61b644620e
+clickhouse-connect==1.10.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:029554cd3d15ce50df2f72e448f522221860794286a1b974f6b28521751a7e75 \
+    --hash=sha256:1dbac6b80131879022c528f879c763357ac63e511dd26911996d01c80f58822c \
+    --hash=sha256:217f370925b3e381f9d2eaf585bc8ae9887b54fc5ac235a75697777eb6435fe0 \
+    --hash=sha256:349c085510015de84b94890ef6900bb6793975d15b4ac76ce07008e56464e625 \
+    --hash=sha256:38b95d7e7e6ef6f1b3a989a521081a3cc2e1e6e22543cbb36c56f38baae688ff \
+    --hash=sha256:38b9a3bc8d480bde105a658b0ba2bff54e2af1faecc1fbc921753026e8dfd6a0 \
+    --hash=sha256:3a8ad0edbc81374e6b990682797c024d2771d85e68c37459160e34ffac41dfd9 \
+    --hash=sha256:4e40705d2e1d25a58a2fdd98c4d0aa20f7000fbffc36efdec15ebba9f10a9542 \
+    --hash=sha256:56192a7f3f219c8caeec8a556d09fde760c0de40fc56d1e5efe3b51989d838ff \
+    --hash=sha256:6aff4a9c21f35cad1363e4359a589df134609a28ad038cf8e98fc1013d1e6f9e \
+    --hash=sha256:712cf8f96a7a67c93957eccc83b88028a245724a0ccf426c2e0721dd003edfbf \
+    --hash=sha256:7d64c6038ada985f2baceab1d0ad78608c12695e689aba2bd0b3af3e7967827f \
+    --hash=sha256:846ced4b94a7f605f86d394bbfc2816fc645b2eb0a4dec510966320d76e4ad3f \
+    --hash=sha256:88ad43a64bbddd78ebb68f72117e29bc37d13155683e39d592ce208ef9b1dfbc \
+    --hash=sha256:949cacbe2ffb5a735f791b839742c0eddcb20b061d020ba5e065125aad8c632c \
+    --hash=sha256:a074fe1cdc3c45201395aedd3f3ca1f7c13b9c6bb95271c7990d673e9cd69e47 \
+    --hash=sha256:ad709d8502d7384d8fb72d59a71d10cec49399175eccef5dca9c8ae5dc267f30 \
+    --hash=sha256:d1bfa79bf5a5ef7c12fc5dc6641adbaa9894923f0ecc1a05b935adbd6c6fa820 \
+    --hash=sha256:dc87f5e94e2e7b5a82faf1998dc8ed1e0dbd03bbbd974a7e8bed14a59b321b9c \
+    --hash=sha256:fc4e03bebb4cf8dbc6bb01335c1d5ff36e46502e6ac97186a2002f713ab7d5d1 \
+    --hash=sha256:fe7e0fa432971c3f70dee63c07619d4737410095967a5cadcb44fe806be5c9c1
     # via
     #   nemo-helix
     #   nhx-intake
@@ -698,6 +724,8 @@ cryptography==50.0.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin'
     #   google-auth
     #   joserfc
     #   nemo-anonymizer
+    #   nemo-builder-plugin
+    #   nemo-helix
     #   ngcsdk
     #   nvidia-nat-core
     #   pyjwt
@@ -1154,6 +1182,7 @@ grpcio==1.83.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (
     --hash=sha256:f47d62808b4c0a97b78bff88a6d4ca283a2a492b9a04a87d814af95ca3b9c19c
     # via
     #   nemo-deployments-plugin
+    #   nhx-jobs
     #   openshell
     #   opentelemetry-exporter-otlp-proto-grpc
     #   pymilvus
@@ -1267,12 +1296,12 @@ httpx==0.28.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   nemo-agents-plugin
     #   nemo-anonymizer
     #   nemo-anonymizer-plugin
-    #   nemo-garak-plugin
+    #   nemo-builder-plugin
     #   nemo-data-designer-plugin
     #   nemo-deployments-plugin
     #   nemo-fabric-adapters-remote-agent
-    #   nhx-evals-sdk
     #   nemo-fabric-runtime
+    #   nemo-garak-plugin
     #   nemo-helix
     #   nemo-helix-ext
     #   nemo-insights-plugin
@@ -1283,6 +1312,7 @@ httpx==0.28.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   nhx-auth
     #   nhx-automodel
     #   nhx-customization-common
+    #   nhx-evals-sdk
     #   nhx-guardrails
     #   nhx-jobs
     #   nhx-rl
@@ -1359,9 +1389,6 @@ importlib-metadata==8.9.0 ; (platform_machine == 'arm64' and sys_platform == 'da
     #   litellm
     #   mlflow-skinny
 insight-agent @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via
-    #   nemo-helix
-    #   nemo-insights-plugin
 instructor==1.15.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:00e0ecda80fd9746fb6d082d3f9641e193adb1d8849f0775f91519a82aeff968 \
     --hash=sha256:ea2280c3678d0f6891c4d826104f95624b680e69877113a6345b1d7c9027ba0f
@@ -1401,10 +1428,10 @@ jinja2==3.1.6 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   litellm
     #   mlx-lm
     #   nemo-agents-plugin
-    #   nhx-evals-sdk
     #   nemo-helix
     #   nemoguardrails
     #   nemohelix
+    #   nhx-evals-sdk
     #   nvidia-nat-core
     #   sqlfluff
     #   torch
@@ -1507,12 +1534,12 @@ jsonschema==4.26.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') 
     #   insight-agent
     #   litellm
     #   mcp
-    #   nhx-evals-sdk
     #   nemo-helix
     #   nemo-helix-plugin
     #   nemo-safe-synthesizer
     #   nemoguardrails
     #   nhx-automodel
+    #   nhx-evals-sdk
 jsonschema-path==0.5.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:2790a070bc7abb08ea3dbe4d340ece4efadf639223001f020c7503229ba068e2 \
     --hash=sha256:493b156ba895c97602655b620a8456caa2ce08c1aa389f5a7addec065e6e855c
@@ -1564,6 +1591,7 @@ kubernetes==36.0.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') 
     --hash=sha256:36993ed25ce59b789c9341473a228fcf268504a2fec7c2b2b1531d73072e5ce7 \
     --hash=sha256:8fde9241c4b298e6374a069dcf728359b4e72c2fb29489a975ba4e1c047cf10f
     # via
+    #   nemo-builder-plugin
     #   nemo-deployments-plugin
     #   nemo-helix
     #   nhx-common
@@ -1635,17 +1663,17 @@ langchain-nvidia-ai-endpoints==1.4.3 ; (platform_machine == 'arm64' and sys_plat
     --hash=sha256:8076a99cecb5318e285e47668ab7ec884b0e188aad5b3d37221e6b155f9f536c \
     --hash=sha256:f71966a079f1800ae292b4add953509481d149dc3bc4a3f60b9c09742642d043
     # via
-    #   nhx-evals-sdk
     #   nemo-helix
+    #   nhx-evals-sdk
     #   nhx-guardrails
 langchain-openai==1.4.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:6d16be615d997db80294731b8e768783f1fb8e0313668e64acd50cd68acbad20 \
     --hash=sha256:8528bb34cc78fdfd2d895573c7917f9441cbb82db5f18ae0e6b3b75d95bdefb3
     # via
-    #   nhx-evals-sdk
     #   nemo-fabric-adapters-deepagents
     #   nemo-guardrails-plugin
     #   nemo-helix
+    #   nhx-evals-sdk
     #   nhx-guardrails
     #   ragas
 langchain-protocol==0.0.18 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
@@ -2034,8 +2062,8 @@ nemo-fabric==0.4.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') 
     --hash=sha256:1bc96589bff0b3bb66630c476578a4a03357c27efaddbf75df16a7cefd2c0eb8
     # via
     #   nemo-agents-plugin
-    #   nhx-evals-sdk
     #   nemo-helix
+    #   nhx-evals-sdk
 nemo-fabric-adapter-contract==0.4.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:36b235be49ed981d0549231effce7440bd1e1987a02e2beda2c9930347b0cd7a
     # via
@@ -2112,10 +2140,10 @@ nemo-relay==0.9.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') o
     --hash=sha256:73bb0f17b4b70bf9a26a3b669042771f3157017c74079d74ceed220cb8ee7dc1 \
     --hash=sha256:b62db23e2a17fa6b794d03096c5fb120b4c62cdd0336356a6456015f75f08345
     # via
-    #   nhx-evals-sdk
     #   nemo-fabric
     #   nemo-helix
     #   nemo-insights-plugin
+    #   nhx-evals-sdk
 nemo-relay-cli-bin==0.9.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:3911f264d1d8720cdd640870d61bfa817de833fb22af23ea4e93287d63b85ff5 \
     --hash=sha256:6b6a9296cbe4162796cdd258f106f6b5e18a13b98852c9ea01422d7a12dcc3d7 \
@@ -2387,10 +2415,10 @@ openai==2.53.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (
     #   instructor
     #   langchain-openai
     #   litellm
-    #   nhx-evals-sdk
     #   nemo-helix
     #   nemo-helix-plugin
     #   nemoguardrails
+    #   nhx-evals-sdk
     #   nhx-guardrails
     #   ragas
 openai-codex==0.144.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
@@ -2433,7 +2461,9 @@ opensandbox==0.1.16 ; (platform_machine == 'arm64' and sys_platform == 'darwin')
     # via nemo-sandboxed-gym
 openshell==0.1.2 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:8c409da4f176d42418d92366fe201f47cceef2c0fa432bfbce2bf938649d59cf
-    # via nemo-deployments-plugin
+    # via
+    #   nemo-deployments-plugin
+    #   nhx-jobs
 opentelemetry-api==1.43.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:107d0d03857ea8fc7c5fcbbbd83f800c281f0d560553d61c1d675fccfd1761c1 \
     --hash=sha256:20acf45e9b21851926835292e4045d290acade1edd2ff3de86d2f069687ba1fd
@@ -2552,8 +2582,8 @@ opentelemetry-proto==1.43.0 ; (platform_machine == 'arm64' and sys_platform == '
     --hash=sha256:c58f1f7ef84bc7dc2834016c0c37fe0081dde7ca9f6339be1970fbf9cdaaa90d
     # via
     #   mlflow-skinny
-    #   nhx-evals-sdk
     #   nemo-helix
+    #   nhx-evals-sdk
     #   nhx-files
     #   nhx-intake
     #   opentelemetry-exporter-otlp-proto-common
@@ -2717,10 +2747,10 @@ pandas==2.3.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   datasets
     #   nemo-anonymizer-plugin
     #   nemo-data-designer-plugin
-    #   nhx-evals-sdk
     #   nemo-helix
     #   nemo-safe-synthesizer
     #   nemoguardrails
+    #   nhx-evals-sdk
     #   nhx-files
     #   nhx-jobs
     #   nvidia-nat-config-optimizer
@@ -2890,6 +2920,7 @@ protobuf==6.33.6 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   nemo-deployments-plugin
     #   nemoguardrails
     #   nemohelix
+    #   nhx-jobs
     #   onnxruntime
     #   openshell
     #   opentelemetry-proto
@@ -3038,13 +3069,13 @@ pydantic==2.13.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   mlflow-skinny
     #   nemo-agent-optimization-plugin
     #   nemo-anonymizer
-    #   nemo-garak-plugin
     #   nemo-automodel-plugin
+    #   nemo-builder-plugin
     #   nemo-customizer-plugin
     #   nemo-deployments-plugin
     #   nemo-evals-plugin
-    #   nhx-evals-sdk
     #   nemo-fabric-runtime
+    #   nemo-garak-plugin
     #   nemo-helix
     #   nemo-helix-ext
     #   nemo-helix-plugin
@@ -3062,6 +3093,7 @@ pydantic==2.13.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   nhx-common
     #   nhx-customization-common
     #   nhx-entities
+    #   nhx-evals-sdk
     #   nhx-files
     #   nhx-inference-gateway
     #   nhx-intake
@@ -3260,9 +3292,7 @@ pytrec-eval-terrier==0.5.10 ; (platform_machine == 'arm64' and sys_platform == '
 pytz==2026.3.post1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:2211d3fcf9a797d3405cac96ac7f61d80e6a644f72a3309607282fe8a2010c5d \
     --hash=sha256:dd95840dd199baea12d9cc096a1d452caa6596a1c1e4b5f3dbd1541855d5e815
-    # via
-    #   clickhouse-connect
-    #   pandas
+    # via pandas
 pyyaml==6.0.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:00c4bdeba853cc34e7dd471f16b4114f4162dc03e6b7afcc2128711f0eca823c \
     --hash=sha256:0f29edc409a6392443abf94b9cf89ce99889a1dd5376d94316ae5145dfedd5d6 \
@@ -3305,8 +3335,8 @@ pyyaml==6.0.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   mlx-lm
     #   nemo-agents-plugin
     #   nemo-anonymizer-plugin
-    #   nemo-garak-plugin
     #   nemo-deployments-plugin
+    #   nemo-garak-plugin
     #   nemo-helix
     #   nemo-helix-ext
     #   nemo-helix-plugin
@@ -3314,6 +3344,7 @@ pyyaml==6.0.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   nemo-optimization-plugin
     #   nemo-safe-synthesizer
     #   nemo-sandboxed-gym
+    #   nemo-switchyard-plugin
     #   nemoguardrails
     #   nemohelix
     #   nhx-auth
@@ -3443,7 +3474,6 @@ rich==14.3.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (pl
     #   harbor
     #   insight-agent
     #   instructor
-    #   nemo-agents-plugin
     #   nemo-helix
     #   nemo-helix-ext
     #   nemo-safe-synthesizer
@@ -3539,8 +3569,8 @@ sacrebleu==2.6.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     --hash=sha256:3edc1531575cfe4ad04ce53491a9307e234af1c3f805a1f491cbec844229a8a8 \
     --hash=sha256:91499b6cd46138d95154fff1e863c2f9be57e82f0c719d8dd718d0006cf6c566
     # via
-    #   nhx-evals-sdk
     #   nemohelix
+    #   nhx-evals-sdk
 safetensors==0.8.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:7a46e5ff292c356d6991e60942ba7f79817682d3a2cef0702136448cb9c4d235 \
     --hash=sha256:87eec7ffed2b809f05a398a8becb7d013f19f7837cd15d9748580d6cf30dbaf4 \
@@ -3984,10 +4014,7 @@ tqdm==4.70.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (pl
     #   unsloth
     #   unsloth-zoo
 trace-ingest @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137#subdirectory=packages/trace-ingest ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via
-    #   insight-agent
-    #   nemo-helix
-    #   nemo-insights-plugin
+    # via insight-agent
 transformers==5.5.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:821a9ff0961abbb29eb1eb686d78df1c85929fdf213a3fe49dc6bd94f9efa944 \
     --hash=sha256:c8db656cf51c600cd8c75f06b20ef85c72e8b8ff9abc880c5d3e8bc70e0ddcbd
@@ -4040,10 +4067,10 @@ typer==0.25.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   harbor
     #   instructor
     #   nemo-agent-optimization-plugin
-    #   nemo-garak-plugin
     #   nemo-automodel-plugin
     #   nemo-customizer-plugin
     #   nemo-evals-plugin
+    #   nemo-garak-plugin
     #   nemo-helix
     #   nemo-helix-ext
     #   nemo-helix-plugin
@@ -4512,6 +4539,4 @@ zstandard==0.25.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') o
     --hash=sha256:aaf21ba8fb76d102b696781bddaa0954b782536446083ae3fdaa6f16b25a1c4b \
     --hash=sha256:bfc4e20784722098822e3eee42b8e576b379ed72cca4a7cb856ae733e62192ea \
     --hash=sha256:e09bb6252b6476d8d56100e8147b803befa9a12cea144bbe629dd508800d1ad0
-    # via
-    #   clickhouse-connect
-    #   langsmith
+    # via langsmith
