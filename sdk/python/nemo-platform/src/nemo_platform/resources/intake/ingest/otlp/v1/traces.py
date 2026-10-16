@@ -17,9 +17,21 @@
 
 from __future__ import annotations
 
+import os
+
 import httpx
 
-from ......_types import Body, Query, Headers, NotGiven, not_given
+from ......_files import read_file_content, async_read_file_content
+from ......_types import (
+    Body,
+    Query,
+    Headers,
+    NotGiven,
+    BinaryTypes,
+    FileContent,
+    AsyncBinaryTypes,
+    not_given,
+)
 from ......_utils import path_template
 from ......_compat import cached_property
 from ......_resource import SyncAPIResource, AsyncAPIResource
@@ -57,6 +69,7 @@ class TracesResource(SyncAPIResource):
 
     def create(
         self,
+        body: FileContent | BinaryTypes,
         *,
         workspace: str | None = None,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
@@ -70,6 +83,8 @@ class TracesResource(SyncAPIResource):
         Ingest Otlp Traces
 
         Args:
+          body: Serialized OTLP ExportTraceServiceRequest protobuf
+
           extra_headers: Send extra headers
 
           extra_query: Add additional query parameters to the request
@@ -82,8 +97,10 @@ class TracesResource(SyncAPIResource):
             workspace = self._client._get_workspace_path_param()
         if not workspace:
             raise ValueError(f"Expected a non-empty value for `workspace` but received {workspace!r}")
+        extra_headers = {"Content-Type": "application/x-protobuf", **(extra_headers or {})}
         return self._post(
             path_template("/apis/intake/v2/workspaces/{workspace}/ingest/otlp/v1/traces", workspace=workspace),
+            content=read_file_content(body) if isinstance(body, os.PathLike) else body,
             options=make_request_options(
                 extra_headers=extra_headers, extra_query=extra_query, extra_body=extra_body, timeout=timeout
             ),
@@ -113,6 +130,7 @@ class AsyncTracesResource(AsyncAPIResource):
 
     async def create(
         self,
+        body: FileContent | AsyncBinaryTypes,
         *,
         workspace: str | None = None,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
@@ -126,6 +144,8 @@ class AsyncTracesResource(AsyncAPIResource):
         Ingest Otlp Traces
 
         Args:
+          body: Serialized OTLP ExportTraceServiceRequest protobuf
+
           extra_headers: Send extra headers
 
           extra_query: Add additional query parameters to the request
@@ -138,8 +158,10 @@ class AsyncTracesResource(AsyncAPIResource):
             workspace = self._client._get_workspace_path_param()
         if not workspace:
             raise ValueError(f"Expected a non-empty value for `workspace` but received {workspace!r}")
+        extra_headers = {"Content-Type": "application/x-protobuf", **(extra_headers or {})}
         return await self._post(
             path_template("/apis/intake/v2/workspaces/{workspace}/ingest/otlp/v1/traces", workspace=workspace),
+            content=await async_read_file_content(body) if isinstance(body, os.PathLike) else body,
             options=make_request_options(
                 extra_headers=extra_headers, extra_query=extra_query, extra_body=extra_body, timeout=timeout
             ),

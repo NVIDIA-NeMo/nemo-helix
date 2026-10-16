@@ -10776,7 +10776,6 @@ nemo intake ingest [OPTIONS] COMMAND [ARGS]...
 
 * `atif`: Manage atif
 * `chat-completions`: Manage chat_completions
-* `otlp`: Otlp operations
 * `spans`: Manage spans
 
 ##### nemo intake ingest atif
@@ -10898,96 +10897,6 @@ nemo intake ingest chat-completions create [OPTIONS]
 * `--provider`
 * `--session-id`: Groups related chat-completions calls without forcing them into the same trace.
 * `--trace-id`: Opt into joining an existing trace built via OTel or ATIF. This is not a grouping mechanism for chat-completions calls; use session_id to group related calls.
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Input Options:**
-
-* `--input-file`: Path to JSON file (use '-' for stdin)
-* `--input-data`: Input data for the request (JSON or YAML)
-
-**Output Options:**
-
-* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
-
-##### nemo intake ingest otlp
-
-Otlp operations
-
-**Usage:**
-
-```shell
-nemo intake ingest otlp [OPTIONS] COMMAND [ARGS]...
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Commands:**
-
-* `v1`: V1 operations
-
-###### nemo intake ingest otlp v1
-
-V1 operations
-
-**Usage:**
-
-```shell
-nemo intake ingest otlp v1 [OPTIONS] COMMAND [ARGS]...
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Commands:**
-
-* `traces`: Manage traces
-
-**nemo intake ingest otlp v1 traces**
-
-Manage traces
-
-**Usage:**
-
-```shell
-nemo intake ingest otlp v1 traces [OPTIONS] COMMAND [ARGS]...
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Commands:**
-
-* `create`: Ingest Otlp Traces
-
-**nemo intake ingest otlp v1 traces create**
-
-Ingest Otlp Traces
-
-**Examples:**
-
-```shell
-nemo intake ingest otlp v1 traces create --input-file config.json
-nemo intake ingest otlp v1 traces create --input-data '{"field": "value"}'
-echo '{"json": "data"}' | nemo intake ingest otlp v1 traces create --input-file -
-nemo intake ingest otlp v1 traces create --<option> "value"
-```
-
-**Usage:**
-
-```shell
-nemo intake ingest otlp v1 traces create [OPTIONS]
-```
-
-**Options:**
-
-* `--workspace`
 
 **Help:**
 

@@ -12,12 +12,10 @@ _cli_child_atif = _importlib_import_module("nemo_platform_ext.cli.commands.api.i
 _cli_child_chat_completions = _importlib_import_module(
     "nemo_platform_ext.cli.commands.api.intake.ingest.chat_completions"
 )
-_cli_child_otlp = _importlib_import_module("nemo_platform_ext.cli.commands.api.intake.ingest.otlp")
 _cli_child_spans = _importlib_import_module("nemo_platform_ext.cli.commands.api.intake.ingest.spans")
 
 app = create_typer_app(name="ingest", help="Ingest operations")
 
 app.add_typer(_cli_child_atif.app, name="atif")
 app.add_typer(_cli_child_chat_completions.app, name="chat-completions")
-app.add_typer(_cli_child_otlp.app, name="otlp")
 app.add_typer(_cli_child_spans.app, name="spans")

@@ -36,6 +36,7 @@ class TestTraces:
     @parametrize
     def test_method_create(self, client: NeMoPlatform) -> None:
         trace = client.intake.ingest.otlp.v1.traces.create(
+            body=b"Example data",
             workspace="workspace",
         )
         assert_matches_type(IngestResponse, trace, path=["response"])
@@ -44,6 +45,7 @@ class TestTraces:
     @parametrize
     def test_raw_response_create(self, client: NeMoPlatform) -> None:
         response = client.intake.ingest.otlp.v1.traces.with_raw_response.create(
+            body=b"Example data",
             workspace="workspace",
         )
 
@@ -56,6 +58,7 @@ class TestTraces:
     @parametrize
     def test_streaming_response_create(self, client: NeMoPlatform) -> None:
         with client.intake.ingest.otlp.v1.traces.with_streaming_response.create(
+            body=b"Example data",
             workspace="workspace",
         ) as response:
             assert not response.is_closed
@@ -71,6 +74,7 @@ class TestTraces:
     def test_path_params_create(self, client: NeMoPlatform) -> None:
         with pytest.raises(ValueError, match=r"Expected a non-empty value for `workspace` but received ''"):
             client.intake.ingest.otlp.v1.traces.with_raw_response.create(
+                body=b"Example data",
                 workspace="",
             )
 
@@ -84,6 +88,7 @@ class TestAsyncTraces:
     @parametrize
     async def test_method_create(self, async_client: AsyncNeMoPlatform) -> None:
         trace = await async_client.intake.ingest.otlp.v1.traces.create(
+            body=b"Example data",
             workspace="workspace",
         )
         assert_matches_type(IngestResponse, trace, path=["response"])
@@ -92,6 +97,7 @@ class TestAsyncTraces:
     @parametrize
     async def test_raw_response_create(self, async_client: AsyncNeMoPlatform) -> None:
         response = await async_client.intake.ingest.otlp.v1.traces.with_raw_response.create(
+            body=b"Example data",
             workspace="workspace",
         )
 
@@ -104,6 +110,7 @@ class TestAsyncTraces:
     @parametrize
     async def test_streaming_response_create(self, async_client: AsyncNeMoPlatform) -> None:
         async with async_client.intake.ingest.otlp.v1.traces.with_streaming_response.create(
+            body=b"Example data",
             workspace="workspace",
         ) as response:
             assert not response.is_closed
@@ -119,5 +126,6 @@ class TestAsyncTraces:
     async def test_path_params_create(self, async_client: AsyncNeMoPlatform) -> None:
         with pytest.raises(ValueError, match=r"Expected a non-empty value for `workspace` but received ''"):
             await async_client.intake.ingest.otlp.v1.traces.with_raw_response.create(
+                body=b"Example data",
                 workspace="",
             )

@@ -139,7 +139,7 @@ from nemo_platform.types.intake.ingest.otlp.v1 import IngestResponse
 
 Methods:
 
-- <code title="post /apis/intake/v2/workspaces/{workspace}/ingest/otlp/v1/traces">client.intake.ingest.otlp.v1.traces.<a href="./src/nemo_platform/resources/intake/ingest/otlp/v1/traces.py">create</a>(\*, workspace) -> <a href="./src/nemo_platform/types/intake/ingest/otlp/v1/ingest_response.py">IngestResponse</a></code>
+- <code title="post /apis/intake/v2/workspaces/{workspace}/ingest/otlp/v1/traces">client.intake.ingest.otlp.v1.traces.<a href="./src/nemo_platform/resources/intake/ingest/otlp/v1/traces.py">create</a>(body, \*, workspace, \*\*<a href="src/nemo_platform/types/intake/ingest/otlp/v1/trace_create_params.py">params</a>) -> <a href="./src/nemo_platform/types/intake/ingest/otlp/v1/ingest_response.py">IngestResponse</a></code>
 
 ## Spans
 

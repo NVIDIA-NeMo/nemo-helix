@@ -58,15 +58,31 @@ class IngestResponse(BaseModel):
     "/v2/workspaces/{workspace}/ingest/otlp/v1/traces",
     response_model=IngestResponse,
     tags=[API_TAG],
+    # The body is streamed off the raw Request, so FastAPI infers no schema for it and
+    # generated clients get no body argument unless the spec declares one here.
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "application/x-protobuf": {
+                    "schema": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "Serialized OTLP ExportTraceServiceRequest protobuf",
+                    }
+                }
+            },
+            "required": True,
+        }
+    },
 )
 async def ingest_otlp_traces(
     workspace: str,
     request: Request,
     service: SpansServiceDep,
     denormalizer: DenormalizerDep,
-    content_type: str = Header(default="application/octet-stream"),
     content_length: int | None = Header(default=None),
 ) -> IngestResponse:
+    content_type = request.headers.get("content-type", "")
     if "application/x-protobuf" not in content_type.lower():
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,

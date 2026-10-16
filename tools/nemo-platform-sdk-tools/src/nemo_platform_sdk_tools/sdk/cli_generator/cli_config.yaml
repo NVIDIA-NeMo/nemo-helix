@@ -351,6 +351,11 @@ config:
     delete:
       override: files/delete.py
 
+# The body is binary protobuf, which cannot be passed as a shell argument. Producers
+# use an OTLP exporter or the SDK's create(body=...) instead.
+- resource: [intake, ingest, otlp]
+  skip: true
+
 - resource: [intake, ingest, spans]
   methods:
     create:

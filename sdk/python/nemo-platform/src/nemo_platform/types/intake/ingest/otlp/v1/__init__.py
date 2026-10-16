@@ -18,3 +18,4 @@
 from __future__ import annotations
 
 from .ingest_response import IngestResponse as IngestResponse
+from .trace_create_params import TraceCreateParams as TraceCreateParams

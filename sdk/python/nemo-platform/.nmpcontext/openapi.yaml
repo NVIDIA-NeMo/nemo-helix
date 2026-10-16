@@ -4656,13 +4656,6 @@ paths:
         schema:
           type: string
           title: Workspace
-      - name: content-type
-        in: header
-        required: false
-        schema:
-          type: string
-          default: application/octet-stream
-          title: Content-Type
       - name: content-length
         in: header
         required: false
@@ -4682,6 +4675,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      requestBody:
+        content:
+          application/x-protobuf:
+            schema:
+              type: string
+              format: binary
+              description: Serialized OTLP ExportTraceServiceRequest protobuf
+        required: true
   /apis/intake/v2/workspaces/{workspace}/ingest/spans:
     post:
       tags:
