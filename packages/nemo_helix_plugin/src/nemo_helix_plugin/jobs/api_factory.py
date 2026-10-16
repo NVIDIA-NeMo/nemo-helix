@@ -77,14 +77,16 @@ from nemo_helix_plugin.jobs.telemetry import stamp_job_telemetry_plugins
 from nemo_helix_plugin.jobs.types import (
     CreateHelixJobRequest,
     JobLogsQueryParams,
+    JobName,
     ListJobsQueryParams,
+    validate_job_name_fits_derived_fileset,
     validate_output_location,
 )
 from nemo_helix_plugin.jobs.types import (
     HelixJobResponse as HelixJob,
 )
 from nemo_helix_plugin.schema import DatetimeFilter, Filter, Page, PaginationData, StringFilter
-from pydantic import BaseModel, Field, TypeAdapter, field_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +131,9 @@ JobSchemaLike = JobSchema | JobSchemaAnnotated
 
 
 class BaseJobRequest(BaseModel, Generic[JobConfigT]):
-    name: str | None = None
+    model_config = ConfigDict(regex_engine="python-re")
+
+    name: JobName | None = None
     description: str | None = None
     project: str | None = None
     spec: JobConfigT
@@ -140,6 +144,7 @@ class BaseJobRequest(BaseModel, Generic[JobConfigT]):
     output_location: str | None = None
 
     _validate_output_location = field_validator("output_location")(validate_output_location)
+    _validate_name_fits_derived_fileset = model_validator(mode="after")(validate_job_name_fits_derived_fileset)
 
 
 class BaseJob(BaseModel, Generic[JobConfigT]):
