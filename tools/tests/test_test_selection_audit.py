@@ -60,6 +60,25 @@ jobs:
     assert job.run_block_working_directories == ("plugins/example", "")
 
 
+def test_a_run_line_inside_a_block_scalar_is_content_not_a_step() -> None:
+    workflow = """\
+jobs:
+  smoke:
+    name: Smoke
+    if: needs.changes.outputs.plugin == 'true'
+    steps:
+      - name: Run smoke
+        working-directory: plugins/example
+        run: |
+          make check
+          run: smoke
+"""
+    job = parse_workflow_jobs(workflow)["smoke"]
+
+    assert job.run_blocks == ("make check\nrun: smoke",)
+    assert job.run_block_working_directories == ("plugins/example",)
+
+
 def test_audit_report_is_clean_after_filter_updates() -> None:
     report = audit_repository(REPO_ROOT)
 

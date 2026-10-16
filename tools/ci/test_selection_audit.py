@@ -964,11 +964,8 @@ def _parse_job_name(block_lines: Sequence[str]) -> str:
 
 def _parse_run_steps(block_lines: Sequence[str]) -> list[tuple[str, str]]:
     """Pair each run block with its step's ``working-directory`` (``""`` when unset)."""
-    blocks = _parse_run_blocks(block_lines)
-    run_indices = [index for index, line in enumerate(block_lines) if re.match(r"^\s*run:", line)]
     return [
-        (block, _step_working_directory(block_lines, run_index))
-        for block, run_index in zip(blocks, run_indices, strict=True)
+        (block, _step_working_directory(block_lines, run_index)) for block, run_index in _parse_run_blocks(block_lines)
     ]
 
 
@@ -992,8 +989,9 @@ def _step_working_directory(block_lines: Sequence[str], run_index: int) -> str:
     return ""
 
 
-def _parse_run_blocks(block_lines: Sequence[str]) -> list[str]:
-    blocks: list[str] = []
+def _parse_run_blocks(block_lines: Sequence[str]) -> list[tuple[str, int]]:
+    """Return each run block with the index of its ``run:`` line, skipping block-scalar content."""
+    blocks: list[tuple[str, int]] = []
     index = 0
     while index < len(block_lines):
         line = block_lines[index]
@@ -1003,6 +1001,7 @@ def _parse_run_blocks(block_lines: Sequence[str]) -> list[str]:
             continue
         indent = len(match.group(1))
         rest = match.group(2).strip()
+        run_index = index
         if rest in {"|", ">"}:
             collected: list[str] = []
             index += 1
@@ -1012,9 +1011,9 @@ def _parse_run_blocks(block_lines: Sequence[str]) -> list[str]:
                     break
                 collected.append(candidate[indent + 2 :] if len(candidate) >= indent + 2 else "")
                 index += 1
-            blocks.append("\n".join(collected))
+            blocks.append(("\n".join(collected), run_index))
             continue
-        blocks.append(_strip_yaml_scalar(rest))
+        blocks.append((_strip_yaml_scalar(rest), run_index))
         index += 1
     return blocks
 
