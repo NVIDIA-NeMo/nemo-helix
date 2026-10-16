@@ -2556,6 +2556,7 @@ def test_resolve_target_raises_a_relay_version_persisted_under_an_older_fabric(t
         "harness": {"adapter_id": "nvidia.fabric.codex"},
         "relay": {"observability": {"version": 3, "atif": {"enabled": True}}},
     }
+    raised = {**persisted, "relay": {"observability": {"version": 4, "atif": {"enabled": True}}}}
 
     fabric_target = FabricRunnerTarget(
         source=RegisteredAgentSource(agent=AgentRef(root="dev/a")), resolved_config=persisted
@@ -2571,4 +2572,4 @@ def test_resolve_target_raises_a_relay_version_persisted_under_an_older_fabric(t
     runner, _, _ = AgentEvalJob._resolve_target(harbor_target, ctx)
     assert isinstance(runner, HarborAgentTaskRunner)
     assert runner._config is not None
-    assert runner._config.agent_kwargs["fabric_config"]["relay"]["observability"]["version"] == 4
+    assert runner._config.agent_kwargs["fabric_config"] == raised
