@@ -918,7 +918,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   return (
     <EvalWizard
       heading="Run Agent Evaluation"
-      headingDescription="Score your agent against a dataset. Start a new experiment, or re-run an existing evaluation to compare against it."
+      headingDescription="Score your agent against a dataset."
       steps={steps.map(stepHeading)}
       activeStep={stepIndex(steps, step)}
       onSubmit={(event) => {

@@ -217,6 +217,10 @@ export const AgentDetailRoute: FC = () => {
   // `isLoading`: a paused retry (hidden tab, offline) is not loading, but has not settled either.
   useEffect(() => {
     if (!actionFromUrl || isAgentPending) return;
+    if (actionFromUrl === 'run-evaluation' && canRunEvaluation && agentName) {
+      navigate(getAgentRunEvaluationRoute(workspace, agentName), { replace: true });
+      return;
+    }
     const optimizeRequested =
       actionFromUrl === 'optimize' && AGENT_OPTIMIZATIONS_ENABLED && !!agent;
     if (optimizeRequested && !AGENT_OPTIMIZATION_FORM_ENABLED) setLaunchOptimizeOpen(true);
@@ -232,7 +236,16 @@ export const AgentDetailRoute: FC = () => {
       },
       { replace: true }
     );
-  }, [actionFromUrl, isAgentPending, agent, setSearchParams]);
+  }, [
+    actionFromUrl,
+    isAgentPending,
+    agent,
+    setSearchParams,
+    canRunEvaluation,
+    agentName,
+    workspace,
+    navigate,
+  ]);
 
   const status = healthyDeployments.length > 0 ? 'running' : agentDeployments[0]?.status;
   const statusPillLabel =

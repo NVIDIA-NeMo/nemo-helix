@@ -12,7 +12,11 @@ import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
-import { getAgentDetailRoute, getAgentRunEvaluationRoute } from '@studio/routes/utils';
+import {
+  getAgentDetailRoute,
+  getAgentEvaluationsTabRoute,
+  getAgentRunEvaluationRoute,
+} from '@studio/routes/utils';
 import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
 import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
 import { renderRoute, screen, within } from '@studio/tests/util/render';
@@ -241,6 +245,20 @@ describe('AgentDetailRoute', () => {
     const [headerButton] = await screen.findAllByRole('button', { name: 'Run Evaluation' });
     await waitFor(() => expect(headerButton).toBeEnabled());
     await user.click(headerButton);
+
+    await waitFor(() =>
+      expect(currentLocation()).toBe(getAgentRunEvaluationRoute(workspace, agentName))
+    );
+  });
+
+  it('sends an old ?action=run-evaluation link to the Run Agent Evaluation page', async () => {
+    renderRoute(undefined, {
+      history: `${getAgentEvaluationsTabRoute(workspace, agentName)}&action=run-evaluation`,
+      routes: [
+        { path: ROUTES.workspace.agentDetail, element: <AgentDetailRoute /> },
+        { path: ROUTES.workspace.agentEvaluationNew, element: <LocationDisplay /> },
+      ],
+    });
 
     await waitFor(() =>
       expect(currentLocation()).toBe(getAgentRunEvaluationRoute(workspace, agentName))
