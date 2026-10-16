@@ -9,6 +9,29 @@ description: ""
 
 This section describes how to configure jobs in NeMo Helix. The Jobs service is responsible for scheduling batch jobs, collecting telemetry and managing job results.
 
+## Viewing Job Attempts
+
+Each job run creates an attempt. The job response includes `attempt_id` for the current attempt. List the attempt history or retrieve the current attempt without first looking up its ID:
+
+```bash
+nemo jobs attempts list <job-name> --workspace default
+nemo jobs attempts get current --job <job-name> --workspace default
+```
+
+Attempt-scoped APIs keep execution data from different runs separate. `nemo jobs results get` requires `--attempt-id <attempt-id>` or `--attempt-id current`; result metadata cannot be retrieved ambiguously from the job alone. Step, task, log, watch, and tail commands also accept an attempt selector when you need data from a specific run.
+
+## Updating Jobs
+
+Use `nemo jobs update` to change mutable metadata or the job definition used by future attempts:
+
+```bash
+nemo jobs update <job-name> \
+  --workspace default \
+  --description "Updated description"
+```
+
+Definition updates must provide both `spec` and `platform_spec`; the Jobs Factory recompiles plugin job specs before forwarding the paired fields. To clear a job description, use `--input-data '{"description": null}'`.
+
 ## Viewing Job Logs
 
 Use `nemo jobs get-logs` to inspect paginated job logs:
@@ -23,7 +46,7 @@ Use `nemo jobs tail` when you only need the newest lines from a long or running 
 nemo jobs tail <job-name> --workspace default -n 500
 ```
 
-Both commands support `--attempt-id`, `--step-id`, and `--task-id` to narrow the log output.
+Both commands support `--attempt-id`, `--step-id`, and `--task-id` to narrow the log output. The attempt selector accepts an attempt ID or `current`.
 
 ## Execution Profiles
 

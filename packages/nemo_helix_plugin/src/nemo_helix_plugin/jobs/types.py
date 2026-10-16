@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, NotRequired, Optional, TypedDict
+from typing import Any, NotRequired, Optional, Self, TypedDict
 
 from nemo_helix_plugin.files.types import MAX_LENGTH as FILESET_NAME_MAX_LENGTH
 from nemo_helix_plugin.files.types import NAME_PATTERN as FILESET_NAME_PATTERN
@@ -30,7 +30,7 @@ from nemo_helix_plugin.jobs.schemas import (
 )
 from nemo_helix_plugin.jobs.spec import HelixJobSpec, HelixJobStepSpec
 from nemo_helix_plugin.schema import Value
-from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, model_validator
 
 _FILESET_NAME_RE = re.compile(FILESET_NAME_PATTERN)
 
@@ -206,6 +206,24 @@ class HelixJobResponse(BaseModel):
     custom_fields: Optional[dict[str, Any]] = Field(default=None, description="Custom Fields")
 
 
+class HelixJobAttemptResponse(BaseModel):
+    """Response model for one execution attempt of a platform job."""
+
+    id: str
+    name: str
+    job: str = Field(..., description="Parent job ID")
+    workspace: str
+    seq: int
+    spec: dict[str, Any] = Field(default_factory=dict)
+    platform_spec: HelixJobSpec
+    status: HelixJobStatus
+    status_details: dict[str, Any] = Field(default_factory=dict)
+    error_details: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime
+    is_current: bool = False
+
+
 class HelixJobStepResponse(BaseModel):
     """Response model for a job step (wire shape of the ``HelixJobStep`` entity)."""
 
@@ -328,6 +346,28 @@ class CreateHelixJobRequest(BaseModel):
     _validate_output_location = field_validator("output_location")(validate_output_location)
 
 
+class UpdateHelixJobRequest(BaseModel):
+    """Validated partial update for a job description or definition."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: str | None = None
+    spec: dict[str, Any] | None = None
+    platform_spec: HelixJobSpec | None = None
+
+    @model_validator(mode="after")
+    def validate_paired_specs(self) -> Self:
+        if not self.model_fields_set:
+            raise ValueError("at least one mutable job field is required")
+        spec_supplied = "spec" in self.model_fields_set
+        platform_spec_supplied = "platform_spec" in self.model_fields_set
+        if spec_supplied != platform_spec_supplied:
+            raise ValueError("spec and platform_spec must be supplied together")
+        if spec_supplied and (self.spec is None or self.platform_spec is None):
+            raise ValueError("spec and platform_spec cannot be null")
+        return self
+
+
 class HelixJobTaskUpdate(BaseModel):
     """Request model for updating a platform job task."""
 
@@ -358,7 +398,7 @@ HelixJobStatusDetailsUpdateRequest = dict[str, Any]
 
 
 class JobStatusDetailsUpdate(RootModel[dict[str, Any]]):
-    """Client request body for ``update_job_status_details`` (a bare JSON object)."""
+    """Client request body for attempt status-details updates (a bare JSON object)."""
 
 
 # NB: list *filter* models (``HelixJobsListFilter`` etc.) are intentionally
@@ -386,6 +426,13 @@ class ListStepsQueryParams(TypedDict, total=False):
     filter: NotRequired[str | dict[str, Any]]
 
 
+class ListAttemptsQueryParams(TypedDict, total=False):
+    page: NotRequired[int]
+    page_size: NotRequired[int]
+    sort: NotRequired[str]
+    filter: NotRequired[str | dict[str, Any]]
+
+
 class ListJobResultsQueryParams(TypedDict, total=False):
     sort: NotRequired[str]
 
@@ -393,7 +440,7 @@ class ListJobResultsQueryParams(TypedDict, total=False):
 class JobLogsQueryParams(TypedDict, total=False):
     limit: NotRequired[int]
     page_cursor: NotRequired[str]
-    attempt_id: NotRequired[int]
+    attempt_id: NotRequired[str | int]
     step_id: NotRequired[str]
     task_id: NotRequired[str]
     tail: NotRequired[int]

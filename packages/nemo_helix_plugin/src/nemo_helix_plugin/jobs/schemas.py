@@ -23,6 +23,7 @@ class HelixJobResultResponse(BaseModel):
     job: str
     workspace: str
     project: str | None = None
+    attempt_id: str | None = None
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
     artifact_url: str

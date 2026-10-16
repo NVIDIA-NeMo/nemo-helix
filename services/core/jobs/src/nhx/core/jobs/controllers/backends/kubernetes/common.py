@@ -1415,10 +1415,11 @@ def update_all_tasks(
             error_details["message"] = f"Pod {pod_status.name} is in error state"
 
         # Upsert the task against the Jobs API.
-        JobsClient.from_client(nemo_client).update_job_step_task(
+        JobsClient.from_client(nemo_client).update_attempt_step_task(
             name=pod_status.task_id,
             workspace=step.workspace,
             job=step.job,
+            attempt=step.attempt_id,
             step=step.name,
             body=HelixJobTaskUpdate(
                 status=status,

@@ -5814,6 +5814,665 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts:
+    get:
+      tags:
+      - Jobs
+      summary: List Job Attempts
+      description: List the execution attempts for a job.
+      operationId: list_job_attempts_apis_jobs_v2_workspaces__workspace__jobs__job__attempts_get
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          description: Page size.
+          default: 25
+          title: Page Size
+        description: Page size.
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobAttemptSortField'
+          description: Sort attempts by sequence. Prefix with `-` for descending order.
+          default: -seq
+        description: Sort attempts by sequence. Prefix with `-` for descending order.
+      - in: query
+        name: filter
+        style: deepObject
+        required: false
+        explode: true
+        schema:
+          $ref: '#/components/schemas/HelixJobAttemptsListFilter'
+        description: Filter attempts by status.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobAttemptResponsesPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}:
+    get:
+      tags:
+      - Jobs
+      summary: Get Job Attempt
+      description: Get an attempt by ID or the reserved current selector.
+      operationId: get_job_attempt_apis_jobs_v2_workspaces__workspace__jobs__job__attempts__attempt__get
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobAttemptResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/results:
+    get:
+      tags:
+      - Jobs
+      summary: List Attempt Results
+      description: List result metadata for one attempt.
+      operationId: list_attempt_results_apis_jobs_v2_workspaces__workspace__jobs__job__attempts__attempt__results_get
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobSortField'
+          default: -created_at
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobListResultResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/results/{name}:
+    post:
+      tags:
+      - Jobs
+      summary: Create Attempt Result
+      description: Create result metadata scoped to one resolved attempt.
+      operationId: create_attempt_result_apis_jobs_v2_workspaces__workspace__jobs__job__attempts__attempt__results__name__post
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HelixJobResultCreateRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobResultResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - Jobs
+      summary: Get Attempt Result
+      description: Get result metadata for one attempt.
+      operationId: get_attempt_result_apis_jobs_v2_workspaces__workspace__jobs__job__attempts__attempt__results__name__get
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobResultResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/results/{name}/download:
+    get:
+      tags:
+      - Jobs
+      summary: Download Attempt Result
+      description: Download an artifact selected through a concrete attempt.
+      operationId: download_attempt_result_apis_jobs_v2_workspaces__workspace__jobs__job__attempts__attempt__results__name__download_get
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/status-details:
+    patch:
+      tags:
+      - Jobs
+      summary: Update Job Attempt Status Details
+      description: Update status details for one resolved attempt.
+      operationId: update_job_attempt_status_details_apis_jobs_v2_workspaces__workspace__jobs__job__attempts__attempt__status_details_patch
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Request
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps:
+    get:
+      tags:
+      - Jobs
+      summary: List Attempt Steps
+      description: List steps for one attempt.
+      operationId: list_attempt_steps_apis_jobs_v2_workspaces__workspace__jobs__job__attempts__attempt__steps_get
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          description: Page size.
+          default: 25
+          title: Page Size
+        description: Page size.
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobSortField'
+          default: created_at
+      - in: query
+        name: filter
+        style: deepObject
+        required: false
+        explode: true
+        schema:
+          $ref: '#/components/schemas/HelixAttemptStepsListFilter'
+        description: Filter steps within the selected attempt.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobStepWithContextsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{name}:
+    get:
+      tags:
+      - Jobs
+      summary: Get Attempt Step
+      description: Get a step from one attempt.
+      operationId: get_attempt_step_apis_jobs_v2_workspaces__workspace__jobs__job__attempts__attempt__steps__name__get
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobStep'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{name}/status:
+    patch:
+      tags:
+      - Jobs
+      summary: Update Attempt Step Status
+      description: Update a step selected through a concrete attempt.
+      operationId: update_attempt_step_status_apis_jobs_v2_workspaces__workspace__jobs__job__attempts__attempt__steps__name__status_patch
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HelixJobStatusUpdateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobStep'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{step}/tasks:
+    get:
+      tags:
+      - Jobs
+      summary: List Attempt Step Tasks
+      description: List tasks after validating the job, attempt, and step chain.
+      operationId: list_attempt_step_tasks_apis_jobs_v2_workspaces__workspace__jobs__job__attempts__attempt__steps__step__tasks_get
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      - name: step
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Step
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobListTaskResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{step}/tasks/{name}:
+    put:
+      tags:
+      - Jobs
+      summary: Update Attempt Step Task
+      description: Create or update a task under one concrete attempt step.
+      operationId: update_attempt_step_task_apis_jobs_v2_workspaces__workspace__jobs__job__attempts__attempt__steps__step__tasks__name__put
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      - name: step
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Step
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HelixJobTaskUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobTask'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - Jobs
+      summary: Get Attempt Step Task
+      description: Get a task under one concrete attempt step.
+      operationId: get_attempt_step_task_apis_jobs_v2_workspaces__workspace__jobs__job__attempts__attempt__steps__step__tasks__name__get
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      - name: step
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Step
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobTask'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/results/{name}:
     post:
       tags:
@@ -5855,46 +6514,6 @@ paths:
                 $ref: '#/components/schemas/HelixJobResultResponse'
         '404':
           description: Job not Found
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-    get:
-      tags:
-      - Jobs
-      summary: Get Job Result
-      description: Get a specific job result.
-      operationId: get_job_result_apis_jobs_v2_workspaces__workspace__jobs__job__results__name__get
-      parameters:
-      - name: job
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Job
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HelixJobResultResponse'
-        '404':
-          description: Not Found
         '422':
           description: Validation Error
           content:
@@ -6208,6 +6827,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Jobs
+      summary: Update Job
+      description: Update mutable job metadata or the definition used by future attempts.
+      operationId: update_job_apis_jobs_v2_workspaces__workspace__jobs__name__patch
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateHelixJobRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobResponse'
+        '404':
+          description: Job not Found
+        '409':
+          description: Version conflict
+        '422':
+          description: Invalid job update
     delete:
       tags:
       - Jobs
@@ -6329,10 +6986,12 @@ paths:
         in: query
         required: false
         schema:
-          description: Filter logs by job attempt ID
+          anyOf:
+          - type: string
+          - type: integer
+          description: Filter logs by job attempt ID or `current`
           title: Attempt Id
-          type: integer
-        description: Filter logs by job attempt ID
+        description: Filter logs by job attempt ID or `current`
       - name: step_id
         in: query
         required: false
@@ -6507,48 +7166,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HelixJobStatusResponse'
-        '404':
-          description: Job not Found
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/status-details:
-    patch:
-      tags:
-      - Jobs
-      summary: Update Job Status Details
-      description: Update the status details of a platform job.
-      operationId: update_job_status_details_apis_jobs_v2_workspaces__workspace__jobs__name__status_details_patch
-      parameters:
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
-              title: Request
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema: {}
         '404':
           description: Job not Found
         '422':
@@ -14526,6 +15143,121 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    HelixAttemptStepsListFilter:
+      additionalProperties: false
+      description: Filter options for steps nested under one attempt.
+      properties:
+        status:
+          description: The list of statuses to filter steps by.
+          title: Status
+          items:
+            $ref: '#/components/schemas/HelixJobStatus'
+          type: array
+        task_cleanup_pending:
+          description: Whether terminal child-task cleanup is unfinished.
+          title: Task Cleanup Pending
+          type: boolean
+      title: HelixAttemptStepsListFilter
+      type: object
+    HelixJobAttemptResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+          description: Parent job ID
+        workspace:
+          type: string
+          title: Workspace
+        seq:
+          type: integer
+          title: Seq
+        spec:
+          additionalProperties: true
+          type: object
+          title: Spec
+        platform_spec:
+          $ref: '#/components/schemas/HelixJobSpec'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        is_current:
+          type: boolean
+          title: Is Current
+          default: false
+      type: object
+      required:
+      - id
+      - name
+      - job
+      - workspace
+      - seq
+      - platform_spec
+      - status
+      - created_at
+      - updated_at
+      title: HelixJobAttemptResponse
+      description: Response model for one execution attempt of a platform job.
+    HelixJobAttemptResponsesPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobAttemptResponse'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: HelixJobAttemptResponsesPage
+    HelixJobAttemptSortField:
+      type: string
+      enum:
+      - seq
+      - -seq
+      title: HelixJobAttemptSortField
+    HelixJobAttemptsListFilter:
+      additionalProperties: false
+      description: Filter options for listing platform job attempts.
+      properties:
+        status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: The current status.
+      title: HelixJobAttemptsListFilter
+      type: object
     HelixJobEnvironmentVariable:
       properties:
         name:
@@ -14759,6 +15491,9 @@ components:
           title: Workspace
         project:
           title: Project
+          type: string
+        attempt_id:
+          title: Attempt Id
           type: string
         created_at:
           type: string
@@ -20976,6 +21711,21 @@ components:
           type: object
       type: object
       title: UpdateFilesetRequest
+    UpdateHelixJobRequest:
+      properties:
+        description:
+          title: Description
+          type: string
+        spec:
+          title: Spec
+          additionalProperties: true
+          type: object
+        platform_spec:
+          $ref: '#/components/schemas/HelixJobSpec'
+      additionalProperties: false
+      type: object
+      title: UpdateHelixJobRequest
+      description: Validated partial update for a job description or definition.
     UpdateModelDeploymentConfigRequest:
       properties:
         description:

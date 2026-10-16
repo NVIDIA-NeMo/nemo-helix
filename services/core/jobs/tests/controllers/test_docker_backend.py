@@ -3194,7 +3194,7 @@ def test_cleanup_single_container_checks_storage_cleanup_allowed(docker_job, doc
 
     # Verify persistent storage cleanup eligibility was checked
     docker_job.check_job_persistent_storage_cleanup_allowed.assert_called_once_with(
-        job="test-job-id", step_name="test-step", workspace="default"
+        job="test-job-id", step_name="test-step", workspace="default", attempt_id=None
     )
 
     # Reset mocks
@@ -3217,7 +3217,7 @@ def test_cleanup_single_container_checks_storage_cleanup_allowed(docker_job, doc
 
     # Verify persistent storage cleanup eligibility was checked
     docker_job.check_job_persistent_storage_cleanup_allowed.assert_called_once_with(
-        job="test-job-id", step_name="test-step", workspace="default"
+        job="test-job-id", step_name="test-step", workspace="default", attempt_id=None
     )
 
 
@@ -3385,7 +3385,7 @@ def test_cleanup_single_container_step_terminal_but_job_has_more_steps(docker_jo
 
     # Verify persistent storage cleanup eligibility was checked
     docker_job.check_job_persistent_storage_cleanup_allowed.assert_called_once_with(
-        job="multi-step-job", step_name="step1", workspace="default"
+        job="multi-step-job", step_name="step1", workspace="default", attempt_id=None
     )
 
     # Verify persistent storage cleanup was NOT called (job is not terminal yet)
@@ -3409,7 +3409,7 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(docker_job, 
 
     # Mock check_step_is_terminal to return True for step1 (terminal)
     # and False for step2 (non-terminal)
-    def check_step_side_effect(job, step_name, workspace):
+    def check_step_side_effect(job, step_name, workspace, attempt_id=None):
         if step_name == "step1":
             return True
         return False
@@ -3491,7 +3491,7 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(docker_job, 
 
     # Verify persistent storage cleanup eligibility was checked for step 1
     docker_job.check_job_persistent_storage_cleanup_allowed.assert_called_once_with(
-        job="multi-step-job", step_name="step1", workspace="default"
+        job="multi-step-job", step_name="step1", workspace="default", attempt_id=None
     )
 
     # Verify persistent storage cleanup was NOT called

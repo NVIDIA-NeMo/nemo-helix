@@ -147,10 +147,11 @@ class JobsServiceProgressReporter:
             return
 
         try:
-            self._jobs.update_job_step_task(
+            self._jobs.update_attempt_step_task(
                 name=self._job_ctx.normalized_task,
                 workspace=self._job_ctx.workspace,
                 job=self._job_ctx.job_id,
+                attempt=self._job_ctx.attempt_id,
                 step=self._job_ctx.step,
                 body=HelixJobTaskUpdate(
                     status=HelixJobStatus(status),
@@ -200,10 +201,11 @@ class JobsServiceProgressReporter:
             return {}
 
         try:
-            task = self._jobs.get_job_step_task(
+            task = self._jobs.get_attempt_step_task(
                 name=self._job_ctx.normalized_task,
                 workspace=self._job_ctx.workspace,
                 job=self._job_ctx.job_id,
+                attempt=self._job_ctx.attempt_id,
                 step=self._job_ctx.step,
             ).data()
             stored = task.status_details or {}

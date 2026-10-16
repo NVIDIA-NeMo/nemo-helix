@@ -28,13 +28,19 @@ def _client_error(error_cls, status_code: int, detail: str):
     return error_cls(response)
 
 
+def _attempt_response(attempt_id: str = "attempt-1") -> MagicMock:
+    response = MagicMock()
+    response.data.return_value = MagicMock(id=attempt_id)
+    return response
+
+
 @contextmanager
 def _patch_jobs_client(jobs_client: MagicMock, files_client: MagicMock) -> Generator[None, None, None]:
     """Patch the typed clients the compiler derives from the platform client.
 
     The compiler validates the ``data_source`` fileset via
     ``AsyncFilesClient.from_client(client).get_fileset(...)`` and then resolves
-    the pretrained-model adapter via ``AsyncJobsClient.from_client(client).get_job_result(...)``.
+    the pretrained-model adapter via an attempt-scoped Jobs client lookup.
     """
     with (
         patch("nemo_safe_synthesizer_plugin.jobs.generate.AsyncFilesClient.from_client", return_value=files_client),
@@ -194,7 +200,8 @@ async def test_job_config_compiler_uses_image_ref_override(mock_sdk, monkeypatch
 @pytest.mark.asyncio
 async def test_job_config_compiler_validates_pretrained_model_job(mock_sdk, mock_files_client):
     jobs_client = MagicMock()
-    jobs_client.get_job_result = AsyncMock(
+    jobs_client.get_job_attempt = AsyncMock(return_value=_attempt_response())
+    jobs_client.get_attempt_result = AsyncMock(
         return_value=MagicMock(artifact_url="default/job-results-prior#results/attempt-1/adapter")
     )
     spec = PluginJobConfig.model_validate(
@@ -208,9 +215,15 @@ async def test_job_config_compiler_validates_pretrained_model_job(mock_sdk, mock
     with _patch_jobs_client(jobs_client, mock_files_client):
         await _compile(spec, mock_sdk)
 
-    jobs_client.get_job_result.assert_awaited_once_with(
+    jobs_client.get_job_attempt.assert_awaited_once_with(
+        job="prior-safe-synth-job",
+        attempt="current",
+        workspace=DEFAULT_WORKSPACE,
+    )
+    jobs_client.get_attempt_result.assert_awaited_once_with(
         name="adapter",
         job="prior-safe-synth-job",
+        attempt="attempt-1",
         workspace=DEFAULT_WORKSPACE,
     )
 
@@ -218,7 +231,8 @@ async def test_job_config_compiler_validates_pretrained_model_job(mock_sdk, mock
 @pytest.mark.asyncio
 async def test_plugin_job_config_allows_pretrained_model_job_runtime_config(mock_sdk, mock_files_client):
     jobs_client = MagicMock()
-    jobs_client.get_job_result = AsyncMock(
+    jobs_client.get_job_attempt = AsyncMock(return_value=_attempt_response())
+    jobs_client.get_attempt_result = AsyncMock(
         return_value=MagicMock(artifact_url="default/job-results-prior#results/attempt-1/adapter")
     )
     spec = PluginJobConfig.model_validate(
@@ -282,7 +296,8 @@ def test_task_job_config_preserves_pretrained_model_without_pretrained_model_job
 @pytest.mark.asyncio
 async def test_job_config_compiler_pretrained_model_job_not_found(mock_sdk, mock_files_client):
     jobs_client = MagicMock()
-    jobs_client.get_job_result = AsyncMock(side_effect=_client_error(ClientNotFoundError, 404, "not found"))
+    jobs_client.get_job_attempt = AsyncMock(return_value=_attempt_response())
+    jobs_client.get_attempt_result = AsyncMock(side_effect=_client_error(ClientNotFoundError, 404, "not found"))
     spec = PluginJobConfig.model_validate(
         {
             "data_source": DEFAULT_DATA_SOURCE,

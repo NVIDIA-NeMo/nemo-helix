@@ -25,7 +25,7 @@ from nemo_helix_plugin.jobs.api_factory import (
     job_route_factory,
 )
 from nemo_helix_plugin.jobs.docker import spec_has_gpu_step
-from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
+from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, UpdateHelixJobRequest
 from pydantic import BaseModel, ConfigDict, ValidationError
 from starlette.testclient import TestClient
 
@@ -83,6 +83,7 @@ def _mock_create_response(spec: dict[str, object]) -> MagicMock:
         id="job-1",
         name="test-job",
         description=None,
+        project="project-a",
         workspace="default",
         created_at=datetime(2026, 1, 1),
         updated_at=datetime(2026, 1, 1),
@@ -92,21 +93,68 @@ def _mock_create_response(spec: dict[str, object]) -> MagicMock:
         error_details=None,
         ownership=None,
         custom_fields=None,
+        attempt_id="attempt-1",
     )
     response = MagicMock()
     response.data.return_value = job
     return response
 
 
+def _mock_attempt_response(spec: dict[str, object]) -> SimpleNamespace:
+    return SimpleNamespace(
+        id="attempt-1",
+        name="attempt-1",
+        job="job-1",
+        workspace="default",
+        seq=0,
+        spec=spec,
+        status="created",
+        status_details={},
+        error_details=None,
+        created_at=datetime(2026, 1, 1),
+        updated_at=datetime(2026, 1, 1),
+        is_current=True,
+    )
+
+
 class _RecordingJobsClient:
     def __init__(self) -> None:
         self.created_body: CreateHelixJobRequest | None = None
+        self.updated_body: UpdateHelixJobRequest | None = None
+        self.list_attempts_call: dict[str, object] | None = None
+        self.get_attempt_call: dict[str, object] | None = None
 
     async def create_job(self, *, workspace: str, body: CreateHelixJobRequest) -> MagicMock:
         del workspace
         self.created_body = body
         expected_spec = {"blob": base64.b64encode(_PICKLE_BYTES).decode("ascii")}
         return _mock_create_response(expected_spec)
+
+    async def update_job(self, *, name: str, workspace: str, body: UpdateHelixJobRequest) -> MagicMock:
+        del name, workspace
+        self.updated_body = body
+        return _mock_create_response(body.spec or {"blob": base64.b64encode(_PICKLE_BYTES).decode("ascii")})
+
+    async def list_job_attempts(self, **kwargs: object) -> MagicMock:
+        self.list_attempts_call = kwargs
+        response = MagicMock()
+        response.page.return_value = SimpleNamespace(
+            items=[_mock_attempt_response({"blob": base64.b64encode(_PICKLE_BYTES).decode("ascii")})],
+            metadata={
+                "page": 1,
+                "page_size": 25,
+                "current_page_size": 1,
+                "total_pages": 1,
+                "total_results": 1,
+            },
+        )
+        return response
+
+    async def get_job_attempt(self, **kwargs: object) -> MagicMock:
+        self.get_attempt_call = kwargs
+        response = MagicMock()
+        response.data.return_value = _mock_attempt_response({"blob": base64.b64encode(_PICKLE_BYTES).decode("ascii")})
+        return response
 
 
 def test_job_spec_models_support_mapping_style_access() -> None:
@@ -208,6 +256,130 @@ def test_create_job_forwards_transformed_spec_in_json_mode() -> None:
     assert blob == base64.b64encode(_PICKLE_BYTES).decode("ascii")
     # Must be JSON-serializable for the typed jobs client (raw bytes would 500).
     json.dumps({"spec": spec})
+    assert response.json()["project"] == "project-a"
+    assert response.json()["attempt_id"] == "attempt-1"
+    assert "db_version" not in response.json()
+
+
+def test_update_job_recompiles_typed_spec_and_sends_paired_core_specs() -> None:
+    router = job_route_factory(
+        service_name="widgets",
+        job_type="Widget",
+        job_input=_InputSpec,
+        job_output=_OutputSpec,
+        input_to_output=_to_output,
+        platform_job_config_compiler=_compiler,
+    )
+    app = FastAPI()
+    app.include_router(router, prefix="/apis/widgets/v2/workspaces/{workspace}")
+    app.dependency_overrides[get_nemo_client] = lambda: MagicMock()
+    app.dependency_overrides[get_entity_client] = lambda: MagicMock()
+    mock_jobs = _RecordingJobsClient()
+
+    client = TestClient(app)
+    with patch(
+        "nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client",
+        return_value=mock_jobs,
+    ):
+        response = client.patch(
+            "/apis/widgets/v2/workspaces/default/jobs/test-job",
+            json={"spec": {"label": "updated"}},
+        )
+
+    assert response.status_code == 200, response.text
+    body = mock_jobs.updated_body
+    assert body is not None
+    assert body.spec == {"blob": base64.b64encode(_PICKLE_BYTES).decode("ascii")}
+    assert body.platform_spec is not None
+
+
+def test_factory_attempt_routes_preserve_typed_specs_and_current_selector() -> None:
+    router = job_route_factory(
+        service_name="widgets",
+        job_type="Widget",
+        job_input=_InputSpec,
+        job_output=_OutputSpec,
+        input_to_output=_to_output,
+        platform_job_config_compiler=_compiler,
+    )
+    app = FastAPI()
+    app.include_router(router, prefix="/apis/widgets/v2/workspaces/{workspace}")
+    app.dependency_overrides[get_nemo_client] = lambda: MagicMock()
+    app.dependency_overrides[get_entity_client] = lambda: MagicMock()
+    mock_jobs = _RecordingJobsClient()
+
+    client = TestClient(app)
+    with patch(
+        "nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client",
+        return_value=mock_jobs,
+    ):
+        listed = client.get("/apis/widgets/v2/workspaces/default/jobs/test-job/attempts")
+        current = client.get("/apis/widgets/v2/workspaces/default/jobs/test-job/attempts/current")
+
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["data"][0]["spec"]["blob"] == base64.b64encode(_PICKLE_BYTES).decode("ascii")
+    assert mock_jobs.list_attempts_call == {
+        "workspace": "default",
+        "job": "test-job",
+        "query_params": {"page": 1, "page_size": 25, "sort": "-seq"},
+    }
+    assert current.status_code == 200, current.text
+    assert current.json()["is_current"] is True
+    assert mock_jobs.get_attempt_call == {"workspace": "default", "job": "test-job", "attempt": "current"}
+
+
+def test_factory_update_rejects_internal_version_without_mutation() -> None:
+    router = job_route_factory(
+        service_name="widgets",
+        job_type="Widget",
+        job_input=_InputSpec,
+        job_output=_OutputSpec,
+        input_to_output=_to_output,
+        platform_job_config_compiler=_compiler,
+    )
+    app = FastAPI()
+    app.include_router(router, prefix="/apis/widgets/v2/workspaces/{workspace}")
+    app.dependency_overrides[get_nemo_client] = lambda: MagicMock()
+    app.dependency_overrides[get_entity_client] = lambda: MagicMock()
+
+    response = TestClient(app).patch(
+        "/apis/widgets/v2/workspaces/default/jobs/test-job",
+        json={"expected_db_version": 1},
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("project", "project-a"),
+        ("ownership", {"user": "owner"}),
+        ("custom_fields", {"key": "value"}),
+        ("profile", "default"),
+        ("options", {"backend": {}}),
+    ],
+)
+def test_factory_update_rejects_removed_fields(field: str, value: object) -> None:
+    router = job_route_factory(
+        service_name="widgets",
+        job_type="Widget",
+        job_input=_InputSpec,
+        job_output=_OutputSpec,
+        input_to_output=_to_output,
+        platform_job_config_compiler=_compiler,
+    )
+    app = FastAPI()
+    app.include_router(router, prefix="/apis/widgets/v2/workspaces/{workspace}")
+    app.dependency_overrides[get_nemo_client] = lambda: MagicMock()
+    app.dependency_overrides[get_entity_client] = lambda: MagicMock()
+
+    response = TestClient(app).patch(
+        "/apis/widgets/v2/workspaces/default/jobs/test-job",
+        json={"description": "ignored", field: value},
+    )
+
+    assert response.status_code == 422
 
 
 def test_create_job_stamps_plugin_telemetry_custom_fields() -> None:

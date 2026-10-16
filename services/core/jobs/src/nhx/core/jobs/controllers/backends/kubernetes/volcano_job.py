@@ -11,6 +11,7 @@ from nemo_helix_plugin.jobs.types import HelixJobStepWithContext
 from nhx.common.auth import get_workload_delegation_audience
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.app.constants import (
+    JOB_ATTEMPT_ID_LABEL,
     JOB_EXECUTION_BACKEND_LABEL,
     JOB_EXECUTION_PROFILE_LABEL,
     JOB_ID_LABEL,
@@ -419,6 +420,7 @@ class VolcanoJobBackend(
         for job in jobs:
             # Extract job_id and step_name from labels
             job_id = job.get("metadata", {}).get("labels", {}).get(JOB_ID_LABEL)
+            attempt_id = job.get("metadata", {}).get("labels", {}).get(JOB_ATTEMPT_ID_LABEL)
             step_name = job.get("metadata", {}).get("labels", {}).get(JOB_STEP_NAME_LABEL)
             workspace_id = job.get("metadata", {}).get("labels", {}).get(JOB_WORKSPACE_ID_LABEL)
 
@@ -442,7 +444,12 @@ class VolcanoJobBackend(
 
             # Verify the step is terminal before cleaning up, or that the job entity is gone (e.g. workspace deleted).
             # check_step_is_terminal returns True when terminal or when step entity is not found (404).
-            if not self.check_step_is_terminal(job=job_id, step_name=step_name, workspace=workspace_id):
+            if not self.check_step_is_terminal(
+                job=job_id,
+                step_name=step_name,
+                workspace=workspace_id,
+                attempt_id=attempt_id,
+            ):
                 logger.debug(
                     "Skipping cleanup for job as step is not in terminal state",
                     extra={"job_id": job_id, "step_name": step_name, "workspace_id": workspace_id},
@@ -457,7 +464,10 @@ class VolcanoJobBackend(
                 )
                 if uses_persistent_storage and self._execution_profile_config.storage:
                     if self.check_job_persistent_storage_cleanup_allowed(
-                        job=job_id, step_name=step_name, workspace=workspace_id
+                        job=job_id,
+                        step_name=step_name,
+                        workspace=workspace_id,
+                        attempt_id=attempt_id,
                     ):
                         logger.info(
                             "Cleaning up persistent storage for successful job",
@@ -506,7 +516,10 @@ class VolcanoJobBackend(
                         )
                         if uses_persistent_storage and self._execution_profile_config.storage:
                             if self.check_job_persistent_storage_cleanup_allowed(
-                                job=job_id, step_name=step_name, workspace=workspace_id
+                                job=job_id,
+                                step_name=step_name,
+                                workspace=workspace_id,
+                                attempt_id=attempt_id,
                             ):
                                 logger.info(
                                     "Cleaning up persistent storage for successful volcano job",

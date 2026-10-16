@@ -8,17 +8,11 @@ from unittest.mock import MagicMock, call
 
 import pandas as pd
 import pytest
-from nemo_helix_plugin.jobs.constants import NEMO_JOB_ID_ENVVAR, NEMO_JOB_WORKSPACE_ENVVAR
-
-
-def _resp(data):
-    """Wrap a payload in a NemoResponse-like object whose ``.data()`` returns it.
-
-    Production consumes typed-client responses via ``client.<op>(...).data()``.
-    """
-    m = MagicMock()
-    m.data.return_value = data
-    return m
+from nemo_helix_plugin.jobs.constants import (
+    NEMO_JOB_ATTEMPT_ID_ENVVAR,
+    NEMO_JOB_ID_ENVVAR,
+    NEMO_JOB_WORKSPACE_ENVVAR,
+)
 
 
 def import_task_main_without_heavy_runtime(monkeypatch):
@@ -33,6 +27,7 @@ def test_upload_results_uploads_and_registers_adapter(tmp_path, monkeypatch):
     task_main = import_task_main_without_heavy_runtime(monkeypatch)
 
     monkeypatch.setenv(NEMO_JOB_ID_ENVVAR, "safe-synth-job")
+    monkeypatch.setenv(NEMO_JOB_ATTEMPT_ID_ENVVAR, "attempt-123")
     monkeypatch.setenv(NEMO_JOB_WORKSPACE_ENVVAR, "test-workspace")
 
     adapter_path = tmp_path / "adapter"
@@ -43,7 +38,6 @@ def test_upload_results_uploads_and_registers_adapter(tmp_path, monkeypatch):
     monkeypatch.setattr(task_main, "get_nemo_client", lambda: client)
 
     jobs_client = MagicMock()
-    jobs_client.get_job.return_value = _resp(SimpleNamespace(attempt_id="attempt-123"))
     files_client = MagicMock()
 
     monkeypatch.setattr(task_main.JobsClient, "from_client", classmethod(lambda _cls, _client: jobs_client))
@@ -80,19 +74,21 @@ def test_upload_results_uploads_and_registers_adapter(tmp_path, monkeypatch):
     file_manager.validate_storage.assert_called_once_with()
     file_manager.upload.assert_has_calls([call(adapter_path, "results/attempt-123/adapter")], any_order=True)
 
-    jobs_client.get_job.assert_called_once_with(name="safe-synth-job", workspace="test-workspace")
-    jobs_client.update_status_details.assert_called_once_with(
+    jobs_client.get_job.assert_not_called()
+    jobs_client.update_attempt_status_details.assert_called_once_with(
         "safe-synth-job",
+        "attempt-123",
         workspace="test-workspace",
         body={"output_tokens": 42},
     )
 
-    # create_job_result is called once per result; assert the adapter call, checking the
+    # create_attempt_result is called once per result; assert the adapter call, checking the
     # artifact fields on the HelixJobResultCreateRequest body object.
-    adapter_calls = [c for c in jobs_client.create_job_result.call_args_list if c.kwargs.get("name") == "adapter"]
+    adapter_calls = [c for c in jobs_client.create_attempt_result.call_args_list if c.kwargs.get("name") == "adapter"]
     assert len(adapter_calls) == 1
     adapter_call = adapter_calls[0]
     assert adapter_call.kwargs["job"] == "safe-synth-job"
+    assert adapter_call.kwargs["attempt"] == "attempt-123"
     assert adapter_call.kwargs["workspace"] == "test-workspace"
     body = adapter_call.kwargs["body"]
     assert body.artifact_url == "test-workspace/job-results-safe-synth-job#results/attempt-123/adapter"

@@ -16,9 +16,17 @@ _MAX_ERROR_STACK_CHARS = 2048
 
 
 class JobDiagnosticTarget(Protocol):
-    workspace: str
-    job: str
-    name: str
+    @property
+    def workspace(self) -> str: ...
+
+    @property
+    def job(self) -> str: ...
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def attempt_id(self) -> str | None: ...
 
 
 @dataclass(frozen=True)
@@ -26,6 +34,7 @@ class _JobDiagnosticRef:
     workspace: str
     job: str
     name: str
+    attempt_id: str | None = None
 
 
 def _trim_error_stack(value: str | None) -> str | None:
@@ -122,13 +131,31 @@ def collect_job_diagnostics(
         diagnostics["status_api_error"] = str(exc)
 
     try:
-        refreshed_step = jobs.get_job_step(name=step_ref.name, job=step_ref.job, workspace=step_ref.workspace).data()
+        if step_ref.attempt_id is None:
+            refreshed_step = jobs.get_job_step(
+                name=step_ref.name, job=step_ref.job, workspace=step_ref.workspace
+            ).data()
+        else:
+            refreshed_step = jobs.get_attempt_step(
+                name=step_ref.name,
+                job=step_ref.job,
+                attempt=step_ref.attempt_id,
+                workspace=step_ref.workspace,
+            ).data()
         diagnostics["step"] = _step_dict(refreshed_step)
     except Exception as exc:
         diagnostics["step_error"] = str(exc)
 
     try:
-        tasks = jobs.list_job_step_tasks(name=step_ref.name, job=step_ref.job, workspace=step_ref.workspace).data()
+        if step_ref.attempt_id is None:
+            tasks = jobs.list_job_step_tasks(name=step_ref.name, job=step_ref.job, workspace=step_ref.workspace).data()
+        else:
+            tasks = jobs.list_attempt_step_tasks(
+                step=step_ref.name,
+                job=step_ref.job,
+                attempt=step_ref.attempt_id,
+                workspace=step_ref.workspace,
+            ).data()
         diagnostics["tasks_api"] = [_task_dict(task) for task in tasks.data]
     except Exception as exc:
         diagnostics["tasks_api_error"] = str(exc)

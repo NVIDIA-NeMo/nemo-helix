@@ -57,6 +57,7 @@ class _JobCtx:
     normalized_task = "training"
     workspace = "default"
     job_id = "job-1"
+    attempt_id = "attempt-1"
     step = "train"
     is_configured = True
 
@@ -108,12 +109,12 @@ class _Jobs:
         harness = self
 
         class _Client:
-            def update_job_step_task(self, **kwargs: Any) -> None:
+            def update_attempt_step_task(self, **kwargs: Any) -> None:
                 if harness.send_error is not None:
                     raise harness.send_error
                 harness.sent.append(kwargs)
 
-            def get_job_step_task(self, **kwargs: Any) -> _Task:
+            def get_attempt_step_task(self, **kwargs: Any) -> _Task:
                 harness.fetches += 1
                 if harness.fetch_error is not None:
                     raise harness.fetch_error

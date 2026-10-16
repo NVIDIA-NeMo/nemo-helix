@@ -46,12 +46,21 @@ class NoOpProgressReporter:
 class JobsServiceProgressReporter:
     """Reports progress to the Jobs service via SDK."""
 
-    def __init__(self, jobs: JobsClient, workspace: str, job_id: str, step_name: str, task_id: str):
+    def __init__(
+        self,
+        jobs: JobsClient,
+        workspace: str,
+        job_id: str,
+        step_name: str,
+        task_id: str,
+        attempt_id: str | None = None,
+    ):
         self.jobs = jobs
         self.workspace = workspace
         self.job_id = job_id
         self.step_name = step_name
         self.task_id = task_id
+        self.attempt_id = attempt_id
 
     def update_progress(
         self,
@@ -77,13 +86,24 @@ class JobsServiceProgressReporter:
                 if error_stack:
                     task_update["error_stack"] = error_stack
 
-                self.jobs.update_job_step_task(
-                    name=self.task_id,
-                    workspace=self.workspace,
-                    job=self.job_id,
-                    step=self.step_name,
-                    body=HelixJobTaskUpdate(**task_update),
-                )
+                body = HelixJobTaskUpdate(**task_update)
+                if self.attempt_id is None:
+                    self.jobs.update_job_step_task(
+                        name=self.task_id,
+                        workspace=self.workspace,
+                        job=self.job_id,
+                        step=self.step_name,
+                        body=body,
+                    )
+                else:
+                    self.jobs.update_attempt_step_task(
+                        name=self.task_id,
+                        workspace=self.workspace,
+                        job=self.job_id,
+                        attempt=self.attempt_id,
+                        step=self.step_name,
+                        body=body,
+                    )
                 logger.debug(f"Progress updated: {status} - {status_details}")
         except Exception as e:
             logger.warning(
@@ -96,7 +116,12 @@ class JobsServiceProgressReporter:
         if job_ctx.jobs_url:
             logger.info(f"Progress reporting enabled: {job_ctx.jobs_url}")
             return JobsServiceProgressReporter(
-                jobs, job_ctx.workspace, job_ctx.job_id, job_ctx.step, job_ctx.normalized_task
+                jobs,
+                job_ctx.workspace,
+                job_ctx.job_id,
+                job_ctx.step,
+                job_ctx.normalized_task,
+                attempt_id=job_ctx.attempt_id,
             )
         logger.info("Progress reporting disabled: jobs_url not configured")
         return NoOpProgressReporter()

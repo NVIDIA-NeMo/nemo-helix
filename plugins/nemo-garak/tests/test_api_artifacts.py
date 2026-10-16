@@ -14,6 +14,7 @@ from __future__ import annotations
 import io
 import tarfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -37,6 +38,12 @@ def _make_result_response(artifact_url: str = "fileset://default/fs/r") -> Magic
     result_info.artifact_url = artifact_url
     resp = MagicMock()
     resp.data.return_value = result_info
+    return resp
+
+
+def _make_attempt_response(attempt_id: str = "attempt-1") -> MagicMock:
+    resp = MagicMock()
+    resp.data.return_value = SimpleNamespace(id=attempt_id)
     return resp
 
 
@@ -94,7 +101,8 @@ class TestDownloadAuditArtifacts:
         hitlog_tmp = _make_tmp(tmp_path, "run.hitlog.jsonl", b"hitlog")
 
         mock_jobs = AsyncMock()
-        mock_jobs.get_job_result = AsyncMock(
+        mock_jobs.get_job_attempt = AsyncMock(return_value=_make_attempt_response())
+        mock_jobs.get_attempt_result = AsyncMock(
             side_effect=[
                 _make_result_response("fileset://default/fs/report-jsonl"),
                 _make_result_response("fileset://default/fs/report-html"),
@@ -125,7 +133,8 @@ class TestDownloadAuditArtifacts:
         jsonl_tmp = _make_tmp(tmp_path, "run.report.jsonl", b"jsonl")
 
         mock_jobs = AsyncMock()
-        mock_jobs.get_job_result = AsyncMock(
+        mock_jobs.get_job_attempt = AsyncMock(return_value=_make_attempt_response())
+        mock_jobs.get_attempt_result = AsyncMock(
             side_effect=[
                 _make_result_response("fileset://default/fs/report-jsonl"),
                 NotFoundError(MagicMock()),
@@ -150,7 +159,8 @@ class TestDownloadAuditArtifacts:
 
     def test_no_results_at_all_returns_404(self, client: TestClient, mock_client: MagicMock) -> None:
         mock_jobs = AsyncMock()
-        mock_jobs.get_job_result = AsyncMock(side_effect=NotFoundError(MagicMock()))
+        mock_jobs.get_job_attempt = AsyncMock(return_value=_make_attempt_response())
+        mock_jobs.get_attempt_result = AsyncMock(side_effect=NotFoundError(MagicMock()))
 
         mock_rm = AsyncMock()
 
@@ -170,7 +180,8 @@ class TestDownloadAuditArtifacts:
         hitlog_tmp = _make_tmp(tmp_path, "run.hitlog.jsonl")
 
         mock_jobs = AsyncMock()
-        mock_jobs.get_job_result = AsyncMock(
+        mock_jobs.get_job_attempt = AsyncMock(return_value=_make_attempt_response())
+        mock_jobs.get_attempt_result = AsyncMock(
             side_effect=[
                 _make_result_response(),
                 _make_result_response(),
@@ -188,8 +199,9 @@ class TestDownloadAuditArtifacts:
         ):
             client.get("/apis/garak/v2/workspaces/default/jobs/audit/job-1/results/artifacts/download")
 
-        queried = [call.kwargs["name"] for call in mock_jobs.get_job_result.await_args_list]
+        queried = [call.kwargs["name"] for call in mock_jobs.get_attempt_result.await_args_list]
         assert queried == ["report-jsonl", "report-html", "report-hitlog-jsonl"]
+        assert {call.kwargs["attempt"] for call in mock_jobs.get_attempt_result.await_args_list} == {"attempt-1"}
 
     def test_workspace_and_job_forwarded_to_jobs_client(
         self, client: TestClient, mock_client: MagicMock, tmp_path: Path
@@ -197,7 +209,8 @@ class TestDownloadAuditArtifacts:
         tmp = _make_tmp(tmp_path, "run.report.jsonl")
 
         mock_jobs = AsyncMock()
-        mock_jobs.get_job_result = AsyncMock(
+        mock_jobs.get_job_attempt = AsyncMock(return_value=_make_attempt_response("attempt-42"))
+        mock_jobs.get_attempt_result = AsyncMock(
             side_effect=[_make_result_response(), NotFoundError(MagicMock()), NotFoundError(MagicMock())]
         )
 
@@ -212,9 +225,11 @@ class TestDownloadAuditArtifacts:
         ):
             client.get("/apis/garak/v2/workspaces/prod/jobs/audit/my-job/results/artifacts/download")
 
-        first_call = mock_jobs.get_job_result.await_args_list[0]
+        mock_jobs.get_job_attempt.assert_awaited_once_with(job="my-job", attempt="current", workspace="prod")
+        first_call = mock_jobs.get_attempt_result.await_args_list[0]
         assert first_call.kwargs["workspace"] == "prod"
         assert first_call.kwargs["job"] == "my-job"
+        assert first_call.kwargs["attempt"] == "attempt-42"
         factory.assert_called_once_with(
             job_name="my-job",
             workspace="prod",

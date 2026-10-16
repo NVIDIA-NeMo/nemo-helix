@@ -118,6 +118,12 @@ paths:
         schema:
           type: string
           title: Job
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -153,6 +159,12 @@ paths:
         schema:
           type: string
           title: Job
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -188,6 +200,12 @@ paths:
         schema:
           type: string
           title: Job
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -222,6 +240,12 @@ paths:
         schema:
           type: string
           title: Job
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -242,8 +266,8 @@ paths:
     get:
       tags:
       - Safe Synthesizer
-      summary: Get Job Result
-      operationId: get_job_result_apis_safe_synthesizer_v2_workspaces__workspace__jobs__job__results__name__get
+      summary: Get Attempt Result
+      operationId: get_attempt_result_apis_safe_synthesizer_v2_workspaces__workspace__jobs__job__results__name__get
       parameters:
       - name: workspace
         in: path
@@ -263,6 +287,14 @@ paths:
         schema:
           type: string
           title: Name
+      - name: attempt_id
+        in: query
+        required: true
+        schema:
+          type: string
+          description: Attempt ID or 'current'
+          title: Attempt Id
+        description: Attempt ID or 'current'
       responses:
         '200':
           description: Successful Response
@@ -301,6 +333,12 @@ paths:
         schema:
           type: string
           title: Name
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -349,6 +387,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Safe Synthesizer
+      summary: Update Job
+      operationId: update_job_apis_safe_synthesizer_v2_workspaces__workspace__jobs__name__patch
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateJobUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
     delete:
       tags:
       - Safe Synthesizer
@@ -374,6 +449,108 @@ paths:
           description: Job not Found
         '409':
           description: Job is not in a terminal state
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/safe-synthesizer/v2/workspaces/{workspace}/jobs/{name}/attempts:
+    get:
+      tags:
+      - Safe Synthesizer
+      summary: List Job Attempts
+      operationId: list_job_attempts_apis_safe_synthesizer_v2_workspaces__workspace__jobs__name__attempts_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 25
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          enum:
+          - seq
+          - -seq
+          type: string
+          default: -seq
+          title: Sort
+      - name: filter
+        in: query
+        required: false
+        schema:
+          title: Filter
+          type: string
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateJobAttemptsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/safe-synthesizer/v2/workspaces/{workspace}/jobs/{name}/attempts/{attempt}:
+    get:
+      tags:
+      - Safe Synthesizer
+      summary: Get Job Attempt
+      operationId: get_job_attempt_apis_safe_synthesizer_v2_workspaces__workspace__jobs__name__attempts__attempt__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateJobAttempt'
         '422':
           description: Validation Error
           content:
@@ -451,6 +628,24 @@ paths:
           type: integer
           maximum: 10000
           exclusiveMinimum: 0
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
+      - name: step_id
+        in: query
+        required: false
+        schema:
+          title: Step Id
+          type: string
+      - name: task_id
+        in: query
+        required: false
+        schema:
+          title: Task Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -483,6 +678,12 @@ paths:
         schema:
           type: string
           title: Name
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -801,6 +1002,9 @@ components:
         id:
           title: Id
           type: string
+        attempt_id:
+          title: Attempt Id
+          type: string
         name:
           type: string
           title: Name
@@ -846,6 +1050,83 @@ components:
       - name
       - spec
       title: GenerateJob
+    GenerateJobAttempt:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        seq:
+          type: integer
+          title: Seq
+        spec:
+          $ref: '#/components/schemas/SafeSynthesizerJobConfig'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        is_current:
+          type: boolean
+          title: Is Current
+      type: object
+      required:
+      - id
+      - name
+      - job
+      - workspace
+      - seq
+      - spec
+      - status
+      - created_at
+      - updated_at
+      - is_current
+      title: GenerateJobAttempt
+    GenerateJobAttemptsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/GenerateJobAttempt'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: GenerateJobAttemptsPage
     GenerateJobRequest:
       properties:
         name:
@@ -881,6 +1162,18 @@ components:
       required:
       - spec
       title: GenerateJobRequest
+    GenerateJobUpdate:
+      properties:
+        description:
+          title: Description
+          type: string
+        spec:
+          $ref: '#/components/schemas/SafeSynthesizerJobConfig'
+      additionalProperties: false
+      type: object
+      required:
+      - spec
+      title: GenerateJobUpdate
     GenerateJobsListFilter:
       additionalProperties: false
       properties:
@@ -1182,6 +1475,9 @@ components:
           title: Workspace
         project:
           title: Project
+          type: string
+        attempt_id:
+          title: Attempt Id
           type: string
         created_at:
           type: string

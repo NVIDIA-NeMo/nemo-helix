@@ -34,6 +34,7 @@ from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.constants import (
     DEFAULT_TASK_STORAGE_PATH,
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
     NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
@@ -146,6 +147,9 @@ def upload_results(result: SafeSynthesizerResults, adapter_path: Path | None = N
     job_id = os.environ.get(NEMO_JOB_ID_ENVVAR)
     if not job_id:
         raise ValueError(f"{NEMO_JOB_ID_ENVVAR} is not set")
+    attempt_id = os.environ.get(NEMO_JOB_ATTEMPT_ID_ENVVAR)
+    if not attempt_id:
+        raise ValueError(f"{NEMO_JOB_ATTEMPT_ID_ENVVAR} is not set")
 
     workspace = os.environ.get(NEMO_JOB_WORKSPACE_ENVVAR, "default")
     client = get_nemo_client()
@@ -163,12 +167,10 @@ def upload_results(result: SafeSynthesizerResults, adapter_path: Path | None = N
     if completion_tokens is not None:
         HelixJobUsageReporter(
             job_name=job_id,
+            attempt_id=attempt_id,
             workspace=workspace,
             jobs_client=jobs_client,
         ).report_totals(output_tokens=completion_tokens)
-
-    job = jobs_client.get_job(name=job_id, workspace=workspace).data()
-    attempt_id = job.attempt_id
 
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
@@ -178,32 +180,40 @@ def upload_results(result: SafeSynthesizerResults, adapter_path: Path | None = N
         result_csv_path = temp_path / "result.csv"
         result.synthetic_data.to_csv(result_csv_path, index=False)
         artifact_url = file_manager.upload(result_csv_path, f"results/{attempt_id}/synthetic-data")
-        _create_job_result(client, workspace, job_id, "synthetic-data", artifact_url)
+        _create_job_result(client, workspace, job_id, attempt_id, "synthetic-data", artifact_url)
 
         summary_json_path = temp_path / "summary.json"
         with open(summary_json_path, "w", encoding="utf-8") as f:
             json.dump(result.summary.model_dump(), f)
         artifact_url = file_manager.upload(summary_json_path, f"results/{attempt_id}/summary")
-        _create_job_result(client, workspace, job_id, "summary", artifact_url)
+        _create_job_result(client, workspace, job_id, attempt_id, "summary", artifact_url)
 
         if result.evaluation_report_html:
             report_html_path = temp_path / "report.html"
             with open(report_html_path, "w", encoding="utf-8") as f:
                 f.write(result.evaluation_report_html)
             artifact_url = file_manager.upload(report_html_path, f"results/{attempt_id}/evaluation-report")
-            _create_job_result(client, workspace, job_id, "evaluation-report", artifact_url)
+            _create_job_result(client, workspace, job_id, attempt_id, "evaluation-report", artifact_url)
 
     if adapter_path is not None and adapter_path.exists():
         embed_run_config_in_adapter(adapter_path)
         artifact_url = file_manager.upload(adapter_path, f"results/{attempt_id}/adapter")
-        _create_job_result(client, workspace, job_id, "adapter", artifact_url)
+        _create_job_result(client, workspace, job_id, attempt_id, "adapter", artifact_url)
 
 
-def _create_job_result(client: NemoClient, workspace: str, job_name: str, result_name: str, artifact_url: str):
+def _create_job_result(
+    client: NemoClient,
+    workspace: str,
+    job_name: str,
+    attempt_id: str,
+    result_name: str,
+    artifact_url: str,
+):
     """Create a job result record."""
-    JobsClient.from_client(client).create_job_result(
+    JobsClient.from_client(client).create_attempt_result(
         name=result_name,
         job=job_name,
+        attempt=attempt_id,
         workspace=workspace,
         body=HelixJobResultCreateRequest(artifact_url=artifact_url, artifact_storage_type=FileStorageType.FILESET),
     )
@@ -228,11 +238,22 @@ def _resolve_pretrained_model(
         workspace_fallback=workspace,
     )
     try:
-        adapter_result = (
-            JobsClient.from_client(client)
-            .get_job_result(name="adapter", job=model_job, workspace=model_workspace)
+        jobs = JobsClient.from_client(client)
+        attempt_id = (
+            jobs.get_job_attempt(
+                job=model_job,
+                attempt="current",
+                workspace=model_workspace,
+            )
             .data()
+            .id
         )
+        adapter_result = jobs.get_attempt_result(
+            name="adapter",
+            job=model_job,
+            attempt=attempt_id,
+            workspace=model_workspace,
+        ).data()
     except Exception as e:
         raise RuntimeError(
             f"Failed to resolve adapter result for pretrained_model_job={job_config.pretrained_model_job!r}"

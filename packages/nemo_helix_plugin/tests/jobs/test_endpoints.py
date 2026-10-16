@@ -21,6 +21,7 @@ from nemo_helix_plugin.jobs.schemas import (
 from nemo_helix_plugin.jobs.spec import HelixJobSpec, HelixJobStepSpec
 from nemo_helix_plugin.jobs.types import (
     CreateHelixJobRequest,
+    HelixJobAttemptResponse,
     HelixJobResponse,
     HelixJobStatusUpdateRequest,
     HelixJobStepResponse,
@@ -28,6 +29,7 @@ from nemo_helix_plugin.jobs.types import (
     HelixJobTaskResponse,
     HelixJobTaskUpdate,
     JobStatusDetailsUpdate,
+    UpdateHelixJobRequest,
 )
 
 
@@ -105,6 +107,16 @@ def test_get_job() -> None:
     assert prepared.response_type is HelixJobResponse
 
 
+def test_update_job_preserves_explicit_null_description() -> None:
+    body = UpdateHelixJobRequest(description=None)
+    prepared = endpoints.update_job(workspace="default", name="j-1", body=body)
+
+    assert prepared.method == "PATCH"
+    assert prepared.path_params == {"workspace": "default", "name": "j-1"}
+    assert isinstance(prepared.content, bytes)
+    assert json.loads(prepared.content) == {"description": None}
+
+
 def test_delete_job() -> None:
     prepared = endpoints.delete_job(workspace="default", name="j-1")
 
@@ -145,16 +157,32 @@ def test_get_job_status() -> None:
     assert prepared.response_type is HelixJobStatusResponse
 
 
-def test_update_job_status_details() -> None:
-    prepared = endpoints.update_job_status_details(
-        workspace="default", name="j-1", body=JobStatusDetailsUpdate({"note": "x"})
+def test_list_and_get_job_attempts() -> None:
+    listed = endpoints.list_job_attempts(
+        workspace="default",
+        job="j-1",
+        query_params={"page": 2, "page_size": 5, "sort": "seq"},
     )
+    fetched = endpoints.get_job_attempt(workspace="default", job="j-1", attempt="current")
+
+    assert listed.path_template.endswith("/jobs/{job}/attempts")
+    assert listed.query_params == {"page": 2, "page_size": 5, "sort": "seq"}
+    assert get_args(listed.response_type)[0] is HelixJobAttemptResponse
+    assert fetched.path_params == {"workspace": "default", "job": "j-1", "attempt": "current"}
+    assert fetched.response_type is HelixJobAttemptResponse
+
+
+def test_update_attempt_status_details() -> None:
+    prepared = endpoints.update_job_attempt_status_details(
+        workspace="default",
+        job="j-1",
+        attempt="att-1",
+        body=JobStatusDetailsUpdate({"progress": 50}),
+    )
+
     assert prepared.method == "PATCH"
-    assert prepared.path_template.endswith("/jobs/{name}/status-details")
-    assert prepared.response_type is None
-    # RootModel serialises to the bare JSON object
-    assert isinstance(prepared.content, bytes)
-    assert json.loads(prepared.content) == {"note": "x"}
+    assert prepared.path_template.endswith("/attempts/{attempt}/status-details")
+    assert json.loads(prepared.content) == {"progress": 50}
 
 
 # ---------------------------------------------------------------------------
@@ -192,12 +220,6 @@ def test_list_job_results() -> None:
     assert prepared.path_template.endswith("/jobs/{name}/results")
 
 
-def test_get_job_result() -> None:
-    prepared = endpoints.get_job_result(workspace="default", job="j-1", name="out")
-    assert prepared.method == "GET"
-    assert prepared.path_params == {"workspace": "default", "job": "j-1", "name": "out"}
-
-
 def test_download_job_result() -> None:
     prepared = endpoints.download_job_result(workspace="default", job="j-1", name="out")
     assert prepared.method == "GET"
@@ -205,6 +227,29 @@ def test_download_job_result() -> None:
     assert prepared.path_params == {"workspace": "default", "job": "j-1", "name": "out"}
     assert prepared.content is None
     assert prepared.response_type is BinaryContent
+
+
+def test_attempt_result_endpoints_include_full_parent_path() -> None:
+    body = HelixJobResultCreateRequest(artifact_url="s3://x", artifact_storage_type=FileStorageType.FILESET)
+    created = endpoints.create_attempt_result(
+        workspace="default",
+        job="j-1",
+        attempt="att-1",
+        name="out",
+        body=body,
+    )
+    listed = endpoints.list_attempt_results(workspace="default", job="j-1", attempt="att-1")
+    fetched = endpoints.get_attempt_result(
+        workspace="default",
+        job="j-1",
+        attempt="att-1",
+        name="out",
+    )
+
+    expected = {"workspace": "default", "job": "j-1", "attempt": "att-1", "name": "out"}
+    assert created.path_params == expected
+    assert listed.path_params == {"workspace": "default", "job": "j-1", "attempt": "att-1"}
+    assert fetched.path_params == expected
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +284,24 @@ def test_update_job_step_status() -> None:
     assert prepared.response_type is HelixJobStepResponse
 
 
+def test_attempt_step_endpoints_include_full_parent_path() -> None:
+    body = HelixJobStatusUpdateRequest(status=HelixJobStatus.ACTIVE)
+    listed = endpoints.list_attempt_steps(workspace="default", job="j-1", attempt="att-1")
+    fetched = endpoints.get_attempt_step(workspace="default", job="j-1", attempt="att-1", name="step-one")
+    updated = endpoints.update_attempt_step_status(
+        workspace="default",
+        job="j-1",
+        attempt="att-1",
+        name="step-one",
+        body=body,
+    )
+
+    assert listed.path_params == {"workspace": "default", "job": "j-1", "attempt": "att-1"}
+    expected = {"workspace": "default", "job": "j-1", "attempt": "att-1", "name": "step-one"}
+    assert fetched.path_params == expected
+    assert updated.path_params == expected
+
+
 # ---------------------------------------------------------------------------
 # Job tasks
 # ---------------------------------------------------------------------------
@@ -264,6 +327,35 @@ def test_get_job_step_task() -> None:
     assert prepared.method == "GET"
     assert prepared.path_params == {"workspace": "default", "job": "j-1", "step": "step-one", "name": "task-1"}
     assert prepared.response_type is HelixJobTaskResponse
+
+
+def test_attempt_task_endpoints_include_full_parent_path() -> None:
+    body = HelixJobTaskUpdate(status=HelixJobStatus.COMPLETED)
+    listed = endpoints.list_attempt_step_tasks(workspace="default", job="j-1", attempt="att-1", step="step-one")
+    updated = endpoints.update_attempt_step_task(
+        workspace="default",
+        job="j-1",
+        attempt="att-1",
+        step="step-one",
+        name="task-1",
+        body=body,
+    )
+    fetched = endpoints.get_attempt_step_task(
+        workspace="default",
+        job="j-1",
+        attempt="att-1",
+        step="step-one",
+        name="task-1",
+    )
+
+    assert listed.path_params == {
+        "workspace": "default",
+        "job": "j-1",
+        "attempt": "att-1",
+        "step": "step-one",
+    }
+    assert updated.path_params["attempt"] == "att-1"
+    assert fetched.path_params == updated.path_params
 
 
 # ---------------------------------------------------------------------------

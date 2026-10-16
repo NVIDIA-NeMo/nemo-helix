@@ -4129,9 +4129,10 @@ nemo jobs [OPTIONS] COMMAND [ARGS]...
 * `pause`: Pause a platform job by name or ID.
 * `resume`: Resume a paused platform job by name or ID.
 * `get`: Get a platform job by name or ID.
-* `update-status-details`: Update the status details of a platform job.
+* `update`: Update a job description or the definition used by future...
 * `watch`: Watch a platform job until it reaches a terminal status.
 * `tail`: Print the newest lines from a platform job log.
+* `attempts`: Inspect job attempts
 * `results`: Manage results
 * `steps`: Manage steps
 * `tasks`: Manage tasks
@@ -4258,7 +4259,7 @@ nemo jobs get-logs [OPTIONS] NAME
 **Options:**
 
 * `--workspace`
-* `--attempt-id <INTEGER>`: Filter logs by job attempt ID
+* `--attempt-id`: Filter logs by attempt ID or 'current'
 * `--limit <INTEGER>`: Maximum number of logs to return
 * `--page-cursor`: Page cursor
 * `--step-id`: Filter logs by step name
@@ -4450,35 +4451,26 @@ nemo jobs get [OPTIONS] NAME
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-#### nemo jobs update-status-details
+#### nemo jobs update
 
-Update the status details of a platform job.
-
-**Required fields:** body
-
-**Examples:**
-
-```shell
-nemo jobs update-status-details <name> --input-file config.json
-nemo jobs update-status-details <name> --input-data '`{"body": {}}`'
-echo '{"json": "data"}' | nemo jobs update-status-details <name> --input-file -
-nemo jobs update-status-details <name> --<option> "value"
-```
+Update a job description or the definition used by future attempts.
 
 **Usage:**
 
 ```shell
-nemo jobs update-status-details [OPTIONS] NAME
+nemo jobs update [OPTIONS] NAME
 ```
 
 **Arguments:**
 
-* `<NAME>`
+* `<NAME>`: Job name or ID (both are accepted).
 
 **Options:**
 
 * `--workspace`
-* `--body`: JSON string
+* `--description`
+* `--spec`: JSON string
+* `--platform-spec`: JSON string
 
 **Help:**
 
@@ -4510,7 +4502,7 @@ nemo jobs watch [OPTIONS] NAME
 **Options:**
 
 * `--workspace`: Workspace containing the job
-* `--attempt-id <INTEGER>`: Filter logs to an attempt ID
+* `--attempt-id`: Filter logs to an attempt ID or 'current'
 * `--step-id`: Filter logs to a step ID
 * `--task-id`: Filter logs to a task ID
 * `--limit <INTEGER RANGE>`: Maximum logs to fetch per page
@@ -4540,13 +4532,93 @@ nemo jobs tail [OPTIONS] NAME
 
 * `-n, --lines <INTEGER RANGE>`: Number of lines to show [default: 100]
 * `--workspace`: Workspace containing the job
-* `--attempt-id <INTEGER>`: Filter logs to an attempt ID
+* `--attempt-id`: Filter logs to an attempt ID or 'current'
 * `--step-id`: Filter logs to a step ID
 * `--task-id`: Filter logs to a task ID
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+#### nemo jobs attempts
+
+Inspect job attempts
+
+**Usage:**
+
+```shell
+nemo jobs attempts [OPTIONS] COMMAND [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+* `list`: List execution attempts for a job.
+* `get`: Get one execution attempt.
+
+##### nemo jobs attempts list
+
+List execution attempts for a job.
+
+**Usage:**
+
+```shell
+nemo jobs attempts list [OPTIONS] JOB
+```
+
+**Arguments:**
+
+* `<JOB>`: Job name or ID.
+
+**Options:**
+
+* `--workspace`
+* `--filter FILTER_JSON`
+* `--page <INTEGER RANGE>`
+* `--page-size <INTEGER RANGE>`
+* `--sort <CHOICE>`: [possible values: seq, -seq]
+* `--all-pages`: Fetch all pages
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+* `--stream`: Emit newline-delimited JSON, one record per line. Requires JSON or raw output.
+
+##### nemo jobs attempts get
+
+Get one execution attempt.
+
+**Usage:**
+
+```shell
+nemo jobs attempts get [OPTIONS] ATTEMPT
+```
+
+**Arguments:**
+
+* `<ATTEMPT>`: Attempt ID or 'current'.
+
+**Options:**
+
+* `--job`: Job name or ID (required).
+* `--workspace`
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 #### nemo jobs results
 
@@ -4567,7 +4639,7 @@ nemo jobs results [OPTIONS] COMMAND [ARGS]...
 * `create`: Create a new result for a job.
 * `download`: Download a job result file.
 * `list`: List results for a job.
-* `get`: Get a specific job result.
+* `get`: Get a result from a specific job attempt.
 
 ##### nemo jobs results create
 
@@ -4598,6 +4670,7 @@ nemo jobs results create [OPTIONS] NAME
 
 * `--workspace`
 * `--job`: (required)
+* `--attempt-id`: Attempt ID or 'current'
 * `--artifact-storage-type <CHOICE>`: (required) [possible values: fileset]
 * `--artifact-url`: (required)
 
@@ -4632,6 +4705,7 @@ nemo jobs results download [OPTIONS] NAME
 
 * `--workspace`
 * `--job`: (required)
+* `--attempt-id`: Attempt ID or 'current'
 * `--output-file, -o <PATH>`: Output file path (required).
 
 **Help:**
@@ -4655,6 +4729,7 @@ nemo jobs results list [OPTIONS] NAME
 **Options:**
 
 * `--workspace`
+* `--attempt-id`: Attempt ID or 'current'
 * `--sort <CHOICE>`: The field to sort by. [possible values: created_at, -created_at, updated_at, -updated_at]
 
 **Help:**
@@ -4670,7 +4745,7 @@ nemo jobs results list [OPTIONS] NAME
 
 ##### nemo jobs results get
 
-Get a specific job result.
+Get a result from a specific job attempt.
 
 **Usage:**
 
@@ -4684,8 +4759,9 @@ nemo jobs results get [OPTIONS] NAME
 
 **Options:**
 
+* `--job`: Job name or ID
+* `--attempt-id`: Attempt ID or 'current' [default: current]
 * `--workspace`
-* `--job`: (required)
 
 **Help:**
 
@@ -4732,6 +4808,7 @@ nemo jobs steps list [OPTIONS] NAME
 **Options:**
 
 * `--workspace`
+* `--attempt-id`: Attempt ID or 'current'
 * `--page <INTEGER>`: Page number.
 * `--page-size <INTEGER>`: Page size.
 * `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: created_at, -created_at, updated_at, -updated_at]
@@ -4776,6 +4853,7 @@ nemo jobs steps get [OPTIONS] NAME
 
 * `--workspace`
 * `--job`: (required)
+* `--attempt-id`: Attempt ID or 'current'
 
 **Help:**
 
@@ -4814,6 +4892,7 @@ nemo jobs steps update-status [OPTIONS] NAME
 
 * `--workspace`
 * `--job`: (required)
+* `--attempt-id`: Attempt ID or 'current'
 * `--status <CHOICE>`: Enumeration of possible job statuses. This enum represents the various states a job can be in during its lifecycle, from creation to a terminal state.  [possible values: created, pending, active, cancelled, cancelling, error, completed, paused, pausing, resuming]
 * `--error-details`: Optional error details related to the status update. (JSON string)
 * `--status-details`: Optional status details related to the status update. (JSON string)
@@ -4880,6 +4959,7 @@ nemo jobs tasks create-or-update [OPTIONS] NAME
 
 * `--workspace`
 * `--job`: (required)
+* `--attempt-id`: Attempt ID or 'current'
 * `--step`: (required)
 * `--error-details`: JSON string
 * `--error-stack`
@@ -4917,6 +4997,7 @@ nemo jobs tasks list [OPTIONS] NAME
 
 * `--workspace`
 * `--job`: (required)
+* `--attempt-id`: Attempt ID or 'current'
 
 **Help:**
 
@@ -4947,6 +5028,7 @@ nemo jobs tasks get [OPTIONS] NAME
 
 * `--workspace`
 * `--job`: (required)
+* `--attempt-id`: Attempt ID or 'current'
 * `--step`: (required)
 
 **Help:**

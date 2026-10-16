@@ -104,6 +104,9 @@ def test_api_factory_routes():
         ("get", "/jobs"),
         ("post", "/jobs"),
         ("get", "/jobs/{name}"),
+        ("patch", "/jobs/{name}"),
+        ("get", "/jobs/{name}/attempts"),
+        ("get", "/jobs/{name}/attempts/{attempt}"),
         ("get", "/jobs/{name}/status"),
         ("delete", "/jobs/{name}"),
         ("post", "/jobs/{name}/cancel"),
@@ -1075,8 +1078,8 @@ def test_list_job_results_empty_list(mock_service_with_job_routes):
     mock_jobs.list_job_results.assert_called_once_with(name="test-job-456", workspace="default")
 
 
-def test_get_job_result_includes_download_url(mock_service_with_job_routes):
-    """Test that get_job_result includes download_url in the response."""
+def test_get_attempt_result_includes_download_url(mock_service_with_job_routes):
+    """Test that an attempt-scoped result includes its download URL."""
     app, mock_jobs = mock_service_with_job_routes
     client = TestClient(app)
 
@@ -1089,10 +1092,13 @@ def test_get_job_result_includes_download_url(mock_service_with_job_routes):
         artifact_url="default/test-fileset#test_result",
     )
 
-    mock_jobs.get_job_result = AsyncMock(return_value=_resp(mock_result))
+    mock_jobs.get_attempt_result = AsyncMock(return_value=_resp(mock_result))
 
     # Make the request
-    response = client.get("/v2/workspaces/default/test/jobs/test-job-789/results/test_result")
+    response = client.get(
+        "/v2/workspaces/default/test/jobs/test-job-789/results/test_result",
+        params={"attempt_id": "attempt-1"},
+    )
 
     # Verify the response
     assert response.status_code == 200
@@ -1103,7 +1109,7 @@ def test_get_job_result_includes_download_url(mock_service_with_job_routes):
     assert "download_url" in response_data
     assert (
         response_data["download_url"]
-        == "http://testserver/v2/workspaces/default/test/jobs/test-job-789/results/test_result/download"
+        == "http://testserver/v2/workspaces/default/test/jobs/test-job-789/results/test_result/download?attempt_id=attempt-1"
     )
 
     # Verify other fields are preserved
@@ -1113,10 +1119,12 @@ def test_get_job_result_includes_download_url(mock_service_with_job_routes):
     assert response_data["artifact_url"] == "default/test-fileset#test_result"
 
     # Verify the jobs client was called correctly
-    mock_jobs.get_job_result.assert_called_once_with(name="test_result", job="test-job-789", workspace="default")
+    mock_jobs.get_attempt_result.assert_awaited_once_with(
+        name="test_result", job="test-job-789", attempt="attempt-1", workspace="default"
+    )
 
 
-def test_get_job_result_download_url_format(mock_service_with_job_routes):
+def test_get_attempt_result_download_url_format(mock_service_with_job_routes):
     """Test that download_url has the correct format with special characters in result name."""
     app, mock_jobs = mock_service_with_job_routes
     client = TestClient(app)
@@ -1130,10 +1138,13 @@ def test_get_job_result_download_url_format(mock_service_with_job_routes):
         artifact_url="default/test-fileset#evaluation_report_v1",
     )
 
-    mock_jobs.get_job_result = AsyncMock(return_value=_resp(mock_result))
+    mock_jobs.get_attempt_result = AsyncMock(return_value=_resp(mock_result))
 
     # Make the request
-    response = client.get("/v2/workspaces/default/test/jobs/test-job-abc/results/evaluation_report_v1")
+    response = client.get(
+        "/v2/workspaces/default/test/jobs/test-job-abc/results/evaluation_report_v1",
+        params={"attempt_id": "attempt-2"},
+    )
 
     # Verify the response
     assert response.status_code == 200
@@ -1144,12 +1155,12 @@ def test_get_job_result_download_url_format(mock_service_with_job_routes):
     assert "download_url" in response_data
     assert (
         response_data["download_url"]
-        == "http://testserver/v2/workspaces/default/test/jobs/test-job-abc/results/evaluation_report_v1/download"
+        == "http://testserver/v2/workspaces/default/test/jobs/test-job-abc/results/evaluation_report_v1/download?attempt_id=attempt-2"
     )
 
     # Verify the jobs client was called correctly
-    mock_jobs.get_job_result.assert_called_once_with(
-        name="evaluation_report_v1", job="test-job-abc", workspace="default"
+    mock_jobs.get_attempt_result.assert_awaited_once_with(
+        name="evaluation_report_v1", job="test-job-abc", attempt="attempt-2", workspace="default"
     )
 
 
@@ -1188,16 +1199,19 @@ def test_list_job_results_download_url_different_job_ids(mock_service_with_job_r
         mock_jobs.reset_mock()
 
 
-def test_get_job_result_not_found(mock_service_with_job_routes):
-    """Test that get_job_result handles not found errors correctly."""
+def test_get_attempt_result_not_found(mock_service_with_job_routes):
+    """Test that attempt-scoped result lookup handles not found errors correctly."""
     app, mock_jobs = mock_service_with_job_routes
     client = TestClient(app)
 
     # The typed client raises a NemoHTTPError subclass on non-2xx responses.
-    mock_jobs.get_job_result = AsyncMock(side_effect=_client_error(ClientNotFoundError, 404, "Result not found"))
+    mock_jobs.get_attempt_result = AsyncMock(side_effect=_client_error(ClientNotFoundError, 404, "Result not found"))
 
     # Make the request
-    response = client.get("/v2/workspaces/default/test/jobs/nonexistent-job/results/nonexistent-result")
+    response = client.get(
+        "/v2/workspaces/default/test/jobs/nonexistent-job/results/nonexistent-result",
+        params={"attempt_id": "attempt-3"},
+    )
 
     # Verify the response
     assert response.status_code == 404
@@ -1205,9 +1219,18 @@ def test_get_job_result_not_found(mock_service_with_job_routes):
     assert "Result not found" in response_data["detail"]
 
     # Verify the jobs client was called
-    mock_jobs.get_job_result.assert_called_once_with(
-        name="nonexistent-result", job="nonexistent-job", workspace="default"
+    mock_jobs.get_attempt_result.assert_awaited_once_with(
+        name="nonexistent-result", job="nonexistent-job", attempt="attempt-3", workspace="default"
     )
+
+
+def test_get_attempt_result_requires_attempt_id(mock_service_with_job_routes):
+    app, mock_jobs = mock_service_with_job_routes
+
+    response = TestClient(app).get("/v2/workspaces/default/test/jobs/test-job/results/output")
+
+    assert response.status_code == 422
+    mock_jobs.get_attempt_result.assert_not_called()
 
 
 # Tests for entity_client injection

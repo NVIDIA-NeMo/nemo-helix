@@ -56,7 +56,7 @@ def test_create_result_nests_under_job_when_output_location_set(tmp_path, mock_s
     test_file.write_bytes(b"x")
 
     mock_jobs = MagicMock(spec=JobsClient)
-    mock_jobs.create_job_result.return_value = _resp(MagicMock())
+    mock_jobs.create_attempt_result.return_value = _resp(MagicMock())
 
     sdk = _sync_client()
     mgr = rm.ResultManager(
@@ -88,8 +88,8 @@ def test_create_result_returns_existing_on_conflict_sync(tmp_path, mock_sync_fil
     # Configure the typed jobs client to raise ConflictError on create, return existing on retrieve.
     existing_result = MagicMock(name="my-result")
     mock_jobs = MagicMock(spec=JobsClient)
-    mock_jobs.create_job_result.side_effect = _conflict_error()
-    mock_jobs.get_job_result.return_value = _resp(existing_result)
+    mock_jobs.create_attempt_result.side_effect = _conflict_error()
+    mock_jobs.get_attempt_result.return_value = _resp(existing_result)
     # Job retrieval provides the fileset name.
     mock_jobs.get_job.return_value = _resp(
         MagicMock(attempt_id="att-123", fileset="test-fileset", output_location=None)
@@ -106,7 +106,9 @@ def test_create_result_returns_existing_on_conflict_sync(tmp_path, mock_sync_fil
     with patch.object(mgr, "_create_file_manager", return_value=mock_sync_file_manager):
         result = mgr.create_result("my-result", test_file)
 
-    mock_jobs.get_job_result.assert_called_once_with(name="my-result", job="test-job", workspace="test-ws")
+    mock_jobs.get_attempt_result.assert_called_once_with(
+        name="my-result", job="test-job", attempt="att-123", workspace="test-ws"
+    )
     assert result is existing_result
 
 
@@ -118,7 +120,7 @@ def test_create_result_wraps_transport_errors_sync(tmp_path, mock_sync_file_mana
     mock_jobs.get_job.return_value = _resp(
         MagicMock(attempt_id="att-123", fileset="test-fileset", output_location=None)
     )
-    mock_jobs.create_job_result.side_effect = NemoTransportError(
+    mock_jobs.create_attempt_result.side_effect = NemoTransportError(
         httpx.ConnectError("Connection refused", request=request)
     )
     sdk = _sync_client()
@@ -145,8 +147,8 @@ async def test_create_result_returns_existing_on_conflict_async(tmp_path, mock_a
     # Configure the typed async jobs client to raise ConflictError on create, return existing on retrieve.
     existing_result = MagicMock(name="my-result")
     mock_jobs = MagicMock(spec=AsyncJobsClient)
-    mock_jobs.create_job_result = AsyncMock(side_effect=_conflict_error())
-    mock_jobs.get_job_result = AsyncMock(return_value=_resp(existing_result))
+    mock_jobs.create_attempt_result = AsyncMock(side_effect=_conflict_error())
+    mock_jobs.get_attempt_result = AsyncMock(return_value=_resp(existing_result))
     # Job retrieval provides the fileset name.
     mock_jobs.get_job = AsyncMock(
         return_value=_resp(MagicMock(attempt_id="att-123", fileset="test-fileset", output_location=None))
@@ -163,7 +165,9 @@ async def test_create_result_returns_existing_on_conflict_async(tmp_path, mock_a
     with patch.object(mgr, "_create_file_manager", return_value=mock_async_file_manager):
         result = await mgr.create_result("my-result", test_file)
 
-    mock_jobs.get_job_result.assert_called_once_with(name="my-result", job="test-job", workspace="test-ws")
+    mock_jobs.get_attempt_result.assert_awaited_once_with(
+        name="my-result", job="test-job", attempt="att-123", workspace="test-ws"
+    )
     assert result is existing_result
 
 
@@ -176,7 +180,7 @@ async def test_create_result_wraps_transport_errors_async(tmp_path, mock_async_f
     mock_jobs.get_job = AsyncMock(
         return_value=_resp(MagicMock(attempt_id="att-123", fileset="test-fileset", output_location=None))
     )
-    mock_jobs.create_job_result = AsyncMock(
+    mock_jobs.create_attempt_result = AsyncMock(
         side_effect=NemoTransportError(httpx.ConnectError("Connection refused", request=request))
     )
     sdk = _async_client()

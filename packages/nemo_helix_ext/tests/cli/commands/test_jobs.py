@@ -15,9 +15,13 @@ from nemo_helix_ext.cli.commands.jobs import (
     _generate_jobs_python_code,
     download_results,
     get_logs_jobs,
+    list_attempts,
     list_jobs,
     list_steps,
+    retrieve_attempt,
+    retrieve_results,
     tail_platform_job,
+    update_jobs,
     update_status_steps,
 )
 from nemo_helix_plugin.client.client import NemoClient
@@ -272,7 +276,7 @@ def test_get_logs_uses_source_owned_cursor_page() -> None:
             _ctx(platform_client),
             name="job-a",
             workspace="test-workspace",
-            attempt_id=2,
+            attempt_id="current",
             limit=25,
             page_cursor="cursor-1",
             step_id="step-a",
@@ -284,7 +288,7 @@ def test_get_logs_uses_source_owned_cursor_page() -> None:
         workspace="test-workspace",
         name="job-a",
         query_params={
-            "attempt_id": 2,
+            "attempt_id": "current",
             "limit": 25,
             "page_cursor": "cursor-1",
             "step_id": "step-a",
@@ -313,7 +317,7 @@ def test_tail_platform_job_renders_newest_log_lines() -> None:
             name="job-a",
             lines=50,
             workspace="test-workspace",
-            attempt_id=2,
+            attempt_id="current",
             step_id="step-a",
             task_id="task-a",
         )
@@ -323,7 +327,7 @@ def test_tail_platform_job_renders_newest_log_lines() -> None:
         name="job-a",
         query_params={
             "tail": 50,
-            "attempt_id": 2,
+            "attempt_id": "current",
             "step_id": "step-a",
             "task_id": "task-a",
         },
@@ -366,6 +370,171 @@ def test_update_status_steps_maps_body_to_source_owned_request() -> None:
     )
 
 
+def test_list_attempts_uses_paginated_source_owned_route() -> None:
+    platform_client = SimpleNamespace()
+    jobs_client = MagicMock()
+    attempt = SimpleNamespace(id="att-1")
+    jobs_client.list_job_attempts.return_value = _PaginatedResponse(
+        SimpleNamespace(
+            items=[attempt],
+            metadata={
+                "page": 1,
+                "page_size": 25,
+                "current_page_size": 1,
+                "total_pages": 1,
+                "total_results": 1,
+            },
+        )
+    )
+
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
+        patch("nemo_helix_ext.cli.commands.jobs.format_output") as format_output,
+        patch("nemo_helix_ext.cli.commands.jobs.warn_if_more_pages"),
+    ):
+        list_attempts(
+            _ctx(platform_client),
+            job="job-a",
+            workspace="test-workspace",
+            page=1,
+            page_size=25,
+            sort="-seq",
+        )
+
+    jobs_client.list_job_attempts.assert_called_once_with(
+        workspace="test-workspace",
+        job="job-a",
+        query_params={"page": 1, "page_size": 25, "sort": "-seq"},
+    )
+    assert format_output.call_args.args[0].data == [attempt]
+
+
+def test_retrieve_current_attempt_uses_selector() -> None:
+    platform_client = SimpleNamespace()
+    jobs_client = MagicMock()
+    attempt = SimpleNamespace(id="att-1")
+    jobs_client.get_job_attempt.return_value = _Response(attempt)
+
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
+        patch("nemo_helix_ext.cli.commands.jobs.format_output"),
+    ):
+        retrieve_attempt(
+            _ctx(platform_client),
+            attempt="current",
+            job="job-a",
+            workspace="test-workspace",
+        )
+
+    jobs_client.get_job_attempt.assert_called_once_with(
+        workspace="test-workspace",
+        job="job-a",
+        attempt="current",
+    )
+
+
+def test_update_job_preserves_explicit_null_description() -> None:
+    platform_client = SimpleNamespace()
+    jobs_client = MagicMock()
+    updated_job = SimpleNamespace(name="job-a")
+    jobs_client.update_job.return_value = _Response(updated_job)
+
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
+        patch("nemo_helix_ext.cli.commands.jobs.format_output"),
+    ):
+        update_jobs(
+            _ctx(platform_client),
+            name="job-a",
+            workspace="test-workspace",
+            input_data='{"description": null}',
+        )
+
+    call_kwargs = jobs_client.update_job.call_args.kwargs
+    assert call_kwargs["workspace"] == "test-workspace"
+    assert call_kwargs["body"].description is None
+    assert "description" in call_kwargs["body"].model_fields_set
+
+
+def test_download_result_with_attempt_uses_canonical_route(tmp_path: Path) -> None:
+    platform_client = SimpleNamespace()
+    jobs_client = MagicMock()
+    binary_response = _BinaryResponse([b"bytes"])
+    jobs_client.download_attempt_result.return_value = binary_response
+    output_file = tmp_path / "metrics.bin"
+
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
+        patch("nemo_helix_ext.cli.commands.jobs.typer.echo"),
+    ):
+        download_results(
+            _ctx(platform_client),
+            name="metrics",
+            workspace="test-workspace",
+            job="job-a",
+            attempt_id="att-1",
+            output_file=output_file,
+        )
+
+    jobs_client.download_attempt_result.assert_called_once_with(
+        workspace="test-workspace",
+        job="job-a",
+        attempt="att-1",
+        name="metrics",
+    )
+    assert output_file.read_bytes() == b"bytes"
+
+
+def test_retrieve_result_requires_attempt_route() -> None:
+    platform_client = SimpleNamespace()
+    jobs_client = MagicMock()
+    result = SimpleNamespace(name="metrics")
+    jobs_client.get_attempt_result.return_value = _Response(result)
+
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
+        patch("nemo_helix_ext.cli.commands.jobs.format_output"),
+    ):
+        retrieve_results(
+            _ctx(platform_client),
+            name="metrics",
+            job="job-a",
+            attempt_id="att-1",
+            workspace="test-workspace",
+        )
+
+    jobs_client.get_attempt_result.assert_called_once_with(
+        workspace="test-workspace",
+        job="job-a",
+        attempt="att-1",
+        name="metrics",
+    )
+
+
+def test_retrieve_result_defaults_to_current_attempt() -> None:
+    platform_client = SimpleNamespace()
+    jobs_client = MagicMock()
+    jobs_client.get_attempt_result.return_value = _Response(SimpleNamespace(name="metrics"))
+
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
+        patch("nemo_helix_ext.cli.commands.jobs.format_output"),
+    ):
+        retrieve_results(
+            _ctx(platform_client),
+            name="metrics",
+            job="job-a",
+            workspace="test-workspace",
+        )
+
+    jobs_client.get_attempt_result.assert_called_once_with(
+        workspace="test-workspace",
+        job="job-a",
+        attempt="current",
+        name="metrics",
+    )
+
+
 def test_jobs_code_generation_uses_source_owned_client_without_path_args_in_query_params() -> None:
     code = _generate_jobs_python_code(
         resource_path=["jobs", "results"],
@@ -404,3 +573,25 @@ def test_jobs_download_code_generation_streams_result() -> None:
     assert "with Path(args['output_file']).open('wb') as output:" in code
     assert "with response.stream() as chunks:" in code
     assert "output.write(chunk)" in code
+
+
+def test_jobs_result_get_code_generation_uses_attempt_route() -> None:
+    code = _generate_jobs_python_code(
+        resource_path=["jobs", "results"],
+        method="retrieve",
+        args={
+            "workspace": "test-workspace",
+            "job": "job-a",
+            "attempt_id": "att-1",
+            "name": "metrics",
+        },
+        base_url="http://example.test",
+        wait_config=None,
+        wait_options=None,
+        watch_config=None,
+        watch_options=None,
+    )
+
+    assert "get_attempt_result" in code
+    assert "get_job_result" not in code
+    assert "attempt=args['attempt_id']" in code

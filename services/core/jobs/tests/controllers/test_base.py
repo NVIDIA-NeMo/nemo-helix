@@ -605,6 +605,10 @@ def _patched_jobs_client(backend):
     task list on its ``.data`` attribute.
     """
     mock_jobs = MagicMock()
+    mock_jobs.get_attempt_step = mock_jobs.get_job_step
+    mock_jobs.list_attempt_step_tasks = mock_jobs.list_job_step_tasks
+    mock_jobs.update_attempt_step_status = mock_jobs.update_job_step_status
+    mock_jobs.update_attempt_step_task = mock_jobs.update_job_step_task
     original = backend._jobs
     backend._jobs = mock_jobs
     try:
