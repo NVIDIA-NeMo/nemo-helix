@@ -36,12 +36,13 @@ deployments:
     interval_seconds: 2
     orphan_cleanup_interval_seconds: 15
 jobs:
+  enable_subprocess_executor: false
   executors:
-    - provider: subprocess
+    # CPU tasks need the task image's harness dependencies, including Deep Agents.
+    - provider: cpu
       profile: default
-      backend: subprocess
+      backend: docker
       config:
-        working_directory: /tmp/nhx-subprocess-jobs
         cleanup_completed_jobs_immediately: false
         ttl_seconds_before_active: 60
         ttl_seconds_active: 3600
