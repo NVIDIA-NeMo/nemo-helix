@@ -50,7 +50,9 @@ def _resolved() -> ResolvedPluginDeployment:
 
 
 def test_compile_nim_server_env_sets_ft_model_for_model_specific_image() -> None:
-    env = compile_nim_server_env(_resolved(), DeploymentsPluginConfig(), weighted=True, tool_call_plugin_path=None)
+    resolved = _resolved()
+    resolved.view.image_name = "nvcr.io/nim/meta/llama-3.1-8b-instruct"
+    env = compile_nim_server_env(resolved, DeploymentsPluginConfig(), weighted=True, tool_call_plugin_path=None)
     assert env["NIM_FT_MODEL"] == "/model-store"
     assert env["NIM_CUSTOM_MODEL"] == "/model-store"
     assert env["NIM_MODEL_NAME"] == "/model-store"
@@ -66,6 +68,7 @@ def test_compile_nim_server_env_non_legacy_name_is_served_fqdn() -> None:
         view=DeploymentConfigView(
             model_namespace="org",
             model_name="model",
+            image_name="nvcr.io/nim/meta/llama-3.1-8b-instruct",
             override_config={"nimLegacy": False},
             additional_envs={"NIM_ENGINE_MODEL_PATH": "alternates/hf"},
         ),

@@ -15,7 +15,7 @@ one shared model emits one ``DeploymentParams`` schema in the merged
 
 from __future__ import annotations
 
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -55,8 +55,8 @@ class DeploymentParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     engine: Literal["nim", "vllm"] = Field(
-        default="nim",
-        description="Inference engine for the deployment: 'nim' (default) or 'vllm'.",
+        default="vllm",
+        description="Inference engine for the deployment: 'vllm' (default) or 'nim'.",
     )
     gpu: int = Field(default=1, gt=0, description="Number of GPUs required for the deployment.")
     additional_envs: dict[str, str] | None = Field(
@@ -81,8 +81,18 @@ class DeploymentParams(BaseModel):
     )
     tool_call_config: ToolCallParams | None = Field(
         default=None,
-        description="Tool calling configuration override. Only applies when engine is 'nim'.",
+        description="Tool calling configuration override. Requires engine 'nim'; setting it without engine selects 'nim'.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _tool_call_config_implies_nim(cls, data: Any) -> Any:
+        # Inline parameters deployed with NIM before engine existed, so a stored spec can
+        # carry tool_call_config without engine. Only NIM reads tool_call_config, so keep
+        # such specs on NIM instead of rejecting them under the vLLM default.
+        if isinstance(data, dict) and "engine" not in data and data.get("tool_call_config") is not None:
+            return {**data, "engine": "nim"}
+        return data
 
     @model_validator(mode="after")
     def _tool_call_config_requires_nim(self) -> Self:
@@ -97,5 +107,5 @@ DEPLOYMENT_CONFIG_DESCRIPTION = (
     "Deployment configuration for auto-deploying the model after training. "
     "Pass a string to reference an existing ModelDeploymentConfig by name "
     "('my-config' or 'workspace/my-config'). An object provides inline "
-    "deployment parameters, deployed with NIM unless engine is 'vllm'. Omit to skip deployment."
+    "deployment parameters, deployed with vLLM unless engine is 'nim'. Omit to skip deployment."
 )

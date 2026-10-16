@@ -29,10 +29,6 @@ _CLICKHOUSE_VERSION_FILE = Path(__file__).resolve().parents[3] / ".clickhouse-ve
 CLICKHOUSE_VERSION = _CLICKHOUSE_VERSION_FILE.read_text(encoding="utf-8").strip()
 
 
-def _run(coro: Any) -> Any:
-    return asyncio.run(coro)
-
-
 def _docker_available() -> bool:
     if find_spec("docker") is None:
         return False
@@ -89,15 +85,15 @@ def intake_config(clickhouse_settings: ClickHouseSettings) -> IntakeConfig:
 
 
 @pytest.fixture(scope="session")
-def clickhouse_client(clickhouse_settings: ClickHouseSettings):
+def clickhouse_client(clickhouse_settings: ClickHouseSettings, run_async):
     client = ClickHouseSpanClient(clickhouse_settings)
-    _run(bootstrap_schema(client))
+    run_async(bootstrap_schema(client))
     yield client
-    _run(client.close())
+    run_async(client.close())
 
 
 @pytest.fixture(autouse=True)
-def clean_clickhouse(clickhouse_client: ClickHouseSpanClient):
+def clean_clickhouse(clickhouse_client: ClickHouseSpanClient, run_async):
     tables = (
         ClickHouseTable.SPANS,
         ClickHouseTable.EVALUATOR_RESULTS,
@@ -105,10 +101,10 @@ def clean_clickhouse(clickhouse_client: ClickHouseSpanClient):
         ClickHouseTable.TRACE_INDEX,
     )
     for table in tables:
-        _run(clickhouse_client.command(f"TRUNCATE TABLE {qualified_table(clickhouse_client.database, table)}"))
+        run_async(clickhouse_client.command(f"TRUNCATE TABLE {qualified_table(clickhouse_client.database, table)}"))
     yield
     for table in tables:
-        _run(clickhouse_client.command(f"TRUNCATE TABLE {qualified_table(clickhouse_client.database, table)}"))
+        run_async(clickhouse_client.command(f"TRUNCATE TABLE {qualified_table(clickhouse_client.database, table)}"))
 
 
 @pytest.fixture
@@ -121,9 +117,10 @@ def client(intake_config: IntakeConfig):
         yield test_client
 
 
-@pytest.fixture
-def run_async() -> Callable[[Any], Any]:
-    return _run
+@pytest.fixture(scope="session")
+def run_async():
+    with asyncio.Runner() as runner:
+        yield runner.run
 
 
 def _clickhouse_config(settings: ClickHouseSettings) -> ClickHouseConfig:
