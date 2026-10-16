@@ -132,6 +132,11 @@ def _secret_refs(spec: AgentEvalSpec) -> Iterator[tuple[str, str]]:
     if isinstance(spec.target, (FabricRunnerTarget, GymRunnerTarget, HarborRunnerTarget)):
         for env_name, secret_ref in spec.target.env_secrets.items():
             yield env_name, secret_ref.root
+    # A Harbor task's verifier may need its own, such as an LLM judge's API key; the runtime hands it only to the
+    # verifier.
+    if isinstance(spec.target, HarborRunnerTarget):
+        for env_name, secret_ref in spec.target.verifier_env_secrets.items():
+            yield env_name, secret_ref.root
 
     endpoint = None
     if isinstance(spec.target, ModelTarget):

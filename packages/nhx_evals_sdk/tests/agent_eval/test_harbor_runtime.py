@@ -1047,7 +1047,16 @@ def _spy_on_run_job(monkeypatch: pytest.MonkeyPatch, calls: list[bool]) -> None:
     """
     from nhx_evals_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
 
-    def fake(config, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates):
+    def fake(
+        config,
+        _dataset_path,
+        _task_names,
+        *,
+        job_name=None,
+        force_rerun=None,
+        env_templates,
+        verifier_env_templates=None,
+    ):
         async def run_job() -> None:
             calls.append(bool(force_rerun))
 
@@ -1570,7 +1579,9 @@ async def test_inputs_changing_mid_run_leaves_the_job_unstamped(
     config = config.model_copy(update={"agent_import_path": "wrapper:Agent", "agent_dir": agent_dir})
     (job_dir / harbor_runtime.CACHE_STAMP_FILENAME).unlink()
 
-    def fake(cfg, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates):
+    def fake(
+        cfg, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates, verifier_env_templates=None
+    ):
         async def run_job() -> None:
             (agent_dir / "wrapper.py").write_text("v2-EDITED-MID-RUN\n")
 
@@ -2014,6 +2025,69 @@ async def test_trace_dir_is_published_to_the_verifier_as_trace_dir_env(
 
 
 @pytest.mark.asyncio
+async def test_verifier_env_secrets_reach_the_verifier_and_never_the_agent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A judge key in the agent's env would hand the reviewer under test the grader's credential.
+    verifier_calls: list[dict[str, object]] = []
+    agent_calls: list[dict[str, object]] = []
+
+    async def create(_config: object) -> _FakeJob:
+        return _FakeJob()
+
+    _stub_harbor(monkeypatch, create, verifier_calls)
+
+    def _agent_config(**kwargs: object) -> object:
+        agent_calls.append(kwargs)
+        return object()
+
+    monkeypatch.setattr(sys.modules["harbor.models.trial.config"], "AgentConfig", _agent_config)
+    config = HarborRuntimeConfig(
+        jobs_dir=tmp_path / "jobs",
+        job_name="pinned",
+        trace_dir="/app/traces",
+        env_secrets={"OPENAI_API_KEY": SecretRef("ws/openai-key")},
+        verifier_env_secrets={"JUDGE_API_KEY": SecretRef("ws/judge-key")},
+    )
+    _built, run_job = _build_native_job(
+        config,
+        tmp_path / "dataset",
+        None,
+        job_name="pinned",
+        force_rerun=False,
+        env_templates={"OPENAI_API_KEY": "${OPENAI_API_KEY}"},
+        verifier_env_templates={"JUDGE_API_KEY": "${JUDGE_API_KEY}"},
+    )
+
+    await run_job()
+
+    assert verifier_calls == [{"env": {"JUDGE_API_KEY": "${JUDGE_API_KEY}", "TRACE_DIR": "/app/traces"}}]
+    assert [call["env"] for call in agent_calls] == [{"OPENAI_API_KEY": "${OPENAI_API_KEY}"}]
+
+
+def test_a_job_built_without_the_verifier_templates_refuses_rather_than_dropping_them(tmp_path: Path) -> None:
+    config = HarborRuntimeConfig(
+        jobs_dir=tmp_path / "jobs", verifier_env_secrets={"JUDGE_API_KEY": SecretRef("ws/judge-key")}
+    )
+
+    with pytest.raises(ValueError, match="don't match verifier_env_secrets keys"):
+        _build_native_job(config, tmp_path / "dataset", None, job_name="pinned", force_rerun=False, env_templates={})
+
+
+def test_verifier_env_secrets_key_the_cache_only_when_set(tmp_path: Path) -> None:
+    # The empty default is left out of the option hash, so job dirs stamped before the field existed stay valid.
+    from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import _CACHE_IRRELEVANT_OPTIONS, _cache_stamp
+
+    plain = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs")
+    options = plain.model_dump(exclude=set(_CACHE_IRRELEVANT_OPTIONS) | {"verifier_env_secrets"}, mode="json")
+    pre_field_hash = hashlib.sha256(json.dumps(options, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    with_judge = plain.model_copy(update={"verifier_env_secrets": {"JUDGE_API_KEY": SecretRef("ws/judge-key")}})
+
+    assert _cache_stamp(plain, tmp_path / "dataset", [])["options"] == pre_field_hash
+    assert _cache_stamp(with_judge, tmp_path / "dataset", [])["options"] != pre_field_hash
+
+
+@pytest.mark.asyncio
 async def test_file_exists_error_without_a_job_dir_propagates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # The retry is scoped to Harbor's resume refusal. A FileExistsError raised with no
     # job dir to discard is something else entirely and must not be swallowed, nor
@@ -2136,8 +2210,8 @@ def test_job_config_drift_is_silent_when_it_cannot_tell(tmp_path: Path) -> None:
 _STAMP_COVERED_HARBOR_FIELDS = {
     "n_attempts": {"n_attempts"},
     "artifacts": {"artifacts", "trace_dir"},
-    # Carries TRACE_DIR, the container trace path verifiers read.
-    "verifier": {"trace_dir"},
+    # Carries TRACE_DIR, the container trace path verifiers read, and the verifier's secret templates.
+    "verifier": {"trace_dir", "verifier_env_secrets"},
     "retry": {"max_retries"},
     "agents": {"agent_name", "agent_import_path", "agent_model_name"},
     "timeout_multiplier": {"timeout_multiplier"},
@@ -3240,12 +3314,20 @@ def clean_probe_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
     return monkeypatch
 
 
-def _capture_env_templates(monkeypatch: pytest.MonkeyPatch, captured: list[Mapping[str, str]]) -> None:
+def _capture_env_templates(
+    monkeypatch: pytest.MonkeyPatch,
+    captured: list[Mapping[str, str]],
+    verifier_captured: list[Mapping[str, str]] | None = None,
+) -> None:
     """Replace the native job build, recording the templates ``run_tasks`` computed for it."""
     from nhx_evals_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
 
-    def fake(config, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates):
+    def fake(
+        config, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates, verifier_env_templates
+    ):
         captured.append(dict(env_templates))
+        if verifier_captured is not None:
+            verifier_captured.append(dict(verifier_env_templates))
 
         async def run_job() -> None:
             return None
@@ -3291,6 +3373,33 @@ async def test_env_secrets_are_templated_from_their_source_without_touching_os_e
 
     assert captured == [expected]
     assert dict(os.environ) == environ_before
+
+
+@pytest.mark.asyncio
+async def test_verifier_env_secrets_are_templated_from_their_source(
+    tmp_path: Path, clean_probe_env: pytest.MonkeyPatch
+) -> None:
+    clean_probe_env.setenv(_PREFIXED, "a")
+    config, _job_dir, task = _forced_run_config(tmp_path, verifier_env_secrets={"JUDGE_API_KEY": _WS_REF})
+    captured: list[Mapping[str, str]] = []
+    verifier_captured: list[Mapping[str, str]] = []
+    _capture_env_templates(clean_probe_env, captured, verifier_captured)
+
+    await HarborAgentTaskRunner(config=config).run_tasks([task])
+
+    assert captured == [{}]
+    assert verifier_captured == [{"JUDGE_API_KEY": f"${{{_PREFIXED}}}"}]
+
+
+@pytest.mark.asyncio
+async def test_a_missing_verifier_secret_is_named_by_its_field(
+    tmp_path: Path, clean_probe_env: pytest.MonkeyPatch
+) -> None:
+    config, _job_dir, task = _forced_run_config(tmp_path, verifier_env_secrets={"JUDGE_API_KEY": _WS_REF})
+    _capture_env_templates(clean_probe_env, [])
+
+    with pytest.raises(ValueError, match=r"^verifier_env_secrets\['JUDGE_API_KEY'\] -> "):
+        await HarborAgentTaskRunner(config=config).run_tasks([task])
 
 
 @pytest.mark.asyncio

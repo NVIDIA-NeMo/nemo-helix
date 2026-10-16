@@ -12,7 +12,9 @@ from nhx_evals_sdk.resolver_protocols import EnvSecretSource, MissingSecretError
 from nhx_evals_sdk.values.common import SecretRef
 
 
-def env_secret_vars(env_secrets: Mapping[str, SecretRef], source: EnvSecretSource) -> dict[str, str]:
+def env_secret_vars(
+    env_secrets: Mapping[str, SecretRef], source: EnvSecretSource, *, field: str = "env_secrets"
+) -> dict[str, str]:
     """Map each ``env_secrets`` key to the environment variable holding its secret.
 
     Example:
@@ -23,14 +25,15 @@ def env_secret_vars(env_secrets: Mapping[str, SecretRef], source: EnvSecretSourc
             env_secret_vars(env_secrets, source)
             # Returns: {"LLM_API_KEY": "MY_WORKSPACE_PROBE_API_KEY"}
 
-        Output keys retain the destination names; values name the source variables.
+        Output keys retain the destination names; values name the source variables. ``field`` names
+        the config field in the missing-secret error.
     """
     sources: dict[str, str] = {}
     for env_name, secret_ref in env_secrets.items():
         try:
             sources[env_name] = source.env_var_for(secret_ref, env_name)
         except MissingSecretError as error:
-            raise MissingSecretError(f"env_secrets[{env_name!r}] -> {error}") from error
+            raise MissingSecretError(f"{field}[{env_name!r}] -> {error}") from error
     return sources
 
 

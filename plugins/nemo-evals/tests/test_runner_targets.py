@@ -44,6 +44,7 @@ HARBOR_CARRIED_VALUES = {
     # A bare ref travels as-is; the platform resolves it in the job's workspace.
     "env_secrets": {"OPENAI_API_KEY": "openai-api-key"},
     "env_vars": {"FABRIC_LOG": "debug"},
+    "verifier_env_secrets": {"JUDGE_API_KEY": "judge-api-key"},
     "n_attempts": 2,
     "n_concurrent_trials": 3,
     "max_retries": 2,
