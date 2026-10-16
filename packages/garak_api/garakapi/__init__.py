@@ -28,6 +28,9 @@ class PluginCacheNoValidate(_plugins.PluginCache):
         # concurrent first imports (e.g. parallel OpenAPI generation on a fresh
         # CI runner) can read a truncated file. Without validation the copy is
         # never rebuilt, so it adds nothing but the race.
+        # TODO: Temporary. Remove this override once upstream garak writes the
+        # user cache atomically (temp file + os.replace) and garakapi is
+        # upgraded to that release.
         with open(self._plugin_cache_filename, encoding="utf-8") as cache_file:
             return json.load(cache_file)
 
