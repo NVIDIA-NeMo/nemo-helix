@@ -31,6 +31,8 @@ export type HuggingFaceSourceFieldsProps = {
    * The route renders the modal outside the form instead.
    */
   onRequestNewSecret: () => void;
+  /** Asks the route to open the edit-secret modal, for the same nested-form reason. */
+  onRequestEditSecret: (secretName: string) => void;
 };
 
 export const HuggingFaceSourceFields: FC<HuggingFaceSourceFieldsProps> = ({
@@ -39,6 +41,7 @@ export const HuggingFaceSourceFields: FC<HuggingFaceSourceFieldsProps> = ({
   control,
   errors,
   onRequestNewSecret,
+  onRequestEditSecret,
 }) => {
   return (
     <>
@@ -57,6 +60,7 @@ export const HuggingFaceSourceFields: FC<HuggingFaceSourceFieldsProps> = ({
         queryEnabled={queryEnabled}
         useControllerProps={{ control, name: 'hfTokenSecret' }}
         onRequestNewSecret={onRequestNewSecret}
+        onRequestEditSecret={onRequestEditSecret}
         formFieldProps={{
           slotLabel: 'HuggingFace Secret',
           slotInfo: 'Required for private or gated models; stored as a workspace secret.',

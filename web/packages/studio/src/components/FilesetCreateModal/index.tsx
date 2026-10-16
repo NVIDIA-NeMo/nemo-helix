@@ -25,6 +25,7 @@ import {
 import { useRemoteRepoMetadata } from '@studio/hooks/useRemoteRepoMetadata';
 import { FilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
 import { CreateSecretModal } from '@studio/routes/SecretsListRoute/CreateSecretModal';
+import { EditSecretModal } from '@studio/routes/SecretsListRoute/EditSecretModal';
 import { SecretSearchableSelect } from '@studio/routes/SecretsListRoute/SecretSearchableSelect';
 import { getFilesetDetailRoute } from '@studio/routes/utils';
 import {
@@ -63,6 +64,7 @@ export const FilesetCreateModal: FC<FilesetCreateModalProps> = ({
 
   const [storageMode, setStorageMode] = useState<StorageMode>(StorageMode.Local);
   const [createSecretModalOpen, setCreateSecretModalOpen] = useState(false);
+  const [editSecretName, setEditSecretName] = useState<string | null>(null);
 
   const {
     control,
@@ -235,6 +237,7 @@ export const FilesetCreateModal: FC<FilesetCreateModalProps> = ({
                 ensureOptionValue={selectedSecretName || undefined}
                 useControllerProps={{ control, name: 'secretKey' }}
                 onRequestNewSecret={() => setCreateSecretModalOpen(true)}
+                onRequestEditSecret={setEditSecretName}
                 triggerPlaceholder=""
                 formFieldProps={{
                   slotLabel: secretKeyLabel,
@@ -269,6 +272,14 @@ export const FilesetCreateModal: FC<FilesetCreateModalProps> = ({
         onClose={() => setCreateSecretModalOpen(false)}
         onSecretCreated={handleSecretCreated}
       />
+      {editSecretName ? (
+        <EditSecretModal
+          workspace={workspace}
+          name={editSecretName}
+          open
+          onClose={() => setEditSecretName(null)}
+        />
+      ) : null}
     </>
   );
 };

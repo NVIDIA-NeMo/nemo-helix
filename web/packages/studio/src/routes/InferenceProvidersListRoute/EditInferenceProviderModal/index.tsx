@@ -22,6 +22,7 @@ import {
 import { ModelProvider } from '@nemo/sdk/generated/platform/schema';
 import { Stack } from '@nvidia/foundations-react-core';
 import { CreateSecretModal } from '@studio/routes/SecretsListRoute/CreateSecretModal';
+import { EditSecretModal } from '@studio/routes/SecretsListRoute/EditSecretModal';
 import { SecretSearchableSelect } from '@studio/routes/SecretsListRoute/SecretSearchableSelect';
 import { useQueryClient } from '@tanstack/react-query';
 import { FC, useEffect, useState } from 'react';
@@ -49,6 +50,7 @@ export const EditInferenceProviderModal: FC<EditInferenceProviderModalProps> = (
   const toast = useToast();
   const queryClient = useQueryClient();
   const [createSecretModalOpen, setCreateSecretModalOpen] = useState(false);
+  const [editSecretName, setEditSecretName] = useState<string | null>(null);
   const currentSecretName = provider.api_key_secret_name ?? '';
 
   const {
@@ -163,6 +165,7 @@ export const EditInferenceProviderModal: FC<EditInferenceProviderModalProps> = (
             ensureOptionValue={currentSecretName || undefined}
             useControllerProps={{ control, name: 'api_key_secret_name' }}
             onRequestNewSecret={() => setCreateSecretModalOpen(true)}
+            onRequestEditSecret={setEditSecretName}
             triggerPlaceholder=""
             formFieldProps={{
               slotLabel: 'API Key Secret',
@@ -177,6 +180,14 @@ export const EditInferenceProviderModal: FC<EditInferenceProviderModalProps> = (
         open={createSecretModalOpen}
         onClose={() => setCreateSecretModalOpen(false)}
       />
+      {editSecretName ? (
+        <EditSecretModal
+          workspace={workspace}
+          name={editSecretName}
+          open
+          onClose={() => setEditSecretName(null)}
+        />
+      ) : null}
     </>
   );
 };

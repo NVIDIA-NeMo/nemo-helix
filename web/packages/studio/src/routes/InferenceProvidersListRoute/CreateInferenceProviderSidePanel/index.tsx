@@ -28,6 +28,7 @@ import {
   type InferenceProviderPresetId,
 } from '@studio/routes/InferenceProvidersListRoute/CreateInferenceProviderSidePanel/inferenceProviderPresets';
 import { CreateSecretModal } from '@studio/routes/SecretsListRoute/CreateSecretModal';
+import { EditSecretModal } from '@studio/routes/SecretsListRoute/EditSecretModal';
 import { SecretSearchableSelect } from '@studio/routes/SecretsListRoute/SecretSearchableSelect';
 import { useQueryClient } from '@tanstack/react-query';
 import { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -79,6 +80,7 @@ export const CreateInferenceProviderSidePanel: FC<CreateInferenceProviderSidePan
   const queryClient = useQueryClient();
   const [preset, setPreset] = useState<InferenceProviderPresetId>(defaultPreset ?? 'custom');
   const [createSecretModalOpen, setCreateSecretModalOpen] = useState(false);
+  const [editSecretName, setEditSecretName] = useState<string | null>(null);
 
   const { data: providersData, isLoading: isProvidersLoading } = useModelsListProviders(
     workspace,
@@ -296,6 +298,7 @@ export const CreateInferenceProviderSidePanel: FC<CreateInferenceProviderSidePan
           queryEnabled={open && !!workspace}
           useControllerProps={{ control, name: 'api_key_secret_name' }}
           onRequestNewSecret={() => setCreateSecretModalOpen(true)}
+          onRequestEditSecret={setEditSecretName}
           triggerPlaceholder=""
           formFieldProps={{
             slotLabel: 'API Key Secret',
@@ -315,6 +318,14 @@ export const CreateInferenceProviderSidePanel: FC<CreateInferenceProviderSidePan
         open={createSecretModalOpen}
         onClose={() => setCreateSecretModalOpen(false)}
       />
+      {editSecretName ? (
+        <EditSecretModal
+          workspace={workspace}
+          name={editSecretName}
+          open
+          onClose={() => setEditSecretName(null)}
+        />
+      ) : null}
     </>
   );
 };
