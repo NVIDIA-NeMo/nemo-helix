@@ -690,6 +690,37 @@ async def test_a_submitter_supplied_policy_setting_wins_over_the_derived_one(moc
     assert resolved.hydra_params["policy_model_name"] == resolved.resolved_config["models"]["default"]["model"]
 
 
+async def test_a_gym_stdio_template_the_job_does_not_set_is_refused_at_submit(mocker: MockerFixture) -> None:
+    """Gym's component leaves an unfilled template literal, so the MCP server would fail its auth mid-rollout."""
+    config = _calculator_with_mcp_config()
+    config["mcp"]["servers"]["calculator"] = {
+        "transport": "stdio",
+        "url": "/usr/bin/python3",
+        "env": {"CALC_TOKEN": "${CALC_TOKEN}", "MODE": "${MODE}"},
+    }
+    _platform(mocker, _agent(config))
+
+    with pytest.raises(
+        ValueError,
+        match=r"server 'calculator' reads CALC_TOKEN, MODE .*`env_secrets` \(or `env_vars` for a non-secret value\)",
+    ):
+        await _resolve(_gym_by_agent())
+
+    by_target = await _resolve(
+        _gym_by_agent(env_secrets={"CALC_TOKEN": SecretRef(root="dev/t")}, env_vars={"MODE": "x"})
+    )
+    del config["mcp"]["servers"]["calculator"]["env"]  # the source binding writes the templates itself
+    _platform(mocker, _agent(config))
+    environment = EnvironmentSpecInline(
+        mcp={"calculator": McpFulfillment(url="/usr/bin/python3", secrets={"CALC_TOKEN": "dev/t", "MODE": "dev/m"})}
+    )
+    by_source = await _resolve(
+        GymRunnerTarget(source=RegisteredAgentSource(agent=_AGENT, environment=environment), resources_server="mcqa")
+    )
+    for resolved in (by_target, by_source):
+        assert resolved.resolved_config["mcp"]["servers"]["calculator"]["env"]["CALC_TOKEN"] == "${CALC_TOKEN}"
+
+
 def test_a_registered_gym_agent_refuses_colocated_execution(tmp_path: Path) -> None:
     """Colocated Gym ignores the staged package, so it would run stock components as the registered agent."""
     target = _gym_by_agent(AgentRef(root="dev/calc"), resolved_config={"harness": {"adapter_id": "x"}})

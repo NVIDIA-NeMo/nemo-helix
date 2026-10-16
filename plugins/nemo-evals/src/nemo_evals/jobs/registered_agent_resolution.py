@@ -192,6 +192,26 @@ def _template_mcp_secret_env(config: dict[str, Any], environment: EnvironmentSpe
     return config
 
 
+def _require_mcp_env_templates_bound(config: dict[str, Any], bound: set[str], *, agent: str) -> None:
+    """Refuse a stdio MCP server ``${NAME}`` env template that names no variable the job will set."""
+    servers = ((config.get("mcp") or {}).get("servers")) or {}
+    for name, server in servers.items():
+        if not isinstance(server, dict) or server.get("transport") != "stdio":
+            continue
+        templated = {
+            m.group(1)
+            for v in (server.get("env") or {}).values()
+            if isinstance(v, str) and (m := _ENV_TEMPLATE.match(v))
+        }
+        unbound = sorted(templated - bound)
+        if unbound:
+            raise ValueError(
+                f"registered agent {agent}'s stdio MCP server {name!r} reads {', '.join(unbound)} from the "
+                "environment, but the job does not set it; bind it in the target's `env_secrets` (or `env_vars` "
+                f"for a non-secret value) or the source's `environment.mcp.{name}.secrets`"
+            )
+
+
 def _without_mcp_env_templates(config: dict[str, Any]) -> dict[str, Any]:
     """The config minus stdio MCP server ``${NAME}`` env templates, for a runtime that cannot expand them."""
     servers = ((config.get("mcp") or {}).get("servers")) or {}
@@ -287,6 +307,7 @@ def _fill_target(
             update={"source": resolved_source, "resolved_config": agent.config, "env_secrets": env_secrets}
         )
     if isinstance(target, GymRunnerTarget):
+        _require_mcp_env_templates_bound(agent.config, {*env_secrets, *target.env_vars}, agent=agent.ref.root)
         hydra_params = {**_gym_policy_params(agent.config), **target.hydra_params}
         return target.model_copy(
             update={
