@@ -67,7 +67,7 @@ flowchart LR
  C --> D{Training Type?}
  D -->|LoRA| E[Adapter created and<br/>attached to Model Entity]
  D -->|Full SFT| F[New Model Entity<br/>with customized weights]
- E --> G[Auto-deploy to NIM<br/>if enabled]
+ E --> G[Auto-deploy<br/>if configured]
 
 ```
 
@@ -358,7 +358,7 @@ flowchart TD
 - You have limited GPU resources (1-2 GPUs)
 - You want fast training iterations
 - You need multiple specialized versions of the same base model
-- You want to auto-deploy adapters to existing NIM deployments
+- You want to auto-deploy adapters to existing deployments
 
 ### When to Use Full Fine-Tuning
 

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEvalsListEvaluateJobResults } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
+import { platformFetch } from '@nemo/sdk/src/utils/platformRequest';
 import { useQuery } from '@tanstack/react-query';
 
 export interface AggregateScores {
@@ -37,7 +38,7 @@ export const useEvaluationJobResultV2 = (workspace: string, jobName: string) => 
         throw new Error('No download URL available');
       }
 
-      const response = await fetch(aggregateScoresResult.download_url);
+      const response = await platformFetch(aggregateScoresResult.download_url);
       if (!response.ok) {
         throw new Error(`Failed to download results: ${response.statusText}`);
       }

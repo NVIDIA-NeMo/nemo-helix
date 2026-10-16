@@ -118,11 +118,8 @@ def get_nemo_client(
         as_service: If provided, authenticate as ``service:{as_service}``.
             If ``None``, propagate the current request's / env principal.
         internal: Mark requests as internal (service-to-service).
-        on_behalf_of: Principal (or id) to act on behalf of.  Passing a
-            :class:`~nhx.common.auth.Principal` (rather than a bare id string)
-            is only reachable through this direct entry point; the plugin-facing
-            :class:`~nemo_helix_plugin.client_provider.NemoClientProvider`
-            protocol narrows ``on_behalf_of`` to ``str | None``.
+        on_behalf_of: Principal (or id) to act on behalf of.  A principal
+            delegates its effective identity; a bare id string delegates the id alone.
         workspace: Default workspace used to fill ``{workspace}`` path params.
         http_client: Optional sync HTTP client; defaults to an endpoint-aware client.
         base_url: Optional platform base URL; defaults to the configured endpoint.

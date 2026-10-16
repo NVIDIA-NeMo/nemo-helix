@@ -3,6 +3,7 @@
 
 import { getGatewayProxyGetQueryKey } from '@nemo/sdk/generated/platform/inference-gateway';
 import { selectOidcBearerToken } from '@nemo/sdk/src/utils/oidcBearerToken';
+import { platformFetch } from '@nemo/sdk/src/utils/platformRequest';
 import { useMutation, UseMutationOptions } from '@tanstack/react-query';
 import OpenAI from 'openai';
 import type { ChatCompletion, ChatCompletionCreateParams } from 'openai/resources/index.mjs';
@@ -35,6 +36,7 @@ const getClient = (baseURL: string): OpenAI => {
         apiKey: '',
         baseURL,
         dangerouslyAllowBrowser: true,
+        fetch: platformFetch,
       })
     );
   }
