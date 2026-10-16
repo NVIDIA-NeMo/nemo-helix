@@ -8,6 +8,7 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { CompareRunSelect } from '@studio/routes/EvaluationSessionDetailRoute/CompareRunSelect';
 import { TestCaseCompare } from '@studio/routes/EvaluationSessionDetailRoute/TestCaseCompare';
+import { TestCaseResultSummary } from '@studio/routes/EvaluationSessionDetailRoute/TestCaseResultSummary';
 import { useSessionCompareRuns } from '@studio/routes/EvaluationSessionDetailRoute/useSessionCompareRuns';
 import { SessionDetailContent } from '@studio/routes/IntakeSessionDetailRoute';
 import {
@@ -84,12 +85,14 @@ const EvaluationSessionDetail: FC<{
   onSelectCompare: (sessionId: string) => void;
 }> = ({ workspace, experimentName, sessionId, routeContext, onSelectCompare }) => {
   const { runs, isRunsLoading } = useSessionCompareRuns(workspace, experimentName, sessionId);
+  const currentRun = runs.find((run) => run.session_id === sessionId);
 
   const contextWithCompare = useMemo<SessionDetailRouteContext>(
     () =>
       routeContext.kind === 'evaluation'
         ? {
             ...routeContext,
+            summary: currentRun ? <TestCaseResultSummary run={currentRun} /> : undefined,
             headerActions: (
               <CompareRunSelect
                 runs={runs}
@@ -101,7 +104,7 @@ const EvaluationSessionDetail: FC<{
             ),
           }
         : routeContext,
-    [routeContext, runs, sessionId, onSelectCompare, isRunsLoading]
+    [routeContext, currentRun, runs, sessionId, onSelectCompare, isRunsLoading]
   );
 
   return <SessionDetailContent sessionId={sessionId} routeContext={contextWithCompare} />;

@@ -24,6 +24,8 @@ import type {
   ListEvaluationSessionsParams,
 } from '@nemo/sdk/generated/platform/schema';
 import { Text, Tooltip } from '@nvidia/foundations-react-core';
+import { getTestCaseVerdict } from '@studio/components/evaluation/testCaseVerdict';
+import { TestCaseVerdictBadge } from '@studio/components/evaluation/TestCaseVerdictBadge';
 import { IntakePayloadPreviewCell } from '@studio/components/IntakeLists/IntakePayloadPreviewCell';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getEvaluationSessionTraceDetailRoute } from '@studio/routes/utils';
@@ -194,6 +196,25 @@ export const EvaluationSessionsDataView: FC<EvaluationSessionsDataViewProps> = (
         );
       },
     }),
+    accessor((original) => getTestCaseVerdict(original), {
+      id: 'result',
+      header: 'Result',
+      enableSorting: false,
+      cell: ({ row }) => <TestCaseVerdictBadge verdict={getTestCaseVerdict(row.original)} />,
+    }),
+    ...evaluatorNames.map((name, index) =>
+      accessor((original) => original.evaluator_scores?.[name], {
+        id: `score-${index}`,
+        header: snakeCaseToTitleCase(name),
+        enableSorting: false,
+        size: 130,
+        meta: { alignment: 'right' },
+        cell: ({ row }) => {
+          const value = row.original.evaluator_scores?.[name];
+          return <Text>{formatEvaluatorScore(value)}</Text>;
+        },
+      })
+    ),
     accessor('status', {
       header: 'Status',
       enableSorting: true,
@@ -248,19 +269,6 @@ export const EvaluationSessionsDataView: FC<EvaluationSessionsDataViewProps> = (
           return <Text>{formatInteger((input_tokens ?? 0) + (output_tokens ?? 0))}</Text>;
         },
       }
-    ),
-    ...evaluatorNames.map((name, index) =>
-      accessor((original) => original.evaluator_scores?.[name], {
-        id: `score-${index}`,
-        header: snakeCaseToTitleCase(name),
-        enableSorting: false,
-        size: 130,
-        meta: { alignment: 'right' },
-        cell: ({ row }) => {
-          const value = row.original.evaluator_scores?.[name];
-          return <Text>{formatEvaluatorScore(value)}</Text>;
-        },
-      })
     ),
   ];
 

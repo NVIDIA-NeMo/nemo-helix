@@ -36,6 +36,7 @@ export type SessionDetailRouteContext =
       readonly parentBreadcrumbs: BreadcrumbsItemProps[];
       readonly getSessionHref: (sessionId: string) => string;
       readonly headerActions?: ReactNode;
+      readonly summary?: ReactNode;
     };
 
 interface SessionDetailViewProps {
@@ -179,6 +180,7 @@ export const SessionDetailView: FC<SessionDetailViewProps> = ({
           slotHeading={title}
           slotActions={routeContext?.kind === 'evaluation' ? routeContext.headerActions : undefined}
         />
+        {routeContext?.kind === 'evaluation' ? routeContext.summary : null}
         {!traceId ? (
           <div data-testid="session-summary-header" className="w-full min-w-0">
             <SessionSummaryHeader session={session} />
