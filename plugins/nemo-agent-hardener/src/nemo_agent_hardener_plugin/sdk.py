@@ -120,8 +120,8 @@ def _run_war_game(
         raise ValueError("agent-hardener run requires exactly one of 'config' or 'manifest_id'.")
     overlay: dict[str, JsonValue] = {
         "port": port,
-        # A fresh list, so it is typed as a JSON list rather than the caller's list[str].
-        "defenders": None if defenders is None else [*defenders],
+        # list is invariant, so a list[str] isn't a JSON list (list[JsonValue]) until copied into one.
+        "defenders": None if defenders is None else list[JsonValue](defenders),
         "attack_intensity": attack_intensity,
     }
     unsupported = sorted(key for key, value in overlay.items() if value is not None)
