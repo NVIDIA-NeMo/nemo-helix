@@ -45,9 +45,31 @@ from nemo_fabric import (
     RelayAtofFileSinkConfig,
     inspect_adapter,
 )
-from nemo_fabric.integrations.harbor.fabric_agent import HARBOR_ARTIFACT_ROOT, FabricAgent, FabricAgentOptions
+from nemo_fabric.integrations.harbor.fabric_agent import HARBOR_ARTIFACT_ROOT, FabricAgent
 from nhx_evals_sdk.agent_eval.runtimes.fabric.image import fabric_version
-from pydantic import Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+try:
+    from nemo_fabric.integrations.harbor.fabric_agent import FabricAgentOptions
+except ImportError as error:
+    # Upstream defines the options only beside its real FabricAgent; without the Harbor extra it
+    # exports a placeholder agent and nothing else. Keep this module importable (the examples import
+    # NVIDIA_MODEL_BASE_URL from it) and surface the missing extra where the agent is first used.
+    _HARBOR_IMPORT_ERROR: ImportError | None = error
+    FabricAgentOptions = BaseModel
+else:
+    _HARBOR_IMPORT_ERROR = None
+
+_HARBOR_EXTRA_HINT = (
+    "NemoFabricAgent requires the Harbor optional dependency: install nemo-fabric[harbor] "
+    "(the SDK's `harbor` extra) on Python 3.12 or later"
+)
+
+
+def _require_harbor() -> None:
+    if _HARBOR_IMPORT_ERROR is not None:
+        raise ModuleNotFoundError(_HARBOR_EXTRA_HINT) from _HARBOR_IMPORT_ERROR
+
 
 #: build.nvidia.com's OpenAI-compatible endpoint, for configs that name an ``nvidia`` model directly.
 NVIDIA_MODEL_BASE_URL = "https://integrate.api.nvidia.com/v1"
@@ -179,7 +201,7 @@ def _refuse_non_default_flat_config_kwargs(kwargs: Mapping[str, Any]) -> None:
         raise _flat_config_kwargs_error(rejected)
 
 
-class NemoFabricAgentOptions(FabricAgentOptions):
+class NemoFabricAgentOptions(FabricAgentOptions):  # ty: ignore[unsupported-base]
     """Harbor-facing options: a complete ``fabric_config`` stands in for the flat agent keywords."""
 
     fabric_config: dict[str, Any] = Field(description="Fabric agent config to run verbatim.")
@@ -222,6 +244,7 @@ class NemoFabricAgent(FabricAgent):  # ty: ignore[unsupported-base]
         fabric_default_max_turns: int | None = None,
         **kwargs: Any,
     ) -> None:
+        _require_harbor()
         _refuse_flat_config_kwargs(kwargs)
         config = _parse_fabric_config(fabric_config)
         assert config.harness is not None  # checked by _parse_fabric_config
@@ -243,12 +266,14 @@ class NemoFabricAgent(FabricAgent):  # ty: ignore[unsupported-base]
         ``fabric_adapter_id`` is exempt because the constructor hands upstream the one derived from the
         config; the options model refuses any other value.
         """
+        _require_harbor()
         _refuse_non_default_flat_config_kwargs(kwargs or {})
         return super().parse_options(kwargs, env)
 
     @classmethod
     def options_schema(cls) -> dict[str, Any]:
         """The schema Harbor shows users, without the keywords this agent refuses."""
+        _require_harbor()
         schema = super().options_schema()
         schema["properties"] = {k: v for k, v in schema.get("properties", {}).items() if k not in FLAT_CONFIG_KWARGS}
         if "required" in schema:

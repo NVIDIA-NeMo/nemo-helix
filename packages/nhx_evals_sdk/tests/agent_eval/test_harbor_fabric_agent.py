@@ -5,6 +5,9 @@
 
 import importlib.metadata
 import json
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -368,6 +371,27 @@ def test_install_and_run_keywords_still_pass_through(tmp_path: Path) -> None:
 
 def test_reports_its_own_name_to_harbor() -> None:
     assert NemoFabricAgent.name() == "nemo-fabric"
+
+
+def test_the_module_imports_without_the_harbor_extra_and_names_it_when_the_agent_is_used() -> None:
+    """The examples import ``NVIDIA_MODEL_BASE_URL`` from here; upstream exports its options model only
+    beside its real ``FabricAgent``, so the import has to tolerate the placeholder."""
+    script = textwrap.dedent(
+        """
+        import sys
+        sys.modules["harbor"] = None  # the extra is absent
+        from nhx_evals_sdk.agent_eval.runtimes.harbor import fabric_agent
+        print(fabric_agent.NVIDIA_MODEL_BASE_URL)
+        try:
+            fabric_agent.NemoFabricAgent.preflight({"fabric_config": {}})
+        except ModuleNotFoundError as error:
+            print(error)
+        """
+    )
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)
+    base_url, hint = result.stdout.strip().splitlines()
+    assert base_url == "https://integrate.api.nvidia.com/v1"
+    assert "nemo-fabric[harbor]" in hint
 
 
 def test_gateway_models_get_the_placeholder_key_their_client_insists_on(tmp_path: Path) -> None:
