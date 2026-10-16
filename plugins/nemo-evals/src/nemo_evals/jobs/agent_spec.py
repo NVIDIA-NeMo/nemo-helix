@@ -920,3 +920,15 @@ class AgentEvalSpec(_AgentEvalSpecCommon):
         validate_task_collection(self.tasks)
         validate_single_kind(self.tasks)
         return self
+
+    def only_task(self, index: int) -> AgentEvalSpec:
+        """A new validated spec running only ``tasks[index]``; everything else equal. Never mutates this spec.
+
+        Raises:
+            IndexError: ``index`` is outside ``tasks``.
+        """
+        if not 0 <= index < len(self.tasks):
+            raise IndexError(f"task index {index} is outside 0..{len(self.tasks) - 1}")
+        data = self.model_dump(mode="json")
+        data["tasks"] = [data["tasks"][index]]
+        return AgentEvalSpec.model_validate(data)

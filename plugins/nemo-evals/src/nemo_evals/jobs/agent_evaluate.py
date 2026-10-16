@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Literal
@@ -102,7 +102,7 @@ from nhx_evals_sdk.agent_eval.evaluator import AgentEvaluator
 from nhx_evals_sdk.agent_eval.results import AgentEvalResult
 from nhx_evals_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
-from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig
+from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTarget
 from nhx_evals_sdk.values import RunConfigOnline, RunConfigOnlineModel
 from pydantic import BaseModel
@@ -200,6 +200,9 @@ class _AgentEvalJobBase(NemoJob):
     spec_schema: ClassVar[type[BaseModel] | None] = AgentEvalSpec
     job_collection_path: ClassVar[str | None] = "/agent-evaluate/jobs"
     adapters: ClassVar[Mapping[str, TaskKindAdapter]] = KIND_ADAPTERS
+    #: Delete a registered agent's files snapshot after a successful run. A taskset run's task Jobs
+    #: share one snapshot, so they keep it; the run controller deletes it (M4 story 8).
+    discard_agent_files: ClassVar[bool] = True
 
     @classmethod
     async def to_spec(
@@ -453,12 +456,17 @@ class _AgentEvalJobBase(NemoJob):
 
     @staticmethod
     def _resolve_target(
-        target: Target | None, ctx: JobContext
+        target: Target | None,
+        ctx: JobContext,
+        *,
+        configure_harbor: Callable[[HarborRuntimeConfig], HarborRuntimeConfig] | None = None,
     ) -> tuple[AgentEvalTarget | None, str | dict[str, Any] | None, RunConfigOnline | RunConfigOnlineModel | None]:
         """Resolve a target spec to ``(runtime target, prompt_template, params)`` for the SDK run config.
 
         Endpoint targets carry their own request config; a runner is instantiated to its runtime and
         shapes its own request, so it contributes neither a prompt template nor inference params.
+        ``configure_harbor`` adjusts a Harbor runner's config last (a Kubernetes task Job selects its
+        sandbox environment there).
         """
         if isinstance(target, ModelTarget):
             return target.model, target.prompt_template, target.params or RunConfigOnlineModel()
@@ -502,6 +510,8 @@ class _AgentEvalJobBase(NemoJob):
             )
             if target.n_concurrent_trials is not None:
                 harbor_config.n_concurrent_trials = target.n_concurrent_trials
+            if configure_harbor is not None:
+                harbor_config = configure_harbor(harbor_config)
             harbor_runtime = HarborAgentTaskRunner(
                 config=harbor_config,
                 secret_resolver=JobEnvSecretSource(workspace=ctx.workspace),
@@ -554,7 +564,10 @@ class _AgentEvalJobBase(NemoJob):
             for kind, group in groupby_kind(spec.tasks)
             for task in get_adapter(kind, prepare_ctx.adapters).prepare(group, prepare_ctx)
         ]
-        target, prompt_template, params = self._resolve_target(spec.target, ctx)
+        self._prepared_tasks(tasks)
+        target, prompt_template, params = self._resolve_target(
+            spec.target, ctx, configure_harbor=lambda harbor_config: self._configure_harbor_runtime(harbor_config, ctx)
+        )
         bundle_dir = ctx.storage.persistent / AGENT_BUNDLE_DIR
         if bundle_dir.exists():
             shutil.rmtree(bundle_dir)
@@ -630,10 +643,17 @@ class _AgentEvalJobBase(NemoJob):
             if isinstance(spec.target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
             else None
         )
-        if snapshot is not None:
+        if snapshot is not None and self.discard_agent_files:
             discard_registered_agent_files_sync(platform_client, snapshot)
 
         return output
+
+    def _prepared_tasks(self, tasks: list[AgentEvalTask]) -> None:
+        """Hook: inspect or adjust materialized tasks before they run. Does nothing by default."""
+
+    def _configure_harbor_runtime(self, config: HarborRuntimeConfig, ctx: JobContext) -> HarborRuntimeConfig:
+        """Hook: adjust a Harbor runner's config before it runs. Returns it unchanged by default."""
+        return config
 
 
 class AgentEvalJob(_AgentEvalJobBase):

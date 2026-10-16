@@ -138,6 +138,20 @@ _DIGEST_CHUNK_BYTES = 1 << 20
 RunJob = Callable[[], Awaitable[None]]
 
 
+class HarborEnvironmentConfig(BaseModel):
+    """Select an installed Harbor environment without importing Harbor in the client."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    import_path: str = Field(min_length=1)
+    kwargs: dict[str, JsonValue] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _reject_credentials(self) -> HarborEnvironmentConfig:
+        require_no_plaintext_credentials(self.kwargs, field="environment.kwargs", alternative="worker environment")
+        return self
+
+
 class HarborRuntimeConfig(BaseModel):
     """Declarative config for running a Harbor job natively through the SDK.
 
@@ -216,6 +230,9 @@ class HarborRuntimeConfig(BaseModel):
         default=None, description="Environment-build timeout multiplier."
     )
     reward_key: str = Field(default=DEFAULT_REWARD_KEY, description="Key read from Harbor's rewards mapping.")
+    environment: HarborEnvironmentConfig | None = Field(
+        default=None, description="Installed custom environment; omitted uses Harbor's default environment."
+    )
 
     @model_validator(mode="after")
     def _agent_kwargs_carry_no_credentials(self) -> HarborRuntimeConfig:
@@ -1039,6 +1056,14 @@ def _build_native_job(
         }
 
         async def _create_and_run(agent: Any) -> None:
+            # A custom environment replaces Harbor's Docker one. Only Docker takes compose overlays:
+            # Linux Docker Engine needs an explicit host-gateway alias (Docker Desktop also accepts
+            # it), so registered Fabric agents in the task container can call the Inference Gateway.
+            environment = (
+                config.environment.model_dump()
+                if config.environment
+                else EnvironmentConfig(extra_docker_compose=[Path(__file__).with_name("host-gateway.yaml")])
+            )
             job_config = JobConfig(
                 job_name=resolved_name,
                 jobs_dir=jobs_dir,
@@ -1047,10 +1072,7 @@ def _build_native_job(
                 quiet=config.quiet,
                 retry=RetryConfig(max_retries=config.max_retries),
                 artifacts=artifacts,
-                # Linux Docker Engine needs an explicit host-gateway alias; Docker
-                # Desktop also accepts it. Keep this in the task container, where
-                # registered Fabric agents call the platform Inference Gateway.
-                environment=EnvironmentConfig(extra_docker_compose=[Path(__file__).with_name("host-gateway.yaml")]),
+                environment=environment,
                 agents=[agent],
                 datasets=[DatasetConfig(path=dataset_path, task_names=list(task_names) if task_names else None)],
                 **verifier_kwargs,

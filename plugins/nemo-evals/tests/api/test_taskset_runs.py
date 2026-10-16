@@ -48,12 +48,12 @@ async def test_taskset_run_create_replay_and_conflict(run_client, published, req
     assert first.status_code == 201, first.text
     assert first.json()["phase"] == "accepted" and first.json()["result_state"] == "pending"
     assert first.json()["created_by"] == "user:alice"
-    assert first.json()["warnings"] == []
+    assert first.json()["warnings"] == [f"task 0 (task-1): Job {first.json()['run_id']}-task-0"]
     assert not {"plan_ref", "plan_digest", "request_digest", "db_version"} & first.json().keys()
     before = list(files_service.calls)
     replay = await run_client.post(PATH, json=request_body)
     assert replay.status_code == 200 and replay.json() == first.json()
-    assert files_service.calls == before
+    assert not [call for call in files_service.calls[len(before) :] if call[0] != "download"]
     request_body["timeout_seconds"] = 1
     conflict = await run_client.post(PATH, json=request_body)
     assert conflict.status_code == 409
@@ -254,3 +254,14 @@ async def test_taskset_run_lost_create_reply_through_production_store(
             assert tuple(snapshot_ref.split("/")) in files_service.filesets
             if mode != "uncommitted-exhausted":
                 assert len(files_service.filesets) == 2
+
+
+async def test_taskset_run_missing_task_job_is_retryable_503(run_client, published, request_body, fake_task_jobs):
+    fake_task_jobs.refuse = {"run-11f77762178b0e05-task-0"}
+    response = await run_client.post(PATH, json=request_body)
+    assert response.status_code == 503, response.text
+    assert response.headers["x-should-retry"] == "true"
+    assert "task 0" in response.json()["detail"]
+    fake_task_jobs.refuse = set()
+    retry = await run_client.post(PATH, json=request_body)
+    assert retry.status_code == 200 and len(fake_task_jobs.created) == 1

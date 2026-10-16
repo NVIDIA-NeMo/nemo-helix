@@ -154,7 +154,7 @@ def test_member_defaults_and_index() -> None:
 def test_frozen_plan_roundtrip(plan: TasksetRunPlan) -> None:
     """Verify the plan fixture round-trips while retaining its strict frozen schema.
 
-    Assertions pin the seven stored fields and expect validation errors for
+    Assertions pin the eleven stored fields and expect validation errors for
     rebinding, extras, unresolved percentages, invalid caps, and missing nullable
     cap fields, protecting the resolved-input contract of stored plans.
     """
@@ -167,6 +167,10 @@ def test_frozen_plan_roundtrip(plan: TasksetRunPlan) -> None:
         "missing_prebuilt_image",
         "max_concurrent_task_jobs",
         "max_failed_tasks",
+        "sandbox_policy",
+        "dispatcher_image",
+        "dispatcher_profile",
+        "task_environments",
     }
     with pytest.raises(ValidationError, match="frozen"):
         plan.run_id = "changed"
@@ -183,6 +187,11 @@ def test_frozen_plan_roundtrip(plan: TasksetRunPlan) -> None:
         del data[field]
         with pytest.raises(ValidationError):
             TasksetRunPlan.model_validate(data)
+    # One frozen environment per task: a retry reads images from here, never prepares them again.
+    with pytest.raises(ValidationError, match="task_environments has 2 entries for 1 tasks"):
+        TasksetRunPlan.model_validate(
+            {**plan.model_dump(), "task_environments": plan.model_dump()["task_environments"] * 2}
+        )
 
 
 def test_execution_input() -> None:
