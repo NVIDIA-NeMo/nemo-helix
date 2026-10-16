@@ -72,7 +72,9 @@ describe.each(['UTC', 'America/Los_Angeles', 'Asia/Kolkata'])('%s', (timeZone) =
         const [fromInput, toInput] = screen.getAllByRole('textbox');
         const open = () => user.click(fromInput);
         const selectDay = async () => {
-          await user.click(await screen.findByRole('button', { name: /May 25th, 2026/ }));
+          // DayPicker exposes an aria-label on each day. Query it directly rather
+          // than computing accessible names for both months on every interaction.
+          await user.click(await screen.findByLabelText(/May 25th, 2026/, { selector: 'button' }));
         };
         const expectOriginal = () => {
           expect(fromInput).toHaveValue(initialValue ? '2026-05-10' : '');
@@ -85,17 +87,17 @@ describe.each(['UTC', 'America/Los_Angeles', 'Asia/Kolkata'])('%s', (timeZone) =
         // Moving focus into the calendar must not commit an unchanged text input.
         expect(onCommit).not.toHaveBeenCalled();
         expectOriginal();
-        await user.click(screen.getByRole('button', { name: 'Cancel' }));
+        await user.click(screen.getByText('Cancel', { selector: 'button' }));
         expect(onCommit).not.toHaveBeenCalled();
         expectOriginal();
-        expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+        expect(screen.queryByText('Apply', { selector: 'button' })).not.toBeInTheDocument();
 
         await user.keyboard('{Escape}');
         await open();
-        expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+        expect(screen.queryByText('Apply', { selector: 'button' })).not.toBeInTheDocument();
         await selectDay();
         expect(onCommit).not.toHaveBeenCalled();
-        await user.click(screen.getByRole('button', { name: 'Apply' }));
+        await user.click(screen.getByText('Apply', { selector: 'button' }));
         expect(onCommit).toHaveBeenCalledTimes(1);
         expect(onCommit).toHaveBeenLastCalledWith({
           $gte: initialValue ? POPULATED.$gte : '2026-05-25T00:00:00.000Z',
@@ -104,11 +106,11 @@ describe.each(['UTC', 'America/Los_Angeles', 'Asia/Kolkata'])('%s', (timeZone) =
         expect(toInput).toHaveValue('2026-05-25');
 
         await open();
-        expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
-        await user.click(screen.getByRole('button', { name: /May 28th, 2026/ }));
+        expect(screen.queryByText('Apply', { selector: 'button' })).not.toBeInTheDocument();
+        await user.click(screen.getByLabelText(/May 28th, 2026/, { selector: 'button' }));
         await user.keyboard('{Escape}');
         await open();
-        expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+        expect(screen.queryByText('Apply', { selector: 'button' })).not.toBeInTheDocument();
         expect(toInput).toHaveValue('2026-05-25');
         expect(onCommit).toHaveBeenCalledTimes(1);
 
@@ -117,9 +119,12 @@ describe.each(['UTC', 'America/Los_Angeles', 'Asia/Kolkata'])('%s', (timeZone) =
         await open();
         expect(fromInput).toHaveValue('2026-05-10');
         expect(toInput).toHaveValue('2026-05-20');
-        expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+        expect(screen.queryByText('Apply', { selector: 'button' })).not.toBeInTheDocument();
         expect(onCommit).toHaveBeenCalledTimes(1);
-      }
+      },
+      // These real-KUI flows exercise several complete calendar sessions. Coverage
+      // plus parallel package tests on CI can exceed the default five seconds.
+      15_000
     );
   });
 });
