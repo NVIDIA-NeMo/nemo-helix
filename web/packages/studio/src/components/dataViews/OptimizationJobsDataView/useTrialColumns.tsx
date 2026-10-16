@@ -3,10 +3,10 @@
 
 import type { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
 import { StatusBadge, type StatusConfigEntry } from '@nemo/common/src/components/StatusBadge';
+import { EM_DASH } from '@nemo/common/src/constants';
 import { formatDurationMs } from '@nemo/common/src/utils/date';
 import { Badge, Button, Text } from '@nvidia/foundations-react-core';
 import {
-  EM_DASH,
   formatParamValue,
   METRIC_SORT_PREFIX,
   PARAM_SORT_PREFIX,

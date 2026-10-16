@@ -81,11 +81,14 @@ class WorkspaceRepositoryInterface(ABC):
         deletion_stage: str,
         session: AsyncSession | None = None,
     ) -> bool:
-        """Mark a workspace for deletion by setting its deletion_stage.
+        """Record a requested deletion stage.
+
+        The delete API uses this to set pending. The cleanup controller takes
+        ownership through ``claim_workspace_for_deletion``.
 
         Args:
             name: Workspace name
-            deletion_stage: The deletion stage to set (e.g., 'pending', 'deleting', 'failed')
+            deletion_stage: The deletion stage to set
             session: Optional database session
 
         Returns:
@@ -103,7 +106,7 @@ class WorkspaceRepositoryInterface(ABC):
         lease_expired_before: datetime | None = None,
         session: AsyncSession | None = None,
     ) -> Workspace | None:
-        """Atomically claim a deletion attempt from the observed state."""
+        """Take the cleanup lease when the observed stage and timestamp still match."""
         pass
 
     @abstractmethod

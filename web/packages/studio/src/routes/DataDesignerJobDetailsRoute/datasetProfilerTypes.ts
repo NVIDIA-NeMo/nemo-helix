@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { EM_DASH } from '@nemo/common/src/constants';
+
 /**
  * Hand-written TypeScript mirror of the Data Designer `DatasetProfilerResults`
  * Pydantic model (data_designer.config.analysis.dataset_profiler).
@@ -182,8 +184,6 @@ export const getPercentNull = (stats: ColumnStatistics): number | undefined => {
   }
   return (100 * stats.num_null) / stats.num_records;
 };
-
-const EM_DASH = '—';
 
 /** Render a sentinel-or-undefined value as display text, or `null` if it's a real value. */
 const formatSentinel = (value: MaybeMissing<number> | null | undefined): string | null => {

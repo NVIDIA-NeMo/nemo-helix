@@ -63,6 +63,7 @@ jobs:
       cpu-smoke: ${{ steps.changes.outputs.cpu-smoke }}
       guardrails-benchmark: ${{ steps.changes.outputs.guardrails-benchmark }}
       deployments-openshell: ${{ steps.changes.outputs.deployments-openshell }}
+      jobs-openshell: ${{ steps.changes.outputs.jobs-openshell }}
       ngc-metadata: ${{ steps.changes.outputs.ngc-metadata }}
       auth-idp: ${{ steps.changes.outputs.auth-idp }}
     steps:
@@ -663,6 +664,18 @@ jobs:
           IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
         run: e2e/k8s/scripts/prepull_kind_images.sh "${IMAGE_REGISTRY}/nhx-gym-tasks:${IMAGE_TAG}"
 
+      - name: Run GRPO sandbox workspace permissions regression
+        shell: bash
+        env:
+          NHX_GYM_WORKSPACE_KIND: ${{ env.KIND_CLUSTER_NAME }}
+        run: |
+          uv run --frozen pytest \
+            -c pytest.ini \
+            services/rl/tests/test_gym_workspace_kubernetes_integration.py \
+            -v -s \
+            --no-cov \
+            --junitxml=report-kubernetes-gym-workspace.xml
+
       - name: Run Gym agent-evaluate e2e test
         shell: bash
         env:
@@ -685,7 +698,7 @@ jobs:
         with:
           kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
           artifact-name: kind-gym-e2e-kubernetes-artifacts
-          junit-report: report-kubernetes-gym-e2e.xml
+          junit-report: report-kubernetes-gym-*.xml
           services-log-dir: ${{ runner.temp }}/e2e-services-logs
   
   kind-network-policy-smoke:
@@ -1455,7 +1468,7 @@ jobs:
           helm dependency build k8s/helm
           helm dependency build contrib/auth/authentik/helm
           helm dependency build contrib/auth/zitadel/helm
-          uv run --frozen pytest tests/auth_idp/static -v
+          uv run --frozen --group auth-idp-e2e pytest tests/auth_idp/static -v
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
       - name: Upload test artifacts
@@ -2343,6 +2356,35 @@ jobs:
           cache-dependency-glob: uv.lock
       - name: Run OpenShell backend unit tests
         run: make test-deployments-openshell
+        env:
+          _TYPER_FORCE_DISABLE_TERMINAL: "1"
+
+  jobs-openshell-tests:
+    name: Jobs OpenShell backend tests
+    needs: [changes]
+    if: >
+      !cancelled() && (
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.deps == 'true' ||
+        needs.changes.outputs.jobs-openshell == 'true'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Run OpenShell job backend unit tests
+        run: make test-jobs-openshell
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
 

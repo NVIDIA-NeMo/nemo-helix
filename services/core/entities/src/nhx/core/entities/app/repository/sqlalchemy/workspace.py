@@ -147,7 +147,11 @@ class SQLAlchemyWorkspaceRepository(WorkspaceRepositoryInterface):
         deletion_stage: str,
         session: AsyncSession | None = None,
     ) -> bool:
-        """Mark a workspace for deletion by setting its deletion_stage."""
+        """Record a requested deletion stage.
+
+        The delete API uses this to set pending. The cleanup controller takes
+        ownership through ``claim_workspace_for_deletion``.
+        """
         async with self._get_session(session) as sess:
             result = await sess.execute(
                 update(DBWorkspace)
@@ -177,7 +181,7 @@ class SQLAlchemyWorkspaceRepository(WorkspaceRepositoryInterface):
         lease_expired_before: datetime | None = None,
         session: AsyncSession | None = None,
     ) -> Workspace | None:
-        """Atomically claim a deletion attempt from the observed state."""
+        """Take the cleanup lease when the observed stage and timestamp still match."""
         conditions = [
             DBWorkspace.name == name,
             DBWorkspace.deletion_stage == expected_stage,

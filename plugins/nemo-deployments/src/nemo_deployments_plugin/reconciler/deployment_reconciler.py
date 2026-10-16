@@ -169,7 +169,8 @@ class DeploymentReconciler:
             if status_update.status == "UNKNOWN":
                 await self._handle_unknown_status(deployment, status_update)
                 return
-            if status_update.status == "STARTING":
+            # A new STARTING transition must be recorded before its timeout is checked.
+            if status_update.status == "STARTING" and deployment.status == "STARTING":
                 timeout_update = self._check_starting_timeout(deployment)
                 if timeout_update is not None:
                     await self._update_deployment_status(deployment, timeout_update)
@@ -464,9 +465,15 @@ class DeploymentReconciler:
 
 
 def _starting_timestamp(deployment: Deployment) -> datetime | None:
+    """Find the beginning of the current uninterrupted STARTING period."""
+    starting_at = None
     for event in reversed(deployment.status_history):
-        if event.status == "STARTING" and event.timestamp:
-            return datetime.fromisoformat(event.timestamp)
+        if event.status != "STARTING":
+            break
+        if event.timestamp:
+            starting_at = datetime.fromisoformat(event.timestamp)
+    if starting_at is not None:
+        return starting_at
     if deployment.status_history and deployment.status_history[0].timestamp:
         return datetime.fromisoformat(deployment.status_history[0].timestamp)
     return None

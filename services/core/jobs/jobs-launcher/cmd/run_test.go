@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -146,7 +147,7 @@ func TestRunExecWithStdinHelper(t *testing.T) {
 	input := "test line 1\ntest line 2\n"
 	var inputReader io.Reader = strings.NewReader(input)
 
-	exitCode, err := runExec([]string{"cat"}, inputReader)
+	exitCode, err := runExec(context.Background(), []string{"cat"}, inputReader)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
@@ -266,10 +267,10 @@ func TestRunExecWithSecrets(t *testing.T) {
 			if !tc.expectError {
 				// Use sh to check that secrets are available in environment
 				// This validates that secrets were actually injected
-				exitCode, err = runExec([]string{"sh", "-c", "env | grep -E '(TEST_SECRET|ANOTHER_SECRET)' || true"}, nil)
+				exitCode, err = runExec(context.Background(), []string{"sh", "-c", "env | grep -E '(TEST_SECRET|ANOTHER_SECRET)' || true"}, nil)
 			} else {
 				// For error cases, use any simple command
-				exitCode, err = runExec([]string{"echo", "test"}, nil)
+				exitCode, err = runExec(context.Background(), []string{"echo", "test"}, nil)
 			}
 
 			// Validate exit code
@@ -311,7 +312,7 @@ func TestRunExecWithSecretsNotFound(t *testing.T) {
 	os.Unsetenv("NHX_BASE_URL")
 	os.Setenv("NHX_PRINCIPAL", `{"id":"test-principal"}`)
 
-	exitCode, err := runExec([]string{"echo", "test"}, nil)
+	exitCode, err := runExec(context.Background(), []string{"echo", "test"}, nil)
 
 	if exitCode != 1 {
 		t.Errorf("Expected exit code 1 for secret not found, got %d", exitCode)
@@ -370,7 +371,7 @@ func TestRunExecWithoutSecrets(t *testing.T) {
 	}()
 
 	// Should run normally without attempting secret fetching
-	exitCode, err := runExec([]string{"echo", "test without secrets"}, nil)
+	exitCode, err := runExec(context.Background(), []string{"echo", "test without secrets"}, nil)
 
 	if exitCode != 0 {
 		t.Errorf("Expected exit code 0, got %d", exitCode)

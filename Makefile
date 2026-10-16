@@ -135,9 +135,17 @@ DOCS_TYPED_SNIPPET_PATHS := \
 	docs/safe-synthesizer/tutorials/safe-synthesizer-101.mdx
 
 .PHONY: docs-lint-snippets
-docs-lint-snippets: docs-check-base-url ## Syntax-check all Python fenced snippets, type-check curated executable docs, and check NHX_BASE_URL usage
+docs-lint-snippets: docs-check-base-url docs-lint-helm-snippets docs-lint-api-examples ## Check Python snippets, Helm YAML, API examples, and CLI context usage
 	$(UV) run --frozen python docs/_scripts/lint_python_snippets.py docs --no-type-check
 	$(UV) run --frozen python docs/_scripts/lint_python_snippets.py $(DOCS_TYPED_SNIPPET_PATHS)
+
+.PHONY: docs-lint-helm-snippets
+docs-lint-helm-snippets: ## Validate Helm docs YAML syntax, duplicate keys, and chart values nesting
+	$(UV) run --frozen python docs/_scripts/lint_helm_snippets.py
+
+.PHONY: docs-lint-api-examples
+docs-lint-api-examples: ## Validate OpenAPI examples and bodyless response code samples
+	$(UV) run --frozen python docs/_scripts/lint_api_examples.py
 
 .PHONY: docs-check-base-url
 docs-check-base-url: ## Flag doc snippets that bypass the CLI context with NHX_BASE_URL
@@ -557,6 +565,12 @@ test-deployments-openshell: ## Run OpenShell deployment backend unit tests with 
 	# run the backend's tests for real (mirrors the nemo-guardrails --extra bench job).
 	$(UV) run --frozen --package nemo-deployments-plugin --extra openshell \
 		pytest -v plugins/nemo-deployments/tests/unit/backends/openshell/
+
+.PHONY: test-jobs-openshell
+test-jobs-openshell: ## Run OpenShell job backend unit + integration tests with the platform-restricted [openshell] extra installed
+	$(UV) run --frozen --all-packages --extra openshell \
+		pytest -v services/core/jobs/tests/controllers/test_openshell_backend.py \
+		services/core/jobs/tests/integration/test_openshell_job_integration.py
 
 .PHONY: test-service
 test-service: ## Run tests for a specific service (usage: make test-service SERVICE=evaluator)

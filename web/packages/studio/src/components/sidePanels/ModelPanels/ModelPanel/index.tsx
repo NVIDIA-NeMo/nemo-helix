@@ -61,6 +61,11 @@ export interface ModelPanelProps {
   showCustomizationDetails?: boolean;
   /** When available, customization job ID for this model (enables "View Job Details" in Customization section) */
   customizationJobId?: string | null;
+  /**
+   * When available, ID of the customization job that produced `adapter` (enables "View Job
+   * Details" in the Adapter section). Resolve it from the adapter, never from `model`.
+   */
+  adapterJobId?: string | null;
   /** Controlled open state; when provided with onOpenChange, panel can be closed by the user */
   open?: boolean;
   /** Called when the panel open state changes (e.g. user closes the panel) */
@@ -96,6 +101,7 @@ export const ModelPanel: FC<ModelPanelProps> = ({
   artifactData,
   showCustomizationDetails = true,
   customizationJobId,
+  adapterJobId,
   open = true,
   onOpenChange,
   defaultTab,
@@ -188,6 +194,7 @@ export const ModelPanel: FC<ModelPanelProps> = ({
           artifactData={artifactData}
           showCustomizationDetails={showCustomizationDetails}
           customizationJobId={customizationJobId}
+          adapterJobId={adapterJobId}
         />
       </Stack>
     );

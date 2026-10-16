@@ -422,7 +422,10 @@ CLI-only. `uv tool uninstall openshell`, then use the curl installer above.
 | `NEMO_AGENT_HARDENER_INDEX_URL` | unset | Extra package index `setup` resolves agent-hardener from |
 | `NEMO_AGENT_HARDENER_INDEX_STRATEGY` | unset | uv `--index-strategy` for that install |
 
-All `NEMO_AGENT_HARDENER_*` values can also be set via Helm `platformConfig.agent_hardener.*`.
+The plugin runs only on a source/local deployment (`nemo services run`). It is not in the `nhx-api`
+image, so Helm and other container deployments do not load it and Studio shows no Agent Hardening
+entry there. War-games need host Docker, the OpenShell gateway, and the per-machine venvs, none of
+which a pod provides yet.
 
 ---
 

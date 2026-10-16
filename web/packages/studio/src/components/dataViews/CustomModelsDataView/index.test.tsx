@@ -20,6 +20,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
 const MODELS_URL = `${PLATFORM_BASE_URL}/apis/models/v2/workspaces/:workspace/models`;
+const JOBS_URL = `${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs`;
 const ADAPTER_DELETE_URL = `${PLATFORM_BASE_URL}/apis/models/v2/workspaces/:workspace/models/:modelName/adapters/:adapter`;
 
 const modelsPage: ModelEntitysPage = {
@@ -131,6 +132,62 @@ describe('CustomModelsDataView', () => {
           adapter: adapterName,
         })
       );
+    });
+  });
+
+  describe('job details action', () => {
+    const jobsFor = (outputNames: string[]) => ({
+      data: outputNames.map((outputName) => ({
+        id: `id-${outputName}`,
+        name: `job-for-${outputName}`,
+        workspace: workspace1.workspace,
+        source: 'customization',
+        status: 'completed',
+        created_at: '2026-10-13T00:00:00Z',
+        spec: { output: { name: outputName } },
+      })),
+      pagination: { page: 1, page_size: 50, total_results: outputNames.length, total_pages: 1 },
+    });
+
+    const openActionsFor = async (rowName: string) => {
+      const user = userEvent.setup();
+      await screen.findByText(rowName);
+      const buttons = screen.getAllByRole('button', { name: /actions/i });
+      return { user, buttons };
+    };
+
+    it('offers Job details for an adapter row, keyed on the adapter name', async () => {
+      const adapterName = entityStoreCustomizedModel1.adapters![0].name;
+      server.use(
+        http.get(MODELS_URL, () => HttpResponse.json(modelsPage)),
+        http.get(JOBS_URL, () => HttpResponse.json(jobsFor([adapterName])))
+      );
+
+      renderComponent();
+      await waitFor(() => expect(screen.queryByTestId('spinner')).not.toBeInTheDocument());
+
+      const { user, buttons } = await openActionsFor(adapterName);
+      // Sub-rows render last; the adapter's menu is the final one.
+      await user.click(buttons[buttons.length - 1]);
+
+      expect(await screen.findByRole('menuitem', { name: 'Job details' })).toBeInTheDocument();
+    });
+
+    it('omits Job details when no customization job produced the row', async () => {
+      server.use(
+        http.get(MODELS_URL, () => HttpResponse.json(modelsPage)),
+        http.get(JOBS_URL, () => HttpResponse.json(jobsFor([])))
+      );
+
+      renderComponent();
+      await waitFor(() => expect(screen.queryByTestId('spinner')).not.toBeInTheDocument());
+
+      const { user, buttons } = await openActionsFor(entityStoreBaseModel1.name);
+      await user.click(buttons[0]);
+
+      // A model can be registered outside a customization run; there is no job to link to.
+      await screen.findByRole('menuitem', { name: 'Model details' });
+      expect(screen.queryByRole('menuitem', { name: 'Job details' })).not.toBeInTheDocument();
     });
   });
 });

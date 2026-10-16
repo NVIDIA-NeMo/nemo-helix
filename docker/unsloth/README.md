@@ -264,12 +264,15 @@ Save as `unsloth-smoke.json`:
 nemo customization unsloth explain
 cat unsloth-smoke.json | jq .
 
-# Submit. Captures the job id from the JSON response.
-JOB_ID=$(
-  nemo customization unsloth submit unsloth-smoke.json -w default --json \
-    | jq -r '.id'
-)
-echo "Submitted: $JOB_ID"
+# Submit. Captures the job id from the JSON response; fails if `name` is missing or empty.
+if JOB_ID=$(
+  nemo customization unsloth --job-json unsloth-smoke.json -w default \
+    | jq -er '.name | select(type == "string" and length > 0)'
+); then
+  echo "Submitted: $JOB_ID"
+else
+  echo "Submit failed: the response has no job name" >&2
+fi
 
 # Tail the status — should go PENDING → ACTIVE → COMPLETED across the four steps.
 nemo jobs status "$JOB_ID" -w default

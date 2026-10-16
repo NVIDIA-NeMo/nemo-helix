@@ -125,6 +125,12 @@ backend customization jobs run only on GPU-capable runners.
 
 Automodel training data is staged from ``s3://aire-e2e-assets/datasets/chat_format/`` into platform filesets before tests run (see ``e2e/customizer/stage_assets.py``).
 
+The public Kind Gym CI job also runs
+`services/rl/tests/test_gym_workspace_kubernetes_integration.py`: a restrictive PVC root
+reproduces the original `PermissionError`, then workspace preparation must allow real wheel
+installation as both the training UID and a different sandbox UID. This CPU regression check
+does not require GPUs or OpenSandbox.
+
 **Environment variables for Automodel and Unsloth tests:**
 
 | Variable | Description | Default |

@@ -6,11 +6,17 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
+from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.models.client import AsyncModelsClient
-from nhx.core.entities.controllers.workspace_cleanup import WorkspaceCleanup, WorkspaceJobCleanupError
+from nhx.core.entities.controllers.workspace_cleanup import (
+    WorkspaceCleanup,
+    WorkspaceJobCleanupError,
+    WorkspaceResourceCleanupError,
+)
 from nhx.core.entities.entities import Workspace, WorkspaceDeletionStage
 
 
@@ -133,6 +139,16 @@ def _make_job(name: str, status: str = "completed") -> MagicMock:
     job.name = name
     job.status = status
     return job
+
+
+def _named(name: str) -> MagicMock:
+    item = MagicMock()
+    item.name = name
+    return item
+
+
+def _not_found() -> NotFoundError:
+    return NotFoundError(httpx.Response(404, request=httpx.Request("DELETE", "http://platform.test/resource")))
 
 
 def _make_controller(
@@ -664,6 +680,148 @@ class TestWorkspaceCleanupAsyncStep:
         repo.fail_workspace_deletion_if_claimed.assert_awaited_once()
         repo.delete_workspace_if_claimed.assert_awaited_once()
 
+    @pytest.mark.parametrize("kind", ["deployment", "model", "adapter", "fileset"])
+    @pytest.mark.asyncio
+    async def test_item_delete_failure_keeps_the_workspace(self, kind: str):
+        workspace = _make_workspace()
+        claimed = _make_workspace(deletion_stage=WorkspaceDeletionStage.DELETING)
+        repo = AsyncMock()
+        repo.list_workspaces.return_value = ([workspace], None)
+        repo.claim_workspace_for_deletion.return_value = claimed
+        repo.fail_workspace_deletion_if_claimed.return_value = True
+        first = _named("first")
+        second = _named("second")
+        model = _named("model")
+        adapter = _named("adapter")
+        fileset = _named("weights")
+        models_client = _make_models_client()
+        files_client = _make_mock_files_client([fileset])
+
+        if kind == "deployment":
+            models_client.list_deployments = AsyncMock(return_value=_MockAsyncPaginatedResponse([first, second]))
+            models_client.delete_deployment = AsyncMock(side_effect=[Exception("fail"), None])
+            attempted = models_client.delete_deployment
+        elif kind == "adapter":
+            models_client.list_adapters = AsyncMock(return_value=_MockAsyncPaginatedResponse([first, second]))
+            models_client.list_models = AsyncMock(return_value=_MockAsyncPaginatedResponse([model]))
+            models_client.delete_adapter = AsyncMock(side_effect=[Exception("fail"), None])
+            models_client.delete_model = AsyncMock()
+            attempted = models_client.delete_adapter
+        elif kind == "model":
+            models_client.list_adapters = AsyncMock(return_value=_MockAsyncPaginatedResponse([adapter]))
+            models_client.list_models = AsyncMock(return_value=_MockAsyncPaginatedResponse([first, second]))
+            models_client.delete_adapter = AsyncMock()
+            models_client.delete_model = AsyncMock(side_effect=[Exception("fail"), None])
+            attempted = models_client.delete_model
+        else:
+            files_client.list_filesets = AsyncMock(return_value=_MockAsyncPaginatedResponse([first, second]))
+            files_client.delete_fileset = AsyncMock(side_effect=[Exception("fail"), None])
+            attempted = files_client.delete_fileset
+
+        controller = _make_controller(workspace_repo=repo)
+        with _patch_clients(_make_jobs_client([]), files_client, models_client):
+            await controller._async_step()
+
+        assert [call.kwargs["name"] for call in attempted.await_args_list] == ["first", "second"]
+        if kind == "adapter":
+            models_client.delete_model.assert_awaited_once_with(name="model", workspace="test-workspace")
+        if kind == "model":
+            models_client.delete_adapter.assert_awaited_once_with(name="adapter", workspace="test-workspace")
+        if kind != "fileset":
+            files_client.delete_fileset.assert_not_called()
+        repo.delete_workspace_if_claimed.assert_not_called()
+        repo.fail_workspace_deletion_if_claimed.assert_awaited_once_with(
+            name=workspace.name,
+            expected_updated_at=claimed.updated_at,
+        )
+
+    @pytest.mark.parametrize("kind", ["deployment", "model", "adapter", "fileset"])
+    @pytest.mark.asyncio
+    async def test_not_found_item_delete_still_deletes_the_workspace(self, kind: str):
+        workspace = _make_workspace()
+        claimed = _make_workspace(deletion_stage=WorkspaceDeletionStage.DELETING)
+        repo = AsyncMock()
+        repo.list_workspaces.return_value = ([workspace], None)
+        repo.claim_workspace_for_deletion.return_value = claimed
+        repo.delete_workspace_if_claimed.return_value = True
+        item = _named("already-gone")
+        models_client = _make_models_client()
+        files_client = _make_mock_files_client()
+
+        if kind == "deployment":
+            models_client.list_deployments = AsyncMock(return_value=_MockAsyncPaginatedResponse([item]))
+            models_client.delete_deployment = AsyncMock(side_effect=_not_found())
+        elif kind == "adapter":
+            models_client.list_adapters = AsyncMock(return_value=_MockAsyncPaginatedResponse([item]))
+            models_client.delete_adapter = AsyncMock(side_effect=_not_found())
+        elif kind == "model":
+            models_client.list_models = AsyncMock(return_value=_MockAsyncPaginatedResponse([item]))
+            models_client.delete_model = AsyncMock(side_effect=_not_found())
+        else:
+            files_client.list_filesets = AsyncMock(return_value=_MockAsyncPaginatedResponse([item]))
+            files_client.delete_fileset = AsyncMock(side_effect=_not_found())
+
+        controller = _make_controller(workspace_repo=repo)
+        with _patch_clients(_make_jobs_client([]), files_client, models_client):
+            await controller._async_step()
+
+        repo.delete_workspace_if_claimed.assert_awaited_once_with(
+            name=workspace.name,
+            expected_updated_at=claimed.updated_at,
+        )
+        repo.fail_workspace_deletion_if_claimed.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_retry_deletes_the_deployment_that_survived_the_failed_attempt(self):
+        pending = _make_workspace()
+        failed = _make_workspace(
+            updated_at=datetime.now(tz=timezone.utc) - timedelta(seconds=120),
+            deletion_stage=WorkspaceDeletionStage.FAILED,
+        )
+        claimed_pending = _make_workspace(deletion_stage=WorkspaceDeletionStage.DELETING)
+        claimed_retry = _make_workspace(deletion_stage=WorkspaceDeletionStage.DELETING)
+        removed = _named("removed")
+        remaining = _named("remaining")
+        repo = AsyncMock()
+        repo.list_workspaces.side_effect = [
+            ([pending], None),
+            ([], None),
+            ([failed], None),
+        ]
+        repo.claim_workspace_for_deletion.side_effect = [claimed_pending, claimed_retry]
+        repo.fail_workspace_deletion_if_claimed.return_value = True
+        repo.delete_workspace_if_claimed.return_value = True
+        models_client = _make_models_client()
+        models_client.list_deployments = AsyncMock(
+            side_effect=[
+                _MockAsyncPaginatedResponse([removed, remaining]),
+                _MockAsyncPaginatedResponse([remaining]),
+            ]
+        )
+        models_client.delete_deployment = AsyncMock(
+            side_effect=[None, Exception("HTTP 503: no healthy upstream"), None]
+        )
+        controller = _make_controller(workspace_repo=repo)
+
+        with _patch_clients(_make_jobs_client([]), _make_mock_files_client([]), models_client):
+            await controller._async_step()
+            repo.delete_workspace_if_claimed.assert_not_called()
+            await controller._async_step()
+
+        assert [call.kwargs["name"] for call in models_client.delete_deployment.await_args_list] == [
+            "removed",
+            "remaining",
+            "remaining",
+        ]
+        repo.fail_workspace_deletion_if_claimed.assert_awaited_once_with(
+            name=pending.name,
+            expected_updated_at=claimed_pending.updated_at,
+        )
+        repo.delete_workspace_if_claimed.assert_awaited_once_with(
+            name=pending.name,
+            expected_updated_at=claimed_retry.updated_at,
+        )
+
     @pytest.mark.asyncio
     async def test_cleanup_failure_increments_error_counter(self):
         workspace = _make_workspace()
@@ -816,7 +974,7 @@ class TestWorkspaceCleanupDeployments:
         )
 
     @pytest.mark.asyncio
-    async def test_continues_on_individual_deployment_failure(self):
+    async def test_attempts_remaining_deployments_then_raises(self):
         workspace = _make_workspace()
         dep1 = MagicMock()
         dep1.name = "dep1"
@@ -828,7 +986,8 @@ class TestWorkspaceCleanupDeployments:
 
         controller = _make_controller()
         with patch.object(AsyncModelsClient, "from_client", return_value=models_client):
-            await controller._cleanup_deployments(workspace)
+            with pytest.raises(WorkspaceResourceCleanupError):
+                await controller._cleanup_deployments(workspace)
 
         assert models_client.delete_deployment.await_count == 2
 
@@ -861,7 +1020,7 @@ class TestWorkspaceCleanupModelsAndAdapters:
         )
 
     @pytest.mark.asyncio
-    async def test_continues_on_individual_model_and_adapter_failure(self):
+    async def test_attempts_remaining_models_and_adapters_then_raises(self):
         workspace = _make_workspace()
         adapter1 = MagicMock()
         adapter1.name = "adapter1"
@@ -880,7 +1039,8 @@ class TestWorkspaceCleanupModelsAndAdapters:
         controller = _make_controller()
 
         with patch.object(AsyncModelsClient, "from_client", return_value=models_client):
-            await controller._cleanup_models_and_adapters(workspace)
+            with pytest.raises(WorkspaceResourceCleanupError):
+                await controller._cleanup_models_and_adapters(workspace)
 
         assert models_client.delete_adapter.await_count == 2
         assert models_client.delete_model.await_count == 2
@@ -916,7 +1076,7 @@ class TestWorkspaceCleanupFilesets:
         )
 
     @pytest.mark.asyncio
-    async def test_continues_on_individual_fileset_failure(self):
+    async def test_attempts_remaining_filesets_then_raises(self):
         workspace = _make_workspace()
         fs1 = MagicMock()
         fs1.name = "fs1"
@@ -928,7 +1088,8 @@ class TestWorkspaceCleanupFilesets:
         controller = _make_controller()
 
         with patch.object(AsyncFilesClient, "from_client", return_value=mock_files):
-            await controller._cleanup_filesets(workspace)
+            with pytest.raises(WorkspaceResourceCleanupError):
+                await controller._cleanup_filesets(workspace)
 
         assert mock_files.delete_fileset.await_count == 2
 

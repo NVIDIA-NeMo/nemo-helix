@@ -140,6 +140,30 @@ export const ModelDetailOverview: FC<ModelDetailOverviewProps> = ({
   );
 };
 
+/**
+ * Link to the customization job that produced a model or an adapter.
+ *
+ * Rendered beside the thing it describes, in the entity's own workspace: an adapter's run
+ * is not its base model's run, and an adapter may live in a different workspace from its
+ * base, so neither the section nor the workspace can be assumed from the model.
+ */
+const JobDetailsLink: FC<{ workspace: string; customizationJobId: string }> = ({
+  workspace,
+  customizationJobId,
+}) => (
+  <KVPair
+    label="Job Details"
+    value={
+      <Anchor
+        href={getWorkspaceCustomizationJobDetailsRoute(workspace, customizationJobId)}
+        className="text-success"
+      >
+        View Job Details
+      </Anchor>
+    }
+  />
+);
+
 /** Optional artifact/deployment fields not on ModelEntity (e.g. from deployment config or job API) */
 export interface ModelArtifactData {
   backend_engine?: string;
@@ -157,8 +181,19 @@ export type ModelParametersAccordionProps = {
   artifactData?: ModelArtifactData | null;
   /** Hides Customizer-specific fields when the Customizer feature is disabled. */
   showCustomizationDetails?: boolean;
-  /** When available, customization job ID for this model (enables "View Job Details" link in Customization section) */
+  /**
+   * When available, ID of the customization job that produced `model` (enables "View Job
+   * Details" in the Customization section). Always the model's own run.
+   *
+   * Callers scoped to an adapter leave this unset: the panel is then describing the
+   * adapter, and the base model's run is not what the user asked about.
+   */
   customizationJobId?: string | null;
+  /**
+   * When available, ID of the customization job that produced `adapter` (enables "View Job
+   * Details" in the Adapter section). Resolve it from the adapter, never from `model`.
+   */
+  adapterJobId?: string | null;
 };
 export const ModelParametersAccordion = ({
   model,
@@ -167,6 +202,7 @@ export const ModelParametersAccordion = ({
   artifactData,
   showCustomizationDetails = true,
   customizationJobId,
+  adapterJobId,
 }: ModelParametersAccordionProps) => {
   const [isApiKeyVisible, setIsApiKeyVisible] = useState(false);
   const { spec } = model;
@@ -266,19 +302,9 @@ export const ModelParametersAccordion = ({
                 }
               />
               {isDefined(customizationJobId) && (
-                <KVPair
-                  label="Job Details"
-                  value={
-                    <Anchor
-                      href={getWorkspaceCustomizationJobDetailsRoute(
-                        model.workspace,
-                        customizationJobId
-                      )}
-                      className="text-success"
-                    >
-                      View Job Details
-                    </Anchor>
-                  }
+                <JobDetailsLink
+                  workspace={model.workspace}
+                  customizationJobId={customizationJobId}
                 />
               )}
             </Stack>
@@ -418,6 +444,9 @@ export const ModelParametersAccordion = ({
               )}
               {isDefined(adapter.created_at) && (
                 <KVPair label="Created" value={<RelativeTime datetime={adapter.created_at} />} />
+              )}
+              {isDefined(adapterJobId) && (
+                <JobDetailsLink workspace={adapter.workspace} customizationJobId={adapterJobId} />
               )}
             </Stack>
           ),

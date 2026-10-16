@@ -52,9 +52,10 @@ on:
       container-ids:
         description: >-
           Custom only. Comma-separated container IDs.
-          Allowed: nhx-api, nhx-tasks, nhx-gym-tasks, nhx-gym-host,
-          nhx-customizer-tasks, nhx-automodel-training, nhx-unsloth-training,
-          nhx-rl-training, nhx-garak-tasks, nhx-safe-synthesizer-tasks.
+          Allowed: nhx-api, nhx-tasks, nhx-tasks-openshell, nhx-gym-tasks,
+          nhx-gym-host, nhx-customizer-tasks, nhx-automodel-training,
+          nhx-unsloth-training, nhx-rl-training, nhx-garak-tasks,
+          nhx-safe-synthesizer-tasks.
         required: false
         type: string
         default: ""
@@ -97,7 +98,10 @@ env:
   # Releasable artifact catalog.
   #
   # Keep this in the workflow so contributors can see release intent without
-  # chasing a second config file. When this changes, update the matching
+  # chasing a second config file. Planning reads this catalog from the selected
+  # source SHA, so main can add artifacts before a release branch ships them.
+  # Keep the catalogs as JSON in folded (>-) env blocks for release-plan.cjs.
+  # When this changes, update the matching
   # workflow_dispatch input descriptions above; GitHub does not support dynamic
   # descriptions in the Run workflow form.
   #
@@ -126,6 +130,7 @@ env:
     [
       {"id":"nhx-api","target":"nhx-api-docker"},
       {"id":"nhx-tasks","target":"nhx-tasks-docker"},
+      {"id":"nhx-tasks-openshell","target":"nhx-tasks-openshell-docker"},
       {"id":"nhx-gym-tasks","target":"nhx-gym-tasks-docker"},
       {"id":"nhx-gym-host","target":"nhx-gym-host-docker"},
       {"id":"nhx-customizer-tasks","target":"nhx-customizer-tasks"},
@@ -167,6 +172,7 @@ jobs:
       wheel_version: ${{ steps.wheel-version.outputs.wheel_version }}
       helm_version: ${{ steps.helm-version.outputs.helm_version }}
       wheel_ids: ${{ steps.plan.outputs.wheel_ids }}
+      wheel_artifacts: ${{ steps.plan.outputs.wheel_artifacts }}
       container_ids: ${{ steps.plan.outputs.container_ids }}
       has_wheels: ${{ steps.plan.outputs.has_wheels }}
       has_containers: ${{ steps.plan.outputs.has_containers }}
@@ -178,7 +184,7 @@ jobs:
       act: ${{ steps.plan.outputs.act }}
     steps:
       # This job is intentionally the first gate. It resolves the user's
-      # requested artifacts, checks custom ids against the inline catalog, then
+      # requested artifacts, checks custom ids against the selected source's catalog, then
       # validates the selected source tree has the wheel package paths, bake
       # targets, and NGC container overview files needed by later jobs.
       - name: Check out workflow revision
@@ -194,8 +200,18 @@ jobs:
           script: |
             const { resolveReleasePlan, resolveNightlyBaseVersion } = require("./.github/scripts/release-plan.cjs");
             const plan = await resolveReleasePlan({
-              env: process.env,
               context,
+              loadSourceWorkflow: async (ref) => {
+                const { data } = await github.rest.repos.getContent({
+                  ...context.repo,
+                  path: ".github/workflows/release.yaml",
+                  ref,
+                });
+                if (data.type !== "file" || data.encoding !== "base64") {
+                  throw new Error(`Cannot read release catalog from ${ref}.`);
+                }
+                return Buffer.from(data.content, "base64").toString("utf8");
+              },
               listBranches: () => github.paginate(
                 github.rest.repos.listBranches,
                 {
@@ -835,7 +851,7 @@ jobs:
         shell: bash
         env:
           WHEEL_IDS: ${{ needs.plan-release.outputs.wheel_ids }}
-          WHEEL_CATALOG: ${{ env.RELEASE_WHEELS_JSON }}
+          WHEEL_CATALOG: ${{ needs.plan-release.outputs.wheel_artifacts }}
           RELEASE_TYPE: ${{ needs.plan-release.outputs.release_type }}
           WHEEL_VERSION: ${{ needs.plan-release.outputs.wheel_version }}
         run: |
@@ -1167,7 +1183,7 @@ jobs:
           SOURCE_SHA: ${{ needs.plan-release.outputs.source_sha }}
           COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ needs.plan-release.outputs.source_sha }}
           WHEEL_IDS: ${{ needs.plan-release.outputs.wheel_ids }}
-          WHEEL_CATALOG: ${{ env.RELEASE_WHEELS_JSON }}
+          WHEEL_CATALOG: ${{ needs.plan-release.outputs.wheel_artifacts }}
           WHEEL_VERSION: ${{ needs.plan-release.outputs.wheel_version }}
           CONTAINER_IDS: ${{ needs.plan-release.outputs.container_ids }}
           INCLUDE_HELM: ${{ needs.plan-release.outputs.include_helm }}

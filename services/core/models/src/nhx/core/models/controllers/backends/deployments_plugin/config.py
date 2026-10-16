@@ -54,8 +54,8 @@ class DeploymentsPluginConfig(BaseModel):
             "is a raw Kubernetes topologySpreadConstraint object."
         ),
     )
-    default_nimservice_image: str = "nvcr.io/nim/meta/llama-3.1-8b-instruct"
-    default_nimservice_image_tag: str = "1.8.5"
+    default_nimservice_image: str = "nvcr.io/nim/nvidia/model-free-nim"
+    default_nimservice_image_tag: str = "2.0.13"
     default_vllm_image: str = Field(
         default="docker.io/vllm/vllm-openai",
         description="Default vLLM image repository. Fully qualified so it resolves on runtimes that block docker.io short names.",

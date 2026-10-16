@@ -197,3 +197,37 @@ def test_the_component_deadline_is_the_agents_task_budget_unless_the_agent_decla
     composed = app.compose_fabric_config(declared, **_compose_kwargs(timeout_seconds=600))
     assert composed["runtime"]["timeout_seconds"] == 90
     assert "timeout_seconds" not in _compose(app).get("runtime", {})  # no budget given, none invented
+
+
+def test_a_packaged_secret_template_survives_gyms_omegaconf_handoff_and_expands_in_the_component(
+    app, tmp_path: Path
+) -> None:
+    """The packaged instance YAML through the steps Gym takes it through: the CLI loads it and passes it to
+    the server process as ``OmegaConf.to_yaml`` text, and the server resolves its own config with
+    ``to_container(resolve=True)``. omegaconf cannot share this repo's lock (its ANTLR pin), so run with
+    ``uv run --with omegaconf==2.3.0 pytest <this test>``.
+    """
+    omegaconf = pytest.importorskip("omegaconf")
+    from nemo_evals.api.schemas import AgentRef
+    from nemo_evals.jobs.gym_registered_agent_package import (
+        GymRegisteredAgentPackageSpec,
+        write_registered_agent_package,
+    )
+
+    root = tmp_path / "environment"
+    root.mkdir()
+    spec = GymRegisteredAgentPackageSpec(
+        agent=AgentRef(root="dev/calc"),
+        resolved_config=_REGISTERED,
+        requirements=["nemo-fabric==0.3.0"],
+    )
+    config_path = write_registered_agent_package(root, spec, agent_files=None, download=lambda *_: None)
+
+    handed_to_server = omegaconf.OmegaConf.to_yaml(omegaconf.OmegaConf.load(root / config_path))
+    server = omegaconf.OmegaConf.create(handed_to_server)["registered_calc"]["responses_api_agents"]
+    resolved = omegaconf.OmegaConf.to_container(server["nemo_registered_agent"], resolve=True)
+    assert resolved["fabric_config"] == _REGISTERED
+
+    composed = app.compose_fabric_config(resolved["fabric_config"], **_compose_kwargs(environ={"CALC_TOKEN": "s3cr3t"}))
+    assert composed["mcp"]["servers"]["calc"]["env"]["CALC_TOKEN"] == "s3cr3t"
+    assert "s3cr3t" not in (root / config_path).read_text()
