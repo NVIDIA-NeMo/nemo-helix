@@ -158,6 +158,22 @@ def test_send_keeps_slashes_literal_in_path_placeholders() -> None:
     assert mock_http.request.call_args.args[1] == f"{BASE}/apis/test/v2/items/a%2Fb/-/dir/sub%20dir/file%3F.txt"
 
 
+@pytest.mark.parametrize("path", ["../x", "a/../b", "./x", "a//b", "/x", "x/"])
+def test_send_rejects_dot_and_empty_segments_in_path_placeholders(path: str) -> None:
+    """A ``{path:path}`` value is sent with literal ``/``, so ``..`` would walk into a
+    sibling route (``delete_file(name="a", path="../../victim")`` would hit
+    ``/filesets/victim``). Reject before any request is built or sent.
+    """
+    client = NemoClient(
+        base_url=BASE, http_client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200)))
+    )
+
+    with pytest.raises(ValueError, match="must not contain empty"):
+        client.send(GET_ITEM_FILE(name="a", path=path))
+    with pytest.raises(TypeError, match="must be {name} or {name:path}"):
+        get("/apis/test/v2/items/{name:int}")(lambda *, name: None)
+
+
 def test_send_url_encodes_default_workspace() -> None:
     mock_http = MagicMock(spec=httpx.Client)
     mock_http.request.return_value = httpx.Response(

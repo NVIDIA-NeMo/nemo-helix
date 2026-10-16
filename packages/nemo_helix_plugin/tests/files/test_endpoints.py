@@ -109,6 +109,14 @@ def test_list_files_with_query_params() -> None:
     assert prepared.query_params == {"path": "data/", "include_cache_status": True}
 
 
+def test_file_routes_use_path_placeholder() -> None:
+    """Pins ``{path:path}`` so nested file paths travel with literal ``/`` (not ``%2F``)."""
+    for prepare in (endpoints.upload_file, endpoints.download_file, endpoints.delete_file):
+        kwargs = {"content": b""} if prepare is endpoints.upload_file else {}
+        prepared = prepare(workspace="default", name="my-fileset", path="a/b", **kwargs)
+        assert prepared.path_template == "/apis/files/v2/workspaces/{workspace}/filesets/{name}/-/{path:path}"
+
+
 def test_upload_file() -> None:
     prepared = endpoints.upload_file(workspace="default", name="my-fileset", path="data/file.txt", content=b"hello")
 

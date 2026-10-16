@@ -72,6 +72,7 @@ from nemo_helix_plugin.client.response import (
 )
 from nemo_helix_plugin.client.tls import client_verify_from_env
 from nemo_helix_plugin.client.types import (
+    PATH_SPEC,
     RESPONSE_VALIDATION_CONTEXT,
     BinaryContent,
     OffsetPagination,
@@ -293,15 +294,12 @@ def _retry_after(response: httpx.Response) -> float | None:
     return delay if 0 < delay <= 60 else None
 
 
-# Path placeholders are ``{name}`` or ``{name:path}``. A plain placeholder is one
-# URL segment, so every reserved character in its value is percent-encoded,
-# ``/`` included. A ``:path`` placeholder spans segments (the server declares it
-# with Starlette's ``{name:path}`` converter), so ``/`` stays literal: a
-# percent-encoded ``/`` (``%2F``) in a request-target is rejected by HTTP
-# proxies that refuse encoded slashes, such as the OpenShell sandbox supervisor.
-_PATH_SPEC = "path"
-
-
+# A ``{name:path}`` value keeps ``/`` literal because a percent-encoded ``/``
+# (``%2F``) in a request-target is rejected by HTTP proxies that refuse encoded
+# slashes, such as the OpenShell sandbox supervisor. Its segments therefore become
+# real URL segments, so ``.``, ``..`` and empty segments (including a leading
+# ``/``) are rejected: they would resolve into a different route, e.g. a sibling
+# fileset.
 def _format_path(template: str, params: Mapping[str, str]) -> str:
     """Fill a path template, percent-encoding each value per its placeholder kind."""
     parts: list[str] = []
@@ -309,10 +307,15 @@ def _format_path(template: str, params: Mapping[str, str]) -> str:
         parts.append(literal)
         if field_name is None:
             continue
-        if format_spec not in ("", _PATH_SPEC):
-            raise ValueError(f"Unsupported path placeholder {{{field_name}:{format_spec}}} in {template}")
-        value = params[field_name]
-        parts.append(quote(str(value), safe="/" if format_spec == _PATH_SPEC else ""))
+        value = str(params[field_name])
+        if format_spec == PATH_SPEC:
+            if any(segment in ("", ".", "..") for segment in value.split("/")):
+                raise ValueError(
+                    f"Path parameter {field_name!r} must not contain empty, '.' or '..' segments, got {value!r}"
+                )
+            parts.append(quote(value, safe="/"))
+        else:
+            parts.append(quote(value, safe=""))
     return "".join(parts)
 
 
