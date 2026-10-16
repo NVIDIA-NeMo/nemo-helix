@@ -57,7 +57,7 @@ def main() -> int:
     if raw is None:
         sys.stderr.write(
             "nhx.unsloth.tasks.training requires NEMO_JOB_STEP_CONFIG_FILE_PATH. "
-            "Submit via `nemo customization unsloth submit <job.json>` so the "
+            "Submit via `nemo customization unsloth --job-json <job.json>` so the "
             "platform Jobs runner populates this for you.\n",
         )
         return 2

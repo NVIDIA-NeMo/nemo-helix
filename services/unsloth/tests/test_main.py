@@ -193,7 +193,7 @@ class TestEntrypointWithoutStepConfig:
         assert rc == 2
         err = capsys.readouterr().err
         # Friendly hint redirects the user to the submit CLI path.
-        assert "nemo customization unsloth submit" in err
+        assert "nemo customization unsloth --job-json" in err
 
     def test_module_invocation_exits_2(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Smoke: ``python -m nhx.unsloth.tasks.training`` exits 2 without a step config."""
@@ -207,4 +207,4 @@ class TestEntrypointWithoutStepConfig:
             env=env,
         )
         assert result.returncode == 2
-        assert "nemo customization unsloth submit" in result.stderr
+        assert "nemo customization unsloth --job-json" in result.stderr

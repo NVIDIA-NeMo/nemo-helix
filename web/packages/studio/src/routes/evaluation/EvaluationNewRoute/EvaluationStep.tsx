@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Card, Stack, Text } from '@nvidia/foundations-react-core';
+import { Panel, Stack, Text } from '@nvidia/foundations-react-core';
 import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect';
 import { LiveTestPanel } from '@studio/routes/evaluation/EvaluationNewRoute/LiveTestPanel';
 import { type EvaluationFormValues } from '@studio/routes/evaluation/EvaluationNewRoute/types';
@@ -25,16 +25,15 @@ export const EvaluationStep: FC = () => {
         placeholder="Select a model"
       />
 
-      <Card className="min-w-0 p-density-lg">
+      <Panel elevation="higher" slotHeading="Live Test (optional)" className="min-w-0">
         <Stack gap="density-sm" className="min-w-0">
-          <Text kind="label/bold/xl">Live Test (optional)</Text>
           <Text kind="body/regular/md" className="text-secondary">
             Test one single row from your dataset with this configuration to validate metric scores
             and model performance.
           </Text>
           <LiveTestPanel />
         </Stack>
-      </Card>
+      </Panel>
     </Stack>
   );
 };

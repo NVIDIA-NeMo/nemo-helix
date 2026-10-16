@@ -217,7 +217,7 @@ export const ModelSelect: FC<ModelSelectProps> = ({
     >
       <SelectRoot
         disabled={fieldDisabled || disabled}
-        value={value ?? null}
+        value={value ?? ''}
         onValueChange={(value: string) => {
           handleChange(value);
         }}

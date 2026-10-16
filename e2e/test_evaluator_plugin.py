@@ -789,6 +789,7 @@ def _gym_task_payloads(limit: int) -> list[dict[str, object]]:
 
 
 @pytest.mark.gym_e2e
+@pytest.mark.timeout(1800)
 def test_gym_agent_evaluate_job_completes(
     client: NemoClient,
     evaluator_client: NemoClient,
@@ -806,6 +807,9 @@ def test_gym_agent_evaluate_job_completes(
 
     task_dicts = _gym_task_payloads(2)  # keep the run cheap; this is a wiring test
 
+    # A fresh task container installs each Gym server's dependencies at startup.
+    startup_timeout_s = 600
+    collection_timeout_s = 120
     target = GymRunnerTarget(
         source=GymAgentSource(
             component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
@@ -813,7 +817,8 @@ def test_gym_agent_evaluate_job_completes(
         resources_server="mcqa",
         num_repeats=1,
         concurrency=2,
-        startup_timeout_s=600,
+        startup_timeout_s=startup_timeout_s,
+        collection_timeout_s=collection_timeout_s,
         hydra_params={
             "policy_base_url": _internal_model_route(evaluator_workspace, model_name),
             "policy_api_key": "not-used-mock-provider",
@@ -825,7 +830,12 @@ def test_gym_agent_evaluate_job_completes(
         evaluator_client, evaluator_workspace, {"tasks": task_dicts, "target": target.model_dump(mode="json")}
     )
     try:
-        job = wait_for_platform_job(evaluator_client, job_name, evaluator_workspace, timeout=780)
+        job = wait_for_platform_job(
+            evaluator_client,
+            job_name,
+            evaluator_workspace,
+            timeout=startup_timeout_s + collection_timeout_s + 120,
+        )
         assert job.status.lower() == "completed", f"job {job_name!r} ended {job.status!r}"
 
         # Download the results archive to a tmp path.

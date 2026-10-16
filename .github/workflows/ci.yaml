@@ -1210,21 +1210,21 @@ jobs:
       # every runner harbor_opensandbox accepts: those whose requirements pin the OpenSandbox SDK.
       # Build each runner's venv from its own requirements, as the image does, and run the tests there.
       - name: Run harbor_opensandbox environment tests on each supported Harbor runner
+        working-directory: plugins/_temporary-scaled-evals
         run: |
           set -eu
-          for requirements in plugins/_temporary-scaled-evals/harbor-runners/*.txt; do
+          for requirements in harbor-runners/*.txt; do
             grep -q '^opensandbox==' "$requirements" || continue
             version="$(basename "$requirements" .txt)"
             venv="$RUNNER_TEMP/harbor-$version"
             uv venv --python 3.12 "$venv"
             # --python, not VIRTUAL_ENV: setup-uv exports UV_PYTHON, which would otherwise send the
             # install to the workspace .venv.
-            uv pip install --python "$venv/bin/python" -r "$requirements" packages/nhx_sandbox pytest pytest-asyncio
+            uv pip install --python "$venv/bin/python" -r "$requirements" ../../packages/nhx_sandbox pytest pytest-asyncio
             echo "::group::Harbor $version"
             "$venv/bin/python" -m pytest -p no:cacheprovider -v \
-              plugins/_temporary-scaled-evals/tests/test_harbor_opensandbox_environment.py \
-              plugins/_temporary-scaled-evals/tests/test_harbor_opensandbox_driver.py \
-              plugins/_temporary-scaled-evals/tests/test_harbor_opensandbox_compose_services.py
+              tests/test_harbor_opensandbox_environment.py tests/test_harbor_opensandbox_driver.py \
+              tests/test_harbor_opensandbox_compose_services.py
             echo "::endgroup::"
           done
 
@@ -1535,7 +1535,7 @@ jobs:
           helm dependency build k8s/helm
           helm dependency build contrib/auth/authentik/helm
           helm dependency build contrib/auth/zitadel/helm
-          uv run --frozen pytest tests/auth_idp/static -v
+          uv run --frozen --group auth-idp-e2e pytest tests/auth_idp/static -v
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
       - name: Upload test artifacts

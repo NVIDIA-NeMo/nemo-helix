@@ -52,7 +52,6 @@ fi
 
 Set up the client to connect to your Safe Synthesizer deployment:
 
-{/* @nemo-docs: skip-python-type-check */}
 ```python
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_safe_synthesizer_plugin.sdk.resources import SafeSynthesizerResource
@@ -74,12 +73,11 @@ print("✅ Client configured successfully")
 
 Test the connection to ensure Safe Synthesizer is accessible:
 
-{/* @nemo-docs: skip-python-type-check */}
 ```python
 try:
     jobs = safe_synthesizer.jobs.list()
     print("✅ Successfully connected to Safe Synthesizer service")
-    print(f"Found {len(jobs.items())} existing jobs")
+    print(f"Found {len(list(jobs.items()))} existing jobs")
 except Exception as e:
     print(f"❌ Cannot connect to service: {e}")
     print("Please verify your CLI context (`nemo config view`) and service status")
@@ -91,10 +89,9 @@ except Exception as e:
 
 For this tutorial, we'll use a women's clothing reviews dataset from Kaggle that contains some PII:
 
-{/* @nemo-docs: skip-python-type-check */}
 ```python
 import pandas as pd
-import kagglehub  # type: ignore[import-not-found]
+import kagglehub  # ty: ignore[unresolved-import] -- tutorial-only dependency installed in Step 1
 
 # Download the dataset
 path = kagglehub.dataset_download("nicapotato/womens-ecommerce-clothing-reviews")
@@ -124,8 +121,9 @@ Without this setup, you may see classification errors and reduced detection qual
 
 </Tip>
 
-{/* @nemo-docs: skip-python-type-check */}
 ```python
+import os
+
 # Use the pre-configured NVIDIA Build model provider
 # This provider is set up during platform deployment
 provider_name = os.environ.get("NSS_CLASSIFY_MODEL_PROVIDER", "default/nvidia-build")
@@ -151,12 +149,12 @@ Pass the fully-qualified provider name (`workspace/provider-name`) to `.with_cla
 
 If you're using private HuggingFace models or want to avoid rate limits, create a secret for your [HuggingFace token](https://huggingface.co/settings/tokens):
 
-{/* @nemo-docs: skip-python-type-check */}
 ```python
 import os
 import time
 
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+from pydantic import SecretStr
 
 # Create a unique secret name (use hyphens, not underscores)
 hf_secret_name = f"hf-token-{int(time.time())}"
@@ -166,7 +164,7 @@ if hf_token:
     # Store your HuggingFace token as a platform secret
     client.secrets.create_secret(
         workspace="default",
-        body=HelixSecretCreateRequest(name=hf_secret_name, value=hf_token),
+        body=HelixSecretCreateRequest(name=hf_secret_name, value=SecretStr(hf_token)),
     )
     print(f"✓ Created secret: {hf_secret_name}")
 else:
@@ -177,7 +175,6 @@ else:
 
 Use the `SafeSynthesizerJobBuilder` to configure and create a job:
 
-{/* @nemo-docs: skip-python-type-check */}
 ```python
 import pandas as pd
 from nemo_helix_plugin.projects.types import CreateProjectRequest
@@ -222,7 +219,6 @@ print(f"✅ Job created: {job.job_name}")
 
 Check the job status:
 
-{/* @nemo-docs: skip-python-type-check */}
 ```python
 status = job.fetch_status()
 print(f"Current status: {status}")
@@ -238,14 +234,12 @@ print(f"Current status: {status}")
 
 View real-time logs:
 
-{/* @nemo-docs: skip-python-type-check */}
 ```python
 job.print_logs()
 ```
 
 Wait for completion (this may take 15-30 minutes depending on data size):
 
-{/* @nemo-docs: skip-python-type-check */}
 ```python
 print("⏳ Waiting for job to complete...")
 try:
@@ -273,7 +267,6 @@ Verify GPU access with `nvidia-smi` on the host, if deployed via quickstart.
 
 Once the job is complete, retrieve the generated synthetic data:
 
-{/* @nemo-docs: skip-python-type-check */}
 ```python
 synthetic_df = job.fetch_data()
 
@@ -284,7 +277,6 @@ print(synthetic_df.head())
 
 Compare with original data structure:
 
-{/* @nemo-docs: skip-python-type-check */}
 ```python
 print("\n📊 Data Comparison:")
 print(f"Original shape: {df.shape}")
@@ -299,7 +291,6 @@ print(f"Synthetic columns: {list(synthetic_df.columns)}")
 
 Fetch the job summary with high-level metrics:
 
-{/* @nemo-docs: skip-python-type-check */}
 ```python
 summary = job.fetch_summary()
 
@@ -311,7 +302,6 @@ print(f" Valid Records: {summary.num_valid_records}/{summary.num_prompts}")
 
 Download the full HTML evaluation report:
 
-{/* @nemo-docs: skip-python-type-check */}
 ```python
 job.save_report("./evaluation_report.html")
 print("✅ Evaluation report saved to evaluation_report.html")
@@ -319,7 +309,6 @@ print("✅ Evaluation report saved to evaluation_report.html")
 
 If using Jupyter, display the report inline:
 
-{/* @nemo-docs: skip-python-type-check */}
 ```python
 job.display_report_in_notebook()
 ```
@@ -361,11 +350,10 @@ Both are measured out of 10, and higher is better.
 
 List and optionally delete completed jobs:
 
-{/* @nemo-docs: skip-python-type-check */}
 ```python
 # List all jobs
 all_jobs = safe_synthesizer.jobs.list()
-print(f"Total jobs: {len(all_jobs.items())}")
+print(f"Total jobs: {len(list(all_jobs.items()))}")
 
 # Delete this job (optional)
 # safe_synthesizer.jobs.list()
@@ -403,7 +391,6 @@ splits your data into training and test sets to measure quality, requiring a min
 
 **Solution:**
 
-{/* @nemo-docs: skip-python-type-check */}
 ```python
 builder = (
     SafeSynthesizerJobBuilder(client)

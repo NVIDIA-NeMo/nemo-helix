@@ -298,7 +298,7 @@ These are the names `--upload` would have used: it derives them from the hub slu
 
 ## Submit the job
 
-There is no `grpo` subcommand. GRPO submits through `nemo customization rl submit`, selected by `training.type`.
+There is no `grpo` subcommand. GRPO submits through `nemo customization rl --job-json`, selected by `training.type`.
 
 ```json
 {
@@ -321,12 +321,12 @@ There is no `grpo` subcommand. GRPO submits through `nemo customization rl submi
 ```
 
 ```bash
-nemo customization rl submit ./job.json --workspace default
+nemo customization rl --job-json ./job.json --workspace default
 ```
 
 `training.type` is required — it is the union discriminator, and omitting it fails with `union_tag_not_found` rather than defaulting to DPO. `model`, `dataset`, and `environment` are plain string references.
 
-Read the `rl-<hex>` job id from the `name` field of the submit response; `rl submit` has no `--name` flag.
+Read the `rl-<hex>` job id from the `name` field of the command's JSON output; `nemo customization rl` has no `--name` flag.
 
 ## Train an adapter instead of full weights
 
@@ -387,7 +387,7 @@ A full-weight GRPO job instead registers a new model entity, which does need its
 
 Set `deployment_config` on the job spec and the platform deploys once training completes, instead of leaving you to create the deployment by hand. Omit it and nothing is deployed.
 
-Pass a string to reuse an existing `ModelDeploymentConfig`:
+Create the deployment config first and pass its name. This is the recommended path; see [Set up automatic deployment](/documentation/customizer-reference/manage-customization-jobs/customization-job-reference#set-up-automatic-deployment) for a reusable vLLM template:
 
 ```json
 {
@@ -399,28 +399,27 @@ Pass a string to reuse an existing `ModelDeploymentConfig`:
 }
 ```
 
-Or an object to have one created inline:
+Or an object to have one created inline. It deploys with NIM unless you set `engine`:
 
 ```json
 {
   "deployment_config": {
     "gpu": 1,
-    "lora_enabled": true,
-    "image_name": "nvcr.io/nim/nvidia/llm-nim",
-    "image_tag": "1.13"
+    "lora_enabled": true
   }
 }
 ```
 
 | Field | Default | Description |
 | --- | --- | --- |
+| `engine` | `nim` | `nim` or `vllm`. |
 | `gpu` | `1` | GPUs the deployment requests. |
 | `lora_enabled` | `true` | Whether the deployment can load LoRA adapters. |
-| `image_name` | multi-llm NIM | Container image from NGC. |
-| `image_tag` | image default | Container image tag. |
+| `image_name` | platform default for the engine | Container image. For NIM, the default is `nvcr.io/nim/nvidia/model-free-nim`. |
+| `image_tag` | platform default for the engine | Container image tag. For NIM, the default is `2.0.13`. |
 | `disk_size` | unset | Disk size for the deployment. |
 | `additional_envs` | unset | Extra environment variables. |
-| `tool_call_config` | unset | Tool-calling overrides for the NIM. Setting `tool_call_plugin` requires the `models.tool-call-plugin.set` permission. |
+| `tool_call_config` | unset | Tool-calling overrides. Only accepted with `engine: nim`. Setting `tool_call_plugin` requires the `models.tool-call-plugin.set` permission. |
 
 A LoRA job deploys the **base** model with `lora_enabled: true` and serves the adapter from it, so `lora_enabled: false` on a LoRA job is rejected at submit — that deployment could never load the adapter. A full-weight job deploys the new model entity it registers.
 

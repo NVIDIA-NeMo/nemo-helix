@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
+import { Button, Flex, Spinner, Text } from '@nvidia/foundations-react-core';
 import { GlobalNav } from '@studio/components/Layouts/GlobalNav';
 import { ASSISTANT_STUDIO_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPathIfExists } from '@studio/hooks/useWorkspaceFromPath';
@@ -9,17 +11,69 @@ import { useAuthTokenStatus } from '@studio/providers/auth/useAuthTokenStatus';
 import { useSelectedWorkspace } from '@studio/providers/workspace';
 import { AssistantChatProvider } from '@studio/routes/agents/AssistantChatRoute/context/AssistantChatProvider';
 import { WorkspaceGuard } from '@studio/routes/RootLayout/WorkspaceGuard';
+import { CircleAlert, LogIn, RefreshCw } from 'lucide-react';
 import { ReactNode } from 'react';
 import { Outlet } from 'react-router';
 
+const SignedOutView = ({ onSignIn }: { onSignIn: () => void }) => (
+  <main className="flex min-h-screen items-center justify-center bg-surface-sunken px-6 text-primary">
+    <Flex className="w-full max-w-[420px] flex-col items-center gap-4 text-center">
+      <Text asChild kind="body/bold/2xl">
+        <h1>Signed out</h1>
+      </Text>
+      <Text kind="body/regular/md" color="secondary">
+        Your Studio session has ended.
+      </Text>
+      <Button color="brand" onClick={onSignIn}>
+        <LogIn size={16} />
+        Sign in
+      </Button>
+    </Flex>
+  </main>
+);
+
+const AuthErrorView = () => (
+  <main className="min-h-screen bg-surface-sunken text-primary">
+    <ErrorMessage
+      height="100vh"
+      header="Unable to verify session"
+      message="Studio couldn't check your sign-in status. Refresh the page to try again."
+      slotMedia={<CircleAlert className="size-16 stroke-2 text-feedback-danger" />}
+      slotFooter={
+        <Button color="brand" onClick={() => window.location.reload()}>
+          <RefreshCw size={16} />
+          Refresh Page
+        </Button>
+      }
+    />
+  </main>
+);
+
+const AuthPendingView = () => (
+  <main
+    aria-busy="true"
+    className="flex min-h-screen items-center justify-center bg-surface-sunken text-primary"
+  >
+    <Spinner size="large" description="Checking sign-in status..." />
+  </main>
+);
+
 export const PageLayout = ({ sideNav }: { sideNav?: (collapsed: boolean) => ReactNode }) => {
-  const { isAuthPending } = useAuthAutoLogin();
+  const { isAuthError, isAuthPending, isSignedOut, signIn } = useAuthAutoLogin();
   const { isTokenActive } = useAuthTokenStatus();
   const { selectedWorkspace, isWorkspaceUnauthorized, isWorkspaceLoading } = useSelectedWorkspace();
   const workspace = useWorkspaceFromPathIfExists();
 
+  if (isSignedOut) {
+    return <SignedOutView onSignIn={signIn} />;
+  }
+
+  if (isAuthError) {
+    return <AuthErrorView />;
+  }
+
   if (isAuthPending) {
-    return null;
+    return <AuthPendingView />;
   }
 
   const workspaceCheckActive = isTokenActive && !!selectedWorkspace;

@@ -389,7 +389,7 @@ async def test_create_job_conflict_sanitizes_log_fields(
             response = await test_client.post(
                 "/apis/jobs/v2/workspaces/default%0Aforged/jobs",
                 json={
-                    "name": "dup-job\r\nforged",
+                    "name": "dup-job",
                     "source": "test-source",
                     "spec": {},
                     "platform_spec": {
@@ -1698,3 +1698,42 @@ async def test_job_status_timestamps(
     assert task_data["updated_at"] is not None
     datetime.fromisoformat(task_data["created_at"])
     datetime.fromisoformat(task_data["updated_at"])
+
+
+def _create_job_body(**overrides: Any) -> Dict[str, Any]:
+    body: Dict[str, Any] = {
+        "source": "test-source",
+        "spec": {},
+        "platform_spec": {
+            "steps": [
+                {
+                    "name": "valid-step",
+                    "executor": TestConstants.TEST_EXECUTOR.model_dump(mode="json"),
+                    "config": {},
+                }
+            ]
+        },
+    }
+    body.update(overrides)
+    return body
+
+
+@pytest.mark.asyncio
+async def test_create_job_without_name_for_source_ending_in_separator_is_admitted(test_client: AsyncClient):
+    """NVBug 6912264: an auto-named ``nemo-evals.retrieve-eval`` job used to fail with a 409."""
+    response = await test_client.post(
+        "/apis/jobs/v2/workspaces/default/jobs", json=_create_job_body(source="nemo-evals.retrieve-eval")
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["name"].startswith("nemo-evals.retrieve-")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["bad--name", "a" * 52])
+async def test_create_job_with_name_that_cannot_name_its_fileset_returns_422(test_client: AsyncClient, name: str):
+    """An invalid caller-supplied name is rejected at request validation, not reported as a state conflict."""
+    response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=_create_job_body(name=name))
+
+    assert response.status_code == 422
+    assert "conflicts with existing platform state" not in response.text

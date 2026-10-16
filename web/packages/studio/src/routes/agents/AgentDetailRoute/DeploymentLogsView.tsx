@@ -9,6 +9,7 @@ import {
 } from '@nemo/sdk/generated/agents/agent-deployments';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema';
 import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
+import { withHelixBrowserAuthRequest } from '@nemo/sdk/src/utils/platformRequest';
 import { Block, Select, Stack, Text } from '@nvidia/foundations-react-core';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { useOidcBearerToken } from '@studio/providers/auth/useOidcBearerToken';
@@ -132,27 +133,41 @@ const LogsForDeployment: FC<LogsForDeploymentProps> = ({ workspace, deploymentNa
     if (!deploymentName || isLoading) return;
     const url = `${PLATFORM_BASE_URL}${getAgentsStreamDeploymentLogsQueryKey(workspace, deploymentName)[0]}`;
     const controller = new AbortController();
-    void streamSse(url, {
-      signal: controller.signal,
-      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-      initialLastEventId: tailOffset != null ? String(tailOffset) : undefined,
-      onEvent: (event) => {
-        try {
-          const parsed = JSON.parse(event.data) as HelixJobLog;
-          setStreamedLines((prev) => {
-            const next = [...prev, parsed];
-            return next.length > MAX_STREAMED_LINES
-              ? next.slice(next.length - MAX_STREAMED_LINES)
-              : next;
-          });
-        } catch {
-          // ignore malformed lines
+    void (async () => {
+      try {
+        const request = await withHelixBrowserAuthRequest({
+          headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+        });
+        if (controller.signal.aborted) return;
+
+        await streamSse(url, {
+          signal: controller.signal,
+          credentials: request.credentials,
+          headers: request.headers,
+          initialLastEventId: tailOffset != null ? String(tailOffset) : undefined,
+          onEvent: (event) => {
+            try {
+              const parsed = JSON.parse(event.data) as HelixJobLog;
+              setStreamedLines((prev) => {
+                const next = [...prev, parsed];
+                return next.length > MAX_STREAMED_LINES
+                  ? next.slice(next.length - MAX_STREAMED_LINES)
+                  : next;
+              });
+            } catch {
+              // ignore malformed lines
+            }
+          },
+          onError: (err) => {
+            logger.warn(`Log stream interrupted for deployment ${deploymentName}; retrying`, err);
+          },
+        });
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          logger.warn(`Unable to start log stream for deployment ${deploymentName}`, error);
         }
-      },
-      onError: (err) => {
-        logger.warn(`Log stream interrupted for deployment ${deploymentName}; retrying`, err);
-      },
-    });
+      }
+    })();
     return () => controller.abort();
   }, [workspace, deploymentName, accessToken, isLoading, tailOffset]);
 

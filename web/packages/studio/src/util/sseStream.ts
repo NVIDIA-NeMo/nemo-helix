@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// Fetch-based SSE reader: native EventSource can't send an Authorization
-// header (cookies only), and we need OIDC bearer auth + Last-Event-ID resume.
+// Fetch-based SSE reader: native EventSource can't send request headers or
+// configure credentials, and we need auth + Last-Event-ID resume.
 
 export interface SseEvent {
   data: string;
@@ -11,7 +11,8 @@ export interface SseEvent {
 
 export interface StreamSseOptions {
   signal: AbortSignal;
-  headers?: Record<string, string>;
+  headers?: HeadersInit;
+  credentials?: RequestCredentials;
   onEvent: (event: SseEvent) => void;
   onError?: (error: unknown) => void;
   // Sent as Last-Event-ID on the *first* connect so the server resumes from a
@@ -57,19 +58,22 @@ const abortableDelay = (ms: number, signal: AbortSignal): Promise<void> =>
   });
 
 export const streamSse = async (url: string, options: StreamSseOptions): Promise<void> => {
-  const { signal, headers, onEvent, onError, initialLastEventId } = options;
+  const { signal, headers, credentials, onEvent, onError, initialLastEventId } = options;
   let lastEventId: string | undefined = initialLastEventId;
   let retryMs = INITIAL_RETRY_MS;
 
   while (!signal.aborted) {
     try {
+      const requestHeaders = new Headers(headers);
+      requestHeaders.set('Accept', 'text/event-stream');
+      if (lastEventId) {
+        requestHeaders.set('Last-Event-ID', lastEventId);
+      }
+
       const response = await fetch(url, {
         signal,
-        headers: {
-          Accept: 'text/event-stream',
-          ...headers,
-          ...(lastEventId ? { 'Last-Event-ID': lastEventId } : {}),
-        },
+        credentials,
+        headers: requestHeaders,
       });
       if (!response.ok || !response.body) {
         const err = new Error(`SSE request failed: ${response.status}`);

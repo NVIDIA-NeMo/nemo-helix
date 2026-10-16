@@ -11,9 +11,12 @@ seam.  The rich platform provider (``nhx.common.client_factory``) is tested in
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from unittest.mock import patch
 
 import pytest
+from nemo_helix_plugin.auth import RuntimePrincipal
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client_provider import (
     DefaultNemoClientProvider,
@@ -59,6 +62,25 @@ class TestReadPrincipalFromEnv:
             _read_principal_from_env()
 
 
+@dataclass
+class _Principal:
+    id: str
+    email: str | None = None
+    account_id: str | None = None
+    groups: Sequence[str] = ()
+    authz_aliases: Sequence[str] = ()
+    on_behalf_of: str | None = None
+    on_behalf_of_groups: Sequence[str] | None = None
+    on_behalf_of_email: str | None = None
+    on_behalf_of_account_id: str | None = None
+    on_behalf_of_authz_aliases: Sequence[str] = ()
+    effective: _Principal | None = field(default=None, repr=False)
+
+    @property
+    def effective_principal(self) -> _Principal:
+        return self.effective or self
+
+
 # ---------------------------------------------------------------------------
 # _build_headers
 # ---------------------------------------------------------------------------
@@ -74,6 +96,31 @@ class TestBuildHeaders:
     def test_explicit_on_behalf_of(self):
         headers = _build_headers(as_service="svc", on_behalf_of="user@ex.com")
         assert headers["X-NHX-Principal-On-Behalf-Of"] == "user@ex.com"
+
+    def test_principal_on_behalf_of_delegates_its_full_identity(self):
+        """Authorization matches email, groups, account id and aliases too, so an id alone can deny a member."""
+        principal = _Principal(
+            id="sub-123",
+            email="editor@ex.com",
+            account_id="acct-1",
+            groups=["team-a", "team-b"],
+            authz_aliases=["alias-1"],
+        )
+        headers = _build_headers(as_service="svc", on_behalf_of=principal)
+        assert headers["X-NHX-Principal-Id"] == "service:svc"
+        assert headers["X-NHX-Principal-On-Behalf-Of"] == "sub-123"
+        assert headers["X-NHX-Principal-On-Behalf-Of-Email"] == "editor@ex.com"
+        assert headers["X-NHX-Principal-On-Behalf-Of-Groups"] == "team-a,team-b"
+        assert headers["X-NHX-Subject-Account-Id"] == "acct-1"
+        assert headers["X-NHX-Subject-Aliases"] == "alias-1"
+
+    def test_principal_on_behalf_of_uses_its_effective_identity(self):
+        """A principal that is itself delegating hands on the identity it acts for, not its own."""
+        user = _Principal(id="user@ex.com", groups=["team-a"])
+        gateway = _Principal(id="service:gateway", on_behalf_of="user@ex.com", effective=user)
+        headers = _build_headers(as_service="svc", on_behalf_of=gateway)
+        assert headers["X-NHX-Principal-On-Behalf-Of"] == "user@ex.com"
+        assert headers["X-NHX-Principal-On-Behalf-Of-Groups"] == "team-a"
 
     def test_principal_from_env_when_no_service(self, monkeypatch):
         monkeypatch.setenv(
@@ -353,7 +400,7 @@ class TestProviderResolution:
                 *,
                 as_service: str | None = None,
                 internal: bool = False,
-                on_behalf_of: str | None = None,
+                on_behalf_of: str | RuntimePrincipal | None = None,
                 workspace: str | None = None,
             ) -> NemoClient:
                 kwargs = {
@@ -370,7 +417,7 @@ class TestProviderResolution:
                 *,
                 as_service: str | None = None,
                 internal: bool = False,
-                on_behalf_of: str | None = None,
+                on_behalf_of: str | RuntimePrincipal | None = None,
                 workspace: str | None = None,
             ) -> AsyncNemoClient:
                 kwargs = {
