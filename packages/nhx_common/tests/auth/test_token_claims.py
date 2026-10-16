@@ -50,6 +50,21 @@ def test_token_claims_extractor_projects_configured_claims(auth_config: AuthConf
     )
 
 
+def test_token_claims_extractor_takes_the_current_actor_from_a_delegation_chain(auth_config: AuthConfig) -> None:
+    claims: JsonObject = {
+        "preferred_username": "alice",
+        "act": {
+            "sub": "service:evaluator",
+            "act": {"sub": "system:serviceaccount:nemo-runs:job-runner", "roles": "system:serviceaccounts"},
+        },
+    }
+
+    token_claims = TokenClaimsExtractor(auth_config).extract(claims)
+
+    assert token_claims is not None
+    assert token_claims.actor == ActorClaims(subject="service:evaluator", groups=[])
+
+
 def test_token_claims_extractor_preserves_external_scope_list(auth_config: AuthConfig) -> None:
     scope_claim = [
         "vendor:tenant:service:Admin",
