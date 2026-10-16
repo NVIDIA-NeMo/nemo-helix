@@ -77,6 +77,7 @@ test_runtimes:
       - managed_workload_deployment_obo
       - device_flow
       - confidential_oidc
+      - evals_job
   - id: authentik-kubernetes
     backend: kubernetes
     command: k8s
@@ -96,4 +97,5 @@ test_runtimes:
       - managed_workload_deployment_obo
       - device_flow
       - confidential_oidc
+      - evals_job
       - kubernetes_token_review

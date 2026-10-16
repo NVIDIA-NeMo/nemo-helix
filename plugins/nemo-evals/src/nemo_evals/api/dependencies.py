@@ -23,9 +23,11 @@ from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.dependencies import (
     RequestAuthorizer,
+    ServiceNemoClientFactory,
     get_effective_principal_id,
     get_nemo_client,
     get_request_authorizer,
+    get_service_nemo_client_factory,
 )
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
@@ -107,12 +109,13 @@ def get_task_service(
 def get_image_build_service(
     workspace: str,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
-    async_client: AsyncNemoClient = Depends(get_nemo_client),
+    service_clients: ServiceNemoClientFactory = Depends(get_service_nemo_client_factory),
     authorize: RequestAuthorizer = Depends(get_request_authorizer),
 ) -> ImageBuildService:
-    """Provide an ImageBuildService whose task-builder Jobs are created as the caller.
+    """Provide an ImageBuildService whose task-builder Jobs are created as evals acting for the caller.
 
-    Builder admits the task-builder Job on evals' own permissions, so the caller's permission to build is checked here.
+    The Job writes evals' build records, so its workload acts as evals. Builder admits it on evals' own
+    permissions, so the caller's permission to build is checked here.
     """
 
     async def authorize_builds(build_workspace: str) -> None:
@@ -127,7 +130,7 @@ def get_image_build_service(
 
     return ImageBuildService(
         entity_client,
-        JobsServiceBuildJobs(AsyncJobsClient.from_client(async_client), workspace=workspace),
+        JobsServiceBuildJobs(AsyncJobsClient.from_client(service_clients(_EVALS_SERVICE)), workspace=workspace),
         authorize_builds,
     )
 

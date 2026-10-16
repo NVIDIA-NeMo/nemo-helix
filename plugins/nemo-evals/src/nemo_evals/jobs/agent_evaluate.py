@@ -198,6 +198,7 @@ class _AgentEvalJobBase(NemoJob):
     """Run agent evaluation (``AgentEvaluator``) over tasks against a Model/Agent endpoint or runner."""
 
     name: ClassVar[str] = "agent-evaluate"
+    runs_as_service: ClassVar[str | None] = "evals"
     description: ClassVar[str] = "Run agent evaluation over tasks against a model, agent, or runner."
     container: ClassVar[str] = "cpu-tasks"
     input_spec_schema: ClassVar[type[BaseModel] | None] = AgentEvalInputSpec

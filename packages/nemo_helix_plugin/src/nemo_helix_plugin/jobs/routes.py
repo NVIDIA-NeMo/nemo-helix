@@ -142,6 +142,7 @@ def add_job_routes(
         generate_job_name=generate_job_name,
         authz=authz,
         jobs_list_filter=job_cls.jobs_list_filter,
+        create_as_service=job_cls.runs_as_service,
     )
     return _rebase_job_collection_routes(router, job_collection_path_for(job_cls))
 

@@ -1420,6 +1420,14 @@ k8s_load_image() {
     fi
 
     k8s_load_image_ref "${cluster_name}" "$(image_ref)"
+
+    # Plugin jobs (evals) run the task image built alongside the API image.
+    local tasks_image="${IMAGE_REGISTRY}/nhx-tasks:${BAKE_TAG}"
+    if docker image inspect "${tasks_image}" >/dev/null 2>&1; then
+        k8s_load_image_ref "${cluster_name}" "${tasks_image}"
+    else
+        echo "Not loading ${tasks_image}: no local image; evals jobs will pull it"
+    fi
 }
 
 k8s_helm_command() {

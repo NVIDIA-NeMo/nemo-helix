@@ -197,6 +197,7 @@ class PackageAgentJob(NemoJob):
     # naming this "package" makes the local packaging flags unreachable.
     # The REST collection path is pinned below so the API surface stays /jobs/package.
     name: ClassVar[str] = "package-agent"
+    runs_as_service: ClassVar[str | None] = "agents"
     job_collection_path: ClassVar[str | None] = "/jobs/package"
     description: ClassVar[str] = "Build a container image for an agent stored on the platform."
     container: ClassVar[str] = "cpu-tasks"

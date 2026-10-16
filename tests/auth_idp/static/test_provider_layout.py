@@ -72,7 +72,7 @@ def test_authentik_compose_runs_required_services_and_controllers():
         "--host",
         "0.0.0.0",
         "--services",
-        "auth,models,files,inference-gateway,jobs,secrets,entities,deployments,studio",
+        "auth,models,files,inference-gateway,jobs,secrets,entities,deployments,evals,studio",
         "--controllers",
         "jobs,models,entities,deployments",
     ]

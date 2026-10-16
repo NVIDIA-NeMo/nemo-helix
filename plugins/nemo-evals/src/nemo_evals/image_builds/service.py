@@ -64,7 +64,7 @@ class BuildJobs(Protocol):
 
 
 class JobsServiceBuildJobs:
-    """:class:`BuildJobs` over the Jobs service, acting as the request's caller."""
+    """:class:`BuildJobs` over the Jobs service."""
 
     def __init__(self, jobs: AsyncJobsClient, *, workspace: str) -> None:
         self._jobs = jobs
