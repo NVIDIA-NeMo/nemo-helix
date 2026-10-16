@@ -18,9 +18,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class HarborTaskJobsExecutionInput(BaseModel):
     """Settings that run a Harbor taskset as many independent task Jobs instead of one Job.
 
-    Passing it as ``execution`` switches to the Kubernetes path: submit pins the
-    taskset revision, registers one Jobs Service Job per task, and returns a single taskset
-    run that tracks progress and combines the per-task results.
+    Passing it as ``execution`` selects the Kubernetes taskset-run path: submit pins
+    the taskset revision and returns a durable run handle. Later execution stages
+    register one Jobs Service Job per task and combine the per-task results.
 
     It exists because these settings mean nothing on the Docker path: where task Jobs are
     placed, which sandbox they may use, and when to give up on a run. Keeping them in their
@@ -28,8 +28,12 @@ class HarborTaskJobsExecutionInput(BaseModel):
     than new ``submit`` methods. It never changes benchmark content or which agent runs.
 
     Submit validates this input, resolves the percent form of ``max_failed_tasks`` into a
-    count, and freezes the result into the run's stored plan; later changes to operator
-    profiles or defaults do not affect an accepted run.
+    count, and stores the M1 execution caps and missing-image policy in the run's plan.
+    In M1, ``sandbox_policy`` and ``dispatcher_profile`` participate in request identity
+    only; their names are intentionally neither resolved nor stored while execution is
+    unavailable. M2 Story 3 validates these selections and adds the resolved sandbox
+    policy, dispatcher profile and pinned dispatcher image as required plan fields before
+    execution is enabled. Earlier development runs are deleted rather than migrated.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -234,6 +238,15 @@ class TasksetRunStatus(BaseModel):
 
 
 _INTERNAL_FIELDS = {"plan_ref", "plan_digest", "request_digest"}
+
+
+class TasksetRunSubmitResponse(TasksetRunStatus):
+    """Return the accepted run with advisory warnings for this submission only."""
+
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Advisory notices about this caller's overlapping active runs on the same taskset revision.",
+    )
 
 
 def to_status(run: TasksetRunEntity) -> TasksetRunStatus:

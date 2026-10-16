@@ -73,7 +73,11 @@ class EvaluatorTaskAdapter(TaskKindAdapter):
                 entity_name=f"{head.workspace}/{head.name}", revision_digest=revision.content_hash
             )
         metrics = await resolve_metrics_to_inline(
-            definition.metrics, workspace=workspace, entity_client=ctx.entity_client, async_client=ctx.async_client
+            definition.metrics,
+            workspace=workspace,
+            entity_client=ctx.entity_client,
+            async_client=ctx.async_client,
+            authorize=ctx.authorize,
         )
         return ResolvedEvaluatorTaskDefinition(
             kind="evaluator",

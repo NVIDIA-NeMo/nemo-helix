@@ -9,7 +9,7 @@ Covers route wiring, the get_task_service dependency, and status-code mapping (2
 
 from __future__ import annotations
 
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import FastAPI
@@ -56,7 +56,7 @@ def verified_archive_projection(monkeypatch):
 def client(entity_store) -> TestClient:
     app = FastAPI()
     app.include_router(tasks_routes.router, prefix="/v2/workspaces/{workspace}")
-    service = TaskService(entity_store, _FakeMetricService(), files_client=Mock())
+    service = TaskService(entity_store, _FakeMetricService(), files_client=Mock(), authorize_metric_read=AsyncMock())
     app.dependency_overrides[get_task_service] = lambda: service
     return TestClient(app)
 
@@ -322,7 +322,7 @@ def test_concurrent_replace_returns_409_not_500(entity_store) -> None:
 
     app = FastAPI()
     app.include_router(tasks_routes.router, prefix="/v2/workspaces/{workspace}")
-    service = TaskService(entity_store, _FakeMetricService(), files_client=Mock())
+    service = TaskService(entity_store, _FakeMetricService(), files_client=Mock(), authorize_metric_read=AsyncMock())
     app.dependency_overrides[get_task_service] = lambda: service
     client = TestClient(app)
 

@@ -26,9 +26,23 @@ from nemo_helix_plugin.entities import (
 )
 from nemo_helix_plugin.entities.types import DeleteResponse
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.in_memory_filter import InMemoryFilterRepository
+from nhx.testing.files import InMemoryFilesService
 from nhx.testing.secrets import InMemorySecretsService
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
+
+
+@pytest.fixture
+def files_service() -> InMemoryFilesService:
+    """Return fresh isolated Files storage for each test's resource assertions."""
+    return InMemoryFilesService()
+
+
+@pytest.fixture
+def files_client(files_service: InMemoryFilesService) -> AsyncFilesClient:
+    """Return a real Files client backed by the test's in-memory Files service."""
+    return files_service.client()
 
 
 def matches_filter(entity, operation) -> bool:

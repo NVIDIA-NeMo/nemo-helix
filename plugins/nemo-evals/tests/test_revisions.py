@@ -826,7 +826,7 @@ async def test_service_response_is_own_revision_during_head_race(kind):
     from nemo_evals.api.service.taskset_service import TasksetService
 
     store = FakeStore()
-    tasks = TaskService(store, AsyncMock())
+    tasks = TaskService(store, AsyncMock(), authorize_metric_read=AsyncMock())
     if kind == "task":
         create, replace, get = tasks.create_task, tasks.replace_task, tasks.get_task
 

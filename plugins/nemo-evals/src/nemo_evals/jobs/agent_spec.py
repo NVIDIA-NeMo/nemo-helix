@@ -292,7 +292,8 @@ class HarborRunnerTarget(BaseModel):
     n_concurrent_trials: int | None = Field(
         default=None,
         ge=1,
-        description="Maximum concurrent Harbor trials. Unset or null: the runner default (4) on Docker. "
+        description="Maximum concurrent Harbor trials. Native Harbor's default parallelism is 4; "
+        "unset or null uses that default on Docker. "
         "Must be unset or null on Kubernetes runs, which run trials one at a time.",
         json_schema_extra={"nullable": True},
     )

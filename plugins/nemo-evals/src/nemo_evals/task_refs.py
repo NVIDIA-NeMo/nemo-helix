@@ -12,18 +12,24 @@ from nemo_evals.jobs.agent_spec import AgentEvalTaskInput, ResolvedTask, Target,
 from nemo_evals.jobs.kinds.registry import get_adapter
 from nemo_evals.jobs.kinds.types import LoadedTask, SubmitContext, TaskKindAdapter
 from nemo_evals.revisions import RevisionNotFoundError, get_revision
+from nemo_evals.source_authorization import SourceReadAuthorizer, authorize_source_read
 from nemo_evals.task_identity import UnsupportedTaskKindError, qualified_task_refs
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial
 
 
-async def _resolve_task_ref(ref: TaskRef, client: EntityClient, *, taskset: TasksetRef | None) -> LoadedTask:
+async def _resolve_task_ref(
+    ref: TaskRef, client: EntityClient, *, taskset: TasksetRef | None, authorize: SourceReadAuthorizer | None
+) -> LoadedTask:
     """Load one stored task's head and the revision named by its ref.
 
     A missing task or revision raises ``ValueError``. When ``taskset`` is set, the message names that
-    taskset, because the missing member was referenced by it.
+    taskset, because the missing member was referenced by it. ``authorize`` runs before the read, so
+    a denied caller cannot learn whether the task exists.
     """
+    workspace, name, _ = parse_subentity_ref(ref.root, "default")
+    await authorize_source_read(authorize, "task", workspace, name)
     try:
         head, revision = await task_revision(ref, client)
         return LoadedTask(stored=(head, revision))
@@ -98,7 +104,7 @@ async def load_tasks(
     # load the tasks from the entity store
     taskset = tasks if isinstance(tasks, TasksetRef) else None
     loaded = await map_with_limited_concurrency(
-        lambda ref: _resolve_task_ref(ref, client, taskset=taskset),
+        lambda ref: _resolve_task_ref(ref, client, taskset=taskset, authorize=ctx.authorize),
         refs,
     )
     _reject_harbor_taskset_fileref(taskset_revision, loaded)

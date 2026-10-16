@@ -32,6 +32,13 @@ class TasksetRunPlan(BaseModel):
     Each cap must be supplied even when None denotes no limit; percentages must
     already have been resolved into a nonnegative failure count.
 
+    This is the intentional M1 subset: ``sandbox_policy``, ``dispatcher_profile``
+    and ``dispatcher_image`` depend on M2's operator configuration. M2 Story 3
+    resolves the sandbox policy, validates the dispatcher profile and adds all
+    three as required fields before execution is enabled. Earlier development
+    runs are deleted when the schema changes; their plans are never filled from
+    operator defaults or migrated into executable runs.
+
     Top-level fields are frozen, but nested spec models remain mutable;
     each verified storage read reconstructs independent models for its consumer.
     """
