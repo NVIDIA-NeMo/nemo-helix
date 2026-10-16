@@ -500,6 +500,8 @@ def render_harbor_config(
             "sandbox_timeout_sec": settings.harbor_opensandbox_sandbox_timeout_seconds,
             "trusted_allowed_hosts": list(trusted_hosts),
             "egress_verification": settings.harbor_opensandbox_egress_verification,
+            "enforce_disk_limit": settings.harbor_opensandbox_enforce_disk_limit,
+            "max_disk_mb": settings.harbor_opensandbox_max_disk_mb,
             "metadata": ownership_metadata(spec),
         },
     }
@@ -669,6 +671,8 @@ def make_harbor_opensandbox_submitter(
             "network_policy": spec.network_policy,
             "trusted_allowed_hosts": trusted_hosts,
             "egress_verification": settings.harbor_opensandbox_egress_verification,
+            "enforce_disk_limit": settings.harbor_opensandbox_enforce_disk_limit,
+            "max_disk_mb": settings.harbor_opensandbox_max_disk_mb,
         }
 
         # Only credential names are logged, never values.
@@ -726,6 +730,8 @@ def collect_applied_egress(job_dir: Path) -> list[dict[str, Any]]:
                 "role": record.get("role"),
                 "network_mode": record.get("network_mode"),
                 "policy_sha256": record.get("policy_sha256"),
+                "disk_requested_mb": record.get("disk_requested_mb"),
+                "disk_limit_mb": record.get("disk_limit_mb"),
             }
         )
     return records
