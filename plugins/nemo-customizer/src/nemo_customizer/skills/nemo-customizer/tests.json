@@ -38,7 +38,7 @@
     },
     {
       "type": "explicit",
-      "prompt": "Use nemo customization unsloth submit to do a LoRA SFT as a Docker GPU job on the platform.",
+      "prompt": "Use nemo customization unsloth --job-json to do a LoRA SFT as a Docker GPU job on the platform.",
       "expected_skill": "nemo-customizer"
     },
     {
@@ -58,7 +58,7 @@
     },
     {
       "type": "explicit",
-      "prompt": "Use nemo customization rl submit to run a DPO job on NeMo Helix.",
+      "prompt": "Use nemo customization rl --job-json to run a DPO job on NeMo Helix.",
       "expected_skill": "nemo-customizer"
     },
     {
@@ -73,7 +73,7 @@
     },
     {
       "type": "explicit",
-      "prompt": "Use nemo customization rl submit to run a GRPO job against a NeMo Gym environment.",
+      "prompt": "Use nemo customization rl --job-json to run a GRPO job against a NeMo Gym environment.",
       "expected_skill": "nemo-customizer"
     },
     {

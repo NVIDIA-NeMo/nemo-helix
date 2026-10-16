@@ -6,9 +6,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from nhx.common.api.common import Page
 from nhx.common.api.filter import FilterOperator
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -47,7 +48,17 @@ API_TAG = "Annotations"
 )
 async def create_annotation(
     workspace: str,
-    body: AnnotationInput,
+    body: Annotated[
+        AnnotationInput,
+        Body(
+            openapi_examples={
+                "note": {
+                    "summary": "Annotate a session with a note",
+                    "value": {"kind": "note", "session_id": "session-123", "text": "Helpful response."},
+                }
+            }
+        ),
+    ],
     service: SpansServiceDep,
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> Annotation:

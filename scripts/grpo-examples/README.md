@@ -121,7 +121,7 @@ environment` is enforced at submit. Confirm with `nemo files list` before submit
 The names above match what the shipped fixtures reference:
 
 ```bash
-nemo customization rl submit plugins/nemo-rl/tests/fixtures/minimal_grpo_lora.json -w default
+nemo customization rl --job-json plugins/nemo-rl/tests/fixtures/minimal_grpo_lora.json -w default
 ```
 
 | Fixture | Shape |
