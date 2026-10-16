@@ -124,3 +124,28 @@ def test_an_index_entry_for_the_platform_without_a_sha256_digest_is_an_upstream_
 
     with pytest.raises(UpstreamError, match="without a sha256 digest"):
         registry.resolve(normalize_reference("ubuntu:24.04"), platform="linux/amd64")
+
+
+def test_an_index_lists_its_platforms_without_attestations_or_arm64s_default_variant() -> None:
+    index = json.dumps(
+        {
+            "manifests": [
+                {"digest": "sha256:" + "a" * 64, "platform": {"os": "linux", "architecture": "amd64"}},
+                {"digest": "sha256:" + "b" * 64, "platform": {"os": "linux", "architecture": "arm64", "variant": "v8"}},
+                {"digest": "sha256:" + "c" * 64, "platform": {"os": "linux", "architecture": "arm", "variant": "v7"}},
+                {"digest": "sha256:" + "d" * 64, "platform": {"os": "unknown", "architecture": "unknown"}},
+            ]
+        }
+    )
+    registry = _registry({f"{BASE}/manifests/24.04": (index.encode(), INDEX)})
+
+    assert registry.platforms(normalize_reference("ubuntu:24.04")) == ["linux/amd64", "linux/arm/v7", "linux/arm64"]
+
+
+def test_a_single_image_lists_its_configs_platform() -> None:
+    manifest, config = _single("arm64")
+    registry = _registry(
+        {f"{BASE}/manifests/24.04": (manifest, MANIFEST), f"{BASE}/blobs/{_digest(config)}": (config, "")}
+    )
+
+    assert registry.platforms(normalize_reference("ubuntu:24.04")) == ["linux/arm64"]

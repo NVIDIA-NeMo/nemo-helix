@@ -451,6 +451,14 @@ def test_sync_build_images_posts_to_the_revision_and_parses_the_build() -> None:
     assert (build.id, build.status) == ("1", "pending")
 
 
+def test_sync_build_images_sends_a_platform_only_when_given() -> None:
+    resource, recorder = _sync_resource(_image_build_payload("1"))
+
+    resource.build_images("task-1", platform="linux/arm64")
+
+    assert _request_body(recorder.requests[0]) == {"allowed_registries": [], "platform": "linux/arm64"}
+
+
 def test_sync_image_builds_default_to_the_latest_revision() -> None:
     resource, recorder = _sync_resource(_page([_image_build_payload("2"), _image_build_payload("1", "failed")]))
 

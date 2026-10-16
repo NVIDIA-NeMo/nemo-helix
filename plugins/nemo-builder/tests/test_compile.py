@@ -43,7 +43,7 @@ def _compile(
     build_set: BuildSet, *, config: BuilderConfig, profiles: list[KubernetesJobExecutionProfile] | None = None
 ) -> HelixJobSpec:
     backend = ExecutionBackend(config, profiles or _profiles())
-    plan = BuildPlan.resolve(build_set, workspace=WORKSPACE)
+    plan = BuildPlan.resolve(build_set.with_default_platform(config.default_platform), workspace=WORKSPACE)
     backend.check(plan)
     return backend.compile(plan.with_destinations(backend.destination))
 
