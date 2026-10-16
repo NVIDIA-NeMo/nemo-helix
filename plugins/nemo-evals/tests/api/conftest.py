@@ -3,7 +3,7 @@
 
 """Shared run-service inputs and published Harbor records for API tests."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -17,6 +17,7 @@ from nemo_evals.config import EvaluatorConfig
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity, TasksetEntity, TasksetRevisionEntity
 from nemo_evals.jobs import agent_files_snapshot, registered_agent_resolution
 from nemo_evals.revisions import publish_revision
+from nemo_evals.taskset_runs.entities import TasksetRunEntity
 from nemo_evals.taskset_runs.store import TasksetRunStore
 from nemo_helix_plugin.agents.client import AsyncAgentsClient
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -56,6 +57,30 @@ def authorizer():
 @pytest.fixture
 def service(run_store, entity_store, async_client, authorizer):
     return TasksetRunService(run_store, entity_store, async_client, authorizer, EvaluatorConfig(), clock=lambda: NOW)
+
+
+@pytest.fixture
+def seed_run(entity_store):
+    """Return an async factory for persisted runs without submit or Files operations."""
+
+    async def seed(name="run-selected", *, workspace="default", caller="user:alice", **state):
+        """Persist name/workspace under caller, applying supplied domain state; return the stored record."""
+        entity_store.caller = caller
+        data = {
+            "name": name,
+            "workspace": workspace,
+            "taskset_ref": "default/suite#" + "a" * 64,
+            "plan_ref": "default/unavailable-plan#plan.json",
+            "plan_digest": "b" * 64,
+            "request_digest": "c" * 64,
+            "accepted_at": NOW,
+            "execution_deadline_at": NOW + timedelta(hours=1),
+            "finalization_deadline_at": NOW + timedelta(hours=2),
+        }
+        data.update(state)
+        return await entity_store.create(TasksetRunEntity.model_validate(data))
+
+    return seed
 
 
 @pytest.fixture

@@ -10,7 +10,13 @@ from typing import Annotated, Literal, Self
 
 from nemo_evals.api.fields import TasksetRef
 from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, HarborRunnerTarget
-from nemo_evals.taskset_runs.entities import ResultState, TasksetRunEntity, TasksetRunPhase
+from nemo_evals.taskset_runs.entities import (
+    MemberPhase,
+    ResultState,
+    TasksetRunEntity,
+    TasksetRunMemberEntity,
+    TasksetRunPhase,
+)
 from nemo_evals.taskset_runs.specs import MissingPrebuiltImagePolicy
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -238,6 +244,44 @@ class TasksetRunStatus(BaseModel):
 
 
 _INTERNAL_FIELDS = {"plan_ref", "plan_digest", "request_digest"}
+
+
+class TasksetRunTask(BaseModel):
+    """Expose one stored member's task identity, progress and optional Job/error.
+
+    Construction takes the five public fields only. Instances contain no parent,
+    persistence metadata or reconstructed Job state; read routes omit unset details.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    task: str = Field(description="Member name within the run, for example task-7.")
+    task_index: int = Field(ge=0, description="Zero-based index of the task in the run's resolved task list.")
+    phase: MemberPhase = Field(description="Stored image preparation and execution progress of this task.")
+    job: str | None = Field(
+        default=None,
+        description="Name of this task's Jobs Service Job; omitted until registered.",
+    )
+    error: str | None = Field(default=None, description="Stored reason the task failed, was cancelled or expired.")
+
+
+def to_task(member: TasksetRunMemberEntity) -> TasksetRunTask:
+    """Copy a stored member's public state without accessing its plan or Job.
+
+    Args:
+        member: Persisted child record with an optional task Job name and error.
+
+    Returns:
+        Five-field task DTO with task_job renamed to job and absent values retained
+        as None until HTTP serialization.
+    """
+    return TasksetRunTask(
+        task=member.name,
+        task_index=member.task_index,
+        phase=member.phase,
+        job=member.task_job,
+        error=member.error,
+    )
 
 
 class TasksetRunSubmitResponse(TasksetRunStatus):

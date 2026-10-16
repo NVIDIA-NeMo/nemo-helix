@@ -15,7 +15,13 @@ from nemo_evals.entities import TasksetRevisionEntity
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.revisions import RevisionContentMismatchError, publish_revision
 from nemo_evals.source_authorization import remember_allowed
-from nemo_evals.taskset_runs.entities import ResultState, TasksetRunEntity, TasksetRunMemberEntity, TasksetRunPhase
+from nemo_evals.taskset_runs.entities import (
+    MemberPhase,
+    ResultState,
+    TasksetRunEntity,
+    TasksetRunMemberEntity,
+    TasksetRunPhase,
+)
 from nemo_evals.taskset_runs.store import PlanStorageError, RunRequestConflict
 from nemo_evals.taskset_runs.submission import TimeoutAboveMaximumError
 
@@ -419,3 +425,165 @@ async def test_repeated_source_is_checked_once_but_denials_are_not_remembered():
         with pytest.raises(HTTPException):
             await check("GET", "/metrics/other")
     assert authorize.await_count == 3
+
+
+async def test_get_reads_stored_state_without_plan_members_or_source_resolution(
+    service, run_store, seed_run, files_service, authorizer, monkeypatch
+):
+    """One stored run read preserves terminal/cancellation/result state even with an unavailable plan."""
+    run = await seed_run(
+        phase=TasksetRunPhase.EXPIRED,
+        result_state=ResultState.READY,
+        cancel_requested_at=NOW,
+        error="execution expired",
+        idempotency_key="original-key",
+    )
+    find = AsyncMock(wraps=run_store.find)
+    monkeypatch.setattr(run_store, "find", find)
+    monkeypatch.setattr(run_store, "load_plan", AsyncMock(side_effect=AssertionError("plan read")))
+    monkeypatch.setattr(run_store, "list_members", AsyncMock(side_effect=AssertionError("member read")))
+    status = await service.get("default", run.name)
+    find.assert_awaited_once_with("default", run.name)
+    assert status.model_dump(mode="json") == {
+        "run_id": "run-selected",
+        "workspace": "default",
+        "taskset_ref": "default/suite#" + "a" * 64,
+        "phase": "expired",
+        "result_state": "ready",
+        "accepted_at": "2026-10-14T12:00:00Z",
+        "execution_deadline_at": "2026-10-14T13:00:00Z",
+        "finalization_deadline_at": "2026-10-14T14:00:00Z",
+        "cancel_requested_at": "2026-10-14T12:00:00Z",
+        "error": "execution expired",
+        "created_by": "user:alice",
+        "idempotency_key": "original-key",
+    }
+    assert not files_service.calls
+    authorizer.assert_not_awaited()
+
+
+async def test_get_missing_and_cross_workspace_returns_none(service, seed_run):
+    """Only absent records produce None, including a name that exists in another workspace."""
+    await seed_run()
+    assert await service.get("default", "unknown") is None
+    assert await service.get("other", "run-selected") is None
+
+
+@pytest.mark.parametrize(
+    "active,mine,expected",
+    [
+        (False, False, ["bob-active", "alice-done", "alice-active"]),
+        (True, False, ["bob-active", "alice-active"]),
+        (False, True, ["alice-done", "alice-active"]),
+        (True, True, ["alice-active"]),
+    ],
+)
+async def test_list_runs_service_preserves_filtering_and_page_metadata(
+    service, run_store, seed_run, authorizer, files_service, monkeypatch, active, mine, expected
+):
+    """Public mine/active filters stay independent and retain the store's complete page metadata."""
+    await seed_run("alice-active")
+    await seed_run("alice-done", phase=TasksetRunPhase.COMPLETED)
+    await seed_run("bob-active", caller="user:bob")
+    await seed_run("outside", workspace="other")
+    query = AsyncMock(wraps=run_store.list_runs)
+    monkeypatch.setattr(run_store, "list_runs", query)
+    result = await service.list_runs("default", caller="user:alice", active=active, mine=mine, page=1, page_size=2)
+    query.assert_awaited_once_with(
+        "default",
+        caller="user:alice" if mine else None,
+        active=active,
+        page=1,
+        page_size=2,
+    )
+    assert [run.run_id for run in result.data] == expected[:2]
+    assert result.pagination.model_dump() == {
+        "page": 1,
+        "page_size": 2,
+        "current_page_size": min(2, len(expected)),
+        "total_pages": (len(expected) + 1) // 2,
+        "total_results": len(expected),
+    }
+    assert result.sort == "-created_at" and result.filter is None
+    assert not files_service.calls
+    authorizer.assert_not_awaited()
+
+
+async def test_list_runs_mine_normalizes_headerless_development_caller(service, seed_run):
+    """Headerless mine requests select the same stable creator used by submit."""
+    await seed_run("development-run", caller="user:development")
+    await seed_run("alice-run")
+    result = await service.list_runs("default", caller="", mine=True)
+    assert [run.run_id for run in result.data] == ["development-run"]
+
+
+async def test_list_tasks_distinguishes_missing_parent_from_empty_page(service, run_store, seed_run, monkeypatch):
+    """Unknown parents return None without querying children; existing empty parents return a page."""
+    run = await seed_run()
+    members = AsyncMock(wraps=run_store.list_members)
+    monkeypatch.setattr(run_store, "list_members", members)
+    assert await service.list_tasks("other", run.name, phase=None, page=1, page_size=100) is None
+    members.assert_not_awaited()
+    result = await service.list_tasks("default", run.name, phase=None, page=1, page_size=100)
+    assert result.data == [] and result.pagination.total_results == result.pagination.total_pages == 0
+    members.assert_awaited_once_with(run, phase=None, page=1, page_size=100)
+
+
+async def test_list_tasks_preserves_stored_task_details_and_page_metadata(
+    service, run_store, entity_store, seed_run, files_service, authorizer, monkeypatch
+):
+    """Task projection retains Job/error details and filtered pagination without reading Jobs or plans."""
+    run = await seed_run()
+    for index in [100, 2, 10]:
+        member = TasksetRunMemberEntity(
+            name=f"task-{index}",
+            workspace="default",
+            task_index=index,
+            phase=MemberPhase.FAILED,
+            task_job=f"recorded-job-{index}",
+            error="saved diagnostic",
+        )
+        member._parent = run.id
+        await entity_store.create(member)
+    find = AsyncMock(wraps=run_store.find)
+    members = AsyncMock(wraps=run_store.list_members)
+    monkeypatch.setattr(run_store, "find", find)
+    monkeypatch.setattr(run_store, "list_members", members)
+    monkeypatch.setattr(run_store, "load_plan", AsyncMock(side_effect=AssertionError("plan read")))
+    result = await service.list_tasks("default", run.name, phase=MemberPhase.FAILED, page=2, page_size=1)
+    assert [task.model_dump(mode="json") for task in result.data] == [
+        {
+            "task": "task-10",
+            "task_index": 10,
+            "phase": "failed",
+            "job": "recorded-job-10",
+            "error": "saved diagnostic",
+        }
+    ]
+    assert result.pagination.model_dump() == {
+        "page": 2,
+        "page_size": 1,
+        "current_page_size": 1,
+        "total_pages": 3,
+        "total_results": 3,
+    }
+    assert result.sort == "task_index" and result.filter is None
+    find.assert_awaited_once_with("default", run.name)
+    members.assert_awaited_once_with(run, phase=MemberPhase.FAILED, page=2, page_size=1)
+    assert not files_service.calls
+    authorizer.assert_not_awaited()
+
+
+@pytest.mark.parametrize("operation", ["get", "list_runs", "list_tasks"])
+async def test_read_service_propagates_storage_failures(service, seed_run, entity_store, monkeypatch, operation):
+    """Unexpected storage failures propagate rather than becoming missing runs or empty lists."""
+    await seed_run()
+    target = "get" if operation == "get" else "list"
+    monkeypatch.setattr(entity_store, target, AsyncMock(side_effect=RuntimeError("store unavailable")))
+    with pytest.raises(RuntimeError, match="store unavailable"):
+        if operation == "get":
+            await service.get("default", "run-selected")
+        elif operation == "list_runs":
+            await service.list_runs("default", caller="user:alice")
+        else:
+            await service.list_tasks("default", "run-selected", phase=None, page=1, page_size=100)

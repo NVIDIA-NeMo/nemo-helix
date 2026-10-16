@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Caller-scoped acceptance of immutable Harbor taskset run inputs."""
+"""Caller-scoped run acceptance and stored-record reads without execution joins."""
 
 import logging
 from collections.abc import Callable
@@ -11,14 +11,22 @@ from urllib.parse import quote
 
 from fastapi import HTTPException
 from nemo_evals.api.fields import TasksetRef, parse_subentity_ref
-from nemo_evals.api.taskset_run_schemas import TasksetRunInput, TasksetRunSubmitResponse, request_digest, to_status
+from nemo_evals.api.taskset_run_schemas import (
+    TasksetRunInput,
+    TasksetRunStatus,
+    TasksetRunSubmitResponse,
+    TasksetRunTask,
+    request_digest,
+    to_status,
+    to_task,
+)
 from nemo_evals.config import EvaluatorConfig
 from nemo_evals.entities import TasksetEntity, TasksetRevisionEntity
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.jobs.agent_spec import AgentEvalSpec, registered_agent_source
 from nemo_evals.revisions import RevisionNotFoundError, get_revision
 from nemo_evals.source_authorization import remember_allowed
-from nemo_evals.taskset_runs.entities import TasksetRunEntity
+from nemo_evals.taskset_runs.entities import MemberPhase, TasksetRunEntity
 from nemo_evals.taskset_runs.identifiers import derive_run_id
 from nemo_evals.taskset_runs.plan_storage import delete_fileset_ref
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
@@ -28,6 +36,7 @@ from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import RequestAuthorizer
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.schema import Page
 
 DEVELOPMENT_CALLER = "user:development"
 """Stable creator identity for headerless requests when authentication is disabled."""
@@ -94,7 +103,11 @@ async def pin_taskset_ref(entity_client: EntityClient, ref: TasksetRef, workspac
 
 
 class TasksetRunService:
-    """Authorize and freeze a caller's Harbor taskset submission without creating Jobs."""
+    """Accept Harbor submissions and project stored runs/members into public DTOs.
+
+    The shared request-scoped clients supply acceptance and read storage. Reads
+    return persisted state without resolving sources, loading plans or inspecting Jobs.
+    """
 
     def __init__(
         self,
@@ -121,6 +134,92 @@ class TasksetRunService:
         self._authorizer = authorize
         self._config = config
         self._clock = clock
+
+    async def get(self, workspace: str, run_id: str) -> TasksetRunStatus | None:
+        """Read one stored run without joining members, plans or Jobs.
+
+        Args:
+            workspace: Workspace that scopes the record lookup.
+            run_id: Public run name in that workspace.
+
+        Returns:
+            Stored public status, or None only when the record is absent. Storage
+            and projection failures propagate for the route to report as errors.
+        """
+        run = await self._store.find(workspace, run_id)
+        return to_status(run) if run is not None else None
+
+    async def list_runs(
+        self,
+        workspace: str,
+        *,
+        caller: str,
+        active: bool = False,
+        mine: bool = False,
+        page: int = 1,
+        page_size: int = 100,
+    ) -> Page[TasksetRunStatus]:
+        """Project one independently filtered workspace run page into public statuses.
+
+        Args:
+            workspace: Workspace containing the records.
+            caller: Effective request principal, normalized as for submit.
+            active: Restrict to accepted/running runs when True.
+            mine: Restrict to the effective caller's runs when True.
+            page: One-based page number.
+            page_size: Maximum records on the requested page.
+
+        Returns:
+            Newest-first status page preserving the store's pagination and sort.
+            Storage and projection failures propagate rather than producing an empty page.
+        """
+        result = await self._store.list_runs(
+            workspace,
+            caller=normalize_run_caller(caller) if mine else None,
+            active=active,
+            page=page,
+            page_size=page_size,
+        )
+        return Page(
+            data=[to_status(run) for run in result.data],
+            pagination=result.pagination,
+            sort=result.sort,
+            filter=result.filter,
+        )
+
+    async def list_tasks(
+        self,
+        workspace: str,
+        run_id: str,
+        *,
+        phase: MemberPhase | None,
+        page: int,
+        page_size: int,
+    ) -> Page[TasksetRunTask] | None:
+        """Project one member page only after verifying its workspace-scoped parent.
+
+        Args:
+            workspace: Workspace containing the run and its children.
+            run_id: Public run name whose persisted entity ID scopes the members.
+            phase: Optional member phase filter; None includes every phase.
+            page: One-based page number.
+            page_size: Maximum records on the requested page.
+
+        Returns:
+            Public task page preserving pagination/sort, including an empty page
+            when the run has no members; None only for an absent parent. Storage
+            and projection failures propagate to the route.
+        """
+        run = await self._store.find(workspace, run_id)
+        if run is None:
+            return None
+        result = await self._store.list_members(run, phase=phase, page=page, page_size=page_size)
+        return Page(
+            data=[to_task(member) for member in result.data],
+            pagination=result.pagination,
+            sort=result.sort,
+            filter=result.filter,
+        )
 
     async def submit(self, req: TasksetRunInput, *, workspace: str, caller: str) -> SubmitOutcome:
         """Authorize, freeze and atomically accept a run, or replay its original status.

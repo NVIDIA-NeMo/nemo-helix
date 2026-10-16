@@ -613,6 +613,195 @@ paths:
         '422':
           description: Invalid request, excessive timeout, or missing or incompatible
             source.
+    get:
+      tags:
+      - Evals Plugin Taskset Run Routes
+      summary: List Taskset Runs
+      description: "Read a newest-first workspace run page with independent active/mine\
+        \ filters.\n\nArgs:\n    workspace: Workspace containing the records.\n  \
+        \  active: Restrict to accepted and running phases when True.\n    mine: Restrict\
+        \ to the effective caller's records when True.\n    page: One-based page number,\
+        \ validated by FastAPI.\n    page_size: Maximum page size, from 1 to 1000.\n\
+        \    caller: Effective principal supplied by the platform dependency.\n  \
+        \  service: Shared request-scoped run service.\n\nReturns:\n    Stored statuses\
+        \ and filtered pagination counts, excluding null optionals.\n\nRaises:\n \
+        \   HTTPException: Unexpected storage or projection failure, sanitized to\
+        \ 500."
+      operationId: list_taskset_runs_apis_evals_v2_workspaces__workspace__agent_evaluate_runs_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: active
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Include only accepted and running runs.
+          default: false
+          title: Active
+        description: Include only accepted and running runs.
+      - name: mine
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Include only runs created by the effective caller.
+          default: false
+          title: Mine
+        description: Include only runs created by the effective caller.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: One-based page number.
+          default: 1
+          title: Page
+        description: One-based page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Maximum runs on the requested page.
+          default: 100
+          title: Page Size
+        description: Maximum runs on the requested page.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TasksetRunStatussPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs/{run_id}:
+    get:
+      tags:
+      - Evals Plugin Taskset Run Routes
+      summary: Get Taskset Run
+      description: "Read one stored run without loading its plan or joining its tasks\
+        \ and Jobs.\n\nArgs:\n    workspace: Workspace that scopes the record lookup.\n\
+        \    run_id: Public run name in that workspace.\n    service: Shared request-scoped\
+        \ run service.\n\nReturns:\n    Current stored status, excluding null optionals\
+        \ and internal metadata.\n\nRaises:\n    HTTPException: The record is absent\
+        \ (404), or an unexpected storage or\n        projection failure occurs (sanitized\
+        \ 500)."
+      operationId: get_taskset_run_apis_evals_v2_workspaces__workspace__agent_evaluate_runs__run_id__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TasksetRunStatus'
+        '404':
+          description: Run not found in this workspace.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs/{run_id}/tasks:
+    get:
+      tags:
+      - Evals Plugin Taskset Run Routes
+      summary: List Taskset Run Tasks
+      description: "Read stored run members in numeric task-index order without inspecting\
+        \ Jobs.\n\nArgs:\n    workspace: Workspace containing the run and its children.\n\
+        \    run_id: Public run name whose persisted entity ID scopes the members.\n\
+        \    phase: Optional stored member phase filter.\n    page: One-based page\
+        \ number, validated by FastAPI.\n    page_size: Maximum page size, from 1\
+        \ to 1000.\n    service: Shared request-scoped run service.\n\nReturns:\n\
+        \    Stored task page and filtered counts; existing runs with no members return\n\
+        \    an empty page. Null Job/error details are omitted.\n\nRaises:\n    HTTPException:\
+        \ The parent run is absent (404), or unexpected storage or\n        projection\
+        \ failure occurs (sanitized 500)."
+      operationId: list_taskset_run_tasks_apis_evals_v2_workspaces__workspace__agent_evaluate_runs__run_id__tasks_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      - name: phase
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/MemberPhase'
+          description: Include only members in this stored phase.
+          title: Phase
+        description: Include only members in this stored phase.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: One-based page number.
+          default: 1
+          title: Page
+        description: One-based page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Maximum tasks on the requested page.
+          default: 100
+          title: Page Size
+        description: Maximum tasks on the requested page.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TasksetRunTasksPage'
+        '404':
+          description: Run not found in this workspace.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/evals/v2/workspaces/{workspace}/eval-results:
     get:
       tags:
@@ -5963,6 +6152,24 @@ components:
         the url + env + secrets for that same name. Matched by server-name key at
 
         compile time; ``secrets`` are merged into the server''s ``env``.'
+    MemberPhase:
+      type: string
+      enum:
+      - image_preparing
+      - image_ready
+      - registered
+      - succeeded
+      - failed
+      - cancelled
+      - expired
+      title: MemberPhase
+      description: 'Encode preparation and execution progress for an individual run
+        member.
+
+
+        String values persist image preparation, Job registration, and settled task
+
+        outcomes so controllers can track each task without changing the run''s plan.'
     MetadataItem:
       properties:
         key:
@@ -7999,6 +8206,108 @@ components:
         finalization is tracked separately by ``ResultState`` so execution completion
 
         does not imply that combined results are already available.'
+    TasksetRunStatus:
+      properties:
+        run_id:
+          type: string
+          title: Run Id
+          description: Run name used to address the accepted run in API routes.
+        workspace:
+          type: string
+          title: Workspace
+          description: Workspace containing the run.
+        taskset_ref:
+          type: string
+          title: Taskset Ref
+          description: Pinned taskset revision this run evaluates, for example default/sort-suite#<64-hex
+            digest>.
+        phase:
+          allOf:
+          - $ref: '#/components/schemas/TasksetRunPhase'
+          description: Execution progress. Starts accepted; terminal phases never
+            change.
+        result_state:
+          allOf:
+          - $ref: '#/components/schemas/ResultState'
+          description: Availability of the combined results, tracked independently
+            of phase.
+        accepted_at:
+          type: string
+          format: date-time
+          title: Accepted At
+          description: When submit accepted the run.
+        execution_deadline_at:
+          type: string
+          format: date-time
+          title: Execution Deadline At
+          description: accepted_at plus the effective timeout; unfinished tasks expire
+            then. Retries do not reset it.
+        finalization_deadline_at:
+          type: string
+          format: date-time
+          title: Finalization Deadline At
+          description: execution_deadline_at plus operator grace; the final result
+            must be saved by then.
+        cancel_requested_at:
+          title: Cancel Requested At
+          description: When a caller requested cancellation; None if never requested.
+          type: string
+          format: date-time
+        error:
+          title: Error
+          description: Why the run failed or expired; None otherwise.
+          type: string
+        created_by:
+          title: Created By
+          description: Principal ID of the caller who created the run; None when creator
+            metadata is unavailable.
+          type: string
+        idempotency_key:
+          title: Idempotency Key
+          description: Caller-supplied submit key; None for a keyless run.
+          type: string
+      additionalProperties: false
+      type: object
+      required:
+      - run_id
+      - workspace
+      - taskset_ref
+      - phase
+      - result_state
+      - accepted_at
+      - execution_deadline_at
+      - finalization_deadline_at
+      title: TasksetRunStatus
+      description: 'Represent public run state for submit, read and cancellation responses.
+
+
+        Instances expose stored domain state and caller identity while excluding plan
+
+        bindings, request digests and Entity Store persistence metadata.'
+    TasksetRunStatussPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/TasksetRunStatus'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: TasksetRunStatussPage
     TasksetRunSubmitResponse:
       properties:
         run_id:
@@ -8080,6 +8389,67 @@ components:
       title: TasksetRunSubmitResponse
       description: Return the accepted run with advisory warnings for this submission
         only.
+    TasksetRunTask:
+      properties:
+        task:
+          type: string
+          title: Task
+          description: Member name within the run, for example task-7.
+        task_index:
+          type: integer
+          minimum: 0.0
+          title: Task Index
+          description: Zero-based index of the task in the run's resolved task list.
+        phase:
+          allOf:
+          - $ref: '#/components/schemas/MemberPhase'
+          description: Stored image preparation and execution progress of this task.
+        job:
+          title: Job
+          description: Name of this task's Jobs Service Job; omitted until registered.
+          type: string
+        error:
+          title: Error
+          description: Stored reason the task failed, was cancelled or expired.
+          type: string
+      additionalProperties: false
+      type: object
+      required:
+      - task
+      - task_index
+      - phase
+      title: TasksetRunTask
+      description: 'Expose one stored member''s task identity, progress and optional
+        Job/error.
+
+
+        Construction takes the five public fields only. Instances contain no parent,
+
+        persistence metadata or reconstructed Job state; read routes omit unset details.'
+    TasksetRunTasksPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/TasksetRunTask'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: TasksetRunTasksPage
     TasksetSort:
       type: string
       enum:

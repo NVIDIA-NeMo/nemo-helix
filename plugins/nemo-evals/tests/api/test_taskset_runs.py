@@ -159,7 +159,9 @@ def test_taskset_run_router_is_registered_once():
         for route in spec.router.routes
         if isinstance(route, APIRoute) and route.path == "/agent-evaluate/runs"
     ]
-    assert len(routes) == 1 and routes[0].methods == {"POST"}
+    assert len(routes) == 2
+    assert any(route.methods == {"POST"} for route in routes)
+    assert any(route.methods == {"GET"} for route in routes)
 
 
 @pytest.mark.parametrize("mode", ["recover", "committed-exhausted", "uncommitted-exhausted"])

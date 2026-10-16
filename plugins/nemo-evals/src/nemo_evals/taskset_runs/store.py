@@ -5,26 +5,57 @@
 
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Self
+from typing import Self, cast
 
-from nemo_evals.taskset_runs.entities import ResultState, TasksetRunEntity, TasksetRunPhase
+from nemo_evals.taskset_runs.entities import (
+    MemberPhase,
+    ResultState,
+    TasksetRunEntity,
+    TasksetRunMemberEntity,
+    TasksetRunPhase,
+)
 from nemo_evals.taskset_runs.identifiers import random_run_id
 from nemo_evals.taskset_runs.plan_storage import PlanDigestMismatchError as PlanDigestMismatchError
 from nemo_evals.taskset_runs.plan_storage import PlanStorageError as PlanStorageError
 from nemo_evals.taskset_runs.plan_storage import StoredPlan, delete_fileset_ref, load_plan, store_plan
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
 from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY
-from nemo_helix_plugin.entities import EntityClient, EntityClientProtocol
+from nemo_helix_plugin.entities import EntityBase, EntityClient, EntityClientProtocol, ListResponse
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
+from nemo_helix_plugin.schema import Page, PaginationData
 
 # The platform default retries 409. For a named create, 409 means "this name is taken": a final
 # answer that no retry can change. Retrying it only adds backoff before ``accept`` settles the
 # conflict. 5xx and timeouts are still retried; those retries are what turn a committed create
 # whose reply was lost into a 409 for our own record, which ``accept`` recognizes by ``plan_ref``.
 _ACCEPT_RETRY_POLICY = replace(PLATFORM_DEFAULT_RETRY_POLICY, retryable_status_codes=(408, 429))
+
+
+def _to_page[EntityT: EntityBase](result: ListResponse[EntityT], *, sort: str) -> Page[EntityT]:
+    """Adapt an Entity Store page without recomputing or changing its totals.
+
+    Args:
+        result: Filtered, ordered records and server-provided pagination counts.
+        sort: Entity-client sort used for the query.
+
+    Returns:
+        API page containing the same records, counts and ordering.
+    """
+    pagination = result.pagination
+    return Page(
+        data=result.data,
+        pagination=PaginationData(
+            page=pagination.page,
+            page_size=pagination.page_size,
+            current_page_size=pagination.current_page_size,
+            total_pages=pagination.total_pages,
+            total_results=pagination.total_results,
+        ),
+        sort=sort,
+    )
 
 
 @dataclass(frozen=True)
@@ -108,6 +139,8 @@ class TasksetRunStore:
     - ``replay``: return the run an identical earlier request made, before redoing work.
     - ``find``: get one run by name, or None.
     - ``load_plan``: download the run's plan and verify it was not changed.
+    - ``list_runs``: one filtered, newest-first page of workspace run records.
+    - ``list_members``: a numerically ordered page of children of a persisted run.
     - ``list_active``: the caller's accepted or running runs, optionally for one taskset revision.
 
     ``accept`` is an idempotent get-or-create built on a named create (below).
@@ -337,46 +370,126 @@ class TasksetRunStore:
             raise RunRequestConflict(run.name)
         return run
 
-    async def list_active(self, workspace: str, caller: str, taskset_ref: str | None = None) -> list[TasksetRunEntity]:
-        """Return caller's accepted/running runs, optionally on one pinned taskset revision.
+    async def list_runs(
+        self,
+        workspace: str,
+        *,
+        caller: str | None = None,
+        active: bool = False,
+        taskset_ref: str | None = None,
+        page: int = 1,
+        page_size: int = 100,
+    ) -> Page[TasksetRunEntity]:
+        """Read one newest-first page with all requested filters applied server-side.
 
-        Filter and sort every page server-side. Complete over stable data; best-effort
-        when concurrent changes shift Entity Store's offset-based pagination.
+        Equal creation timestamps have no secondary sort and can cross page boundaries.
+        Offset pages may repeat rows when concurrent insertions shift earlier pages.
 
         Args:
-            workspace: Workspace in which to look for active runs.
-            caller: Authenticated identity to match against record ``created_by``.
-            taskset_ref: Optional pinned revision ref; None includes every taskset.
+            workspace: Workspace containing the records.
+            caller: Optional creator principal; None includes every caller.
+            active: Restrict to accepted and running phases when True.
+            taskset_ref: Optional pinned revision; None includes all tasksets.
+            page: One-based page number.
+            page_size: Maximum records on the requested page.
 
         Returns:
-            Accepted/running records ordered by name across all returned pages,
-            useful for detecting a caller's overlapping submissions. List errors
-            propagate instead of returning a misleading partial result.
+            Stored records and the filtered Entity Store pagination counts. No Files
+            or Jobs reads are performed; storage failures propagate to the caller.
         """
-        conditions: list[FilterOperation] = [
-            ComparisonOperation(field="created_by", operator=FilterOperator.EQ, value=caller),
-            ComparisonOperation(
-                field="data.phase",
-                operator=FilterOperator.IN,
-                value=[TasksetRunPhase.ACCEPTED, TasksetRunPhase.RUNNING],
-            ),
-        ]
+        conditions: list[FilterOperation] = []
+        if caller is not None:
+            conditions.append(ComparisonOperation(field="created_by", operator=FilterOperator.EQ, value=caller))
+        if active:
+            conditions.append(
+                ComparisonOperation(
+                    field="data.phase",
+                    operator=FilterOperator.IN,
+                    value=[TasksetRunPhase.ACCEPTED, TasksetRunPhase.RUNNING],
+                )
+            )
         if taskset_ref is not None:
             conditions.append(
                 ComparisonOperation(field="data.taskset_ref", operator=FilterOperator.EQ, value=taskset_ref)
             )
-        filter_operation = LogicalOperation(operator=FilterOperator.AND, operations=conditions)
+        filter_operation = LogicalOperation(operator=FilterOperator.AND, operations=conditions) if conditions else None
+        result = await self.entity_client.list(
+            TasksetRunEntity,
+            workspace=workspace,
+            filter_operation=filter_operation,
+            sort="-created_at",
+            page=page,
+            page_size=page_size,
+        )
+        return _to_page(result, sort="-created_at")
+
+    async def list_members(
+        self,
+        run: TasksetRunEntity,
+        *,
+        phase: MemberPhase | None,
+        page: int,
+        page_size: int,
+    ) -> Page[TasksetRunMemberEntity]:
+        """Read one parent-scoped member page in numeric task-index order.
+
+        Do not advance offsets while moving members out of a phase filter: re-query
+        page 1 or omit that filter to avoid skipping records as the result set shrinks.
+
+        Args:
+            run: Persisted parent record, including its entity ID and workspace.
+            phase: Optional member phase; None includes every phase.
+            page: One-based page number.
+            page_size: Maximum records on the requested page.
+
+        Returns:
+            Stored members and filtered pagination counts; accepted M1 runs have
+            empty pages. No plan or Jobs reads occur; storage failures propagate.
+        """
+        conditions: list[FilterOperation] = [
+            ComparisonOperation(field="parent", operator=FilterOperator.EQ, value=run.id),
+        ]
+        if phase is not None:
+            conditions.append(ComparisonOperation(field="data.phase", operator=FilterOperator.EQ, value=phase))
+        member_client = cast(EntityClientProtocol[TasksetRunMemberEntity], self.entity_client)
+        result = await member_client.list(
+            TasksetRunMemberEntity,
+            workspace=run.workspace,
+            filter_operation=LogicalOperation(operator=FilterOperator.AND, operations=conditions),
+            sort="task_index",
+            page=page,
+            page_size=page_size,
+        )
+        return _to_page(result, sort="task_index")
+
+    async def list_active(self, workspace: str, caller: str, taskset_ref: str | None = None) -> list[TasksetRunEntity]:
+        """Read all pages of this caller's active runs for overlap warnings.
+
+        Complete over stable data; concurrent inserts or equal creation timestamps
+        may repeat or move rows across newest-first offset pages.
+
+        Args:
+            workspace: Workspace containing the records.
+            caller: Creator principal to match.
+            taskset_ref: Optional pinned taskset revision.
+
+        Returns:
+            Accepted/running records, newest first. List failures propagate rather
+            than returning a misleading partial result.
+        """
         runs: list[TasksetRunEntity] = []
         page = 1
         while True:
-            result = await self.entity_client.list(
-                TasksetRunEntity,
-                workspace=workspace,
-                filter_operation=filter_operation,
-                sort="name",
+            result = await self.list_runs(
+                workspace,
+                caller=caller,
+                active=True,
+                taskset_ref=taskset_ref,
                 page=page,
+                page_size=100,
             )
             runs.extend(result.data)
+            assert result.pagination is not None
             if page >= result.pagination.total_pages:
                 return runs
             page += 1
