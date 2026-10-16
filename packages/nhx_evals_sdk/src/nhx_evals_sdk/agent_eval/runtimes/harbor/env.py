@@ -28,22 +28,36 @@ logger = logging.getLogger(__name__)
 HARBOR_SENSITIVE_ENV_KEY_RE = re.compile(r"(KEY|SECRET|TOKEN(?!S)|PASSWORD|CREDENTIAL|AUTH)", re.IGNORECASE)
 
 
-def harbor_env_templates(env_secrets: Mapping[str, SecretRef], source: EnvSecretSource) -> dict[str, str]:
+def harbor_env_templates(
+    env_secrets: Mapping[str, SecretRef], source: EnvSecretSource, *, field: str = "env_secrets"
+) -> dict[str, str]:
     """Map each ``env_secrets`` key to a ``${<source var>}`` template Harbor expands when it creates the agent.
 
-    Raises before anything runs when a secret is missing.
+    Also used for ``verifier_env_secrets``, which Harbor expands for the verifier; ``field`` names the config
+    field in the error. Raises before anything runs when a secret is missing.
     """
-    return {name: "${" + var + "}" for name, var in env_secret_vars(env_secrets, source).items()}
+    return {name: "${" + var + "}" for name, var in env_secret_vars(env_secrets, source, field=field).items()}
 
 
-def validate_harbor_env(env_vars: Mapping[str, str], env_secrets: Mapping[str, object]) -> None:
+def validate_harbor_env(
+    env_vars: Mapping[str, str],
+    env_secrets: Mapping[str, object],
+    verifier_env_secrets: Mapping[str, object] | None = None,
+) -> None:
     """Refuse ``env_vars`` Harbor would mishandle; shared by the SDK config, the job target and the run.
 
-    ``env_vars`` are non-secret literals handed only to the agent.
+    ``env_vars`` are non-secret literals handed only to the agent. ``verifier_env_secrets`` reach only the
+    verifier, so a name in it may not also name an agent variable: a platform job injects each name once.
     """
     overlap = sorted(set(env_vars) & set(env_secrets))
     if overlap:
         raise ValueError(f"{overlap} appear in both env_vars and env_secrets; name each variable once")
+    verifier_overlap = sorted(set(verifier_env_secrets or {}) & (set(env_vars) | set(env_secrets)))
+    if verifier_overlap:
+        raise ValueError(
+            f"{verifier_overlap} appear in verifier_env_secrets and in the agent's env_secrets or env_vars; "
+            "name each variable once"
+        )
     for key, value in env_vars.items():
         # Harbor expands a `${NAME}` value from the process environment, which would forward the
         # job's environment into the agent.

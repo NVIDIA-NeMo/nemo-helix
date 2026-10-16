@@ -60,6 +60,25 @@ def test_invalid_env_vars_are_refused(env_vars: dict[str, str], message: str) ->
         validate_harbor_env(env_vars, {"LLM_API_KEY": REF})
 
 
+@pytest.mark.parametrize(
+    ("env_vars", "env_secrets"),
+    [({}, {"JUDGE_API_KEY": REF}), ({"JUDGE_API_KEY": "x"}, {})],
+)
+def test_a_verifier_secret_cannot_share_a_name_with_an_agent_variable(
+    env_vars: dict[str, str], env_secrets: dict[str, SecretRef]
+) -> None:
+    # A platform job injects each name once, so the agent and the verifier would read the same variable.
+    with pytest.raises(ValueError, match=re.escape("appear in verifier_env_secrets and in the agent's")):
+        validate_harbor_env(env_vars, env_secrets, {"JUDGE_API_KEY": REF})
+
+
+def test_a_verifier_secret_cannot_replace_trace_dir(tmp_path) -> None:
+    from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig
+
+    with pytest.raises(ValueError, match="would replace the trace_dir"):
+        HarborRuntimeConfig(jobs_dir=tmp_path, trace_dir="/app/traces", verifier_env_secrets={"TRACE_DIR": REF})
+
+
 def test_non_secret_env_vars_are_accepted() -> None:
     validate_harbor_env(
         {

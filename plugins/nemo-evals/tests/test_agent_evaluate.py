@@ -2464,6 +2464,54 @@ async def test_compile_resolves_harbor_runner_env_secrets(mocker: MockerFixture)
     assert stored_target["env_secrets"] == {"OPENAI_API_KEY": "my-workspace/openai-key"}
 
 
+async def test_compile_injects_harbor_verifier_env_secrets_beside_the_agents(mocker: MockerFixture) -> None:
+    """A verifier's credential, such as an LLM judge's key, is injected into the job like the agent's own.
+
+    The runtime then hands it to Harbor's verifier only; the stored target still carries only the reference.
+    """
+    _patch_execution_profiles(mocker, [SubprocessJobExecutionProfile()])
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=HarborRunnerTarget(
+            source=HarborBuiltinAgentSource(name="codex", model_name="gpt-5"),
+            env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")},
+            verifier_env_secrets={"JUDGE_API_KEY": SecretRef(root="my-workspace/judge-key")},
+        ),
+    )
+
+    compiled = await AgentEvalJob.compile(
+        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_sdk()
+    )
+
+    step = HelixJobSpec.model_validate(compiled).steps[0]
+    secrets = {env.name: env.from_secret.name for env in step.environment or [] if env.from_secret}
+    assert secrets == {"OPENAI_API_KEY": "my-workspace/openai-key", "JUDGE_API_KEY": "my-workspace/judge-key"}
+    stored_target = cast(dict[str, Any], step.config)["target"]
+    assert stored_target["verifier_env_secrets"] == {"JUDGE_API_KEY": "my-workspace/judge-key"}
+
+
+def test_harbor_runner_carries_verifier_env_secrets_apart_from_the_agents(tmp_path: Path) -> None:
+    ctx = _job_context(tmp_path)
+    harbor_target = HarborRunnerTarget(
+        env_secrets={"OPENAI_API_KEY": SecretRef(root="openai-key")},
+        verifier_env_secrets={"JUDGE_API_KEY": SecretRef(root="judge-key")},
+    )
+
+    runner, _, _ = AgentEvalJob._resolve_target(harbor_target, ctx)
+
+    assert isinstance(runner, HarborAgentTaskRunner) and runner._config is not None
+    assert runner._config.env_secrets == {"OPENAI_API_KEY": SecretRef(root="openai-key")}
+    assert runner._config.verifier_env_secrets == {"JUDGE_API_KEY": SecretRef(root="judge-key")}
+
+
+def test_harbor_target_refuses_a_verifier_secret_named_like_an_agent_variable() -> None:
+    with pytest.raises(ValidationError, match="appear in verifier_env_secrets and in the agent's"):
+        HarborRunnerTarget(
+            env_secrets={"JUDGE_API_KEY": SecretRef(root="judge-key")},
+            verifier_env_secrets={"JUDGE_API_KEY": SecretRef(root="judge-key")},
+        )
+
+
 @pytest.mark.parametrize("valid", [False, True])
 async def test_gym_submission_validates_before_environment_resolution(monkeypatch, valid) -> None:
     """Invalid Gym rows stop submission before environment lookups; valid rows reach them."""

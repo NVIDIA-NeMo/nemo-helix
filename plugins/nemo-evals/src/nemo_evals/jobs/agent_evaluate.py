@@ -515,6 +515,7 @@ class _AgentEvalJobBase(NemoJob):
                 agent_kwargs=agent_kwargs,
                 env_secrets=target.env_secrets,
                 env_vars=target.env_vars,
+                verifier_env_secrets=target.verifier_env_secrets,
                 n_attempts=target.n_attempts,
                 max_retries=target.max_retries,
                 artifacts=target.artifacts,

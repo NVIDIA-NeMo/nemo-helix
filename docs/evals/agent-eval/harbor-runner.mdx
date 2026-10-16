@@ -622,6 +622,19 @@ completed
   (matching `KEY`, `SECRET`, `TOKEN` but not `TOKENS`, `PASSWORD`, `CREDENTIAL` or `AUTH`,
   case-insensitively, such as `TOKENIZERS_PARALLELISM`), since Harbor would mask them in `config.json` and scrub their values from every
   trial file.
+- **`verifier_env_secrets`** — credentials for each task's verifier, such as an LLM judge's API key,
+  as `{ENV_NAME: secret-ref}`. They resolve exactly like `env_secrets`, but Harbor passes the
+  `${NAME}` template only to the verifier, never to the agent. A name may not also appear in
+  `env_secrets` or `env_vars`.
+  - Every task in the run must set `[verifier] environment_mode = "separate"` in its `task.toml`,
+    including any `[[steps]]` that override it. Harbor's default runs the verifier in the agent's
+    container, where the agent could read the credential, so a run with a shared verifier is refused.
+    In separate mode Harbor runs the verifier in its own container, built from `tests/`, and copies in
+    only the artifacts the task declares. The `[verifier]` section can also set that container's own `network_mode` and
+    `allowed_hosts`, so the judge's API can be reachable from the verifier while the agent stays on
+    its allowlist.
+  - Run with Harbor directly, the same task reads the value from the host environment through its
+    own `[verifier.env]` entry, for example `JUDGE_API_KEY = "${JUDGE_API_KEY}"`.
 
 <Warning>
 
@@ -863,8 +876,8 @@ The SDK stores the cache stamp in `jobs_dir/<job_name>/.nemo-eval-harbor-cache.j
   can serve A, but cached A cannot serve A and B.
 - **Scoring and scheduling settings** — `reward_key`, selected metrics, `quiet`, and
   `n_concurrent_trials` do not invalidate Harbor execution results.
-- **`env_secrets` and `env_vars`** — `env_secrets` participates by reference and `env_vars` by
-  value. Secret values are never fingerprinted, so rotating a credential keeps the cache valid.
+- **`env_secrets`, `verifier_env_secrets` and `env_vars`** — the secrets participate by reference and
+  `env_vars` by value. Secret values are never fingerprinted, so rotating a credential keeps the cache valid.
   Job dirs stamped by an SDK release before these fields existed re-run once.
 - **Installed agents** — when `agent_dir` is unset, the stamp covers the agent selection or import path,
   not the installed package contents. Change the import path, use `agent_dir`, or force a rerun after
