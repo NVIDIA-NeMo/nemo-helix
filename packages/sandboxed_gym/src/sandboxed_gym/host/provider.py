@@ -14,8 +14,6 @@ class SandboxedGymHostProvider(Protocol[TProvider]):
     """Provisions and tears down the job-level Gym host sandbox."""
 
     name: str
-    # Concrete provider implementation stored on ``GymHostHandle.provider``.
-    provider_class: type[TProvider]
 
     async def create_host(self, spec: GymHostSpec) -> GymHostHandle[TProvider]:
         """Create the host and return actor-reachable health/rollout URLs."""

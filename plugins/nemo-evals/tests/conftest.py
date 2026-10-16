@@ -9,13 +9,22 @@ import math
 import pickle
 import tempfile
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import pytest
 from nemo_evals.api.schemas import MetricInline
 from nemo_evals.config import get_config
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager, CloudpickleMetricPayload
-from nemo_helix_plugin.entities import EntityBase, EntityClient, ListResponse, PaginationInfo
+from nemo_helix_plugin.entities import (
+    DEFAULT_WORKSPACE,
+    EntityBase,
+    EntityClient,
+    ListResponse,
+    PaginationInfo,
+    parse_qualified_name,
+)
+from nemo_helix_plugin.entities.types import DeleteResponse
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.in_memory_filter import InMemoryFilterRepository
@@ -108,7 +117,8 @@ class FakeEntityStore(EntityClient):
         self.entities[key] = entity.model_copy(deep=True)
         return entity.model_copy(deep=True)
 
-    async def get(self, entity_type, name: str, *, workspace: str, parent: str | None = None):
+    async def get(self, entity_type, name: str, *, workspace: str | None = None, parent: str | None = None):
+        workspace, name = parse_qualified_name(name, default_workspace=workspace)
         key = self._key(entity_type, name, workspace, parent)
         if key not in self.entities:
             raise NemoEntityNotFoundError(f"{workspace}/{name} not found")
@@ -135,27 +145,33 @@ class FakeEntityStore(EntityClient):
         entity_type,
         name: str,
         *,
-        workspace: str,
+        workspace: str | None = None,
         parent: str | None = None,
         expected_db_version: int | None = None,
-    ) -> None:
+    ) -> DeleteResponse:
         # ``parent`` is part of the key, not decoration: revision children of different heads share
         # the name ``rev.1``, so ignoring it here would delete whichever one was inserted first.
+        workspace, name = parse_qualified_name(name, default_workspace=workspace)
         key = self._key(entity_type, name, workspace, parent)
         if key not in self.entities:
             raise NemoEntityNotFoundError(f"{workspace}/{name} not found")
-        del self.entities[key]
+        deleted = self.entities.pop(key)
+        return DeleteResponse(id=deleted.id)
 
     async def list(
         self,
         entity_type,
         *,
-        workspace: str,
+        workspace: str = DEFAULT_WORKSPACE,
         filter_operation=None,
+        filter_str: str | None = None,
         sort: str | None = None,
+        filter_obj: dict[str, Any] | None = None,
         page: int = 1,
         page_size: int = 100,
     ) -> ListResponse:
+        if filter_str is not None or filter_obj is not None:
+            raise NotImplementedError("the fake entity store filters by filter_operation only")
         items = [
             entity
             for (entity_type_name, record_workspace, _, _), entity in self.entities.items()

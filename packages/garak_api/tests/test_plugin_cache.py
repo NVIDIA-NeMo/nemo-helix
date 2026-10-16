@@ -31,3 +31,19 @@ def test_parse_plugin_spec_non_probe_default_tag_filter():
 
 def test_plugin_info():
     assert isinstance(plugin_info("probes.grandma.Slurs"), dict)
+
+
+def test_load_plugin_cache_reads_packaged_cache_without_user_copy(tmp_path, monkeypatch):
+    import json
+
+    from garakapi import PluginCacheNoValidate, _plugins
+
+    user_cache = tmp_path / "resources" / "plugin_cache.json"
+    monkeypatch.setattr(_plugins.PluginCache, "_user_plugin_cache_filename", user_cache)
+
+    loaded = PluginCacheNoValidate()._load_plugin_cache()
+
+    with open(_plugins.PluginCache._plugin_cache_filename, encoding="utf-8") as f:
+        assert loaded == json.load(f)
+    # Concurrent importers raced on this copy; nothing may write it any more.
+    assert not user_cache.exists()

@@ -52,7 +52,8 @@ class TqdmPerFileUploadCallback(Callback):
         self.src_path = src_path
         super().__init__(**kwargs)
 
-    def branched(self, full_src_path: str, full_dest_path: str, **kwargs: Any) -> TqdmCallback:
+    def branched(self, path_1: str, path_2: str, **kwargs: Any) -> TqdmCallback:
+        full_src_path = path_1
         if self.src_path.is_file():
             relative_path = self.src_path.name
         else:
@@ -82,8 +83,8 @@ class TqdmPerFileDownloadCallback(Callback):
         self.file_sizes = file_sizes or {}
         super().__init__(**kwargs)
 
-    def branched(self, full_src_path: str, full_dest_path: str, **kwargs: Any) -> TqdmCallback:
-        dest_full_path = Path(full_dest_path)
+    def branched(self, path_1: str, path_2: str, **kwargs: Any) -> TqdmCallback:
+        full_src_path, dest_full_path = path_1, Path(path_2)
         if self.dest_path.is_file():
             relative_path = dest_full_path.name
         else:
@@ -147,8 +148,11 @@ class BaseProgressCallback(Callback):
         return [FileInfo(path=f.path, size=f.size) for f in _list_local_files(src_path)]
 
     @abstractmethod
-    def branched(self, source_path: str, dest_path: str, **kwargs: Any) -> "BaseSingleFileCallback":
-        """Create a child callback for a single file transfer."""
+    def branched(self, path_1: str, path_2: str, **kwargs: Any) -> "BaseSingleFileCallback":
+        """Create a child callback for copying ``path_1`` to ``path_2``.
+
+        The parameter names are fsspec's ``Callback.branched``, which overrides must keep.
+        """
         ...
 
 
@@ -268,11 +272,11 @@ class FileUploadProgressCallback(BaseProgressCallback):
             },
         )
 
-    def branched(self, source_path: str, dest_path: str, **kwargs: Any) -> "SingleFileUploadCallback":
+    def branched(self, path_1: str, path_2: str, **kwargs: Any) -> "SingleFileUploadCallback":
         return SingleFileUploadCallback(
             parent=self,
-            source_path=source_path,
-            dest_path=dest_path,
+            source_path=path_1,
+            dest_path=path_2,
             **kwargs,
         )
 
@@ -346,11 +350,11 @@ class FileDownloadProgressCallback(BaseProgressCallback):
             },
         )
 
-    def branched(self, source_path: str, dest_path: str, **kwargs: Any) -> "SingleFileDownloadCallback":
+    def branched(self, path_1: str, path_2: str, **kwargs: Any) -> "SingleFileDownloadCallback":
         return SingleFileDownloadCallback(
             parent=self,
-            source_path=source_path,
-            dest_path=dest_path,
+            source_path=path_1,
+            dest_path=path_2,
             **kwargs,
         )
 
@@ -409,8 +413,8 @@ class CompositeCallback(Callback):
         for cb in self.callbacks:
             cb.relative_update(inc)
 
-    def branched(self, source_path: str, dest_path: str, **kwargs: Any) -> "CompositeCallback":
-        child_callbacks = [cb.branched(source_path, dest_path, **kwargs) for cb in self.callbacks]
+    def branched(self, path_1: str, path_2: str, **kwargs: Any) -> "CompositeCallback":
+        child_callbacks = [cb.branched(path_1, path_2, **kwargs) for cb in self.callbacks]
         return CompositeCallback(*child_callbacks)
 
     def call(self, hook_name: str | None = None, **kwargs: Any) -> None:

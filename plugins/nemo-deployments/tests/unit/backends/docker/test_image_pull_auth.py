@@ -28,7 +28,7 @@ def _nim_config(*, ngc_api_key: str | None = None) -> DeploymentConfig:
                 env=[EnvVar(name="NGC_API_KEY", value=ngc_api_key)] if ngc_api_key else [],
             )
         ],
-        restart_policy="Always",  # ty: ignore[unknown-argument]
+        restart_policy="Always",
     )
 
 

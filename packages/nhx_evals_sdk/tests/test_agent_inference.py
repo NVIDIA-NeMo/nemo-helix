@@ -35,7 +35,20 @@ from nhx_evals_sdk.values.agents import (
 )
 from nhx_evals_sdk.values.common import SecretRef
 from nhx_evals_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
-from pydantic import TypeAdapter, ValidationError
+from pydantic import JsonValue, TypeAdapter, ValidationError
+
+
+def _json_at(value: JsonValue, *path: str | int) -> JsonValue:
+    """Follow *path* through nested JSON objects and arrays, failing if a step doesn't fit."""
+    for step in path:
+        if isinstance(step, int):
+            assert isinstance(value, list), f"expected an array at {step!r}, got {value!r}"
+            value = value[step]
+        else:
+            assert isinstance(value, dict), f"expected an object at {step!r}, got {value!r}"
+            value = value[step]
+    return value
+
 
 # ============================================================================
 # AgentFormat enum
@@ -753,7 +766,7 @@ class TestNATAgentExecutor:
         assert isinstance(trace.data, dict)
         assert trace.data["schema_version"] == "ATIF-v1.7"
         assert trace.data["agent"] == {"name": "nat-agent", "version": "0"}
-        assert trace.data["steps"][0]["step_id"] == 1
+        assert _json_at(trace.data, "steps", 0, "step_id") == 1
         assert seen["frames"][0].channel == "intermediate_data"
         context = seen["context"]
         assert context.run_id == "run-1"
@@ -969,7 +982,9 @@ class TestNATAgentExecutor:
         assert result.evidence is not None
         error = result.evidence.require("translation_error", kind="error")
         assert isinstance(error.data, dict)
-        assert "reserved names" in error.data["error"]
+        message = error.data["error"]
+        assert isinstance(message, str)
+        assert "reserved names" in message
 
     @pytest.mark.asyncio
     async def test_translator_must_return_canonical_atif_v1_7(self):
@@ -1016,7 +1031,9 @@ class TestNATAgentExecutor:
         assert result.evidence is not None
         error = result.evidence.require("translation_error", kind="error")
         assert isinstance(error.data, dict)
-        assert "ATIF-v1.7" in error.data["error"]
+        message = error.data["error"]
+        assert isinstance(message, str)
+        assert "ATIF-v1.7" in message
 
     @pytest.mark.asyncio
     async def test_translator_runs_for_partial_stream_and_preserves_partial_status(self):
@@ -1165,8 +1182,8 @@ class TestNATAgentExecutor:
         assert "trace" not in result.evidence.names()
         events = result.evidence.require("stream_events").data
         assert isinstance(events, list)
-        assert events[0]["channel"] == "intermediate_data"
-        assert events[1]["payload"]["value"]["bug_ids"] == []
+        assert _json_at(events, 0, "channel") == "intermediate_data"
+        assert _json_at(events, 1, "payload", "value", "bug_ids") == []
         assert mock_client.stream.call_args.args[:2] == ("POST", "http://nat.test/generate/stream")
         assert mock_client.stream.call_args.kwargs["json"] == payload
         assert mock_client.stream.call_args.kwargs["params"] == {}

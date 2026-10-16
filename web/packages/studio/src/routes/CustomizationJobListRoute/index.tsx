@@ -28,7 +28,10 @@ export const CustomizationJobListRoute: FC = () => {
     items: [{ slotLabel: 'Fine-tuning' }],
   });
 
-  const { jobName: customizationJobName } = useCustomizationJobForModel(workspace, selectedModel);
+  // Resolved from each entity in its own right: an adapter's run is not its base model's
+  // run, and the two may even live in different workspaces.
+  const { jobName: modelJobName } = useCustomizationJobForModel(selectedModel);
+  const { jobName: adapterJobName } = useCustomizationJobForModel(selectedAdapter);
 
   return (
     <AccessibleTitle title={`Fine-tuning for ${workspace}`}>
@@ -52,8 +55,12 @@ export const CustomizationJobListRoute: FC = () => {
       <ModelPanel
         open={!!selectedModel}
         model={selectedModel ?? undefined}
-        customizationJobId={customizationJobName}
+        // An adapter row shows that adapter's run and nothing else: the user asked about
+        // the adapter, and offering the base's run alongside invites attributing one to
+        // the other. The panel itself stays agnostic -- this is the caller's choice.
+        customizationJobId={selectedAdapter ? undefined : modelJobName}
         adapter={selectedAdapter}
+        adapterJobId={adapterJobName}
         onOpenChange={(open) => {
           if (!open) {
             setSelectedModel(null);

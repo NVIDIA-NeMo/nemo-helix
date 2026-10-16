@@ -395,7 +395,7 @@ class _FakeFabric:
 def _install_fake_fabric(monkeypatch: pytest.MonkeyPatch) -> type[_FakeFabric]:
     """Inject a ``nemo_fabric`` module whose planner is fake, so skills routing is ours to decide."""
     _FakeFabric.planned = []
-    import nemo_fabric  # ty: ignore[unresolved-import]
+    import nemo_fabric
 
     # Only the planner is faked; every other symbol stays the installed one. The runtime also builds
     # its config and telemetry out of this module, and a stand-in for those would happily accept a

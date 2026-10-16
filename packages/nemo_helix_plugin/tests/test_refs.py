@@ -123,7 +123,7 @@ class TestPydanticIntegration:
         class _M(BaseModel):
             path: LocalDir
 
-        m = _M(path="./out")  # ty: ignore[invalid-argument-type]
+        m = _M(path="./out")
         assert isinstance(m.path, LocalDir)
         assert m.path == "./out"
 
@@ -131,13 +131,13 @@ class TestPydanticIntegration:
         class _M(BaseModel):
             out: OutputTarget | None = None
 
-        assert _M(out="./eval-out").out == "./eval-out"  # ty: ignore[invalid-argument-type]
+        assert _M(out="./eval-out").out == "./eval-out"
 
     def test_union_field_accepts_fileset_ref(self) -> None:
         class _M(BaseModel):
             out: OutputTarget | None = None
 
-        assert _M(out="default/eval-results").out == "default/eval-results"  # ty: ignore[invalid-argument-type]
+        assert _M(out="default/eval-results").out == "default/eval-results"
 
     def test_union_field_accepts_none(self) -> None:
         class _M(BaseModel):

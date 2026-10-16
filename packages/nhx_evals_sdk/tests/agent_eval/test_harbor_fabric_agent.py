@@ -247,7 +247,7 @@ def test_a_fabric_config_may_name_its_credential_variable_but_never_hold_a_value
         agent_kwargs={"fabric_config": _registered_agent_config()},
     )
     kept = config.agent_kwargs["fabric_config"]
-    assert isinstance(kept, dict) and kept["models"]["default"]["api_key_env"] == "NVIDIA_API_KEY"
+    assert kept == _registered_agent_config()
 
     for name, value in [
         ("NVIDIA_API_KEY", "nvapi-" + "a" * 60),

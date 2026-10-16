@@ -64,7 +64,7 @@ from nemo_evals.jobs.result_persistence import persist_agent_eval_result
 from nemo_evals.jobs.run_outcome import STATUS_DETAILS_KEY, agent_eval_outcome, report_run_outcome
 from nemo_evals.jobs.secret_env import JobEnvSecretSource
 from nemo_evals.jobs.token_usage import capture_agent_evaluation_usage, capture_evaluator_request_logs
-from nemo_evals.jobs.utils import async_client_from_sync_client
+from nemo_evals.jobs.utils import async_client_from_sync_client, require_platform_client
 from nemo_evals.source_authorization import SourceReadAuthorizer
 from nemo_evals.task_refs import (
     groupby_kind,
@@ -249,7 +249,7 @@ class _AgentEvalJobBase(NemoJob):
                 if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
                 else None
             )
-            if snapshot is not None:
+            if snapshot is not None and async_sdk is not None:
                 await discard_registered_agent_files(client_from_platform(async_sdk, AsyncFilesClient), snapshot)
             raise
 
@@ -337,8 +337,11 @@ class _AgentEvalJobBase(NemoJob):
         require_pvc_storage: bool = False,
     ) -> BaseExecutionProfile | None:
         """Resolve the profile that Jobs will use for this submission."""
+        jobs_client = client_from_platform(
+            require_platform_client(async_client, f"resolving execution profile {profile!r}"), AsyncJobsClient
+        )
         try:
-            profiles = (await client_from_platform(async_client, AsyncJobsClient).get_execution_profiles()).data()
+            profiles = (await jobs_client.get_execution_profiles()).data()
         except (NemoTransportError, NemoResponseValidationError, InternalServerError) as exc:
             raise _profile_dependency_unavailable(profile) from exc
         if require_pvc_storage:
@@ -371,8 +374,11 @@ class _AgentEvalJobBase(NemoJob):
     ) -> SubprocessExecutionProviderSpec:
         """Resolve Harbor's selected profile to an explicit host subprocess executor."""
         profile = executor.profile
+        jobs_client = client_from_platform(
+            require_platform_client(async_client, f"resolving execution profile {profile!r}"), AsyncJobsClient
+        )
         try:
-            profiles = (await client_from_platform(async_client, AsyncJobsClient).get_execution_profiles()).data()
+            profiles = (await jobs_client.get_execution_profiles()).data()
         except (NemoTransportError, NemoResponseValidationError, InternalServerError) as exc:
             raise _profile_dependency_unavailable(profile) from exc
 
