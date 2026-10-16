@@ -15,11 +15,11 @@ from typing import Any
 import yaml
 from harbor.models.task.config import EnvironmentConfig, TaskConfig, TaskOS
 from harbor.models.task.verifier_mode import resolve_effective_verifier_env_config, task_has_any_separate_verifier
+from nemo_builder_plugin.identity import ImageIdentityError, normalize_reference, normalize_registry
 from nemo_evals.image_builds.models import BuildImage
 from pydantic import ValidationError
 
 COMPOSE_FILENAMES = ("docker-compose.yaml", "docker-compose.yml")
-_DEFAULT_REGISTRY = "docker.io"
 
 
 class ImagePlanError(ValueError):
@@ -100,12 +100,18 @@ def plan_images(config: Mapping[str, Any], archive: TaskArchive, *, allowed_regi
                 "invalid_compose_file", "a compose service named verifier can't run next to a separate verifier"
             )
         images.append(_verifier_image(verifier, archive))
+    allowed = {normalize_registry(host) for host in allowed_registries}
     for image in images:
-        if image.image is not None and registry_host(image.image) not in allowed_registries:
+        if image.image is None:
+            continue
+        try:
+            registry = normalize_reference(image.image).registry
+        except ImageIdentityError as exc:
+            raise ImagePlanError("invalid_image_reference", f"{image.role} image {image.image!r}: {exc}") from exc
+        if allowed and registry not in allowed:
             raise ImagePlanError(
                 "registry_not_allowed",
-                f"{image.role} image {image.image} is from {registry_host(image.image)}, "
-                f"which is not in allowed_registries",
+                f"{image.role} image {image.image} is from {registry}, which is not in allowed_registries",
             )
     return images
 
@@ -195,11 +201,3 @@ def _dockerfile_image(role: str, archive: TaskArchive, context_path: str, docker
     return BuildImage(
         role=role, source="dockerfile", context_path=f"{archive.root}/{context_path}", dockerfile=dockerfile
     )
-
-
-def registry_host(image: str) -> str:
-    """The registry an image reference pulls from, with Docker Hub for a bare name."""
-    first, _, rest = image.partition("/")
-    if rest and ("." in first or ":" in first or first == "localhost"):
-        return first
-    return _DEFAULT_REGISTRY

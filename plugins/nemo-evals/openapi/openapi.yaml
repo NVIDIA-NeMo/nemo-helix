@@ -3963,7 +3963,8 @@ components:
           - prebuilt
           title: Source
           description: '`dockerfile` when built from the task archive, `prebuilt`
-            when the task names an image.'
+            when the task names an image, which is copied unchanged into the platform''s
+            registry.'
         context_path:
           title: Context Path
           description: Build context inside the task archive, for a `dockerfile` image.
@@ -5850,9 +5851,10 @@ components:
             type: string
           type: array
           title: Allowed Registries
-          description: Registry hosts a prebuilt image named by the task may be copied
-            from, e.g. `docker.io`. A prebuilt image from any other registry fails
-            the build.
+          description: Registry hosts, such as `docker.io`, that a prebuilt image
+            named by the task may be copied from. Narrows the registries the deployment
+            allows; empty allows all of those. A prebuilt image from any other registry
+            fails the build.
       additionalProperties: false
       type: object
       title: ImageBuildRequest

@@ -10,7 +10,7 @@ import tarfile
 from pathlib import Path
 
 import pytest
-from nemo_evals.image_builds.planning import ImagePlanError, TaskArchive, plan_images, registry_host
+from nemo_evals.image_builds.planning import ImagePlanError, TaskArchive, plan_images
 
 
 def _archive(*paths: str, compose: str | None = None) -> TaskArchive:
@@ -213,18 +213,25 @@ def test_unbuildable_tasks_fail_with_a_stable_code(config: dict, archive: TaskAr
     assert error.value.code == code
 
 
-@pytest.mark.parametrize(
-    ("image", "host"),
-    [
-        ("ubuntu:24.04", "docker.io"),
-        ("library/ubuntu", "docker.io"),
-        ("ghcr.io/org/app:1", "ghcr.io"),
-        ("localhost/app", "localhost"),
-        ("registry:5000/app", "registry:5000"),
-    ],
-)
-def test_registry_host(image: str, host: str) -> None:
-    assert registry_host(image) == host
+def test_without_allowed_registries_any_registry_is_left_to_builder() -> None:
+    """Builder holds the deployment's allowlist; a caller's list only narrows it."""
+    config = {"environment": {"docker_image": "quay.io/org/x:1"}}
+
+    assert _plan(config, _archive()) == [("main", "prebuilt", None, None, "quay.io/org/x:1")]
+
+
+@pytest.mark.parametrize("allowed", [["docker.io"], ["index.docker.io"], ["registry-1.docker.io"]])
+def test_docker_hub_shorthand_matches_any_spelling_of_docker_hub(allowed: list[str]) -> None:
+    config = {"environment": {"docker_image": "ubuntu:24.04"}}
+
+    assert _plan(config, _archive(), allowed)[0][1] == "prebuilt"
+
+
+def test_an_image_that_is_not_a_reference_fails_planning() -> None:
+    with pytest.raises(ImagePlanError) as error:
+        plan_images({"environment": {"docker_image": "Not A Ref"}}, _archive(), allowed_registries=[])
+
+    assert error.value.code == "invalid_image_reference"
 
 
 def _write_tar(path: Path, files: dict[str, bytes]) -> None:

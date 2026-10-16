@@ -13,11 +13,13 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from nemo_builder_plugin.backend import Backend, BackendRejectedError
-from nemo_builder_plugin.entities import ContainerImage, Provenance
-from nemo_builder_plugin.plan import BuildPlan
+from nemo_builder_plugin.entities import ContainerImage, Provenance, UpstreamImage
+from nemo_builder_plugin.identity import ImageReference
+from nemo_builder_plugin.plan import BuildPlan, PlannedImage
 from nemo_builder_plugin.schema import BuildSet
+from nemo_builder_plugin.upstream import UpstreamError, UpstreamNotFound
 from nemo_helix_plugin.client.errors import ConflictError
-from nemo_helix_plugin.entities import EntityConflictError
+from nemo_helix_plugin.entities import EntityConflictError, EntityNotFoundError
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 from nemo_helix_plugin.log_utils import sanitize_for_log
@@ -41,6 +43,10 @@ GetJobFields = Callable[[str], Awaitable[Mapping[str, Any]]]
 #: Whether the caller can read the platform secret ``(workspace, name)``.
 SecretReadable = Callable[[str, str], Awaitable[bool]]
 
+#: The manifest digest an image reference names for a platform. Raises :class:`UpstreamNotFound` or
+#: :class:`UpstreamError`.
+ResolveUpstream = Callable[[ImageReference, str], Awaitable[str]]
+
 
 class InvalidBuildRequest(Exception):
     """The request contradicts itself or names something unusable (400).
@@ -51,6 +57,10 @@ class InvalidBuildRequest(Exception):
 
 class BuildConflict(Exception):
     """This ``(name, revision)`` was submitted with a different request, or its job name is taken (409)."""
+
+
+class UpstreamUnavailable(Exception):
+    """An image to copy couldn't be resolved because its registry failed (502)."""
 
 
 class MissingSecrets(Exception):
@@ -95,10 +105,59 @@ def _rows_for(plan: BuildPlan, digest: str) -> list[ContainerImage]:
                 spec=image.spec.name,
                 job=f"{plan.workspace}/{plan.job_name}",
                 request_digest=digest,
+                upstream=_upstream_image(image),
             ),
         )
         for image in plan.images
     ]
+
+
+def _upstream_image(image: PlannedImage) -> UpstreamImage | None:
+    if image.upstream is None or image.upstream_digest is None:
+        return None
+    return UpstreamImage(image=str(image.upstream), manifest_digest=image.upstream_digest)
+
+
+async def _resolve_copies(
+    plan: BuildPlan, entity_client: _EntityWriter, resolve_upstream: ResolveUpstream, build_set: BuildSet, digest: str
+) -> BuildPlan:
+    """Pin each copy to a manifest digest: the one its row already holds, or the registry's now.
+
+    A resubmit of the same request is the same build, so it keeps the digest pinned first, without asking the
+    registry again: a tag that moved since then, or a registry that refuses (a rate limit, say), changes nothing.
+    """
+    digests: dict[str, str] = {}
+    for image in plan.copies:
+        upstream = image.upstream
+        assert upstream is not None
+        pinned = await _pinned_digest(entity_client, image.name, plan.workspace, build_set, digest)
+        if pinned is not None:
+            digests[image.name] = pinned
+            continue
+        try:
+            digests[image.name] = await resolve_upstream(upstream, image.spec.platform)
+        except UpstreamNotFound as exc:
+            raise InvalidBuildRequest(f"{image.name}: {exc}") from exc
+        except UpstreamError as exc:
+            raise UpstreamUnavailable(f"{image.name}: {exc}") from exc
+    return plan.with_upstream(digests)
+
+
+async def _pinned_digest(
+    entity_client: _EntityWriter, name: str, workspace: str, build_set: BuildSet, digest: str
+) -> str | None:
+    """The manifest digest the copy's row already pinned, if it has a row.
+
+    A row written for a different request makes the submit a conflict, whatever the registry would say.
+    """
+    try:
+        row = await entity_client.get(ContainerImage, name=name, workspace=workspace)
+    except EntityNotFoundError:
+        return None
+    if row.provenance.request_digest != digest:
+        raise _different_request(build_set)
+    upstream = row.provenance.upstream
+    return upstream.manifest_digest if upstream is not None else None
 
 
 async def submit_build_set(
@@ -110,12 +169,15 @@ async def submit_build_set(
     create_job: CreateJob,
     get_job_fields: GetJobFields,
     secret_readable: SecretReadable,
+    resolve_upstream: ResolveUpstream,
 ) -> SubmitResult:
     """Resolve, check, place, compile; then write the rows and create the job. In that order."""
+    digest = request_digest(build_set)
     # Everything that can refuse the request runs before anything is written.
     try:
         plan = BuildPlan.resolve(build_set, workspace=workspace)
         backend.check(plan)
+        plan = await _resolve_copies(plan, entity_client, resolve_upstream, build_set, digest)
         plan = plan.with_destinations(backend.destination)
         platform_spec = backend.compile(plan)
     except BackendRejectedError:
@@ -132,7 +194,6 @@ async def submit_build_set(
         raise MissingSecrets(
             "the push step needs platform secrets that don't exist, or that you can't read: " + ", ".join(missing)
         )
-    digest = request_digest(build_set)
 
     images: list[ContainerImage] = []
     created: list[ContainerImage] = []
@@ -214,8 +275,12 @@ async def _adopt(
 ) -> ContainerImage:
     existing = await entity_client.get(ContainerImage, name=row.name, workspace=workspace)
     if existing.provenance.request_digest != digest:
-        raise BuildConflict(
-            f"build set {build_set.name!r} revision {build_set.revision} was already submitted with a "
-            "different request. Submit a new revision; a revision names one request."
-        )
+        raise _different_request(build_set)
     return existing
+
+
+def _different_request(build_set: BuildSet) -> BuildConflict:
+    return BuildConflict(
+        f"build set {build_set.name!r} revision {build_set.revision} was already submitted with a "
+        "different request. Submit a new revision; a revision names one request."
+    )

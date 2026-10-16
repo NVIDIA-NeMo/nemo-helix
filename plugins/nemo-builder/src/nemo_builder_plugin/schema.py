@@ -7,12 +7,12 @@ from __future__ import annotations
 
 import re
 from pathlib import PurePosixPath
-from typing import Self
+from typing import Annotated, Literal, Self
 
 from nemo_builder_plugin.entities import ContainerImage
-from nemo_builder_plugin.identity import validate_caller_tag, validate_repository
+from nemo_builder_plugin.identity import normalize_reference, validate_caller_tag, validate_repository
 from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, field_validator, model_validator
 
 _STRICT = ConfigDict(extra="forbid")
 
@@ -90,6 +90,39 @@ class FileSetSource(BaseModel):
         return None if value is None else _relative_path(value, field="context_path")
 
 
+class ImageSource(BaseModel):
+    """A published image to copy unchanged, rather than build."""
+
+    model_config = _STRICT
+
+    type: Literal["image"] = "image"
+    image: str = Field(
+        description=(
+            "The image, by tag or digest, as `docker pull` takes it: `ubuntu:24.04` is "
+            "`docker.io/library/ubuntu:24.04`. Its registry must be one the deployment allows. The build "
+            "copies the image for the spec's `platform` that this names when the build is submitted."
+        )
+    )
+
+    @field_validator("image")
+    @classmethod
+    def _image_is_a_reference(cls, value: str) -> str:
+        normalize_reference(value)
+        return value
+
+
+def _source_type(value: object) -> str:
+    if isinstance(value, dict):
+        return "image" if value.get("type") == "image" or "image" in value else "fileset"
+    return "image" if isinstance(value, ImageSource) else "fileset"
+
+
+BuildSource = Annotated[
+    Annotated[FileSetSource, Tag("fileset")] | Annotated[ImageSource, Tag("image")],
+    Discriminator(_source_type),
+]
+
+
 class BuildOutput(BaseModel):
     """Where a built image is published: ``<repository_prefix>/<workspace>/<repository>:<tag>``.
 
@@ -130,7 +163,9 @@ class BuildSpec(BaseModel):
             "One spec in a set may leave it out."
         ),
     )
-    source: FileSetSource
+    source: BuildSource = Field(
+        description="What to build from: a fileset holding a build context, or a published image to copy."
+    )
     output: BuildOutput | None = Field(
         default=None,
         description="Where to publish. Omit to publish under the workspace, with the system tag only (see `name`).",
@@ -141,6 +176,8 @@ class BuildSpec(BaseModel):
     @model_validator(mode="after")
     def _dockerfile_stays_within_the_context(self) -> Self:
         _relative_path(self.dockerfile, field="dockerfile")
+        if isinstance(self.source, ImageSource) and "dockerfile" in self.model_fields_set:
+            raise ValueError("a spec that copies an image has no dockerfile")
         return self
 
 

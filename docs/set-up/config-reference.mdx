@@ -901,6 +901,12 @@ builder:
   registry:
   # Path every image is published under, before `<workspace>/`. For GAR, `<project>/<repository>`; for Artifactory, the repository key. | default: ''
   repository_prefix: ''
+  # Registries a build may copy a published image from, as hosts. A copy from any other registry is refused with `409`. Empty refuses every copy. Images are read anonymously, so only public ones copy.
+  import_registries:
+  - docker.io
+  - ghcr.io
+  - nvcr.io
+  - quay.io
   # The platform secret holding the username the push step logs in to `registry` with. Null, with `registry_password_secret`, pushes without logging in, which only a registry open to anonymous pushes allows. | default: 'builder-registry-username'
   registry_username_secret: builder-registry-username
   # The platform secret holding that username's password or token. | default: 'builder-registry-password'
