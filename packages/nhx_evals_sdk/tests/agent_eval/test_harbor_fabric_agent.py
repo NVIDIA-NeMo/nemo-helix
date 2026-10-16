@@ -221,6 +221,13 @@ def test_harbor_preflight_refuses_flat_agent_description_keywords(keyword: str) 
         NemoFabricAgent.preflight({"fabric_config": _registered_agent_config(), keyword: "x"})
 
 
+@pytest.mark.parametrize("turns", [0, -1])
+def test_harbor_preflight_refuses_a_non_positive_default_turn_budget(turns: int) -> None:
+    """Fabric's ``runtime.max_turns`` is ``gt=0``; catching it here keeps the failure out of ``Trial.create``."""
+    with pytest.raises(ValueError, match="fabric_default_max_turns"):
+        NemoFabricAgent.preflight({"fabric_config": _registered_agent_config(), "fabric_default_max_turns": turns})
+
+
 def test_harbor_preflight_refuses_a_config_without_a_harness() -> None:
     with pytest.raises(ValueError, match="harness.adapter_id"):
         NemoFabricAgent.preflight({"fabric_config": {"metadata": {"name": "no-harness"}}})

@@ -92,7 +92,7 @@ class NemoFabricAgentOptions(FabricAgentOptions):
 
     fabric_config: dict[str, Any] = Field(description="Fabric agent config to run verbatim.")
     fabric_default_max_turns: int | None = Field(
-        default=None, description="Maximum agent turns when fabric_config sets no runtime.max_turns."
+        default=None, gt=0, description="Maximum agent turns when fabric_config sets no runtime.max_turns."
     )
     fabric_adapter_id: str = Field(default="", description="Derived from fabric_config.harness.adapter_id.")
 
