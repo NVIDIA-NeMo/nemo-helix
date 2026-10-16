@@ -252,16 +252,18 @@ def _codex_adapter_installed() -> bool:
     """Whether the codex harness adapter is installed (the ``fabric`` extra, not the base SDK).
 
     ``nemo_fabric`` itself is a base dependency, so importing it proves nothing about harnesses:
-    without the adapters Fabric resolves none and fails with ``available adapters: []``. ``find_spec``
-    raises rather than returning None when the parent package is missing, hence the guard.
+    without the adapters Fabric resolves none and fails with ``available adapters: []``. Answered with
+    ``find_spec`` so collection never imports the adapter and its SDK: an import error there would take
+    the whole module's collection down rather than skip the one live test. ``find_spec`` raises rather
+    than returning None when the parent package is missing, hence the guard.
     """
     try:
-        importlib.import_module("nemo_fabric_adapters.codex.adapter")
-    except ModuleNotFoundError as error:
-        if (error.name or "").split(".")[0] in {"nemo_fabric_adapters", "openai_codex"}:
-            return False
-        raise
-    return True
+        return all(
+            importlib.util.find_spec(name) is not None
+            for name in ("nemo_fabric_adapters.codex.adapter", "openai_codex")
+        )
+    except ModuleNotFoundError:
+        return False
 
 
 # No NeMo-Fabric checkout in the gate: the adapter registry resolves from the installed wheels
