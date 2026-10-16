@@ -20,6 +20,7 @@ from nhx.common.config import HelixConfig, ImagePullSecret
 from nhx.common.jobs.constants import (
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
     NEMO_JOB_FILESET_ENVVAR,
+    NEMO_JOB_SECRETS_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
 )
@@ -51,6 +52,7 @@ from nhx.core.jobs.controllers.backends.base import (
     WORKLOAD_IDENTITY_VOLUME_PATH,
     JobUpdate,
 )
+from nhx.core.jobs.controllers.backends.exceptions import FailedToScheduleError
 from nhx.core.jobs.controllers.backends.kubernetes import (
     CPUKubernetesJobBackend,
     GPUKubernetesJobBackend,
@@ -3115,3 +3117,129 @@ def test_image_pull_ttl_can_be_disabled(kubernetes_job, test_step_pending):
 
     assert update.status == HelixJobStatus.PENDING
     terminate.assert_not_called()
+
+
+def _with_secret_env(step: HelixJobStepWithContext) -> HelixJobStepWithContext:
+    assert step.step_spec is not None
+    step.step_spec.environment = [
+        *(step.step_spec.environment or []),
+        HelixJobEnvironmentVariable(
+            name="LOCAL_SECRET", from_secret=HelixJobSecretEnvironmentVariableRef(name="local-secret")
+        ),
+        HelixJobEnvironmentVariable(
+            name="CROSS_WORKSPACE_SECRET",
+            from_secret=HelixJobSecretEnvironmentVariableRef(name="other-ws/shared-secret"),
+        ),
+    ]
+    return step
+
+
+class TestSecretsUnderWorkloadTokenExchange:
+    """With exchange on, the controller reads a step's secrets for its submitter; the pod reads a Kubernetes Secret.
+
+    The launcher's in-pod fetch sends trusted identity headers, which exchange mode refuses.
+    """
+
+    def _schedule(self, kubernetes_job, provider, step, auth_config, values: dict[tuple[str, str], str]):
+        reads: list[tuple[str, str, str]] = []
+
+        def read(workspace: str, name: str, on_behalf_of):
+            reads.append((workspace, name, on_behalf_of.id))
+            return values[(workspace, name)]
+
+        with (
+            patch("nhx.common.config.get_auth_config", return_value=auth_config),
+            patch.object(kubernetes_job._workload_delegations, "ensure_for_target_after_initial_pod_wait"),
+            patch.object(kubernetes_job, "_read_secret_value", side_effect=read),
+        ):
+            kubernetes_job.schedule(provider, step)
+        return reads
+
+    def test_the_step_reads_its_secrets_from_a_kubernetes_secret_the_controller_wrote(
+        self, kubernetes_job, cpu_execution_provider, test_step_pending_with_auth_context, workload_exchange_auth_config
+    ) -> None:
+        step = _with_secret_env(test_step_pending_with_auth_context)
+        values = {("default", "local-secret"): "local-value", ("other-ws", "shared-secret"): "shared-value"}
+
+        reads = self._schedule(kubernetes_job, cpu_execution_provider, step, workload_exchange_auth_config, values)
+
+        assert sorted(reads) == [
+            ("default", "local-secret", "creator@example.com"),
+            ("other-ws", "shared-secret", "creator@example.com"),
+        ]
+        secret = kubernetes_job._core_v1.create_namespaced_secret.call_args.kwargs["body"]
+        assert secret.metadata.name == name_for_step(step)
+        assert secret.metadata.labels[JOB_MANAGED_BY_LABEL] == JOB_MANAGED_BY_JOBS_CONTROLLER
+        assert secret.string_data == {"LOCAL_SECRET": "local-value", "CROSS_WORKSPACE_SECRET": "shared-value"}
+
+        job_body = kubernetes_job._batch_v1.create_namespaced_job.call_args.kwargs["body"]
+        env = {variable.name: variable for variable in job_body.spec.template.spec.containers[0].env}
+        for name in ("LOCAL_SECRET", "CROSS_WORKSPACE_SECRET"):
+            assert env[name].value is None
+            assert env[name].value_from.secret_key_ref.name == name_for_step(step)
+            assert env[name].value_from.secret_key_ref.key == name
+        assert NEMO_JOB_SECRETS_ENVVAR not in env or not env[NEMO_JOB_SECRETS_ENVVAR].value
+
+    def test_a_secret_the_submitter_cannot_read_fails_the_step_before_anything_is_created(
+        self, kubernetes_job, cpu_execution_provider, test_step_pending_with_auth_context, workload_exchange_auth_config
+    ) -> None:
+        step = _with_secret_env(test_step_pending_with_auth_context)
+
+        with pytest.raises(FailedToScheduleError, match="other-ws/shared-secret"):
+            self._schedule(
+                kubernetes_job,
+                cpu_execution_provider,
+                step,
+                workload_exchange_auth_config,
+                {("default", "local-secret"): "local-value"},
+            )
+
+        kubernetes_job._core_v1.create_namespaced_secret.assert_not_called()
+        kubernetes_job._batch_v1.create_namespaced_job.assert_not_called()
+
+    def test_without_exchange_the_launcher_still_fetches_the_secrets(
+        self, kubernetes_job, cpu_execution_provider, test_step_pending_with_auth_context
+    ) -> None:
+        step = _with_secret_env(test_step_pending_with_auth_context)
+
+        with patch.object(kubernetes_job, "_read_secret_value") as read:
+            kubernetes_job.schedule(cpu_execution_provider, step)
+
+        read.assert_not_called()
+        kubernetes_job._core_v1.create_namespaced_secret.assert_not_called()
+        job_body = kubernetes_job._batch_v1.create_namespaced_job.call_args.kwargs["body"]
+        env = {variable.name: variable.value for variable in job_body.spec.template.spec.containers[0].env}
+        assert "LOCAL_SECRET=default/local-secret" in env[NEMO_JOB_SECRETS_ENVVAR]
+
+    def test_deleting_the_job_deletes_its_secret(self, kubernetes_job, test_step_pending_with_auth_context) -> None:
+        job = MagicMock()
+        job.metadata.name = name_for_step(test_step_pending_with_auth_context)
+        job.metadata.labels = {JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER}
+        kubernetes_job._core_v1.read_namespaced_secret.return_value = SimpleNamespace(
+            metadata=SimpleNamespace(labels={JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER})
+        )
+
+        kubernetes_job.terminate_job(job)
+
+        kubernetes_job._core_v1.delete_namespaced_secret.assert_called_once_with(
+            name=job.metadata.name, namespace=kubernetes_job.namespace
+        )
+
+
+def test_a_resumed_steps_secret_is_written_again_with_the_controllers_verbs(test_step_pending_with_auth_context):
+    """The controller's role can create and delete secrets but not update them."""
+    from nhx.core.jobs.controllers.backends.kubernetes.common import create_step_secret
+
+    core_v1 = MagicMock()
+    core_v1.create_namespaced_secret.side_effect = [ApiException(status=409), None]
+    core_v1.read_namespaced_secret.return_value = SimpleNamespace(
+        metadata=SimpleNamespace(labels={JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER})
+    )
+
+    create_step_secret(core_v1, "test-namespace", test_step_pending_with_auth_context, {"TOKEN": "new-value"})
+
+    name = name_for_step(test_step_pending_with_auth_context)
+    core_v1.delete_namespaced_secret.assert_called_once_with(name=name, namespace="test-namespace")
+    assert core_v1.create_namespaced_secret.call_count == 2
+    assert core_v1.create_namespaced_secret.call_args.kwargs["body"].string_data == {"TOKEN": "new-value"}
+    core_v1.replace_namespaced_secret.assert_not_called()
