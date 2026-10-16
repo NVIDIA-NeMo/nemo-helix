@@ -25,7 +25,7 @@ not-for:
 preconditions:
   - nemo_setup_complete
   - agents_plugin_available
-compatibility: nemo-helix >= 0.1.0; writes or edits agents/<name>/agent.yaml; validates through nemo agents create; supports nemo-agents-spec-v1 configs; safe under sandbox.
+compatibility: nemo-helix >= 0.1.0; writes or edits agents/{name}/agent.yaml; validates through nemo agents create; supports nemo-agents-spec-v1 configs; safe under sandbox.
 maturity: active
 license: Apache-2.0
 user-invocable: true

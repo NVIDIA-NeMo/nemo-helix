@@ -9,6 +9,9 @@ preconditions:
   - nemo_setup_complete
   - workspace_exists
 allowed-tools: Bash, Read
+permissions:
+  - env
+  - network
 metadata:
   author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---

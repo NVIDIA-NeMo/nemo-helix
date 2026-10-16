@@ -3,7 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: plugin-entities
-description: Defines NemoEntity subclasses and uses NemoEntitiesClient for CRUD in the NeMo Helix entity store. Use when defining a new entity type, storing plugin data in the entity store, handling optimistic locking conflicts, listing entities with filters, or building entity clients for controllers. Trigger keywords: entity, entity store, NemoEntity, entity_type, NemoEntitiesClient, entity client, store data, optimistic lock, EntityConflictError, EntityNotFoundError.
+description: 'Defines NemoEntity subclasses and uses NemoEntitiesClient for CRUD in the NeMo Helix entity store. Use when defining a new entity type, storing plugin data in the entity store, handling optimistic locking conflicts, listing entities with filters, or building entity clients for controllers. Trigger keywords: entity, entity store, NemoEntity, entity_type, NemoEntitiesClient, entity client, store data, optimistic lock, EntityConflictError, EntityNotFoundError.'
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Plugin Entities (NemoEntity + NemoEntitiesClient)

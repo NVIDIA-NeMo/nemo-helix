@@ -14,6 +14,8 @@ description: >-
   — package coverage, vitest coverage, pnpm workspace tests, coverage baseline,
   raise coverage.
 disable-model-invocation: true
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Package test coverage improvement (autonomous)

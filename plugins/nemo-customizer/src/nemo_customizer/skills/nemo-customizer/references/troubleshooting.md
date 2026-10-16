@@ -317,7 +317,7 @@ Shared:
 | Action | Command |
 |--------|---------|
 | Execution profiles | `nemo jobs list-execution-profiles -f json` |
-| Create dataset fileset | `nemo files filesets create <name> --workspace default --purpose dataset --exist-ok` |
+| Create dataset fileset | `nemo files filesets create <name> --workspace default --purpose dataset` (no `--exist-ok`; use a new name when the data changes — see `references/gotchas.md`) |
 | Create HF weights fileset (public) | `nemo files filesets create <name> --workspace default --purpose model --exist-ok --storage '{"type":"huggingface","repo_id":"<repo>","repo_type":"model","revision":"main"}'` |
 | Create HF weights fileset (gated) | Same as above plus `"token_secret":"hf-token"` — see § **Gated HuggingFace models** |
 | Upload | `nemo files upload <local> <fileset> --workspace default --remote-path train.jsonl` |
@@ -330,7 +330,7 @@ Automodel:
 | Action | Command |
 |--------|---------|
 | Submit | `nemo customization automodel --job-json <job.json> --workspace default` |
-| Status | `nemo jobs get-status automodel-<job-id>` |
+| Status | `nemo jobs get-status <name>` (submit `"name"`, verbatim: already `automodel-…`) |
 | Live schema | `nemo customization automodel explain` |
 
 Unsloth:
@@ -338,7 +338,7 @@ Unsloth:
 | Action | Command |
 |--------|---------|
 | Submit | `nemo customization unsloth --job-json <job.json> --workspace default [--profile P]` |
-| Status | `nemo jobs get-status unsloth-<job-id>` |
+| Status | `nemo jobs get-status <name>` (submit `"name"`, verbatim: already `unsloth-…`) |
 | Live schema | `nemo customization unsloth explain` |
 
 All backends return a job id from `submit` — poll until top-level status is terminal (`completed`, `error`, or `cancelled`).

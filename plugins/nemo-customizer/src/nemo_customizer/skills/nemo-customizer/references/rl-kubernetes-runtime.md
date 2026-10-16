@@ -5,15 +5,16 @@
 
 The `rl` (DPO **and GRPO**) backend runs **each job step as a Kubernetes pod** via the
 `kubernetes_job` execution backend. This is different from `automodel` / `unsloth`,
-which use the **docker** job backend. So the platform you submit against must be
-deployed/configured for Kubernetes job execution — the docker job backend cannot
-run rl, and `rl --job-json` fails fast (`require_distributed_runtime`) on a
-docker-runtime platform.
+which run on either the `docker` or the `kubernetes_job` backend, depending on how
+the platform is configured. rl has no docker fallback, so the platform you submit
+against must be deployed/configured for Kubernetes job execution — the docker job
+backend cannot run rl, and `rl --job-json` fails fast (`require_distributed_runtime`)
+on a docker-runtime platform.
 
 Deployment model is the same as automodel/unsloth: **run the platform locally**
 (`nemo services run` — never anything else). The only difference for rl is the
-**execution backend** the local platform dispatches jobs to: `kubernetes_job`
-(pointing at a Kubernetes GPU cluster via its kubeconfig) instead of `docker`.
+**execution backend** the local platform dispatches jobs to: it must be
+`kubernetes_job` (pointing at a Kubernetes GPU cluster via its kubeconfig), never `docker`.
 What matters is that the platform's jobs backend is `kubernetes_job` and the job
 pods can reach the platform's APIs.
 

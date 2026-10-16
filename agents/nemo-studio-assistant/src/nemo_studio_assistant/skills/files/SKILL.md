@@ -4,8 +4,10 @@
 
 name: files
 description: platform fileset and file CRUD playbook with the exact `nemo_api(resource='files'|'files.filesets', ...)` sequence used by harbor benchmarks. Use when the task involves filesets, file uploads/downloads, `verify.txt`, `harbor-test-fileset`, or `harbor-final-fileset`.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
-File tasks
+# File tasks
 
 - Use `nemo_api` for small file content uploads:
   - resource: `files`

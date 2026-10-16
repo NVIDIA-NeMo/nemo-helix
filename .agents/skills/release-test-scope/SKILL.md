@@ -1,6 +1,8 @@
 ---
 name: release-test-scope
 description: Build one pre-cut NeMo Helix release test-scope artifact with feature descriptions, QA validation, stakeholder review fields, and draft release notes from the previous-release-to-release-branch range while verifying release-derived work on main. Use for release planning, cross-functional feature review, QA scoping, and pre-release notes. Do not use it as a generic main-branch changelog.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
