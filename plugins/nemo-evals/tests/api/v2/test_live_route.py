@@ -19,6 +19,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from nemo_evals.api import dependencies as api_dependencies
 from nemo_evals.api.schemas import MetricInline
 from nemo_evals.api.v2 import live as live_routes
 from nemo_evals.entities import MetricBundleEntity
@@ -414,8 +415,8 @@ def _delegated_service_client(monkeypatch: pytest.MonkeyPatch, service_secrets_c
         calls.append(kwargs)
         yield service_secrets_client
 
-    monkeypatch.setattr(live_routes, "current_auth_context", lambda: _EDITOR)
-    monkeypatch.setattr(live_routes, "get_async_nemo_client", fake_get_async_nemo_client)
+    monkeypatch.setattr(api_dependencies, "current_auth_context", lambda: _EDITOR)
+    monkeypatch.setattr(api_dependencies, "get_async_nemo_client", fake_get_async_nemo_client)
     return calls
 
 
