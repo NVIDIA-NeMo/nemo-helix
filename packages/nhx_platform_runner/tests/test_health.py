@@ -49,6 +49,17 @@ def _client_for(services: list[Service]) -> TestClient:
     return TestClient(app)
 
 
+@pytest.mark.parametrize("path", ["/health/live", "/apis/health/live"])
+@pytest.mark.parametrize("ready", [True, False])
+def test_liveness_is_independent_of_service_readiness(path: str, ready: bool) -> None:
+    client = _client_for([ProbeService("entities", ready=ready)])
+
+    response = client.get(path)
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "live"}
+
+
 def test_status_and_ready_are_healthy_when_no_services_are_running() -> None:
     client = _client_for([])
 

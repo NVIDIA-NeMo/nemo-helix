@@ -423,7 +423,7 @@ entities_workspace_object_path(base_path, method) if {
 # Health check endpoints - always allow (must match middleware auth exclusions)
 allow_request if {
 	path := extract_path
-	path in ["/health/live", "/health/ready", "/status", "/metrics"]
+	path in ["/health/live", "/apis/health/live", "/health/ready", "/status", "/metrics"]
 }
 
 # Deny all non-health requests when no endpoint data is loaded (fail-closed).
@@ -433,5 +433,5 @@ allow_request if {
 deny_request if {
 	count(data.authz.endpoints) == 0
 	path := extract_path
-	not path in ["/health/live", "/health/ready", "/status", "/metrics", "/cluster-info"]
+	not path in ["/health/live", "/apis/health/live", "/health/ready", "/status", "/metrics", "/cluster-info"]
 }

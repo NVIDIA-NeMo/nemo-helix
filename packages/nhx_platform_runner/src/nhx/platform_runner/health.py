@@ -122,6 +122,7 @@ def create_platform_health_router(
             controllers=ControllerStatusBreakdown(healthy=all_healthy, status=controllers),
         )
 
+    @router.get("/apis/health/live", response_model=HealthLiveResponse, include_in_schema=False)
     @router.get("/health/live", operation_id="platform_health_live", response_model=HealthLiveResponse)
     async def health_live() -> HealthLiveResponse:
         return HealthLiveResponse()

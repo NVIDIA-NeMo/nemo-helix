@@ -22,7 +22,7 @@ export const PLATFORM_HEALTH_RETRY_INTERVAL_MS = 5_000;
 
 /** Liveness probe exposed by the platform runner; it is not part of the OpenAPI spec. */
 export const getPlatformHealthUrl = (): string =>
-  `${PLATFORM_BASE_URL.replace(/\/+$/, '')}/health/live`;
+  `${PLATFORM_BASE_URL.replace(/\/+$/, '')}/apis/health/live`;
 
 const isLiveResponse = (data: unknown): boolean =>
   typeof data === 'object' && data !== null && 'status' in data && data.status === 'live';

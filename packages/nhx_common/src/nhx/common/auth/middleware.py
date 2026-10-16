@@ -200,6 +200,7 @@ AUTH_MIDDLEWARE_EXCLUDED_ROUTES = (
     AuthMiddlewareExcludedRoute("/status"),
     AuthMiddlewareExcludedRoute("/cluster-info"),
     AuthMiddlewareExcludedRoute("/health/live"),
+    AuthMiddlewareExcludedRoute("/apis/health/live"),
     AuthMiddlewareExcludedRoute("/health/ready"),
     AuthMiddlewareExcludedRoute("/metrics"),
     AuthMiddlewareExcludedRoute("/apis/auth/discovery"),  # Discovery endpoint for CLI/SDK

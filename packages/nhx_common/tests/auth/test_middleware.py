@@ -203,6 +203,8 @@ class TestAuthMiddlewareExcludedPaths:
         """Verify public health/auth endpoints are excluded from middleware auth checks."""
         assert is_auth_middleware_excluded_path("/status")
         assert is_auth_middleware_excluded_path("/health/live")
+        assert is_auth_middleware_excluded_path("/apis/health/live")
+        assert not is_auth_middleware_excluded_path("/apis/health/live/other")
         assert is_auth_middleware_excluded_path("/health/ready")
         assert is_auth_middleware_excluded_path("/metrics")
         assert is_auth_middleware_excluded_path("/apis/auth/discovery")

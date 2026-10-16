@@ -518,7 +518,7 @@ class TestDefaultDenyWithoutData:
     def test_health_endpoints_allowed_with_empty_endpoints(self):
         """Health endpoints remain accessible even with empty endpoint data."""
         set_policy_data({"authz": {"endpoints": {}, "principals": {}, "roles": {}}})
-        for health_path in ["/health/live", "/health/ready", "/status", "/metrics"]:
+        for health_path in ["/health/live", "/apis/health/live", "/health/ready", "/status", "/metrics"]:
             result = evaluate("allow", {"path": health_path, "method": "GET"})
             assert result["allowed"] is True, f"{health_path} should be allowed"
 

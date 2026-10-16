@@ -6,8 +6,8 @@ import { server } from '@studio/mocks/node';
 import { http, HttpResponse } from 'msw';
 
 describe('checkPlatformHealth', () => {
-  it('probes /health/live on the platform base URL', () => {
-    expect(getPlatformHealthUrl()).toBe('http://localhost:8080/health/live');
+  it('probes /apis/health/live on the platform base URL', () => {
+    expect(getPlatformHealthUrl()).toBe('http://localhost:8080/apis/health/live');
   });
 
   it('resolves "live" on the platform liveness response', async () => {
