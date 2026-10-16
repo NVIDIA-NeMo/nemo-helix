@@ -2428,11 +2428,7 @@ jobs:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
 
   deployments-openshell-tests:
-    # The openshell extra is a platform-restricted manylinux_2_39 wheel that the
-    # shared unit-test job does not install, so the OpenShell backend tests skip
-    # there. Install the extra in this isolated, path-filtered job and exercise the
-    # backend for real. Kept separate so a wheel-install failure fails only this
-    # small job, not the whole unit suite (mirrors the nemo-guardrails extra job).
+    # Path-filtered job that runs only the OpenShell deployment backend tests.
     name: Deployments OpenShell backend tests
     needs: [changes]
     if: >
