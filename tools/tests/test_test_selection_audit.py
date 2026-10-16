@@ -31,11 +31,33 @@ def test_workflow_parser_finds_gated_test_commands() -> None:
     jobs = parse_workflow_jobs((REPO_ROOT / ".github/workflows/ci.yaml").read_text(encoding="utf-8"))
 
     assert jobs["python-unit-test-scaled-evals"].referenced_outputs == ("deps", "scaled-evals")
-    assert jobs["python-unit-test-scaled-evals"].run_blocks == (
-        "uv run --frozen --group scaled-evals pytest plugins/_temporary-scaled-evals/tests -v",
+    scaled_evals = jobs["python-unit-test-scaled-evals"]
+    assert scaled_evals.run_blocks[0] == (
+        "uv run --frozen --group scaled-evals pytest plugins/_temporary-scaled-evals/tests -v"
     )
+    # The per-runner Harbor step runs from inside the plugin.
+    assert scaled_evals.run_block_working_directories == ("", "plugins/_temporary-scaled-evals")
     assert jobs["deployments-openshell-tests"].referenced_outputs == ("deps", "deployments-openshell")
     assert jobs["deployments-openshell-tests"].run_blocks == ("make test-deployments-openshell",)
+
+
+def test_pytest_paths_resolve_against_the_step_working_directory() -> None:
+    workflow = """\
+jobs:
+  plugin-tests:
+    name: Plugin tests
+    if: needs.changes.outputs.plugin == 'true'
+    steps:
+      - name: Run plugin tests
+        working-directory: plugins/example
+        run: |
+          python -m pytest tests/test_one.py
+      - name: Run root tests
+        run: pytest tests/test_two.py
+"""
+    job = parse_workflow_jobs(workflow)["plugin-tests"]
+
+    assert job.run_block_working_directories == ("plugins/example", "")
 
 
 def test_audit_report_is_clean_after_filter_updates() -> None:
