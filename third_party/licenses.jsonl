@@ -238,6 +238,7 @@
 {"name": "narwhals", "license": "MIT", "compatible": true}
 {"name": "nemo-anonymizer", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric", "license": "APACHE-2.0", "compatible": true}
+{"name": "nemo-fabric-adapter-catalog", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-adapter-contract", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-adapters-claude", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-adapters-codex", "license": "APACHE-2.0", "compatible": true}
