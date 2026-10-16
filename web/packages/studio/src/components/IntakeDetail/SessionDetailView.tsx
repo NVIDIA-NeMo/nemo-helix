@@ -24,7 +24,7 @@ import {
 } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { getIntakeSessionRoute, getIntakeTracesRoute } from '@studio/routes/utils';
-import { getTraceDisplayName } from '@studio/util/intakeTelemetry';
+import { getTraceDisplayName, type SessionTrajectory } from '@studio/util/intakeTelemetry';
 import { CircleAlert } from 'lucide-react';
 import { type FC, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
@@ -36,7 +36,7 @@ export type SessionDetailRouteContext =
       readonly parentBreadcrumbs: BreadcrumbsItemProps[];
       readonly getSessionHref: (sessionId: string) => string;
       readonly headerActions?: ReactNode;
-      readonly summary?: ReactNode;
+      readonly renderSummary?: (trajectories: readonly SessionTrajectory[]) => ReactNode;
     };
 
 interface SessionDetailViewProps {
@@ -180,7 +180,7 @@ export const SessionDetailView: FC<SessionDetailViewProps> = ({
           slotHeading={title}
           slotActions={routeContext?.kind === 'evaluation' ? routeContext.headerActions : undefined}
         />
-        {routeContext?.kind === 'evaluation' ? routeContext.summary : null}
+        {routeContext?.kind === 'evaluation' ? routeContext.renderSummary?.(trajectories) : null}
         {!traceId ? (
           <div data-testid="session-summary-header" className="w-full min-w-0">
             <SessionSummaryHeader session={session} />
