@@ -14,8 +14,12 @@ pytest.importorskip("harbor", reason="NemoFabricAgent subclasses Harbor's BaseAg
 
 from harbor.models.task.config import MCPServerConfig
 from nemo_fabric import RelayAtifConfig, RelayAtofConfig
-from nemo_fabric.integrations.harbor.fabric_agent import HARBOR_ARTIFACT_ROOT
-from nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_agent import FLAT_CONFIG_KWARGS, NemoFabricAgent
+from nemo_fabric.integrations.harbor.fabric_agent import HARBOR_ARTIFACT_ROOT, FabricAgentOptions
+from nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_agent import (
+    FLAT_CONFIG_KWARGS,
+    INSTALL_RUN_KWARGS,
+    NemoFabricAgent,
+)
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig
 from nhx_evals_sdk.agent_eval.runtimes.provenance import credential_shaped_settings, redact_credentials
 
@@ -199,6 +203,50 @@ def test_flat_agent_description_keywords_are_refused(tmp_path: Path, keyword: st
     """Two descriptions of one agent cannot be merged sensibly; the config is the description."""
     with pytest.raises(ValueError, match=keyword):
         _agent(tmp_path, **{keyword: "x"})
+
+
+def test_the_refused_keywords_are_everything_upstream_accepts_that_is_not_install_or_run() -> None:
+    """A keyword upstream adds lands in one set or the other; drifting into neither would merge silently."""
+    assert FLAT_CONFIG_KWARGS | INSTALL_RUN_KWARGS == set(FabricAgentOptions.model_fields)
+    assert not FLAT_CONFIG_KWARGS & INSTALL_RUN_KWARGS
+    assert "fabric_adapter_id" in FLAT_CONFIG_KWARGS and "fabric_discovery_paths" in INSTALL_RUN_KWARGS
+
+
+def test_harbor_config_validate_sees_the_same_refusals_as_preflight() -> None:
+    """``harbor config validate`` calls ``parse_options``, not ``preflight``; the two must not disagree."""
+    with pytest.raises(ValueError, match="fabric_max_turns"):
+        NemoFabricAgent.parse_options({"fabric_config": _registered_agent_config(), "fabric_max_turns": 3})
+    with pytest.raises(ValueError, match="fabric_adapter_id"):
+        NemoFabricAgent.parse_options(
+            {"fabric_config": _registered_agent_config(), "fabric_adapter_id": "nvidia.fabric.codex"}
+        )
+    # The adapter the config itself names is what the constructor hands upstream, so it passes.
+    options = NemoFabricAgent.parse_options(
+        {"fabric_config": _registered_agent_config(), "fabric_adapter_id": _DEEPAGENTS}
+    )
+    assert options is not None and options.fabric_adapter_id == _DEEPAGENTS
+
+
+def test_the_options_schema_lists_only_what_the_agent_honours() -> None:
+    schema = NemoFabricAgent.options_schema()
+    assert not FLAT_CONFIG_KWARGS & set(schema["properties"])
+    assert {"fabric_config", "fabric_default_max_turns", "fabric_package", "fabric_discovery_paths"} <= set(
+        schema["properties"]
+    )
+    assert schema.get("required") == ["fabric_config"]
+
+
+def test_task_local_discovery_paths_reach_the_config(tmp_path: Path) -> None:
+    """Upstream applies ``fabric_discovery_paths`` in its ``_build_config``; overriding it must not drop them."""
+    config = _agent(tmp_path, fabric_discovery_paths=["/tmp/adapters"])._build_spec("hi").config
+    assert config.discovery is not None and [str(p) for p in config.discovery.local_paths] == ["/tmp/adapters"]
+
+    listed = _registered_agent_config()
+    listed["discovery"] = {"local_paths": ["adapters", "/tmp/adapters"]}
+    agent = NemoFabricAgent(logs_dir=tmp_path, fabric_config=listed, fabric_discovery_paths=["/tmp/adapters", "/opt/x"])
+    config = agent._build_spec("hi").config
+    assert config.discovery is not None
+    assert [str(p) for p in config.discovery.local_paths] == ["adapters", "/tmp/adapters", "/opt/x"]
 
 
 def test_a_config_without_a_harness_is_refused_at_construction(tmp_path: Path) -> None:

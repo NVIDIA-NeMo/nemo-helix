@@ -37,7 +37,14 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from nemo_fabric import EnvironmentConfig, FabricConfig, FabricConfigError, RelayAtofFileSinkConfig, inspect_adapter
+from nemo_fabric import (
+    DiscoveryConfig,
+    EnvironmentConfig,
+    FabricConfig,
+    FabricConfigError,
+    RelayAtofFileSinkConfig,
+    inspect_adapter,
+)
 from nemo_fabric.integrations.harbor.fabric_agent import HARBOR_ARTIFACT_ROOT, FabricAgent, FabricAgentOptions
 from nhx_evals_sdk.agent_eval.runtimes.fabric.image import fabric_version
 from pydantic import Field, field_validator, model_validator
@@ -45,22 +52,26 @@ from pydantic import Field, field_validator, model_validator
 #: build.nvidia.com's OpenAI-compatible endpoint, for configs that name an ``nvidia`` model directly.
 NVIDIA_MODEL_BASE_URL = "https://integrate.api.nvidia.com/v1"
 
-#: Upstream ``FabricAgent`` keywords that describe the agent rather than how to install or run it.
-FLAT_CONFIG_KWARGS: frozenset[str] = frozenset(
+#: Upstream ``FabricAgent`` keywords that say how to install and run the agent; everything else it
+#: accepts describes the agent and is refused here in favour of ``fabric_config``.
+INSTALL_RUN_KWARGS: frozenset[str] = frozenset(
     {
-        "fabric_adapter_id",
-        "fabric_harness_settings",
-        "fabric_model_base_url",
-        "fabric_model_api_key_env",
-        "fabric_system_instruction",
-        "fabric_max_turns",
-        "fabric_runtime_timeout_seconds",
-        "fabric_environment_env",
-        "fabric_blocked_tools",
-        "fabric_enabled_tools",
-        "fabric_telemetry",
+        "fabric_config_base_dir",
+        "fabric_config_bundle",
+        "fabric_config_target",
+        "fabric_discovery_paths",
+        "fabric_adapter_descriptor",
+        "fabric_workspace",
+        "fabric_python",
+        "fabric_package",
+        "fabric_venv_path",
+        "fabric_install_command",
+        "fabric_cwd",
+        "fabric_timeout_sec",
     }
 )
+#: Upstream ``FabricAgent`` keywords that describe the agent rather than how to install or run it.
+FLAT_CONFIG_KWARGS: frozenset[str] = frozenset(FabricAgentOptions.model_fields) - INSTALL_RUN_KWARGS
 
 HARBOR_INPUT_SCHEMA = "text"
 HARBOR_OUTPUT_SCHEMA = "message"
@@ -143,13 +154,29 @@ def _require_fabric_package_matches_host(fabric_package: str | None) -> None:
             )
 
 
+def _flat_config_kwargs_error(rejected: list[str]) -> ValueError:
+    return ValueError(
+        f"{', '.join(rejected)}: NemoFabricAgent runs the `fabric_config` it is given; describe the "
+        "agent there instead of through FabricAgent's flat keywords"
+    )
+
+
 def _refuse_flat_config_kwargs(kwargs: Mapping[str, Any]) -> None:
     rejected = sorted(FLAT_CONFIG_KWARGS & kwargs.keys())
     if rejected:
-        raise ValueError(
-            f"{', '.join(rejected)}: NemoFabricAgent runs the `fabric_config` it is given; describe the "
-            "agent there instead of through FabricAgent's flat keywords"
-        )
+        raise _flat_config_kwargs_error(rejected)
+
+
+def _refuse_non_default_flat_config_kwargs(kwargs: Mapping[str, Any]) -> None:
+    """The keys-present check is too strict for ``parse_options``: upstream's constructor forwards every
+    flat keyword at its default, so only a value that differs from the default is a description."""
+    rejected = sorted(
+        name
+        for name in FLAT_CONFIG_KWARGS & kwargs.keys()
+        if name != "fabric_adapter_id" and kwargs[name] != FabricAgentOptions.model_fields[name].default
+    )
+    if rejected:
+        raise _flat_config_kwargs_error(rejected)
 
 
 class NemoFabricAgentOptions(FabricAgentOptions):
@@ -171,6 +198,8 @@ class NemoFabricAgentOptions(FabricAgentOptions):
     def derive_adapter_id(self) -> NemoFabricAgentOptions:
         harness = _parse_fabric_config(self.fabric_config).harness
         assert harness is not None  # checked by validate_fabric_config
+        if "fabric_adapter_id" in self.model_fields_set and self.fabric_adapter_id != harness.adapter_id:
+            raise _flat_config_kwargs_error(["fabric_adapter_id"])
         self.fabric_adapter_id = harness.adapter_id
         return self
 
@@ -208,8 +237,26 @@ class NemoFabricAgent(FabricAgent):  # ty: ignore[unsupported-base]
         )
 
     @classmethod
+    def parse_options(cls, kwargs: dict[str, Any] | None = None, env: Mapping[str, str] | None = None) -> Any:
+        """Refuse the flat agent keywords here too, so ``harbor config validate`` agrees with preflight.
+
+        ``fabric_adapter_id`` is exempt because the constructor hands upstream the one derived from the
+        config; the options model refuses any other value.
+        """
+        _refuse_non_default_flat_config_kwargs(kwargs or {})
+        return super().parse_options(kwargs, env)
+
+    @classmethod
+    def options_schema(cls) -> dict[str, Any]:
+        """The schema Harbor shows users, without the keywords this agent refuses."""
+        schema = super().options_schema()
+        schema["properties"] = {k: v for k, v in schema.get("properties", {}).items() if k not in FLAT_CONFIG_KWARGS}
+        if "required" in schema:
+            schema["required"] = [name for name in schema["required"] if name not in FLAT_CONFIG_KWARGS]
+        return schema
+
+    @classmethod
     def preflight(cls, kwargs: dict[str, Any] | None = None, env: Mapping[str, str] | None = None) -> None:
-        _refuse_flat_config_kwargs(kwargs or {})
         options = cls.parse_options(kwargs, env)
         assert isinstance(options, NemoFabricAgentOptions)  # options_model
         _require_fabric_package_matches_host(options.fabric_package)
@@ -230,6 +277,11 @@ class NemoFabricAgent(FabricAgent):  # ty: ignore[unsupported-base]
         runtime.artifacts = artifact_root
         if "max_turns" not in runtime.model_fields_set and self.fabric_default_max_turns is not None:
             runtime.max_turns = self.fabric_default_max_turns
+
+        if self.fabric_discovery_paths:
+            discovery = config.discovery or DiscoveryConfig()
+            discovery.local_paths = list(dict.fromkeys([*discovery.local_paths, *self.fabric_discovery_paths]))
+            config.discovery = discovery
 
         # Harbor's task container is Fabric's local provider, whatever the config says.
         environment = config.environment or EnvironmentConfig(provider="local")
