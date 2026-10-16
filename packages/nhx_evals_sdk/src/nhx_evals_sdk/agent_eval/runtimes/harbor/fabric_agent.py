@@ -23,16 +23,23 @@ refused rather than merged; the install/run keywords (``fabric_package``, ``fabr
 Files the config refers to by relative path (``skills.paths``) resolve against ``fabric_config_target``
 when a ``fabric_config_bundle`` is uploaded, exactly as upstream: stage the agent's files into a
 directory, pass it as the bundle, and keep the paths relative. Custom adapters shipped in the bundle
-are found only if the config lists their directory under ``discovery.local_paths``.
+are found only if the config lists their directory under ``discovery.local_paths``, and the host needs
+their descriptor too (``fabric_adapter_descriptor``) to confirm the skills, MCP servers and telemetry
+the config asks of them before a trial starts.
 """
 
 from __future__ import annotations
 
+import json
+import re
+import shlex
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
-from nemo_fabric import EnvironmentConfig, FabricConfig, RelayAtofFileSinkConfig
+from nemo_fabric import EnvironmentConfig, FabricConfig, FabricConfigError, RelayAtofFileSinkConfig, inspect_adapter
 from nemo_fabric.integrations.harbor.fabric_agent import HARBOR_ARTIFACT_ROOT, FabricAgent, FabricAgentOptions
+from nhx_evals_sdk.agent_eval.runtimes.fabric.image import fabric_version
 from pydantic import Field, field_validator, model_validator
 
 #: build.nvidia.com's OpenAI-compatible endpoint, for configs that name an ``nvidia`` model directly.
@@ -70,12 +77,70 @@ PLATFORM_GATEWAY_PATH_MARKER = "/apis/inference-gateway/"
 PLATFORM_GATEWAY_API_KEY_ENV = "NEMO_AGENTS_IGW_API_KEY"
 PLATFORM_GATEWAY_API_KEY_PLACEHOLDER = "not-used"
 
+#: An exact ``nemo-fabric`` pin inside ``fabric_package``, with or without extras.
+_FABRIC_DISTRIBUTION_PIN = re.compile(r"nemo[-_]fabric(?:\[[^\]]*\])?\s*==\s*(?P<version>[^\s,;]+)\Z", re.IGNORECASE)
+
 
 def _parse_fabric_config(fabric_config: Mapping[str, Any]) -> FabricConfig:
     config = FabricConfig.from_mapping(fabric_config)
     if config.harness is None or not config.harness.adapter_id.strip():
         raise ValueError("fabric_config must select a harness: set `harness.adapter_id`")
     return config
+
+
+def _host_adapter_descriptor(adapter_id: str, descriptor_path: Path | None) -> Mapping[str, Any] | None:
+    """The adapter descriptor the host can read, as upstream ``FabricAgent`` resolves it at construction."""
+    if descriptor_path is not None:
+        return json.loads(descriptor_path.read_text(encoding="utf-8"))
+    try:
+        from nemo_fabric_adapter_catalog import get_adapter_descriptor
+    except ModuleNotFoundError as error:
+        if error.name != "nemo_fabric_adapter_catalog":
+            raise
+        return None
+    try:
+        return get_adapter_descriptor(adapter_id)
+    except KeyError:
+        return None
+
+
+def _require_adapter_inspectable(config: FabricConfig, descriptor_path: Path | None) -> None:
+    """Run the host-side inspection upstream runs in ``__init__``, so it fails preflight rather than a trial.
+
+    Fabric refuses to run a config that asks an adapter for skills, MCP servers or telemetry unless the
+    host can read that adapter's descriptor. Harbor does not catch construction errors per trial, so
+    without this the whole job aborts with Fabric's wording and no pointer at what is missing.
+    """
+    assert config.harness is not None  # checked by _parse_fabric_config
+    try:
+        inspect_adapter(config, _host_adapter_descriptor(config.harness.adapter_id, descriptor_path))
+    except FabricConfigError as error:
+        raise ValueError(
+            f"fabric_config: {error}. A catalog adapter needs the `nemo-fabric-adapter-catalog` package on the "
+            "host (installed by `nemo-fabric[harbor]`); an adapter shipped in the bundle needs its descriptor "
+            "passed as `fabric_adapter_descriptor`."
+        ) from error
+
+
+def _require_fabric_package_matches_host(fabric_package: str | None) -> None:
+    """Refuse a ``fabric_package`` that pins ``nemo-fabric`` to a release other than the host's.
+
+    Fabric's runner protocol is versioned by payload shape: the task-side runner rejects a payload the
+    host serialises with fields it does not know. An exact pin that disagrees with the host is caught
+    here; a range is left to pip.
+    """
+    if not fabric_package:
+        return
+    for requirement in shlex.split(fabric_package):
+        pin = _FABRIC_DISTRIBUTION_PIN.fullmatch(requirement)
+        if pin is None:
+            continue
+        host = fabric_version()
+        if pin.group("version") != host:
+            raise ValueError(
+                f"fabric_package pins nemo-fabric to {pin.group('version')} but the host runs {host}: the "
+                "task-side Fabric runner must match the host's release, so pin the same version"
+            )
 
 
 def _refuse_flat_config_kwargs(kwargs: Mapping[str, Any]) -> None:
@@ -145,7 +210,10 @@ class NemoFabricAgent(FabricAgent):  # ty: ignore[unsupported-base]
     @classmethod
     def preflight(cls, kwargs: dict[str, Any] | None = None, env: Mapping[str, str] | None = None) -> None:
         _refuse_flat_config_kwargs(kwargs or {})
-        super().preflight(kwargs, env)
+        options = cls.parse_options(kwargs, env)
+        assert isinstance(options, NemoFabricAgentOptions)  # options_model
+        _require_fabric_package_matches_host(options.fabric_package)
+        _require_adapter_inspectable(_parse_fabric_config(options.fabric_config), options.fabric_adapter_descriptor)
 
     @staticmethod
     def name() -> str:

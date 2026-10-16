@@ -3,6 +3,8 @@
 
 """``NemoFabricAgent`` runs the ``fabric_config`` it is given; Harbor only decides where the trial lives."""
 
+import importlib.metadata
+import json
 from pathlib import Path
 from typing import Any
 
@@ -236,6 +238,62 @@ def test_harbor_preflight_refuses_a_config_without_a_harness() -> None:
 def test_harbor_preflight_requires_a_fabric_config() -> None:
     with pytest.raises(ValueError, match="fabric_config"):
         NemoFabricAgent.preflight({"fabric_workspace": "/app"})
+
+
+def _custom_adapter_descriptor(tmp_path: Path, adapter_id: str) -> Path:
+    descriptor = {
+        "contract_version": "fabric.adapter/v1alpha2",
+        "adapter_id": adapter_id,
+        "adapter_kind": "process",
+        "runner": {"command": "python3", "script": "adapter.py"},
+        "requirements": {"binaries": ["python3"]},
+        "config": {
+            "accepts": ["models", "models.base_url", "instructions.system", "skills", "mcp", "tools.blocked"],
+            "system_instruction_modes": ["replace"],
+        },
+        "telemetry": {"providers": {"relay": {"outputs": ["atif"]}}},
+        "capabilities": {"streaming": False, "cancellation": False, "updates": False, "service": False},
+    }
+    path = tmp_path / "custom.fabric-adapter.json"
+    path.write_text(json.dumps(descriptor), encoding="utf-8")
+    return path
+
+
+def test_harbor_preflight_refuses_a_custom_adapter_the_host_cannot_inspect(tmp_path: Path) -> None:
+    """Fabric runs this check in ``__init__``; Harbor does not catch construction errors per trial, so
+    the job would abort with Fabric's wording and no pointer at what is missing."""
+    custom = _registered_agent_config()
+    custom["harness"] = {"adapter_id": "acme.fabric.custom"}
+    custom["discovery"] = {"local_paths": ["adapters"]}
+
+    with pytest.raises(ValueError, match="fabric_adapter_descriptor"):
+        NemoFabricAgent.preflight({"fabric_config": custom})
+
+    descriptor = _custom_adapter_descriptor(tmp_path, "acme.fabric.custom")
+    NemoFabricAgent.preflight({"fabric_config": custom, "fabric_adapter_descriptor": str(descriptor)})
+
+
+def test_harbor_preflight_refuses_a_fabric_package_pinned_to_another_release() -> None:
+    """The task-side runner rejects a payload serialised by a host on a different Fabric release."""
+    with pytest.raises(ValueError, match="task-side Fabric runner must match"):
+        NemoFabricAgent.preflight(
+            {"fabric_config": _registered_agent_config(), "fabric_package": "nemo-fabric[deepagents]==0.4.0"}
+        )
+    with pytest.raises(ValueError, match="task-side Fabric runner must match"):
+        NemoFabricAgent.preflight(
+            {
+                "fabric_config": _registered_agent_config(),
+                "fabric_package": "nemo-fabric[deepagents,relay]==0.4.0 mcp==1.29.0",
+            }
+        )
+
+    host = importlib.metadata.version("nemo-fabric")
+    for package in (
+        f"nemo-fabric[deepagents]=={host}",
+        "nemo-fabric[deepagents]>=0.5,<0.6",
+        f"mcp==1.29.0 nemo-fabric=={host}",
+    ):
+        NemoFabricAgent.preflight({"fabric_config": _registered_agent_config(), "fabric_package": package})
 
 
 def test_parsed_options_carry_the_config_and_its_adapter(tmp_path: Path) -> None:
