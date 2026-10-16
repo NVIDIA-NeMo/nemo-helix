@@ -382,7 +382,9 @@ response = InferenceGatewayClient.from_client(client).provider_post(
 
 <Warning>
 
-A NIM deployment config that sets no image uses the platform default, the model-free NIM (`nvcr.io/nim/nvidia/model-free-nim:2.0.13`). It serves models whose architecture its vLLM backend supports; check the [model-free NIM support matrix](https://docs.nvidia.com/nim/large-language-models/latest/reference/support-matrix.html#model-free-nim) before deploying. If your model architecture is not supported, use a model-specific NIM image (see [Deploy from NGC](#deploy-from-ngc)) or [deploy with vLLM](#deploy-with-vllm).
+A NIM deployment config that sets no image uses the platform default, the [multi-LLM NIM](https://docs.nvidia.com/nim/large-language-models/1.15.0/introduction.html) (`nvcr.io/nim/nvidia/llm-nim:latest`), which only supports specific model architectures. Check the [supported architectures list](https://docs.nvidia.com/nim/large-language-models/1.15.0/supported-architectures.html) before deploying. If your model architecture is not listed, use a model-specific NIM image (see [Deploy from NGC](#deploy-from-ngc)) or [deploy with vLLM](#deploy-with-vllm).
+
+To serve models trained with Customizer, we recommend [deploying with vLLM](#deploy-with-vllm).
 
 </Warning>
 
@@ -825,9 +827,9 @@ For larger models requiring multiple GPUs, parallelism configuration depends on 
 
 Model-specific NIMs (for example, `nvcr.io/nim/meta/llama-3.1-70b-instruct`) have TP/PP settings derived from manifest profiles in the container. Configure enough GPUs and the NIM selects the appropriate profile automatically.
 
-### Model-Free NIM
+### Multi-LLM NIM
 
-The model-free NIM (`nvcr.io/nim/nvidia/model-free-nim:2.0.13`), the platform's default NIM image, does not derive parallelism from the GPU count: tensor and pipeline parallelism both default to 1. Set `NIM_TENSOR_PARALLEL_SIZE` and `NIM_PIPELINE_PARALLEL_SIZE` in `additional_envs` so that their product equals `gpu`. See [About Model-Free NIM](https://docs.nvidia.com/nim/large-language-models/latest/deployment/model-free-nim.html) for other ways to select a profile.
+The multi-LLM NIM (`nvcr.io/nim/nvidia/llm-nim:latest`), the platform's default NIM image, uses all GPUs for tensor parallelism by default (TP = `gpu`, PP = 1). To split the GPUs differently, set `NIM_TENSOR_PARALLEL_SIZE` and `NIM_PIPELINE_PARALLEL_SIZE` in `additional_envs` so that their product equals `gpu`.
 
 This example deploys [Qwen2.5-14B-Instruct](https://huggingface.co/Qwen/Qwen2.5-14B-Instruct) across 2 GPUs using tensor parallelism.
 
