@@ -754,12 +754,12 @@ def delete_step_secret(core_v1: client.CoreV1Api, namespace: str, name: str) -> 
     if labels.get(JOB_MANAGED_BY_LABEL) != JOB_MANAGED_BY_JOBS_CONTROLLER:
         logger.warning(
             "Skipping Secret deletion: not managed by jobs-controller",
-            extra=dict(secret_name=name, namespace=namespace),
+            extra=dict(kind="Secret", resource_name=name, namespace=namespace),
         )
         return
     try:
         core_v1.delete_namespaced_secret(name=name, namespace=namespace)
-        logger.info("Deleted Kubernetes Secret", extra=dict(secret_name=name, namespace=namespace))
+        logger.info("Deleted Kubernetes Secret", extra=dict(kind="Secret", resource_name=name, namespace=namespace))
     except ApiException as e:
         if e.status != 404:
             raise
