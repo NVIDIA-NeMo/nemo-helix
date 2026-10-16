@@ -122,7 +122,7 @@ print(len(response["data"][0]["embedding"]))
 
 <Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
 
-A ModelProvider attaches once the deployment reaches `READY`. `retrieve-eval` scores only entities with a non-empty `model_providers` list.
+A ModelProvider attaches shortly after the deployment reaches `READY`, once the platform discovers the models it serves. `retrieve-eval` scores only entities with a non-empty `model_providers` list.
 
 For the full recipe, from the NVDocs dump through mining, training, deployment, and evaluation, see [Embedding Model Customization](/documentation/customizer-reference/tutorials/embedding-customization-job).
 
