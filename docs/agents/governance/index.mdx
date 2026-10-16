@@ -116,6 +116,10 @@ Before running a war-game, make sure you have:
 
 ## Scope
 
+- **Local deployments only.** Agent Governance runs on a platform started from
+  source with `nemo services run`. The Helm chart and container images do not
+  include it, so the Agent Hardener API and the Studio Agent Hardening
+  page are absent there.
 - **Attacks focus on agent behavior.** Probes exercise how the agent responds to
   adversarial input, including prompt injection, indirect injection through tool
   output and jailbreaks. Network reach is covered on the defense side, where the

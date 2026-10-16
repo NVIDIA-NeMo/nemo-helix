@@ -158,6 +158,8 @@ def test_compile_grpo_config_sandboxed_paths(
     step, dataset_pvc = _prepared_step(tmp_path)
     cfg = compile_grpo_config(step, job_ctx)
 
+    assert (job_ctx.storage_path / "gym-work").is_dir()
+
     nemo_gym = cfg["env"]["nemo_gym"]
     assert cfg["env"]["should_use_nemo_gym"] is True
     assert nemo_gym["sandboxed"] is True

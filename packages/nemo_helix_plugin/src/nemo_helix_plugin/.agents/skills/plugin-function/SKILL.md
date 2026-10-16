@@ -57,7 +57,7 @@ class GreetResponse(BaseModel):
 class GreetFunction(NemoFunction[GreetSpec]):
     name:        ClassVar[str] = "greet"
     description: ClassVar[str] = "Say hello to a name."
-    spec_schema: ClassVar[type[BaseModel]] = GreetSpec
+    spec_schema: ClassVar[type[GreetSpec]] = GreetSpec
 
     async def run(self, spec: GreetSpec) -> GreetResponse:
         return GreetResponse(message=f"Hello, {spec.name}!")

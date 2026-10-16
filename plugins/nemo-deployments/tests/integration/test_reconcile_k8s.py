@@ -17,14 +17,16 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from kubeconfig_availability import skip_without_kubeconfig
 from kubernetes.client.rest import ApiException
+from kubernetes.stream import stream
 from nemo_deployments_plugin.backends.k8s.backend import K8sDeploymentBackend
-from nemo_deployments_plugin.backends.labels import k8s_volume_resource_name
+from nemo_deployments_plugin.backends.labels import k8s_deployment_resource_name, k8s_volume_resource_name
 from nemo_deployments_plugin.backends.registry import BACKEND_CLASSES, ExecutorRegistry
 from nemo_deployments_plugin.config import ControllerConfig
 from nemo_deployments_plugin.entities import (
@@ -33,6 +35,8 @@ from nemo_deployments_plugin.entities import (
     Deployment,
     DeploymentConfig,
     Prerequisite,
+    Probe,
+    StatusEvent,
     Volume,
 )
 from nemo_deployments_plugin.reconciler.deployment_reconciler import DeploymentReconciler
@@ -98,6 +102,92 @@ class _InMemoryVolumeStore:
         volume = await self.get(entity_type, name=name, workspace=workspace)
         assert expected_db_version == volume.db_version
         del self._volumes[(workspace, name)]
+
+
+@pytest.mark.asyncio
+async def test_ready_deployment_recovers_after_readiness_loss(k8s_registry: ExecutorRegistry) -> None:
+    """An old deployment gets a fresh timeout when a running pod loses readiness."""
+    name = f"readiness-{uuid.uuid4().hex[:8]}"
+    workspace = "itest-readiness"
+    dep = Deployment(name=name, workspace=workspace, deployment_config=name)
+    cfg = DeploymentConfig(
+        name=name,
+        workspace=workspace,
+        containers=[
+            Container(
+                name="agent",
+                image=ALPINE_IMAGE,
+                command=["sh", "-c"],
+                args=["touch /tmp/ready; exec sleep 3600"],
+                readinessProbe=Probe.model_validate(
+                    {
+                        "exec": {"command": ["test", "-f", "/tmp/ready"]},
+                        "periodSeconds": 1,
+                        "timeoutSeconds": 2,
+                        "failureThreshold": 2,
+                    }
+                ),
+            )
+        ],
+    )
+    entities = AsyncMock()
+    entities.update.side_effect = lambda entity: entity
+    entities.get.side_effect = lambda entity_type, name, workspace: cfg if entity_type is DeploymentConfig else dep
+    backend = _backend(k8s_registry)
+    backend._entities = entities
+    reconciler = DeploymentReconciler(entities, k8s_registry, ControllerConfig())
+    reconciler.set_config_cache({(workspace, name): cfg})
+    resource_name = k8s_deployment_resource_name(workspace, name)
+
+    async def wait_for_status(expected: str) -> None:
+        for _ in range(POLL_ATTEMPTS):
+            await reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name={})
+            assert dep.status != "FAILED", dep.status_message
+            if dep.status == expected:
+                return
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+        pytest.fail(f"Expected {expected}, got {dep.status}: {dep.status_message}")
+
+    async def set_readiness(pod_name: str, ready: bool) -> None:
+        await asyncio.to_thread(
+            stream,
+            backend.clients.core_v1.connect_get_namespaced_pod_exec,
+            pod_name,
+            NAMESPACE,
+            command=["touch", "/tmp/ready"] if ready else ["rm", "/tmp/ready"],
+            container="agent",
+            stderr=True,
+            stdout=True,
+        )
+
+    try:
+        await wait_for_status("READY")
+        pods = await asyncio.to_thread(backend.clients.core_v1.list_namespaced_pod, NAMESPACE)
+        pod = next(p for p in pods.items if p.metadata.name.startswith(f"{resource_name}-"))
+        now = datetime.now(timezone.utc)
+        dep.status_history = [
+            StatusEvent(status="STARTING", timestamp=(now - timedelta(hours=20)).isoformat()),
+            StatusEvent(status="READY", timestamp=(now - timedelta(hours=19)).isoformat()),
+        ]
+
+        await set_readiness(pod.metadata.name, False)
+        await wait_for_status("STARTING")
+        assert datetime.fromisoformat(dep.status_history[-1].timestamp) >= now
+        assert dep.error_details is None
+        unready_pod = await asyncio.to_thread(backend.clients.core_v1.read_namespaced_pod, pod.metadata.name, NAMESPACE)
+        assert unready_pod.status.phase == "Running"
+        assert any(c.type == "Ready" and c.status == "False" for c in unready_pod.status.conditions)
+
+        await set_readiness(pod.metadata.name, True)
+        await wait_for_status("READY")
+        recovered_pod = await asyncio.to_thread(
+            backend.clients.core_v1.read_namespaced_pod, pod.metadata.name, NAMESPACE
+        )
+        assert recovered_pod.metadata.uid == pod.metadata.uid
+        assert recovered_pod.status.container_statuses[0].restart_count == 0
+        assert dep.error_details is None
+    finally:
+        await backend.delete_deployment(workspace, name)
 
 
 @pytest.mark.asyncio
@@ -167,13 +257,13 @@ async def test_puller_server_prerequisite_chain(k8s_registry: ExecutorRegistry) 
     puller_cfg = DeploymentConfig(
         name="puller-cfg",
         workspace="itest",
-        restart_policy="Never",  # ty: ignore[unknown-argument]  # pyright: ignore[reportCallIssue]
+        restart_policy="Never",  # pyright: ignore[reportCallIssue]
         containers=[Container(name="puller", image=ALPINE_IMAGE, command=["sh", "-c"], args=["echo pulled"])],
     )
     server_cfg = DeploymentConfig(
         name="server-cfg",
         workspace="itest",
-        restart_policy="Always",  # ty: ignore[unknown-argument]  # pyright: ignore[reportCallIssue]
+        restart_policy="Always",  # pyright: ignore[reportCallIssue]
         containers=[Container(name="server", image=NGINX_IMAGE, ports=[ContainerPort(name="http", containerPort=80)])],
     )
 

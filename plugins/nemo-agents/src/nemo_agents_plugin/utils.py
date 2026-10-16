@@ -12,7 +12,7 @@ import os
 import re
 import tempfile
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Generator
 from urllib.parse import urlsplit
 
 import yaml
@@ -643,7 +643,7 @@ def temp_injected_config(
     defaults: dict[str, Any] | None = None,
     extra_config: dict[str, Any] | None = None,
     output_base: Path | None = None,
-) -> Iterator[Path]:
+) -> Generator[Path, None, None]:
     """Context manager that writes a URL-injected copy of a NAT config to a temp file.
 
     Loads the YAML at *config_path*, expands any ``$VAR`` / ``${VAR}``

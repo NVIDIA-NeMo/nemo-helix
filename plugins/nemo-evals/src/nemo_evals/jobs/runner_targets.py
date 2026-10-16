@@ -87,6 +87,8 @@ def _harbor_target(runner: HarborAgentTaskRunner) -> HarborRunnerTarget:
     ``jobs_dir`` is optional at construction and deliberately omitted from submission: workers
     supply job-owned storage. Standalone execution requires an explicit directory.
     Only ``env_secrets`` references travel; the platform resolves them with its own resolver.
+    Trial concurrency stays unset unless explicitly supplied. Dumping and revalidating
+    a runtime config marks its defaults as supplied, including trial concurrency.
     """
     config = runner._config
     if config is None:
@@ -122,7 +124,6 @@ def _harbor_target(runner: HarborAgentTaskRunner) -> HarborRunnerTarget:
         "env_secrets",
         "env_vars",
         "n_attempts",
-        "n_concurrent_trials",
         "max_retries",
         "artifacts",
         "trace_dir",
@@ -131,7 +132,13 @@ def _harbor_target(runner: HarborAgentTaskRunner) -> HarborRunnerTarget:
         "agent_timeout_multiplier",
     )
     try:
-        target = HarborRunnerTarget(source=source, **{name: getattr(config, name) for name in carried_fields})
+        target = HarborRunnerTarget(
+            source=source,
+            n_concurrent_trials=config.n_concurrent_trials
+            if "n_concurrent_trials" in config.model_fields_set
+            else None,
+            **{name: getattr(config, name) for name in carried_fields},
+        )
         target.model_dump(mode="json")
     except (ValidationError, PydanticSerializationError) as error:
         # Both models set `hide_input_in_errors`, so the text names the problem without echoing a value.

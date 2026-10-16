@@ -83,7 +83,7 @@ async def test_puller_server_prerequisite_chain(docker_registry: ExecutorRegistr
     puller_cfg = DeploymentConfig(
         name="puller-cfg",
         workspace="itest",
-        restart_policy="OnFailure",  # ty: ignore[unknown-argument]  # pyright: ignore[reportCallIssue]
+        restart_policy="OnFailure",  # pyright: ignore[reportCallIssue]
         containers=[
             Container(
                 name="puller",
@@ -98,7 +98,7 @@ async def test_puller_server_prerequisite_chain(docker_registry: ExecutorRegistr
     server_cfg = DeploymentConfig(
         name="server-cfg",
         workspace="itest",
-        restart_policy="Always",  # ty: ignore[unknown-argument]  # pyright: ignore[reportCallIssue]
+        restart_policy="Always",  # pyright: ignore[reportCallIssue]
         containers=[
             Container(
                 name="server",
@@ -109,7 +109,7 @@ async def test_puller_server_prerequisite_chain(docker_registry: ExecutorRegistr
                     VolumeMount(
                         name="weights",
                         mountPath="/data",
-                        read_only=True,  # ty: ignore[unknown-argument]  # pyright: ignore[reportCallIssue]
+                        read_only=True,  # pyright: ignore[reportCallIssue]
                     )
                 ],
             )

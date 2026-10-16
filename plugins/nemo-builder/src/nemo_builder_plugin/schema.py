@@ -7,11 +7,12 @@ from __future__ import annotations
 
 import re
 from pathlib import PurePosixPath
-from typing import Self
+from typing import Annotated, Literal, Self
 
-from nemo_builder_plugin.identity import validate_caller_tag, validate_repository
+from nemo_builder_plugin.entities import ContainerImage
+from nemo_builder_plugin.identity import normalize_reference, validate_caller_tag, validate_repository
 from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, field_validator, model_validator
 
 _STRICT = ConfigDict(extra="forbid")
 
@@ -31,9 +32,6 @@ JOB_NAME_PREFIX = "builder-"
 
 # Jobs names a job's fileset `job-fileset-<job name>`: the longest name a set's name ends up in.
 _JOBS_FILESET_PREFIX = "job-fileset-"
-
-#: The archives a build context may come in: tar, compressed or not. `fetch` unpacks them.
-ARCHIVE_SUFFIXES = (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")
 
 
 def _relative_path(value: str, *, field: str) -> str:
@@ -56,8 +54,8 @@ class FileSetSource(BaseModel):
     archive: str | None = Field(
         default=None,
         description=(
-            "A tar archive in the fileset, compressed or not, to unpack and build from. "
-            "`context_path` is then a directory inside it."
+            "A tar archive in the fileset, compressed or not, to unpack and build from, under any file name. "
+            "`context_path` is then a directory inside it. A file that isn't a tar archive fails the build."
         ),
     )
     context_path: str | None = Field(
@@ -82,14 +80,47 @@ class FileSetSource(BaseModel):
         if value is None:
             return None
         _relative_path(value, field="archive")
-        if not value.lower().endswith(ARCHIVE_SUFFIXES):
-            raise ValueError(f"archive must be a tar archive, one of {', '.join(ARCHIVE_SUFFIXES)}; got {value!r}")
+        if PurePosixPath(value).as_posix() != value:
+            raise ValueError(f"archive must be written plainly, without '.' or empty segments, got {value!r}")
         return value
 
     @field_validator("context_path")
     @classmethod
     def _context_path_stays_in_the_fileset(cls, value: str | None) -> str | None:
         return None if value is None else _relative_path(value, field="context_path")
+
+
+class ImageSource(BaseModel):
+    """A published image to copy unchanged, rather than build."""
+
+    model_config = _STRICT
+
+    type: Literal["image"] = "image"
+    image: str = Field(
+        description=(
+            "The image, by tag or digest, as `docker pull` takes it: `ubuntu:24.04` is "
+            "`docker.io/library/ubuntu:24.04`. Its registry must be one the deployment allows. The build "
+            "copies the image for the spec's `platform` that this names when the build is submitted."
+        )
+    )
+
+    @field_validator("image")
+    @classmethod
+    def _image_is_a_reference(cls, value: str) -> str:
+        normalize_reference(value)
+        return value
+
+
+def _source_type(value: object) -> str:
+    if isinstance(value, dict):
+        return "image" if value.get("type") == "image" or "image" in value else "fileset"
+    return "image" if isinstance(value, ImageSource) else "fileset"
+
+
+BuildSource = Annotated[
+    Annotated[FileSetSource, Tag("fileset")] | Annotated[ImageSource, Tag("image")],
+    Discriminator(_source_type),
+]
 
 
 class BuildOutput(BaseModel):
@@ -132,7 +163,9 @@ class BuildSpec(BaseModel):
             "One spec in a set may leave it out."
         ),
     )
-    source: FileSetSource
+    source: BuildSource = Field(
+        description="What to build from: a fileset holding a build context, or a published image to copy."
+    )
     output: BuildOutput | None = Field(
         default=None,
         description="Where to publish. Omit to publish under the workspace, with the system tag only (see `name`).",
@@ -143,6 +176,8 @@ class BuildSpec(BaseModel):
     @model_validator(mode="after")
     def _dockerfile_stays_within_the_context(self) -> Self:
         _relative_path(self.dockerfile, field="dockerfile")
+        if isinstance(self.source, ImageSource) and "dockerfile" in self.model_fields_set:
+            raise ValueError("a spec that copies an image has no dockerfile")
         return self
 
 
@@ -192,3 +227,12 @@ class BuildSet(BaseModel):
                 f"over {NAME_MAX_LENGTH} characters"
             )
         return self
+
+
+class SubmitBuildResponse(BaseModel):
+    """The submitted build's job and images."""
+
+    job: str = Field(description="Name of the build job, for logs and debugging.")
+    images: list[ContainerImage] = Field(
+        description="One row per build spec, created `pending`. POLL THESE, not the job."
+    )

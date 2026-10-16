@@ -589,20 +589,20 @@ class TestEvaluateAgentSpecAgent:
         only sees the union annotation.  The runtime assertion is the
         actual behaviour we care about.
         """
-        cfg = EvaluateAgentSpec(eval_config="/tmp/eval.yml", agent="calculator")  # ty: ignore[invalid-argument-type]
+        cfg = EvaluateAgentSpec(eval_config="/tmp/eval.yml", agent="calculator")
         assert cfg.agent == "calculator"
         assert isinstance(cfg.agent, str)
 
     def test_agent_accepts_ws_qualified_name(self) -> None:
-        cfg = EvaluateAgentSpec(eval_config="/tmp/eval.yml", agent="prod/calculator")  # ty: ignore[invalid-argument-type]
+        cfg = EvaluateAgentSpec(eval_config="/tmp/eval.yml", agent="prod/calculator")
         assert cfg.agent == "prod/calculator"
 
     def test_agent_accepts_http_url(self) -> None:
-        cfg = EvaluateAgentSpec(eval_config="/tmp/eval.yml", agent="http://localhost:8080")  # ty: ignore[invalid-argument-type]
+        cfg = EvaluateAgentSpec(eval_config="/tmp/eval.yml", agent="http://localhost:8080")
         assert cfg.agent == "http://localhost:8080"
 
     def test_agent_accepts_https_url(self) -> None:
-        cfg = EvaluateAgentSpec(eval_config="/tmp/eval.yml", agent="https://api.example.com/v1/agent")  # ty: ignore[invalid-argument-type]
+        cfg = EvaluateAgentSpec(eval_config="/tmp/eval.yml", agent="https://api.example.com/v1/agent")
         assert cfg.agent == "https://api.example.com/v1/agent"
 
     def test_no_agent_endpoint_field_after_union_merge(self) -> None:
@@ -664,20 +664,20 @@ class TestEvaluateAgentSpecOutput:
         assert cfg.output is None
 
     def test_output_accepts_local_path(self) -> None:
-        cfg = EvaluateAgentSpec(eval_config="/tmp/eval.yml", output="./eval-out")  # ty: ignore[invalid-argument-type]
+        cfg = EvaluateAgentSpec(eval_config="/tmp/eval.yml", output="./eval-out")
         assert cfg.output == "./eval-out"
         assert isinstance(cfg.output, str)
 
     def test_output_accepts_absolute_path(self) -> None:
-        cfg = EvaluateAgentSpec(eval_config="/tmp/eval.yml", output="/tmp/eval-out")  # ty: ignore[invalid-argument-type]
+        cfg = EvaluateAgentSpec(eval_config="/tmp/eval.yml", output="/tmp/eval-out")
         assert cfg.output == "/tmp/eval-out"
 
     def test_output_accepts_fileset_name(self) -> None:
-        cfg = EvaluateAgentSpec(eval_config="/tmp/eval.yml", output="eval-results")  # ty: ignore[invalid-argument-type]
+        cfg = EvaluateAgentSpec(eval_config="/tmp/eval.yml", output="eval-results")
         assert cfg.output == "eval-results"
 
     def test_output_accepts_ws_qualified_fileset(self) -> None:
-        cfg = EvaluateAgentSpec(eval_config="/tmp/eval.yml", output="prod/eval-results")  # ty: ignore[invalid-argument-type]
+        cfg = EvaluateAgentSpec(eval_config="/tmp/eval.yml", output="prod/eval-results")
         assert cfg.output == "prod/eval-results"
 
     def test_no_output_base_dir_field_after_rename(self) -> None:

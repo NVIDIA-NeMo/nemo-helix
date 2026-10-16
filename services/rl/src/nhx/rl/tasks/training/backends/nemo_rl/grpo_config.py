@@ -36,6 +36,7 @@ from nhx.rl.tasks.training.backends.nemo_rl.sandbox_config import (
     SandboxNetworkPolicy,
     assemble_master_egress_allow,
     build_sandbox_mounts,
+    prepare_sandbox_workspace,
     resolve_job_storage_pvc_claim,
 )
 from nhx.rl.tasks.training.chat_templates import resolve_chat_template
@@ -355,6 +356,7 @@ def _build_nemo_gym_env_config(
                 f"can mount the environment and dataset; {NHX_JOB_STORAGE_PVC_ENVVAR} is unset. "
                 "Set NHX_RL_JOB_STORAGE_PVC_CLAIM on the rl service."
             )
+        prepare_sandbox_workspace(job_ctx.storage_path)
         mounts = build_sandbox_mounts(
             pvc_claim=pvc_claim,
             workspace=job_ctx.workspace,

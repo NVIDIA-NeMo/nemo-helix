@@ -9,20 +9,40 @@ import math
 import pickle
 import tempfile
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
-import httpx
 import pytest
 from nemo_evals.api.schemas import MetricInline
 from nemo_evals.config import get_config
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager, CloudpickleMetricPayload
-from nemo_helix_plugin.client.errors import NotFoundError
-from nemo_helix_plugin.entities import EntityBase, EntityClient, ListResponse, PaginationInfo
+from nemo_helix_plugin.entities import (
+    DEFAULT_WORKSPACE,
+    EntityBase,
+    EntityClient,
+    ListResponse,
+    PaginationInfo,
+    parse_qualified_name,
+)
+from nemo_helix_plugin.entities.types import DeleteResponse
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.in_memory_filter import InMemoryFilterRepository
-from nemo_helix_plugin.secrets.client import AsyncSecretsClient
-from nemo_helix_plugin.secrets.types import HelixSecretAccessResponse
+from nhx.testing.files import InMemoryFilesService
+from nhx.testing.secrets import InMemorySecretsService
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
+
+
+@pytest.fixture
+def files_service() -> InMemoryFilesService:
+    """Return fresh isolated Files storage for each test's resource assertions."""
+    return InMemoryFilesService()
+
+
+@pytest.fixture
+def files_client(files_service: InMemoryFilesService) -> AsyncFilesClient:
+    """Return a real Files client backed by the test's in-memory Files service."""
+    return files_service.client()
 
 
 def matches_filter(entity, operation) -> bool:
@@ -97,7 +117,8 @@ class FakeEntityStore(EntityClient):
         self.entities[key] = entity.model_copy(deep=True)
         return entity.model_copy(deep=True)
 
-    async def get(self, entity_type, name: str, *, workspace: str, parent: str | None = None):
+    async def get(self, entity_type, name: str, *, workspace: str | None = None, parent: str | None = None):
+        workspace, name = parse_qualified_name(name, default_workspace=workspace)
         key = self._key(entity_type, name, workspace, parent)
         if key not in self.entities:
             raise NemoEntityNotFoundError(f"{workspace}/{name} not found")
@@ -124,27 +145,33 @@ class FakeEntityStore(EntityClient):
         entity_type,
         name: str,
         *,
-        workspace: str,
+        workspace: str | None = None,
         parent: str | None = None,
         expected_db_version: int | None = None,
-    ) -> None:
+    ) -> DeleteResponse:
         # ``parent`` is part of the key, not decoration: revision children of different heads share
         # the name ``rev.1``, so ignoring it here would delete whichever one was inserted first.
+        workspace, name = parse_qualified_name(name, default_workspace=workspace)
         key = self._key(entity_type, name, workspace, parent)
         if key not in self.entities:
             raise NemoEntityNotFoundError(f"{workspace}/{name} not found")
-        del self.entities[key]
+        deleted = self.entities.pop(key)
+        return DeleteResponse(id=deleted.id)
 
     async def list(
         self,
         entity_type,
         *,
-        workspace: str,
+        workspace: str = DEFAULT_WORKSPACE,
         filter_operation=None,
+        filter_str: str | None = None,
         sort: str | None = None,
+        filter_obj: dict[str, Any] | None = None,
         page: int = 1,
         page_size: int = 100,
     ) -> ListResponse:
+        if filter_str is not None or filter_obj is not None:
+            raise NotImplementedError("the fake entity store filters by filter_operation only")
         items = [
             entity
             for (entity_type_name, record_workspace, _, _), entity in self.entities.items()
@@ -172,7 +199,7 @@ class FakeEntityStore(EntityClient):
                 page=page,
                 page_size=page_size,
                 current_page_size=len(items),
-                total_pages=max(1, math.ceil(total_results / page_size)),
+                total_pages=math.ceil(total_results / page_size),
                 total_results=total_results,
             ),
         )
@@ -190,32 +217,6 @@ def entity_store() -> FakeEntityStore:
 
 
 # ---- judge secret resolution ----------------------------------------------
-
-
-class FakeAccessResponse:
-    """Stands in for the typed client's response wrapper, whose `data()` yields the payload."""
-
-    def __init__(self, payload: HelixSecretAccessResponse) -> None:
-        self._payload = payload
-
-    def data(self) -> HelixSecretAccessResponse:
-        return self._payload
-
-
-class FakeSecretsClient(AsyncSecretsClient):
-    """Answers secret lookups from a dict and records every (workspace, name) it was asked for."""
-
-    def __init__(self, secrets: dict[tuple[str, str], str] | None = None) -> None:
-        super().__init__(base_url="http://secrets.invalid", workspace="default")
-        self._secrets = secrets or {}
-        self.lookups: list[tuple[str, str]] = []
-
-    async def access_secret(self, *, workspace: str | None = None, name: str) -> FakeAccessResponse:
-        key = (workspace or "default", name)
-        self.lookups.append(key)
-        if key not in self._secrets:
-            raise NotFoundError(httpx.Response(404, json={"detail": "not found"}, request=httpx.Request("GET", "/")))
-        return FakeAccessResponse(HelixSecretAccessResponse(name=name, workspace=key[0], value=self._secrets[key]))
 
 
 @pytest.fixture
@@ -239,9 +240,9 @@ def detonating_cloudpickle_metric() -> dict:
 
 
 @pytest.fixture
-def make_secrets_client():
-    """Return a factory for Secrets clients seeded with ``(workspace, name) -> value``."""
-    return FakeSecretsClient
+def make_secrets_service() -> type[InMemorySecretsService]:
+    """Return a factory for in-memory Secrets services seeded with ``(workspace, name) -> value``."""
+    return InMemorySecretsService
 
 
 @pytest.fixture(autouse=True)

@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -15,6 +17,7 @@ from nhx.rl.tasks.training.backends.nemo_rl.sandbox_config import (
     apply_master_egress_to_sandbox_config,
     assemble_master_egress_allow,
     build_sandbox_mounts,
+    prepare_sandbox_workspace,
 )
 from pydantic import ValidationError
 
@@ -86,6 +89,35 @@ def test_apply_master_egress_to_sandbox_config() -> None:
     assert sandbox.network_policy.egress_allow[0].host == "placeholder"
 
 
+def test_workspace_permissions_survive_restrictive_umask(tmp_path: Path) -> None:
+    previous_umask = os.umask(0o077)
+    try:
+        workspace = prepare_sandbox_workspace(tmp_path)
+    finally:
+        os.umask(previous_umask)
+    assert workspace == tmp_path / "gym-work"
+    assert stat.S_IMODE(workspace.stat().st_mode) == 0o777
+
+
+def test_workspace_preparation_preserves_existing_contents(tmp_path: Path) -> None:
+    workspace = prepare_sandbox_workspace(tmp_path)
+    sentinel = workspace / "existing-result"
+    sentinel.write_text("keep", encoding="utf-8")
+    assert prepare_sandbox_workspace(tmp_path) == workspace
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+
+
+@pytest.mark.parametrize("symlink", [False, True], ids=["file", "symlink"])
+def test_workspace_preparation_rejects_non_directory_paths(tmp_path: Path, symlink: bool) -> None:
+    workspace = tmp_path / "gym-work"
+    if symlink:
+        workspace.symlink_to(tmp_path, target_is_directory=True)
+    else:
+        workspace.write_text("file", encoding="utf-8")
+    with pytest.raises(NotADirectoryError, match="Gym workspace must be a directory"):
+        prepare_sandbox_workspace(tmp_path)
+
+
 def test_egress_is_operator_scoped_not_per_job() -> None:
     """The job schema must have no path to widen sandbox egress.
 
@@ -112,9 +144,11 @@ def test_sandbox_config_carries_both_operator_egress_levers() -> None:
         SandboxNetworkPolicy,
     )
 
-    common = {"environment_pvc_claim": "c", "workspace_pvc_claim": "c"}
-    assert SandboxConfig(image="i", **common).allow_internet is False
-    assert SandboxConfig(image="i", allow_internet=True, **common).allow_internet is True
+    assert SandboxConfig(image="i", environment_pvc_claim="c", workspace_pvc_claim="c").allow_internet is False
+    assert (
+        SandboxConfig(image="i", allow_internet=True, environment_pvc_claim="c", workspace_pvc_claim="c").allow_internet
+        is True
+    )
 
     assert SandboxNetworkPolicy().public_dns_allow == ()
     policy = SandboxNetworkPolicy(public_dns_allow=("hub.primeintellect.ai",))

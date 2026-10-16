@@ -32,7 +32,7 @@ import time
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO, Iterator
+from typing import IO, Generator
 
 import httpx
 from nemo_guardrails_plugin.benchmarks.bootstrap import build_env
@@ -176,7 +176,7 @@ class SupervisedProcess:
 
 
 @contextmanager
-def supervised_processes(specs: list[SupervisedProcess]) -> Iterator[list[SupervisedProcess]]:
+def supervised_processes(specs: list[SupervisedProcess]) -> Generator[list[SupervisedProcess], None, None]:
     """Start every spec in order; stop them in reverse on exit.
 
     Backed by ``ExitStack`` so that if any spec's ``start()`` raises, every

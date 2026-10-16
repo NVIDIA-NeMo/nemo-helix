@@ -49,7 +49,7 @@ import shutil
 import sys
 import threading
 import warnings
-from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Generator, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
@@ -1010,6 +1010,7 @@ def _build_native_job(
             from harbor.models.trial.config import (  # ty: ignore[unresolved-import,unused-ignore-comment]
                 AgentConfig,
                 ArtifactConfig,
+                EnvironmentConfig,
                 VerifierConfig,
             )
         except ModuleNotFoundError as exc:
@@ -1046,6 +1047,10 @@ def _build_native_job(
                 quiet=config.quiet,
                 retry=RetryConfig(max_retries=config.max_retries),
                 artifacts=artifacts,
+                # Linux Docker Engine needs an explicit host-gateway alias; Docker
+                # Desktop also accepts it. Keep this in the task container, where
+                # registered Fabric agents call the platform Inference Gateway.
+                environment=EnvironmentConfig(extra_docker_compose=[Path(__file__).with_name("host-gateway.yaml")]),
                 agents=[agent],
                 datasets=[DatasetConfig(path=dataset_path, task_names=list(task_names) if task_names else None)],
                 **verifier_kwargs,
@@ -1167,7 +1172,7 @@ def _truncated_repr(value: Any) -> str:
 @contextlib.contextmanager
 def scoped_harbor_agent_import(
     agent_dir: Path, import_path: str, *, exclude: frozenset[Path] = frozenset()
-) -> Iterator[str]:
+) -> Generator[str, None, None]:
     """Make ``agent_dir`` importable under a content-addressed package for the block.
 
     Args:

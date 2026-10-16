@@ -19,6 +19,18 @@ from sandboxed_gym.host.models import (
 from sandboxed_gym.wire import BROKER_TOKEN_ENV, BROKER_URL_ENV
 
 
+@pytest.fixture(autouse=True)
+def _cluster_resolver(tmp_path, monkeypatch):
+    """Pin the default resolver so policies don't depend on the host running the tests.
+
+    ``resolver_addresses=None`` reads ``/etc/resolv.conf``, and some CI runners list a public
+    nameserver there, which then shows up as an allowed public address.
+    """
+    resolv_conf = tmp_path / "cluster-resolv.conf"
+    resolv_conf.write_text("nameserver 10.96.0.10\n")
+    monkeypatch.setattr(egress, "RESOLV_CONF_PATH", str(resolv_conf))
+
+
 def _mount(claim: str, path: str, read_only: bool) -> GymHostVolumeMount:
     return GymHostVolumeMount(
         pvc_claim=claim,

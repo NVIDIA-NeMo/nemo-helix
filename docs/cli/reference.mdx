@@ -6179,7 +6179,7 @@ nemo agents optimize run-strategy [OPTIONS] [COMMAND] [ARGS]...
 
 **Job Spec:**
 
-* `--strategy`: Installed optimization strategy to run, e.g. 'legacy'. List what this platform has with `nemo agents optimize list-strategies`.
+* `--strategy`: Installed optimization strategy to run, e.g. 'config-tuning'. List what this platform has with `nemo agents optimize list-strategies`.
 * `--optimize-config`: Location of the strategy's configuration YAML, for strategies that take one.  With optimize_config_fileset set — required for remote submission — this is a path relative to the fileset root.  Without it (programmatic local runs only) it is an absolute path on the host running the job.  Whether it is required is the selected strategy's call.
 * `--optimize-config-fileset FILESET_REF`: Fileset holding the optimization bundle: the config named by optimize_config plus every asset it references.  Stage one with `nemo agents optimize prepare-fileset`.  Required for remote submissions, where the job has no access to the client's filesystem.
 * `--agent`: Platform agent to optimize ('name' or 'workspace/name'). Strategies that can take the agent under test from the config itself may leave this unset.
@@ -9012,8 +9012,8 @@ nemo evals agent-evaluate [OPTIONS] [COMMAND] [ARGS]...
 
 **Job Spec:**
 
-* `--max-concurrent-tasks <INTEGER>`: Maximum number of tasks evaluated concurrently. Distinct from a target's `params.parallelism`, which bounds concurrent inference requests *within* trial generation.
-* `--fail-fast`: Stop the run on the first scoring failure when True.
+* `--max-concurrent-tasks <INTEGER>`: Concurrency for this evaluation's SDK work. Harbor and Gym: concurrent scoring calls only (trials are bounded by the runner). Other runners: concurrent trials and scoring calls. For model and agent targets, target.params.parallelism bounds concurrent inference requests during trial generation. On Kubernetes runs it applies per task Job; the task-Job cap is execution.max_concurrent_task_jobs.
+* `--fail-fast`: Fail on the first metric error instead of recording an errored score. On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks budget can also fail the run and cancel remaining task Jobs.
 * `--publication.intake.evaluation-id`: Name of the existing Evaluation to publish under. Must already exist; the job does not create it.
 * `--publication.intake.agent-name`: Agent name recorded on each published trajectory. Derived from the target when it names one; required otherwise.
 * `--publication.intake.agent-version`: Agent version recorded on each published trajectory. Neither a Model nor an Agent carries a version, so this defaults to 'unknown' unless the submitter supplies one.
@@ -9631,7 +9631,7 @@ nemo customization automodel.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--integrations.mlflow.name`: MLflow run name. Defaults to job_id if not provided.
 * `--integrations.mlflow.description`: MLflow run description.
 * `--integrations.mlflow.tracking-uri`: MLflow tracking server URI (e.g., 'http://mlflow.mycompany.com:5000'). Can also be set via MLFLOW_TRACKING_URI environment variable.
-* `--deployment-config`: Deployment configuration for auto-deploying the model after training. Pass a string to reference an existing ModelDeploymentConfig by name ('my-config' or 'workspace/my-config'). An object provides inline NIM deployment parameters. Omit to skip deployment. This flag accepts the string form only; use --spec or --spec-file for the other union form(s).
+* `--deployment-config`: Deployment configuration for auto-deploying the model after training. Pass a string to reference an existing ModelDeploymentConfig by name ('my-config' or 'workspace/my-config'). An object provides inline deployment parameters, deployed with NIM unless engine is 'vllm'. Omit to skip deployment. This flag accepts the string form only; use --spec or --spec-file for the other union form(s).
 
 **Spec Source:**
 
@@ -9703,7 +9703,7 @@ nemo customization rl.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--integrations.mlflow.description`: MLflow run description.
 * `--integrations.mlflow.tracking-uri`: MLflow tracking server URI (e.g., 'http://mlflow.mycompany.com:5000'). Can also be set via MLFLOW_TRACKING_URI environment variable.
 * `--output.name`: Override `output.name` in the spec.
-* `--deployment-config`: Deployment configuration for auto-deploying the model after training. Pass a string to reference an existing ModelDeploymentConfig by name ('my-config' or 'workspace/my-config'). An object provides inline NIM deployment parameters. Omit to skip deployment. This flag accepts the string form only; use --spec or --spec-file for the other union form(s).
+* `--deployment-config`: Deployment configuration for auto-deploying the model after training. Pass a string to reference an existing ModelDeploymentConfig by name ('my-config' or 'workspace/my-config'). An object provides inline deployment parameters, deployed with NIM unless engine is 'vllm'. Omit to skip deployment. This flag accepts the string form only; use --spec or --spec-file for the other union form(s).
 
 **Spec Source:**
 
@@ -9811,7 +9811,7 @@ nemo customization unsloth.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--integrations.mlflow.tracking-uri`: MLflow tracking server URI (e.g., 'http://mlflow.mycompany.com:5000'). Can also be set via MLFLOW_TRACKING_URI environment variable.
 * `--output.name`: Override `output.name` in the spec.
 * `--output.description`: Override `output.description` in the spec.
-* `--deployment-config`: Deployment configuration for auto-deploying the model after training. Pass a string to reference an existing ModelDeploymentConfig by name ('my-config' or 'workspace/my-config'). An object provides inline NIM deployment parameters. Omit to skip deployment. This flag accepts the string form only; use --spec or --spec-file for the other union form(s).
+* `--deployment-config`: Deployment configuration for auto-deploying the model after training. Pass a string to reference an existing ModelDeploymentConfig by name ('my-config' or 'workspace/my-config'). An object provides inline deployment parameters, deployed with NIM unless engine is 'vllm'. Omit to skip deployment. This flag accepts the string form only; use --spec or --spec-file for the other union form(s).
 
 **Spec Source:**
 

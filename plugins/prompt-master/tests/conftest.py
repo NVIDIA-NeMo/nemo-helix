@@ -14,7 +14,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -83,7 +83,7 @@ def stored_agent() -> Callable[[dict[str, Any] | BaseException], contextlib.Abst
     """Patch the Agents client so ``get_agent`` returns *config* (or raises it when given an exception)."""
 
     @contextlib.contextmanager
-    def _stored(config: dict[str, Any] | BaseException) -> Iterator[MagicMock]:
+    def _stored(config: dict[str, Any] | BaseException) -> Generator[MagicMock, None, None]:
         agents = MagicMock()
         if isinstance(config, BaseException):
             agents.get_agent.side_effect = config

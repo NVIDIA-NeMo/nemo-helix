@@ -86,6 +86,48 @@ def test_run_config_pii_only_uses_processed_training_df(tmp_path, monkeypatch):
     pd.testing.assert_frame_equal(result.synthetic_data, processed)
 
 
+def test_run_config_pii_only_disables_dataset_size_floor(tmp_path, monkeypatch):
+    task_main = import_task_main_without_heavy_runtime(monkeypatch)
+
+    small_df = pd.DataFrame({"name": ["Alice", "Bob"], "age": [1, 2]})
+    observed_disabled_checks = []
+
+    class FakeSafeSynthesizer:
+        def __init__(self, config, save_path):
+            self.config = config
+            self._total_start = None
+            self._training_df = None
+            self._workdir = None
+
+        def with_data_source(self, data_source):
+            return self
+
+        def process_data(self):
+            observed_disabled_checks.extend(self.config.preflight.disabled_checks)
+            self._training_df = small_df
+
+    monkeypatch.setattr(task_main, "SafeSynthesizer", FakeSafeSynthesizer)
+    results_module = ModuleType("nemo_safe_synthesizer.results")
+    setattr(
+        results_module,
+        "make_nss_results",
+        lambda generate_results, total_time=None: SimpleNamespace(synthetic_data=generate_results),
+    )
+    monkeypatch.setitem(sys.modules, "nemo_safe_synthesizer.results", results_module)
+    job_config = task_main.SafeSynthesizerJobConfig.model_validate(
+        {
+            "data_source": "default/data#input.csv",
+            "config": {"enable_synthesis": False, "enable_replace_pii": False},
+        }
+    )
+
+    task_main.run_config(job_config, small_df, tmp_path)
+
+    assert observed_disabled_checks == ["dataset.size"]
+    assert job_config.config.preflight.disabled_checks == []
+    assert len(small_df) < 200
+
+
 def test_run_from_env_reports_missing_config_path(monkeypatch):
     task_main = import_task_main_without_heavy_runtime(monkeypatch)
     monkeypatch.setattr(task_main, "initialize_observability", lambda: None)

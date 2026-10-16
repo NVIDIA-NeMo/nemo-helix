@@ -1368,8 +1368,8 @@ class TestWaitForHealthy:
             return mock_resp
 
         with (
-            patch(f"{_CLI_MODULE}.time.monotonic", side_effect=monotonic),
-            patch(f"{_CLI_MODULE}.time.sleep", side_effect=sleep),
+            patch(f"{_CLI_MODULE}.monotonic", side_effect=monotonic),
+            patch(f"{_CLI_MODULE}.sleep", side_effect=sleep),
             patch(f"{_CLI_MODULE}.httpx.get", side_effect=get),
         ):
             result = _wait_for_healthy("127.0.0.1", 8080, timeout=1, poll_interval=2)
@@ -1396,8 +1396,8 @@ class TestWaitForHealthy:
             raise httpx.ConnectError("")
 
         with (
-            patch(f"{_CLI_MODULE}.time.monotonic", side_effect=monotonic),
-            patch(f"{_CLI_MODULE}.time.sleep", side_effect=sleep),
+            patch(f"{_CLI_MODULE}.monotonic", side_effect=monotonic),
+            patch(f"{_CLI_MODULE}.sleep", side_effect=sleep),
             patch(f"{_CLI_MODULE}.httpx.get", side_effect=get),
         ):
             result = _wait_for_healthy("127.0.0.1", 8080, timeout=1, poll_interval=2)
@@ -1429,8 +1429,8 @@ class TestWaitForHealthy:
             raise httpx.ConnectError("")
 
         with (
-            patch(f"{_CLI_MODULE}.time.monotonic", side_effect=monotonic),
-            patch(f"{_CLI_MODULE}.time.sleep", side_effect=sleep),
+            patch(f"{_CLI_MODULE}.monotonic", side_effect=monotonic),
+            patch(f"{_CLI_MODULE}.sleep", side_effect=sleep),
             patch(f"{_CLI_MODULE}.httpx.get", side_effect=get),
         ):
             result = _wait_for_healthy("127.0.0.1", 8080, timeout=1, poll_interval=2)
@@ -1461,8 +1461,8 @@ class TestWaitForHealthy:
             raise httpx.ConnectError("")
 
         with (
-            patch(f"{_CLI_MODULE}.time.monotonic", side_effect=monotonic),
-            patch(f"{_CLI_MODULE}.time.sleep", side_effect=sleep),
+            patch(f"{_CLI_MODULE}.monotonic", side_effect=monotonic),
+            patch(f"{_CLI_MODULE}.sleep", side_effect=sleep),
             patch(f"{_CLI_MODULE}.httpx.get", side_effect=get),
         ):
             result = _wait_for_healthy("127.0.0.1", 8080, timeout=1, poll_interval=2)

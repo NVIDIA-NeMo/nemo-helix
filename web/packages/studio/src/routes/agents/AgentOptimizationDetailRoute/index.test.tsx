@@ -42,7 +42,7 @@ const renderStudy = (status: HelixJobStatus) => {
         status,
         created_at: '2026-08-13T09:00:00Z',
         spec: {
-          strategy: 'legacy',
+          strategy: 'config-tuning',
           agent: 'hermes',
           optimize_config: 'optimize.yaml',
           optimize_config_fileset: 'hermes-bundle',
@@ -109,7 +109,7 @@ describe('AgentOptimizationDetailRoute', () => {
     renderStudy('active');
 
     const inProgress = await screen.findByTestId('study-in-progress');
-    expect(within(inProgress).getByText('legacy')).toBeInTheDocument();
+    expect(within(inProgress).getByText('config-tuning')).toBeInTheDocument();
     expect(within(inProgress).getByText('hermes')).toBeInTheDocument();
     expect(within(inProgress).getByText('optimize.yaml')).toBeInTheDocument();
     expect(within(inProgress).getByText('hermes-bundle')).toBeInTheDocument();

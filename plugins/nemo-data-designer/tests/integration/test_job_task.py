@@ -19,7 +19,7 @@ written its results.
 """
 
 import logging
-from collections.abc import Generator, Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
@@ -189,7 +189,7 @@ class _MessageCaptureHandler(logging.Handler):
 
 
 @contextmanager
-def capture_job_log_messages() -> Iterator[list[str]]:
+def capture_job_log_messages() -> Generator[list[str], None, None]:
     job_logger = logging.getLogger("nemo_data_designer_plugin.jobs.run")
     previous_level = job_logger.level
     handler = _MessageCaptureHandler()

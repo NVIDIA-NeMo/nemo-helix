@@ -162,10 +162,10 @@ auth:
   admin_email:
   # Name of the default workspace where all authenticated users get Editor role | default: 'default'
   default_workspace: default
-  # CPU budget for embedded PDP policy evaluation, in millions of WASM fuel units. Default of 200 provides headroom for full plugin-merged authorization data. | default: 200
-  embedded_pdp_cpu_limit: 200
-  # Maximum linear memory (MB) the embedded PDP WASM runtime can consume. | default: 32
-  embedded_pdp_memory_limit_mb: 32
+  # CPU budget for embedded PDP policy evaluation, in millions of WASM fuel units. Default of 1500 keeps a platform-scoped service-principal check within budget on a production-sized route/scope table (full plugin-merged authorization data). | default: 1500
+  embedded_pdp_cpu_limit: 1500
+  # Maximum linear memory (MB) the embedded PDP WASM runtime can consume. Default of 256 accommodates the allocation the scope-family scan makes over a production-sized authorization-data document. | default: 256
+  embedded_pdp_memory_limit_mb: 256
   # Fail-mode for a plugin that contributes invalid HTTP authz. | default: 'hard_fail' | values: 'deny_route' | 'quarantine' | 'hard_fail'
   on_invalid_plugin: hard_fail
   # Additional service principal names allowed for stable account materialization. Built-in Helix services and installed plugin services are allowed automatically.
@@ -532,10 +532,10 @@ models:
         default_affinity: {}
         # Platform-default pod topology spread constraints applied to every k8s model deployment/job (all engines) when the deployment does not already set them. Each entry is a raw Kubernetes topologySpreadConstraint object.
         default_topology_spread_constraints: []
-        # default: 'nvcr.io/nim/meta/llama-3.1-8b-instruct'
-        default_nimservice_image: nvcr.io/nim/meta/llama-3.1-8b-instruct
-        # default: '1.8.5'
-        default_nimservice_image_tag: 1.8.5
+        # default: 'nvcr.io/nim/nvidia/model-free-nim'
+        default_nimservice_image: nvcr.io/nim/nvidia/model-free-nim
+        # default: '2.0.13'
+        default_nimservice_image_tag: 2.0.13
         # Default vLLM image repository. Fully qualified so it resolves on runtimes that block docker.io short names. | default: 'docker.io/vllm/vllm-openai'
         default_vllm_image: docker.io/vllm/vllm-openai
         # default: 'v0.22.1'
@@ -901,6 +901,12 @@ builder:
   registry:
   # Path every image is published under, before `<workspace>/`. For GAR, `<project>/<repository>`; for Artifactory, the repository key. | default: ''
   repository_prefix: ''
+  # Registries a build may copy a published image from, as hosts. A copy from any other registry is refused with `409`. Empty refuses every copy. Images are read anonymously, so only public ones copy.
+  import_registries:
+  - docker.io
+  - ghcr.io
+  - nvcr.io
+  - quay.io
   # The platform secret holding the username the push step logs in to `registry` with. Null, with `registry_password_secret`, pushes without logging in, which only a registry open to anonymous pushes allows. | default: 'builder-registry-username'
   registry_username_secret: builder-registry-username
   # The platform secret holding that username's password or token. | default: 'builder-registry-password'

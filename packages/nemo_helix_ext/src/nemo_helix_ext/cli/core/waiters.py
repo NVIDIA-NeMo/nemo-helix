@@ -18,10 +18,10 @@
 from __future__ import annotations
 
 import logging
-import time
 from collections.abc import Iterator
 from datetime import datetime
 from enum import Enum
+from time import monotonic, sleep
 from typing import Any
 
 from nemo_helix_plugin.client.client import NemoClient
@@ -50,7 +50,7 @@ _TRANSIENT_GATEWAY_STATUS_CODES = {429, 502, 503, 504}
 
 
 def _pause(seconds: float) -> None:
-    time.sleep(seconds)
+    sleep(seconds)
 
 
 class _WatchedJobsClient:
@@ -172,7 +172,7 @@ class _HelixJobWaitLiveDisplay:
         self.poll_interval = poll_interval
 
     def snapshot(self) -> tuple[str, int]:
-        return datetime.now().strftime("%H:%M:%S"), int(time.monotonic() - self.start_time)
+        return datetime.now().strftime("%H:%M:%S"), int(monotonic() - self.start_time)
 
     def __rich__(self) -> Text:
         polling_time, wait_elapsed = self.snapshot()
@@ -182,7 +182,7 @@ class _HelixJobWaitLiveDisplay:
 def _sleep_until_next_poll(start_time: float, timeout: float, poll_interval: int) -> bool:
     if poll_interval <= 0:
         raise ValueError(f"_sleep_until_next_poll poll_interval must be greater than 0, got {poll_interval}")
-    remaining = timeout - (time.monotonic() - start_time)
+    remaining = timeout - (monotonic() - start_time)
     if remaining <= 0:
         return False
     _pause(min(poll_interval, remaining))
@@ -219,7 +219,7 @@ def wait_for_inference_deployment(
     workspace = client.require_workspace(workspace)
     models_client = ModelsClient.from_client(client)
 
-    start_time = time.monotonic()
+    start_time = monotonic()
     last_history_len = 0
     last_status = ""
     last_message = ""
@@ -228,8 +228,8 @@ def wait_for_inference_deployment(
         console.print(f"[bold]Waiting for deployment '{name}' to reach status: {status}[/bold]\n")
 
     with Live(console=console, refresh_per_second=4, transient=True) as live:
-        while time.monotonic() - start_time < timeout:
-            wait_elapsed = int(time.monotonic() - start_time)
+        while monotonic() - start_time < timeout:
+            wait_elapsed = int(monotonic() - start_time)
             polling_time = datetime.now().strftime("%H:%M:%S")
             if verbose:
                 live.update(_make_live_display(polling_time, timeout, poll_interval, wait_elapsed))
@@ -272,7 +272,7 @@ def wait_for_inference_deployment(
                     if verbose:
                         console.print(f"\n[green]✓ Deployment reached {status} status![/green]")
                     if status == "READY" and check_gateway:
-                        remaining_timeout = timeout - (time.monotonic() - start_time)
+                        remaining_timeout = timeout - (monotonic() - start_time)
                         if remaining_timeout <= 0:
                             console.print("\n[red]✗ Timeout before gateway readiness check could complete[/red]")
                             return False
@@ -312,7 +312,7 @@ def wait_for_inference_deployment(
             if not _sleep_until_next_poll(start_time, timeout, poll_interval):
                 break
 
-    wait_elapsed = int(time.monotonic() - start_time)
+    wait_elapsed = int(monotonic() - start_time)
     detail = f"Last status: {last_status}"
     if last_message:
         detail += f" - {last_message}"
@@ -330,7 +330,7 @@ def wait_for_platform_job(
     poll_interval: int = 3,
 ) -> bool:
     """Wait for a platform job resource to complete."""
-    start_time = time.monotonic()
+    start_time = monotonic()
     last_status = ""
     jobs = _WatchedJobsClient(jobs_client)
 
@@ -380,7 +380,7 @@ def wait_for_platform_job(
         except JobWatchTimeoutError:
             pass
 
-    wait_elapsed = int(time.monotonic() - start_time)
+    wait_elapsed = int(monotonic() - start_time)
     detail = f"Last status: {last_status}" if last_status else "No status returned"
     console.print(f"\n[red]✗ Timeout after {wait_elapsed}s. {detail}[/red]")
     return False
@@ -395,7 +395,7 @@ def wait_for_gateway(
     verbose: bool = True,
 ) -> bool:
     """Wait for the inference gateway to be able to route to a provider."""
-    start_time = time.monotonic()
+    start_time = monotonic()
     start_timestamp = datetime.now().strftime("%H:%M:%S")
     gateway_client = InferenceGatewayClient.from_client(client)
 
@@ -411,8 +411,8 @@ def wait_for_gateway(
         return text
 
     with Live(console=console, refresh_per_second=4, transient=True) as live:
-        while time.monotonic() - start_time < timeout:
-            elapsed = int(time.monotonic() - start_time)
+        while monotonic() - start_time < timeout:
+            elapsed = int(monotonic() - start_time)
             polling_time = datetime.now().strftime("%H:%M:%S")
             if verbose:
                 live.update(_make_gateway_display(polling_time, elapsed, "Checking gateway..."))
@@ -438,6 +438,6 @@ def wait_for_gateway(
             if not _sleep_until_next_poll(start_time, timeout, poll_interval):
                 break
 
-    elapsed = int(time.monotonic() - start_time)
+    elapsed = int(monotonic() - start_time)
     console.print(f"\n[red]✗ Gateway timeout after {elapsed}s[/red]")
     return False

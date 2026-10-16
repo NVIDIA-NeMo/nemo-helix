@@ -86,7 +86,7 @@ def test_download_verifies_release_checksum_before_writing(monkeypatch: pytest.M
         raise AssertionError(f"unexpected URL: {url}")
 
     monkeypatch.setattr(module.urllib.request, "urlopen", fake_urlopen)
-    monkeypatch.setattr(module.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(module, "sleep", lambda seconds: None)
 
     module.download(archive_url, destination)
 

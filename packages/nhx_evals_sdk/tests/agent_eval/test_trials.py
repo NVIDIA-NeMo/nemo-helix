@@ -32,6 +32,13 @@ def test_trial_measurements_default_empty_and_serialize_on_trial() -> None:
     }
 
 
+def test_with_runtime_none_keeps_a_recorded_runtime() -> None:
+    measurements = TrialMeasurements(runtime_sec=12.5)
+
+    assert measurements.with_runtime(None) is measurements
+    assert measurements.with_runtime(3.0).runtime_sec == 3.0
+
+
 def test_trial_measurements_derive_and_validate_total_tokens() -> None:
     measurements = TrialMeasurements(prompt_tokens=80, completion_tokens=10)
 

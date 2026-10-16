@@ -53,7 +53,7 @@ def _build_app() -> typer.Typer:
         raise AssertionError("Customizer overrides should remove generated run commands")
 
     scheduler = NemoJobScheduler()
-    _add_submit_command(app, UnslothJob, scheduler)
+    _add_submit_command(app, UnslothJob, scheduler, as_callback=True)
     _add_explain_command(app, UnslothJob, scheduler)
     apply_unsloth_job_cli_overrides(app)
     return app

@@ -35,7 +35,7 @@ describe('CompareRunSelect', () => {
         isLoading
       />
     );
-    expect(screen.getByText('Loading other runs')).toBeInTheDocument();
+    expect(screen.getByRole('combobox')).toHaveTextContent('Loading other runs');
     expect(screen.getByRole('combobox')).toBeDisabled();
   });
 
@@ -49,7 +49,7 @@ describe('CompareRunSelect', () => {
         onChange={onChange}
       />
     );
-    expect(screen.getByText('No runs to compare to')).toBeInTheDocument();
+    expect(screen.getByRole('combobox')).toHaveTextContent('No runs to compare to');
     expect(screen.getByRole('combobox')).toBeDisabled();
   });
 
@@ -62,7 +62,7 @@ describe('CompareRunSelect', () => {
         onChange={onChange}
       />
     );
-    expect(screen.getByText('Compare against evaluation run')).toBeInTheDocument();
+    expect(screen.getByRole('combobox')).toHaveTextContent('Compare against evaluation run');
     expect(screen.getByRole('combobox')).toBeEnabled();
   });
 

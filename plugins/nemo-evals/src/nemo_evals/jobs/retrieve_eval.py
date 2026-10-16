@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar, Self
@@ -30,7 +30,7 @@ from nemo_evals.jobs.evaluate import (
 )
 from nemo_evals.jobs.metric_resolution import HelixMetricModelResolver
 from nemo_evals.jobs.secret_env import build_task_environment
-from nemo_evals.jobs.utils import job_evaluator, run_with_isolated_async_client
+from nemo_evals.jobs.utils import job_evaluator, require_platform_client, run_with_isolated_async_client
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.job import NemoJob
@@ -145,6 +145,16 @@ class RetrieveEvalSpec(BaseModel):
         return self
 
 
+def _secret_refs(spec: RetrieveEvalSpec) -> Iterator[tuple[str, str]]:
+    """Yield ``(env_name, secret_name)`` for each embeddings and reranker api key."""
+    for retrieval in (spec.target, spec.baseline):
+        if retrieval is None:
+            continue
+        for model in (retrieval.embeddings, retrieval.reranker):
+            if model is not None and model.api_key_secret is not None and model.api_key_env:
+                yield model.api_key_env, model.api_key_secret.root
+
+
 class _RetrieveEvalJobBase(NemoJob):
     """Score a BEIR fileset with a deployed embedding NIM and optional reranker."""
 
@@ -188,14 +198,7 @@ class _RetrieveEvalJobBase(NemoJob):
         """Compile a CPU task that calls the embedding target through IGW."""
         del workspace, entity_client, job_name, async_sdk, options
         canonical = RetrieveEvalSpec.model_validate(spec.model_dump())
-        secret_refs = [
-            (model.api_key_env, model.api_key_secret.root)
-            for retrieval in (canonical.target, canonical.baseline)
-            if retrieval is not None
-            for model in (retrieval.embeddings, retrieval.reranker)
-            if model is not None and model.api_key_secret is not None and model.api_key_env
-        ]
-        environment = build_task_environment(secret_refs)
+        environment = build_task_environment(_secret_refs(canonical))
         return HelixJobSpec(
             steps=[
                 HelixJobStep(
@@ -224,7 +227,7 @@ class _RetrieveEvalJobBase(NemoJob):
             RetrievalPrecisionMetric(k=cutoffs),
             RetrievalMAPMetric(k=cutoffs),
         ]
-        evaluator = job_evaluator()
+        evaluator = job_evaluator(_secret_refs(spec))
         started_at = datetime.now(UTC)
         result, baseline_result = _run_pipelines(evaluator, dataset, spec, metrics)
         result_files = EvaluateJob._write_result_files(
@@ -338,18 +341,24 @@ async def _resolve_retrieval(
     async_client: AsyncHelixClient | None,
 ) -> Retrieval:
     if isinstance(value, ModelRef):
-        models_client = client_from_platform(async_client, AsyncModelsClient)
+        models_client = client_from_platform(
+            require_platform_client(async_client, "resolving a model reference"), AsyncModelsClient
+        )
         return Retrieval(embeddings=await HelixMetricModelResolver(models_client).resolve_model(value))
     if isinstance(value, Model):
         return Retrieval(embeddings=value)
     embeddings = value.embeddings
     reranker = value.reranker
     if isinstance(embeddings, ModelRef):
-        models_client = client_from_platform(async_client, AsyncModelsClient)
+        models_client = client_from_platform(
+            require_platform_client(async_client, "resolving a model reference"), AsyncModelsClient
+        )
         embeddings = await HelixMetricModelResolver(models_client).resolve_model(embeddings)
     if isinstance(reranker, ModelRef):
         reranker_ref = reranker.root
-        models_client = client_from_platform(async_client, AsyncModelsClient)
+        models_client = client_from_platform(
+            require_platform_client(async_client, "resolving a model reference"), AsyncModelsClient
+        )
         reranker = await HelixMetricModelResolver(models_client).resolve_model(reranker)
         try:
             async with asyncio.timeout(15.0):

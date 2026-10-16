@@ -6,16 +6,17 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Iterator, Mapping
+from collections.abc import Awaitable, Callable, Generator, Iterable, Mapping
 from contextlib import contextmanager
 from typing import TypeVar, cast
 
 import httpx
+from nemo_evals.jobs.secret_env import JobSecretResolver
+from nemo_helix_plugin.client.adapter import AsyncHelixClient
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nhx_evals_sdk import Evaluator
 from nhx_evals_sdk.execution.backends.local.backend import LocalBackend
 from nhx_evals_sdk.execution.metric_execution import run_sync
-from nhx_evals_sdk.resolvers import LocalSecretResolver
 
 T = TypeVar("T")
 AsyncClientT = TypeVar("AsyncClientT", bound=AsyncNemoClient)
@@ -26,14 +27,25 @@ type _AsyncRequestHook = Callable[[httpx.Request], Awaitable[None]]
 type _AsyncResponseHook = Callable[[httpx.Response], Awaitable[None]]
 
 
-def job_evaluator() -> Evaluator:
+def require_platform_client(client: AsyncHelixClient | None, purpose: str) -> AsyncHelixClient:
+    """Return ``client``, or raise if a step that needs the platform was given none.
+
+    Job hooks receive the client as optional so they can pass a job context's handle straight
+    through; *purpose* names the step in the error, e.g. ``"resolving a registered agent"``.
+    """
+    if client is None:
+        raise ValueError(f"{purpose} requires a platform client")
+    return client
+
+
+def job_evaluator(secret_refs: Iterable[tuple[str, str]]) -> Evaluator:
     """An SDK ``Evaluator`` for code running inside a job.
 
-    The service injects each secret under its own env name, and a bare name such as ``OPENAI_API_KEY`` may hold
-    another consumer's secret, so a workspace-qualified ref never falls back to it.
+    Args:
+        secret_refs: The ``(env_name, secret_name)`` pairs the job's compiler injected.
     """
     backend = LocalBackend()
-    backend.secret_resolver = LocalSecretResolver(bare_fallback=False)
+    backend.secret_resolver = JobSecretResolver(secret_refs)
     return Evaluator(backend)
 
 
@@ -80,7 +92,7 @@ def _sync_event_hooks_as_async(client: NemoClient) -> dict[str, list[_AsyncReque
 
 
 @contextmanager
-def async_client_from_sync_client(client: NemoClient) -> Iterator[AsyncNemoClient]:
+def async_client_from_sync_client(client: NemoClient) -> Generator[AsyncNemoClient, None, None]:
     """Yield an async typed client with the sync client's auth, headers, and request hooks.
 
     Sync evaluator jobs still use their sync client for downloads and inference identity checks.

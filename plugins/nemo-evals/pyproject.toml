@@ -10,6 +10,7 @@ dependencies = [
     "cloudpickle>=3.1.1",
     "filesets",
     "nemo-agents-plugin",
+    "nemo-builder-plugin",
     "nhx-evals-sdk[harbor]",
     "nemo-helix-plugin",
     "pydantic>=2.12.0",
@@ -50,6 +51,7 @@ packages = ["src/nemo_evals"]
 [tool.uv.sources]
 filesets = { workspace = true }
 nemo-agents-plugin = { workspace = true }
+nemo-builder-plugin = { workspace = true }
 nhx-evals-sdk = { workspace = true }
 nemo-helix-plugin = { workspace = true }
 nhx-testing = { workspace = true }

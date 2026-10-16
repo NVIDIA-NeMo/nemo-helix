@@ -23,7 +23,7 @@ import json
 import sys
 from pathlib import Path
 
-from nemo_fabric import Fabric, FabricConfig  # ty: ignore[unresolved-import]
+from nemo_fabric import Fabric, FabricConfig
 
 
 def main(argv: list[str]) -> int:

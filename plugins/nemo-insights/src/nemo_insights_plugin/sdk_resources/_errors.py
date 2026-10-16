@@ -3,7 +3,7 @@
 
 """Error compatibility helpers for plugin SDK resources."""
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 import httpx
@@ -11,7 +11,7 @@ from nemo_helix_plugin.client.errors import NemoHTTPError
 
 
 @contextmanager
-def httpx_status_errors() -> Iterator[None]:
+def httpx_status_errors() -> Generator[None, None, None]:
     """Preserve the historical raw-httpx error shape of plugin SDK resources."""
     try:
         yield

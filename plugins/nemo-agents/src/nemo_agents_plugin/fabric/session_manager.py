@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -144,7 +144,7 @@ class FabricSessionManager:
             return await run_fabric_agent_once(one_shot_request, fabric=self._fabric)
 
     @asynccontextmanager
-    async def stream_once(self, request: FabricInvocationRequest) -> AsyncIterator[FabricRuntimeStream]:
+    async def stream_once(self, request: FabricInvocationRequest) -> AsyncGenerator[FabricRuntimeStream, None]:
         """Stream one request from an ephemeral, unregistered runtime."""
         async with self._invocation_slot():
             one_shot_request = await self._to_one_shot_request(request, streaming=True)
@@ -171,7 +171,7 @@ class FabricSessionManager:
         self,
         session: FabricRuntimeSession,
         request: FabricInvocationRequest,
-    ) -> AsyncIterator[FabricRuntimeStream]:
+    ) -> AsyncGenerator[FabricRuntimeStream, None]:
         """Serialize and stream one turn on a session's active runtime."""
         async with session.invocation_lock:
             if session.closing:
@@ -279,7 +279,7 @@ class FabricSessionManager:
         )
 
     @asynccontextmanager
-    async def _invocation_slot(self) -> AsyncIterator[None]:
+    async def _invocation_slot(self) -> AsyncGenerator[None, None]:
         if self._invocation_semaphore is None:
             yield
             return

@@ -147,7 +147,7 @@ def test_compose_backend_waits_for_all_ready_urls(monkeypatch, tmp_path: Path) -
         return Response(200 if discovery_attempts == 2 else 404)
 
     monkeypatch.setattr("e2e.backends.docker_compose.httpx.get", fake_get)
-    monkeypatch.setattr("e2e.backends.docker_compose.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("e2e.backends.docker_compose.sleep", lambda _seconds: None)
 
     backend = DockerComposeE2EBackend(
         compose_file=compose_file,
@@ -410,7 +410,7 @@ def test_compose_backend_waits_for_healthy_services_before_ready_probe(monkeypat
 
     monkeypatch.setattr("e2e.backends.docker_compose.subprocess.run", fake_run)
     monkeypatch.setattr("e2e.backends.docker_compose.httpx.get", fake_get)
-    monkeypatch.setattr("e2e.backends.docker_compose.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("e2e.backends.docker_compose.sleep", lambda _seconds: None)
 
     backend = DockerComposeE2EBackend(
         compose_file=compose_file,

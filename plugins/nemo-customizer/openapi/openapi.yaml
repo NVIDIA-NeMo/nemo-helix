@@ -1599,7 +1599,8 @@ components:
           description: Deployment configuration for auto-deploying the model after
             training. Pass a string to reference an existing ModelDeploymentConfig
             by name ('my-config' or 'workspace/my-config'). An object provides inline
-            NIM deployment parameters. Omit to skip deployment.
+            deployment parameters, deployed with NIM unless engine is 'vllm'. Omit
+            to skip deployment.
       additionalProperties: false
       type: object
       required:
@@ -1647,7 +1648,8 @@ components:
           description: Deployment configuration for auto-deploying the model after
             training. Pass a string to reference an existing ModelDeploymentConfig
             by name ('my-config' or 'workspace/my-config'). An object provides inline
-            NIM deployment parameters. Omit to skip deployment.
+            deployment parameters, deployed with NIM unless engine is 'vllm'. Omit
+            to skip deployment.
       additionalProperties: false
       type: object
       required:
@@ -1716,6 +1718,12 @@ components:
         name:
           title: Name
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -2441,6 +2449,15 @@ components:
       type: object
     DeploymentParams:
       properties:
+        engine:
+          type: string
+          enum:
+          - nim
+          - vllm
+          title: Engine
+          description: 'Inference engine for the deployment: ''nim'' (default) or
+            ''vllm''.'
+          default: nim
         gpu:
           type: integer
           exclusiveMinimum: 0.0
@@ -2459,12 +2476,13 @@ components:
           type: string
         image_name:
           title: Image Name
-          description: Container image name from NGC. If not specified, defaults to
-            multi-llm.
+          description: Container image name. If not specified, the platform default
+            image for the engine is used.
           type: string
         image_tag:
           title: Image Tag
-          description: Container image tag from NGC.
+          description: Container image tag. If not specified, the platform default
+            tag for the engine is used.
           type: string
         lora_enabled:
           type: boolean
@@ -2475,7 +2493,8 @@ components:
         tool_call_config:
           allOf:
           - $ref: '#/components/schemas/ToolCallParams'
-          description: Tool calling configuration override for the NIM deployment.
+          description: Tool calling configuration override. Only applies when engine
+            is 'nim'.
       additionalProperties: false
       type: object
       title: DeploymentParams
@@ -3646,7 +3665,8 @@ components:
           description: Deployment configuration for auto-deploying the model after
             training. Pass a string to reference an existing ModelDeploymentConfig
             by name ('my-config' or 'workspace/my-config'). An object provides inline
-            NIM deployment parameters. Omit to skip deployment.
+            deployment parameters, deployed with NIM unless engine is 'vllm'. Omit
+            to skip deployment.
       additionalProperties: false
       type: object
       required:
@@ -3703,7 +3723,8 @@ components:
           description: Deployment configuration for auto-deploying the model after
             training. Pass a string to reference an existing ModelDeploymentConfig
             by name ('my-config' or 'workspace/my-config'). An object provides inline
-            NIM deployment parameters. Omit to skip deployment.
+            deployment parameters, deployed with NIM unless engine is 'vllm'. Omit
+            to skip deployment.
       additionalProperties: false
       type: object
       required:
@@ -3768,6 +3789,12 @@ components:
         name:
           title: Name
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -4241,7 +4268,8 @@ components:
           description: Deployment configuration for auto-deploying the model after
             training. Pass a string to reference an existing ModelDeploymentConfig
             by name ('my-config' or 'workspace/my-config'). An object provides inline
-            NIM deployment parameters. Omit to skip deployment.
+            deployment parameters, deployed with NIM unless engine is 'vllm'. Omit
+            to skip deployment.
       additionalProperties: false
       type: object
       required:
@@ -4287,7 +4315,8 @@ components:
           description: Deployment configuration for auto-deploying the model after
             training. Pass a string to reference an existing ModelDeploymentConfig
             by name ('my-config' or 'workspace/my-config'). An object provides inline
-            NIM deployment parameters. Omit to skip deployment.
+            deployment parameters, deployed with NIM unless engine is 'vllm'. Omit
+            to skip deployment.
       additionalProperties: false
       type: object
       required:
@@ -4361,6 +4390,12 @@ components:
         name:
           title: Name
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
         description:
           title: Description
           type: string

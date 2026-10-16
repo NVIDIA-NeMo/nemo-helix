@@ -47,11 +47,12 @@ import math
 import os
 import shutil
 import tempfile
-import time
 import tomllib
+from asyncio import wait_for
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from time import sleep
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -107,7 +108,7 @@ if TYPE_CHECKING:
     # native package not yet in our locked dependency set, so it is imported for typing only and
     # loaded lazily at runtime (see ``run_tasks``). Drop the ty:ignore once nemo-fabric is a
     # resolvable dependency and the checker can see it.
-    from nemo_fabric import (  # ty: ignore[unresolved-import]
+    from nemo_fabric import (
         Fabric,
         FabricConfig,
         RelayObservabilityConfig,
@@ -338,7 +339,7 @@ class FabricAgentRuntime:
         try:
             # nemo_fabric ships a native (pyo3) core and is an optional dependency, so it is imported
             # lazily here rather than at module load.
-            from nemo_fabric import Fabric, FabricConfig  # ty: ignore[unresolved-import]
+            from nemo_fabric import Fabric, FabricConfig
         except ImportError as exc:
             raise RuntimeError(_MISSING_FABRIC_MSG) from exc
         agent_config = FabricConfig.from_mapping(
@@ -348,7 +349,7 @@ class FabricAgentRuntime:
         # importable, rather than failing every task the same way inside the per-task guard.
         if self._capture_trajectory:
             try:
-                import nemo_relay.observability  # noqa: F401  # ty: ignore[unresolved-import]
+                import nemo_relay.observability  # noqa: F401
             except ImportError as exc:
                 raise RuntimeError(_MISSING_RELAY_MSG) from exc
         # ``Fabric`` is a lightweight, reusable facade — not a lifecycle context manager — so it is
@@ -382,7 +383,7 @@ class FabricAgentRuntime:
         detected without a hardcoded list. See :func:`~...skills.resolve_skill_mode`.
         """
         try:
-            from nemo_fabric import Fabric, FabricConfig  # ty: ignore[unresolved-import]
+            from nemo_fabric import Fabric, FabricConfig
         except ImportError as exc:
             raise RuntimeError(_MISSING_FABRIC_MSG) from exc
         probe_config = FabricConfig.from_mapping(self._config)
@@ -400,7 +401,7 @@ class FabricAgentRuntime:
     ) -> _common.TaskRun:
         # nemo_fabric is already imported+validated in ``_open_host``; this is a cached sys.modules
         # lookup, not a re-load, so the types are used where they're constructed instead of threaded down.
-        from nemo_fabric import RunRequest  # ty: ignore[unresolved-import]
+        from nemo_fabric import RunRequest
 
         workspace_dir = evidence_dir / _WORKSPACE_SUBDIR
         workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -464,7 +465,7 @@ class FabricAgentRuntime:
                     workspace_dir=workspace_dir,
                 )
 
-            result = await asyncio.wait_for(
+            result = await wait_for(
                 # ``Fabric.run`` folds the per-invocation input + request id into a ``RunRequest``.
                 client.run(
                     task_config,
@@ -654,7 +655,7 @@ class FabricAgentRuntime:
     ) -> FabricConfig:
         # nemo_fabric is already imported+validated in ``_open_host``; this is a cached sys.modules
         # lookup, not a re-load, so the type is used where it's constructed instead of threaded down.
-        from nemo_fabric import EnvironmentConfig  # ty: ignore[unresolved-import]
+        from nemo_fabric import EnvironmentConfig
 
         # Copy the prepared base config and apply this task's workspace and trajectory settings directly
         # onto it. These land last, so they override anything the supplied config declared.
@@ -889,7 +890,7 @@ _CODEX_HOME_REMOVAL_DELAYS_S = (0.0, 0.5, 1.0, 2.0)
 
 def _remove_codex_home(home: Path) -> None:
     for delay in _CODEX_HOME_REMOVAL_DELAYS_S:
-        time.sleep(delay)
+        sleep(delay)
         shutil.rmtree(home, ignore_errors=True)
         if not home.exists():
             return

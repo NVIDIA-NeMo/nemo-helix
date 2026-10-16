@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""OptimizeJob — Fabric agent optimization, the ``legacy`` optimization strategy.
+"""OptimizeJob — Fabric agent optimization, the ``config-tuning`` optimization strategy.
 
-Reached as ``nemo agents optimize run-strategy --strategy legacy``: the router job in
+Reached as ``nemo agents optimize run-strategy --strategy config-tuning``: the router job in
 nemo-agent-optimization-plugin discovers this class through the
 ``nemo_agent_optimization_strategy`` class variable below and delegates its
 ``compile`` / ``run`` to it, so this job's steps are what the platform actually runs.
@@ -17,7 +17,7 @@ import logging
 import os
 import re
 import shutil
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any, ClassVar
 
@@ -80,8 +80,10 @@ class OptimizeJob(NemoJob):
     #: strategy's, not the job's: ``description`` below introduces the job to CLI users,
     #: while this one tells a caller choosing a ``--strategy`` what this one does.
     nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(
-        name="legacy",
-        description="Hyperparameter and GA prompt optimization.",
+        name="config-tuning",
+        title="Hyper-parameter and prompt optimization",
+        description="Tunes model settings and the prompt with hyperparameter search and genetic algorithms, scored against your eval set.",
+        requires_config=True,
     )
     description: ClassVar[str] = "Optimize a Fabric agent workflow."
     container: ClassVar[str] = "cpu-tasks"
@@ -237,7 +239,7 @@ def _staged_bundle(
     *,
     ctx: JobContext,
     sdk: NemoClient | None,
-) -> Iterator[tuple[Path, Path | None]]:
+) -> Generator[tuple[Path, Path | None], None, None]:
     """Yield ``(optimize config path, bundle root)`` for the run.
 
     In fileset mode the whole bundle is downloaded and the root is the download dir, so the
@@ -276,7 +278,7 @@ def _bundle_root_of(config_path: Path, config_rel_path: str) -> Path:
 
 
 @contextlib.contextmanager
-def _bundle_workdir(bundle_root: Path | None) -> Iterator[None]:
+def _bundle_workdir(bundle_root: Path | None) -> Generator[None, None, None]:
     """Run the study with *bundle_root* as the working directory (no-op when ``None``).
 
     Relative paths in the optimize config are documented as fileset-root-relative, and they are
@@ -311,7 +313,7 @@ def _staged_dataset(
     workspace: str,
     ctx: JobContext,
     sdk: NemoClient | None,
-) -> Iterator[dict[str, Any]]:
+) -> Generator[dict[str, Any], None, None]:
     """Yield *optimize_config* with a fileset dataset reference replaced by a local path.
 
     ``eval.general.dataset`` may be a plain host path (CLI runs) or a

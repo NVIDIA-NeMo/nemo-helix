@@ -17,15 +17,15 @@ Lifecycle contract:
 from __future__ import annotations
 
 import argparse
-import asyncio
 import hashlib
 import logging
 import os
 import sys
-import time
+from asyncio import to_thread
 from dataclasses import dataclass, replace
 from enum import Enum, auto
 from pathlib import Path
+from time import monotonic, sleep
 from typing import Any, Final, cast
 from uuid import UUID, uuid4
 
@@ -146,7 +146,7 @@ async def reconcile_local_clickhouse(
 ) -> str:
     """Reconcile Intake's data-directory-owned ClickHouse and return its HTTP URL."""
 
-    return await asyncio.to_thread(
+    return await to_thread(
         _reconcile_local_clickhouse,
         settings,
         image=image,
@@ -157,13 +157,13 @@ async def reconcile_local_clickhouse(
 async def stop_local_clickhouse(*, data_dir: Path | None = None) -> bool:
     """Stop Intake's data-directory-owned ClickHouse without removing it or its data."""
 
-    return await asyncio.to_thread(_stop_local_clickhouse, data_dir=data_dir)
+    return await to_thread(_stop_local_clickhouse, data_dir=data_dir)
 
 
 async def check_local_clickhouse_data_directory(*, data_dir: Path | None = None) -> None:
     """Verify that the managed container can write its ClickHouse data directory."""
 
-    await asyncio.to_thread(_check_local_clickhouse_data_directory, data_dir=data_dir)
+    await to_thread(_check_local_clickhouse_data_directory, data_dir=data_dir)
 
 
 def _reconcile_local_clickhouse(
@@ -665,19 +665,19 @@ def _container_http_url(container: Container) -> str:
 
 
 def _wait_until_ready(settings: ClickHouseSettings) -> None:
-    deadline = time.monotonic() + _READINESS_TIMEOUT_SECONDS
+    deadline = monotonic() + _READINESS_TIMEOUT_SECONDS
     last_error: Exception | None = None
     driver_logger = logging.getLogger(_CLICKHOUSE_HTTP_LOGGER_NAME)
     transient_warning_filter = _TransientClickHouseStartupFilter()
     driver_logger.addFilter(transient_warning_filter)
     try:
-        while time.monotonic() < deadline:
+        while monotonic() < deadline:
             try:
                 _ping_clickhouse(settings)
                 return
             except Exception as exc:
                 last_error = exc
-                time.sleep(_READINESS_POLL_SECONDS)
+                sleep(_READINESS_POLL_SECONDS)
     finally:
         driver_logger.removeFilter(transient_warning_filter)
     raise LocalClickHouseProvisioningError(

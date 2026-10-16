@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import ClassVar, Literal
 
@@ -25,8 +26,16 @@ from nemo_builder_plugin.completion import (
 )
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import ContainerImage
-from nemo_builder_plugin.schema import BuildSet
-from nemo_builder_plugin.submit import BuildConflict, InvalidBuildRequest, MissingSecrets, submit_build_set
+from nemo_builder_plugin.identity import ImageReference
+from nemo_builder_plugin.schema import BuildSet, SubmitBuildResponse
+from nemo_builder_plugin.submit import (
+    BuildConflict,
+    InvalidBuildRequest,
+    MissingSecrets,
+    UpstreamUnavailable,
+    submit_build_set,
+)
+from nemo_builder_plugin.upstream import UpstreamRegistry
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NotFoundError, PermissionDeniedError
@@ -40,18 +49,8 @@ from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nemo_helix_plugin.service import NemoService, RouterSpec
-from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
-
-
-class SubmitBuildResponse(BaseModel):
-    """The submitted build's job and images."""
-
-    job: str = Field(description="Name of the build job, for logs and debugging.")
-    images: list[ContainerImage] = Field(
-        description="One row per build spec, created `pending`. POLL THESE, not the job."
-    )
 
 
 async def _get_row(entity_client: NemoEntitiesClient, workspace: str, name: str) -> ContainerImage:
@@ -103,7 +102,7 @@ def _build_router() -> APIRouter:
             return await jobs_client.create_job(workspace=workspace, body=request)
 
         async def get_job_fields(name: str):
-            return (await jobs_client.retrieve(name, workspace=workspace)).custom_fields or {}
+            return (await jobs_client.get_job(workspace=workspace, name=name)).data().custom_fields or {}
 
         secrets_client = AsyncSecretsClient.from_client(client)
 
@@ -113,6 +112,13 @@ def _build_router() -> APIRouter:
             except (NotFoundError, PermissionDeniedError):
                 return False
             return True
+
+        async def resolve_upstream(reference: ImageReference, platform: str) -> str:
+            registry = UpstreamRegistry()
+            try:
+                return (await asyncio.to_thread(registry.resolve, reference, platform=platform)).manifest_digest
+            finally:
+                registry.close()
 
         try:
             # The sandbox runs where the build's profiles put its steps.
@@ -125,11 +131,14 @@ def _build_router() -> APIRouter:
                 create_job=create_job,
                 get_job_fields=get_job_fields,
                 secret_readable=secret_readable,
+                resolve_upstream=resolve_upstream,
             )
         except InvalidBuildRequest as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except (BackendRejectedError, BuildConflict, MissingSecrets) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except UpstreamUnavailable as exc:
+            raise HTTPException(status_code=502, detail=f"Couldn't resolve an image to copy: {exc}") from exc
         except PermissionDeniedError as exc:
             # From Jobs, which lists the profiles and creates the job as the caller. A refused listing writes nothing;
             # a refused job leaves the rows written before it pending.

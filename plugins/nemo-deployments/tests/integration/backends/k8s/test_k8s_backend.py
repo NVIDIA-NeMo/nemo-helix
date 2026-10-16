@@ -68,11 +68,11 @@ def _never_config(
     return DeploymentConfig(
         name=name,
         workspace="itest",
-        restart_policy="Never",  # ty: ignore[unknown-argument]  # pyright: ignore[reportCallIssue]
+        restart_policy="Never",  # pyright: ignore[reportCallIssue]
         containers=[
             Container(name="main", image=ALPINE_IMAGE, command=["sh", "-c"], args=args or ["echo hello-from-k8s"])
         ],
-        config_files=config_files or [],  # ty: ignore[unknown-argument]  # pyright: ignore[reportCallIssue]
+        config_files=config_files or [],  # pyright: ignore[reportCallIssue]
     )
 
 
@@ -80,7 +80,7 @@ def _always_http_config() -> DeploymentConfig:
     return DeploymentConfig(
         name="http-cfg",
         workspace="itest",
-        restart_policy="Always",  # ty: ignore[unknown-argument]  # pyright: ignore[reportCallIssue]
+        restart_policy="Always",  # pyright: ignore[reportCallIssue]
         containers=[
             Container(
                 name="main",

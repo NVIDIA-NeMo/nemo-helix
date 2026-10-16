@@ -436,7 +436,7 @@ def merge_lora_cross_encoder_adapter(
         import gc
 
         import torch
-        from peft import PeftModel
+        from peft import PeftConfig, PeftModel
         from transformers import AutoModelForSequenceClassification, AutoTokenizer
     except ImportError as e:
         raise ImportError(
@@ -459,7 +459,13 @@ def merge_lora_cross_encoder_adapter(
         )
 
         logger.info("Loading adapter from %s", adapter_path)
-        model = PeftModel.from_pretrained(model, str(adapter_path))
+        # Automodel writes task_type SEQ_CLS but freezes the score head, so the adapter holds
+        # LoRA weights only. PEFT's SEQ_CLS loader would expect a saved score head and raise
+        # KeyError; loading as plain LoRA keeps the base model's head. Any modules_to_save the
+        # adapter does list are still loaded.
+        peft_config = PeftConfig.from_pretrained(str(adapter_path))
+        peft_config.task_type = None
+        model = PeftModel.from_pretrained(model, str(adapter_path), config=peft_config)
 
         logger.info("Merging adapter into base model")
         model = model.merge_and_unload()

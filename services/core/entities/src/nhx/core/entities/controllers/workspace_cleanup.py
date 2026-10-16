@@ -4,7 +4,11 @@
 import asyncio
 import logging
 import threading
-from datetime import datetime, timezone
+from asyncio import sleep as async_sleep
+from collections.abc import Awaitable, Callable, Iterable
+from contextlib import suppress
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NotFoundError
@@ -30,10 +34,27 @@ _TERMINAL_JOB_STATUSES: frozenset[HelixJobStatus] = frozenset(
 _JOB_TERMINAL_WAIT_TIMEOUT_SECONDS = 300.0
 _JOB_TERMINAL_WAIT_POLL_SECONDS = 2.0
 _FAILED_CLEANUP_RETRY_BACKOFF_SECONDS = 60.0
+_DELETION_LEASE_TIMEOUT_SECONDS = 60.0
+_DELETION_LEASE_RENEW_INTERVAL_SECONDS = 20.0
 
 
 class WorkspaceJobCleanupError(RuntimeError):
     """Raised when workspace cleanup cannot delete every job."""
+
+
+class WorkspaceDeletionLeaseLost(RuntimeError):
+    """Raised when another controller owns a workspace deletion attempt."""
+
+
+class WorkspaceResourceCleanupError(RuntimeError):
+    """Raised when workspace cleanup cannot delete every deployment, model, adapter, or fileset."""
+
+
+@dataclass
+class _WorkspaceDeletionLease:
+    workspace_name: str
+    updated_at: datetime
+    error: Exception | None = None
 
 
 def _job_status_value(status: object) -> HelixJobStatus | str:
@@ -58,6 +79,11 @@ def _failed_retry_backoff_elapsed(updated_at: datetime) -> bool:
     """Return whether a failed deletion is old enough to claim again."""
     age = _as_naive_utc(datetime.now(timezone.utc)) - _as_naive_utc(updated_at)
     return age.total_seconds() >= _FAILED_CLEANUP_RETRY_BACKOFF_SECONDS
+
+
+def _deletion_lease_expired(updated_at: datetime) -> bool:
+    age = _as_naive_utc(datetime.now(timezone.utc)) - _as_naive_utc(updated_at)
+    return age.total_seconds() >= _DELETION_LEASE_TIMEOUT_SECONDS
 
 
 def _deletion_stage_filter(stage: WorkspaceDeletionStage) -> ComparisonOperation:
@@ -121,47 +147,110 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
             WorkspaceCleanupContext(workspace_name=workspace.name),
         ):
             logger.info(f"Processing workspace deletion: {workspace.name}")
+            lease = await self._claim_workspace(workspace)
+            if lease is None:
+                return
+            await self._cleanup_claimed_workspace(workspace, lease)
 
-            try:
-                success = await self._workspace_repository.mark_workspace_for_deletion(
-                    name=workspace.name,
-                    deletion_stage=WorkspaceDeletionStage.DELETING,
-                )
-                if not success:
-                    logger.info(f"Workspace already being processed: {workspace.name}")
-                    return
+    async def _claim_workspace(self, workspace: Workspace) -> _WorkspaceDeletionLease | None:
+        stage = workspace._deletion_stage
+        if stage is None:
+            raise RuntimeError(f"Workspace {workspace.name} has no deletion stage")
+        lease_expired_before = None
+        if stage == WorkspaceDeletionStage.DELETING:
+            lease_expired_before = _as_naive_utc(datetime.now(timezone.utc)) - timedelta(
+                seconds=_DELETION_LEASE_TIMEOUT_SECONDS
+            )
+        claimed = await self._workspace_repository.claim_workspace_for_deletion(
+            name=workspace.name,
+            expected_stage=stage,
+            expected_updated_at=workspace.updated_at,
+            lease_expired_before=lease_expired_before,
+        )
+        if claimed is None:
+            logger.info("Workspace already being processed", extra={"workspace": workspace.name})
+            return None
+        return _WorkspaceDeletionLease(
+            workspace_name=workspace.name,
+            updated_at=claimed.updated_at,
+        )
 
-                await self._cleanup_jobs(workspace)
-                self.emit_heartbeat()
-                await self._cleanup_deployments(workspace)
-                self.emit_heartbeat()
-                # Models and adapters can hold fileset refs in this workspace.
-                # Delete them before filesets so same-workspace teardown is not
-                # blocked by the fileset DELETE 409 referential guard.
-                await self._cleanup_models_and_adapters(workspace)
-                self.emit_heartbeat()
-                await self._cleanup_filesets(workspace)
-                self.emit_heartbeat()
+    async def _cleanup_claimed_workspace(
+        self,
+        workspace: Workspace,
+        lease: _WorkspaceDeletionLease,
+    ) -> None:
+        cleanup_task = asyncio.create_task(self._cleanup_resources(workspace))
+        renewal_task = asyncio.create_task(self._renew_deletion_lease(lease))
+        try:
+            done, _ = await asyncio.wait(
+                {cleanup_task, renewal_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        except asyncio.CancelledError:
+            cleanup_task.cancel()
+            renewal_task.cancel()
+            await asyncio.gather(cleanup_task, renewal_task, return_exceptions=True)
+            raise
+        if renewal_task in done:
+            cleanup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await cleanup_task
+            await self._handle_renewal_failure(workspace, lease)
+            return
 
-                await self._workspace_repository.delete_workspace(name=workspace.name)
-                logger.info(f"Successfully deleted workspace: {workspace.name}")
+        await self._stop_lease_renewal(renewal_task)
+        cleanup_error: Exception | None = None
+        try:
+            cleanup_task.result()
+        except Exception as error:
+            cleanup_error = error
 
-            except Exception as e:
-                logger.error(
-                    f"Failed to cleanup workspace {workspace.name}: {e}",
-                    exc_info=True,
-                )
-                self._cleanup_errors.add(
-                    1,
-                    attributes={"error_type": "cleanup_failed"},
-                )
-                await self._workspace_repository.mark_workspace_for_deletion(
-                    name=workspace.name,
-                    deletion_stage=WorkspaceDeletionStage.FAILED,
-                )
+        if cleanup_error is not None:
+            await self._fail_cleanup_attempt(workspace, lease, cleanup_error)
+            return
+
+        deleted = await self._workspace_repository.delete_workspace_if_claimed(
+            name=workspace.name,
+            expected_updated_at=lease.updated_at,
+        )
+        if deleted:
+            logger.info("Successfully deleted workspace", extra={"workspace": workspace.name})
+        else:
+            logger.warning(
+                "Workspace deletion lease changed before final delete",
+                extra={"workspace": workspace.name},
+            )
+
+    async def _handle_renewal_failure(
+        self,
+        workspace: Workspace,
+        lease: _WorkspaceDeletionLease,
+    ) -> None:
+        if isinstance(lease.error, WorkspaceDeletionLeaseLost):
+            logger.warning(
+                "Workspace deletion lease was lost; cancelled cleanup",
+                extra={"workspace": workspace.name},
+            )
+            return
+        if lease.error is None:
+            raise RuntimeError("Workspace deletion lease renewal stopped without an error")
+        await self._fail_cleanup_attempt(workspace, lease, lease.error)
+
+    async def _cleanup_resources(self, workspace: Workspace) -> None:
+        await self._cleanup_jobs(workspace)
+        self.emit_heartbeat()
+        await self._cleanup_deployments(workspace)
+        self.emit_heartbeat()
+        # Models and adapters can hold fileset refs in this workspace.
+        # Delete them before filesets so the fileset referential guard does not block teardown.
+        await self._cleanup_models_and_adapters(workspace)
+        self.emit_heartbeat()
+        await self._cleanup_filesets(workspace)
+        self.emit_heartbeat()
 
     async def _next_workspace_for_cleanup(self) -> Workspace | None:
-        """Return the next pending deletion, or the oldest failed deletion past the backoff."""
+        """Return the next pending, retryable failed, or expired in-progress deletion."""
         pending, _ = await self._workspace_repository.list_workspaces(
             filter_op=_deletion_stage_filter(WorkspaceDeletionStage.PENDING),
             page_size=1,
@@ -174,20 +263,86 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
             page_size=1,
             sort="updated_at",
         )
-        if not failed:
-            logger.debug("No workspaces pending deletion")
-            return None
-
-        workspace = failed[0]
-        if not _failed_retry_backoff_elapsed(workspace.updated_at):
+        if failed:
+            workspace = failed[0]
+            if _failed_retry_backoff_elapsed(workspace.updated_at):
+                logger.info("Retrying failed workspace deletion", extra={"workspace": workspace.name})
+                return workspace
             logger.debug(
                 "Skipping failed workspace deletion still inside backoff",
                 extra={"workspace": workspace.name},
             )
-            return None
 
-        logger.info("Retrying failed workspace deletion", extra={"workspace": workspace.name})
-        return workspace
+        deleting, _ = await self._workspace_repository.list_workspaces(
+            filter_op=_deletion_stage_filter(WorkspaceDeletionStage.DELETING),
+            page_size=1,
+            sort="updated_at",
+        )
+        if deleting and _deletion_lease_expired(deleting[0].updated_at):
+            logger.info(
+                "Reclaiming expired workspace deletion",
+                extra={"workspace": deleting[0].name},
+            )
+            return deleting[0]
+
+        logger.debug("No workspaces ready for deletion cleanup")
+        return None
+
+    async def _renew_deletion_lease(self, lease: _WorkspaceDeletionLease) -> None:
+        loop = asyncio.get_running_loop()
+        # Leave one renewal interval before expiry. A stalled database call must
+        # stop this cleaner before another controller can reclaim the workspace.
+        deadline = loop.time() + _DELETION_LEASE_TIMEOUT_SECONDS - _DELETION_LEASE_RENEW_INTERVAL_SECONDS
+        try:
+            while True:
+                await asyncio.sleep(_DELETION_LEASE_RENEW_INTERVAL_SECONDS)
+                renewed = await asyncio.wait_for(
+                    self._workspace_repository.renew_workspace_deletion_lease(
+                        name=lease.workspace_name,
+                        expected_updated_at=lease.updated_at,
+                    ),
+                    timeout=max(deadline - loop.time(), 0.0),
+                )
+                if renewed is None:
+                    raise WorkspaceDeletionLeaseLost(lease.workspace_name)
+                lease.updated_at = renewed.updated_at
+                deadline = loop.time() + _DELETION_LEASE_TIMEOUT_SECONDS - _DELETION_LEASE_RENEW_INTERVAL_SECONDS
+                self.emit_heartbeat()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            lease.error = error
+
+    async def _stop_lease_renewal(self, renewal_task: asyncio.Task[None]) -> None:
+        if not renewal_task.done():
+            renewal_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await renewal_task
+
+    async def _fail_cleanup_attempt(
+        self,
+        workspace: Workspace,
+        lease: _WorkspaceDeletionLease,
+        error: Exception,
+    ) -> None:
+        logger.error(
+            "Failed to cleanup workspace",
+            exc_info=(type(error), error, error.__traceback__),
+            extra={"workspace": workspace.name},
+        )
+        self._cleanup_errors.add(
+            1,
+            attributes={"error_type": "cleanup_failed"},
+        )
+        failed = await self._workspace_repository.fail_workspace_deletion_if_claimed(
+            name=workspace.name,
+            expected_updated_at=lease.updated_at,
+        )
+        if not failed:
+            logger.warning(
+                "Workspace deletion lease changed before failure transition",
+                extra={"workspace": workspace.name},
+            )
 
     @tracer.start_as_current_span("workspace_cleanup/cleanup_jobs")
     async def _cleanup_jobs(self, workspace: Workspace) -> None:
@@ -254,7 +409,35 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
                     f"last status was {last_status}"
                 )
             self.emit_heartbeat()
-            await asyncio.sleep(_JOB_TERMINAL_WAIT_POLL_SECONDS)
+            await async_sleep(_JOB_TERMINAL_WAIT_POLL_SECONDS)
+
+    async def _delete_resources(
+        self,
+        names: Iterable[str],
+        delete: Callable[[str], Awaitable[object]],
+        *,
+        kind: str,
+    ) -> list[Exception]:
+        """Delete each resource. A missing resource is success; other errors are returned."""
+        cleanup_errors: list[Exception] = []
+        for name in names:
+            try:
+                logger.info(f"Deleting {kind}: {name}")
+                await delete(name)
+            except NotFoundError:
+                logger.info(f"{kind} already deleted: {name}")
+            except Exception as e:
+                logger.warning(f"Failed to delete {kind} {name}: {e}")
+                cleanup_errors.append(e)
+            finally:
+                self.emit_heartbeat()
+        return cleanup_errors
+
+    def _raise_if_resource_deletes_failed(self, workspace_name: str, errors: list[Exception], kind: str) -> None:
+        if errors:
+            raise WorkspaceResourceCleanupError(
+                f"Failed to delete {len(errors)} {kind} while cleaning workspace {workspace_name}"
+            )
 
     @tracer.start_as_current_span("workspace_cleanup/cleanup_deployments")
     async def _cleanup_deployments(self, workspace: Workspace) -> None:
@@ -262,22 +445,16 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
         try:
             models_client = AsyncModelsClient.from_client(self._client)
             deployments_response = await models_client.list_deployments(workspace=workspace.name)
-            deployments = [deployment async for deployment in deployments_response.items()]
-
-            for deployment in deployments:
-                try:
-                    logger.info(f"Deleting deployment: {deployment.name}")
-                    await models_client.delete_deployment(
-                        name=deployment.name,
-                        workspace=workspace.name,
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to delete deployment {deployment.name}: {e}")
-                finally:
-                    self.emit_heartbeat()
+            deployments = [deployment.name async for deployment in deployments_response.items()]
+            errors = await self._delete_resources(
+                deployments,
+                lambda name: models_client.delete_deployment(name=name, workspace=workspace.name),
+                kind="deployment",
+            )
+            self._raise_if_resource_deletes_failed(workspace.name, errors, "deployment(s)")
 
         except Exception as e:
-            logger.error(f"Failed to list deployments for workspace {workspace.name}: {e}")
+            logger.error(f"Failed to cleanup deployments for workspace {workspace.name}: {e}")
             raise
 
     @tracer.start_as_current_span("workspace_cleanup/cleanup_models_and_adapters")
@@ -286,36 +463,25 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
         try:
             models_client = AsyncModelsClient.from_client(self._client)
             adapters_response = await models_client.list_adapters(workspace=workspace.name)
-            adapters = [adapter async for adapter in adapters_response.items()]
+            adapters = [adapter.name async for adapter in adapters_response.items()]
             models_response = await models_client.list_models(workspace=workspace.name)
-            models = [model async for model in models_response.items()]
-
-            for adapter in adapters:
-                try:
-                    logger.info(f"Deleting adapter: {adapter.name}")
-                    await models_client.delete_adapter(
-                        name=adapter.name,
-                        workspace=workspace.name,
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to delete adapter {adapter.name}: {e}")
-                finally:
-                    self.emit_heartbeat()
-
-            for model in models:
-                try:
-                    logger.info(f"Deleting model: {model.name}")
-                    await models_client.delete_model(
-                        name=model.name,
-                        workspace=workspace.name,
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to delete model {model.name}: {e}")
-                finally:
-                    self.emit_heartbeat()
+            models = [model.name async for model in models_response.items()]
+            errors = await self._delete_resources(
+                adapters,
+                lambda name: models_client.delete_adapter(name=name, workspace=workspace.name),
+                kind="adapter",
+            )
+            errors.extend(
+                await self._delete_resources(
+                    models,
+                    lambda name: models_client.delete_model(name=name, workspace=workspace.name),
+                    kind="model",
+                )
+            )
+            self._raise_if_resource_deletes_failed(workspace.name, errors, "model(s) or adapter(s)")
 
         except Exception as e:
-            logger.error(f"Failed to list models or adapters for workspace {workspace.name}: {e}")
+            logger.error(f"Failed to cleanup models and adapters for workspace {workspace.name}: {e}")
             raise
 
     @tracer.start_as_current_span("workspace_cleanup/cleanup_filesets")
@@ -324,19 +490,14 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
         try:
             files = AsyncFilesClient.from_client(self._client)
             filesets_response = await files.list_filesets(workspace=workspace.name)
-
-            async for fileset in filesets_response.items():
-                try:
-                    logger.info(f"Deleting fileset: {fileset.name}")
-                    await files.delete_fileset(
-                        name=fileset.name,
-                        workspace=workspace.name,
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to delete fileset {fileset.name}: {e}")
-                finally:
-                    self.emit_heartbeat()
+            filesets = [fileset.name async for fileset in filesets_response.items()]
+            errors = await self._delete_resources(
+                filesets,
+                lambda name: files.delete_fileset(name=name, workspace=workspace.name),
+                kind="fileset",
+            )
+            self._raise_if_resource_deletes_failed(workspace.name, errors, "fileset(s)")
 
         except Exception as e:
-            logger.error(f"Failed to list filesets for workspace {workspace.name}: {e}")
+            logger.error(f"Failed to cleanup filesets for workspace {workspace.name}: {e}")
             raise

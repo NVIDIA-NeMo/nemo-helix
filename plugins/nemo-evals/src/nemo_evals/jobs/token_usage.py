@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar, cast
@@ -171,7 +171,7 @@ def capture_agent_evaluation_usage(
     request_logs: Sequence[Mapping[str, object]],
     *,
     include_trial_measurements: bool,
-) -> Iterator[_ResultCapture[AgentEvalResult]]:
+) -> Generator[_ResultCapture[AgentEvalResult], None, None]:
     """Report agent-evaluation usage in a source-local finalizer.
 
     Request logs are side-channel data and can be reported even if the evaluator
@@ -195,7 +195,7 @@ def capture_agent_evaluation_usage(
 
 
 @contextmanager
-def capture_evaluator_request_logs() -> Iterator[list[dict[str, Any]]]:
+def capture_evaluator_request_logs() -> Generator[list[dict[str, Any]], None, None]:
     """Capture evaluator inference calls that are not persisted on agent scores."""
     request_logs: list[dict[str, Any]] = []
     token = requests_log_var.set(request_logs)

@@ -10,6 +10,7 @@ import {
   defaultColumnName,
   defaultColumnValues,
   findColumnOption,
+  MODEL_ALIAS_KEY,
 } from '@studio/routes/DataDesignerJobBuildRoute/columns';
 import {
   type BuilderModel,
@@ -237,6 +238,22 @@ export const useJobBuilder = (
     [getValues, removeColumnField]
   );
 
+  const pointLlmColumnsAtOnlyModel = useCallback(() => {
+    const models = getValues('models');
+    if (models.length !== 1) {
+      return;
+    }
+    const alias = models[0].alias.trim();
+    if (!alias) {
+      return;
+    }
+    getValues('columns').forEach((column, index) => {
+      if (MODEL_ALIAS_KEY in column.values && column.values[MODEL_ALIAS_KEY] !== alias) {
+        form.setValue(`columns.${index}.values.${MODEL_ALIAS_KEY}`, alias, { shouldDirty: true });
+      }
+    });
+  }, [form, getValues]);
+
   const handleAddModel = useCallback(
     (selection: ModelSelection, provider: string) => {
       const id = `model-${nextModelId.current++}`;
@@ -249,18 +266,22 @@ export const useJobBuilder = (
           new Set(models.map((model) => model.alias.trim()))
         )
       );
+      pointLlmColumnsAtOnlyModel();
       selectModel(id);
     },
-    [appendModel, getValues, selectModel]
+    [appendModel, getValues, pointLlmColumnsAtOnlyModel, selectModel]
   );
 
   const removeModel = useCallback(
     (id: string) => {
       const index = getValues('models').findIndex((model) => model.id === id);
-      if (index >= 0) removeModelField(index);
+      if (index >= 0) {
+        removeModelField(index);
+        pointLlmColumnsAtOnlyModel();
+      }
       setSelectedModelId((current) => (current === id ? null : current));
     },
-    [getValues, removeModelField]
+    [getValues, removeModelField, pointLlmColumnsAtOnlyModel]
   );
 
   const getBuilderValues = useCallback((): JobBuilderValues => {

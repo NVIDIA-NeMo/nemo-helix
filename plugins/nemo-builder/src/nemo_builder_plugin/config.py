@@ -10,7 +10,12 @@ from __future__ import annotations
 
 from typing import Any, ClassVar, Self
 
-from nemo_builder_plugin.identity import ImageIdentityError, validate_registry_host, validate_repository
+from nemo_builder_plugin.identity import (
+    ImageIdentityError,
+    normalize_registry,
+    validate_registry_host,
+    validate_repository,
+)
 from nemo_helix_plugin.config import NemoConfig
 from pydantic import (
     BaseModel,
@@ -136,6 +141,22 @@ class BuilderConfig(NemoConfig):
     def _prefix_is_a_repository_path(cls, value: str) -> str:
         value = value.strip("/")
         return validate_repository(value) if value else value
+
+    import_registries: list[str] = Field(
+        default_factory=lambda: ["docker.io", "ghcr.io", "nvcr.io", "quay.io"],
+        description=(
+            "Registries a build may copy a published image from, as hosts. A copy from any other registry is "
+            "refused with `409`. Empty refuses every copy. Images are read anonymously, so only public ones copy."
+        ),
+    )
+
+    @field_validator("import_registries")
+    @classmethod
+    def _import_registries_are_hosts(cls, value: list[str]) -> list[str]:
+        try:
+            return sorted({normalize_registry(host) for host in value})
+        except ImageIdentityError as exc:
+            raise ValueError(f"import_registries must be registry hosts: {exc}") from exc
 
     # The push step's credentials: platform secrets in the submitting workspace, which Jobs reads as the
     # submitter and gives the push step as environment variables. A workspace without them can't build.

@@ -6,8 +6,9 @@
 from __future__ import annotations
 
 import io
+import json
 import tarfile
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -17,7 +18,7 @@ import pytest
 from nemo_builder_plugin.run import fetch
 from nemo_builder_plugin.run.fetch import ArchiveRefused, clear_earlier_attempts, fetch_source
 from nemo_builder_plugin.run.supervise import _volume_mounts
-from nemo_builder_plugin.steps import ContextSource, SandboxGroup, SandboxImage, WorkLayout
+from nemo_builder_plugin.steps import ContextSource, FetchImport, SandboxGroup, SandboxImage, WorkLayout
 from nemo_helix_plugin.files.client import FilesClient
 
 JOB_SLICE = "jobs/default/abc"
@@ -57,7 +58,7 @@ class FakeFiles:
                 return content
 
             @contextmanager
-            def stream(self, chunk_size: int | None = None) -> Iterator[Iterator[bytes]]:
+            def stream(self, chunk_size: int | None = None) -> Generator[Iterator[bytes], None, None]:
                 size = chunk_size or 7
                 yield iter([content[i : i + size] for i in range(0, len(content), size)])
 
@@ -229,3 +230,40 @@ class TestHostileListings:
                 ContextSource(fileset="default/fs-a"),
                 workspace="default",
             )
+
+
+class TestPullingACopy:
+    REF = "docker.io/library/ubuntu@sha256:" + "c" * 64
+
+    def _pull(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, writes: list[str]) -> Path:
+        layout = WorkLayout(PurePosixPath(tmp_path))
+        calls: list[list[str]] = []
+
+        def crane(args: list[str], **_: object) -> str:
+            calls.append(args)
+            slot = Path(args[-1])
+            slot.mkdir(parents=True)
+            (slot / "index.json").write_text(json.dumps({"manifests": [{"digest": d} for d in writes]}))
+            return ""
+
+        monkeypatch.setattr(fetch, "run_tool", crane)
+        copy = FetchImport(image="demo-1.copy0", ref=self.REF, platform="linux/arm64")
+        try:
+            fetch.pull_copy(layout, copy)
+        finally:
+            assert calls == [["crane", "pull", "--format=oci", "--platform=linux/arm64", self.REF, calls[0][-1]]]
+        return Path(layout.output(copy.image))
+
+    def test_the_one_manifest_lands_in_its_images_layout_slot(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        slot = self._pull(tmp_path, monkeypatch, writes=["sha256:" + "c" * 64])
+        assert (slot / "index.json").exists()
+
+    def test_a_pull_that_yields_another_manifest_leaves_no_slot(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Push reads a missing slot as a failed image; a wrong one it would publish."""
+        with pytest.raises(RuntimeError, match="not exactly"):
+            self._pull(tmp_path, monkeypatch, writes=["sha256:" + "d" * 64])
+        assert not (tmp_path / "out").exists() or not any((tmp_path / "out").iterdir())

@@ -53,7 +53,7 @@ const detailOf = (error: unknown): string | undefined => {
         .join('; ')
     : raw;
   if (typeof candidate !== 'string' || !candidate.trim()) return undefined;
-  return candidate.length > 240 ? `${candidate.slice(0, 240)}…` : candidate;
+  return candidate;
 };
 
 const describeFailure = (error: unknown): string => {

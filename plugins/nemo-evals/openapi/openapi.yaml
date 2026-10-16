@@ -561,6 +561,247 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs:
+    post:
+      tags:
+      - Evals Plugin Taskset Run Routes
+      summary: Submit Taskset Run
+      description: "Freeze and accept a Harbor run, returning its original status\
+        \ on a keyed retry.\n\nThe caller must be able to read every source: the taskset,\
+        \ its member tasks, their metrics and\nmetric models. Submission copies those\
+        \ definitions into a plan stored in this workspace, so\nanyone who can read\
+        \ this workspace's files or jobs can read the copy, even without access to\n\
+        the source workspaces.\n\nArgs:\n    workspace: Workspace that owns the run.\n\
+        \    req: Validated stored Harbor taskset and execution inputs.\n    response:\
+        \ HTTP response whose status distinguishes acceptance from replay.\n    caller:\
+        \ Effective authenticated principal, supplied by the platform dependency.\n\
+        \    service: Caller-delegated request-scoped acceptance service.\n\nReturns:\n\
+        \    Public run status with advisory overlap warnings; 201 for acceptance\
+        \ or 200\n    for replay. Submission creates no Jobs or member records.\n\n\
+        Raises:\n    RequestValidationError: The execution budget exceeds the operator\
+        \ maximum.\n    HTTPException: Source denial (403), conflicting key (409),\
+        \ resolution rejection\n        (422), or a sanitized unexpected failure (500)."
+      operationId: submit_taskset_run_apis_evals_v2_workspaces__workspace__agent_evaluate_runs_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TasksetRunInput'
+      responses:
+        '201':
+          description: Accept a new run with frozen taskset and agent inputs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TasksetRunSubmitResponse'
+        '200':
+          description: Replay an identical existing run.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TasksetRunSubmitResponse'
+        '409':
+          description: The idempotency key already belongs to a different request.
+        '422':
+          description: Invalid request, excessive timeout, or missing or incompatible
+            source.
+    get:
+      tags:
+      - Evals Plugin Taskset Run Routes
+      summary: List Taskset Runs
+      description: "Read a newest-first workspace run page with independent active/mine\
+        \ filters.\n\nArgs:\n    workspace: Workspace containing the records.\n  \
+        \  active: Restrict to accepted and running phases when True.\n    mine: Restrict\
+        \ to the effective caller's records when True.\n    page: One-based page number,\
+        \ validated by FastAPI.\n    page_size: Maximum page size, from 1 to 1000.\n\
+        \    caller: Effective principal supplied by the platform dependency.\n  \
+        \  service: Shared request-scoped run service.\n\nReturns:\n    Stored statuses\
+        \ and filtered pagination counts, excluding null optionals.\n\nRaises:\n \
+        \   HTTPException: Unexpected storage or projection failure, sanitized to\
+        \ 500."
+      operationId: list_taskset_runs_apis_evals_v2_workspaces__workspace__agent_evaluate_runs_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: active
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Include only accepted and running runs.
+          default: false
+          title: Active
+        description: Include only accepted and running runs.
+      - name: mine
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Include only runs created by the effective caller.
+          default: false
+          title: Mine
+        description: Include only runs created by the effective caller.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: One-based page number.
+          default: 1
+          title: Page
+        description: One-based page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Maximum runs on the requested page.
+          default: 100
+          title: Page Size
+        description: Maximum runs on the requested page.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TasksetRunStatussPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs/{run_id}:
+    get:
+      tags:
+      - Evals Plugin Taskset Run Routes
+      summary: Get Taskset Run
+      description: "Read one stored run without loading its plan or joining its tasks\
+        \ and Jobs.\n\nArgs:\n    workspace: Workspace that scopes the record lookup.\n\
+        \    run_id: Public run name in that workspace.\n    service: Shared request-scoped\
+        \ run service.\n\nReturns:\n    Current stored status, excluding null optionals\
+        \ and internal metadata.\n\nRaises:\n    HTTPException: The record is absent\
+        \ (404), or an unexpected storage or\n        projection failure occurs (sanitized\
+        \ 500)."
+      operationId: get_taskset_run_apis_evals_v2_workspaces__workspace__agent_evaluate_runs__run_id__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TasksetRunStatus'
+        '404':
+          description: Run not found in this workspace.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs/{run_id}/tasks:
+    get:
+      tags:
+      - Evals Plugin Taskset Run Routes
+      summary: List Taskset Run Tasks
+      description: "Read stored run members in numeric task-index order without inspecting\
+        \ Jobs.\n\nArgs:\n    workspace: Workspace containing the run and its children.\n\
+        \    run_id: Public run name whose persisted entity ID scopes the members.\n\
+        \    phase: Optional stored member phase filter.\n    page: One-based page\
+        \ number, validated by FastAPI.\n    page_size: Maximum page size, from 1\
+        \ to 1000.\n    service: Shared request-scoped run service.\n\nReturns:\n\
+        \    Stored task page and filtered counts; existing runs with no members return\n\
+        \    an empty page. Null Job/error details are omitted.\n\nRaises:\n    HTTPException:\
+        \ The parent run is absent (404), or unexpected storage or\n        projection\
+        \ failure occurs (sanitized 500)."
+      operationId: list_taskset_run_tasks_apis_evals_v2_workspaces__workspace__agent_evaluate_runs__run_id__tasks_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      - name: phase
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/MemberPhase'
+          description: Include only members in this stored phase.
+          title: Phase
+        description: Include only members in this stored phase.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: One-based page number.
+          default: 1
+          title: Page
+        description: One-based page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Maximum tasks on the requested page.
+          default: 100
+          title: Page Size
+        description: Maximum tasks on the requested page.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TasksetRunTasksPage'
+        '404':
+          description: Run not found in this workspace.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/evals/v2/workspaces/{workspace}/eval-results:
     get:
       tags:
@@ -2113,6 +2354,186 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/tasks/{name}/revisions/{revision}/image-builds:
+    post:
+      tags:
+      - Evals Plugin Task Image Build Routes
+      summary: Request Task Image Build
+      description: 'Build every container image a Harbor task revision needs.
+
+
+        Repeating the request while a build is running, or after it succeeded, returns
+        that build.
+
+        After a failed build, it starts the next attempt.'
+      operationId: request_task_image_build_apis_evals_v2_workspaces__workspace__tasks__name__revisions__revision__image_builds_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 255
+          pattern: ^[\w\-\.]+$
+          title: Name
+      - name: revision
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 255
+          pattern: ^[\w\-\.]+$
+          description: Revision digest or tag.
+          title: Revision
+        description: Revision digest or tag.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/ImageBuildRequest'
+              title: Request
+      responses:
+        '202':
+          description: The build started, or the one already running or done
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImageBuild'
+        '403':
+          description: The caller may not submit container image builds
+        '404':
+          description: Task or revision not found
+        '409':
+          description: The build's Job name is held by another Job
+        '422':
+          description: The task's images can't be built
+    get:
+      tags:
+      - Evals Plugin Task Image Build Routes
+      summary: List Task Image Builds
+      description: List the container image builds of a task revision.
+      operationId: list_task_image_builds_apis_evals_v2_workspaces__workspace__tasks__name__revisions__revision__image_builds_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 255
+          pattern: ^[\w\-\.]+$
+          title: Name
+      - name: revision
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 255
+          pattern: ^[\w\-\.]+$
+          description: Revision digest or tag.
+          title: Revision
+        description: Revision digest or tag.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
+      responses:
+        '200':
+          description: The revision's builds, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImageBuildsPage'
+        '404':
+          description: Task or revision not found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/tasks/{name}/revisions/{revision}/image-builds/{build_id}:
+    get:
+      tags:
+      - Evals Plugin Task Image Build Routes
+      summary: Get Task Image Build
+      description: Get one container image build of a task revision.
+      operationId: get_task_image_build_apis_evals_v2_workspaces__workspace__tasks__name__revisions__revision__image_builds__build_id__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 255
+          pattern: ^[\w\-\.]+$
+          title: Name
+      - name: revision
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 255
+          pattern: ^[\w\-\.]+$
+          description: Revision digest or tag.
+          title: Revision
+        description: Revision digest or tag.
+      - name: build_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Build Id
+      responses:
+        '200':
+          description: One build and the status of each image
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImageBuild'
+        '404':
+          description: Task, revision or build not found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/evals/v2/workspaces/{workspace}/tasks/{name}/tags/{tag}:
     put:
       tags:
@@ -2620,14 +3041,19 @@ components:
           type: integer
           minimum: 1.0
           title: Max Concurrent Tasks
-          description: Maximum number of tasks evaluated concurrently. Distinct from
-            a target's `params.parallelism`, which bounds concurrent inference requests
-            *within* trial generation.
+          description: 'Concurrency for this evaluation''s SDK work. Harbor and Gym:
+            concurrent scoring calls only (trials are bounded by the runner). Other
+            runners: concurrent trials and scoring calls. For model and agent targets,
+            target.params.parallelism bounds concurrent inference requests during
+            trial generation. On Kubernetes runs it applies per task Job; the task-Job
+            cap is execution.max_concurrent_task_jobs.'
           default: 4
         fail_fast:
           type: boolean
           title: Fail Fast
-          description: Stop the run on the first scoring failure when True.
+          description: Fail on the first metric error instead of recording an errored
+            score. On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks
+            budget can also fail the run and cancel remaining task Jobs.
           default: false
         labels:
           additionalProperties:
@@ -2871,14 +3297,19 @@ components:
           type: integer
           minimum: 1.0
           title: Max Concurrent Tasks
-          description: Maximum number of tasks evaluated concurrently. Distinct from
-            a target's `params.parallelism`, which bounds concurrent inference requests
-            *within* trial generation.
+          description: 'Concurrency for this evaluation''s SDK work. Harbor and Gym:
+            concurrent scoring calls only (trials are bounded by the runner). Other
+            runners: concurrent trials and scoring calls. For model and agent targets,
+            target.params.parallelism bounds concurrent inference requests during
+            trial generation. On Kubernetes runs it applies per task Job; the task-Job
+            cap is execution.max_concurrent_task_jobs.'
           default: 4
         fail_fast:
           type: boolean
           title: Fail Fast
-          description: Stop the run on the first scoring failure when True.
+          description: Fail on the first metric error instead of recording an errored
+            score. On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks
+            budget can also fail the run and cancel remaining task Jobs.
           default: false
         labels:
           additionalProperties:
@@ -3069,6 +3500,12 @@ components:
         name:
           title: Name
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -3511,6 +3948,67 @@ components:
       - scores
       title: AggregatedMetricResult
       description: Result of aggregating metric scores with full statistics.
+    BuildImage:
+      properties:
+        role:
+          type: string
+          title: Role
+          description: 'The container the image runs as, named as Harbor names it:
+            `main`, the agent''s container; a compose service''s own name; or `verifier`,
+            for a separate verifier.'
+        source:
+          type: string
+          enum:
+          - dockerfile
+          - prebuilt
+          title: Source
+          description: '`dockerfile` when built from the task archive, `prebuilt`
+            when the task names an image, which is copied unchanged into the platform''s
+            registry.'
+        context_path:
+          title: Context Path
+          description: Build context inside the task archive, for a `dockerfile` image.
+          type: string
+        dockerfile:
+          title: Dockerfile
+          description: Dockerfile path relative to `context_path`, for a `dockerfile`
+            image.
+          type: string
+        image:
+          title: Image
+          description: The image the task names, for a `prebuilt` image.
+          type: string
+        status:
+          type: string
+          enum:
+          - pending
+          - building
+          - ready
+          - failed
+          title: Status
+          default: pending
+        builder_image:
+          title: Builder Image
+          description: The Builder container image record.
+          type: string
+        build_job:
+          title: Build Job
+          description: The Builder job building this image.
+          type: string
+        image_ref:
+          title: Image Ref
+          description: '`<registry>/<repository>@<digest>` once the image is ready.'
+          type: string
+        error:
+          title: Error
+          type: string
+      additionalProperties: false
+      type: object
+      required:
+      - role
+      - source
+      title: BuildImage
+      description: One container image a task needs, and where its build stands.
     BundledMetricOutputSpec:
       properties:
         name:
@@ -3817,6 +4315,12 @@ components:
         name:
           title: Name
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -4740,11 +5244,13 @@ components:
           description: Number of attempts Harbor runs per task.
           default: 1
         n_concurrent_trials:
+          title: N Concurrent Trials
+          description: Maximum concurrent Harbor trials. Native Harbor's default parallelism
+            is 4; unset or null uses that default on Docker. Must be unset or null
+            on Kubernetes runs, which run trials one at a time.
+          nullable: true
           type: integer
           minimum: 1.0
-          title: N Concurrent Trials
-          description: Maximum concurrent Harbor trials.
-          default: 4
         max_retries:
           type: integer
           minimum: 0.0
@@ -4876,6 +5382,121 @@ components:
       title: HarborTaskHash
       description: Producer fingerprint for future use; never an integrity or execution
         gate.
+    HarborTaskJobsExecutionInput:
+      properties:
+        kind:
+          type: string
+          const: harbor-task-jobs
+          title: Kind
+          description: 'Execution strategy: one Kubernetes Job per Harbor task. Future
+            strategies add new kinds.'
+          default: harbor-task-jobs
+        sandbox_policy:
+          type: string
+          title: Sandbox Policy
+          description: 'Name of an operator-approved sandbox policy: which sandbox
+            provider and isolation policy each task''s agent and environment run under,
+            meaning the security and isolation boundary. It does not control compute
+            resources; see dispatcher_profile. Operators define the available policies.'
+          examples:
+          - harbor-standard
+        dispatcher_profile:
+          type: string
+          title: Dispatcher Profile
+          description: Name of a Jobs Service profile that decides where task Jobs
+            run and what resources they get. Operators define the available profiles;
+            defaults to local-k8s, the profile the Helm chart ships.
+          default: local-k8s
+          examples:
+          - local-k8s
+        missing_prebuilt_image:
+          type: string
+          enum:
+          - fail
+          - build
+          title: Missing Prebuilt Image
+          description: What to do when a task pins a prebuilt image (its docker_image)
+            and that image is no longer in the registry. 'fail' (default) fails that
+            task with image_unavailable. 'build' builds the image from the task's
+            Dockerfile instead and records the substitution; the result may differ
+            from the image the task author benchmarked, and a task without a Dockerfile
+            still fails. Does not apply to tasks without a pinned image, which are
+            always built from their Dockerfile, or to an image this run built that
+            disappears mid-run, which is always rebuilt.
+          default: fail
+          examples:
+          - fail
+          - build
+        max_concurrent_task_jobs:
+          title: Max Concurrent Task Jobs
+          description: Maximum number of this run's task Jobs running at once. Omit
+            to rely only on the job controller's admission limits.
+          examples:
+          - 5
+          type: integer
+          minimum: 1.0
+        max_failed_tasks:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: string
+            pattern: ^(100|[1-9]?\d)%$
+          title: Max Failed Tasks
+          description: Failed tasks the run tolerates, as a count or a percent of
+            the taskset's tasks. Once exceeded, the run fails and its remaining task
+            Jobs are cancelled. Submit resolves a percent into a count. Omit for no
+            limit.
+          examples:
+          - 3
+          - 10%
+      additionalProperties: false
+      type: object
+      required:
+      - sandbox_policy
+      title: HarborTaskJobsExecutionInput
+      description: 'Settings that run a Harbor taskset as many independent task Jobs
+        instead of one Job.
+
+
+        Passing it as ``execution`` selects the Kubernetes taskset-run path: submit
+        pins
+
+        the taskset revision and returns a durable run handle. Later execution stages
+
+        register one Jobs Service Job per task and combine the per-task results.
+
+
+        It exists because these settings mean nothing on the Docker path: where task
+        Jobs are
+
+        placed, which sandbox they may use, and when to give up on a run. Keeping
+        them in their
+
+        own model, selected by ``kind``, lets future execution strategies add new
+        models rather
+
+        than new ``submit`` methods. It never changes benchmark content or which agent
+        runs.
+
+
+        Submit validates this input, resolves the percent form of ``max_failed_tasks``
+        into a
+
+        count, and stores the M1 execution caps and missing-image policy in the run''s
+        plan.
+
+        In M1, ``sandbox_policy`` and ``dispatcher_profile`` participate in request
+        identity
+
+        only; their names are intentionally neither resolved nor stored while execution
+        is
+
+        unavailable. M2 Story 3 validates these selections and adds the resolved sandbox
+
+        policy, dispatcher profile and pinned dispatcher image as required plan fields
+        before
+
+        execution is enabled. Earlier development runs are deleted rather than migrated.'
     HelixJobListResultResponse:
       properties:
         data:
@@ -5167,6 +5788,101 @@ components:
       - count
       title: HistogramBin
       description: A single bin in a histogram.
+    ImageBuild:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: The build's attempt number for this revision.
+        task:
+          type: string
+          title: Task
+        revision:
+          type: string
+          title: Revision
+          description: Digest of the task revision being built.
+        status:
+          type: string
+          enum:
+          - pending
+          - running
+          - ready
+          - failed
+          title: Status
+        job:
+          type: string
+          title: Job
+        allowed_registries:
+          items:
+            type: string
+          type: array
+          title: Allowed Registries
+        images:
+          items:
+            $ref: '#/components/schemas/BuildImage'
+          type: array
+          title: Images
+        error:
+          title: Error
+          type: string
+        created_at:
+          title: Created At
+          type: string
+          format: date-time
+        updated_at:
+          title: Updated At
+          type: string
+          format: date-time
+      type: object
+      required:
+      - id
+      - task
+      - revision
+      - status
+      - job
+      - allowed_registries
+      - images
+      title: ImageBuild
+      description: An image build of one task revision.
+    ImageBuildRequest:
+      properties:
+        allowed_registries:
+          items:
+            type: string
+          type: array
+          title: Allowed Registries
+          description: Registry hosts, such as `docker.io`, that a prebuilt image
+            named by the task may be copied from. Narrows the registries the deployment
+            allows; empty allows all of those. A prebuilt image from any other registry
+            fails the build.
+      additionalProperties: false
+      type: object
+      title: ImageBuildRequest
+      description: Options for an image build of one task revision.
+    ImageBuildsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/ImageBuild'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: ImageBuildsPage
     InferenceParams:
       properties:
         temperature:
@@ -5438,6 +6154,24 @@ components:
         the url + env + secrets for that same name. Matched by server-name key at
 
         compile time; ``secrets`` are merged into the server''s ``env``.'
+    MemberPhase:
+      type: string
+      enum:
+      - image_preparing
+      - image_ready
+      - registered
+      - succeeded
+      - failed
+      - cancelled
+      - expired
+      title: MemberPhase
+      description: 'Encode preparation and execution progress for an individual run
+        member.
+
+
+        String values persist image preparation, Job registration, and settled task
+
+        outcomes so controllers can track each task without changing the run''s plan.'
     MetadataItem:
       properties:
         key:
@@ -6268,6 +7002,21 @@ components:
       - -updated_at
       title: ResultSort
       description: Sort fields for result queries (``-`` prefix sorts descending).
+    ResultState:
+      type: string
+      enum:
+      - pending
+      - ready
+      - failed
+      - none
+      title: ResultState
+      description: 'Encode result availability independently of the run''s execution
+        phase.
+
+
+        Persisted values distinguish pending finalization, ready results, failed
+
+        finalization, and no result, allowing readers to interpret terminal runs.'
     Retrieval:
       properties:
         embeddings:
@@ -6492,6 +7241,12 @@ components:
         name:
           title: Name
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -7396,6 +8151,307 @@ components:
         \ resolve to, even if the\nsubmitted member names were identical. A **pinned**\
         \ ref is fixed against that too, and is what an\nevaluation needs to stay\
         \ comparable across a ``replace``."
+    TasksetRunInput:
+      properties:
+        spec:
+          allOf:
+          - $ref: '#/components/schemas/AgentEvalInputSpec'
+          description: 'Evaluation inputs: a stored taskset reference and Harbor runner
+            target. Inline tasks and precomputed trials are not supported for Kubernetes
+            runs.'
+        execution:
+          allOf:
+          - $ref: '#/components/schemas/HarborTaskJobsExecutionInput'
+          description: 'Kubernetes task Job settings: sandbox policy, dispatcher profile,
+            run-wide task Job concurrency and failure tolerance.'
+        idempotency_key:
+          title: Idempotency Key
+          description: Optional caller-supplied key, scoped to workspace and caller,
+            so retries of the same request return the accepted run. Omit for a new
+            keyless run.
+          type: string
+          maxLength: 256
+          minLength: 1
+        timeout_seconds:
+          title: Timeout Seconds
+          description: Execution budget in seconds from acceptance. Omit to use evals.runs.default_timeout_seconds.
+            Must not exceed evals.runs.max_timeout_seconds.
+          type: integer
+          exclusiveMinimum: 0.0
+      additionalProperties: false
+      type: object
+      required:
+      - spec
+      - execution
+      title: TasksetRunInput
+      description: "Validate a stored Harbor taskset request for independent Kubernetes\
+        \ task Jobs.\n\nConstruction produces a validated request without resolving\
+        \ references or doing\nservice I/O. Submit uses it to derive request identity\
+        \ and acceptance budgets.\n\nRaises:\n    ValidationError: Fields are invalid\
+        \ or the spec violates Kubernetes run rules."
+    TasksetRunPhase:
+      type: string
+      enum:
+      - accepted
+      - running
+      - completed
+      - failed
+      - cancelled
+      - expired
+      title: TasksetRunPhase
+      description: 'Encode execution progress as stable string values for persisted
+        run records.
+
+
+        Controllers move from accepted to running or a terminal phase; result
+
+        finalization is tracked separately by ``ResultState`` so execution completion
+
+        does not imply that combined results are already available.'
+    TasksetRunStatus:
+      properties:
+        run_id:
+          type: string
+          title: Run Id
+          description: Run name used to address the accepted run in API routes.
+        workspace:
+          type: string
+          title: Workspace
+          description: Workspace containing the run.
+        taskset_ref:
+          type: string
+          title: Taskset Ref
+          description: Pinned taskset revision this run evaluates, for example default/sort-suite#<64-hex
+            digest>.
+        phase:
+          allOf:
+          - $ref: '#/components/schemas/TasksetRunPhase'
+          description: Execution progress. Starts accepted; terminal phases never
+            change.
+        result_state:
+          allOf:
+          - $ref: '#/components/schemas/ResultState'
+          description: Availability of the combined results, tracked independently
+            of phase.
+        accepted_at:
+          type: string
+          format: date-time
+          title: Accepted At
+          description: When submit accepted the run.
+        execution_deadline_at:
+          type: string
+          format: date-time
+          title: Execution Deadline At
+          description: accepted_at plus the effective timeout; unfinished tasks expire
+            then. Retries do not reset it.
+        finalization_deadline_at:
+          type: string
+          format: date-time
+          title: Finalization Deadline At
+          description: execution_deadline_at plus operator grace; the final result
+            must be saved by then.
+        cancel_requested_at:
+          title: Cancel Requested At
+          description: When a caller requested cancellation; None if never requested.
+          type: string
+          format: date-time
+        error:
+          title: Error
+          description: Why the run failed or expired; None otherwise.
+          type: string
+        created_by:
+          title: Created By
+          description: Principal ID of the caller who created the run; None when creator
+            metadata is unavailable.
+          type: string
+        idempotency_key:
+          title: Idempotency Key
+          description: Caller-supplied submit key; None for a keyless run.
+          type: string
+      additionalProperties: false
+      type: object
+      required:
+      - run_id
+      - workspace
+      - taskset_ref
+      - phase
+      - result_state
+      - accepted_at
+      - execution_deadline_at
+      - finalization_deadline_at
+      title: TasksetRunStatus
+      description: 'Represent public run state for submit, read and cancellation responses.
+
+
+        Instances expose stored domain state and caller identity while excluding plan
+
+        bindings, request digests and Entity Store persistence metadata.'
+    TasksetRunStatussPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/TasksetRunStatus'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: TasksetRunStatussPage
+    TasksetRunSubmitResponse:
+      properties:
+        run_id:
+          type: string
+          title: Run Id
+          description: Run name used to address the accepted run in API routes.
+        workspace:
+          type: string
+          title: Workspace
+          description: Workspace containing the run.
+        taskset_ref:
+          type: string
+          title: Taskset Ref
+          description: Pinned taskset revision this run evaluates, for example default/sort-suite#<64-hex
+            digest>.
+        phase:
+          allOf:
+          - $ref: '#/components/schemas/TasksetRunPhase'
+          description: Execution progress. Starts accepted; terminal phases never
+            change.
+        result_state:
+          allOf:
+          - $ref: '#/components/schemas/ResultState'
+          description: Availability of the combined results, tracked independently
+            of phase.
+        accepted_at:
+          type: string
+          format: date-time
+          title: Accepted At
+          description: When submit accepted the run.
+        execution_deadline_at:
+          type: string
+          format: date-time
+          title: Execution Deadline At
+          description: accepted_at plus the effective timeout; unfinished tasks expire
+            then. Retries do not reset it.
+        finalization_deadline_at:
+          type: string
+          format: date-time
+          title: Finalization Deadline At
+          description: execution_deadline_at plus operator grace; the final result
+            must be saved by then.
+        cancel_requested_at:
+          title: Cancel Requested At
+          description: When a caller requested cancellation; None if never requested.
+          type: string
+          format: date-time
+        error:
+          title: Error
+          description: Why the run failed or expired; None otherwise.
+          type: string
+        created_by:
+          title: Created By
+          description: Principal ID of the caller who created the run; None when creator
+            metadata is unavailable.
+          type: string
+        idempotency_key:
+          title: Idempotency Key
+          description: Caller-supplied submit key; None for a keyless run.
+          type: string
+        warnings:
+          items:
+            type: string
+          type: array
+          title: Warnings
+          description: Advisory notices about this caller's overlapping active runs
+            on the same taskset revision.
+      additionalProperties: false
+      type: object
+      required:
+      - run_id
+      - workspace
+      - taskset_ref
+      - phase
+      - result_state
+      - accepted_at
+      - execution_deadline_at
+      - finalization_deadline_at
+      title: TasksetRunSubmitResponse
+      description: Return the accepted run with advisory warnings for this submission
+        only.
+    TasksetRunTask:
+      properties:
+        task:
+          type: string
+          title: Task
+          description: Member name within the run, for example task-7.
+        task_index:
+          type: integer
+          minimum: 0.0
+          title: Task Index
+          description: Zero-based index of the task in the run's resolved task list.
+        phase:
+          allOf:
+          - $ref: '#/components/schemas/MemberPhase'
+          description: Stored image preparation and execution progress of this task.
+        job:
+          title: Job
+          description: Name of this task's Jobs Service Job; omitted until registered.
+          type: string
+        error:
+          title: Error
+          description: Stored reason the task failed, was cancelled or expired.
+          type: string
+      additionalProperties: false
+      type: object
+      required:
+      - task
+      - task_index
+      - phase
+      title: TasksetRunTask
+      description: 'Expose one stored member''s task identity, progress and optional
+        Job/error.
+
+
+        Construction takes the five public fields only. Instances contain no parent,
+
+        persistence metadata or reconstructed Job state; read routes omit unset details.'
+    TasksetRunTasksPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/TasksetRunTask'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: TasksetRunTasksPage
     TasksetSort:
       type: string
       enum:

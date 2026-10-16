@@ -20,6 +20,17 @@ Update pinned container image tags, Helm chart versions, and Python package vers
 
 v0.7.1 has the same compatibility target as v0.7.0.
 
+## Known issues
+
+v0.7.1 carries the [v0.7.0 known issues](/documentation/reference/release-notes/release-0-7-0#known-issues), including:
+
+- **DPO jobs fail before the first training step with `KeyError: 'checkpoint'`.**
+  Customizer `rl` DPO jobs submitted from Studio, the CLI, or the API fail
+  shortly after the training pod starts. The generated DPO configuration omits
+  the `policy.dtensor_cfg.checkpoint` section that the pinned NeMo-RL version
+  requires. There is no workaround in the 0.7 release line. DPO jobs run on
+  v0.6.0. GRPO jobs are not affected.
+
 ## Links
 
 - Repository: [https://github.com/NVIDIA-NeMo/nemo-helix](https://github.com/NVIDIA-NeMo/nemo-helix)

@@ -33,7 +33,7 @@ import shutil
 import socket
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -185,6 +185,28 @@ def _write_yaml_config(path: Path, config: dict[str, Any]) -> Path:
     return path
 
 
+def _read_log_tail(path: Path, *, max_bytes: int = 8192, max_lines: int = 20) -> str:
+    """Return a concise, non-empty tail from a child-process log file."""
+    try:
+        with path.open("rb") as fh:
+            size = fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, size - max_bytes))
+            chunk = fh.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+    lines = [line.rstrip() for line in chunk.splitlines() if line.strip()]
+    return "\n".join(lines[-max_lines:])
+
+
+def _process_exit_error(returncode: int | None, log_path: Path) -> str:
+    """Describe a failed child process without dropping its startup diagnostics."""
+    message = f"Process exited with code {returncode}"
+    if diagnostic := _read_log_tail(log_path):
+        return f"{message}. Last log lines:\n{diagnostic}"
+    return message
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -250,7 +272,7 @@ class InMemoryRunnerBackend(RunnerBackend):
         return candidate
 
     @contextmanager
-    def reserve_socket(self) -> Iterator[socket.socket]:
+    def reserve_socket(self) -> Generator[socket.socket, None, None]:
         """Reserve a listening loopback socket until context exit for handoff to a child."""
         for candidate in self._port_candidates():
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -435,7 +457,7 @@ class InMemoryRunnerBackend(RunnerBackend):
         proc = self._processes.get(key)
         if proc is not None and proc.poll() is not None:
             info.status = "failed"
-            info.error = f"Process exited with code {proc.returncode}"
+            info.error = _process_exit_error(proc.returncode, self.log_path_for(workspace, name))
         return info
 
     async def delete_deployment(self, workspace: str, name: str) -> bool:

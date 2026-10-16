@@ -26,6 +26,10 @@ server:
         secretKeyRef:
           name: opensandbox-server-api-key
           key: api-key
+    # Loads the NeMo Compose services extension from the nemo-opensandbox-ext
+    # ConfigMap when it exists; without it the server runs unchanged.
+    - name: PYTHONPATH
+      value: /opt/nemo-opensandbox-ext
 
   resources:
     requests:
@@ -51,10 +55,22 @@ server:
       mountPath: /etc/opensandbox/batchsandbox-template.yaml
       subPath: batchsandbox-template.yaml
       readOnly: true
+    - name: nemo-opensandbox-ext
+      mountPath: /opt/nemo-opensandbox-ext
+      readOnly: true
   volumes:
     - name: batchsandbox-template
       configMap:
         name: opensandbox-batchsandbox-template
+    - name: nemo-opensandbox-ext
+      configMap:
+        name: nemo-opensandbox-ext
+        optional: true
+        items:
+          - {key: sitecustomize.py, path: sitecustomize.py}
+          - {key: nemo_ext_server.py, path: nemo_ext_server.py}
+          - {key: nemo_ext_pod.py, path: nemo_ext_pod.py}
+          - {key: harbor_opensandbox_services.py, path: scaled_evals/harbor_opensandbox_services.py}
 
   # In-cluster clients use the Service + use_server_proxy; gateway optional.
   gateway:

@@ -95,6 +95,63 @@ describe('EvaluationSessionsDataView', () => {
     expect(screen.getByText('Session output')).toBeInTheDocument();
   });
 
+  it('marks an evaluator that ran but produced no score as failed', async () => {
+    server.use(
+      http.get(EVALUATION_URL, () =>
+        HttpResponse.json({ ...mockEvaluation, evaluator_names: ['judge.accuracy'] })
+      ),
+      http.get(SESSIONS_URL, () =>
+        HttpResponse.json({
+          ...mockSessionsPage,
+          data: [{ ...mockSession, evaluator_scores: {}, failed_evaluators: ['judge.accuracy'] }],
+        })
+      )
+    );
+    renderDataView();
+    expect((await screen.findAllByText('Failed')).length).toBeGreaterThan(0);
+  });
+
+  it('shows the reason an evaluator failed when its Failed badge is hovered', async () => {
+    const resultsRequests: string[] = [];
+    server.use(
+      http.get(SESSIONS_URL, () =>
+        HttpResponse.json({
+          ...mockSessionsPage,
+          data: [{ ...mockSession, evaluator_scores: {}, failed_evaluators: ['judge.accuracy'] }],
+        })
+      ),
+      http.get(
+        `${PLATFORM_BASE_URL}/apis/intake/v2/workspaces/:workspace/evaluator-results`,
+        ({ request }) => {
+          resultsRequests.push(new URL(request.url).search);
+          return HttpResponse.json({
+            data: [
+              {
+                evaluator_result_id: 'er-1',
+                span_id: 'span-root-1',
+                session_id: 'session-1',
+                name: 'judge.accuracy',
+                data_type: 'NUMERIC',
+                status: 'FAILED',
+                comment: 'judge endpoint unreachable',
+              },
+            ],
+          });
+        }
+      )
+    );
+    renderDataView();
+
+    const badge = (await screen.findAllByText('Failed'))[0];
+    // Nothing is fetched until someone asks why.
+    expect(resultsRequests).toHaveLength(0);
+
+    await userEvent.hover(badge);
+    expect(await screen.findByText('judge endpoint unreachable')).toBeInTheDocument();
+    expect(resultsRequests[0]).toContain('session_id%5D=session-1');
+    expect(resultsRequests[0]).toContain('status%5D=FAILED');
+  });
+
   it('requests experiment sessions in preview mode', async () => {
     renderDataView();
 

@@ -19,7 +19,7 @@ from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 from nhx.common.auth.token_resolver import resolve_bearer_token
 from nhx.common.config import get_auth_config, get_platform_config
@@ -476,7 +476,31 @@ async def token_authorization_callback(
     return response
 
 
-@router.post("/v2/logout", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/v2/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    openapi_extra={
+        "x-codeSamples": [
+            {
+                "lang": "Python",
+                "source": "import requests\n\nresponse = requests.post(\n"
+                '    "http://localhost:8080/apis/auth/v2/logout",\n'
+                '    headers={"X-Source": "NeMo Studio"},\n'
+                '    cookies={"nhx_session": "YOUR_SESSION_COOKIE"},\n'
+                ")\nresponse.raise_for_status()\nprint(response.status_code)  # 204: no response body\n",
+            },
+            {
+                "lang": "JavaScript",
+                "source": 'const response = await fetch("http://localhost:8080/apis/auth/v2/logout", {\n'
+                '  method: "POST",\n'
+                '  headers: {"X-Source": "NeMo Studio"},\n'
+                '  credentials: "include",\n'
+                "});\nif (!response.ok) throw new Error(`Logout failed: ${response.status}`);\n"
+                "console.log(response.status); // 204: no response body\n",
+            },
+        ]
+    },
+)
 async def logout(request: Request, credential_store: CredentialStore) -> Response:
     if request.headers.get(WEB_SESSION_CSRF_HEADER) != WEB_SESSION_CSRF_VALUE:
         raise HTTPException(status_code=403, detail="Missing or invalid X-Source")
@@ -550,7 +574,29 @@ async def continue_token_authorization(transaction_id: str, store: LoginStore) -
 
 
 @router.post("/v2/token")
-async def broker_token(body: BrokerTokenRequest, credential_store: CredentialStore) -> dict[str, str | int]:
+async def broker_token(
+    body: Annotated[
+        BrokerTokenRequest,
+        Body(
+            discriminator="grant_type",
+            openapi_examples={
+                "authorization_code": {
+                    "summary": "Exchange an authorization code using PKCE",
+                    "value": {
+                        "grant_type": "authorization_code",
+                        "code": "YOUR_AUTHORIZATION_CODE",
+                        "code_verifier": "YOUR_PKCE_CODE_VERIFIER_AT_LEAST_43_CHARACTERS_LONG",
+                    },
+                },
+                "refresh_token": {
+                    "summary": "Refresh an access token",
+                    "value": {"grant_type": "refresh_token", "refresh_token": "YOUR_REFRESH_TOKEN"},
+                },
+            },
+        ),
+    ],
+    credential_store: CredentialStore,
+) -> dict[str, str | int]:
     if body.grant_type == "authorization_code":
         pending_record = await credential_store.get_active("token_authorization_code", body.code)
         if pending_record is None:

@@ -51,8 +51,8 @@ class _FakeStrategySpec(BaseModel):
 
 class _FakeStrategyJob(NemoJob):
     name: ClassVar[str] = "optimize"
-    nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(name="fake")
-    spec_schema: ClassVar[type[BaseModel]] = _FakeStrategySpec
+    nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(name="fake", title="Fake")
+    spec_schema: ClassVar[type[BaseModel] | None] = _FakeStrategySpec
 
     #: Recorded by ``compile`` so tests can assert what the router forwarded.
     compiled_with: ClassVar[dict[str, Any]] = {}
@@ -90,7 +90,9 @@ class _NoSchemaStrategyJob(_FakeStrategyJob):
     """A strategy that declares no ``spec_schema`` and takes the raw payload."""
 
     name: ClassVar[str] = "passthrough"
-    nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(name="passthrough")
+    nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(
+        name="passthrough", title="Passthrough"
+    )
     spec_schema: ClassVar[type[BaseModel] | None] = None
 
     @classmethod
@@ -149,7 +151,9 @@ class _ResolvingStrategyJob(_FakeStrategyJob):
     """A strategy whose ``to_spec`` does real work, so skipping it would be visible."""
 
     name: ClassVar[str] = "resolving"
-    nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(name="resolving")
+    nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(
+        name="resolving", title="Resolving"
+    )
     spec_schema: ClassVar[type[BaseModel]] = _FakeResolvedSpec
     input_spec_schema: ClassVar[type[BaseModel]] = _FakeSubmitSpec
 
@@ -194,7 +198,9 @@ class _CustomStrategySpec(BaseModel):
 
 class _CustomStrategyJob(_FakeStrategyJob):
     name: ClassVar[str] = "custom"
-    nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(name="custom")
+    nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(
+        name="custom", title="Custom"
+    )
     spec_schema: ClassVar[type[BaseModel]] = _CustomStrategySpec
 
     @classmethod
@@ -443,7 +449,7 @@ async def test_compile_calls_to_spec_the_way_the_route_layer_would(
 async def test_compile_applies_the_strategys_submit_rules_not_only_its_canonical_ones(
     resolving_strategy: type[_ResolvingStrategyJob],
 ) -> None:
-    """A rule that lives only on the submit shape (like the legacy strategy's remote-only bundle check) still fires."""
+    """A rule that lives only on the submit shape (like the config-tuning strategy's remote-only bundle check) still fires."""
     spec = submitted_spec(strategy="resolving", optimize_config_fileset=None)
 
     with pytest.raises(HelixJobCompilationError, match="not valid for optimization strategy 'resolving'"):

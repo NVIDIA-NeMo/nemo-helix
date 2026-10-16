@@ -45,13 +45,13 @@ import re
 import shlex
 import sys
 import tempfile
-import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from pkgutil import resolve_name
+from time import monotonic, sleep
 from typing import Any, ClassVar, Optional, TypeVar, cast
 
 import click
@@ -130,7 +130,6 @@ from nemo_helix_plugin.client.errors import (
 from nemo_helix_plugin.client.response import NemoPaginatedResponse, NemoResponse
 from nemo_helix_plugin.discovery import AGENT_CLI_GROUP, discover_entry_points
 from nemo_helix_plugin.files.client import FilesClient
-from nemo_helix_plugin.job import NemoJob
 from pydantic import BaseModel, ValidationError
 from typer.main import get_command as _typer_get_command
 
@@ -187,9 +186,6 @@ _COMPUTE_SPEC_LIST_COLUMNS = [
 
 
 _AGENT_CLI_PANEL = "Additional commands from plugins"
-# POC agent-improvement jobs stay registered (service routes, job discovery) but
-# are kept out of `nemo agents` help until the workflow is ready for users.
-_HIDDEN_JOBS = frozenset({"evaluate-suite", "analyze", "optimize-skills"})
 
 
 @dataclass(frozen=True)
@@ -301,10 +297,6 @@ class AgentsCLI(NemoCLI):
         _register_platform_commands(app)
         _register_environment_commands(app)
         return app
-
-    def update_job_cli(self, job_cls: type[NemoJob], group: typer.Typer) -> None:
-        if job_cls.name in _HIDDEN_JOBS:
-            group.info.hidden = True
 
 
 # ---------------------------------------------------------------------------
@@ -2166,18 +2158,18 @@ def _wait_for_deployment(
         ``True`` if the deployment reached ``running``, ``False`` if it
         reached ``failed`` or the timeout expired.
     """
-    start = time.monotonic()
+    start = monotonic()
     last_status = ""
 
     typer.echo(f"Waiting for deployment '{name}' (timeout={timeout}s)...")
 
-    while time.monotonic() - start < timeout:
+    while monotonic() - start < timeout:
         dep = _run_sdk(
             "GET agent API",
             lambda: _json_from_response(client.get_deployment(workspace=workspace, name=name)),
         )
         status = dep.get("status", "")
-        elapsed = int(time.monotonic() - start)
+        elapsed = int(monotonic() - start)
 
         if status != last_status:
             line = f"  [{elapsed:>4}s] status: {status}"
@@ -2194,9 +2186,9 @@ def _wait_for_deployment(
             typer.echo(f"Deployment '{name}' failed.", err=True)
             return False
 
-        time.sleep(interval)
+        sleep(interval)
 
-    elapsed = int(time.monotonic() - start)
+    elapsed = int(monotonic() - start)
     typer.echo(f"Timeout after {elapsed}s. Last status: {last_status}", err=True)
     return False
 
@@ -2273,7 +2265,7 @@ def _print_log(log_path: Path, *, tail: Optional[int] = None, follow: bool = Fal
                     if chunk:
                         typer.echo(chunk, nl=False)
                     else:
-                        time.sleep(0.5)
+                        sleep(0.5)
             except KeyboardInterrupt:
                 return
     except BrokenPipeError:
@@ -2513,7 +2505,7 @@ class _HttpxStreamingResponse:
         return self._response
 
     @contextmanager
-    def stream(self) -> Iterator[Iterator[bytes]]:
+    def stream(self) -> Generator[Iterator[bytes], None, None]:
         try:
             yield self._response.iter_bytes()
         finally:
@@ -3223,9 +3215,18 @@ def _delete_agent_entity_if_present(client: AgentsClient, *, agent_name: str, wo
     return True
 
 
-def _load_yaml(path: Path) -> dict:
-    with open(path, encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+def _load_yaml(path: Path) -> Any:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return yaml.safe_load(fh)
+    except yaml.YAMLError as error:
+        problem = getattr(error, "problem", None) or "could not parse YAML"
+        mark = getattr(error, "problem_mark", None)
+        location = ""
+        if mark is not None:
+            location = f" at line {mark.line + 1}, column {mark.column + 1}"
+        typer.echo(f"Error: invalid YAML in agent config {path}{location}: {problem}", err=True)
+        raise typer.Exit(code=1) from error
 
 
 # Mirrors ``nemo_agents_plugin.utils._ENV_VAR_PATTERN`` semantics: matches

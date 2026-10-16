@@ -119,6 +119,7 @@ class FakeStore:
         if key not in self.records:
             raise NemoEntityNotFoundError(f"{name} not found")
         stored = self.records[key]
+        assert isinstance(stored, entity_type), f"{key} holds a {type(stored).__name__}, not a {entity_type.__name__}"
         copy = stored.model_copy(deep=True)
         copy._parent, copy._id, copy._db_version = stored._parent, stored._id, stored._db_version
         return copy
@@ -825,7 +826,7 @@ async def test_service_response_is_own_revision_during_head_race(kind):
     from nemo_evals.api.service.taskset_service import TasksetService
 
     store = FakeStore()
-    tasks = TaskService(store, AsyncMock())
+    tasks = TaskService(store, AsyncMock(), authorize_metric_read=AsyncMock())
     if kind == "task":
         create, replace, get = tasks.create_task, tasks.replace_task, tasks.get_task
 

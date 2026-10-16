@@ -13,7 +13,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from nemo_agents_plugin.agent_config import load_agent_config
 from nemo_agents_plugin.fabric.translator import translate_agent_config
-from nemo_fabric import Fabric  # ty: ignore[unresolved-import]
+from nemo_fabric import Fabric
 
 EXAMPLE_DIR = Path(__file__).parents[2] / "examples/nemo-agent-config/calculator-agent"
 BASE_CONFIG_PATH = EXAMPLE_DIR / "agent.yaml"

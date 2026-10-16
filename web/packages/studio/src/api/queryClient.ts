@@ -10,7 +10,15 @@
  * its affiliates is strictly prohibited.
  */
 
+import { isLocalDevelopmentEnv } from '@studio/constants/environment';
 import { QueryClient, QueryClientConfig } from '@tanstack/react-query';
+
+declare global {
+  interface Window {
+    /** Read by the TanStack Query browser devtools extensions. */
+    __TANSTACK_QUERY_CLIENT__?: QueryClient;
+  }
+}
 
 /**
  * The default number of times to retry a failed query,
@@ -34,3 +42,7 @@ export const queryClientConfig: QueryClientConfig = {
  * The global app query client, used by every useQuery and useMutation
  */
 export const queryClient = new QueryClient(queryClientConfig);
+
+if (isLocalDevelopmentEnv) {
+  window.__TANSTACK_QUERY_CLIENT__ = queryClient;
+}

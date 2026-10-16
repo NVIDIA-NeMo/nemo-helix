@@ -4,7 +4,7 @@
 """Run-scoped cache shared by everything participating in one evaluation."""
 
 import asyncio
-from collections.abc import AsyncIterator, Hashable
+from collections.abc import AsyncGenerator, Hashable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from typing import Any
@@ -14,7 +14,7 @@ _LOCK: ContextVar[asyncio.Lock | None] = ContextVar("evaluation_session_lock", d
 
 
 @asynccontextmanager
-async def begin_evaluation_session() -> AsyncIterator[None]:
+async def begin_evaluation_session() -> AsyncGenerator[None, None]:
     """Scope cached evaluation state to one run.
 
     Entries live only inside this boundary, which is what makes caching a failed result safe: a

@@ -18,3 +18,5 @@ build in a sandbox, then pushes and signs the images. It includes crane, which p
 
 This container is licensed under the [Apache License 2.0](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/LICENSE).
 It includes [crane](https://github.com/google/go-containerregistry), under the Apache License 2.0.
+The source code of the open source components it includes is in the image under
+`/usr/share/nemo-helix/source-distributions/nhx-builder-tasks`.

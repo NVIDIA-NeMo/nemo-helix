@@ -10,11 +10,15 @@ These tests verify that the JobDispatcher correctly manages job lifecycle operat
 import asyncio
 import gc
 import json
+import re
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from typing import TypeVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from nemo_helix_plugin.entity_naming import NAME_PATTERN
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.jobs.telemetry import build_job_telemetry_custom_fields
 from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation, parse_json_filter
 from nhx.common.api.parsed_filter import ParsedFilter
@@ -34,7 +38,12 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
     HelixJobTaskUpdate,
 )
 from nhx.core.jobs.app.constants import JOB_TASK_CLEANUP_PENDING_KEY
-from nhx.core.jobs.app.dispatcher import JobDeletionConflictError, JobDispatcher, JobStatusUpdateSkippedError
+from nhx.core.jobs.app.dispatcher import (
+    JobDeletionConflictError,
+    JobDispatcher,
+    JobStatusUpdateSkippedError,
+    generate_job_name,
+)
 from nhx.core.jobs.app.schemas import (
     HelixJobStepSpec,
 )
@@ -46,6 +55,11 @@ from nhx.core.jobs.entities import (
     HelixJobStep,
     HelixJobTask,
 )
+
+WorkerResultT = TypeVar("WorkerResultT")
+
+# Upper bound for a worker to reach a patched checkpoint; it normally takes milliseconds.
+CHECKPOINT_TIMEOUT_SECONDS = 30
 
 
 async def create_job_with_attempt(dispatcher: JobDispatcher, job_request: CreateHelixJobRequest) -> HelixJobResponse:
@@ -124,6 +138,27 @@ async def create_test_job_data(
     saved_result = await store.add(result)
 
     return saved_job.id, saved_job.name, saved_attempt.id, saved_step.id, saved_task.id, saved_result.id
+
+
+async def wait_until_reached(checkpoint: asyncio.Event, worker: asyncio.Task[WorkerResultT]) -> None:
+    """Wait for ``worker`` to set ``checkpoint``, raising the worker's own error if it stops first.
+
+    The bound is generous on purpose: a one-second bound flaked on loaded CI runners and reported
+    a bare ``TimeoutError`` even when the worker had failed. It only catches a worker that stalls.
+    """
+    reached = asyncio.create_task(checkpoint.wait())
+    try:
+        await asyncio.wait({reached, worker}, timeout=CHECKPOINT_TIMEOUT_SECONDS, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        reached.cancel()
+    if checkpoint.is_set():
+        return
+    coro = worker.get_coro()
+    worker_name = coro.__qualname__ if coro is not None else worker.get_name()
+    if not worker.done():
+        raise AssertionError(f"{worker_name} did not reach its checkpoint within {CHECKPOINT_TIMEOUT_SECONDS}s")
+    worker.result()
+    raise AssertionError(f"{worker_name} finished without reaching its checkpoint")
 
 
 async def cancellation_test_data(
@@ -434,7 +469,7 @@ async def test_cancellation_serializes_with_late_task_creation(mock_dispatcher, 
         cancellation = asyncio.create_task(mock_dispatcher.update_job_status_from_step(step, HelixJobStatus.CANCELLED))
         late_report = None
         try:
-            await asyncio.wait_for(cleanup_started.wait(), timeout=1)
+            await wait_until_reached(cleanup_started, cancellation)
             late_report = asyncio.create_task(
                 other_dispatcher.create_or_update_task(
                     job_name, "late-task", step.workspace, HelixJobTaskUpdate(status=HelixJobStatus.ACTIVE), step
@@ -568,7 +603,7 @@ async def test_other_replica_task_write_after_final_sweep_rechecks_parent(
             )
         )
         try:
-            await asyncio.wait_for(creation_started.wait(), timeout=1)
+            await wait_until_reached(creation_started, late_report)
             await mock_dispatcher.update_job_status_from_step(step, final_status)
             allow_creation.set()
             assert (await late_report).status == final_status
@@ -813,7 +848,7 @@ async def test_delete_job_serializes_with_rerun_job(
         delete_task = asyncio.create_task(mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE))
         rerun_task = None
         try:
-            await asyncio.wait_for(delete_started.wait(), timeout=1.0)
+            await wait_until_reached(delete_started, delete_task)
 
             rerun_task = asyncio.create_task(other_dispatcher.rerun_job(job_name, DEFAULT_WORKSPACE))
             await asyncio.sleep(0.05)
@@ -856,7 +891,7 @@ async def test_delete_job_serializes_with_same_name_create(
         delete_task = asyncio.create_task(mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE))
         create_task = None
         try:
-            await asyncio.wait_for(delete_started.wait(), timeout=1.0)
+            await wait_until_reached(delete_started, delete_task)
 
             create_task = asyncio.create_task(other_dispatcher.create_job(create_request, DEFAULT_WORKSPACE))
             await asyncio.sleep(0.05)
@@ -902,7 +937,7 @@ async def test_delete_job_serializes_with_task_creation(
         delete_task = asyncio.create_task(mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE))
         task_create_task = None
         try:
-            await asyncio.wait_for(delete_started.wait(), timeout=1.0)
+            await wait_until_reached(delete_started, delete_task)
 
             task_create_task = asyncio.create_task(
                 other_dispatcher.create_or_update_task(
@@ -955,7 +990,7 @@ async def test_delete_job_serializes_with_result_creation(
         delete_task = asyncio.create_task(mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE))
         result_create_task = None
         try:
-            await asyncio.wait_for(delete_started.wait(), timeout=1.0)
+            await wait_until_reached(delete_started, delete_task)
 
             result_create_task = asyncio.create_task(
                 other_dispatcher.create_result(
@@ -2782,3 +2817,68 @@ async def test_list_jobs_filter_name_operator_and_project_like(
     assert "excluded-job" not in returned_names
     assert "no-project-job" not in returned_names
     assert len(returned_names) == 1
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "nemo-evals.retrieve-eval",
+        "nemo-evals.agent-eval",
+        "abcdefghijklmnopqrs-tail",
+        "abcdefghijklmnopqrst-tail",
+        "nemo--double-hyphen",
+        "nemo-evals.retrieve--",
+        "-leading-hyphen",
+        "123-starts-with-digit",
+        "Mixed Case/Path:Source",
+        "a" * 80,
+        "a",
+        "---",
+        "",
+    ],
+)
+def test_generate_job_name_yields_valid_job_and_fileset_names(source: str):
+    """The generated name and its derived ``job-fileset-`` name satisfy the entity name rule for any source."""
+    name = generate_job_name(source, "bfbbh5ui")
+
+    assert re.fullmatch(NAME_PATTERN, name)
+    assert name.endswith("-bfbbh5ui")
+    CreateFilesetRequest(name=f"job-fileset-{name}")
+
+
+def test_generate_job_name_keeps_truncated_source_prefix():
+    assert generate_job_name("nemo-evals.retrieve-eval", "bfbbh5ui") == "nemo-evals.retrieve-bfbbh5ui"
+
+
+@pytest.mark.asyncio
+async def test_create_job_without_name_derives_valid_fileset_from_source(
+    mock_dispatcher: JobDispatcher,
+    mock_files_client,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """NVBug 6912264: the 20-char prefix of ``nemo-evals.retrieve-eval`` ends in a hyphen."""
+    request = sample_platform_job_request.model_copy(update={"name": None, "source": "nemo-evals.retrieve-eval"})
+
+    job = await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE)
+
+    assert job.name.startswith("nemo-evals.retrieve-")
+    assert "--" not in job.name
+    fileset_request = mock_files_client.create_fileset.await_args.kwargs["body"]
+    assert fileset_request.name == f"job-fileset-{job.name}"
+
+
+@pytest.mark.asyncio
+async def test_create_job_invalid_generated_name_is_not_a_client_error(
+    mock_dispatcher: JobDispatcher,
+    mock_files_client,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """A generator defect must surface as a server error, never as a client-facing ValueError (409/422)."""
+    request = sample_platform_job_request.model_copy(update={"name": None})
+
+    with patch("nhx.core.jobs.app.dispatcher.generate_job_name", return_value="bad--name"):
+        with pytest.raises(RuntimeError) as exc_info:
+            await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE)
+
+    assert not isinstance(exc_info.value, ValueError)
+    mock_files_client.create_fileset.assert_not_called()

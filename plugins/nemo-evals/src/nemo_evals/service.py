@@ -8,10 +8,12 @@ from __future__ import annotations
 from typing import ClassVar
 
 from fastapi import APIRouter
+from nemo_evals.api.v2 import image_builds as image_builds_routes
 from nemo_evals.api.v2 import live as live_routes
 from nemo_evals.api.v2 import metrics as metrics_routes
 from nemo_evals.api.v2 import results as results_routes
 from nemo_evals.api.v2 import tasks as tasks_routes
+from nemo_evals.api.v2 import taskset_runs as taskset_run_routes
 from nemo_evals.api.v2 import tasksets as tasksets_routes
 from nemo_evals.authz import scope
 from nemo_evals.core import say_hello
@@ -139,6 +141,13 @@ class EvaluatorPluginService(NemoService):
                 prefix="/v2/workspaces/{workspace}",
             ),
             RouterSpec(
+                # /apis/evals/v2/workspaces/{workspace}/tasks/{name}/revisions/{revision}/image-builds.
+                router=image_builds_routes.router,
+                tag="Evals Plugin Task Image Build Routes",
+                description="Container image builds of stored Harbor task revisions.",
+                prefix="/v2/workspaces/{workspace}",
+            ),
+            RouterSpec(
                 # CRUD /apis/evals/v2/workspaces/{workspace}/tasksets.
                 router=tasksets_routes.router,
                 tag="Evals Plugin Tasksets Routes",
@@ -150,6 +159,12 @@ class EvaluatorPluginService(NemoService):
                 router=live_routes.router,
                 tag="Evals Plugin Live Evaluation Route",
                 description="Single-row evaluation run in-process, without creating a job.",
+                prefix="/v2/workspaces/{workspace}",
+            ),
+            RouterSpec(
+                router=taskset_run_routes.router,
+                tag="Evals Plugin Taskset Run Routes",
+                description="Submit stored Harbor tasksets as durable runs.",
                 prefix="/v2/workspaces/{workspace}",
             ),
         ]

@@ -28,6 +28,8 @@ from nemo_agents_plugin.environment_resolution import (
 )
 from nemo_agents_plugin.fabric.gateway_credentials import platform_gateway_credential_env
 from nemo_agents_plugin.fabric.translator import FabricTranslationError, translate_agent_config
+from nemo_agents_plugin.runner.deployments_backend import resolve_agent_gateway_url, rewrite_fabric_config_base_urls
+from nemo_agents_plugin.utils import get_base_url
 from nemo_evals.api.schemas import AgentRef
 from nemo_evals.filesets import FilesetRef
 from nemo_evals.jobs.agent_files_snapshot import discard_registered_agent_files, snapshot_registered_agent_files
@@ -42,6 +44,7 @@ from nemo_evals.jobs.agent_spec import (
     registered_agent_source,
 )
 from nemo_evals.jobs.fabric_harness_packages import fabric_harness_package
+from nemo_evals.jobs.utils import require_platform_client
 from nemo_helix_plugin.agents.client import AsyncAgentsClient
 from nemo_helix_plugin.agents.types import EnvironmentSpecInline
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
@@ -99,7 +102,8 @@ async def _load_registered_agent(
     parsed = parse_entity_ref(agent_ref, workspace)
     agent_workspace, agent_name = parsed.workspace, parsed.name
 
-    agents = client_from_platform(async_sdk, AsyncAgentsClient)
+    platform = require_platform_client(async_sdk, "resolving a registered agent")
+    agents = client_from_platform(platform, AsyncAgentsClient)
     try:
         agent = (await agents.get_agent(workspace=agent_workspace, name=agent_name)).data()
     except NotFoundError as exc:
@@ -130,7 +134,7 @@ async def _load_registered_agent(
     config = _template_mcp_secret_env(fabric_config.model_dump(mode="json", exclude_none=True), environment)
     files: FilesetRef | None = None
     if registered_agent_config_needs_files(config):
-        files_client = client_from_platform(async_sdk, AsyncFilesClient)
+        files_client = client_from_platform(platform, AsyncFilesClient)
         try:
             await files_client.get_fileset(workspace=agent_workspace, name=ethos_fileset_name(agent_name))
         except NotFoundError:
@@ -190,6 +194,26 @@ def _template_mcp_secret_env(config: dict[str, Any], environment: EnvironmentSpe
             **{env_name: f"${{{env_name}}}" for env_name in fulfillment.secrets},
         }
     return config
+
+
+def _require_mcp_env_templates_bound(config: dict[str, Any], bound: set[str], *, agent: str) -> None:
+    """Refuse a stdio MCP server ``${NAME}`` env template that names no variable the job will set."""
+    servers = ((config.get("mcp") or {}).get("servers")) or {}
+    for name, server in servers.items():
+        if not isinstance(server, dict) or server.get("transport") != "stdio":
+            continue
+        templated = {
+            m.group(1)
+            for v in (server.get("env") or {}).values()
+            if isinstance(v, str) and (m := _ENV_TEMPLATE.match(v))
+        }
+        unbound = sorted(templated - bound)
+        if unbound:
+            raise ValueError(
+                f"registered agent {agent}'s stdio MCP server {name!r} reads {', '.join(unbound)} from the "
+                "environment, but the job does not set it; bind it in the target's `env_secrets` (or `env_vars` "
+                f"for a non-secret value) or the source's `environment.mcp.{name}.secrets`"
+            )
 
 
 def _without_mcp_env_templates(config: dict[str, Any]) -> dict[str, Any]:
@@ -256,7 +280,7 @@ async def resolve_registered_agent(
     except Exception:
         # The load may have snapshotted the agent's files; nothing downstream owns that FileSet until a
         # resolved target exists, so a failure here deletes it rather than leaving one per attempt.
-        if agent.files is not None:
+        if agent.files is not None and async_sdk is not None:
             await discard_registered_agent_files(client_from_platform(async_sdk, AsyncFilesClient), agent.files)
         raise
 
@@ -287,6 +311,7 @@ def _fill_target(
             update={"source": resolved_source, "resolved_config": agent.config, "env_secrets": env_secrets}
         )
     if isinstance(target, GymRunnerTarget):
+        _require_mcp_env_templates_bound(agent.config, {*env_secrets, *target.env_vars}, agent=agent.ref.root)
         hydra_params = {**_gym_policy_params(agent.config), **target.hydra_params}
         return target.model_copy(
             update={
@@ -303,11 +328,15 @@ def _fill_target(
         raise ValueError(
             f"`agent_kwargs.fabric_package` must be a requirement string or null, not {type(fabric_package).__name__}"
         )
+    # Harbor runs the agent inside a Docker task container, even when the evaluation
+    # worker itself is a local subprocess. Apply the same gateway rebase as deployments.
+    gateway_url = resolve_agent_gateway_url(get_base_url(), mode="docker")
+    container_config = rewrite_fabric_config_base_urls(agent.config, gateway_url)
     agent_kwargs: dict[str, Any] = {
         **target.agent_kwargs,
         # The runner inside the task container expands no templates; a literal "${NAME}" is worse than
         # no variable, so a Harbor agent's stdio servers go without the secret (see the Harbor docs).
-        "fabric_config": _without_mcp_env_templates(_without_gateway_placeholders(agent.config)),
+        "fabric_config": _without_mcp_env_templates(_without_gateway_placeholders(container_config)),
         "fabric_package": fabric_package if fabric_package is not None else fabric_harness_package(adapter_id),
     }
     return target.model_copy(

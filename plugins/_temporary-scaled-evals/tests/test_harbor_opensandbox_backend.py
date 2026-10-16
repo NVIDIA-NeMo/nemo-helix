@@ -70,7 +70,7 @@ def _write_task(task_dir: Path, environment: str = "") -> None:
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
-        ({"framework_version": "0.13.2"}, "requires Harbor 0.20.0"),
+        ({"framework_version": "0.6.4"}, "requires Harbor 0.13.2 or 0.20.0"),
         ({"network_policy": "unrestricted"}, "supports network_policy default_deny"),
         ({"network_policy": "scoped_egress"}, "supports network_policy default_deny"),
         ({"network_policy_config": {"allowed_hosts": ["x"]}}, "omit network_policy_config"),
@@ -85,18 +85,62 @@ def test_preflight_rejects_what_it_cannot_isolate(overrides: dict[str, Any], mes
         backend.preflight(_spec(**overrides))
 
 
-def test_preflight_accepts_supported_evaluation() -> None:
-    backend.preflight(_spec())
+@pytest.mark.parametrize("version", ["0.13.2", "0.20.0"])
+def test_preflight_accepts_supported_evaluation(version: str) -> None:
+    """Launch-time preflight accepts every Harbor runner the runtime supports."""
+    backend.preflight(_spec(framework_version=version))
 
 
-@pytest.mark.parametrize("compose", ["environment/docker-compose.yaml", "compose.yml"])
-def test_staged_preflight_rejects_compose(tmp_path: Path, compose: str) -> None:
-    _write_task(tmp_path)
-    (tmp_path / compose).parent.mkdir(parents=True, exist_ok=True)
-    (tmp_path / compose).write_text("services: {}\n")
+COMPOSE_PROFILE = {"services": [{"name": "db", "image": "nvcr.io/org/postgres:16"}]}
 
-    with pytest.raises(ValueError, match="single-container"):
-        backend.preflight_staged_task(tmp_path, ["pypi.org"])
+
+def _write_compose_task(task_dir: Path) -> None:
+    """A task like ``_write_task``'s, plus a Compose file with one service, ``db``, next to ``main``."""
+    _write_task(task_dir)
+    (task_dir / "environment").mkdir()
+    (task_dir / "environment" / "docker-compose.yaml").write_text("services: {main: {}, db: {}}\n")
+
+
+def test_staged_preflight_runs_compose_task_with_matching_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_compose_task(tmp_path)
+    monkeypatch.setattr(settings, "task_image_allowed_registries", "nvcr.io")
+
+    backend.preflight_staged_task(tmp_path, ["pypi.org"], backend.parse_compose_services(COMPOSE_PROFILE))
+
+    # Service images run in the task's pod, so they get the task image registry policy.
+    monkeypatch.setattr(settings, "task_image_allowed_registries", "registry.example.com")
+    with pytest.raises(ValueError, match="compose service 'db'"):
+        backend.preflight_staged_task(tmp_path, ["pypi.org"], backend.parse_compose_services(COMPOSE_PROFILE))
+
+
+@pytest.mark.parametrize(
+    ("compose_file", "profile", "message"),
+    [
+        (True, None, "lists them under environment.kwargs.compose_services"),
+        (False, COMPOSE_PROFILE, "the task has no compose file"),
+        (True, {"services": [{"name": "cache", "image": "nvcr.io/org/redis:7"}]}, r"missing \['db'\].*\['cache'\]"),
+    ],
+)
+def test_staged_preflight_rejects_mismatched_compose(
+    tmp_path: Path, compose_file: bool, profile: dict[str, Any] | None, message: str
+) -> None:
+    _write_compose_task(tmp_path) if compose_file else _write_task(tmp_path)
+    services = backend.parse_compose_services(profile) if profile is not None else None
+
+    with pytest.raises(ValueError, match=message):
+        backend.preflight_staged_task(tmp_path, ["pypi.org"], services)
+
+
+def test_render_passes_profile_compose_services_to_the_environment(tmp_path: Path) -> None:
+    profile = {"harbor_config": yaml.safe_dump({"environment": {"kwargs": {"compose_services": COMPOSE_PROFILE}}})}
+
+    config = backend.render_harbor_config(
+        "agents: []\n", _spec(harbor_config=profile), task_path=tmp_path, jobs_dir="j", trusted_hosts=[]
+    )
+
+    assert config["environment"]["kwargs"]["compose_services"] == COMPOSE_PROFILE
 
 
 def test_staged_preflight_rejects_task_egress_outside_operator_allowlist(tmp_path: Path) -> None:
@@ -149,7 +193,7 @@ def test_staged_preflight_rejects_separate_verifier_without_pinned_image(
     _write_task(tmp_path, SEPARATE_VERIFIER)
 
     with pytest.raises(IncompatibleTaskError, match="verifier_image_digest"):
-        backend.preflight_staged_task(tmp_path, ["pypi.org"], **verifier)
+        backend.preflight_staged_task(tmp_path, ["pypi.org"], None, **verifier)
 
 
 def test_staged_preflight_rejects_multistep_separate_verifier(tmp_path: Path) -> None:
@@ -246,13 +290,15 @@ def test_trusted_hosts_put_model_endpoint_first_without_duplicates() -> None:
     assert backend.trusted_allowed_hosts() == ["igw.example.internal", "pypi.org"]
 
 
-def test_sandbox_lifetime_default_matches_harbor() -> None:
-    harbor_opensandbox = pytest.importorskip("harbor.environments.opensandbox")
-    harbor_default = (
-        inspect.signature(harbor_opensandbox.OpenSandboxEnvironment.__init__).parameters["sandbox_timeout_sec"].default
+def test_sandbox_lifetime_default_matches_the_environment() -> None:
+    """The deployment setting and the environment's own default agree on the sandbox lifetime."""
+    environment = pytest.importorskip("scaled_evals.harbor_opensandbox_environment")
+    environment_default = (
+        inspect.signature(environment.NemoOpenSandboxEnvironment.__init__).parameters["sandbox_timeout_sec"].default
     )
 
-    assert Settings.model_fields["harbor_opensandbox_sandbox_timeout_seconds"].default == harbor_default
+    assert environment_default == environment.DEFAULT_SANDBOX_TIMEOUT_SEC
+    assert Settings.model_fields["harbor_opensandbox_sandbox_timeout_seconds"].default == environment_default
 
 
 def test_render_owns_environment_block(tmp_path: Path) -> None:
@@ -661,9 +707,15 @@ def test_enabled_backend_requires_config(monkeypatch: pytest.MonkeyPatch) -> Non
         backend.build_backend()
 
 
-def test_runtime_pins_harbor_020() -> None:
-    assert resolve_framework_runner("harbor", None, runtime="harbor_opensandbox").version == "0.20.0"
-    with pytest.raises(ValueError, match="supports only Harbor 0.20.0"):
-        resolve_framework_runner("harbor", "0.13.2", runtime="harbor_opensandbox")
+def test_runtime_accepts_the_supported_harbor_runners() -> None:
+    """Submission accepts 0.13.2 and 0.20.0, defaults this runtime to 0.20.0, and rejects other runners."""
+    # An omitted version gets this runtime's default, not the catalog's, and is still recorded as omitted.
+    omitted = resolve_framework_runner("harbor", None, runtime="harbor_opensandbox")
+    assert (omitted.version, omitted.requested_version) == ("0.20.0", None)
+    assert resolve_framework_runner("harbor", None).version == "0.13.2"
+    assert resolve_framework_runner("harbor", "stable", runtime="harbor_opensandbox").version == "0.13.2"
+    assert resolve_framework_runner("harbor", "0.20.0", runtime="harbor_opensandbox").version == "0.20.0"
+    with pytest.raises(ValueError, match="supports Harbor 0.13.2, 0.20.0, not 0.6.4"):
+        resolve_framework_runner("harbor", "0.6.4", runtime="harbor_opensandbox")
     with pytest.raises(ValueError, match="requires framework 'harbor'"):
         resolve_framework_runner("gym", None, runtime="harbor_opensandbox")

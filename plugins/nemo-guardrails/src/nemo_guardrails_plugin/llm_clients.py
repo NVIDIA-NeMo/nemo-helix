@@ -17,7 +17,7 @@ headers in a ``ContextVar`` and merges them into each outbound ``ChatNVIDIA`` ca
 to a guardrail model.
 """
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from types import MappingProxyType
@@ -49,7 +49,7 @@ def get_request_headers() -> RequestHeaders:
 
 
 @contextmanager
-def platform_headers_context(client: AsyncNemoClient) -> Iterator[None]:
+def platform_headers_context(client: AsyncNemoClient) -> Generator[None, None, None]:
     """Make platform headers visible to rail model calls in this context.
 
     Model calls happen deep inside nemoguardrails/LangChain library code that

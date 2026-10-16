@@ -64,7 +64,8 @@ from nemo_evals.jobs.result_persistence import persist_agent_eval_result
 from nemo_evals.jobs.run_outcome import STATUS_DETAILS_KEY, agent_eval_outcome, report_run_outcome
 from nemo_evals.jobs.secret_env import JobEnvSecretSource
 from nemo_evals.jobs.token_usage import capture_agent_evaluation_usage, capture_evaluator_request_logs
-from nemo_evals.jobs.utils import async_client_from_sync_client
+from nemo_evals.jobs.utils import async_client_from_sync_client, require_platform_client
+from nemo_evals.source_authorization import SourceReadAuthorizer
 from nemo_evals.task_refs import (
     groupby_kind,
     load_tasks,
@@ -209,8 +210,12 @@ class _AgentEvalJobBase(NemoJob):
         entity_client: object,
         async_sdk: AsyncHelixClient | None,
         is_local: bool,
+        authorize: SourceReadAuthorizer | None = None,
     ) -> BaseModel:
-        """Resolve each task's metric references into inline metrics for the canonical spec."""
+        """Resolve each task's metric references into inline metrics for the canonical spec.
+
+        ``authorize``, when set, checks each stored task, metric and model as the caller before it is read.
+        """
         del is_local
         submit_spec = (
             input_spec.model_copy(deep=True)
@@ -222,6 +227,7 @@ class _AgentEvalJobBase(NemoJob):
             entity_client=entity_client if isinstance(entity_client, EntityClient) else None,
             async_client=async_sdk,
             adapters=cls.adapters,
+            authorize=authorize,
         )
         loaded_tasks = await load_tasks(submit_spec.tasks, ctx)
         resolved_tasks = await map_with_limited_concurrency(lambda task: snapshot_task(task, ctx), loaded_tasks)
@@ -243,7 +249,7 @@ class _AgentEvalJobBase(NemoJob):
                 if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
                 else None
             )
-            if snapshot is not None:
+            if snapshot is not None and async_sdk is not None:
                 await discard_registered_agent_files(client_from_platform(async_sdk, AsyncFilesClient), snapshot)
             raise
 
@@ -331,8 +337,11 @@ class _AgentEvalJobBase(NemoJob):
         require_pvc_storage: bool = False,
     ) -> BaseExecutionProfile | None:
         """Resolve the profile that Jobs will use for this submission."""
+        jobs_client = client_from_platform(
+            require_platform_client(async_client, f"resolving execution profile {profile!r}"), AsyncJobsClient
+        )
         try:
-            profiles = (await client_from_platform(async_client, AsyncJobsClient).get_execution_profiles()).data()
+            profiles = (await jobs_client.get_execution_profiles()).data()
         except (NemoTransportError, NemoResponseValidationError, InternalServerError) as exc:
             raise _profile_dependency_unavailable(profile) from exc
         if require_pvc_storage:
@@ -365,8 +374,11 @@ class _AgentEvalJobBase(NemoJob):
     ) -> SubprocessExecutionProviderSpec:
         """Resolve Harbor's selected profile to an explicit host subprocess executor."""
         profile = executor.profile
+        jobs_client = client_from_platform(
+            require_platform_client(async_client, f"resolving execution profile {profile!r}"), AsyncJobsClient
+        )
         try:
-            profiles = (await client_from_platform(async_client, AsyncJobsClient).get_execution_profiles()).data()
+            profiles = (await jobs_client.get_execution_profiles()).data()
         except (NemoTransportError, NemoResponseValidationError, InternalServerError) as exc:
             raise _profile_dependency_unavailable(profile) from exc
 
@@ -472,24 +484,26 @@ class _AgentEvalJobBase(NemoJob):
             staged = _staged_agent_files(target, ctx)
             if staged is not None:
                 agent_kwargs["fabric_config_bundle"] = str(staged)
+            harbor_config = HarborRuntimeConfig(
+                jobs_dir=ctx.storage.persistent / AGENT_BUNDLE_DIR / "evidence" / "harbor",
+                agent_name=target.agent_name,
+                agent_import_path=target.agent_import_path,
+                agent_model_name=target.agent_model_name,
+                agent_kwargs=agent_kwargs,
+                env_secrets=target.env_secrets,
+                env_vars=target.env_vars,
+                n_attempts=target.n_attempts,
+                max_retries=target.max_retries,
+                artifacts=target.artifacts,
+                trace_dir=target.trace_dir,
+                reward_key=target.reward_key,
+                agent_setup_timeout_multiplier=target.agent_setup_timeout_multiplier,
+                agent_timeout_multiplier=target.agent_timeout_multiplier,
+            )
+            if target.n_concurrent_trials is not None:
+                harbor_config.n_concurrent_trials = target.n_concurrent_trials
             harbor_runtime = HarborAgentTaskRunner(
-                config=HarborRuntimeConfig(
-                    jobs_dir=ctx.storage.persistent / AGENT_BUNDLE_DIR / "evidence" / "harbor",
-                    agent_name=target.agent_name,
-                    agent_import_path=target.agent_import_path,
-                    agent_model_name=target.agent_model_name,
-                    agent_kwargs=agent_kwargs,
-                    env_secrets=target.env_secrets,
-                    env_vars=target.env_vars,
-                    n_attempts=target.n_attempts,
-                    n_concurrent_trials=target.n_concurrent_trials,
-                    max_retries=target.max_retries,
-                    artifacts=target.artifacts,
-                    trace_dir=target.trace_dir,
-                    reward_key=target.reward_key,
-                    agent_setup_timeout_multiplier=target.agent_setup_timeout_multiplier,
-                    agent_timeout_multiplier=target.agent_timeout_multiplier,
-                ),
+                config=harbor_config,
                 secret_resolver=JobEnvSecretSource(workspace=ctx.workspace),
             )
             return harbor_runtime, None, None

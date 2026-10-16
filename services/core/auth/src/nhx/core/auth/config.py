@@ -49,13 +49,16 @@ class AuthServiceConfig(SharedAuthConfig):
 
     # Embedded PDP resource limits
     embedded_pdp_cpu_limit: int = Field(
-        default=200,
+        default=1500,
         description="CPU budget for embedded PDP policy evaluation, in millions of WASM fuel units. "
-        "Default of 200 provides headroom for full plugin-merged authorization data.",
+        "Default of 1500 keeps a platform-scoped service-principal check within budget on a "
+        "production-sized route/scope table (full plugin-merged authorization data).",
     )
     embedded_pdp_memory_limit_mb: int = Field(
-        default=32,
-        description="Maximum linear memory (MB) the embedded PDP WASM runtime can consume.",
+        default=256,
+        description="Maximum linear memory (MB) the embedded PDP WASM runtime can consume. "
+        "Default of 256 accommodates the allocation the scope-family scan makes over a "
+        "production-sized authorization-data document.",
     )
 
     # Plugin HTTP authz fail-mode: what to do when a plugin contributes invalid authz

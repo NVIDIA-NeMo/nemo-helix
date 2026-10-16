@@ -10,11 +10,11 @@ excluded from the job timeout, separate image-pull cap).
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-import time
+from asyncio import sleep as async_sleep
 from collections.abc import Awaitable, Callable, Mapping
+from time import monotonic
 from typing import TypeVar
 
 log = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ _StatusT = TypeVar("_StatusT")
 
 
 async def _async_pause(seconds: float) -> None:
-    await asyncio.sleep(seconds)
+    await async_sleep(seconds)
 
 
 async def async_poll_until_terminal(
@@ -59,7 +59,7 @@ async def async_poll_until_terminal(
     pending_elapsed = 0.0
 
     while True:
-        poll_start = time.monotonic()
+        poll_start = monotonic()
         status_response = await get_status()
         status = status_value(status_response)
         log_payload: dict[str, object] = {
@@ -79,7 +79,7 @@ async def async_poll_until_terminal(
         if status in terminal:
             return status_response
 
-        poll_duration = time.monotonic() - poll_start
+        poll_duration = monotonic() - poll_start
         if status == "pending":
             pending_elapsed += poll_duration
             if pending_elapsed >= pending_timeout:
@@ -89,9 +89,9 @@ async def async_poll_until_terminal(
             if elapsed >= timeout:
                 raise TimeoutError(f"'{job_name}' timed out after {timeout}s. Status: {status}")
 
-        sleep_start = time.monotonic()
+        sleep_start = monotonic()
         await _async_pause(poll_interval)
-        sleep_duration = time.monotonic() - sleep_start
+        sleep_duration = monotonic() - sleep_start
         if status == "pending":
             pending_elapsed += sleep_duration
         else:

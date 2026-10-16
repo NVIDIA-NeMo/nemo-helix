@@ -468,6 +468,33 @@ async def test_harbor_target_by_agent_selects_the_installed_fabric_agent_with_th
     assert await _resolve(resolved) is resolved
 
 
+async def test_harbor_rebases_gateway_models_without_changing_external_models_or_host_targets(
+    mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("NEMO_BASE_URL", raising=False)
+    monkeypatch.setenv("NHX_BASE_URL", "http://127.0.0.1:8080")
+    config = _calculator_config()
+    config["models"]["external"] = {
+        "provider": "openai",
+        "model": "external-model",
+        "base_url": "https://provider.example/v1",
+    }
+    _platform(mocker, _agent(config))
+
+    harbor = await _resolve(_harbor_by_agent())
+    fabric = await _resolve(_by_agent())
+
+    models = harbor.agent_kwargs["fabric_config"]["models"]
+    assert models["default"]["base_url"] == (
+        "http://host.docker.internal:8080/apis/inference-gateway/v2/workspaces/dev/openai/-/v1"
+    )
+    assert models["external"]["base_url"] == "https://provider.example/v1"
+    assert fabric.config["models"]["default"]["base_url"] == (
+        "http://127.0.0.1:8080/apis/inference-gateway/v2/workspaces/dev/openai/-/v1"
+    )
+    assert "base_url" not in config["models"]["default"]
+
+
 def test_every_harness_extra_the_resolver_names_exists_in_the_installed_fabric() -> None:
     """`pip install nemo-fabric[<extra>]` only warns on an unknown extra; the container would run without its harness."""
     provided = set(importlib.metadata.distribution("nemo-fabric").metadata.get_all("Provides-Extra") or [])
@@ -688,6 +715,37 @@ async def test_a_submitter_supplied_policy_setting_wins_over_the_derived_one(moc
     assert isinstance(resolved, GymRunnerTarget)
     assert resolved.hydra_params["policy_api_key"] == "from-the-spec"
     assert resolved.hydra_params["policy_model_name"] == resolved.resolved_config["models"]["default"]["model"]
+
+
+async def test_a_gym_stdio_template_the_job_does_not_set_is_refused_at_submit(mocker: MockerFixture) -> None:
+    """Gym's component leaves an unfilled template literal, so the MCP server would fail its auth mid-rollout."""
+    config = _calculator_with_mcp_config()
+    config["mcp"]["servers"]["calculator"] = {
+        "transport": "stdio",
+        "url": "/usr/bin/python3",
+        "env": {"CALC_TOKEN": "${CALC_TOKEN}", "MODE": "${MODE}"},
+    }
+    _platform(mocker, _agent(config))
+
+    with pytest.raises(
+        ValueError,
+        match=r"server 'calculator' reads CALC_TOKEN, MODE .*`env_secrets` \(or `env_vars` for a non-secret value\)",
+    ):
+        await _resolve(_gym_by_agent())
+
+    by_target = await _resolve(
+        _gym_by_agent(env_secrets={"CALC_TOKEN": SecretRef(root="dev/t")}, env_vars={"MODE": "x"})
+    )
+    del config["mcp"]["servers"]["calculator"]["env"]  # the source binding writes the templates itself
+    _platform(mocker, _agent(config))
+    environment = EnvironmentSpecInline(
+        mcp={"calculator": McpFulfillment(url="/usr/bin/python3", secrets={"CALC_TOKEN": "dev/t", "MODE": "dev/m"})}
+    )
+    by_source = await _resolve(
+        GymRunnerTarget(source=RegisteredAgentSource(agent=_AGENT, environment=environment), resources_server="mcqa")
+    )
+    for resolved in (by_target, by_source):
+        assert resolved.resolved_config["mcp"]["servers"]["calculator"]["env"]["CALC_TOKEN"] == "${CALC_TOKEN}"
 
 
 def test_a_registered_gym_agent_refuses_colocated_execution(tmp_path: Path) -> None:

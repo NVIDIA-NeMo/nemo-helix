@@ -7,7 +7,14 @@ from __future__ import annotations
 
 import pytest
 from nemo_builder_plugin.entities import ContainerImage, Provenance
-from nemo_builder_plugin.schema import MAX_BUILD_SPECS, BuildOutput, BuildSet, BuildSpec, FileSetSource
+from nemo_builder_plugin.schema import (
+    MAX_BUILD_SPECS,
+    BuildOutput,
+    BuildSet,
+    BuildSpec,
+    FileSetSource,
+    ImageSource,
+)
 from pydantic import ValidationError
 
 _DIGEST = "sha256:" + "b" * 64
@@ -52,17 +59,17 @@ class TestSourcePaths:
 
 
 class TestArchives:
-    @pytest.mark.parametrize(
-        "archive", ["task.tar", "tb/task.tar.gz", "task.tgz", "task.tar.bz2", "task.tbz2", "task.tar.xz", "TASK.TXZ"]
-    )
-    def test_a_tar_archive_compressed_or_not_is_a_source(self, archive: str) -> None:
+    @pytest.mark.parametrize("archive", ["task.tar", "tb/task.tar.gz", "TASK.TXZ", "suite/sort/0a1b/task_archive"])
+    def test_an_archive_under_any_file_name_is_a_source(self, archive: str) -> None:
+        """Fetch reads the format from the bytes, so stored archives without a suffix build too."""
         source = FileSetSource(fileset="fs-a", archive=archive, context_path="environment")
         assert (source.archive, source.context_path) == (archive, "environment")
 
-    @pytest.mark.parametrize("bad", ["task.zip", "task.gz", "task", "task.tar.zst"])
-    def test_anything_but_a_tar_is_refused(self, bad: str) -> None:
-        with pytest.raises(ValidationError, match="tar archive"):
-            FileSetSource(fileset="fs-a", archive=bad)
+    @pytest.mark.parametrize("spelling", ["task_archive/.", "t//task_archive", "./task_archive"])
+    def test_an_archive_is_named_one_way_only(self, spelling: str) -> None:
+        """Fetch unpacks each archive into a directory named after it; two spellings of one file would collide."""
+        with pytest.raises(ValidationError, match="written plainly"):
+            FileSetSource(fileset="fs-a", archive=spelling)
 
     @pytest.mark.parametrize("bad", ["../task.tar", "/task.tar", "a/../../task.tar"])
     def test_an_archive_stays_inside_the_fileset(self, bad: str) -> None:
@@ -241,3 +248,23 @@ class TestContainerImage:
 
     def test_the_unnamed_spec_has_no_spec_name(self) -> None:
         assert _provenance(spec=None).spec is None
+
+
+class TestImageSources:
+    def test_a_spec_can_copy_an_image(self) -> None:
+        spec = BuildSpec.model_validate({"source": {"image": "ubuntu:24.04"}, "platform": "linux/arm64"})
+        assert spec.source == ImageSource(image="ubuntu:24.04")
+
+    def test_a_fileset_request_reads_and_serializes_as_before(self) -> None:
+        """Its request digest must not change, or resubmitting an earlier request would conflict."""
+        spec = BuildSpec.model_validate({"source": {"fileset": "fs-a"}})
+        assert isinstance(spec.source, FileSetSource)
+        assert spec.model_dump(mode="json")["source"] == {"fileset": "fs-a", "archive": None, "context_path": None}
+
+    def test_a_copy_names_no_dockerfile(self) -> None:
+        with pytest.raises(ValidationError, match="no dockerfile"):
+            BuildSpec.model_validate({"source": {"image": "ubuntu:24.04"}, "dockerfile": "Dockerfile"})
+
+    def test_an_image_that_is_not_a_reference_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="image reference"):
+            BuildSpec.model_validate({"source": {"image": "not a reference"}})

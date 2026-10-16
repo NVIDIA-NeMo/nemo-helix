@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import pytest
-from nemo_evals.jobs.secret_env import JobEnvSecretSource, build_task_environment
+from nemo_evals.jobs.secret_env import JobEnvSecretSource, JobSecretResolver, build_task_environment
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nhx_evals_sdk.resolver_protocols import MissingSecretError
 from nhx_evals_sdk.values.common import SecretRef
@@ -43,6 +43,42 @@ def test_job_resolver_reads_only_injected_keys(monkeypatch: pytest.MonkeyPatch) 
     with pytest.raises(MissingSecretError, match="nemo secrets get openai-key --workspace my-workspace"):
         resolver.env_var_for(ref, "OPENAI_API_KEY")
     assert resolver.env_var_for(ref, "LLM_API_KEY") == "LLM_API_KEY"
+
+
+@pytest.mark.parametrize("secret_name", ["my-ws/judge-key", "judge-key"])
+async def test_job_secret_resolver_reads_the_env_name_the_compiler_injected(
+    secret_name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A metric's ``secrets`` key, not its ref, names the variable a job injects."""
+    for derived in ("MY_WS_JUDGE_KEY", "JUDGE_KEY", "my_ws_judge_key", "judge_key"):
+        monkeypatch.delenv(derived, raising=False)
+    monkeypatch.setenv("LLM_JUDGE_TOKEN", "injected")
+    resolver = JobSecretResolver([("LLM_JUDGE_TOKEN", secret_name)])
+
+    assert await resolver.resolve_secret(SecretRef(root=secret_name)) == "injected"
+
+
+async def test_job_secret_resolver_tries_every_env_name_injected_for_one_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("JUDGE_A", raising=False)
+    monkeypatch.setenv("JUDGE_B", "injected")
+    resolver = JobSecretResolver([("JUDGE_A", "ws/judge-key"), ("JUDGE_B", "ws/judge-key")])
+
+    assert await resolver.resolve_secret(SecretRef(root="ws/judge-key")) == "injected"
+
+
+async def test_job_secret_resolver_never_reads_a_bare_name_for_a_workspace_ref(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bare ``OPENAI_API_KEY`` in a job may hold another consumer's secret."""
+    monkeypatch.delenv("DEFAULT_OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "another-consumers-key")
+    monkeypatch.setenv("NVIDIA_BUILD_API_KEY", "metric-key")
+    resolver = JobSecretResolver([])
+
+    assert await resolver.resolve_secret(SecretRef(root="default/openai-api-key")) is None
+    assert await resolver.resolve_secret(SecretRef(root="nvidia-build-api-key")) == "metric-key"
 
 
 @pytest.mark.parametrize(

@@ -51,6 +51,15 @@ vi.mock('@studio/hooks/useCustomizationDatasetValidation', async (importOriginal
   return { ...actual, useCustomizationDatasetValidation: vi.fn() };
 });
 
+const mockDeleteTemplate = vi.hoisted(() => vi.fn());
+
+vi.mock('@nemo/sdk/generated/customizer/customization-job-templates', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('@nemo/sdk/generated/customizer/customization-job-templates')
+  >()),
+  useCustomizationDeleteJobTemplate: () => ({ mutateAsync: mockDeleteTemplate, isPending: false }),
+}));
+
 const mockReadiness = vi.hoisted(() => vi.fn());
 const mockCreateDeploymentConfig = vi.hoisted(() => vi.fn());
 const mockCreateUnboundConfig = vi.hoisted(() => vi.fn());
@@ -726,6 +735,48 @@ describe('NewCustomizationForm', () => {
 
       await screen.findByText(/This run produces my-model/);
       expect(mockReadiness).toHaveBeenCalledWith(expect.anything(), { enabled: false });
+    });
+  });
+
+  describe('saved template', () => {
+    it('offers no delete when the values did not come from a saved template', async () => {
+      renderRoute(
+        <NewCustomizationForm workspace="default" initialValues={validAutomodelValues()} />
+      );
+
+      await screen.findByRole('button', { name: /Start Fine-Tuning/i });
+      expect(screen.queryByRole('button', { name: /Delete template/ })).not.toBeInTheDocument();
+    });
+
+    it('deletes the template it was started from, after confirming, and goes back to the cards', async () => {
+      mockDeleteTemplate.mockReset().mockResolvedValue(undefined);
+      const user = userEvent.setup();
+      renderRoute(undefined, {
+        history: '/form',
+        routes: [
+          {
+            path: '/form',
+            element: (
+              <NewCustomizationForm
+                workspace="default"
+                initialValues={validAutomodelValues()}
+                savedTemplateName="my-sft-recipe"
+              />
+            ),
+          },
+          { path: '/workspaces/default/fine-tune/new', element: <div>Start page</div> },
+        ],
+      });
+
+      await user.click(await screen.findByRole('button', { name: /Delete template/ }));
+      expect(await screen.findByText('Delete my-sft-recipe?')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Delete' }));
+
+      expect(mockDeleteTemplate).toHaveBeenCalledWith({
+        workspace: 'default',
+        name: 'my-sft-recipe',
+      });
+      expect(await screen.findByText('Start page')).toBeInTheDocument();
     });
   });
 });

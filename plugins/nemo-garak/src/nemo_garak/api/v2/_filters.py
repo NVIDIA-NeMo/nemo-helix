@@ -13,8 +13,7 @@ silently swallowed.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-from typing import cast
+from collections.abc import Callable
 
 from fastapi import HTTPException
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
@@ -28,9 +27,7 @@ def make_filter_dep(filter_model: type[BaseModel]) -> Callable[[Request], object
 
     async def _dep(request: Request) -> object:
         try:
-            # make_filter_obj_dep returns an async dependency; its declared
-            # return type is the (sync-looking) filter model, so cast to await it.
-            return await cast(Awaitable[object], inner(request))
+            return await inner(request)
         except ValidationError as exc:
             raise HTTPException(
                 status_code=422,

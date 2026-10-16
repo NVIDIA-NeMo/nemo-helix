@@ -5,10 +5,52 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal, Self
 
 from nemo_helix_plugin.config import NemoConfig, get_platform_config
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class TasksetRunsConfig(BaseModel):
+    """Operator budgets under evals.runs.
+
+    Construction produces validated execution and finalization budgets for submit;
+    the default execution timeout cannot exceed the maximum callers may request.
+
+    Environment overrides use JSON, e.g.
+    ``NEMO_EVALS_RUNS='{"default_timeout_seconds": 7}'``: the settings delimiter
+    splits underscores, so flat environment names cannot address these fields.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    default_timeout_seconds: int = Field(
+        default=86_400,
+        gt=0,
+        description="Run budget when the request omits timeout_seconds (24 h; TB3 with 10 slots needs ~16 h).",
+    )
+    max_timeout_seconds: int = Field(
+        default=259_200, gt=0, description="Largest timeout_seconds a request may ask for (72 h)."
+    )
+    finalization_grace_seconds: int = Field(
+        default=600,
+        gt=0,
+        description="Time after the execution deadline to finish scoring and bundling (10 min).",
+    )
+
+    @model_validator(mode="after")
+    def _default_within_max(self) -> Self:
+        """Validate the relationship between this instance's parsed execution budgets.
+
+        Returns:
+            These settings unchanged when the default timeout fits within the maximum.
+
+        Raises:
+            ValueError: The default timeout exceeds the maximum allowed timeout.
+        """
+        if self.default_timeout_seconds > self.max_timeout_seconds:
+            raise ValueError("runs.default_timeout_seconds must be ≤ runs.max_timeout_seconds")
+        return self
 
 
 class EvaluatorConfig(NemoConfig):
@@ -16,6 +58,11 @@ class EvaluatorConfig(NemoConfig):
 
     plugin_name: ClassVar[str] = "evals"
     plugin_description: ClassVar[str] = "Configuration namespace for the evals plugin."
+
+    runs: TasksetRunsConfig = Field(
+        default_factory=TasksetRunsConfig,
+        description="Operator execution timeout defaults, maximum request budget and finalization grace for taskset runs.",
+    )
 
     gym_tasks_image: str | None = Field(
         default=None,

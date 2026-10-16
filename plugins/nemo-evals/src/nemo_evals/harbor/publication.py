@@ -23,7 +23,40 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.tasks import HarborAgentEvalTask
 
 
 def _capture_for_publication(root: Path, contents: Path, verify_against: HarborAgentEvalTask | None) -> Path:
-    """Verify discovered fields against the exact upload snapshot before remote writes."""
+    """Capture the upload snapshot and verify discovered fields against it before remote writes.
+
+    Only checks that the in-memory task still matches the files being uploaded; scoring is validated
+    by the caller.
+
+    Algorithm:
+        - Without ``verify_against``, capture the task as is; no Harbor validation runs.
+        - Otherwise capture a validated copy and compare the discovered task with the native task
+          Harbor reads from that copy:
+
+          ==========================  =======  ===================================================
+          Field                       Checked  Rule
+          ==========================  =======  ===================================================
+          ``id``, ``intent``          yes      equal to the snapshot's ``task_id``
+          ``inputs``                  yes      equal to ``{"instruction": ...}`` normalized from
+                                               the snapshot
+          ``reference``               yes      empty; Harbor tasks keep their tests in the archive
+          ``metrics``, ``views``,     no       validated and attached by the caller, never part
+          ``metadata``                         of the archive
+          ==========================  =======  ===================================================
+
+    Args:
+        root: Local Harbor task directory to capture.
+        contents: Existing private directory that will own the captured copy.
+        verify_against: Discovered task whose id, intent, inputs and reference must match the
+            snapshot; ``None`` skips validation and comparison.
+
+    Returns:
+        Path of the captured task directory beneath ``contents``.
+
+    Raises:
+        ValueError: The source is unsafe or changes during capture, is not a valid Harbor task, or
+            its fields differ from ``verify_against``.
+    """
     if verify_against is None:
         return capture_task(root, contents)
     snapshot, native = capture_validated_task(root, contents)

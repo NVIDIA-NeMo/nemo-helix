@@ -35,7 +35,12 @@ export const NewCustomizationRoute = () => {
       getNewCustomizationFormRoute(workspace),
       selection.optionId === 'scratch'
         ? undefined
-        : { state: { initialValues: selection.initialValues } }
+        : {
+            state: {
+              initialValues: selection.initialValues,
+              savedTemplateName: selection.savedTemplateName,
+            },
+          }
     );
   };
 

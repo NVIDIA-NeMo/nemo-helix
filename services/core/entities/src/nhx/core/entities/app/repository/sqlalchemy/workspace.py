@@ -5,15 +5,16 @@
 
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import AsyncIterator, List, Optional
 
 from nhx.common.api.filter import FilterOperation
 from nhx.core.entities.app.repository.sqlalchemy.filter import SQLAlchemyFilterRepository
 from nhx.core.entities.app.repository.sqlalchemy.models import DBWorkspace, _utcnow
 from nhx.core.entities.app.repository.workspace import WorkspaceRepositoryInterface
-from nhx.core.entities.entities import Workspace
+from nhx.core.entities.entities import Workspace, WorkspaceDeletionStage
 from nhx.core.entities.utils.identifiers import generate_entity_id
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 logger = logging.getLogger(__name__)
@@ -146,7 +147,11 @@ class SQLAlchemyWorkspaceRepository(WorkspaceRepositoryInterface):
         deletion_stage: str,
         session: AsyncSession | None = None,
     ) -> bool:
-        """Mark a workspace for deletion by setting its deletion_stage."""
+        """Record a requested deletion stage.
+
+        The delete API uses this to set pending. The cleanup controller takes
+        ownership through ``claim_workspace_for_deletion``.
+        """
         async with self._get_session(session) as sess:
             result = await sess.execute(
                 update(DBWorkspace)
@@ -165,6 +170,123 @@ class SQLAlchemyWorkspaceRepository(WorkspaceRepositoryInterface):
                 return False
             await sess.commit()
 
+            return True
+
+    async def claim_workspace_for_deletion(
+        self,
+        *,
+        name: str,
+        expected_stage: WorkspaceDeletionStage,
+        expected_updated_at: datetime,
+        lease_expired_before: datetime | None = None,
+        session: AsyncSession | None = None,
+    ) -> Workspace | None:
+        """Take the cleanup lease when the observed stage and timestamp still match."""
+        conditions = [
+            DBWorkspace.name == name,
+            DBWorkspace.deletion_stage == expected_stage,
+            DBWorkspace.updated_at == expected_updated_at,
+        ]
+        if expected_stage == WorkspaceDeletionStage.DELETING:
+            if lease_expired_before is None:
+                raise ValueError("lease_expired_before is required to reclaim a deleting workspace")
+            conditions.append(DBWorkspace.updated_at <= lease_expired_before)
+        elif lease_expired_before is not None:
+            raise ValueError("lease_expired_before is only valid when reclaiming a deleting workspace")
+
+        async with self._get_session(session) as sess:
+            result = await sess.execute(
+                update(DBWorkspace)
+                .where(*conditions)
+                .values(
+                    deletion_stage=WorkspaceDeletionStage.DELETING,
+                    updated_at=_utcnow(),
+                )
+                .returning(DBWorkspace)
+            )
+            db_workspace = result.scalar_one_or_none()
+            if db_workspace is None:
+                return None
+            workspace = db_workspace.to_pydantic()
+            await sess.commit()
+            return workspace
+
+    async def renew_workspace_deletion_lease(
+        self,
+        *,
+        name: str,
+        expected_updated_at: datetime,
+        session: AsyncSession | None = None,
+    ) -> Workspace | None:
+        """Renew a deletion claim if its lease timestamp still matches."""
+        async with self._get_session(session) as sess:
+            result = await sess.execute(
+                update(DBWorkspace)
+                .where(
+                    DBWorkspace.name == name,
+                    DBWorkspace.deletion_stage == WorkspaceDeletionStage.DELETING,
+                    DBWorkspace.updated_at == expected_updated_at,
+                )
+                .values(updated_at=_utcnow())
+                .returning(DBWorkspace)
+            )
+            db_workspace = result.scalar_one_or_none()
+            if db_workspace is None:
+                return None
+            workspace = db_workspace.to_pydantic()
+            await sess.commit()
+            return workspace
+
+    async def fail_workspace_deletion_if_claimed(
+        self,
+        *,
+        name: str,
+        expected_updated_at: datetime,
+        session: AsyncSession | None = None,
+    ) -> bool:
+        """Mark a deletion failed only while holding its current lease."""
+        async with self._get_session(session) as sess:
+            result = await sess.execute(
+                update(DBWorkspace)
+                .where(
+                    DBWorkspace.name == name,
+                    DBWorkspace.deletion_stage == WorkspaceDeletionStage.DELETING,
+                    DBWorkspace.updated_at == expected_updated_at,
+                )
+                .values(
+                    deletion_stage=WorkspaceDeletionStage.FAILED,
+                    updated_at=_utcnow(),
+                )
+                .returning(DBWorkspace.id)
+            )
+            claimed_workspace_id = result.scalar_one_or_none()
+            if claimed_workspace_id is None:
+                return False
+            await sess.commit()
+            return True
+
+    async def delete_workspace_if_claimed(
+        self,
+        *,
+        name: str,
+        expected_updated_at: datetime,
+        session: AsyncSession | None = None,
+    ) -> bool:
+        """Delete a workspace only while holding its current lease."""
+        async with self._get_session(session) as sess:
+            result = await sess.execute(
+                delete(DBWorkspace)
+                .where(
+                    DBWorkspace.name == name,
+                    DBWorkspace.deletion_stage == WorkspaceDeletionStage.DELETING,
+                    DBWorkspace.updated_at == expected_updated_at,
+                )
+                .returning(DBWorkspace.id)
+            )
+            claimed_workspace_id = result.scalar_one_or_none()
+            if claimed_workspace_id is None:
+                return False
+            await sess.commit()
             return True
 
     async def delete_workspace(

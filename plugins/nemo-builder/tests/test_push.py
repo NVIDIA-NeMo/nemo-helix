@@ -386,3 +386,22 @@ class TestPublishAll:
         digest = self._work(tmp_path, monkeypatch, "demo-1-0")
         builder = FakeBuilder(digest, events, {"demo-1-0": "failed"})
         assert _publish_all(self._config("demo-1-0"), builder=builder, sign=_sign(events)) == 1
+
+
+class TestPushingACopy:
+    def test_a_layout_that_is_not_the_manifest_copied_is_neither_pushed_nor_completed(
+        self, tmp_path: Path, events: list[str]
+    ) -> None:
+        digest = _layout(tmp_path / "out")
+        image = _image().model_copy(update={"expected_digest": "sha256:" + "f" * 64})
+
+        with pytest.raises(Refused, match="copies"):
+            _push_one(_row(), image, tmp_path / "out", builder=FakeBuilder(digest, events), sign=None, plain_http=False)
+        assert events == []
+
+    def test_the_manifest_copied_is_pushed_and_completed(self, tmp_path: Path, events: list[str]) -> None:
+        digest = _layout(tmp_path / "out")
+        image = _image(caller=False).model_copy(update={"expected_digest": digest})
+
+        _push_one(_row(), image, tmp_path / "out", builder=FakeBuilder(digest, events), sign=None, plain_http=False)
+        assert events[-1] == f"complete demo-1-0 {digest}"

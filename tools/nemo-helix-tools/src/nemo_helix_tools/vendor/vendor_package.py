@@ -430,15 +430,25 @@ def _process_bundle_packages() -> None:
         member_pyproject_path.write_text(tomlkit.dumps(pyproject), encoding="utf-8")
 
 
+def _append_body_item(table: tomlkit.items.Table, key: tomlkit.items.Key | None, item: tomlkit.items.Item) -> None:
+    """Re-add one ``(key, item)`` entry of a table's body to *table*.
+
+    Keyless body entries are comments and whitespace; anything else would be a malformed body.
+    """
+    if key is not None:
+        table.add(key, item)
+    elif isinstance(item, (tomlkit.items.Comment, tomlkit.items.Whitespace)):
+        table.add(item)
+    else:
+        raise TypeError(f"unexpected keyless {type(item).__name__} in a TOML table body")
+
+
 def _copy_table_without_comments(table: tomlkit.items.Table, comments: set[str]) -> tomlkit.items.Table:
     cleaned = tomlkit.table()
     for key, item in table._value.body:
         if isinstance(item, tomlkit.items.Comment) and item.as_string().strip() in comments:
             continue
-        if key is None:
-            cleaned.add(item)  # type: ignore
-        else:
-            cleaned.add(key, item)
+        _append_body_item(cleaned, key, item)
     while cleaned._value.body and isinstance(cleaned._value.body[0][1], tomlkit.items.Whitespace):
         cleaned._value.body.pop(0)
     while cleaned._value.body and isinstance(cleaned._value.body[-1][1], tomlkit.items.Whitespace):
@@ -484,7 +494,7 @@ def _remove_marked_child_tables(
             if isinstance(item, tomlkit.items.Whitespace):
                 changed = True
                 continue
-            cleaned.add(item)  # type: ignore
+            _append_body_item(cleaned, key, item)
             continue
 
         if skip_next_child and key is not None:
@@ -493,10 +503,7 @@ def _remove_marked_child_tables(
                 changed = True
                 continue
 
-        if key is None:
-            cleaned.add(item)  # type: ignore
-        else:
-            cleaned.add(key, item)
+        _append_body_item(cleaned, key, item)
 
     return cleaned, changed
 
@@ -520,10 +527,7 @@ def _remove_marked_project_table_entries(table: tomlkit.items.Table) -> tuple[to
             changed = True
             continue
 
-        if key is None:
-            cleaned.add(item)  # type: ignore
-        else:
-            cleaned.add(key, item)
+        _append_body_item(cleaned, key, item)
 
     return cleaned, changed
 

@@ -3,9 +3,10 @@
 
 from __future__ import annotations
 
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
+from fastapi import HTTPException
 from nemo_evals.api.schemas import (
     EvaluatorTaskDefinition,
     HarborTaskDefinition,
@@ -108,7 +109,7 @@ def metric_service() -> _FakeMetricService:
 
 @pytest.fixture
 def service(metric_service: _FakeMetricService, entity_store) -> TaskService:
-    return TaskService(entity_store, metric_service, files_client=Mock())
+    return TaskService(entity_store, metric_service, files_client=Mock(), authorize_metric_read=AsyncMock())
 
 
 async def test_create_then_get(service: TaskService) -> None:
@@ -225,6 +226,74 @@ async def test_delete_returns_false_when_missing(service: TaskService) -> None:
     assert await service.delete_task("default", "nope") is False
 
 
+# --- Metric-ref authorization -------------------------------------------------
+
+
+def _task_input_with_metrics(*metrics: MetricRef | MetricInline) -> TaskInput:
+    return TaskInput(
+        spec=EvaluatorTaskDefinition(
+            kind="evaluator",
+            intent="Answer the question.",
+            inputs=TaskInputs(instruction="What is 2+2?"),
+            metrics=list(metrics),
+        )
+    )
+
+
+async def test_same_workspace_metric_ref_is_authorized_and_allowed(
+    metric_service: _FakeMetricService, entity_store
+) -> None:
+    authorize = AsyncMock()
+    service = TaskService(entity_store, metric_service, files_client=Mock(), authorize_metric_read=authorize)
+
+    created, _ = await service.create_task(
+        "task-1", _task_input_with_metrics(MetricRef("stored-metric")), workspace="default"
+    )
+
+    authorize.assert_awaited_once_with("default", "stored-metric")
+    assert _ref(_evaluator_spec(created).metrics[0]).root == "default/stored-metric"
+
+
+async def test_readable_cross_workspace_metric_ref_is_allowed(entity_store) -> None:
+    metric_service = _FakeMetricService(existing={("other", "shared-metric")})
+    authorize = AsyncMock()
+    service = TaskService(entity_store, metric_service, files_client=Mock(), authorize_metric_read=authorize)
+
+    created, _ = await service.create_task(
+        "task-1", _task_input_with_metrics(MetricRef("other/shared-metric")), workspace="default"
+    )
+
+    authorize.assert_awaited_once_with("other", "shared-metric")
+    assert _ref(_evaluator_spec(created).metrics[0]).root == "other/shared-metric"
+
+
+async def test_unreadable_cross_workspace_metric_ref_is_denied_before_lookup(entity_store) -> None:
+    """A denied caller must not learn whether the metric exists, so the check precedes the lookup."""
+    metric_service = _FakeMetricService(existing={("other", "private-metric")})
+    authorize = AsyncMock(side_effect=HTTPException(403, "Denied"))
+    service = TaskService(entity_store, metric_service, files_client=Mock(), authorize_metric_read=authorize)
+
+    with pytest.raises(HTTPException) as raised:
+        await service.create_task(
+            "task-1", _task_input_with_metrics(MetricRef("other/private-metric")), workspace="default"
+        )
+
+    assert raised.value.status_code == 403
+    assert metric_service.looked_up == []
+    assert await service.get_task("default", "task-1") is None
+
+
+async def test_inline_metrics_skip_metric_read_authorization(metric_service: _FakeMetricService, entity_store) -> None:
+    authorize = AsyncMock()
+    service = TaskService(entity_store, metric_service, files_client=Mock(), authorize_metric_read=authorize)
+    inline = _inline_metric()
+
+    await service.create_task("task-1", _task_input_with_metrics(inline), workspace="default")
+
+    authorize.assert_not_awaited()
+    assert metric_service.stored == [inline]
+
+
 # --- Failure handling ---------------------------------------------------------
 
 
@@ -234,7 +303,7 @@ async def test_create_rolls_back_the_head_when_publishing_fails(
     """A head with no revision would break the invariant every consumer relies on — `#latest`
     always resolves and `revision` is never 0. There is no cross-entity transaction, so create
     must undo itself rather than leave a half-created task behind."""
-    service = TaskService(entity_store, metric_service, files_client=Mock())
+    service = TaskService(entity_store, metric_service, files_client=Mock(), authorize_metric_read=AsyncMock())
 
     real_create = type(entity_store).create
 
@@ -255,7 +324,7 @@ async def test_create_rolls_back_the_head_when_publishing_fails(
 async def test_replace_propagates_a_concurrent_write_conflict(metric_service: _FakeMetricService, entity_store) -> None:
     """Losing the optimistic lock is a client-retryable conflict, not a server fault — the route
     maps this to 409, so the service must let it through rather than swallowing it."""
-    service = TaskService(entity_store, metric_service, files_client=Mock())
+    service = TaskService(entity_store, metric_service, files_client=Mock(), authorize_metric_read=AsyncMock())
     await service.create_task("task-1", _task_input(), workspace="default")
 
     async def _stale(entity, *, original_name=None):
@@ -276,7 +345,7 @@ async def test_replace_leaves_no_uncovered_head_content_when_publishing_fails(
     happens leaves nothing behind. Committing the head first would instead make a plain GET —
     which reads the head — return content that `#latest` does not resolve to.
     """
-    service = TaskService(entity_store, metric_service, files_client=Mock())
+    service = TaskService(entity_store, metric_service, files_client=Mock(), authorize_metric_read=AsyncMock())
     await service.create_task("task-1", _task_input(), workspace="default")
 
     real_create = type(entity_store).create
@@ -331,7 +400,7 @@ async def test_rollback_failure_does_not_mask_the_original_error(
     metric_service: _FakeMetricService, entity_store
 ) -> None:
     """If cleanup also fails, the caller must still see *why* the publish failed."""
-    service = TaskService(entity_store, metric_service, files_client=Mock())
+    service = TaskService(entity_store, metric_service, files_client=Mock(), authorize_metric_read=AsyncMock())
     real_create = type(entity_store).create
 
     async def _boom(entity):

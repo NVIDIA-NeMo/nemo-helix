@@ -53,6 +53,26 @@ def test_crud_binding_agent_create() -> None:
     assert "agents.agents.create" in contrib.permissions
 
 
+def test_crud_binding_agent_reads_allow_task_service_principals() -> None:
+    contrib = _contribution()
+    for path, method, permission in (
+        (f"{_BASE}/agents", "get", "agents.agents.list"),
+        (f"{_BASE}/agents/{{name}}", "get", "agents.agents.read"),
+    ):
+        binding = contrib.endpoints[path][method]
+        assert binding.permissions == [permission], (path, method)
+        assert binding.scopes == ["agents:read", "platform:read"], (path, method)
+        assert binding.callers == ["principal", "service_principal"], (path, method)
+        assert not binding.deny, (path, method)
+
+
+def test_crud_binding_agent_writes_stay_principal_only() -> None:
+    contrib = _contribution()
+    for path, method in ((f"{_BASE}/agents", "post"), (f"{_BASE}/agents/{{name}}", "delete")):
+        binding = contrib.endpoints[path][method]
+        assert binding.callers == ["principal"], (path, method)
+
+
 def test_crud_binding_deployment_read_covers_logs() -> None:
     contrib = _contribution()
     # The two log routes are read-only and share the deployments.read permission.
@@ -143,23 +163,23 @@ def test_gateway_invoke_reaches_both_roles_after_merge() -> None:
 
 def test_job_factory_binding() -> None:
     contrib = _contribution()
-    # evaluate-suite maps to the ``agents.suite`` sub-namespace; its collection
+    # execute maps to the ``agents.execute`` sub-namespace; its collection
     # POST is a create and its item DELETE is a delete. Factory-generated routes carry
     # both caller kinds (see authz.GENERATED_ROUTE_CALLERS), unlike the hand-written
     # routes above, which stay principal-only.
-    collection = f"{_BASE}/jobs/evaluate-suite"
+    collection = f"{_BASE}/jobs/execute"
     create = contrib.endpoints[collection]["post"]
-    assert create.permissions == ["agents.suite.create"]
+    assert create.permissions == ["agents.execute.create"]
     assert create.scopes == ["agents:write", "platform:write"]
     assert create.callers == ["principal", "service_principal"]
 
     delete = contrib.endpoints[f"{collection}/{{name}}"]["delete"]
-    assert delete.permissions == ["agents.suite.delete"]
+    assert delete.permissions == ["agents.execute.delete"]
 
-    # Every job-factory permission for all six job collections is declared.
+    # Every job-factory permission for all three job collections is declared.
     expected_job_perms = {
         f"agents.{sub}.{verb}"
-        for sub in ("evaluate", "execute", "suite", "optimize-skills", "analyze", "package")
+        for sub in ("evaluate", "execute", "package")
         for verb in ("create", "list", "read", "delete", "cancel")
     }
     assert expected_job_perms <= set(contrib.permissions)
