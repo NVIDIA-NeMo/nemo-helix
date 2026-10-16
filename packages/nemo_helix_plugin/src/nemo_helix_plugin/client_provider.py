@@ -39,6 +39,7 @@ from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from nemo_helix_plugin.auth import RuntimePrincipal
 from nemo_helix_plugin.client.auth import AsyncFromSyncTokenProvider, TokenProvider
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.constants import (
@@ -70,7 +71,7 @@ class NemoClientProvider(Protocol):
         *,
         as_service: str | None = None,
         internal: bool = False,
-        on_behalf_of: str | None = None,
+        on_behalf_of: str | RuntimePrincipal | None = None,
         workspace: str | None = None,
     ) -> NemoClient:
         """Build a sync NemoClient for the current service context."""
@@ -80,7 +81,7 @@ class NemoClientProvider(Protocol):
         *,
         as_service: str | None = None,
         internal: bool = False,
-        on_behalf_of: str | None = None,
+        on_behalf_of: str | RuntimePrincipal | None = None,
         workspace: str | None = None,
     ) -> AsyncNemoClient:
         """Build an async NemoClient for the current service context."""
@@ -135,7 +136,7 @@ def _build_headers(
     *,
     as_service: str | None = None,
     internal: bool = False,
-    on_behalf_of: str | None = None,
+    on_behalf_of: str | RuntimePrincipal | None = None,
 ) -> dict[str, str]:
     """Build X-NHX-* headers from env vars and explicit parameters."""
     headers: dict[str, str] = {}
@@ -178,8 +179,24 @@ def _build_headers(
         headers.pop("X-NHX-Principal-On-Behalf-Of-Groups", None)
         headers.pop("X-NHX-Subject-Account-Id", None)
         headers.pop("X-NHX-Subject-Aliases", None)
-        headers["X-NHX-Principal-On-Behalf-Of"] = on_behalf_of
+        headers.update(_delegated_principal_headers(on_behalf_of))
 
+    return headers
+
+
+def _delegated_principal_headers(on_behalf_of: str | RuntimePrincipal) -> dict[str, str]:
+    if isinstance(on_behalf_of, str):
+        return {"X-NHX-Principal-On-Behalf-Of": on_behalf_of}
+    effective = on_behalf_of.effective_principal
+    headers = {"X-NHX-Principal-On-Behalf-Of": effective.id}
+    if effective.groups:
+        headers["X-NHX-Principal-On-Behalf-Of-Groups"] = ",".join(effective.groups)
+    if effective.email:
+        headers["X-NHX-Principal-On-Behalf-Of-Email"] = effective.email
+    if effective.account_id:
+        headers["X-NHX-Subject-Account-Id"] = effective.account_id
+    if effective.authz_aliases:
+        headers["X-NHX-Subject-Aliases"] = ",".join(effective.authz_aliases)
     return headers
 
 
@@ -266,7 +283,7 @@ class DefaultNemoClientProvider:
         *,
         as_service: str | None = None,
         internal: bool = False,
-        on_behalf_of: str | None = None,
+        on_behalf_of: str | RuntimePrincipal | None = None,
         workspace: str | None = None,
     ) -> NemoClient:
         base_url = _base_url()
@@ -284,7 +301,7 @@ class DefaultNemoClientProvider:
         *,
         as_service: str | None = None,
         internal: bool = False,
-        on_behalf_of: str | None = None,
+        on_behalf_of: str | RuntimePrincipal | None = None,
         workspace: str | None = None,
     ) -> AsyncNemoClient:
         base_url = _base_url()
@@ -422,7 +439,7 @@ def get_nemo_client(
     *,
     as_service: str | None = None,
     internal: bool = False,
-    on_behalf_of: str | None = None,
+    on_behalf_of: str | RuntimePrincipal | None = None,
     workspace: str | None = None,
 ) -> NemoClient:
     """Build a sync NemoClient for the current service context.
@@ -437,7 +454,7 @@ def get_nemo_client(
         as_service: If provided, authenticate as ``service:{as_service}``.
             If ``None``, propagate the principal read from ``NHX_PRINCIPAL``.
         internal: Mark requests as internal (service-to-service).
-        on_behalf_of: Principal ID to act on behalf of.
+        on_behalf_of: Principal ID, or full principal (identity, email, groups), to act on behalf of.
         workspace: Default workspace used to fill ``{workspace}`` path params.
     """
     return _resolve_provider().get_nemo_client(
@@ -452,7 +469,7 @@ def get_async_nemo_client(
     *,
     as_service: str | None = None,
     internal: bool = False,
-    on_behalf_of: str | None = None,
+    on_behalf_of: str | RuntimePrincipal | None = None,
     workspace: str | None = None,
 ) -> AsyncNemoClient:
     """Async counterpart of :func:`get_nemo_client`.

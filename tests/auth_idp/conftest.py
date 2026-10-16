@@ -27,7 +27,7 @@ from tests.auth_idp.runtime_host import HostAuthIdpRuntime
 from tests.auth_idp.token_acquisition import exchange_token_with_retries, token_request_auth, token_request_body
 
 PYTEST_TIMEOUT_SECONDS = 2400
-pytest_plugins = ("e2e.conftest",)
+pytest_plugins = ("e2e.conftest", "tests.auth_idp.browser_fixtures")
 
 _exchange_token_with_retries = exchange_token_with_retries
 _token_request_auth = token_request_auth

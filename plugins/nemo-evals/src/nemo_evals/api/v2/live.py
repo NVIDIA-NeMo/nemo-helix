@@ -24,6 +24,7 @@ import logging
 from typing import Any, Self
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from nemo_evals.api.dependencies import delegated_service_client
 from nemo_evals.api.schemas import MetricRefOrInline
 from nemo_evals.authz import scope
 from nemo_evals.jobs.metric_resolution import (
@@ -229,10 +230,13 @@ async def run_live_evaluation(
                     request.metrics, workspace=workspace, entity_client=entity_client, async_client=async_client
                 )
                 params = _live_params(request.params, request.target)
-                secret_resolver = HelixMetricSecretResolver(
-                    client_from_platform(async_client, AsyncSecretsClient), workspace=workspace
-                )
-                output, results = await _score(metrics, request=request, params=params, secret_resolver=secret_resolver)
+                async with delegated_service_client(async_client) as secrets_access_client:
+                    secret_resolver = HelixMetricSecretResolver(
+                        client_from_platform(secrets_access_client, AsyncSecretsClient), workspace=workspace
+                    )
+                    output, results = await _score(
+                        metrics, request=request, params=params, secret_resolver=secret_resolver
+                    )
         except HTTPException:
             raise
         except TimeoutError:

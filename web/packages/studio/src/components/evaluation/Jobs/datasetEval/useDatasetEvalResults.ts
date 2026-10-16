@@ -5,6 +5,7 @@ import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { useEvalsGetEvalResult } from '@nemo/sdk/generated/evals/evals-plugin-eval-results-routes';
 import { useEvalsGetEvaluateJobResult } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { platformFetch } from '@nemo/sdk/src/utils/platformRequest';
 import type { DatasetEvalRow } from '@studio/components/evaluation/Jobs/datasetEval/DatasetEvalRowResultsPanel';
 import { useQuery } from '@tanstack/react-query';
 
@@ -24,7 +25,7 @@ const parseRowScores = (text: string): DatasetEvalRow[] =>
     });
 
 const downloadText = async (url: string, label: string): Promise<string> => {
-  const response = await fetch(url);
+  const response = await platformFetch(url);
   if (!response.ok) throw new Error(`Failed to download ${label}: ${response.statusText}`);
   return response.text();
 };

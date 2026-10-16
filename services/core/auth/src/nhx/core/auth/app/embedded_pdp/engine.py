@@ -42,7 +42,7 @@ def _get_engine() -> Engine:
 class OPAPolicy:
     """Wrapper for OPA WASM policy evaluation."""
 
-    def __init__(self, wasm_path: str, *, fuel_limit: int = 200_000_000, memory_limit_mb: int = 32):
+    def __init__(self, wasm_path: str, *, fuel_limit: int = 1_500_000_000, memory_limit_mb: int = 256):
         self._owner_thread_id = threading.get_ident()
         engine = _get_engine()
 

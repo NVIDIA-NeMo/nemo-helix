@@ -23,13 +23,6 @@ describe('ComparisonPanel', () => {
       [ROUTE_PARAMS.workspace]: workspace,
       id: metricEvaluationJob1.id,
     });
-
-    // Mock the results list endpoint used by useEvalsListEvaluateJobResults
-    server.use(
-      http.get(mockApiUrl(getEvalsListEvaluateJobResultsQueryKey, ':workspace', ':jobName'), () => {
-        return HttpResponse.json({ data: [], pagination: {} });
-      })
-    );
   });
 
   describe('Loading State', () => {
@@ -79,14 +72,11 @@ describe('ComparisonPanel', () => {
   describe('Completed Status', () => {
     beforeEach(() => {
       server.use(
-        http.get(
-          mockApiUrl(getEvalsListEvaluateJobResultsQueryKey, ':workspace', ':jobName'),
-          () => {
-            return HttpResponse.json({
-              download_url: 'http://localhost/mock-scores.json',
-            });
-          }
-        )
+        http.get(mockApiUrl(getEvalsListEvaluateJobResultsQueryKey, workspace, jobName), () => {
+          return HttpResponse.json({
+            download_url: 'http://localhost/mock-scores.json',
+          });
+        })
       );
     });
 
