@@ -131,7 +131,7 @@ export const LiveTestPanel: FC = () => {
         </Text>
       ) : null}
 
-      <Stack>
+      <Flex justify="center">
         {/* type="button", never a second submit: the live test is a separate action
             from creating the evaluation and must not trigger the form. Cancel
             replaces Test rather than sitting beside it -- a disabled Test during a
@@ -145,7 +145,7 @@ export const LiveTestPanel: FC = () => {
             Test
           </Button>
         )}
-      </Stack>
+      </Flex>
     </Stack>
   );
 };

@@ -105,7 +105,10 @@ export function useCreateEvaluation() {
 
       const job = await createEvaluateJob({ workspace, data: request });
       toast.success('Evaluation job created');
-      navigate(getEvaluationResultDetailsRoute(workspace, job.name), { flushSync: true });
+      navigate(getEvaluationResultDetailsRoute(workspace, job.name), {
+        flushSync: true,
+        replace: true,
+      });
     } catch (error) {
       if (!reusing && isConflictError(error)) {
         onNameConflict?.(fileset);
