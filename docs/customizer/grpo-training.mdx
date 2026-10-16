@@ -399,7 +399,7 @@ Create the deployment config first and pass its name. This is the recommended pa
 }
 ```
 
-Or an object to have one created inline. It deploys with NIM unless you set `engine`:
+Or an object to have one created inline. It deploys with vLLM, the recommended engine for Customizer outputs. Set `"engine": "nim"` only if you know that the NIM image you use supports the model, or that the model works with the default multi-LLM NIM:
 
 ```json
 {
@@ -412,14 +412,16 @@ Or an object to have one created inline. It deploys with NIM unless you set `eng
 
 | Field | Default | Description |
 | --- | --- | --- |
-| `engine` | `nim` | `nim` or `vllm`. |
+| `engine` | `vllm` | `vllm` or `nim`. |
 | `gpu` | `1` | GPUs the deployment requests. |
 | `lora_enabled` | `true` | Whether the deployment can load LoRA adapters. |
-| `image_name` | platform default for the engine | Container image. For NIM, the default is `nvcr.io/nim/nvidia/model-free-nim`. |
-| `image_tag` | platform default for the engine | Container image tag. For NIM, the default is `2.0.13`. |
+| `image_name` | platform default for the engine | Container image. For vLLM, the default is `docker.io/vllm/vllm-openai`; for NIM, the multi-LLM NIM, `nvcr.io/nim/nvidia/llm-nim`. |
+| `image_tag` | platform default for the engine | Container image tag. For NIM, the default is `latest`. |
 | `disk_size` | unset | Disk size for the deployment. |
 | `additional_envs` | unset | Extra environment variables. |
-| `tool_call_config` | unset | Tool-calling overrides. Only accepted with `engine: nim`. Setting `tool_call_plugin` requires the `models.tool-call-plugin.set` permission. |
+| `tool_call_config` | unset | Tool-calling overrides. Requires NIM: setting it without `engine` deploys with NIM, and it is rejected with `"engine": "vllm"`. Setting `tool_call_plugin` requires the `models.tool-call-plugin.set` permission. |
+
+vLLM loads LoRA adapters up to rank 16. To serve a higher `rank`, reference a deployment config that sets `"additional_args": ["--max-lora-rank", "<rank>"]` in its `executor_config`.
 
 A LoRA job deploys the **base** model with `lora_enabled: true` and serves the adapter from it, so `lora_enabled: false` on a LoRA job is rejected at submit — that deployment could never load the adapter. A full-weight job deploys the new model entity it registers.
 

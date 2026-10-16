@@ -146,12 +146,10 @@ def test_vllm_server_command_image_args_and_gpu() -> None:
     assert "nvidia.com/gpu" not in puller.resources.limits
 
 
-def test_nim_defaults_to_the_model_free_nim_image() -> None:
-    # A NIM config without an image must use a NIM that can load transformers 5 checkpoints,
-    # which is how Customizer saves its outputs.
+def test_nim_defaults_to_the_multi_llm_nim_image() -> None:
     compiled = compile_model_deployment(_resolved("nim"), DeploymentsPluginConfig())
     server = compiled.server_config.containers[0]
-    assert server.image == "nvcr.io/nim/nvidia/model-free-nim:2.0.13"
+    assert server.image == "nvcr.io/nim/nvidia/llm-nim:latest"
 
 
 def test_nim_gpu_resources_without_override() -> None:
@@ -195,8 +193,9 @@ def test_nim_weighted_chain_sets_model_path_env() -> None:
     assert env["NIM_MODEL_NAME"] == "/model-store"
     assert env["NIM_MODEL_PATH"] == "/model-store"
     assert env["NIM_SERVED_MODEL_NAME"] == "org/model"
-    assert env["NIM_FT_MODEL"] == "/model-store"
-    assert env["NIM_CUSTOM_MODEL"] == "/model-store"
+    # The default image is the multi-LLM NIM, which takes no fine-tuned-model env.
+    assert "NIM_FT_MODEL" not in env
+    assert "NIM_CUSTOM_MODEL" not in env
     ngc_env = next(item for item in env_items if item.name == "NGC_API_KEY")
     assert ngc_env.value is None
     assert ngc_env.secret_ref == secret_ref
@@ -232,6 +231,7 @@ def test_nim_non_legacy_weighted_chain_uses_engine_model_env() -> None:
 )
 def test_nim_additional_envs_path_overrides_weights_dir_only(runtime: Runtime, path_env: dict[str, str]) -> None:
     resolved = _resolved("nim", runtime=runtime)
+    resolved.view.image_name = "nvcr.io/nim/meta/llama-3.1-8b-instruct"
     resolved.view.override_config = {"nimLegacy": False}
     resolved.view.additional_envs = path_env
     with patch(

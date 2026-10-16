@@ -18,7 +18,7 @@ class TestDeploymentParams:
     def test_defaults(self) -> None:
         params = DeploymentParams()
 
-        assert params.engine == "nim"
+        assert params.engine == "vllm"
         assert params.gpu == 1
         assert params.lora_enabled is True
         assert params.tool_call_config is None
@@ -33,8 +33,8 @@ class TestDeploymentParams:
         with pytest.raises(ValidationError):
             DeploymentParams.model_validate({"gpu": 1, "junk": True})
 
-    def test_accepts_vllm_engine(self) -> None:
-        assert DeploymentParams(engine="vllm").engine == "vllm"
+    def test_accepts_nim_engine(self) -> None:
+        assert DeploymentParams(engine="nim").engine == "nim"
 
     @pytest.mark.parametrize("engine", ["generic", "trtllm"])
     def test_rejects_engines_other_than_vllm_and_nim(self, engine: str) -> None:
@@ -48,7 +48,14 @@ class TestDeploymentParams:
         with pytest.raises(ValidationError, match="only supported with engine='nim'"):
             DeploymentParams(engine="vllm", tool_call_config=tool_call_config)
 
-        assert DeploymentParams(tool_call_config=tool_call_config).tool_call_config == tool_call_config
+        assert DeploymentParams(engine="nim", tool_call_config=tool_call_config).tool_call_config == tool_call_config
+
+    def test_tool_call_config_without_engine_selects_nim(self) -> None:
+        """Specs stored before engine existed deployed with NIM and must keep loading."""
+        params = DeploymentParams.model_validate({"gpu": 1, "tool_call_config": {"tool_call_parser": "hermes"}})
+
+        assert params.engine == "nim"
+        assert DeploymentParams.model_validate({"gpu": 1}).engine == "vllm"
 
     def test_tool_call_plugin_must_be_a_workspace_qualified_ref(self) -> None:
         with pytest.raises(ValidationError):
