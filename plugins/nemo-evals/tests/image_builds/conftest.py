@@ -38,13 +38,22 @@ def store_task(entity_store, monkeypatch) -> StoreTask:
     monkeypatch.setattr("nemo_evals.api.service.task_service.verify_definition", verify)
     service = TaskService(entity_store, _Metrics(), files_client=Mock(), authorize_metric_read=AsyncMock())
 
-    async def store(name: str = "sort-task", *, config: dict | None = None, harbor: bool = True) -> str:
+    async def store(
+        name: str = "sort-task",
+        *,
+        config: dict | None = None,
+        harbor: bool = True,
+        workspace: str = "default",
+        archive_digest: str = ARCHIVE_DIGEST,
+        fileset_ref: str = ARCHIVE_REF,
+        tags: list[str] | None = None,
+    ) -> str:
         spec = (
             HarborTaskDefinition(
                 kind="harbor",
                 native_task_id="sort-task",
                 harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
-                source=HarborArchiveSource(fileset_ref=ARCHIVE_REF, files_hash=ARCHIVE_DIGEST),
+                source=HarborArchiveSource(fileset_ref=fileset_ref, files_hash=archive_digest),
                 config=config or {},
             )
             if harbor
@@ -55,8 +64,8 @@ def store_task(entity_store, monkeypatch) -> StoreTask:
                 metrics=[MetricRef("default/m")],
             )
         )
-        await service.create_task(name, TaskInput(spec=spec), workspace="default")
-        head = await entity_store.get(TaskEntity, name=name, workspace="default")
+        await service.replace_task(name, TaskInput(spec=spec, tags=tags or []), workspace=workspace)
+        head = await entity_store.get(TaskEntity, name=name, workspace=workspace)
         return (await get_revision(entity_store, TaskRevisionEntity, head)).content_hash
 
     return store

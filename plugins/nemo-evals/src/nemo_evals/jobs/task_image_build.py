@@ -90,4 +90,4 @@ def is_job_for(custom_fields: dict | None, spec: TaskImageBuildSpec) -> bool:
 
 
 def _build_key(spec: TaskImageBuildSpec) -> str:
-    return f"{spec.workspace}/{spec.task}#{spec.revision_digest}/{spec.attempt}"
+    return f"{spec.workspace}/{spec.task}#{spec.revision_id}/{spec.revision_digest}/{spec.attempt}"

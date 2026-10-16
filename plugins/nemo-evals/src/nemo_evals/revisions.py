@@ -42,6 +42,7 @@ from nemo_evals.entities import (
 )
 from nemo_helix_plugin.entities import (
     EntityBase,
+    EntityClient,
     EntityClientProtocol,
     EntityGetterProtocol,
     EntityUpdateClientProtocol,
@@ -244,6 +245,31 @@ async def _current_revision(
     if ordinal is None:
         return None
     return await _revision_at(revision_client, revision_type, head, ordinal)
+
+
+async def get_revision_by_id(
+    entity_client: EntityClient,
+    revision_type: type[RevisionT],
+    head: TaskEntity | TasksetEntity,
+    revision_id: str,
+) -> RevisionT:
+    """Read an exact revision, confirming its stored type, parent, workspace and content.
+
+    ID reads deserialize into the requested model without checking the stored entity type.
+    Confirm through the typed child endpoint before trusting that model or verifying its content.
+    """
+    missing = f"'{head.workspace}/{head.name}' has no revision with ID {revision_id!r}"
+    try:
+        candidate = await entity_client.get_by_id(revision_type, revision_id)
+        if candidate.workspace != head.workspace or candidate.parent != head.id:
+            raise RevisionNotFoundError(missing)
+        revision = await entity_client.get(revision_type, name=candidate.name, workspace=head.workspace, parent=head.id)
+    except NemoEntityNotFoundError as exc:
+        raise RevisionNotFoundError(missing) from exc
+    if revision.id != revision_id:
+        raise RevisionNotFoundError(missing)
+    _verify_content(head, revision)
+    return revision
 
 
 async def get_revision(

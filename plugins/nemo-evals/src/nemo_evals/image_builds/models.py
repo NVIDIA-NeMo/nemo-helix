@@ -130,7 +130,7 @@ def build_entity_name(attempt: int) -> str:
     return f"{_BUILD_NAME_PREFIX}{attempt}"
 
 
-def build_job_name(task: str, revision_digest: str, attempt: int) -> str:
+def build_job_name(task: str, revision_id: str, attempt: int) -> str:
     """Name of the task-builder Job for one attempt, unique per task revision and attempt."""
-    key = hashlib.sha256(f"{task}#{revision_digest}".encode()).hexdigest()[:16]
+    key = hashlib.sha256(f"{task}#{revision_id}".encode()).hexdigest()[:16]
     return f"task-image-build-{key}-{attempt}"
