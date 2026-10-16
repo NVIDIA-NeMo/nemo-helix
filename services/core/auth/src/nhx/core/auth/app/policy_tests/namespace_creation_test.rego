@@ -68,6 +68,7 @@ test_workspace_creation_allowed_via_wildcard_binding if {
     with data.authz.endpoints as workspace_test_data.endpoints
     with data.authz.workspaces as workspace_test_data.workspaces
     with data.authz.principals as workspace_test_data.principals
+    with data.authz.scope_families as scope_families_fixture
     
     result.allowed == true
 }
@@ -149,6 +150,7 @@ test_workspace_creation_allowed_via_group_binding if {
     with data.authz.endpoints as workspace_test_data.endpoints
     with data.authz.workspaces as workspace_test_data.workspaces
     with data.authz.principals as workspace_test_data.principals
+    with data.authz.scope_families as scope_families_fixture
     
     result.allowed == true
 }
