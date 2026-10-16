@@ -178,6 +178,14 @@ def test_the_jobs_controllers_role_carries_its_component_label() -> None:
     assert role["metadata"]["labels"]["app.kubernetes.io/component"] == "custom-controller"
 
 
+def test_the_jobs_controller_can_write_a_build_steps_secrets() -> None:
+    """Under workload token exchange the controller hands the push step its secrets through a Kubernetes Secret."""
+    role = _in_namespace(_helm_template(*ENABLED), "nhx-builds")["Role", "nemo-helix-core-controller"]
+
+    verbs = {verb for rule in role["rules"] if "secrets" in rule["resources"] for verb in rule["verbs"]}
+    assert {"create", "get", "delete"} <= verbs
+
+
 class TestWithOpenSandboxOnTheCluster:
     """Jobs gives every job pod a required reference to the OpenSandbox key, which no build step uses."""
 
