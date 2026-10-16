@@ -21,8 +21,10 @@ from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.jobs.types import HelixJobStepResponse, HelixJobStepWithContext
 from nemo_helix_plugin.refs import parse_entity_ref
-from nhx.common.auth import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
-from nhx.common.auth.models import NHX_PRINCIPAL_ENVVAR
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nhx.common.auth import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, AuthContext
+from nhx.common.auth.models import NHX_PRINCIPAL_ENVVAR, Principal
+from nhx.common.client_factory import get_nemo_client
 from nhx.common.config.base import (
     LOOPBACK_ADDRESSES,
     NHX_CONFIG_WARNINGS_DISABLED_ENV_VAR,
@@ -49,6 +51,7 @@ from nhx.core.jobs.app.constants import DEFAULT_PROFILE as DEFAULT_PROFILE
 from nhx.core.jobs.app.constants import DEFAULT_PROVIDER as DEFAULT_PROVIDER
 from nhx.core.jobs.app.lifecycle import active_ttl_anchor, ensure_aware, step_provider_profile
 from nhx.core.jobs.app.providers import ComputeResources
+from nhx.core.jobs.controllers.backends.exceptions import FailedToScheduleError
 from nhx.core.jobs.entities import get_step_spec_name, is_final_platform_step
 from pydantic import BaseModel, model_validator
 
@@ -378,7 +381,10 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
         Returns:
             The environment variable to create to inform the job which secrets to fetch.
             It has the format "ENV_VAR1=workspace/secret_name1,ENV_VAR2=workspace/secret_name2".
+            Empty under workload token exchange, where :meth:`resolve_step_secrets` reads them instead.
         """
+        if is_workload_identity_token_exchange_enabled():
+            return ""
         env_var_str = ""
         for envvar in (step.step_spec.environment or []) if step.step_spec else []:
             if envvar.from_secret is not None:
@@ -387,6 +393,51 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
                 secret_ref = parse_entity_ref(envvar.from_secret.name, default_workspace=step.workspace)
                 env_var_str += f"{envvar.name}={secret_ref.workspace}/{secret_ref.name}"
         return env_var_str
+
+    def resolve_step_secrets(self, step: HelixJobStepWithContext) -> dict[str, str]:
+        """Under workload token exchange, the value of each of the step's ``from_secret`` variables, by name.
+
+        The job's launcher reads its secrets with trusted identity headers, which exchange mode refuses, so the
+        controller reads them instead, as ``service:jobs`` acting for the step's submitter. Without exchange this
+        is empty and the launcher fetches them as before.
+
+        Raises:
+            FailedToScheduleError: A secret can't be read for the submitter, or the step has no submitter.
+        """
+        if not is_workload_identity_token_exchange_enabled():
+            return {}
+        environment = (step.step_spec.environment if step.step_spec else None) or []
+        references = [
+            (envvar.name, parse_entity_ref(envvar.from_secret.name, default_workspace=step.workspace))
+            for envvar in environment
+            if envvar.from_secret is not None
+        ]
+        if not references:
+            return {}
+        if step.auth_context is None:
+            raise FailedToScheduleError(f"Job step {step.job}/{step.name} has secrets but no submitter to read them as")
+        submitter = (
+            AuthContext.model_validate(step.auth_context.model_dump(mode="python", exclude_none=True))
+            .to_principal()
+            .effective_principal
+        )
+        values: dict[str, str] = {}
+        for name, reference in references:
+            try:
+                values[name] = self._read_secret_value(reference.workspace, reference.name, submitter)
+            except Exception as exc:
+                raise FailedToScheduleError(
+                    f"Can't read secret {reference.workspace}/{reference.name} for {name} as the job's submitter: {exc}"
+                ) from exc
+        return values
+
+    def _read_secret_value(self, workspace: str, name: str, on_behalf_of: Principal) -> str:
+        """The value of secret ``workspace/name``, read as ``service:jobs`` acting for ``on_behalf_of``."""
+        client = get_nemo_client(as_service="jobs", internal=True, on_behalf_of=on_behalf_of)
+        try:
+            return SecretsClient.from_client(client).access_secret(workspace=workspace, name=name).data().value
+        finally:
+            client.close()
 
     def get_step(self, job: str, step_name: str, workspace: str) -> HelixJobStepResponse:
         """Fetch the latest state of a job step via the typed Jobs client."""

@@ -13,6 +13,10 @@ The feature uses three environment variables:
 2. **`NHX_SECRETS_URL`** (required when NEMO_JOB_SECRETS is set) - The base URL of the NeMo Helix API (e.g., `http://localhost:8080`)
 3. **`NHX_PRINCIPAL`** (optional) - JSON containing auth context for authenticated API calls, e.g. `{"id":"user@example.com","email":"user@example.com","groups":["team-a"]}`
 
+With workload token exchange enabled, the platform refuses the launcher's trusted identity headers, so the jobs
+controller reads a step's secrets itself and leaves `NEMO_JOB_SECRETS` empty. See "Job secrets" in
+`docs/auth/deployment/credential-propagation.mdx`.
+
 ## Usage Example
 
 ```bash

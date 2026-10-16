@@ -51,8 +51,10 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     create_configmap,
     create_pod_template_spec,
     create_step_network_policy,
+    create_step_secret,
     delete_configmap,
     delete_step_network_policy,
+    delete_step_secret,
     first_task_image_id,
     get_namespace_from_environment,
     image_pull_backoff_failure,
@@ -243,6 +245,9 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
                 extra={"job_name": job_name, "namespace": self.namespace},
             )
 
+        # Under workload token exchange, read the step's secrets first, so one that can't be read creates nothing.
+        secret_values = self.resolve_step_secrets(step)
+
         # Create a configmap storing the job's step config
         configmap_name = create_configmap(
             core_v1=self._core_v1,
@@ -254,6 +259,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             if self._execution_profile_config.step_network_policies_enabled
             else None
         )
+        secret_env = create_step_secret(self._core_v1, self.namespace, step, secret_values) if secret_values else []
 
         # Otherwise, create a new job
         common_labels = common_labels_for_step(step)
@@ -270,6 +276,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             self._core_v1,
             num_gpus=num_gpus,
             executor_resources=executor_resources,
+            secret_env=secret_env,
         )
 
         # Create job spec
@@ -640,6 +647,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             namespace=self.namespace,
             name=job_name,
         )
+        delete_step_secret(self._core_v1, self.namespace, job_name)
         self._delete_step_network_policy(job_name)
 
     def _delete_step_network_policy(self, name: str | None) -> None:
