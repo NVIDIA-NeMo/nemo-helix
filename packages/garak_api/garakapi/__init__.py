@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 import pathlib
 import sys
 from typing import Callable, List, Union
@@ -20,6 +21,15 @@ class PluginCacheNoValidate(_plugins.PluginCache):
 
     def _valid_loaded_cache(self, *args, **kwargs):
         return True
+
+    def _load_plugin_cache(self):
+        # Read the packaged cache directly. Upstream copies it into the per-user
+        # cache dir with a non-atomic shutil.copy2 and then reads that copy, so
+        # concurrent first imports (e.g. parallel OpenAPI generation on a fresh
+        # CI runner) can read a truncated file. Without validation the copy is
+        # never rebuilt, so it adds nothing but the race.
+        with open(self._plugin_cache_filename, encoding="utf-8") as cache_file:
+            return json.load(cache_file)
 
 
 # Prepopulate the singleton cache so that PluginCache doesn't call its
