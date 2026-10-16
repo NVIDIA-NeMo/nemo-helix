@@ -151,6 +151,7 @@ export const AgentEvaluationDetailRoute: FC = () => {
     data: result,
     isLoading: isLoadingResult,
     isPending: isResultPending,
+    isError: isResultError,
   } = useQuery({
     queryKey: ['agent-eval-result', workspace, jobName] as const,
     queryFn: ({ signal }) => fetchAgentEvalResult(workspace, jobName, signal),
@@ -173,6 +174,19 @@ export const AgentEvaluationDetailRoute: FC = () => {
       <Flex align="center" justify="center" className="h-full w-full">
         <Spinner size="medium" aria-label="Loading evaluation..." />
       </Flex>
+    );
+  }
+
+  // fetchAgentEvalResult maps a 404 to null, so an error here is a failed request, not a
+  // missing evaluation.
+  if (!job && isResultError) {
+    return (
+      <Stack padding="density-2xl">
+        <ErrorMessage
+          header="Failed to load evaluation"
+          message={`Could not load the result for "${jobName}" in workspace "${workspace}". Please try again.`}
+        />
+      </Stack>
     );
   }
 

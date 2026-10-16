@@ -126,6 +126,24 @@ describe('AgentEvaluationDetailRoute', () => {
     });
   });
 
+  it('shows a request error, not not-found, when the result lookup fails', async () => {
+    // The Job lookup 404s (default handler); the result request fails with a 500.
+    server.use(
+      http.get(
+        `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/${workspace}/agent-eval-results/run-broken`,
+        () => HttpResponse.json({ detail: 'boom' }, { status: 500 })
+      )
+    );
+    renderRoute(<AgentEvaluationDetailRoute />, {
+      history: getAgentEvaluationDetailRoute(workspace, 'run-broken'),
+      routes: [
+        { path: ROUTES.workspace.agentEvaluationDetail, element: <AgentEvaluationDetailRoute /> },
+      ],
+    });
+    expect(await screen.findByText('Failed to load evaluation')).toBeInTheDocument();
+    expect(screen.queryByText('Evaluation not found')).not.toBeInTheDocument();
+  });
+
   describe('run outcome', () => {
     const failedJob = {
       ...completedJob,
