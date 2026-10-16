@@ -236,8 +236,9 @@ export NHX_BASE_URL=http://localhost:8080
 `imagePullSecrets`, and get the same Secret into `$NS-builds`: the chart doesn't copy it, but
 `builder.namespaceLabels` can label the namespace for a tool that does. Installing needs permission
 to create the build namespace and its RBAC. Platform auth is off, the chart's default, as in the
-quickstart; with it on, your calls need a token, and the builder needs workload token exchange off
-(see [Security](#security)).
+quickstart; with it on, your calls need a token. Workload token exchange works too, but if a
+private CA signs the gateway's certificate, the build steps need that CA (see
+[Security](#security)).
 
 **Instead of step 5:** the username from your file, not `builder`.
 
@@ -727,7 +728,7 @@ volume and `node_selector`, so the profiles must agree with each other:
   secret in any workspace: the platform takes those headers on trust. A build's own `RUN` reaches
   the platform, so a Dockerfile can read every workspace's signing key and registry credential,
   sign as any workspace, and push to its repositories. With exchange on, the platform refuses those
-  headers, but the builder doesn't work with exchange on yet (below).
+  headers (below).
 - **A service can submit builds for anyone it names.** `POST /builds` admits a service acting for a
   person, so that a platform service, such as evaluations, can build for its user. The policy
   admits a service on its own permissions, so the checks behind `403` and `409`, that the person
@@ -750,12 +751,18 @@ volume and `node_selector`, so the profiles must agree with each other:
   One that names a service can also rewrite any image's row through the platform's generic Entities
   route, including a `ready` row's digest, which `complete` never changes. Even a real workload
   token says only whom a step acts for, not which job it belongs to.
-- **Platform auth on works only with workload token exchange off.** With exchange on, the jobs
-  launcher can't fetch the push step's secrets: it fetches them with the step's delegated identity,
-  which Jobs doesn't give a step under exchange, so the step never starts. Without exchange, the
-  push step calls the builder as `service:builder`, acting for the submitter. `complete` admits a
-  service only when it acts for the image's submitter; reading an image admits one acting for any
-  person.
+- **How the steps authenticate.** Without workload token exchange, the push step calls the builder
+  as `service:builder`, acting for the submitter, and the jobs launcher fetches its registry
+  credential and signing key the same way. With exchange, each step exchanges its pod's token for
+  one acting for the submitter, and the jobs controller reads the push step's secrets for the
+  submitter and hands them over in a Kubernetes Secret in the build namespace, deleted with the
+  step. `complete` admits a caller only when it acts for the image's submitter; reading an image
+  admits one acting for any person.
+- **With exchange, the build steps must trust the gateway's certificate.** They call the platform
+  over TLS to exchange their tokens. The chart gives its build profiles no extra environment or
+  volumes, so if a private CA signs that certificate, define `build-fetch`, `build-control` and
+  `build-push` yourself under `platformConfig.jobs.executors`, with the CA mounted and
+  `SSL_CERT_FILE` pointing at it: a profile you define replaces the chart's.
 - **`fetch` unpacks archives the request names.** It runs acting for the submitter and parses an
   archive anyone who can write to the fileset put there. Python's `data` filter keeps every entry
   inside the archive's directory, and refuses links out of it and devices; the caps bound what one
