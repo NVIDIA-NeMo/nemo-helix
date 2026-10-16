@@ -306,6 +306,54 @@ class TestDependencyProviderEntityClient:
             auth_client_context.reset(token)
 
 
+class TestDependencyProviderServiceClientFactory:
+    """Tests for DependencyProvider.get_service_nemo_client_factory()."""
+
+    def test_builds_clients_as_the_named_service_for_the_caller(self):
+        from unittest.mock import patch
+
+        from nhx.common.auth import auth_client_context
+        from nhx.common.auth.client import AuthClient
+        from nhx.common.auth.models import Principal
+        from nhx.common.service.base import DependencyProvider
+
+        dp = DependencyProvider()
+        user_principal = Principal(id="user@example.com", email="user@example.com", groups=["team-a"])
+        token = auth_client_context.set(AuthClient(principal=user_principal, config=AuthConfig(), http_client=None))
+
+        try:
+            http_client = object()
+            nemo_client = object()
+            with (
+                patch.object(dp, "get_http_client", return_value=http_client),
+                patch("nhx.common.client_factory.get_async_nemo_client", return_value=nemo_client) as get_nemo_client,
+            ):
+                result = dp.get_service_nemo_client_factory()("evaluator")
+
+            assert result is nemo_client
+            get_nemo_client.assert_called_once_with(
+                as_service="evaluator",
+                internal=True,
+                on_behalf_of=user_principal.effective_principal,
+                http_client=http_client,
+            )
+        finally:
+            auth_client_context.reset(token)
+
+    def test_service_nemo_client_factory_is_bound_for_plugin_routes(self):
+        from unittest.mock import MagicMock
+
+        from fastapi import FastAPI
+        from nemo_helix_plugin.dependencies import get_service_nemo_client_factory
+        from nhx.common.service.base import DependencyProvider
+
+        dp = DependencyProvider()
+        app = FastAPI()
+        dp.setup_dependencies(app, MagicMock(_service_config=None))
+
+        assert app.dependency_overrides[get_service_nemo_client_factory] == dp.get_service_nemo_client_factory
+
+
 class TestPrincipalOtlpHeaders:
     """Tests for Principal.get_otlp_headers_value()."""
 

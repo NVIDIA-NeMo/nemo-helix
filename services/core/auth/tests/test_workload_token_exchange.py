@@ -1057,6 +1057,54 @@ def test_kubernetes_reference_row_mints_delegated_access_token(
     }
 
 
+def test_job_created_by_a_service_mints_a_token_acting_as_that_service(
+    client: TestClient,
+    exchange_config: AuthConfig,
+    exchange_service: exchange.WorkloadTokenExchangeService,
+    entity_client: _FakeEntityClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delegation = _reference_delegation_entity(
+        auth_context=PluginAuthContext.from_principal(
+            Principal(
+                id="service:evaluator",
+                on_behalf_of="creator@example.com",
+                on_behalf_of_email="creator@example.com",
+                on_behalf_of_groups=["workspace-editors"],
+            )
+        )
+    )
+    entity_client.entities[delegation.name] = delegation
+
+    async def decode_subject_token(
+        config: AuthConfig, subject_token: str, audience: str
+    ) -> exchange.DecodedSubjectToken:
+        return _decoded_subject_token(
+            {
+                "sub": "system:serviceaccount:nemo-runs:job-runner",
+                "groups": ["system:serviceaccounts"],
+            },
+            bound_reference=_pod_uid_bound_reference(),
+        )
+
+    monkeypatch.setattr(exchange_service, "decode_subject_token", decode_subject_token)
+
+    response = client.post("/token", data=_exchange_form("kubernetes-token"))
+
+    assert response.status_code == 200
+    claims = _decode_access_token(response.json()["access_token"], exchange_config, exchange_service)
+    assert claims["sub"] == "creator@example.com"
+    assert claims["email"] == "creator@example.com"
+    assert claims["groups"] == "workspace-editors"
+    assert claims["act"] == {
+        "sub": "service:evaluator",
+        "act": {
+            "sub": "system:serviceaccount:nemo-runs:job-runner",
+            "groups": "system:serviceaccounts",
+        },
+    }
+
+
 def test_kubernetes_reference_row_mints_delegated_access_token_for_deployment_row(
     client: TestClient,
     exchange_config: AuthConfig,
