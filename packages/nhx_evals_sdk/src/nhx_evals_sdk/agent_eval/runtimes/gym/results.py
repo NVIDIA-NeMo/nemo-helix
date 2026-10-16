@@ -81,6 +81,12 @@ _FAILURE_MESSAGE_KEYS = (
 )
 #: The exception Gym caught (0.6+), else the failure class Gym routed the record to the sidecar by.
 _FAILURE_TYPE_KEYS = ("_ng_failure_type", "_ng_failure_class")
+#: Prefix of every key Gym writes about a failure: its class, the exception, the HTTP status and reply,
+#: and later additions such as the stage. Gym strips by it before scoring a failure row as zero.
+_NG_FAILURE_PREFIX = "_ng_failure_"
+#: What the server answered a failed ``/run`` with. A NeMo Gym server answers 500 with its handler's
+#: exception, so this holds the cause that the transport message only gives the status of.
+_NG_FAILURE_RESPONSE_BODY = "_ng_failure_response_body"
 
 
 def _first_text(record: Mapping[str, Any], keys: Sequence[str]) -> str | None:
@@ -90,6 +96,40 @@ def _first_text(record: Mapping[str, Any], keys: Sequence[str]) -> str | None:
     A non-string under an earlier key is skipped, so it cannot hide a usable value under a later one.
     """
     return next((value for value in map(record.get, keys) if isinstance(value, str) and value.strip()), None)
+
+
+def _diagnostic_text(value: Any, *, reply: bool = False) -> str | None:
+    """One diagnostic as text: a string trimmed, an object or list as JSON, anything else ``None``.
+
+    Gym's servers JSON-encode their reply, so a reply that decodes to a string is shown decoded.
+    """
+    if reply and isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            decoded = None
+        if isinstance(decoded, str):
+            value = decoded
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, (Mapping, list)) and value:
+        return json.dumps(value)
+    return None
+
+
+def _failure_message(record: Mapping[str, Any]) -> str | None:
+    """Every reason the record gives for the failure, once each, one per line.
+
+    Each producer writes its own key, so a record can hold several. The server's reply comes last:
+    for a ``/run`` that failed, Gym's message is the transport exception's text, which names the
+    status and URL, while the reply holds the cause.
+    """
+    parts: list[str] = []
+    for key in (*_FAILURE_MESSAGE_KEYS, _NG_FAILURE_RESPONSE_BODY):
+        text = _diagnostic_text(record.get(key), reply=key == _NG_FAILURE_RESPONSE_BODY)
+        if text is not None and text not in parts:
+            parts.append(text)
+    return "\n".join(parts) or None
 
 
 def _agent_never_ran(record: Mapping[str, Any]) -> bool:
@@ -709,10 +749,9 @@ def trials_from_rollouts(
                 descriptors[NG_TRAJECTORY_EVIDENCE] = EvidenceDescriptor(
                     kind="filesystem", format="file", ref=str(capture_path)
                 )
-            failure = next((value for value in map(record.get, _FAILURE_MESSAGE_KEYS) if value), None)
             error = TrialError(
                 type=_first_text(record, _FAILURE_TYPE_KEYS) or UNKNOWN_ERROR_TYPE,
-                message=_first_text(record, _FAILURE_MESSAGE_KEYS),
+                message=_failure_message(record),
             )
             trials.append(
                 AgentEvalTrial(
@@ -733,7 +772,13 @@ def trials_from_rollouts(
                     measurements=_usage_measurements(record),
                     metadata={
                         "reward": None,
-                        "gym_failure": failure,
+                        # Every diagnostic the record carries, verbatim. The error keeps one type and
+                        # message; this keeps the rest, such as Gym's class, HTTP status and stage.
+                        "gym_failure": {
+                            key: value
+                            for key, value in record.items()
+                            if key in _FAILURE_MESSAGE_KEYS or key.startswith(_NG_FAILURE_PREFIX)
+                        },
                         NG_TASK_INDEX: record.get(NG_TASK_INDEX),
                         NG_ROLLOUT_INDEX: raw_rollout_index,
                     },

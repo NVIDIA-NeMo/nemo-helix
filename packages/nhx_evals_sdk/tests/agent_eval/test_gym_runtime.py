@@ -398,7 +398,7 @@ def test_failures_sidecar_yields_failed_trials(tmp_path: Path) -> None:
     assert completed.measurements.total_tokens == 10
     assert failed.measurements.total_tokens == 5
     assert failed.metadata["reward"] is None
-    assert failed.metadata["gym_failure"] == "boom"
+    assert failed.metadata["gym_failure"] == {"error": "boom"}
 
 
 @pytest.mark.parametrize(
@@ -409,9 +409,68 @@ def test_failures_sidecar_yields_failed_trials(tmp_path: Path) -> None:
                 "_ng_failure_class": "agent_run_error",
                 "_ng_failure_type": "ClientResponseError",
                 "_ng_failure_message": "500, message='Internal Server Error'",
+                "_ng_failure_http_status": 500,
+                "_ng_failure_response_body": json.dumps("RuntimeError('NeMo Fabric invocation failed: overloaded')"),
             },
-            TrialError(type="ClientResponseError", message="500, message='Internal Server Error'"),
+            TrialError(
+                type="ClientResponseError",
+                message="500, message='Internal Server Error'\n"
+                "RuntimeError('NeMo Fabric invocation failed: overloaded')",
+            ),
             id="gym-0.6-request-failure",
+        ),
+        pytest.param(
+            {
+                "_ng_failure_class": "agent_request_failed",
+                "_ng_failure_type": "ClientResponseError",
+                "_ng_failure_message": "502, message='Bad Gateway'",
+                "_ng_failure_http_status": 502,
+                "_ng_failure_response_body": "<html>Bad Gateway</html>",
+            },
+            TrialError(type="ClientResponseError", message="502, message='Bad Gateway'\n<html>Bad Gateway</html>"),
+            id="gateway-page",
+        ),
+        pytest.param(
+            {
+                "_ng_failure_class": "agent_run_error",
+                "_ng_failure_type": "ClientResponseError",
+                "_ng_failure_message": "404, message='Not Found'",
+                "_ng_failure_http_status": 404,
+                "_ng_failure_response_body": '{"detail": "Not Found"}',
+            },
+            TrialError(type="ClientResponseError", message='404, message=\'Not Found\'\n{"detail": "Not Found"}'),
+            id="json-object-reply",
+        ),
+        pytest.param(
+            {
+                "_ng_failure_class": "agent_request_failed",
+                "_ng_failure_type": "TimeoutError",
+                "_ng_failure_message": "TimeoutError()",
+                "_ng_failure_http_status": None,
+                "_ng_failure_response_body": None,
+            },
+            TrialError(type="TimeoutError", message="TimeoutError()"),
+            id="gym-0.6-timeout",
+        ),
+        pytest.param(
+            {
+                "_ng_failure_class": "environment_server_failed",
+                "_ng_failure_terminal": False,
+                "_ng_failure_message": "sandbox unreachable",
+                "_ng_failure_stage": "agent",
+            },
+            TrialError(type="environment_server_failed", message="sandbox unreachable"),
+            id="gym-0.7-environment-server",
+        ),
+        pytest.param(
+            {"_ng_failure_class": "agent_run_error", "_ng_failure_response_body": json.dumps("ValueError('x')")},
+            TrialError(type="agent_run_error", message="ValueError('x')"),
+            id="reply-without-message",
+        ),
+        pytest.param(
+            {"_ng_failure_class": "agent_run_error", "_ng_failure_response_body": "503"},
+            TrialError(type="agent_run_error", message="503"),
+            id="json-scalar-reply",
         ),
         pytest.param(
             {"_ng_failure_class": "judge_failed", "_ng_failure_judge_error": "judge 503"},
@@ -425,18 +484,23 @@ def test_failures_sidecar_yields_failed_trials(tmp_path: Path) -> None:
         ),
         pytest.param(
             {"error": "boom", "_ng_failure_message": "gym"},
-            TrialError(type=UNKNOWN_ERROR_TYPE, message="boom"),
-            id="agent-error-kept",
+            TrialError(type=UNKNOWN_ERROR_TYPE, message="boom\ngym"),
+            id="every-message-kept",
         ),
         pytest.param(
-            {"_ng_failure_type": " ", "_ng_failure_class": 7, "error": {"status": 503}},
+            {"error": "boom", "error_message": " boom "},
+            TrialError(type=UNKNOWN_ERROR_TYPE, message="boom"),
+            id="repeat-dropped",
+        ),
+        pytest.param(
+            {"_ng_failure_type": " ", "_ng_failure_class": 7, "error": 503, "exception": []},
             TrialError(type=UNKNOWN_ERROR_TYPE),
             id="odd-diagnostic",
         ),
         pytest.param(
             {"error": {"status": 503}, "_ng_failure_type": "ClientResponseError", "_ng_failure_message": "503"},
-            TrialError(type="ClientResponseError", message="503"),
-            id="odd-agent-error-gym-message-kept",
+            TrialError(type="ClientResponseError", message='{"status": 503}\n503'),
+            id="structured-agent-error-kept",
         ),
     ],
 )
@@ -458,8 +522,8 @@ def test_a_failed_attempt_keeps_its_diagnostic_and_model_calls(
     (trial,) = trials_from_rollouts(bundle, tasks, index_map, capture_dir=captures)
 
     assert trial.error == error
-    # gym_failure keeps the raw diagnostic, an agent's own first, including one too odd for the error message.
-    assert trial.metadata["gym_failure"] == (failure.get("error") or error.message)
+    # gym_failure keeps every diagnostic verbatim, including what the error drops or is too odd to hold.
+    assert trial.metadata["gym_failure"] == failure
     assert trial.evidence is not None
     # No OTLP trace: that would move publication off the ATIF fallback, which records the agent identity.
     assert trial.evidence.descriptors.keys() == {"rollout_failures", "ng_trajectory"}
@@ -1495,7 +1559,7 @@ def test_empty_rollouts_alongside_a_sidecar_failure_do_not_raise(tmp_path: Path)
     assert all(trial.status is AgentEvalTrialStatus.FAILED for trial in trials)
     # The sidecar's own diagnosis survives rather than being replaced by the empty-rollout message.
     sidecar = next(trial for trial in trials if trial.task_id == tasks[1].id)
-    assert sidecar.metadata["gym_failure"] == "verifier timeout"
+    assert sidecar.metadata["gym_failure"] == {"error": "verifier timeout"}
 
 
 def test_some_rollouts_empty_fails_only_those_trials(tmp_path: Path) -> None:
