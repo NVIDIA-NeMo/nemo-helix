@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from urllib.parse import quote
 
@@ -103,7 +103,7 @@ def get_taskset_service(
 
 
 @asynccontextmanager
-async def delegated_service_client(request_client: AsyncNemoClient) -> AsyncIterator[AsyncNemoClient]:
+async def delegated_service_client(request_client: AsyncNemoClient) -> AsyncGenerator[AsyncNemoClient, None]:
     """Yield a client that calls the platform as the evals service, delegating the request's caller.
 
     Use it for calls only a service principal may make, such as reading a secret value; the target

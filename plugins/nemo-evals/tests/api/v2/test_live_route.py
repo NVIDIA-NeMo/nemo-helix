@@ -11,7 +11,7 @@ would block the worker for the whole of generation plus judging.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
 from typing import Any, NoReturn
 
@@ -415,7 +415,7 @@ def _delegated_service_client(monkeypatch: pytest.MonkeyPatch, service_secrets_c
     calls: list[dict[str, Any]] = []
 
     @asynccontextmanager
-    async def fake_get_async_nemo_client(**kwargs: Any) -> AsyncIterator[object]:
+    async def fake_get_async_nemo_client(**kwargs: Any) -> AsyncGenerator[object, None]:
         calls.append(kwargs)
         yield service_secrets_client
 
