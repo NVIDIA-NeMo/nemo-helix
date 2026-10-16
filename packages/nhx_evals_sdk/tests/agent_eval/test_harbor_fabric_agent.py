@@ -176,17 +176,20 @@ def test_harbor_model_name_without_a_default_model_is_refused_not_invented(tmp_p
         NemoFabricAgent(logs_dir=tmp_path, fabric_config=config, model_name="x")._build_config()
 
 
-def test_harbor_provided_mcp_servers_and_skills_are_added_to_the_agents_own(tmp_path: Path) -> None:
+def test_harbor_provided_mcp_servers_are_added_and_skills_travel_through_the_payload(tmp_path: Path) -> None:
+    """The task runner expands ``skills_dir`` into its ``<skill>/SKILL.md`` children; the root itself is not a
+    skill and the Claude/Codex adapters refuse it as one."""
     agent = _agent(
         tmp_path,
         mcp_servers=[MCPServerConfig(name="task-tools", transport="stdio", command="tools", args=["--serve"])],
         skills_dir="/task/skills",
     )
-    config = agent._build_config()
+    spec = agent._build_spec("hi")
 
-    assert config.mcp is not None and set(config.mcp.servers) == {"calculator", "task-tools"}
-    assert config.skills is not None
-    assert [str(p) for p in config.skills.paths] == ["skills/arithmetic", "/task/skills"]
+    assert spec.config.mcp is not None and set(spec.config.mcp.servers) == {"calculator", "task-tools"}
+    assert spec.config.skills is not None
+    assert [str(p) for p in spec.config.skills.paths] == ["skills/arithmetic"]
+    assert str(spec.skills_dir) == "/task/skills"
 
 
 @pytest.mark.parametrize("keyword", sorted(FLAT_CONFIG_KWARGS))

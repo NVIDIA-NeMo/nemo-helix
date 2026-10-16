@@ -218,6 +218,4 @@ class NemoFabricAgent(FabricAgent):  # ty: ignore[unsupported-base]
                     url=str(server.url),
                     exposure="harness_native",
                 )
-        if self.skills_dir is not None:
-            config.add_skill_path(self.skills_dir)
         return config
