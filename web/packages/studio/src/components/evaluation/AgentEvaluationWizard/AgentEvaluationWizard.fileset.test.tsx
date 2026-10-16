@@ -282,6 +282,18 @@ describe('AgentEvaluationWizard dataset from a fileset', () => {
     );
   });
 
+  it('holds Next and says why while the picked fileset file is still being read', async () => {
+    vi.mocked(filesDownloadFile).mockReturnValue(new Promise(() => {}));
+    const user = userEvent.setup();
+    renderWizard();
+
+    await openDatasetStep(user);
+    await pickFilesetFile(user);
+
+    expect(await screen.findByText('Reading the selected file...')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+  });
+
   it('shows why a fileset file could not be downloaded', async () => {
     vi.mocked(filesDownloadFile).mockRejectedValue(new Error('Unable to find base file.'));
     const user = userEvent.setup();

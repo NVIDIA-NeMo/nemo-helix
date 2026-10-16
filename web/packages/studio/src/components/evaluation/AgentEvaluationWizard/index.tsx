@@ -832,11 +832,14 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
         return `An experiment named ${experimentPreview} already exists.`;
       return errors.newName?.message;
     }
+    if (step === 'configuration') {
+      if (isLoadingFilesetFile || isLoadingFilesetConfig) return 'Reading the selected file...';
+      if (isLlmJudge && isJudgeModelsLoading) return 'Loading judge models...';
+    }
     // The re-run path picks its source on this step too, so the source's own problems are
     // reported here rather than swallowed by a Submit that quietly does nothing.
     if (step === 'evaluation' && mode === MODE_EXPERIMENT) {
       if (hasNoEvaluations) return NO_EVALUATIONS_MESSAGE;
-      if (!selectedEvaluation) return 'Pick an evaluation to re-run.';
       if (isValidatingEvaluation) return 'Checking the saved eval config...';
       return evaluationConfigIssue ?? undefined;
     }
@@ -1161,7 +1164,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
             </>
           )}
 
-          {blocker && step === 'evaluation' && (
+          {blocker && (step === 'configuration' || step === 'evaluation') && (
             <Text className="text-secondary" kind="body/regular/sm">
               {blocker}
             </Text>
