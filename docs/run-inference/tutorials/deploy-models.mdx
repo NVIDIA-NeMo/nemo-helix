@@ -382,7 +382,11 @@ response = InferenceGatewayClient.from_client(client).provider_post(
 
 <Warning>
 
-HuggingFace deployments use the Multi-LLM NIM (`nvcr.io/nim/nvidia/llm-nim:1.13.1`) by default, which only supports specific model architectures. Check the [supported architectures list](https://docs.nvidia.com/nim/large-language-models/1.13.0/supported-architectures.html) before deploying. If your model architecture is not listed, you will need a model-specific NIM image — see [Deploy from NGC](#deploy-from-ngc) for that approach.
+A NIM deployment config that sets no image uses the platform default, the [multi-LLM NIM](https://docs.nvidia.com/nim/large-language-models/1.15.0/introduction.html) (`nvcr.io/nim/nvidia/llm-nim:1.15.5`), which only supports specific model architectures. Check the [supported architectures list](https://docs.nvidia.com/nim/large-language-models/1.15.0/supported-architectures.html) before deploying. If your model architecture is not listed, use a model-specific NIM image (see [Deploy from NGC](#deploy-from-ngc)) or [deploy with vLLM](#deploy-with-vllm).
+
+In NIM 2.x, the multi-LLM NIM is succeeded by the model-free NIM (`nvcr.io/nim/nvidia/model-free-nim`). See [About Model-Free NIM](https://docs.nvidia.com/nim/large-language-models/latest/deployment/model-free-nim.html), its [support matrix](https://docs.nvidia.com/nim/large-language-models/latest/reference/support-matrix.html#model-free-nim), and the [NIM 1.x migration guide](https://docs.nvidia.com/nim/large-language-models/latest/reference/1.x-migration-guide.html). To use it, set `image_name` to `nvcr.io/nim/nvidia/model-free-nim` and `image_tag` to `2.0.13`; the platform sets the configuration that each NIM version reads.
+
+To serve models trained with Customizer, we recommend [deploying with vLLM](#deploy-with-vllm). The multi-LLM NIM uses transformers 4 and cannot load merged LoRA models (`lora_merged`), which Customizer saves with transformers 5; deploy those with vLLM or the model-free NIM.
 
 </Warning>
 
@@ -827,9 +831,13 @@ Model-specific NIMs (for example, `nvcr.io/nim/meta/llama-3.1-70b-instruct`) hav
 
 ### Multi-LLM NIM
 
-The multi-LLM NIM (`nvcr.io/nim/nvidia/llm-nim:1.13.1`) requires explicit parallelism configuration via environment variables (`NIM_TENSOR_PARALLEL_SIZE`, `NIM_PIPELINE_PARALLEL_SIZE`). By default, it uses all GPUs for tensor parallelism (TP=gpu, PP=1).
+The multi-LLM NIM (`nvcr.io/nim/nvidia/llm-nim:1.15.5`), the platform's default NIM image, uses all GPUs for tensor parallelism by default (TP = `gpu`, PP = 1). To split the GPUs differently, set `NIM_TENSOR_PARALLEL_SIZE` and `NIM_PIPELINE_PARALLEL_SIZE` in `additional_envs` so that their product equals `gpu`.
 
-This example deploys [Qwen2.5-14B-Instruct](https://huggingface.co/Qwen/Qwen2.5-14B-Instruct) across 2 GPUs using tensor parallelism.
+### Model-Free NIM
+
+The model-free NIM (`nvcr.io/nim/nvidia/model-free-nim:2.0.13`) does not derive parallelism from the GPU count: tensor and pipeline parallelism both default to 1. Set `NIM_TENSOR_PARALLEL_SIZE` and `NIM_PIPELINE_PARALLEL_SIZE` in `additional_envs` so that their product equals `gpu`. See [About Model-Free NIM](https://docs.nvidia.com/nim/large-language-models/latest/deployment/model-free-nim.html) for other ways to select a profile.
+
+This example deploys [Qwen2.5-14B-Instruct](https://huggingface.co/Qwen/Qwen2.5-14B-Instruct) across 2 GPUs using tensor parallelism. Setting `NIM_TENSOR_PARALLEL_SIZE` works on both the multi-LLM NIM and the model-free NIM.
 
 <Tabs>
 
@@ -1009,7 +1017,7 @@ When both are set, deployment config values override fileset values.
 
 1. User sets `chat_template`, `tool_call_parser`, `tool_call_plugin`, and/or `auto_tool_choice` on the fileset via `metadata.model.tool_calling`
 2. The model-spec background task reads the fileset's `metadata.model.tool_calling` and writes them into the model entity's `spec`
-3. At deployment time, the platform reads `model_entity.spec` and any deployment-level overrides to set NIM environment variables
+3. At deployment time, the platform reads `model_entity.spec` and any deployment-level overrides and passes them to NIM (see [NIM Configuration Mapping](#nim-configuration-mapping))
 
 ```mermaid
 flowchart LR
@@ -1348,7 +1356,7 @@ client.models.create_model(
 </Tab>
 
 </Tabs>
-The platform downloads the plugin fileset at deployment time and passes the `.py` file path to NIM via the `NIM_TOOL_PARSER_PLUGIN` environment variable.
+The platform downloads the plugin fileset at deployment time and passes the `.py` file path to NIM: through the `NIM_TOOL_PARSER_PLUGIN` environment variable on NIM 1.x images, and through the `--tool-parser-plugin` flag on the model-free NIM.
 
 ### Tool Call Config Reference
 
@@ -1358,16 +1366,18 @@ The platform downloads the plugin fileset at deployment time and passes the `.py
 | `tool_call_plugin` | `string` | Fileset reference (`workspace/fileset-name`) containing a custom plugin `.py` file |
 | `auto_tool_choice` | `boolean` | When `true`, the model can decide to call tools without explicit user instruction |
 
-### NIM Environment Variable Mapping
+### NIM Configuration Mapping
 
-The platform translates tool calling configuration into NIM environment variables:
+NIM 1.x images read tool calling configuration from environment variables. The model-free NIM (NIM 2.x) does not read those variables; it takes `vllm serve` flags in `NIM_PASSTHROUGH_ARGS` instead. The platform sets whichever the deployment's image reads:
 
-| Metadata Field | NIM Environment Variable | Example Value |
-|--------------|--------------------------|---------------|
-| `tool_calling.chat_template` | `NIM_CHAT_TEMPLATE` | Jinja2 template string |
-| `tool_calling.tool_call_parser` | `NIM_TOOL_CALL_PARSER` | `llama3_json` |
-| `tool_calling.tool_call_plugin` | `NIM_TOOL_PARSER_PLUGIN` | `/path/to/my_parser.py` |
-| `tool_calling.auto_tool_choice` | `NIM_ENABLE_AUTO_TOOL_CHOICE` | `1` or `0` |
+| Metadata Field | NIM 1.x Environment Variable | Model-Free NIM Flag (in `NIM_PASSTHROUGH_ARGS`) |
+|--------------|------------------------------|--------------------------------------------------|
+| `tool_calling.chat_template` | `NIM_CHAT_TEMPLATE` (Jinja2 template string) | `--chat-template` (the platform writes the template to a file in the container) |
+| `tool_calling.tool_call_parser` | `NIM_TOOL_CALL_PARSER` (for example, `llama3_json`) | `--tool-call-parser` |
+| `tool_calling.tool_call_plugin` | `NIM_TOOL_PARSER_PLUGIN` (plugin file path) | `--tool-parser-plugin` |
+| `tool_calling.auto_tool_choice` | `NIM_ENABLE_AUTO_TOOL_CHOICE` (`1` or `0`) | `--enable-auto-tool-choice` (when `true`) |
+
+On the model-free NIM, the platform places these flags before any `NIM_PASSTHROUGH_ARGS` you set in `executor_config.additional_envs`. NIM keeps the last value of a repeated flag, so your own flags take precedence.
 
 ---
 

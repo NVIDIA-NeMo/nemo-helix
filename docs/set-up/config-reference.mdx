@@ -532,10 +532,10 @@ models:
         default_affinity: {}
         # Platform-default pod topology spread constraints applied to every k8s model deployment/job (all engines) when the deployment does not already set them. Each entry is a raw Kubernetes topologySpreadConstraint object.
         default_topology_spread_constraints: []
-        # default: 'nvcr.io/nim/meta/llama-3.1-8b-instruct'
-        default_nimservice_image: nvcr.io/nim/meta/llama-3.1-8b-instruct
-        # default: '1.8.5'
-        default_nimservice_image_tag: 1.8.5
+        # default: 'nvcr.io/nim/nvidia/llm-nim'
+        default_nimservice_image: nvcr.io/nim/nvidia/llm-nim
+        # default: '1.15.5'
+        default_nimservice_image_tag: 1.15.5
         # Default vLLM image repository. Fully qualified so it resolves on runtimes that block docker.io short names. | default: 'docker.io/vllm/vllm-openai'
         default_vllm_image: docker.io/vllm/vllm-openai
         # default: 'v0.22.1'

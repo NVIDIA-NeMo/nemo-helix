@@ -399,7 +399,7 @@ Pass a string to reuse an existing `ModelDeploymentConfig`:
 }
 ```
 
-Or an object to have one created inline:
+Or an object to have one created inline. It deploys with NIM:
 
 ```json
 {
@@ -416,10 +416,10 @@ Or an object to have one created inline:
 | --- | --- | --- |
 | `gpu` | `1` | GPUs the deployment requests. |
 | `lora_enabled` | `true` | Whether the deployment can load LoRA adapters. |
-| `image_name` | multi-llm NIM | Container image from NGC. |
-| `image_tag` | image default | Container image tag. |
+| `image_name` | platform default | Container image. The default is the multi-LLM NIM, `nvcr.io/nim/nvidia/llm-nim`. |
+| `image_tag` | platform default | Container image tag. The default is `1.15.5`. |
 | `disk_size` | unset | Disk size for the deployment. |
-| `additional_envs` | unset | Extra environment variables. |
+| `additional_envs` | unset | Extra environment variables. The default NIM image loads LoRA adapters up to rank 32 (`NIM_MAX_LORA_RANK`); the model-free NIM (`nvcr.io/nim/nvidia/model-free-nim`) loads up to rank 16 unless you set `NIM_PASSTHROUGH_ARGS` to `--max-lora-rank <rank>`. |
 | `tool_call_config` | unset | Tool-calling overrides for the NIM. Setting `tool_call_plugin` requires the `models.tool-call-plugin.set` permission. |
 
 A LoRA job deploys the **base** model with `lora_enabled: true` and serves the adapter from it, so `lora_enabled: false` on a LoRA job is rejected at submit — that deployment could never load the adapter. A full-weight job deploys the new model entity it registers.
