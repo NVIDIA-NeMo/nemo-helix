@@ -479,10 +479,25 @@ AGENT_BUNDLE = {
 }
 
 
+@pytest.fixture
+def bundle_registry_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Approve AGENT_BUNDLE's registry: the bundle gets the task image registry policy."""
+    monkeypatch.setattr(settings, "task_image_allowed_registries", "nvcr.io")
+
+
+@pytest.mark.usefixtures("bundle_registry_allowed")
 def test_preflight_accepts_a_registered_bundle() -> None:
     backend.preflight(_spec(agent_bundle=AGENT_BUNDLE))
 
 
+def test_preflight_rejects_a_bundle_from_an_unapproved_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "task_image_allowed_registries", "registry.example.com")
+
+    with pytest.raises(ValueError, match="agent bundle image: task image registry 'nvcr.io' is not approved"):
+        backend.preflight(_spec(agent_bundle=AGENT_BUNDLE))
+
+
+@pytest.mark.usefixtures("bundle_registry_allowed")
 def test_render_passes_the_bundle_pinned_by_digest(tmp_path: Path) -> None:
     config = backend.render_harbor_config(
         "agents: [{name: claude-code}]\n",
@@ -515,6 +530,7 @@ def test_render_without_a_bundle_sends_none(tmp_path: Path) -> None:
         ("[{name: codex, kwargs: {version: 0.1.0}}]", False),
     ],
 )
+@pytest.mark.usefixtures("bundle_registry_allowed")
 def test_render_rejects_a_version_pin_the_bundle_does_not_provide(tmp_path: Path, agents: str, rejected: bool) -> None:
     def render() -> None:
         backend.render_harbor_config(
@@ -528,6 +544,7 @@ def test_render_rejects_a_version_pin_the_bundle_does_not_provide(tmp_path: Path
         render()
 
 
+@pytest.mark.usefixtures("bundle_registry_allowed")
 def test_submit_records_the_bundle_delivery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     handle, _ = _submit(tmp_path, monkeypatch, spec=_spec(agent_bundle=AGENT_BUNDLE))
 

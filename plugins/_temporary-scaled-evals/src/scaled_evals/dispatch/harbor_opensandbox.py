@@ -449,12 +449,18 @@ def environment_agent_bundle(bundle: Mapping[str, Any]) -> SandboxAgentBundle:
     relies on: an image pinned by digest, so the trial runs exactly the registered bundle, and an
     entrypoint inside ``/installed-agent``.
     """
-    return SandboxAgentBundle(
+    sandbox_bundle = SandboxAgentBundle(
         image=str(bundle.get("image_digest") or ""),
         # The installer path belongs to the bundle image's layout, so it comes from configuration.
         installer=settings.agent_bundle_installer_path,
         entrypoint=str(bundle.get("entrypoint") or ""),
     )
+    # The bundle runs in the task's pod, so like service images it gets the task image registry policy.
+    try:
+        validate_task_image_request(sandbox_bundle.image)
+    except TaskImageIdentityError as exc:
+        raise ValueError(f"agent bundle image: {exc}") from exc
+    return sandbox_bundle
 
 
 def _check_agent_version_pins(config: Mapping[str, Any], bundle: Mapping[str, Any]) -> None:
