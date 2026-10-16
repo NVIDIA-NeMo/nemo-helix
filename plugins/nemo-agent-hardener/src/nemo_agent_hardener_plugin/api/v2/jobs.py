@@ -42,6 +42,7 @@ async def _compile_war_game(
 router = job_route_factory(
     service_name="agent-hardener",
     job_type="WarGame",
+    create_as_service="agent-hardener",
     job_input=WarGameSpec,
     platform_job_config_compiler=_compile_war_game,
     authz=scope.child("jobs"),
@@ -72,6 +73,7 @@ async def _compile_synth_benign(
 synth_router = job_route_factory(
     service_name="agent-hardener",
     job_type="SynthBenign",
+    create_as_service="agent-hardener",
     job_input=SynthBenignSpec,
     platform_job_config_compiler=_compile_synth_benign,
     authz=scope.child("jobs"),

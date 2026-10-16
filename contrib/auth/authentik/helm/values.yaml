@@ -173,6 +173,7 @@ nemo-helix:
       - secrets
       - entities
       - deployments
+      - evals
       - studio
     env:
       NHX_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE: "/etc/nhx/workload-token/private-key.pem"

@@ -15,7 +15,7 @@ from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTa
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity, TasksetEntity, TasksetRevisionEntity
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.revisions import publish_revision
-from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client
+from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client, get_service_nemo_client_factory
 from nemo_helix_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
 from nemo_helix_plugin.jobs.routes import add_job_routes
 from nhx_evals_sdk.agent_eval.tasks import SemanticView
@@ -109,6 +109,7 @@ async def test_post_snapshots_tasks_before_creating_job(entity_store, monkeypatc
     app.include_router(add_job_routes(AgentEvalJob), prefix="/apis/evals/v2/workspaces/{workspace}")
     app.dependency_overrides[get_entity_client] = lambda: entity_store
     app.dependency_overrides[get_nemo_client] = lambda: MagicMock()
+    app.dependency_overrides[get_service_nemo_client_factory] = lambda: lambda service: MagicMock()
     public_tasks = ["default/checkout"] if direct else "default/suite"
     response = TestClient(app).post(
         "/apis/evals/v2/workspaces/default/agent-evaluate/jobs",

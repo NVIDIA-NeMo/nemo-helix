@@ -9,6 +9,7 @@ The platform injects real implementations via app.dependency_overrides.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, Protocol
 
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
@@ -53,6 +54,25 @@ def get_nemo_client() -> AsyncNemoClient:
     """
     raise RuntimeError(
         "get_nemo_client() was called without being overridden. "
+        "Ensure your Service subclass calls super().create_app()."
+    )
+
+
+ServiceNemoClientFactory = Callable[[str], AsyncNemoClient]
+
+
+def get_service_nemo_client_factory() -> ServiceNemoClientFactory:
+    """FastAPI dependency for building clients that act as a service for the caller.
+
+    ``factory(service_name)`` returns an async NemoClient authenticated as
+    ``service:{service_name}`` acting on behalf of the request's caller, so the
+    platform records the service as the actor and the caller as the subject.
+
+    This is a placeholder. The actual factory is injected via
+    app.dependency_overrides in Service.create_app().
+    """
+    raise RuntimeError(
+        "get_service_nemo_client_factory() was called without being overridden. "
         "Ensure your Service subclass calls super().create_app()."
     )
 

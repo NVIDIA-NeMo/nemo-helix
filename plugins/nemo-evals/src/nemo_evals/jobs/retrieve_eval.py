@@ -159,6 +159,7 @@ class _RetrieveEvalJobBase(NemoJob):
     """Score a BEIR fileset with a deployed embedding NIM and optional reranker."""
 
     name: ClassVar[str] = "retrieve-eval"
+    runs_as_service: ClassVar[str | None] = "evals"
     description: ClassVar[str] = "Evaluate dense retrieval over a BEIR corpus with nDCG, recall, precision, and MAP."
     container: ClassVar[str] = "cpu-tasks"
     input_spec_schema: ClassVar[type[BaseModel] | None] = RetrieveEvalInputSpec

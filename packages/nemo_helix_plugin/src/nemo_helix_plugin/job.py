@@ -150,6 +150,16 @@ class NemoJob(_NamedPlugin):
         when ``name = "train"``; ``"/metric-jobs"`` for a legacy flat
         collection path.
 
+    .. attribute:: runs_as_service
+        :type: str | None
+
+        Service name to create this type's jobs as, acting on behalf of the
+        submitter. The job's workload then acts as ``service:{name}`` for the
+        submitter, so it may write records the plugin's service manages.
+        Use the name the job's task container passes to
+        ``get_task_nemo_client``. ``None`` (the default) creates jobs as the
+        submitter.
+
     Plugin-owned options:
 
     .. attribute:: backend_options_schemas
@@ -186,6 +196,8 @@ class NemoJob(_NamedPlugin):
     # Plugin-defined list filter passed to ``job_route_factory``. When set,
     # replaces the generated ``{job_type}JobsListFilter``.
     jobs_list_filter: ClassVar[type | None] = None
+
+    runs_as_service: ClassVar[str | None] = None
 
     # ------------------------------------------------------------------ #
     # Plugin-owned options (inert; see class docstring)                  #
