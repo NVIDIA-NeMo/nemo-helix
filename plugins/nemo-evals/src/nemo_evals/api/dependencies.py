@@ -5,7 +5,8 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
 from urllib.parse import quote
 
 from fastapi import Depends, HTTPException, status
@@ -17,6 +18,7 @@ from nemo_evals.api.service.taskset_service import TasksetService
 from nemo_evals.config import get_config
 from nemo_evals.image_builds.service import ImageBuildForbiddenError, ImageBuildService, JobsServiceBuildJobs
 from nemo_evals.taskset_runs.store import TasksetRunStore
+from nemo_helix_plugin.auth import current_auth_context
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.dependencies import (
@@ -30,6 +32,8 @@ from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, get_entity_client
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
+
+_EVALS_SERVICE = "evals"
 
 
 async def get_taskset_run_service(
@@ -149,3 +153,21 @@ def get_taskset_service(
         await authorize("GET", f"/apis/evals/v2/workspaces/{quote(workspace, safe='')}/tasks/{quote(name, safe='')}")
 
     return TasksetService(entity_client, task_service, authorize_task_read=authorize_task_read)
+
+
+@asynccontextmanager
+async def delegated_service_client(request_client: AsyncNemoClient) -> AsyncIterator[AsyncNemoClient]:
+    """Yield a client that calls the platform as the evals service, delegating the request's caller.
+
+    Use it for calls only a service principal may make, such as reading a secret value; the target
+    service still authorizes the delegated caller. Without a request principal there is nobody to
+    delegate, so the request-scoped client is used rather than an undelegated service client.
+    """
+    caller = current_auth_context()
+    if caller is None:
+        yield request_client
+        return
+    async with get_async_nemo_client(
+        as_service=_EVALS_SERVICE, internal=True, on_behalf_of=caller.to_principal()
+    ) as service_client:
+        yield service_client

@@ -149,12 +149,13 @@ class HelixMetricModelResolver(ModelResolver):
 
 @dataclass(frozen=True)
 class HelixMetricSecretResolver(SecretResolver):
-    """Resolve a metric's secret references through the Secrets service, as the calling principal.
+    """Resolve a metric's secret references through the Secrets service, on behalf of the caller.
 
     The SDK's default ``LocalSecretResolver`` reads ``os.environ``, which a job populates through
-    ``build_task_environment`` and an in-process request handler cannot. Pass a *request-scoped*
-    client: a service-privileged one would let any caller read another workspace's key and send it
-    to an endpoint of their choosing. An unqualified ref resolves in ``workspace``.
+    ``build_task_environment`` and an in-process request handler cannot. Pass a service client that
+    delegates the calling principal: an undelegated one would let any caller read another
+    workspace's key and send it to an endpoint of their choosing. An unqualified ref resolves in
+    ``workspace``.
     """
 
     secrets_client: AsyncSecretsClient

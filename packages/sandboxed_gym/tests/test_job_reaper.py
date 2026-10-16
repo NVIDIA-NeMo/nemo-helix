@@ -10,9 +10,11 @@ would take the session down with the handler's re-raise.
 
 from __future__ import annotations
 
+import asyncio
 import atexit
 import signal
 from collections.abc import Callable, Mapping
+from typing import Any
 
 import pytest
 from sandboxed_gym.config import JOB_ID_METADATA_KEY
@@ -113,6 +115,42 @@ def test_reap_logs_an_unknown_provider_and_returns(caplog: pytest.LogCaptureFixt
         assert reap_job_sandboxes("rl-1", host_provider="no-such-provider") == ()
 
     assert "failed to reap sandboxes for job rl-1" in caplog.text
+
+
+class _FakeHostProvider:
+    def __init__(self) -> None:
+        self.destroyed: list[str] = []
+
+    async def destroy_job_sandboxes(self, job_id: str) -> tuple[str, ...]:
+        await asyncio.sleep(0)
+        self.destroyed.append(job_id)
+        return ("gym-host-1",)
+
+
+def test_reap_completes_when_called_inside_a_running_event_loop(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A SIGINT to ``serve --mode orchestrator`` runs the reaper while Uvicorn's loop is running.
+
+    ``asyncio.run`` refuses to nest there, so the destroy was never awaited and the Gym host
+    container outlived the CLI.
+    """
+    provider = _FakeHostProvider()
+
+    def _get(name: str, options: Mapping[str, Any] | None = None) -> _FakeHostProvider:
+        return provider
+
+    monkeypatch.setattr("sandboxed_gym.job_reaper.get_host_provider", _get)
+
+    async def _as_uvicorn_would() -> tuple[str, ...]:
+        return reap_job_sandboxes("rl-1", host_provider="docker")
+
+    with caplog.at_level("ERROR"):
+        removed = asyncio.run(_as_uvicorn_would())
+
+    assert removed == ("gym-host-1",)
+    assert provider.destroyed == ["rl-1"]
+    assert "failed to reap" not in caplog.text
 
 
 def test_exit_and_cancel_both_reap(monkeypatch: pytest.MonkeyPatch, restore_process_state) -> None:

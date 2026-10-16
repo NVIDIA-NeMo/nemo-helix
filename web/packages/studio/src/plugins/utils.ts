@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { logger } from '@nemo/common/src/utils/logger';
+import { platformFetch } from '@nemo/sdk/src/utils/platformRequest';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { PLUGINS_MANIFEST_ENDPOINT } from '@studio/plugins/consts';
 import { isTrustedBundleUrl } from '@studio/plugins/security';
@@ -55,7 +56,7 @@ export async function loadPlugin(
 export async function fetchPlugins(): Promise<PluginQueryData> {
   // Falls back to same-origin when PLATFORM_BASE_URL is not configured
   const baseUrl = PLATFORM_BASE_URL ?? '';
-  const res = await fetch(`${baseUrl}${PLUGINS_MANIFEST_ENDPOINT}`);
+  const res = await platformFetch(`${baseUrl}${PLUGINS_MANIFEST_ENDPOINT}`);
   if (!res.ok) throw new Error(`${PLUGINS_MANIFEST_ENDPOINT} returned ${res.status}`);
   const data: unknown = await res.json();
   if (!Array.isArray(data)) {

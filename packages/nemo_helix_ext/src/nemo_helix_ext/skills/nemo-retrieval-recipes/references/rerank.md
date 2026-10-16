@@ -18,7 +18,7 @@ Keep the first-stage retriever fixed while comparing base and tuned rerankers.
 | Stage | Platform command | Output |
 |---|---|---|
 | 0–1 | Same Data Designer jobs as embed | `training.jsonl` + `eval_beir/` |
-| 2 | `nemo customization automodel submit` `recipe: cross_encoder` | HF sequence-classification entity |
+| 2 | `nemo customization automodel --job-json <rerank-job.json>`, where the file holds the Stage 2 spec below (`recipe: cross_encoder`) | HF sequence-classification entity |
 | 3 | `retrieve-eval` with `target.embeddings` + `target.reranker`, `first_stage_k: 100` | `eval_results.json` |
 | 4 | Produced automatically by the successful Automodel job: ONNX (`logits`) + `alternates/hf/` | Ranking NIM layout |
 | 5 | Ranking NIM `llama-nemotron-rerank-1b-v2:1.10.0` `/v1/ranking` | Deploy the **output** model entity |

@@ -372,7 +372,8 @@ These values are the configuration validated on the frozen 20,909-query NVDocs s
 Equivalent CLI:
 
 ```bash
-nemo customization automodel.jobs submit --workspace default --name embed-nvdocs --spec '{
+cat > embed-nvdocs-job.json <<'EOF'
+{
   "model": "default/nemotron-3-embed-1b",
   "dataset": {"training": "default/nvdocs-embed-artifacts"},
   "training": {
@@ -396,12 +397,13 @@ nemo customization automodel.jobs submit --workspace default --name embed-nvdocs
   "optimizer": {"learning_rate": 2.5e-5, "min_learning_rate": 1.25e-5, "warmup_steps": 432, "weight_decay": 0.01, "lr_decay_style": "cosine"},
   "parallelism": {"num_gpus_per_node": 4, "tensor_parallel_size": 1},
   "output": {"name": "nemotron-3-embed-1b-tuned"}
-}'
+}
+EOF
 
-nemo jobs watch embed-nvdocs --workspace default
+nemo customization automodel --job-json embed-nvdocs-job.json --workspace default --watch
 ```
 
-`training.recipe`, `training.finetuning_type`, and `training.retrieval.export.primary` have no per-flag form; supply them through `--spec` or `--spec-file`.
+The command prints the created job as JSON; its `name` field is the job ID. `--watch` follows the job and its logs until it finishes. Without it, track the job with `nemo jobs watch <job ID>`.
 
 ```python
 from nemo_automodel_plugin.schema import (

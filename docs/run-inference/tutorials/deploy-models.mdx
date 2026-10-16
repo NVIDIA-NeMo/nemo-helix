@@ -83,6 +83,8 @@ nemo chat -m nvidia/llama-3.3-nemotron-super-49b-v1 'Hello!' \
 <Tab title="Python SDK">
 
 ```python
+import os
+
 # Store API key
 client.secrets.create_secret(
     body=HelixSecretCreateRequest(
@@ -380,7 +382,7 @@ response = InferenceGatewayClient.from_client(client).provider_post(
 
 <Warning>
 
-HuggingFace deployments use the Multi-LLM NIM (`nvcr.io/nim/nvidia/llm-nim:1.13.1`) by default, which only supports specific model architectures. Check the [supported architectures list](https://docs.nvidia.com/nim/large-language-models/1.13.0/supported-architectures.html) before deploying. If your model architecture is not listed, you will need a model-specific NIM image — see [Deploy from NGC](#deploy-from-ngc) for that approach.
+A NIM deployment config that sets no image uses the platform default, the model-free NIM (`nvcr.io/nim/nvidia/model-free-nim:2.0.13`). It serves models whose architecture its vLLM backend supports; check the [model-free NIM support matrix](https://docs.nvidia.com/nim/large-language-models/latest/reference/support-matrix.html#model-free-nim) before deploying. If your model architecture is not supported, use a model-specific NIM image (see [Deploy from NGC](#deploy-from-ngc)) or [deploy with vLLM](#deploy-with-vllm).
 
 </Warning>
 
@@ -823,9 +825,9 @@ For larger models requiring multiple GPUs, parallelism configuration depends on 
 
 Model-specific NIMs (for example, `nvcr.io/nim/meta/llama-3.1-70b-instruct`) have TP/PP settings derived from manifest profiles in the container. Configure enough GPUs and the NIM selects the appropriate profile automatically.
 
-### Multi-LLM NIM
+### Model-Free NIM
 
-The multi-LLM NIM (`nvcr.io/nim/nvidia/llm-nim:1.13.1`) requires explicit parallelism configuration via environment variables (`NIM_TENSOR_PARALLEL_SIZE`, `NIM_PIPELINE_PARALLEL_SIZE`). By default, it uses all GPUs for tensor parallelism (TP=gpu, PP=1).
+The model-free NIM (`nvcr.io/nim/nvidia/model-free-nim:2.0.13`), the platform's default NIM image, does not derive parallelism from the GPU count: tensor and pipeline parallelism both default to 1. Set `NIM_TENSOR_PARALLEL_SIZE` and `NIM_PIPELINE_PARALLEL_SIZE` in `additional_envs` so that their product equals `gpu`. See [About Model-Free NIM](https://docs.nvidia.com/nim/large-language-models/latest/deployment/model-free-nim.html) for other ways to select a profile.
 
 This example deploys [Qwen2.5-14B-Instruct](https://huggingface.co/Qwen/Qwen2.5-14B-Instruct) across 2 GPUs using tensor parallelism.
 
@@ -847,14 +849,15 @@ nemo files filesets create "qwen-2-5-14b" \
 nemo models create "qwen-2-5-14b" \
   --fileset "default/qwen-2-5-14b"
 
-# Create deployment config with 2 GPUs (TP=2 by default)
+# Create deployment config with 2 GPUs and tensor parallelism 2
 nemo inference deployment-configs create "qwen-14b-config" \
   --engine "nim" \
   --model-spec '{
     "model_name": "default/qwen-2-5-14b"
 }' \
   --executor-config '{
-    "gpu": 2
+    "gpu": 2,
+    "additional_envs": {"NIM_TENSOR_PARALLEL_SIZE": "2"}
 }'
 
 # Deploy
@@ -886,13 +889,13 @@ client.models.create_model(
     body=CreateModelEntityRequest(name="qwen-2-5-14b", fileset="default/qwen-2-5-14b"),
 )
 
-# Create deployment config with 2 GPUs (TP=2 by default)
+# Create deployment config with 2 GPUs and tensor parallelism 2
 config = client.models.create_deployment_config(
     body=CreateModelDeploymentConfigRequest(
         name="qwen-14b-config",
         engine=Engine.NIM,
         model_spec=ModelDeploymentConfigModelSpec(model_name="default/qwen-2-5-14b"),
-        executor_config=ContainerExecutorConfig(gpu=2),
+        executor_config=ContainerExecutorConfig(gpu=2, additional_envs={"NIM_TENSOR_PARALLEL_SIZE": "2"}),
     ),
 ).data()
 
@@ -915,7 +918,6 @@ response = InferenceGatewayClient.from_client(client).model_post(
         "max_tokens": 100,
     },
 )
-# NIM sets NIM_TENSOR_PARALLEL_SIZE=2 automatically
 ```
 
 </Tab>

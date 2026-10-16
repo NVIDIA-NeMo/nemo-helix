@@ -146,6 +146,14 @@ def test_vllm_server_command_image_args_and_gpu() -> None:
     assert "nvidia.com/gpu" not in puller.resources.limits
 
 
+def test_nim_defaults_to_the_model_free_nim_image() -> None:
+    # A NIM config without an image must use a NIM that can load transformers 5 checkpoints,
+    # which is how Customizer saves its outputs.
+    compiled = compile_model_deployment(_resolved("nim"), DeploymentsPluginConfig())
+    server = compiled.server_config.containers[0]
+    assert server.image == "nvcr.io/nim/nvidia/model-free-nim:2.0.13"
+
+
 def test_nim_gpu_resources_without_override() -> None:
     resolved = _resolved("nim")
     resolved = ResolvedPluginDeployment(

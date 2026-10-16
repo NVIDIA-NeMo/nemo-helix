@@ -809,7 +809,7 @@ type PrimitivePropsWithRef$1<E extends React$1.ElementType> = React$1.ComponentP
   asChild?: boolean;
 };
 //#endregion
-//#region ../../node_modules/.pnpm/@nvidia+foundations-react-core@1.13.0_@types+react-dom@19.2.3_@types+react@19.2.14__@ty_247a325dc0ddc8e94b7fcca3d196f80f/node_modules/@nvidia/foundations-react-core/dist/sanitize-href-i4E6mVJ9.d.ts
+//#region ../../node_modules/.pnpm/@nvidia+foundations-react-core@1.16.0_@types+react-dom@19.2.3_@types+react@19.2.14__@ty_07145dee84c0a9c7bf0d1ad2c2905fa3/node_modules/@nvidia/foundations-react-core/dist/sanitize-href-i4E6mVJ9.d.ts
 /**
  * Common attributes
  * @see {@link https://react.dev/reference/react-dom/components/common}
@@ -1093,7 +1093,7 @@ type SafeHrefProp<T extends {
   href: string;
 };
 //#endregion
-//#region ../../node_modules/.pnpm/@nvidia+foundations-react-core@1.13.0_@types+react-dom@19.2.3_@types+react@19.2.14__@ty_247a325dc0ddc8e94b7fcca3d196f80f/node_modules/@nvidia/foundations-react-core/dist/index.d.ts
+//#region ../../node_modules/.pnpm/@nvidia+foundations-react-core@1.16.0_@types+react-dom@19.2.3_@types+react@19.2.14__@ty_07145dee84c0a9c7bf0d1ad2c2905fa3/node_modules/@nvidia/foundations-react-core/dist/index.d.ts
 declare const text$1: (props?: ({
   fontFamily?: "sans" | "mono" | null | undefined;
   fontWeight?: "bold" | "light" | "regular" | "semibold" | null | undefined;
@@ -1309,6 +1309,7 @@ declare const button: (props?: ({
   size?: "small" | "medium" | "large" | "tiny" | null | undefined;
   kind?: "primary" | "secondary" | "tertiary" | null | undefined;
   color?: "brand" | "neutral" | "danger" | null | undefined;
+  loading?: boolean | null | undefined;
 } & ClassProp) | undefined) => string;
 type ButtonVariantProps = VariantProps<typeof button>;
 interface ButtonProps extends Omit<PrimitivePropsWithRef<"button">, "color"> {
@@ -1333,6 +1334,20 @@ interface ButtonProps extends Omit<PrimitivePropsWithRef<"button">, "color"> {
    */
   kind?: ButtonVariantProps["kind"];
   /**
+   * Shows a loading indicator alongside children and applies the pressed
+   * treatment while retaining focus and reporting `aria-busy` and `aria-disabled`.
+   * Suppresses activation events after hydration; guard native navigation,
+   * form submission, and custom child handlers in your application.
+   * @defaultValue false
+   */
+  loading?: boolean;
+  /**
+   * Noninteractive inline loading indicator; omit or pass `undefined` for the default spinner, or pass `null` for no indicator.
+   * Keep loading text in children. With `asChild`, render children directly inside the child's root element.
+   * Void elements such as `<input>` cannot contain a custom indicator, so `slotLoading` is ignored for them.
+   */
+  slotLoading?: react__default.ReactNode;
+  /**
    * The size of the button.
    * - "large" - The main call-to-action for a page or section.
    * - "medium" - Suitable for most use cases.
@@ -1356,6 +1371,13 @@ interface ButtonProps extends Omit<PrimitivePropsWithRef<"button">, "color"> {
  * @llm Stack order is context-dependent: commitment contexts (dialogs, form footers, page-level action bars) use `[tertiary] [secondary] [primary]` with primary trailing; CTA contexts (hero stacks, empty states, onboarding) use `[primary] [secondary] [tertiary]` with primary leading.
  * @llm For single action → Button; 2-4 related actions → ButtonGroup; navigation to URL → `Button asChild` wrapping `<a>`; inline prose navigation → Anchor.
  * @llm Use specific verb + noun labels ("Create cluster", "Delete workspace"); avoid generic verbs and keep to 2-3 words. If the action requires more than 3 words to describe, the surrounding UI should provide that context instead.
+ * @llm Use `loading` for an action the user just triggered (submitting, saving).
+ * @llm Guard repeated submissions in the form's submit handler; loading only blocks this button's activation after hydration.
+ * @llm Native link destinations, submit types, and popover targets remain unchanged; guard those actions in your application, including before hydration.
+ * @llm Custom children must forward props and refs, render children directly inside their root element, and guard handlers they own.
+ * @llm Use children for the label in both states; `slotLoading` customizes only the indicator, including with `asChild`.
+ * @llm For a custom arrow indicator, pass `<Spinner size="small" aria-label="Loading" />` to `slotLoading`. The slot makes it decorative; announce progress in a live region outside the button.
+ * @llm Prefer an ellipsis (`...`) at the end of loading labels, such as "Sending..."; this is writing guidance, not automatic punctuation.
  * @llm Icon-only buttons must set `aria-label` describing the action. Reserve icon-only buttons for universally understood symbols (close, edit, delete, settings, kebab).
  * @llm Tertiary buttons need an affordance so they read as interactive. Options: trailing arrow/right caret for navigation-style actions, leading icon for utility verbs ("Edit", "Configure"), a color shift, or uppercase + letterspacing for dev-tool UIs. The default for hero contexts is the trailing arrow. A tertiary button with no icon, no color shift, and no label styling reads as a caption rather than an action.
  * @see {@link ButtonGroup}
@@ -1426,6 +1448,54 @@ interface ButtonProps extends Omit<PrimitivePropsWithRef<"button">, "color"> {
  * <Button asChild>
  * 	<a href="https://example.com">Link</a>
  * </Button>
+ * ```
+ *
+ * @example
+ * <caption>Button Loading Methods</caption>
+ * Loading buttons with an unchanged label, a changing label, an icon-only action, no indicator, and a custom arrow spinner.
+ * ```tsx
+ * <Flex direction="col" align="start" gap="4">
+ * 	<Flex direction="col" align="start" gap="2">
+ * 		<span>Same text, default spinner</span>
+ * 		<Button loading>Send</Button>
+ * 	</Flex>
+ * 	<Flex direction="col" align="start" gap="2">
+ * 		<span>Changing text, default spinner</span>
+ * 		<Button loading>Sending...</Button>
+ * 	</Flex>
+ * 	<Flex direction="col" align="start" gap="2">
+ * 		<span>Icon only</span>
+ * 		<Button loading aria-label="Send message" />
+ * 	</Flex>
+ * 	<Flex direction="col" align="start" gap="2">
+ * 		<span>Changing text, no spinner</span>
+ * 		<Button loading slotLoading={null}>
+ * 			Sending...
+ * 		</Button>
+ * 	</Flex>
+ * 	<Flex direction="col" align="start" gap="2">
+ * 		<span>Same text, no spinner</span>
+ * 		<Button loading slotLoading={null}>
+ * 			Send
+ * 		</Button>
+ * 	</Flex>
+ * 	<Flex direction="col" align="start" gap="2">
+ * 		<span>Custom arrow spinner</span>
+ * 		<Button
+ * 			loading
+ * 			slotLoading={
+ * 				<Spinner
+ * 					kind="default"
+ * 					size="small"
+ * 					className="[--spacing:2px]"
+ * 					aria-label="Sending"
+ * 				/>
+ * 			}
+ * 		>
+ * 			Sending...
+ * 		</Button>
+ * 	</Flex>
+ * </Flex>
  * ```
  *
  * @example
@@ -1759,6 +1829,7 @@ interface CardProps extends CardRootProps, Pick<CardMediaProps, "mediaTheme"> {
 declare const Card$1: react__default.ForwardRefExoticComponent<Omit<CardProps, "ref"> & react__default.RefAttributes<HTMLDivElement>>;
 declare const label$1: (props?: ({
   disabled?: boolean | null | undefined;
+  required?: boolean | null | undefined;
   size?: "small" | "medium" | "large" | null | undefined;
 } & ClassProp) | undefined) => string;
 interface LabelProps extends PrimitivePropsWithRef<"label"> {
@@ -1766,6 +1837,8 @@ interface LabelProps extends PrimitivePropsWithRef<"label"> {
   htmlFor?: string;
   /** Styles the label as disabled, for use only with disabled form controls. */
   disabled?: boolean;
+  /** Renders the required indicator after the label text. Presentational only — also set `required` (or `aria-required`) on the control so assistive tech announces it. */
+  required?: boolean;
   /**
    * Typographic size of the label.
    * @defaultValue "medium"
@@ -1775,6 +1848,9 @@ interface LabelProps extends PrimitivePropsWithRef<"label"> {
 /**
  * A text label for a form control. Prefer FormField for end-user forms; this primitive is intended for composing custom field layouts.
  * @param props - {@link LabelProps}
+ *
+ * @llm The required indicator belongs on the label that names the field, and only once. Inside a `FormField`, set `required` there instead — it already renders the indicator on the field label.
+ * @llm `required` on Label is presentational. Assistive tech hears required state from the control, so set `required` (or `aria-required`) there too.
  *
  * @example
  * <caption>Basic Label</caption>
@@ -1790,6 +1866,24 @@ interface LabelProps extends PrimitivePropsWithRef<"label"> {
  * <Label htmlFor="email" disabled aria-disabled="true">
  * 	Email Address
  * </Label>
+ * ```
+ *
+ * @example
+ * <caption>Required Label</caption>
+ * Renders the required indicator after the label text. It is presentational, so set `required` on the control as well — that is what assistive tech announces.
+ * ```tsx
+ * <Flex direction="col" gap="2">
+ * 	<Label htmlFor="required-email" required>
+ * 		Email Address
+ * 	</Label>
+ * 	<TextInput
+ * 		id="required-email"
+ * 		name="email"
+ * 		placeholder="name@example.com"
+ * 		required
+ * 		type="email"
+ * 	/>
+ * </Flex>
  * ```
  *
  * @example
@@ -1812,15 +1906,48 @@ interface LabelProps extends PrimitivePropsWithRef<"label"> {
  * 	</Tooltip>
  * </Label>
  * ```
+ *
+ * @example
+ * <caption>HTML</caption>
+ * ```html
+ * <label for="email" class="nv-label">
+ *   Email Address
+ * </label>
+ * <div class="nv-input-shell">
+ *   <input
+ *     type="email"
+ *     id="email"
+ *     placeholder="name@example.com"
+ *   />
+ * </div>
+ * ```
+ *
+ * @example
+ * <caption>HTML Required</caption>
+ * Add `nv-label--required` for the required indicator, and keep `required` on the control it names.
+ * ```html
+ * <label for="required-email" class="nv-label nv-label--required">
+ *   Email Address
+ * </label>
+ * <div class="nv-input-shell">
+ *   <input
+ *     type="email"
+ *     id="required-email"
+ *     placeholder="name@example.com"
+ *     required
+ *   />
+ * </div>
+ * ```
  */
 declare const Label: react__default.ForwardRefExoticComponent<Omit<LabelProps, "ref"> & react__default.RefAttributes<HTMLLabelElement>>;
 /** Checked state of a checkbox, including the tri-state `"indeterminate"` value. */
 type CheckedState = boolean | "indeterminate";
 interface CheckboxInputProps extends Omit<ComponentPropsWithRef<"input">, "defaultChecked" | "checked" | "type"> {
   /**
-   * Initial checked state when the checkbox is uncontrolled.
+   * Initial checked state when the checkbox is uncontrolled, including the tri-state
+   * `"indeterminate"` value.
    */
-  defaultChecked?: boolean;
+  defaultChecked?: CheckedState;
   /**
    * Controlled checked state; pair with `onCheckedChange` to handle updates.
    */
@@ -2406,15 +2533,14 @@ interface TextInputProps extends PropsFromRoot$3, PropsFromInput$2 {
  *
  * @example
  * <caption>With Form Field Text Input</caption>
- * Wrap in FormField to attach a label, helper text, and required indicator. FormField pipes `id`, `name`, `required`, and validation status into the input via context.
+ * Wrap in FormField to attach a label and helper text. FormField pipes `id`, `name`, and validation status into the input via context, and automatically renders the required indicator when the wrapped input has `required` set.
  * ```tsx
  * <FormField
  * 	name="username"
  * 	slotLabel="Username"
  * 	slotHelp="3–20 characters, letters and numbers only."
- * 	required
  * >
- * 	<TextInput placeholder="Enter your username" />
+ * 	<TextInput placeholder="Enter your username" required />
  * </FormField>
  * ```
  *
@@ -2650,6 +2776,13 @@ interface DropdownRootProps extends PropsWithChildren {
    */
   modal?: boolean;
   /**
+   * Whether Tab closes the popup or moves through its enabled items while keeping it open.
+   * Set `"close"` on new dropdowns; `"navigate"` keeps Tab working for custom item components.
+   * The default changes to `"close"` in the next major version.
+   * @defaultValue "navigate"
+   */
+  tabBehavior?: "close" | "navigate";
+  /**
    * Size applied to the dropdown and its trigger.
    * @defaultValue "medium"
    */
@@ -2695,6 +2828,12 @@ interface DropdownSubTriggerProps extends Omit<ComponentPropsWithRef<"button">, 
  */
 declare const DropdownSubTrigger: React$1.ForwardRefExoticComponent<DropdownSubTriggerProps & React$1.RefAttributes<HTMLButtonElement>>;
 interface DropdownTriggerProps extends ButtonProps {
+  /**
+   * Sets `aria-busy` and `aria-disabled` and prevents menu activation after hydration while retaining focus.
+   * With `asChild`, the child owns its loading indicator and custom handlers.
+   * @defaultValue false
+   */
+  loading?: ButtonProps["loading"];
   /**
    * Renders a chevron that reflects the current open state. Set to `false` for icon-only kebab/overflow triggers — the icon already signals a menu. Keep `true` for standalone text triggers.
    * @defaultValue true
@@ -2771,6 +2910,12 @@ interface DropdownSectionEntry extends Omit<MenuSectionEntry, "items" | "attribu
 type DropdownEntry = string | DropdownDefaultItemEntry | DropdownCheckboxItemEntry | DropdownRadioGroupEntry | DropdownSubSection | DropdownSectionEntry | DropdownDividerItemEntry;
 type DropdownRenderLinkItem = SafeHrefProp<DropdownDefaultItemEntry>;
 type DropdownProps = PropsWithChildren<Pick<DropdownRootProps, "id" | "open" | "defaultOpen" | "modal" | "onOpenChange" | "size"> & Pick<DropdownContentProps, "density" | "onPointerDownOutside" | "onInteractOutside" | "onEscapeKeyDown" | "align" | "side" | "onCloseAutoFocus" | "portal" | "portalContainer"> & Pick<DropdownTriggerProps, "asChild" | "showChevron"> & NativeElementAttributes<"button", typeof DropdownTrigger>> & {
+  /**
+   * Whether Tab closes the popup or moves through its enabled items while keeping it open.
+   * @deprecated - will be removed in the next major version and only allow "close"
+   * @defaultValue "close"
+   */
+  tabBehavior?: DropdownRootProps["tabBehavior"];
   /** Custom renderer for items with an `href`. Use to swap in a framework-specific link component such as Next.js `<Link>`. */
   renderLink?: (item: DropdownRenderLinkItem) => ReactNode;
   /** Initial value of the dropdown search input when filterable. */
@@ -3358,6 +3503,26 @@ interface RangeMeta {
    */
   pageSize: number;
 }
+type PaginationAction = "form";
+interface PaginationContextType {
+  getHref?: (destination: {
+    page: number;
+    pageSize: number;
+  }) => string;
+  renderLink?: (item: {
+    href: string;
+    children?: ReactNode;
+  }) => ReactNode;
+  totalItems: number;
+  page: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+  pageMeta: PageMeta;
+  rangeMeta: RangeMeta;
+  pageSizeOptions: number[];
+  action?: "form";
+}
 type InternalSelectItemProps = "aria-checked" | "aria-selected" | "role" | "slotControl";
 interface PropsFromMenuItem extends Omit<MenuItemProps, InternalSelectItemProps> {}
 interface PropsFromMenuCheckboxItem extends Omit<MenuCheckboxItemProps, InternalSelectItemProps | keyof PropsFromMenuItem> {}
@@ -3375,7 +3540,7 @@ interface SelectDefaultItem extends Pick<SelectItemProps, "children" | "value" |
    * The native HTML attributes to apply to the internal composed components.
    */
   attributes?: {
-    SelectItem?: NativeElementAttributes<"li", typeof SelectItem>;
+    SelectItem?: NativeElementAttributes<"button", typeof SelectItem>;
   };
 }
 interface SelectSectionEntry extends Omit<MenuSectionEntry, "items"> {
@@ -3457,6 +3622,11 @@ interface SelectRootProps extends react__default.PropsWithChildren, Pick<SelectS
    */
   allowBackspaceRemoval?: boolean;
   /**
+   * Whether Tab closes the popup or moves through its enabled items while keeping it open.
+   * @defaultValue "close"
+   */
+  tabBehavior?: "close" | "navigate";
+  /**
    * Whether the listbox is open on first render. Use for uncontrolled open state.
    * @defaultValue false
    */
@@ -3511,11 +3681,11 @@ interface SelectTriggerProps extends PropsFromInputShell, PropsFromSelect {
   slotEnd?: react__default.ReactNode;
 }
 /**
- * The button surface that displays the current Select value and opens the listbox. Renders a hidden native `<select>` for form submission when `name` is provided.
+ * The button surface that displays the current Select value and opens the listbox. Includes a native `<select>` fallback that remains usable without JavaScript and participates in form submission when named.
  * @param props - {@link SelectTriggerProps}
  */
 declare const SelectTrigger: react__default.ForwardRefExoticComponent<SelectTriggerProps & react__default.RefAttributes<HTMLButtonElement>>;
-interface BaseSelectProps extends Pick<SelectContentProps, "autoFocusOnHide" | "hideOnEscape" | "portal" | "portalContainer">, Pick<SelectListboxProps, "density" | "onScrollToBottom">, Pick<SelectRootProps, "allowBackspaceRemoval" | "defaultOpen" | "defaultValue" | "disabled" | "readOnly" | "onOpenChange" | "open" | "side" | "size" | "value">, Pick<SelectTriggerProps, "name" | "form" | "dismissible" | "placeholder" | "required" | "selectRef" | "slotStart" | "slotEnd" | "status">, Omit<MergedHoistedElementAttributes<[["div", typeof SelectTrigger], ["div", typeof SelectContent]]>, "defaultValue" | "onKeyDown" | "value"> {
+interface BaseSelectProps extends Pick<SelectContentProps, "autoFocusOnHide" | "hideOnEscape" | "portal" | "portalContainer">, Pick<SelectListboxProps, "density" | "onScrollToBottom">, Pick<SelectRootProps, "allowBackspaceRemoval" | "defaultOpen" | "defaultValue" | "disabled" | "readOnly" | "onOpenChange" | "open" | "side" | "size" | "tabBehavior" | "value">, Pick<SelectTriggerProps, "name" | "form" | "dismissible" | "placeholder" | "required" | "selectRef" | "slotStart" | "slotEnd" | "status">, Omit<MergedHoistedElementAttributes<[["div", typeof SelectTrigger], ["div", typeof SelectContent]]>, "defaultValue" | "onKeyDown" | "value"> {
   /**
    * Keyboard event handler invoked on the trigger before the Select's built-in shortcuts run. Call `event.preventDefault()` to cancel the default ArrowDown/ArrowUp open and (when enabled) Backspace removal behavior.
    */
@@ -3771,8 +3941,11 @@ type SelectProps = BaseSelectProps & SelectSingleAndMultipleProps;
  * ```
  */
 declare const Select: react__default.ForwardRefExoticComponent<SelectProps & react__default.RefAttributes<HTMLButtonElement>>;
-type PaginationAction = "form";
 interface PaginationRootProps extends PrimitivePropsWithRef<"div"> {
+  /** Builds URLs for arrows, numbered pages, and page-size options. Page-size destinations use page 1. */
+  getHref?: PaginationContextType["getHref"];
+  /** Renders navigation links with a custom component, typically a framework router link. */
+  renderLink?: PaginationContextType["renderLink"];
   /** Total number of items in the underlying dataset. Used to derive the page count and item range. */
   totalItems: number;
   /**
@@ -3803,7 +3976,7 @@ interface PaginationRootProps extends PrimitivePropsWithRef<"div"> {
    */
   pageSizeOptions?: number[];
   /**
-   * Submission mode for server-driven pagination. When set to `"form"`, controls render as submit buttons that submit `page` and `pageSize` to the surrounding form instead of updating internal state. Pass `name` to an individual control to submit it under a different field name.
+   * Submits `page` and `pageSize` through the associated form instead of updating internal state. Use the pagination parsing helpers to resolve repeated fields from shared forms.
    */
   action?: PaginationAction;
 }
@@ -3873,6 +4046,7 @@ declare const tableRoot: (props?: ({
   layout?: "fixed" | "auto" | null | undefined;
   align?: "center" | "left" | "right" | null | undefined;
   hoverableRows?: boolean | null | undefined;
+  cellHeight?: "default" | "dense" | null | undefined;
 } & ClassProp) | undefined) => string;
 type TableRootVariantProps = VariantProps<typeof tableRoot>;
 interface TableRootProps extends Omit<ComponentPropsWithRef<"table">, "align">, DensityVariantProps {
@@ -3892,6 +4066,13 @@ interface TableRootProps extends Omit<ComponentPropsWithRef<"table">, "align">, 
    * @defaultValue false
    */
   hoverableRows?: TableRootVariantProps["hoverableRows"];
+  /**
+   * Controls the minimum height of cell content.
+   * - "default" - Cells reserve a minimum content height so rows stay a consistent height.
+   * - "dense" - Cells shrink to fit their content, for compact data-dense tables.
+   * @defaultValue "default"
+   */
+  cellHeight?: TableRootVariantProps["cellHeight"];
 }
 interface TableToolbarProps extends react__default.ComponentPropsWithoutRef<"section"> {
   /** Renders the toolbar into the child element passed via `children` instead of a `<section>` wrapper. */
