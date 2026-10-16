@@ -49,9 +49,10 @@ logger = logging.getLogger(__name__)
 class StudyDriverError(RuntimeError):
     """Raised when study configuration or execution fails."""
 
-    def __init__(self, message: str, *, trial_count: int = 0) -> None:
+    def __init__(self, message: str, *, trial_count: int = 0, phase: str | None = None) -> None:
         super().__init__(message)
         self.trial_count = trial_count
+        self.phase = phase
 
 
 @dataclass(frozen=True)
@@ -88,7 +89,9 @@ def parse_numeric_study_config(optimizer: Mapping[str, Any]) -> NumericStudyConf
     try:
         shared = parse_optimizer_config({"optimizer": numeric_only})
         search_space = parse_search_space(optimizer)
-    except (OptimizerConfigError, SearchSpaceError) as exc:
+    except OptimizerConfigError as exc:
+        raise StudyDriverError(str(exc), phase=exc.phase) from exc
+    except SearchSpaceError as exc:
         raise StudyDriverError(str(exc)) from exc
     numeric = shared.numeric
     if numeric is None or not numeric.enabled:
