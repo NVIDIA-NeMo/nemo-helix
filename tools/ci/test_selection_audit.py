@@ -10,6 +10,7 @@ import argparse
 import ast
 import fnmatch
 import json
+import posixpath
 import re
 import shlex
 import sys
@@ -105,6 +106,8 @@ class WorkflowJob:
     referenced_outputs: tuple[str, ...]
     run_blocks: tuple[str, ...]
     raw_block: str
+    #: Each run block's step ``working-directory`` relative to the repo root, ``""`` for the root.
+    run_block_working_directories: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -261,12 +264,14 @@ def parse_workflow_jobs(text: str) -> Mapping[str, WorkflowJob]:
         next_index = starts[start_index + 1][1] if start_index + 1 < len(starts) else len(lines)
         block_lines = lines[line_index:next_index]
         raw_block = "\n".join(block_lines)
+        run_steps = _parse_run_steps(block_lines)
         parsed[job_id] = WorkflowJob(
             job_id=job_id,
             name=_parse_job_name(block_lines),
             referenced_outputs=tuple(_unique(_WORKFLOW_OUTPUT_REF_RE.findall(raw_block))),
-            run_blocks=tuple(_parse_run_blocks(block_lines)),
+            run_blocks=tuple(block for block, _ in run_steps),
             raw_block=raw_block,
+            run_block_working_directories=tuple(working_directory for _, working_directory in run_steps),
         )
     return parsed
 
@@ -359,8 +364,9 @@ def audit_repository(repo_root: Path, include_all_gated_jobs: bool = False) -> A
 def infer_job_paths(job: WorkflowJob, repo: RepoModel) -> tuple[InferredPath, ...]:
     collector = _PathCollector()
 
-    for run_block in job.run_blocks:
-        _infer_run_block(run_block, repo, collector, active_make_targets=())
+    working_directories = job.run_block_working_directories or ("",) * len(job.run_blocks)
+    for run_block, working_directory in zip(job.run_blocks, working_directories, strict=True):
+        _infer_run_block(run_block, repo, collector, active_make_targets=(), working_directory=working_directory)
 
     test_paths = tuple(path for path in collector.paths if _path_points_to_python_tests(repo.root, path))
     for test_path in test_paths:
@@ -660,12 +666,13 @@ def _infer_run_block(
     repo: RepoModel,
     collector: _PathCollector,
     active_make_targets: tuple[str, ...],
+    working_directory: str = "",
 ) -> None:
     for command in _logical_shell_lines(run_block):
         tokens = _split_shell(command)
         if not tokens:
             continue
-        _infer_tokens(tokens, repo, collector, active_make_targets)
+        _infer_tokens(tokens, repo, collector, active_make_targets, working_directory)
 
 
 def _infer_tokens(
@@ -673,21 +680,24 @@ def _infer_tokens(
     repo: RepoModel,
     collector: _PathCollector,
     active_make_targets: tuple[str, ...],
+    working_directory: str = "",
 ) -> None:
     for index, token in enumerate(tokens):
         if token == "uv":
             collector.add("pyproject.toml", "uv command reads root dependency declarations", "high")
             collector.add("uv.lock", "uv command installs locked dependency versions", "high")
-            _infer_uv_options(tokens[index + 1 :], repo, collector)
+            _infer_uv_options(tokens[index + 1 :], repo, collector, working_directory)
         if token == "pytest":
-            _infer_pytest_paths(tokens[index + 1 :], repo, collector)
+            _infer_pytest_paths(tokens[index + 1 :], repo, collector, working_directory)
         if token == "make":
             _infer_make_targets(tokens[index + 1 :], repo, collector, active_make_targets)
         if token in {"python", "python3"}:
             _infer_python_module(tokens[index + 1 :], repo, collector)
 
 
-def _infer_uv_options(tokens: Sequence[str], repo: RepoModel, collector: _PathCollector) -> None:
+def _infer_uv_options(
+    tokens: Sequence[str], repo: RepoModel, collector: _PathCollector, working_directory: str = ""
+) -> None:
     packages = _option_values(tokens, "--package")
     groups = _option_values(tokens, "--group") + _option_values(tokens, "--only-group")
     extras = _option_values(tokens, "--extra")
@@ -721,14 +731,16 @@ def _infer_uv_options(tokens: Sequence[str], repo: RepoModel, collector: _PathCo
 
     for index, token in enumerate(tokens):
         if token == "pytest":
-            _infer_pytest_paths(tokens[index + 1 :], repo, collector)
+            _infer_pytest_paths(tokens[index + 1 :], repo, collector, working_directory)
         if token in {"python", "python3"}:
             _infer_python_module(tokens[index + 1 :], repo, collector)
         if _looks_like_python_script(token, repo.root):
             collector.add(token, "uv runs this Python script directly", "high")
 
 
-def _infer_pytest_paths(tokens: Sequence[str], repo: RepoModel, collector: _PathCollector) -> None:
+def _infer_pytest_paths(
+    tokens: Sequence[str], repo: RepoModel, collector: _PathCollector, working_directory: str = ""
+) -> None:
     skip_next = False
     for token in tokens:
         if token in {"&&", "||", ";"}:
@@ -742,6 +754,8 @@ def _infer_pytest_paths(tokens: Sequence[str], repo: RepoModel, collector: _Path
         if token.startswith("-"):
             continue
         pytest_path = _pytest_path_token(token)
+        if working_directory and not pytest_path.startswith(("/", "$")):
+            pytest_path = posixpath.normpath(posixpath.join(working_directory, pytest_path))
         if _looks_like_repo_path(pytest_path, repo.root):
             collector.add(pytest_path, "pytest collects this test path", "high")
 
@@ -948,8 +962,36 @@ def _parse_job_name(block_lines: Sequence[str]) -> str:
     return ""
 
 
-def _parse_run_blocks(block_lines: Sequence[str]) -> list[str]:
-    blocks: list[str] = []
+def _parse_run_steps(block_lines: Sequence[str]) -> list[tuple[str, str]]:
+    """Pair each run block with its step's ``working-directory`` (``""`` when unset)."""
+    return [
+        (block, _step_working_directory(block_lines, run_index)) for block, run_index in _parse_run_blocks(block_lines)
+    ]
+
+
+def _step_working_directory(block_lines: Sequence[str], run_index: int) -> str:
+    """Return the ``working-directory`` key of the step that holds the ``run:`` at *run_index*."""
+    indent = _leading_spaces(block_lines[run_index])
+    # The step's keys sit at the run key's indent; the step starts at its "- " item two columns left.
+    start = run_index
+    while start > 0 and not re.match(rf"^\s{{{max(indent - 2, 0)}}}- ", block_lines[start]):
+        start -= 1
+    end = run_index + 1
+    while end < len(block_lines):
+        line = block_lines[end]
+        if line.strip() and _leading_spaces(line) < indent:
+            break
+        end += 1
+    for line in block_lines[start:end]:
+        match = re.match(rf"^(?:\s{{{indent}}}|\s{{{max(indent - 2, 0)}}}- )working-directory:\s*(.+?)\s*$", line)
+        if match is not None:
+            return _strip_yaml_scalar(match.group(1)).rstrip("/")
+    return ""
+
+
+def _parse_run_blocks(block_lines: Sequence[str]) -> list[tuple[str, int]]:
+    """Return each run block with the index of its ``run:`` line, skipping block-scalar content."""
+    blocks: list[tuple[str, int]] = []
     index = 0
     while index < len(block_lines):
         line = block_lines[index]
@@ -959,6 +1001,7 @@ def _parse_run_blocks(block_lines: Sequence[str]) -> list[str]:
             continue
         indent = len(match.group(1))
         rest = match.group(2).strip()
+        run_index = index
         if rest in {"|", ">"}:
             collected: list[str] = []
             index += 1
@@ -968,9 +1011,9 @@ def _parse_run_blocks(block_lines: Sequence[str]) -> list[str]:
                     break
                 collected.append(candidate[indent + 2 :] if len(candidate) >= indent + 2 else "")
                 index += 1
-            blocks.append("\n".join(collected))
+            blocks.append(("\n".join(collected), run_index))
             continue
-        blocks.append(_strip_yaml_scalar(rest))
+        blocks.append((_strip_yaml_scalar(rest), run_index))
         index += 1
     return blocks
 
