@@ -340,6 +340,11 @@ def run_config(
         if enable_synthesis:
             ss.run()
         else:
+            from nemo_safe_synthesizer.preflight.checks.dataframe import DatasetSizeCheck
+
+            # PII replacement only: the 200-row training-size floor doesn't apply.
+            # The check instance is registered at import time and reads this class attribute.
+            DatasetSizeCheck.min_rows = 0
             ss.process_data()
             total_time = time.monotonic() - (ss._total_start or time.monotonic())
             pii_replaced_df = getattr(ss, "_training_df", None)

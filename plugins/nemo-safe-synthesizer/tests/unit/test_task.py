@@ -66,6 +66,10 @@ def test_run_config_pii_only_uses_processed_training_df(tmp_path, monkeypatch):
         ),
     )
     monkeypatch.setitem(sys.modules, "nemo_safe_synthesizer.results", results_module)
+    # The real preflight module needs transformers; stub it so this test stays light.
+    dataframe_checks = ModuleType("nemo_safe_synthesizer.preflight.checks.dataframe")
+    setattr(dataframe_checks, "DatasetSizeCheck", SimpleNamespace(min_rows=200))
+    monkeypatch.setitem(sys.modules, "nemo_safe_synthesizer.preflight.checks.dataframe", dataframe_checks)
     job_config = task_main.SafeSynthesizerJobConfig.model_validate(
         {
             "data_source": "default/data#input.csv",
@@ -84,6 +88,56 @@ def test_run_config_pii_only_uses_processed_training_df(tmp_path, monkeypatch):
 
     assert adapter_path is None
     pd.testing.assert_frame_equal(result.synthetic_data, processed)
+
+
+def test_run_config_pii_only_disables_dataset_size_floor(tmp_path, monkeypatch):
+    task_main = import_task_main_without_heavy_runtime(monkeypatch)
+
+    # Stand-in for the upstream check (the real module needs transformers); it mirrors
+    # the upstream default of a class-level ``min_rows = 200``. monkeypatch discards
+    # the stub module afterwards, so the mutation can't leak.
+    class DatasetSizeCheck:
+        min_rows = 200
+
+    dataframe_checks = ModuleType("nemo_safe_synthesizer.preflight.checks.dataframe")
+    setattr(dataframe_checks, "DatasetSizeCheck", DatasetSizeCheck)
+    monkeypatch.setitem(sys.modules, "nemo_safe_synthesizer.preflight.checks.dataframe", dataframe_checks)
+    small_df = pd.DataFrame({"name": ["Alice", "Bob"], "age": [1, 2]})
+    seen_min_rows = []
+
+    class FakeSafeSynthesizer:
+        def __init__(self, config, save_path):
+            self._total_start = None
+            self._training_df = None
+            self._workdir = None
+
+        def with_data_source(self, data_source):
+            return self
+
+        def process_data(self):
+            # The registered check reads min_rows from the class at check time.
+            seen_min_rows.append(DatasetSizeCheck().min_rows)
+            self._training_df = small_df
+
+    monkeypatch.setattr(task_main, "SafeSynthesizer", FakeSafeSynthesizer)
+    results_module = ModuleType("nemo_safe_synthesizer.results")
+    setattr(
+        results_module,
+        "make_nss_results",
+        lambda generate_results, total_time=None: SimpleNamespace(synthetic_data=generate_results),
+    )
+    monkeypatch.setitem(sys.modules, "nemo_safe_synthesizer.results", results_module)
+    job_config = task_main.SafeSynthesizerJobConfig.model_validate(
+        {
+            "data_source": "default/data#input.csv",
+            "config": {"enable_synthesis": False, "enable_replace_pii": False},
+        }
+    )
+
+    task_main.run_config(job_config, small_df, tmp_path)
+
+    assert seen_min_rows == [0]
+    assert len(small_df) < 200
 
 
 def test_run_from_env_reports_missing_config_path(monkeypatch):
