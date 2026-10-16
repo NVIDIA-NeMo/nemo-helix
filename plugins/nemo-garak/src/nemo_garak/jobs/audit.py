@@ -335,6 +335,7 @@ class AuditJob(NemoJob):
     """Run an audit (per-probe garak invocations) against a configured target."""
 
     name: ClassVar[str] = "audit"
+    runs_as_service: ClassVar[str | None] = "auditor"
     description: ClassVar[str] = "Run a garak scan against a configured target."
     container: ClassVar[str] = "nhx-garak-tasks"
     input_spec_schema: ClassVar[type[BaseModel] | None] = AuditInputSpec

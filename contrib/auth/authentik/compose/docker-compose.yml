@@ -25,7 +25,7 @@ services:
         "--host",
         "0.0.0.0",
         "--services",
-        "auth,models,files,inference-gateway,jobs,secrets,entities,deployments,studio",
+        "auth,models,files,inference-gateway,jobs,secrets,entities,deployments,evals,studio",
         "--controllers",
         "jobs,models,entities,deployments",
       ]
@@ -42,6 +42,9 @@ services:
       NHX_AUTH_SESSION_ENCRYPTION_KEY: ${NHX_AUTH_SESSION_ENCRYPTION_KEY:?run contrib/auth/authentik/run.sh prepare-local}
       NHX_SECRETS_DEFAULT_ENCRYPTION_KEY: ${NHX_SECRETS_DEFAULT_ENCRYPTION_KEY:?run contrib/auth/authentik/run.sh prepare-local}
       NHX_SEED_ON_STARTUP: "true"
+      # Plugin jobs (evals) run the task images built alongside this API image.
+      NHX_IMAGE_REGISTRY: ${IMAGE_REGISTRY:-my-registry}
+      NHX_IMAGE_TAG: ${BAKE_TAG:-local}
       NHX_PLATFORM_SEED_MODEL_PROVIDER_ENABLED: "false"
       NEMO_JOBS_DEFAULT_DOCKER_NETWORK: ${AUTHENTIK_WORKLOAD_NETWORK_NAME:-authentik_workload}
       NEMO_DEPLOYMENTS_DOCKER_NETWORK: ${AUTHENTIK_WORKLOAD_NETWORK_NAME:-authentik_workload}

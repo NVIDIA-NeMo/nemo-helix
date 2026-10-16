@@ -405,6 +405,7 @@ def test_authentik_umbrella_values_define_one_shared_postgresql_instance() -> No
         "secrets",
         "entities",
         "deployments",
+        "evals",
         "studio",
     ]
     assert values["nemo-helix"]["core"]["controller"]["controllers"] == [

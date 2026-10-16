@@ -288,6 +288,7 @@ class ExecuteAgentStepConfig(BaseModel):
 
 class ExecuteAgentJob(NemoJob):
     name: ClassVar[str] = "execute"
+    runs_as_service: ClassVar[str | None] = "agents"
     description: ClassVar[str] = "Execute an agent to completion as a scheduled platform job."
     container: ClassVar[str] = "cpu-tasks"
     input_spec_schema: ClassVar[type[BaseModel]] = ExecuteAgentJobConfig

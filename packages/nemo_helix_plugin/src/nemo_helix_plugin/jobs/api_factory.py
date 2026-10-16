@@ -36,7 +36,12 @@ from nemo_helix_plugin.authz import GENERATED_ROUTE_CALLERS, AuthzScope, path_ru
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError
 from nemo_helix_plugin.client.types import RetryPolicy
-from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client
+from nemo_helix_plugin.dependencies import (
+    ServiceNemoClientFactory,
+    get_entity_client,
+    get_nemo_client,
+    get_service_nemo_client_factory,
+)
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
@@ -808,6 +813,7 @@ def job_route_factory(
     generate_job_name: JobNameGenerator | None = None,
     authz: AuthzScope | None = None,
     jobs_list_filter: type[BaseJobsListFilter] | None = None,
+    create_as_service: str | None = None,
 ) -> APIRouter:
     """Create a job router with standard CRUD operations.
 
@@ -845,6 +851,9 @@ def job_route_factory(
             is generated. A field this model adds with a string default, such as
             ``backend: Literal["rl"] = "rl"``, is AND-ed into every list as
             ``spec.<field>``.
+        create_as_service: Service name to create jobs as (``service:{create_as_service}``),
+            acting on behalf of the caller, so the job's workload acts as that service.
+            When omitted, jobs are created as the caller.
 
     Example with separate input/output types:
         ```python
@@ -963,6 +972,19 @@ def job_route_factory(
             custom_fields=job_resp.custom_fields,
         )
 
+    if create_as_service is not None:
+        creating_service = create_as_service
+
+        def jobs_client_for_create(
+            service_clients: ServiceNemoClientFactory = Depends(get_service_nemo_client_factory),
+        ) -> AsyncJobsClient:
+            return AsyncJobsClient.from_client(service_clients(creating_service))
+
+    else:
+
+        def jobs_client_for_create(async_client: AsyncNemoClient = Depends(get_nemo_client)) -> AsyncJobsClient:
+            return AsyncJobsClient.from_client(async_client)
+
     # Core job routes
     if JobRouteOption.CORE in route_options:
 
@@ -975,6 +997,7 @@ def job_route_factory(
             request: TypedJobRequest,
             async_client: AsyncNemoClient = Depends(get_nemo_client),
             entity_client: EntityClient = Depends(get_entity_client),
+            jobs: AsyncJobsClient = Depends(jobs_client_for_create),
         ) -> TypedJobResponse:
             f"""Create a new job for the {service_name} microservice."""
 
@@ -1039,7 +1062,6 @@ def job_route_factory(
             if request.output_location is not None:
                 create_fields["output_location"] = request.output_location
 
-            jobs = AsyncJobsClient.from_client(async_client)
             job_resp = (await jobs.create_job(workspace=workspace, body=CreateHelixJobRequest(**create_fields))).data()
             return from_response(job_resp)
 

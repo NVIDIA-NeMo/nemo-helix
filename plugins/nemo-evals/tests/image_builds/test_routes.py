@@ -137,12 +137,26 @@ async def test_the_build_check_authorizes_builders_submit_route_as_the_caller(en
         raise HTTPException(status_code=403, detail="Access to taskset member denied")
 
     service = get_image_build_service(
-        "team a", entity_store, AsyncNemoClient(base_url="http://platform.test"), authorize
+        "team a", entity_store, lambda service: AsyncNemoClient(base_url="http://platform.test"), authorize
     )
 
     with pytest.raises(ImageBuildForbiddenError, match="workspace team a"):
         await service.authorize_builds("team a")
     assert checked == [("POST", "/apis/builder/v2/workspaces/team%20a/builds")]
+
+
+async def test_task_builder_jobs_are_created_as_evals_for_the_caller(entity_store, mocker) -> None:
+    """The task-builder Job writes evals' build records, so its workload must act as evals."""
+    evals_client = AsyncNemoClient(base_url="http://platform.test")
+    clients_for: dict[str, AsyncNemoClient] = {"evals": evals_client}
+    jobs_from_client = mocker.patch("nemo_evals.api.dependencies.AsyncJobsClient.from_client")
+
+    async def authorize(method: str, path: str) -> None:
+        del method, path
+
+    get_image_build_service("default", entity_store, clients_for.__getitem__, authorize)
+
+    jobs_from_client.assert_called_once_with(evals_client)
 
 
 def test_request_by_tag_builds_the_revision_the_tag_names(client, store_task) -> None:

@@ -752,17 +752,23 @@ def _build_delegated_claims(
     delegation: WorkloadDelegationEntity,
     verified_subject: VerifiedSubjectToken,
 ) -> dict[str, Any]:
-    delegated_principal = delegation.auth_context.to_principal().effective_principal
+    creator = delegation.auth_context.to_principal()
+    delegated_principal = creator.effective_principal
     claims: dict[str, Any] = {"sub": delegated_principal.id}
     if delegated_principal.email:
         claims["email"] = delegated_principal.email
     if delegated_principal.groups:
         claims["groups"] = ",".join(delegated_principal.groups)
 
-    actor_claims: dict[str, Any] = {"sub": verified_subject.subject}
+    workload_actor: dict[str, Any] = {"sub": verified_subject.subject}
     if verified_subject.groups:
-        actor_claims["groups"] = ",".join(verified_subject.groups)
-    claims["act"] = actor_claims
+        workload_actor["groups"] = ",".join(verified_subject.groups)
+    if creator.on_behalf_of is not None:
+        # A service created this workload for a user: the workload acts as that service,
+        # and the RFC 8693 actor chain keeps the workload identity beneath it.
+        claims["act"] = {"sub": creator.id, "act": workload_actor}
+    else:
+        claims["act"] = workload_actor
     return claims
 
 
