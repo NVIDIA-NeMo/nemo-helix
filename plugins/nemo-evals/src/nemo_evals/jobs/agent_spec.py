@@ -288,6 +288,18 @@ class HarborRunnerTarget(BaseModel):
         "spec and reach only the agent. Keys Harbor treats as secrets (matching KEY, SECRET, TOKEN, PASSWORD, "
         "CREDENTIAL or AUTH) are rejected; use `env_secrets` for credentials.",
     )
+    # Left out of the JSON when empty: taskset-run digests hash this target, and runs from before the field existed
+    # must keep their identity.
+    verifier_env_secrets: dict[str, SecretRef] = Field(
+        default_factory=dict,
+        exclude_if=lambda value: not value,
+        description="Environment variables for each task's verifier, sourced from the secrets service, as "
+        "{ENV_NAME: secret-ref}: an LLM-judge verifier's API key, for example. The service resolves each "
+        "reference into the job's environment, and Harbor passes a `${ENV_NAME}` template to the verifier "
+        'only, never to the agent. With the task\'s `[verifier] environment_mode = "separate"`, the verifier '
+        "runs in a container the agent never ran in. A name may not also appear in `env_secrets` or `env_vars`. "
+        "A bare ref resolves in the job's workspace.",
+    )
     n_attempts: int = Field(default=1, ge=1, description="Number of attempts Harbor runs per task.")
     n_concurrent_trials: int | None = Field(
         default=None,
@@ -345,7 +357,7 @@ class HarborRunnerTarget(BaseModel):
 
     @model_validator(mode="after")
     def _env_vars_are_harbor_safe(self) -> Self:
-        validate_harbor_env(self.env_vars, self.env_secrets)
+        validate_harbor_env(self.env_vars, self.env_secrets, self.verifier_env_secrets)
         return self
 
     @property

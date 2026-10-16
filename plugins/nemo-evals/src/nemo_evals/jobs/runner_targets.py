@@ -86,7 +86,8 @@ def _harbor_target(runner: HarborAgentTaskRunner) -> HarborRunnerTarget:
 
     ``jobs_dir`` is optional at construction and deliberately omitted from submission: workers
     supply job-owned storage. Standalone execution requires an explicit directory.
-    Only ``env_secrets`` references travel; the platform resolves them with its own resolver.
+    Only ``env_secrets`` and ``verifier_env_secrets`` references travel; the platform resolves them with its
+    own resolver.
     Trial concurrency stays unset unless explicitly supplied. Dumping and revalidating
     a runtime config marks its defaults as supplied, including trial concurrency.
     """
@@ -123,6 +124,7 @@ def _harbor_target(runner: HarborAgentTaskRunner) -> HarborRunnerTarget:
         "agent_kwargs",
         "env_secrets",
         "env_vars",
+        "verifier_env_secrets",
         "n_attempts",
         "max_retries",
         "artifacts",

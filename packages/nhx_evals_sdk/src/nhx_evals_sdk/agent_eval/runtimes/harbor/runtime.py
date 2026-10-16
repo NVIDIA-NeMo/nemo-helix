@@ -95,6 +95,8 @@ logger = logging.getLogger(__name__)
 
 # Default reward key inside Harbor's ``verifier_result.rewards`` mapping.
 DEFAULT_REWARD_KEY = "reward"
+#: Verifier env var naming the container path of collected agent traces, set from ``trace_dir``.
+TRACE_DIR_ENV = "TRACE_DIR"
 # Synthetic sys.modules root a custom ``import_path`` agent package is injected under.
 _AGENT_IMPORT_ROOT = "_nemo_evals_harbor_agents"
 # Guards the sys.modules mutation while injecting/removing scoped agent packages.
@@ -198,6 +200,18 @@ class HarborRuntimeConfig(BaseModel):
             "PASSWORD, CREDENTIAL or AUTH) are rejected; use ``env_secrets`` for credentials."
         ),
     )
+    # Left out of dumps when empty, so cache stamps written before the field existed stay valid.
+    verifier_env_secrets: dict[str, SecretRef] = Field(
+        default_factory=dict,
+        exclude_if=lambda value: not value,
+        description=(
+            "Environment variables for each task's verifier, sourced from secrets, as {ENV_NAME: secret-ref}: "
+            "an LLM-judge verifier's API key, for example. They reach only the verifier, never the agent; with "
+            "the task's ``[verifier] environment_mode = 'separate'``, that is a container the agent never ran "
+            "in. Resolved like ``env_secrets``, and Harbor receives a ``${NAME}`` template. A name may not also "
+            "appear in ``env_secrets`` or ``env_vars``."
+        ),
+    )
     n_attempts: int = Field(default=1, ge=1, description="Number of attempts Harbor runs per task.")
     n_concurrent_trials: int = Field(default=4, ge=1, description="Maximum concurrent Harbor trials.")
     quiet: bool = Field(default=True, description="Suppress Harbor's trial progress displays.")
@@ -224,7 +238,9 @@ class HarborRuntimeConfig(BaseModel):
 
     @model_validator(mode="after")
     def _env_vars_are_harbor_safe(self) -> HarborRuntimeConfig:
-        validate_harbor_env(self.env_vars, self.env_secrets)
+        validate_harbor_env(self.env_vars, self.env_secrets, self.verifier_env_secrets)
+        if self.trace_dir is not None and TRACE_DIR_ENV in self.verifier_env_secrets:
+            raise ValueError(f"verifier_env_secrets[{TRACE_DIR_ENV!r}] would replace the trace_dir the verifier reads")
         return self
 
     @model_validator(mode="after")
@@ -298,7 +314,8 @@ class HarborAgentTaskRunner:
         self._job_dir = Path(job_dir) if job_dir is not None else None
         self._run_job = run_job
         self._secret_resolver = secret_resolver if secret_resolver is not None else LocalSecretResolver()
-        if config is not None and config.env_secrets and not isinstance(self._secret_resolver, EnvSecretSource):
+        needs_env_source = config is not None and (config.env_secrets or config.verifier_env_secrets)
+        if needs_env_source and not isinstance(self._secret_resolver, EnvSecretSource):
             raise TypeError(
                 f"{type(self._secret_resolver).__name__} can't name an env var holding a secret. Harbor env_secrets "
                 "need an env-backed resolver (LocalSecretResolver locally; the platform supplies its own)."
@@ -326,6 +343,9 @@ class HarborAgentTaskRunner:
                 if config is not None
                 else None,
                 "env_vars": redact_credentials(config.env_vars) if config is not None else None,
+                "verifier_env_secrets": {name: ref.root for name, ref in config.verifier_env_secrets.items()}
+                if config is not None
+                else None,
                 "effective_agent": _effective_harbor_agent(config),
                 "n_attempts": config.n_attempts if config is not None else None,
                 # Native mode resolves the concrete job directory inside run_tasks (the name defaults
@@ -414,6 +434,9 @@ class HarborAgentTaskRunner:
                 # `_build_native_job`, whose `run_job` may rmtree the job dir: a missing secret must
                 # never cost completed trials. `run_job` re-checks `env_vars` before its rmtree.
                 env_templates = harbor_env_templates(self._config.env_secrets, self._secret_resolver)
+                verifier_env_templates = harbor_env_templates(
+                    self._config.verifier_env_secrets, self._secret_resolver, field="verifier_env_secrets"
+                )
                 job_dir, run_job = _build_native_job(
                     self._config,
                     dataset_path,
@@ -426,6 +449,7 @@ class HarborAgentTaskRunner:
                     # JobConfig comparison can therefore match.
                     force_rerun=(self._config.force_rerun or stale),
                     env_templates=env_templates,
+                    verifier_env_templates=verifier_env_templates,
                 )
                 # Fingerprint the inputs *before* running and confirm they are
                 # unchanged afterwards. Stamping only the post-run state would label
@@ -825,8 +849,8 @@ def _cache_stamp(
     *content* is hashed separately, so a relocated but identical agent still hits;
     and ``reward_key``, which only selects which reward
     :func:`build_trials_from_job_dir` reads back and must not cost a Docker re-run.
-    ``env_secrets`` participates by ref and ``env_vars`` by value: secret values are not
-    fingerprinted, so rotating a credential keeps the cache valid.
+    ``env_secrets`` and ``verifier_env_secrets`` participate by ref and ``env_vars`` by value:
+    secret values are not fingerprinted, so rotating a credential keeps the cache valid.
     """
     # Missing execution storage is invalid configuration, not a best-effort filesystem failure.
     jobs_dir = _require_jobs_dir(config)
@@ -962,6 +986,7 @@ def _build_native_job(
     job_name: str | None = None,
     force_rerun: bool | None = None,
     env_templates: Mapping[str, str],
+    verifier_env_templates: Mapping[str, str] | None = None,
 ) -> tuple[Path, RunJob]:
     """Build a Harbor ``JobConfig`` from ``config`` and return ``(job_dir, run_job)``.
 
@@ -986,10 +1011,19 @@ def _build_native_job(
             ``MY_WORKSPACE_OPENAI_API_KEY`` exported, it is
             ``{"OPENAI_API_KEY": "${MY_WORKSPACE_OPENAI_API_KEY}"}``;
             in a platform job it is ``{"OPENAI_API_KEY": "${OPENAI_API_KEY}"}``.
+        verifier_env_templates: The same, per ``config.verifier_env_secrets`` key; Harbor passes these
+            only to the verifier. Its keys must match ``config.verifier_env_secrets``, so omitting it
+            when the config has verifier secrets raises instead of dropping them.
     """
     if set(env_templates) != set(config.env_secrets):
         raise ValueError(
             f"env_templates keys {sorted(env_templates)} don't match env_secrets keys {sorted(config.env_secrets)}"
+        )
+    verifier_env_templates = dict(verifier_env_templates or {})
+    if set(verifier_env_templates) != set(config.verifier_env_secrets):
+        raise ValueError(
+            f"verifier_env_templates keys {sorted(verifier_env_templates)} don't match verifier_env_secrets keys "
+            f"{sorted(config.verifier_env_secrets)}"
         )
     jobs_dir = _require_jobs_dir(config)
     resolved_name = job_name if job_name is not None else _resolve_job_dir(config)[0]
@@ -1001,9 +1035,9 @@ def _build_native_job(
         # field validator: `model_copy(update=...)` skips validators, and a run that refuses after
         # deleting the job dir has destroyed completed trials to reach the same refusal.
         require_no_plaintext_credentials(config.agent_kwargs, field="agent_kwargs", alternative="env_secrets")
-        validate_harbor_env(config.env_vars, config.env_secrets)
+        validate_harbor_env(config.env_vars, config.env_secrets, config.verifier_env_secrets)
         # Warn rather than refuse: some agents read a fixed variable name the caller can't rename.
-        warn_unscrubbed_secret_keys(config.env_secrets)
+        warn_unscrubbed_secret_keys({**config.env_secrets, **config.verifier_env_secrets})
         try:
             from harbor.job import DatasetConfig, Job, JobConfig  # ty: ignore[unresolved-import,unused-ignore-comment]
             from harbor.models.job.config import RetryConfig  # ty: ignore[unresolved-import,unused-ignore-comment]
@@ -1019,11 +1053,13 @@ def _build_native_job(
             shutil.rmtree(job_dir)
 
         artifacts: list[str | ArtifactConfig] = list(config.artifacts)
-        verifier_kwargs: dict[str, Any] = {}
+        # Harbor hands the trial-level verifier env only to the verifier, and expands each `${NAME}` there.
+        verifier_env: dict[str, str] = dict(verifier_env_templates)
         if config.trace_dir is not None:
             artifacts = [ArtifactConfig(source=config.trace_dir, destination="traces"), *artifacts]
             # Nothing else tells a verifier where the traces are.
-            verifier_kwargs["verifier"] = VerifierConfig(env={"TRACE_DIR": config.trace_dir})
+            verifier_env[TRACE_DIR_ENV] = config.trace_dir
+        verifier_kwargs: dict[str, Any] = {"verifier": VerifierConfig(env=verifier_env)} if verifier_env else {}
 
         timeout_kwargs = {
             key: value
