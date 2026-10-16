@@ -922,6 +922,9 @@ chmod -R 777 {job_vol}/{storage_subpath}
 
                     env[envvar.name] = envvar.value
 
+        # Under workload token exchange the controller reads the step's secrets for its submitter: the launcher can't.
+        env.update(self.resolve_step_secrets(step))
+
         # Thread through shared platform envvars to the job
         # Note: address_override defaults to None, which triggers automatic loopback detection
         env.update(get_job_runtime_shared_envvars(platform_config))

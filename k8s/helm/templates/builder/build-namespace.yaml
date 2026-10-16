@@ -88,6 +88,10 @@ rules:
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["create", "get", "list", "delete", "patch", "update"]
+  # Under workload token exchange, a step's secrets reach it through a Kubernetes Secret the controller writes.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "list", "delete"]
   - apiGroups: [""]
     resources: ["persistentvolumeclaims", "events"]
     verbs: ["get", "list", "watch"]

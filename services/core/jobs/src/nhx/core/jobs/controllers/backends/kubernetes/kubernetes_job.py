@@ -46,7 +46,9 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     common_labels_for_step,
     create_configmap,
     create_pod_template_spec,
+    create_step_secret,
     delete_configmap,
+    delete_step_secret,
     get_namespace_from_environment,
     image_pull_backoff_failure,
     list_pod_status,
@@ -213,12 +215,16 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
                     extra={"job_name": job_name, "namespace": self.namespace},
                 )
 
+        # Under workload token exchange, read the step's secrets first, so one that can't be read creates nothing.
+        secret_values = self.resolve_step_secrets(step)
+
         # Create a configmap storing the job's step config
         configmap_name = create_configmap(
             core_v1=self._core_v1,
             namespace=self.namespace,
             step=step,
         )
+        secret_env = create_step_secret(self._core_v1, self.namespace, step, secret_values) if secret_values else []
 
         # Otherwise, create a new job
         common_labels = common_labels_for_step(step)
@@ -235,6 +241,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             self._core_v1,
             num_gpus=num_gpus,
             executor_resources=executor_resources,
+            secret_env=secret_env,
         )
 
         # Create job spec
@@ -565,6 +572,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             namespace=self.namespace,
             name=job_name,
         )
+        delete_step_secret(self._core_v1, self.namespace, job_name)
 
     def cleanup_steps(self):
         jobs = self.get_kubernetes_job_list_by_labels(labels=KUBE_JOB_SELECTOR_LABELS)

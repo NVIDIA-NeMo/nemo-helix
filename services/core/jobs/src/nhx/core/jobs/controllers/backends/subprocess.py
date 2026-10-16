@@ -482,6 +482,9 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             principal = auth_context.to_principal()
             env.update(principal.get_env_var())
 
+        # Under workload token exchange the controller reads the step's secrets for its submitter, and NEMO_JOB_SECRETS
+        # is empty; without it, inject_secret_env_vars fetches them as before.
+        env.update(self.resolve_step_secrets(step))
         inject_secret_env_vars(env)
         return env, task_id, work_dir, log_path, persistent_dir
 
