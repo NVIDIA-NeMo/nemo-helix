@@ -139,8 +139,6 @@ SERVER_RETRY_BASE_SEC = 0.5
 SERVER_RETRY_MAX_SEC = 8.0
 # The readiness wait polls the services status on every poll, so each read gets only this long.
 PROVISIONING_STATUS_BUDGET_SEC = 30
-# The image's PATH when it can't be read; the usual Debian/Ubuntu default.
-DEFAULT_IMAGE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 # How long each command that activates the agent bundle may take: reading PATH, then ``--version``.
 AGENT_BUNDLE_EXEC_TIMEOUT_SEC = 60
 
@@ -505,11 +503,16 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
 
         Harbor's installed agents skip their install when they find the agent on ``PATH``. The
         image's own ``PATH`` is read as the default user and kept after the bundle's directory;
-        ``PATH`` set at create would replace it.
+        ``PATH`` set at create would replace it. The runtime always gives a container a ``PATH``,
+        so failing to read one means the sandbox can't run commands, and the trial fails here.
         """
         path_probe = await self.exec('printf %s "$PATH"', cwd="/", timeout_sec=AGENT_BUNDLE_EXEC_TIMEOUT_SEC)
-        image_path = (path_probe.stdout or "") if path_probe.return_code == 0 else ""
-        entries = [entry for entry in image_path.split(":") if entry] or DEFAULT_IMAGE_PATH.split(":")
+        entries = [entry for entry in (path_probe.stdout or "").split(":") if entry]
+        if path_probe.return_code != 0 or not entries:
+            raise RuntimeError(
+                f"Agent bundle setup failed: could not read the sandbox's PATH (exit {path_probe.return_code}): "
+                f"{(path_probe.stderr or '').strip()[-2000:]}"
+            )
         bundle_dir = bundle.executable.rsplit("/", 1)[0]
         self._persistent_env["PATH"] = ":".join([bundle_dir, *(entry for entry in entries if entry != bundle_dir)])
 

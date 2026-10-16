@@ -691,22 +691,22 @@ async def test_start_puts_the_bundle_first_on_the_image_path_and_checks_it(
     assert environment._persistent_env["PATH"] == "/installed-agent/bin:/home/agent/.local/bin:/usr/bin:/bin"
 
 
-async def test_start_falls_back_to_the_default_path(
-    tmp_path: Path, server: Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "path_probe",
+    [ExecResult(stdout="", stderr="sh: not found", return_code=127), ExecResult(stdout="", return_code=0)],
+)
+async def test_start_fails_when_the_path_cannot_be_read(
+    tmp_path: Path, server: Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch, path_probe: ExecResult
 ) -> None:
     environment = _bundle_environment(tmp_path, server)
-    _scripted_exec(
-        environment,
-        monkeypatch,
-        {
-            'printf %s "$PATH"': ExecResult(stdout="", stderr="no shell", return_code=127),
-            "/installed-agent/bin/claude --version": ExecResult(stdout="2.1.301", return_code=0),
-        },
-    )
+    calls = _scripted_exec(environment, monkeypatch, {'printf %s "$PATH"': path_probe})
 
-    await environment.start(force_build=False)
+    with pytest.raises(RuntimeError, match=r"could not read the sandbox's PATH"):
+        await environment.start(force_build=False)
 
-    assert environment._persistent_env["PATH"] == f"/installed-agent/bin:{environment_module.DEFAULT_IMAGE_PATH}"
+    # The agent's version check never runs, and PATH is left alone.
+    assert [command for command, _ in calls] == ['printf %s "$PATH"']
+    assert "PATH" not in environment._persistent_env
 
 
 async def test_start_fails_when_the_bundle_does_not_run(
