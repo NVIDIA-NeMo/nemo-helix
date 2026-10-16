@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from nemo_agents_plugin.fabric.translator import upgrade_relay_observability_version
 from nemo_evals.api.schemas import AgentRef
 from nemo_evals.jobs.agent_spec import (
     REGISTERED_AGENT_GYM_COMPONENT,
@@ -246,7 +247,7 @@ def write_registered_agent_package(
         "description": f"Registered platform agent {spec.agent.root}, run through NeMo Fabric.",
         "resources_server": {"type": "resources_servers", "name": "???"},
         "model_server": {"type": "responses_api_models", "name": "policy_model"},
-        "fabric_config": _omegaconf_literal(spec.resolved_config),
+        "fabric_config": _omegaconf_literal(upgrade_relay_observability_version(spec.resolved_config)),
         "fabric_config_base_dir": base_dir,
     }
     instance_config = {instance: {CUSTOM_AGENT_SUBDIR: {REGISTERED_AGENT_GYM_COMPONENT: component}}}
