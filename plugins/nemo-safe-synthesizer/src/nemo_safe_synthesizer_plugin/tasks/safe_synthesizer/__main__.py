@@ -334,17 +334,16 @@ def run_config(
                 adapter_location=str(location) if location is not None else None,
             )
 
-        ss: SafeSynthesizer = SafeSynthesizer(config=job_config.config, save_path=save_path).with_data_source(
-            data_source
-        )
+        nss_config = job_config.config
+        if not enable_synthesis:
+            nss_config = nss_config.model_copy(deep=True)
+            if "dataset.size" not in nss_config.preflight.disabled_checks:
+                nss_config.preflight.disabled_checks.append("dataset.size")
+
+        ss: SafeSynthesizer = SafeSynthesizer(config=nss_config, save_path=save_path).with_data_source(data_source)
         if enable_synthesis:
             ss.run()
         else:
-            from nemo_safe_synthesizer.preflight.checks.dataframe import DatasetSizeCheck
-
-            # PII replacement only: the 200-row training-size floor doesn't apply.
-            # The check instance is registered at import time and reads this class attribute.
-            DatasetSizeCheck.min_rows = 0
             ss.process_data()
             total_time = time.monotonic() - (ss._total_start or time.monotonic())
             pii_replaced_df = getattr(ss, "_training_df", None)
