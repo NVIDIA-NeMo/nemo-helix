@@ -338,7 +338,8 @@ unpacks an archive once, however many of its specs use it:
 A spec can copy an image instead of building one: `{"source": {"image": "ubuntu:24.04"}}`, by tag or
 digest, as `docker pull` takes it. At submit the builder resolves it, anonymously, to the one manifest
 for the spec's `platform`, and records the reference and that manifest's digest on the row as
-`provenance.upstream`. The job pulls exactly that manifest and pushes it unchanged, so the published
+`provenance.upstream`. Submitting the same revision again keeps that digest without asking the
+registry, even if the tag has moved since. The job pulls exactly that manifest and pushes it unchanged, so the published
 digest is the upstream one; the push step and `complete` both refuse any other. The copy is signed
 like a build. Copies skip the build step, so a set of nothing but copies runs no sandbox.
 

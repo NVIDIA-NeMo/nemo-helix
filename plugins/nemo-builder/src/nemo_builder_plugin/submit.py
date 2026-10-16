@@ -19,7 +19,7 @@ from nemo_builder_plugin.plan import BuildPlan, PlannedImage
 from nemo_builder_plugin.schema import BuildSet
 from nemo_builder_plugin.upstream import UpstreamError, UpstreamNotFound
 from nemo_helix_plugin.client.errors import ConflictError
-from nemo_helix_plugin.entities import EntityConflictError
+from nemo_helix_plugin.entities import EntityConflictError, EntityNotFoundError
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 from nemo_helix_plugin.log_utils import sanitize_for_log
@@ -118,11 +118,22 @@ def _upstream_image(image: PlannedImage) -> UpstreamImage | None:
     return UpstreamImage(image=str(image.upstream), manifest_digest=image.upstream_digest)
 
 
-async def _resolve_copies(plan: BuildPlan, resolve_upstream: ResolveUpstream) -> BuildPlan:
+async def _resolve_copies(
+    plan: BuildPlan, entity_client: _EntityWriter, resolve_upstream: ResolveUpstream
+) -> BuildPlan:
+    """Pin each copy to a manifest digest: the one its row already holds, or the registry's now.
+
+    A resubmit of the same request is the same build, so it keeps the digest pinned first, without asking the
+    registry again: a tag that moved since then, or a registry that refuses (a rate limit, say), changes nothing.
+    """
     digests: dict[str, str] = {}
     for image in plan.copies:
         upstream = image.upstream
         assert upstream is not None
+        pinned = await _pinned_digest(entity_client, image.name, plan.workspace)
+        if pinned is not None:
+            digests[image.name] = pinned
+            continue
         try:
             digests[image.name] = await resolve_upstream(upstream, image.spec.platform)
         except UpstreamNotFound as exc:
@@ -130,6 +141,19 @@ async def _resolve_copies(plan: BuildPlan, resolve_upstream: ResolveUpstream) ->
         except UpstreamError as exc:
             raise UpstreamUnavailable(f"{image.name}: {exc}") from exc
     return plan.with_upstream(digests)
+
+
+async def _pinned_digest(entity_client: _EntityWriter, name: str, workspace: str) -> str | None:
+    """The manifest digest the copy's row already pinned, if it has a row.
+
+    A row written for a different request makes the submit a conflict further on, whatever is pinned here.
+    """
+    try:
+        row = await entity_client.get(ContainerImage, name=name, workspace=workspace)
+    except EntityNotFoundError:
+        return None
+    upstream = row.provenance.upstream
+    return upstream.manifest_digest if upstream is not None else None
 
 
 async def submit_build_set(
@@ -148,7 +172,7 @@ async def submit_build_set(
     try:
         plan = BuildPlan.resolve(build_set, workspace=workspace)
         backend.check(plan)
-        plan = await _resolve_copies(plan, resolve_upstream)
+        plan = await _resolve_copies(plan, entity_client, resolve_upstream)
         plan = plan.with_destinations(backend.destination)
         platform_spec = backend.compile(plan)
     except BackendRejectedError:

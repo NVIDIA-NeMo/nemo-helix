@@ -29,7 +29,7 @@ from nemo_builder_plugin.submit import (
 )
 from nemo_builder_plugin.upstream import UpstreamError, UpstreamNotFound
 from nemo_helix_plugin.client.errors import ConflictError
-from nemo_helix_plugin.entities import EntityConflictError
+from nemo_helix_plugin.entities import EntityConflictError, EntityNotFoundError
 from nemo_helix_plugin.jobs.execution_profiles import KubernetesJobExecutionProfile
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
@@ -59,6 +59,8 @@ class FakeEntityClient:
 
     async def get(self, entity_type: type[ContainerImage], *, name: str, workspace: str) -> ContainerImage:
         self.events.append(f"get:{name}")
+        if name not in self.rows:
+            raise EntityNotFoundError(f"{name} not found")
         return self.rows[name]
 
     async def update(self, entity: ContainerImage) -> ContainerImage:
@@ -361,7 +363,57 @@ class TestCopies:
         upstream = result.images[0].provenance.upstream
         assert upstream is not None
         assert (upstream.image, upstream.manifest_digest) == (UBUNTU, UBUNTU_AMD64)
-        assert entities.events[0] == f"resolve:{UBUNTU}:linux/amd64"
+        assert entities.events[:2] == ["get:demo-1.copy0", f"resolve:{UBUNTU}:linux/amd64"]
+
+    @pytest.mark.asyncio
+    async def test_a_resubmitted_copy_reuses_its_pinned_digest_without_asking_the_registry(self) -> None:
+        """Evals resubmits a copy every time a task needs it, so a rate limit there mustn't fail an image we have."""
+        entities = FakeEntityClient()
+        jobs = FakeJobs(entities.events)
+        await _submit(entities, jobs, build_set=_copy_set("ubuntu:24.04"), upstream={UBUNTU: UBUNTU_AMD64})
+        resolved_once = entities.events.count(f"resolve:{UBUNTU}:linux/amd64")
+
+        result = await _submit(
+            entities, jobs, build_set=_copy_set("ubuntu:24.04"), upstream={UBUNTU: UpstreamError("429 rate limited")}
+        )
+
+        assert entities.events.count(f"resolve:{UBUNTU}:linux/amd64") == resolved_once == 1
+        upstream = result.images[0].provenance.upstream
+        assert upstream is not None and upstream.manifest_digest == UBUNTU_AMD64
+
+    @pytest.mark.asyncio
+    async def test_a_retry_after_a_failed_job_creation_pins_the_digest_its_rows_hold(self) -> None:
+        """A tag that moved between the two submits doesn't split the rows and the job across two digests."""
+        entities = FakeEntityClient()
+
+        class _Unavailable(FakeJobs):
+            async def create_job(self, request: CreateHelixJobRequest) -> CreateHelixJobRequest:
+                raise RuntimeError("jobs unavailable")
+
+        with pytest.raises(RuntimeError):
+            await _submit(
+                entities,
+                _Unavailable(entities.events),
+                build_set=_copy_set("ubuntu:24.04"),
+                upstream={UBUNTU: UBUNTU_AMD64},
+            )
+        jobs = FakeJobs(entities.events)
+        await _submit(entities, jobs, build_set=_copy_set("ubuntu:24.04"), upstream={UBUNTU: "sha256:" + "e" * 64})
+
+        fetch = FetchStepConfig.model_validate(next(iter(jobs.jobs.values())).platform_spec.steps[0].config)
+        assert [i.ref for i in fetch.imports] == [f"docker.io/library/ubuntu@{UBUNTU_AMD64}"]
+
+    @pytest.mark.asyncio
+    async def test_a_new_revision_resolves_its_copies_again(self) -> None:
+        entities = FakeEntityClient()
+        await _submit(entities, build_set=_copy_set("ubuntu:24.04"), upstream={UBUNTU: UBUNTU_AMD64})
+        next_revision = _copy_set("ubuntu:24.04")
+        next_revision.revision = 2
+
+        result = await _submit(entities, build_set=next_revision, upstream={UBUNTU: "sha256:" + "e" * 64})
+
+        upstream = result.images[0].provenance.upstream
+        assert upstream is not None and upstream.manifest_digest == "sha256:" + "e" * 64
 
     @pytest.mark.asyncio
     async def test_a_set_of_copies_pulls_and_pushes_without_a_build_step(self) -> None:
@@ -420,4 +472,4 @@ class TestCopies:
         entities = FakeEntityClient()
         with pytest.raises(error, match="demo-1.copy0"):
             await _submit(entities, build_set=_copy_set("ubuntu:24.04"), upstream={UBUNTU: failure})
-        assert entities.events == [f"resolve:{UBUNTU}:linux/amd64"]
+        assert entities.events == ["get:demo-1.copy0", f"resolve:{UBUNTU}:linux/amd64"]
