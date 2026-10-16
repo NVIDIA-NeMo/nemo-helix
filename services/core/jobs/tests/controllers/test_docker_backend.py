@@ -3754,3 +3754,41 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(docker_job, 
     # Verify persistent storage cleanup was NOT called
     # because the job is not terminal yet (step 2 still running)
     docker_job.cleanup_job_persistent_storage.assert_not_called()
+
+
+def test_docker_job_gets_its_secret_values_from_the_controller_under_token_exchange(
+    docker_job, docker_client_mock, test_job_step_with_auth_context
+):
+    """The launcher's in-container fetch sends trusted identity headers, which exchange mode refuses."""
+    test_job_step_with_auth_context.step_spec.environment = [
+        *(test_job_step_with_auth_context.step_spec.environment or []),
+        HelixJobEnvironmentVariable(
+            name="SECRET_ENV_VAR", from_secret=HelixJobSecretEnvironmentVariableRef(name="other-ws/test-secret")
+        ),
+    ]
+    docker_job._workload_delegation_store = workload_delegation_store_mock()
+    reads: list[tuple[str, str, str]] = []
+
+    def read(workspace: str, name: str, on_behalf_of):
+        reads.append((workspace, name, on_behalf_of.id))
+        return "secret-value"
+
+    with (
+        patch("nhx.common.config.get_auth_config", return_value=workload_token_exchange_auth_config()),
+        patch.object(docker_job, "_write_workload_identity_subject_token"),
+        patch.object(docker_job, "_read_secret_value", side_effect=read),
+    ):
+        docker_job.schedule(test_job_step_with_auth_context.step_spec.executor, test_job_step_with_auth_context)
+
+    docker_job._container_run_threadpool.shutdown(wait=True)
+    docker_job._container_run_threadpool = MagicMock()
+
+    assert reads == [("other-ws", "test-secret", "creator@example.com")]
+    job_create_call = next(
+        call
+        for call in docker_client_mock.containers.create.call_args_list
+        if call.kwargs.get("name") == "job-test-job-id-test-step"
+    )
+    env = job_create_call.kwargs["environment"]
+    assert env["SECRET_ENV_VAR"] == "secret-value"
+    assert not env.get("NEMO_JOB_SECRETS")

@@ -761,3 +761,30 @@ class TestResolveTaskImage:
         with patch("nemo_helix_plugin.jobs.image.get_platform_config") as mock_config:
             mock_config.return_value = MagicMock(image_registry="my-registry", image_tag="v1.0")
             assert resolve_task_image(None, None) == "my-registry/nhx-tasks:v1.0"
+
+
+class TestReadingAStepsSecret:
+    """The controller reads a secret as ``service:jobs`` acting for the step's submitter, through Secrets' API."""
+
+    def test_reads_the_value_through_the_secrets_access_route_for_the_submitter(self) -> None:
+        import httpx
+        from nhx.common.auth import Principal
+
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json={"name": "hf-token", "workspace": "team-a", "value": "hf-value"})
+
+        client = NemoClient(
+            base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+        )
+        submitter = Principal(id="creator@example.com")
+        with patch("nhx.core.jobs.controllers.backends.base.get_nemo_client", return_value=client) as build:
+            value = _make_backend()._read_secret_value("team-a", "hf-token", submitter)
+
+        assert value == "hf-value"
+        assert build.call_args.kwargs == {"as_service": "jobs", "internal": True, "on_behalf_of": submitter}
+        assert [(r.method, r.url.path) for r in requests] == [
+            ("GET", "/apis/secrets/v2/workspaces/team-a/secrets/hf-token/access")
+        ]

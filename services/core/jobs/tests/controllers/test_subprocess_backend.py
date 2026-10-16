@@ -791,3 +791,36 @@ def test_reclaim_raises_when_storage_cannot_be_removed(mock_nemo_client, tmp_pat
         pytest.raises(PermissionError),
     ):
         backend.reclaim_persistent_storage("default", "train-llama")
+
+
+def test_under_token_exchange_the_controller_reads_the_steps_secrets(
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending
+):
+    """The in-process fetch sends trusted identity headers, which exchange mode refuses."""
+    from nhx.common.auth import AuthContext
+    from nhx.core.jobs.app.schemas import HelixJobEnvironmentVariable, HelixJobSecretEnvironmentVariableRef
+
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    step = _step_with_command(test_step_pending, ["/bin/true"])
+    step.auth_context = AuthContext(principal_id="creator@example.com")
+    step.step_spec.environment = [
+        *(step.step_spec.environment or []),
+        HelixJobEnvironmentVariable(name="HF_TOKEN", from_secret=HelixJobSecretEnvironmentVariableRef(name="hf-token")),
+    ]
+    exchange = SimpleNamespace(oidc=SimpleNamespace(workload=SimpleNamespace(client_id="w", audience="nemo-helix")))
+    reads: list[tuple[str, str, str]] = []
+
+    def read(workspace: str, name: str, on_behalf_of):
+        reads.append((workspace, name, on_behalf_of.id))
+        return "hf-value"
+
+    with (
+        patch("nhx.common.config.get_auth_config", return_value=exchange),
+        patch("nhx.core.jobs.controllers.backends.subprocess.get_platform_config", return_value=mock_platform_config),
+        patch.object(backend, "_read_secret_value", side_effect=read),
+    ):
+        env, *_ = backend._prepare_runtime(step)
+
+    assert reads == [(step.workspace, "hf-token", "creator@example.com")]
+    assert env["HF_TOKEN"] == "hf-value"
+    assert not env.get("NEMO_JOB_SECRETS")
