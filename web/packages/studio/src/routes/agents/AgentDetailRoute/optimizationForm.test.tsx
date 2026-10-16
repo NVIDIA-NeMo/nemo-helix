@@ -98,12 +98,12 @@ describe('AgentDetailRoute optimization form', () => {
       'Upload a config',
       'Hyperparameter optimization',
       'Model routing using Switchyard',
-      'Prompt optimization using Prompt Master',
     ].entries()) {
       expect(screen.getAllByRole('radio')[index]).toHaveAccessibleName(
         expect.stringContaining(title)
       );
     }
+    expect(screen.getAllByRole('radio')).toHaveLength(3);
   });
 
   it('leaves out strategies the platform has not installed', async () => {
@@ -169,22 +169,23 @@ describe('AgentDetailRoute optimization form', () => {
 
   it('opens the launch modal for a strategy Studio has no form for, and stays on the picker when it closes', async () => {
     const user = userEvent.setup();
+    server.use(
+      http.get(STRATEGIES_URL, () =>
+        HttpResponse.json({
+          data: [{ name: 'no-form', title: 'No form here', requires_config: false }],
+        })
+      )
+    );
     renderDetail('?tab=optimizations&view=strategy');
 
-    await user.click(
-      await screen.findByRole('radio', { name: /Prompt optimization using Prompt Master/ })
-    );
+    await user.click(await screen.findByRole('radio', { name: /No form here/ }));
 
-    const dialog = await screen.findByRole('dialog', {
-      name: 'Prompt optimization using Prompt Master',
-    });
+    const dialog = await screen.findByRole('dialog', { name: 'No form here' });
     expect(within(dialog).getByRole('button', { name: 'Start study' })).toBeEnabled();
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(
-      screen.getByRole('radio', { name: /Prompt optimization using Prompt Master/ })
-    ).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /No form here/ })).toBeInTheDocument();
   });
 
   it('returns to the table from the strategy picker', async () => {
