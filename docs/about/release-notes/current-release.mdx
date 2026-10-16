@@ -53,7 +53,9 @@ NeMo Helix v0.8.0 builds on the 0.7 release line with broader agent optimization
   client secret or provider refresh token. Public CLI clients can opt into the
   same encrypted server-side session store without becoming confidential, and
   `platform.advertised_base_url` lets discovery publish the gateway origin when
-  services connect internally.
+  services connect internally. **Breaking:** the OIDC config and discovery
+  changes mean CLIs older than v0.8.0 cannot authenticate against a v0.8
+  server. See [Upgrade from v0.7.x](#upgrade-from-v07x).
 - `nemo setup` can create a sample workspace and demo Fabric agent, and the setup model picker is searchable. See [Setup](/documentation/get-started/setup).
 - CLI and plugin commands are more remote-cluster aware: skills and config views avoid clobbering configured remote base URLs, denied binds report as permission errors, generated submit commands use the global context, and shared HTTP transports reduce repeated client setup.
 - Product services, plugins, and tests have moved off the legacy generated `nemo_helix` SDK surface toward typed clients; documentation examples now instantiate clients from the active CLI context. See [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
@@ -82,6 +84,13 @@ this release. Move flat interactive fields under `auth.oidc.public_client` or
 [OIDC Setup](/documentation/access-control/authentication/oidc-setup#breaking-configuration-migration)
 for the complete field mapping. There is no compatibility translation for the
 old schema.
+
+**Older `nemo` CLIs cannot authenticate against a v0.8 server.** Because the
+OIDC configuration and auth discovery format changed, a CLI from v0.7.x or
+earlier cannot complete login against a server that uses the new schema. Upgrade
+the `nemo` CLI to v0.8.0 on every machine that connects to an upgraded
+deployment, and upgrade the CLI before or together with the server so users are
+not locked out of authenticated deployments.
 
 From an existing local checkout:
 
