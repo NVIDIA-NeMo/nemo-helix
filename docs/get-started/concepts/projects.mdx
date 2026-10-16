@@ -42,13 +42,13 @@ from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
 client = NemoClient.from_config()
 
-# The project belongs to this workspace; create it first if needed.
+# Use a dedicated workspace so this tutorial does not modify other examples.
 client.workspaces.create_workspace(
-    body=CreateWorkspaceRequest(name="ml-team"), exist_ok=True
+    body=CreateWorkspaceRequest(name="projects-tutorial"), exist_ok=True
 )
 
 project = client.projects.create_project(
-    workspace="ml-team",
+    workspace="projects-tutorial",
     body=CreateProjectRequest(
         name="llama-finetune-v2",
         description="Fine-tuning experiment for customer support",
@@ -60,8 +60,9 @@ project = client.projects.create_project(
 <Tab title="CLI">
 
 ```bash
+nemo workspaces create projects-tutorial
 nemo projects create llama-finetune-v2 \
-    --workspace ml-team \
+    --workspace projects-tutorial \
     --description "Fine-tuning experiment for customer support"
 ```
 
@@ -81,7 +82,7 @@ from nemo_helix_plugin.client.client import NemoClient
 
 client = NemoClient.from_config()
 
-for project in client.projects.list_projects(workspace="ml-team").items():
+for project in client.projects.list_projects(workspace="projects-tutorial").items():
     print(f"{project.name}: {project.description}")
 ```
 
@@ -89,7 +90,7 @@ for project in client.projects.list_projects(workspace="ml-team").items():
 <Tab title="CLI">
 
 ```bash
-nemo projects list --workspace ml-team
+nemo projects list --workspace projects-tutorial
 ```
 
 </Tab>
@@ -108,14 +109,14 @@ from nemo_helix_plugin.client.client import NemoClient
 
 client = NemoClient.from_config()
 
-project = client.projects.get_project(name="llama-finetune-v2", workspace="ml-team").data()
+project = client.projects.get_project(name="llama-finetune-v2", workspace="projects-tutorial").data()
 ```
 
 </Tab>
 <Tab title="CLI">
 
 ```bash
-nemo projects get llama-finetune-v2 --workspace ml-team
+nemo projects get llama-finetune-v2 --workspace projects-tutorial
 ```
 
 </Tab>
@@ -137,7 +138,7 @@ client = NemoClient.from_config()
 
 project = client.projects.update_project(
     name="llama-finetune-v2",
-    workspace="ml-team",
+    workspace="projects-tutorial",
     body=UpdateProjectRequest(
         description="Updated: Fine-tuning experiment for customer support chatbot"
     ),
@@ -149,7 +150,7 @@ project = client.projects.update_project(
 
 ```bash
 nemo projects update llama-finetune-v2 \
-    --workspace ml-team \
+    --workspace projects-tutorial \
     --description "Updated: Fine-tuning experiment for customer support chatbot"
 ```
 
@@ -169,14 +170,14 @@ from nemo_helix_plugin.client.client import NemoClient
 
 client = NemoClient.from_config()
 
-client.projects.delete_project(name="llama-finetune-v2", workspace="ml-team").data()
+client.projects.delete_project(name="llama-finetune-v2", workspace="projects-tutorial").data()
 ```
 
 </Tab>
 <Tab title="CLI">
 
 ```bash
-nemo projects delete llama-finetune-v2 --workspace ml-team
+nemo projects delete llama-finetune-v2 --workspace projects-tutorial
 ```
 
 </Tab>

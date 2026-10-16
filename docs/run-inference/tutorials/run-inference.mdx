@@ -23,6 +23,7 @@ The Python SDK examples on this page also use this import:
 ```python
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
 
 client = NemoClient.from_config()
 ```
@@ -115,11 +116,11 @@ nemo chat -m meta-llama-3-2-1b-instruct 'Hello!' --max-tokens 100
 response = InferenceGatewayClient.from_client(client).model_post(
     name="meta-llama-3-2-1b-instruct",
     trailing_uri="v1/chat/completions",
-    body={
+    body=JsonBody({
         "model": "meta/llama-3.2-1b-instruct",
         "messages": [{"role": "user", "content": "Hello!"}],
         "max_tokens": 100,
-    },
+    }),
 )
 ```
 
@@ -184,11 +185,11 @@ nemo chat -m meta/llama-3.2-1b-instruct 'Hello!' \
 response = InferenceGatewayClient.from_client(client).provider_post(
     name="llama-3-2-1b-deployment",
     trailing_uri="v1/chat/completions",
-    body={
+    body=JsonBody({
         "model": "meta/llama-3.2-1b-instruct",
         "messages": [{"role": "user", "content": "Hello!"}],
         "max_tokens": 100,
-    },
+    }),
 )
 ```
 
@@ -245,11 +246,11 @@ Make requests to the OpenAI-compatible Inference Gateway route with NeMo Helix S
 ```python
 response = InferenceGatewayClient.from_client(client).openai_post(
     trailing_uri="v1/chat/completions",
-    body={
+    body=JsonBody({
         "model": "default/meta-llama-3-2-1b-instruct",  # workspace/model-entity
         "messages": [{"role": "user", "content": "Hello!"}],
         "max_tokens": 100,
-    },
+    }),
 )
 ```
 
