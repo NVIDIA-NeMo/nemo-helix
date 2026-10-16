@@ -468,6 +468,33 @@ async def test_harbor_target_by_agent_selects_the_installed_fabric_agent_with_th
     assert await _resolve(resolved) is resolved
 
 
+async def test_harbor_rebases_gateway_models_without_changing_external_models_or_host_targets(
+    mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("NEMO_BASE_URL", raising=False)
+    monkeypatch.setenv("NHX_BASE_URL", "http://127.0.0.1:8080")
+    config = _calculator_config()
+    config["models"]["external"] = {
+        "provider": "openai",
+        "model": "external-model",
+        "base_url": "https://provider.example/v1",
+    }
+    _platform(mocker, _agent(config))
+
+    harbor = await _resolve(_harbor_by_agent())
+    fabric = await _resolve(_by_agent())
+
+    models = harbor.agent_kwargs["fabric_config"]["models"]
+    assert models["default"]["base_url"] == (
+        "http://host.docker.internal:8080/apis/inference-gateway/v2/workspaces/dev/openai/-/v1"
+    )
+    assert models["external"]["base_url"] == "https://provider.example/v1"
+    assert fabric.config["models"]["default"]["base_url"] == (
+        "http://127.0.0.1:8080/apis/inference-gateway/v2/workspaces/dev/openai/-/v1"
+    )
+    assert "base_url" not in config["models"]["default"]
+
+
 def test_every_harness_extra_the_resolver_names_exists_in_the_installed_fabric() -> None:
     """`pip install nemo-fabric[<extra>]` only warns on an unknown extra; the container would run without its harness."""
     provided = set(importlib.metadata.distribution("nemo-fabric").metadata.get_all("Provides-Extra") or [])

@@ -28,6 +28,8 @@ from nemo_agents_plugin.environment_resolution import (
 )
 from nemo_agents_plugin.fabric.gateway_credentials import platform_gateway_credential_env
 from nemo_agents_plugin.fabric.translator import FabricTranslationError, translate_agent_config
+from nemo_agents_plugin.runner.deployments_backend import resolve_agent_gateway_url, rewrite_fabric_config_base_urls
+from nemo_agents_plugin.utils import get_base_url
 from nemo_evals.api.schemas import AgentRef
 from nemo_evals.filesets import FilesetRef
 from nemo_evals.jobs.agent_files_snapshot import discard_registered_agent_files, snapshot_registered_agent_files
@@ -324,11 +326,15 @@ def _fill_target(
         raise ValueError(
             f"`agent_kwargs.fabric_package` must be a requirement string or null, not {type(fabric_package).__name__}"
         )
+    # Harbor runs the agent inside a Docker task container, even when the evaluation
+    # worker itself is a local subprocess. Apply the same gateway rebase as deployments.
+    gateway_url = resolve_agent_gateway_url(get_base_url(), mode="docker")
+    container_config = rewrite_fabric_config_base_urls(agent.config, gateway_url)
     agent_kwargs: dict[str, Any] = {
         **target.agent_kwargs,
         # The runner inside the task container expands no templates; a literal "${NAME}" is worse than
         # no variable, so a Harbor agent's stdio servers go without the secret (see the Harbor docs).
-        "fabric_config": _without_mcp_env_templates(_without_gateway_placeholders(agent.config)),
+        "fabric_config": _without_mcp_env_templates(_without_gateway_placeholders(container_config)),
         "fabric_package": fabric_package if fabric_package is not None else fabric_harness_package(adapter_id),
     }
     return target.model_copy(
