@@ -21,7 +21,10 @@ This tutorial assumes you have an external provider registered. The platform pre
 The Python SDK examples on this page also use this import:
 
 ```python
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+
+client = NemoClient.from_config()
 ```
 ---
 

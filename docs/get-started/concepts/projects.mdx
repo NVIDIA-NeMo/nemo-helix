@@ -38,8 +38,14 @@ Once created, a project cannot be renamed.
 ```python
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.projects.types import CreateProjectRequest
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
 client = NemoClient.from_config()
+
+# The project belongs to this workspace; create it first if needed.
+client.workspaces.create_workspace(
+    body=CreateWorkspaceRequest(name="ml-team"), exist_ok=True
+)
 
 project = client.projects.create_project(
     workspace="ml-team",

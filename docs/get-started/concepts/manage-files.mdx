@@ -346,6 +346,11 @@ Completed upload to fileset-a1b2c3d4
 <Tab title="Python SDK">
 
 ```python
+from pathlib import Path
+
+# Create a small sample file, or substitute your own training data.
+Path("./data.jsonl").write_text('{"text": "Example training record"}\n', encoding="utf-8")
+
 # Upload a single file
 with open("./data.jsonl", "rb") as f:
     client.files.upload_file(
