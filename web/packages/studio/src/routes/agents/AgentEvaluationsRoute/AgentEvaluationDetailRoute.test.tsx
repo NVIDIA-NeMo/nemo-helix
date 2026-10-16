@@ -44,6 +44,88 @@ describe('AgentEvaluationDetailRoute', () => {
     expect(await screen.findByText('Evaluation not found')).toBeInTheDocument();
   });
 
+  describe('taskset run (no agent-evaluate Job)', () => {
+    const RUN_ID = 'run-86677187bb3c9f34';
+    const bundleFiles: Record<string, string> = {
+      'tasks.jsonl': JSON.stringify({ id: 'greet-universe', inputs: { instruction: 'Say hi' } }),
+      'trials.jsonl': JSON.stringify({
+        id: 'trial-0',
+        task_id: 'greet-universe',
+        status: 'completed',
+        output: { output_text: 'Hello, universe!' },
+      }),
+      'scores.jsonl': JSON.stringify({
+        id: 'score-0',
+        task_id: 'greet-universe',
+        trial_id: 'trial-0',
+        metric_type: 'harbor',
+        status: 'completed',
+        outputs: [{ name: 'reward', value: 1 }],
+      }),
+    };
+
+    const renderRun = () =>
+      renderRoute(<AgentEvaluationDetailRoute />, {
+        history: getAgentEvaluationDetailRoute(workspace, RUN_ID),
+        routes: [
+          {
+            path: ROUTES.workspace.agentEvaluationDetail,
+            element: <AgentEvaluationDetailRoute />,
+          },
+        ],
+      });
+
+    beforeEach(() => {
+      // The Job lookup falls through to the default 404 handler.
+      server.use(
+        http.get(
+          `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/${workspace}/agent-eval-results/${RUN_ID}`,
+          () =>
+            HttpResponse.json({
+              name: RUN_ID,
+              workspace,
+              id: 'r-run',
+              job_id: `${RUN_ID}-bundle-1`,
+              target_kind: 'agent',
+              target_name: 'codex',
+              bundle_ref: `${workspace}/run-bundle-fs#results/run`,
+              created_at: '2026-10-16T08:00:00Z',
+              updated_at: '2026-10-16T08:00:00Z',
+              scores: {
+                scores: [
+                  { name: 'harbor.reward', score_type: 'range', mean: 1, count: 1, nan_count: 0 },
+                ],
+              },
+              summary: { task_count: 1, trial_count: 1, score_count: 1, error_count: 0 },
+            })
+        ),
+        http.get(
+          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/${workspace}/filesets/run-bundle-fs/-/*`,
+          ({ request }) => {
+            const path = decodeURIComponent(new URL(request.url).pathname);
+            const file = Object.keys(bundleFiles).find((name) =>
+              path.endsWith(`results/run/${name}`)
+            );
+            return file
+              ? new HttpResponse(bundleFiles[file])
+              : HttpResponse.json({ detail: 'Not found' }, { status: 404 });
+          }
+        )
+      );
+    });
+
+    it('renders scores and task results from the result record', async () => {
+      renderRun();
+      expect(await screen.findByText('Taskset Run')).toBeInTheDocument();
+      expect(screen.getByText('codex')).toBeInTheDocument();
+      expect(await screen.findByText('reward')).toBeInTheDocument();
+      expect(await screen.findByText('Task Results (1)')).toBeInTheDocument();
+      // No Job, so no logs and no cancel.
+      expect(screen.queryByText('Logs')).not.toBeInTheDocument();
+      expect(screen.queryByText('Cancel Job')).not.toBeInTheDocument();
+    });
+  });
+
   describe('run outcome', () => {
     const failedJob = {
       ...completedJob,

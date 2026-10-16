@@ -85,6 +85,11 @@ export const AgentEvaluationDetailRoute: FC = () => {
     refetchInterval: (query) => (isTerminal(query.state.data?.status) ? false : 5_000),
   });
 
+  // A Kubernetes taskset run (one Job per task, merged by the run controller) has no
+  // agent-evaluate Job: only its result record, named after the run, exists. When the Job
+  // lookup 404s, the page renders from that record instead.
+  const isJobMissing = !isLoadingJob && job === null;
+
   // The "Evaluations" crumb links the agent's eval tab, but the agent name only arrives with
   // the loaded job — so set breadcrumbs from an effect keyed on it (the useBreadcrumbs `items`
   // param runs once on mount and would keep the crumb non-clickable after the job resolves).
@@ -138,13 +143,19 @@ export const AgentEvaluationDetailRoute: FC = () => {
   };
 
   // Aggregate scores (mean/min/max per metric) from the queryable result record.
-  // Only meaningful once the job is terminal. The record is persisted best-effort and
-  // may lag the terminal status, so poll while it is still absent and stop once it loads.
-  const { data: result, isLoading: isLoadingResult } = useQuery({
+  // Only meaningful once the job is terminal, or right away for a run without a Job. A
+  // Job's record is persisted best-effort and may lag the terminal status, so poll while it
+  // is still absent and stop once it loads. Without a Job, an absent record means not found.
+  const showsResults = isJobTerminal || isJobMissing;
+  const {
+    data: result,
+    isLoading: isLoadingResult,
+    isPending: isResultPending,
+  } = useQuery({
     queryKey: ['agent-eval-result', workspace, jobName] as const,
     queryFn: ({ signal }) => fetchAgentEvalResult(workspace, jobName, signal),
-    enabled: !!workspace && !!jobName && isJobTerminal,
-    refetchInterval: (query) => (query.state.data == null ? 5_000 : false),
+    enabled: !!workspace && !!jobName && showsResults,
+    refetchInterval: (query) => (query.state.data == null && !isJobMissing ? 5_000 : false),
   });
 
   // Per-task detail (agent response + per-task score + diagnostics) from the
@@ -153,11 +164,11 @@ export const AgentEvaluationDetailRoute: FC = () => {
   const { data: bundle, isLoading: isLoadingBundle } = useQuery({
     queryKey: ['agent-eval-bundle', workspace, jobName, result?.bundle_ref] as const,
     queryFn: ({ signal }) => fetchAgentEvalBundle(workspace, result?.bundle_ref, signal),
-    enabled: !!workspace && isJobTerminal && !!result?.bundle_ref,
+    enabled: !!workspace && showsResults && !!result?.bundle_ref,
     refetchInterval: (query) => (query.state.data == null ? 5_000 : false),
   });
 
-  if (isLoadingJob && !job) {
+  if ((isLoadingJob && !job) || (isJobMissing && isResultPending)) {
     return (
       <Flex align="center" justify="center" className="h-full w-full">
         <Spinner size="medium" aria-label="Loading evaluation..." />
@@ -165,26 +176,32 @@ export const AgentEvaluationDetailRoute: FC = () => {
     );
   }
 
-  if (!job) {
+  if (!job && !result) {
     return (
       <Stack padding="density-2xl">
         <ErrorMessage
           header="Evaluation not found"
-          message={`No evaluation job named "${jobName}" in workspace "${workspace}".`}
+          message={`No evaluation job or result named "${jobName}" in workspace "${workspace}".`}
         />
       </Stack>
     );
   }
 
   const statusMessage =
-    typeof job.status_details?.message === 'string' ? job.status_details.message : null;
+    typeof job?.status_details?.message === 'string' ? job.status_details.message : null;
   const errorMessage =
-    typeof job.error_details?.message === 'string' ? job.error_details.message : null;
+    typeof job?.error_details?.message === 'string' ? job.error_details.message : null;
   // The outcome banner already explains a failed run, so the backend's exit-code message would only
   // repeat it with less information.
-  const responseMessage = evalRunOutcomeOf(job.status_details)?.failed
+  const responseMessage = evalRunOutcomeOf(job?.status_details)?.failed
     ? null
     : (errorMessage ?? statusMessage);
+  // A run's record is written only once its merged bundle is, so a run shown from it is complete.
+  const status = job?.status ?? 'completed';
+  const agentLabel = job ? agentNameForJob(job) : result?.target_name;
+  const taskCount = job ? job.spec.tasks?.length : result?.summary?.task_count;
+  const createdAt = job?.created_at ?? result?.created_at;
+  const configName = job ? evalConfigName(job) : null;
   const allScores = aggregateScoresOf(result ?? null);
   const nativeScores = allScores.filter((s) => !s.name.startsWith('runner.'));
   const runnerScores = allScores.filter((s) => s.name.startsWith('runner.'));
@@ -201,7 +218,7 @@ export const AgentEvaluationDetailRoute: FC = () => {
             <Flex align="center" gap="2">
               {jobName}
               <Badge kind="outline" color="gray">
-                Task-Driven
+                {job ? 'Task-Driven' : 'Taskset Run'}
               </Badge>
             </Flex>
           }
@@ -232,13 +249,13 @@ export const AgentEvaluationDetailRoute: FC = () => {
             }
           >
             <Stack gap="density-xl">
-              <EvalRunOutcomeBanner statusDetails={job.status_details} />
-              <KVPair label="Name" value={job.name} loading={isLoadingJob} />
+              <EvalRunOutcomeBanner statusDetails={job?.status_details} />
+              <KVPair label="Name" value={jobName} loading={isLoadingJob} />
               <KVPair
                 label="Status"
                 value={
                   <Flex align="center" gap="density-md">
-                    <StatusBadge status={job.status} />
+                    <StatusBadge status={status} />
                     {!isJobTerminal && liveSeconds !== undefined && (
                       <Text kind="body/regular/sm">{formatTimeInSeconds(liveSeconds)}</Text>
                     )}
@@ -249,28 +266,24 @@ export const AgentEvaluationDetailRoute: FC = () => {
                 }
                 loading={isLoadingJob}
               />
-              <KVPair label="Agent" value={agentNameForJob(job) ?? '-'} loading={isLoadingJob} />
-              <KVPair
-                label="Tasks"
-                value={String(job.spec.tasks?.length ?? '-')}
-                loading={isLoadingJob}
-              />
-              {evalConfigName(job) && (
+              <KVPair label="Agent" value={agentLabel ?? '-'} loading={isLoadingJob} />
+              <KVPair label="Tasks" value={String(taskCount ?? '-')} loading={isLoadingJob} />
+              {configName && (
                 <KVPair
                   label="Eval Config"
                   value={
                     <Link
-                      to={getFilesetRoute(workspace, evalConfigName(job) ?? '')}
+                      to={getFilesetRoute(workspace, configName)}
                       className="text-primary underline"
                     >
-                      {evalConfigName(job)}
+                      {configName}
                     </Link>
                   }
                 />
               )}
               <KVPair
                 label="Created"
-                value={job.created_at ? <RelativeTime datetime={job.created_at} /> : ''}
+                value={createdAt ? <RelativeTime datetime={createdAt} /> : ''}
                 loading={isLoadingJob}
               />
               {artifactsFileset && (
@@ -305,17 +318,17 @@ export const AgentEvaluationDetailRoute: FC = () => {
             elevation="high"
             density="compact"
           >
-            {!isJobTerminal && (
+            {!showsResults && (
               <Block className="text-subtle">
                 Scores are computed once the job reaches a terminal state.
               </Block>
             )}
-            {isJobTerminal && isLoadingResult && (
+            {showsResults && isLoadingResult && (
               <Flex justify="center" align="center" className="min-h-[120px] w-full">
                 <Spinner size="small" aria-label="Loading scores..." />
               </Flex>
             )}
-            {isJobTerminal && !isLoadingResult && (
+            {showsResults && !isLoadingResult && (
               <Stack gap="density-lg">
                 <EvalAggregateScoresTable
                   scores={[
@@ -340,23 +353,26 @@ export const AgentEvaluationDetailRoute: FC = () => {
           </Panel>
         </Grid>
 
-        {isJobTerminal && isLoadingBundle && (
+        {showsResults && isLoadingBundle && (
           <Flex justify="center" align="center" className="min-h-[120px] w-full">
             <Spinner size="small" aria-label="Loading task results..." />
           </Flex>
         )}
 
-        {isJobTerminal && !isLoadingBundle && taskDetails.length > 0 && (
+        {showsResults && !isLoadingBundle && taskDetails.length > 0 && (
           <AgentEvalTaskResultsPanel tasks={taskDetails} />
         )}
 
-        <AccordionPanel slotHeading="Logs" slotIcon={<ScrollText />}>
-          <StatusLogsContent
-            workspace={workspace}
-            jobName={jobName}
-            jobStatus={job.status as HelixJobStatus}
-          />
-        </AccordionPanel>
+        {/* A run's logs live on its per-task Jobs, not under the run name. */}
+        {job && (
+          <AccordionPanel slotHeading="Logs" slotIcon={<ScrollText />}>
+            <StatusLogsContent
+              workspace={workspace}
+              jobName={jobName}
+              jobStatus={job.status as HelixJobStatus}
+            />
+          </AccordionPanel>
+        )}
       </Stack>
 
       <Modal

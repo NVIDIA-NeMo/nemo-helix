@@ -106,6 +106,10 @@ Fileset create/upload (Files service), for seeding a config into a new Fileset:
 
 Submit body is wrapped: `{"spec": { ...AgentEvalInputSpec }}`.
 
+A Kubernetes taskset run has no agent-evaluate Job: its run controller saves only a result record
+named after the run id. When `GET .../agent-evaluate/jobs/{name}` 404s, the detail page renders
+from `GET .../agent-eval-results/{name}` and its `bundle_ref` instead (no logs, no cancel).
+
 ## Payloads
 
 ### Job spec
