@@ -2493,7 +2493,8 @@ components:
         tool_call_config:
           allOf:
           - $ref: '#/components/schemas/ToolCallParams'
-          description: Tool calling configuration override. Requires engine 'nim'.
+          description: Tool calling configuration override. Requires engine 'nim';
+            setting it without engine selects 'nim'.
       additionalProperties: false
       type: object
       title: DeploymentParams

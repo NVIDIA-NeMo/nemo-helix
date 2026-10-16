@@ -46,9 +46,16 @@ class TestDeploymentParams:
         """The vLLM compiler ignores tool_call_config, so it is rejected rather than dropped."""
         tool_call_config = ToolCallParams(tool_call_parser="hermes")
         with pytest.raises(ValidationError, match="only supported with engine='nim'"):
-            DeploymentParams(tool_call_config=tool_call_config)
+            DeploymentParams(engine="vllm", tool_call_config=tool_call_config)
 
         assert DeploymentParams(engine="nim", tool_call_config=tool_call_config).tool_call_config == tool_call_config
+
+    def test_tool_call_config_without_engine_selects_nim(self) -> None:
+        """Specs stored before engine existed deployed with NIM and must keep loading."""
+        params = DeploymentParams.model_validate({"gpu": 1, "tool_call_config": {"tool_call_parser": "hermes"}})
+
+        assert params.engine == "nim"
+        assert DeploymentParams.model_validate({"gpu": 1}).engine == "vllm"
 
     def test_tool_call_plugin_must_be_a_workspace_qualified_ref(self) -> None:
         with pytest.raises(ValidationError):

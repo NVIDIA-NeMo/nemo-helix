@@ -15,7 +15,7 @@ one shared model emits one ``DeploymentParams`` schema in the merged
 
 from __future__ import annotations
 
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -81,8 +81,18 @@ class DeploymentParams(BaseModel):
     )
     tool_call_config: ToolCallParams | None = Field(
         default=None,
-        description="Tool calling configuration override. Requires engine 'nim'.",
+        description="Tool calling configuration override. Requires engine 'nim'; setting it without engine selects 'nim'.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _tool_call_config_implies_nim(cls, data: Any) -> Any:
+        # Inline parameters deployed with NIM before engine existed, so a stored spec can
+        # carry tool_call_config without engine. Only NIM reads tool_call_config, so keep
+        # such specs on NIM instead of rejecting them under the vLLM default.
+        if isinstance(data, dict) and "engine" not in data and data.get("tool_call_config") is not None:
+            return {**data, "engine": "nim"}
+        return data
 
     @model_validator(mode="after")
     def _tool_call_config_requires_nim(self) -> Self:

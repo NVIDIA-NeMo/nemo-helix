@@ -378,9 +378,7 @@ async def test_all_weights_job_accepts_inline_params_without_resolving(platform:
 
 
 def _tool_call_job() -> UnslothJobOutput:
-    return _lora_job(
-        DeploymentParams(engine="nim", tool_call_config=ToolCallParams(tool_call_plugin="default/my-plugin"))
-    )
+    return _lora_job(DeploymentParams(tool_call_config=ToolCallParams(tool_call_plugin="default/my-plugin")))
 
 
 @pytest.mark.asyncio

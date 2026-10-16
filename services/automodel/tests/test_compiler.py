@@ -630,9 +630,7 @@ async def test_tool_call_plugin_without_an_auth_context_is_rejected(
         AsyncMock(return_value=_make_mock_model_entity()),
     )
     monkeypatch.setattr("nhx.automodel.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: None))
-    job = _deployable_job(
-        DeploymentParams(engine="nim", tool_call_config=ToolCallParams(tool_call_plugin="default/my-plugin"))
-    )
+    job = _deployable_job(DeploymentParams(tool_call_config=ToolCallParams(tool_call_plugin="default/my-plugin")))
 
     with pytest.raises(HelixJobCompilationError, match="No auth context available"):
         await platform_job_config_compiler(job, "default", platform_clients)
@@ -650,9 +648,7 @@ async def test_tool_call_plugin_without_the_permission_is_rejected(
     auth_client = AsyncMock()
     auth_client.has_permissions = AsyncMock(return_value=False)
     monkeypatch.setattr("nhx.automodel.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: auth_client))
-    job = _deployable_job(
-        DeploymentParams(engine="nim", tool_call_config=ToolCallParams(tool_call_plugin="default/my-plugin"))
-    )
+    job = _deployable_job(DeploymentParams(tool_call_config=ToolCallParams(tool_call_plugin="default/my-plugin")))
 
     with pytest.raises(HelixJobCompilationError, match="models.tool-call-plugin.set"):
         await platform_job_config_compiler(job, "default", platform_clients)

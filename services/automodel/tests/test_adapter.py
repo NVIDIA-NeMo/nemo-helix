@@ -334,7 +334,7 @@ def test_adapter_plumbs_deployment_config_from_automodel_job_output() -> None:
             "optimizer": {},
             "parallelism": {},
             "output": {"name": "out", "type": "adapter", "fileset": "out-fs"},
-            "deployment_config": {"engine": "nim", "gpu": 4, "tool_call_config": {"tool_call_parser": "hermes"}},
+            "deployment_config": {"gpu": 4, "tool_call_config": {"tool_call_parser": "hermes"}},
         }
     )
     spec = automodel_spec_to_compiler_output(job_output)

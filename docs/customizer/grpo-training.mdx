@@ -419,7 +419,7 @@ Or an object to have one created inline. It deploys with vLLM, the recommended e
 | `image_tag` | platform default for the engine | Container image tag. For NIM, the default is `latest`. |
 | `disk_size` | unset | Disk size for the deployment. |
 | `additional_envs` | unset | Extra environment variables. |
-| `tool_call_config` | unset | Tool-calling overrides. Only accepted with `"engine": "nim"`. Setting `tool_call_plugin` requires the `models.tool-call-plugin.set` permission. |
+| `tool_call_config` | unset | Tool-calling overrides. Requires NIM: setting it without `engine` deploys with NIM, and it is rejected with `"engine": "vllm"`. Setting `tool_call_plugin` requires the `models.tool-call-plugin.set` permission. |
 
 vLLM loads LoRA adapters up to rank 16. To serve a higher `rank`, reference a deployment config that sets `"additional_args": ["--max-lora-rank", "<rank>"]` in its `executor_config`.
 
