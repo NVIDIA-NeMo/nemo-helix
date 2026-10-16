@@ -38,6 +38,15 @@ entries:
       identifiers:
         name: System - OAuth2 Provider - Scopes
       required: true
+  # The providers' signing key is not from a blueprint: the server creates it on startup, after it
+  # already reports healthy. If it is missing, the optional signing_key !Find leaves the providers
+  # signing HS256 tokens with no kid and an empty JWKS, which NeMo rejects. `created` leaves an
+  # existing keypair untouched, but creating one without certificate_data fails this apply (so the
+  # caller retries) until the server has created it.
+  - model: authentik_crypto.certificatekeypair
+    state: created
+    identifiers:
+      name: authentik Self-signed Certificate
 
   - model: authentik_providers_oauth2.scopemapping
     id: nemo-groups-scope
