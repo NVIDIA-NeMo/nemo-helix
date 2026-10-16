@@ -16,8 +16,7 @@ from nhx.testing.notebooks import execute_notebook
 def test_execute_markdown_notebook(tmp_path, monkeypatch, suffix, execution_fails):
     source = tmp_path / f"tutorial{suffix}"
     source.write_text(
-        '---\ntitle: Test\n---\n{/* @nemo-nb: process */}\n\n'
-        '<Note>A note</Note>\n\n```python\nprint("hello")\n```\n'
+        '---\ntitle: Test\n---\n{/* @nemo-nb: process */}\n\n<Note>A note</Note>\n\n```python\nprint("hello")\n```\n'
     )
     executed = []
 

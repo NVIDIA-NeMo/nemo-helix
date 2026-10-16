@@ -137,11 +137,11 @@ def test_mdx_discovery(tmp_path):
     marked = tmp_path / "tutorial.mdx"
     marked.write_text('{/* @nemo-nb: process */}\n\n```python\nprint("hello")\n```')
     skipped = tmp_path / "skipped.mdx"
-    skipped.write_text('{/* @nemo-nb: process */}\n{/* @nemo-nb: skip-test */}')
+    skipped.write_text("{/* @nemo-nb: process */}\n{/* @nemo-nb: skip-test */}")
     (tmp_path / "unmarked.mdx").write_text("# Not executable")
     build = tmp_path / "_build"
     build.mkdir()
-    (build / "generated.mdx").write_text('{/* @nemo-nb: process */}')
+    (build / "generated.mdx").write_text("{/* @nemo-nb: process */}")
 
     assert set(find_processable_notebooks(str(tmp_path)).md_files) == {marked, skipped}
     assert find_processable_notebooks(str(marked)).md_files == [marked]
@@ -150,7 +150,7 @@ def test_mdx_discovery(tmp_path):
 
 
 def test_mdx_ipynb_conflict(tmp_path):
-    (tmp_path / "tutorial.mdx").write_text('{/* @nemo-nb: process */}')
+    (tmp_path / "tutorial.mdx").write_text("{/* @nemo-nb: process */}")
     (tmp_path / "tutorial.ipynb").write_text(
         '{"cells": [{"cell_type": "markdown", "source": "<!-- @nemo-nb: process -->"}]}'
     )
