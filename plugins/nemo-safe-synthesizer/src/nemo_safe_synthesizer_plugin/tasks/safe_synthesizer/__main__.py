@@ -334,9 +334,13 @@ def run_config(
                 adapter_location=str(location) if location is not None else None,
             )
 
-        ss: SafeSynthesizer = SafeSynthesizer(config=job_config.config, save_path=save_path).with_data_source(
-            data_source
-        )
+        nss_config = job_config.config
+        if not enable_synthesis:
+            nss_config = nss_config.model_copy(deep=True)
+            if "dataset.size" not in nss_config.preflight.disabled_checks:
+                nss_config.preflight.disabled_checks.append("dataset.size")
+
+        ss: SafeSynthesizer = SafeSynthesizer(config=nss_config, save_path=save_path).with_data_source(data_source)
         if enable_synthesis:
             ss.run()
         else:
