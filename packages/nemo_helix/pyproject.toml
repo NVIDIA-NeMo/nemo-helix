@@ -876,7 +876,7 @@ nhx-platform-runner = { source = "../../packages/nhx_platform_runner/src/nhx/pla
 garak-api = { source = "../../packages/garak_api/garakapi", module = "garakapi", deps_group = "garak-service" }
 
 # Default first-party plugins
-nemo-agents-plugin = { source = "../../plugins/nemo-agents/src/nemo_agents_plugin", module = "nemo_agents_plugin", optional-dependencies-prefix = "nemo-agents-plugin-", inherit = { "entry-points" = ["nemo.*", "nat.plugins", "nat.components"], "optional-dependencies" = ["claude", "codex", "deepagents", "mini-swe-agent", "nooa"] } }
+nemo-agents-plugin = { source = "../../plugins/nemo-agents/src/nemo_agents_plugin", module = "nemo_agents_plugin", optional-dependencies-prefix = "nemo-agents-plugin-", inherit = { "entry-points" = ["nemo.*", "nat.plugins", "nat.components"], "optional-dependencies" = ["claude", "codex", "deepagents", "mini-swe-agent", "nooa"] }, shared_data = { "../../pi.fabric-adapter.json" = "share/nemo-fabric/adapters/pi/pi.fabric-adapter.json" } }
 nemo-agent-optimization-plugin = { source = "../../plugins/nemo-agent-optimization/src/nemo_agent_optimization_plugin", module = "nemo_agent_optimization_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-anonymizer-plugin = { source = "../../plugins/nemo-anonymizer/src/nemo_anonymizer_plugin", module = "nemo_anonymizer_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-garak-plugin = { source = "../../plugins/nemo-garak/src/nemo_garak", module = "nemo_garak", inherit = { "entry-points" = ["nemo.*"] } }

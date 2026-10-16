@@ -1,0 +1,135 @@
+{
+  "contract_version": "fabric.adapter/v1alpha2",
+  "adapter_id": "nvidia.fabric.pi",
+  "adapter_kind": "process",
+  "runner": {
+    "command": "node",
+    "script": "dist/cli.js"
+  },
+  "requirements": {
+    "binaries": ["node"]
+  },
+  "config": {
+    "accepts": [
+      "models",
+      "models.base_url",
+      "instructions.system",
+      "tools.definitions",
+      "tools.enabled",
+      "tools.blocked",
+      "skills",
+      "mcp",
+      "mcp.tool_filters"
+    ],
+    "system_instruction_modes": ["replace"]
+  },
+  "settings_schema": {
+    "type": "object",
+    "properties": {
+      "extensions": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        },
+        "uniqueItems": true
+      },
+      "relay_extension_path": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Absolute path or environment.workspace-relative path to the NeMo Relay 0.9 or 0.10 Pi extension"
+      }
+    },
+    "additionalProperties": false
+  },
+  "model_schema": {
+    "type": "object",
+    "properties": {
+      "provider": {"type": "string", "minLength": 1},
+      "model": {"type": "string", "minLength": 1},
+      "api_key_env": {"type": "string", "minLength": 1},
+      "base_url": {"type": ["string", "null"], "format": "uri"}
+    },
+    "required": ["provider", "model", "api_key_env"],
+    "additionalProperties": false
+  },
+  "extension_schemas": {
+    "model": {
+      "type": "object",
+      "description": "Pi-specific catalog metadata for a model Pi does not already ship natively. `api` is the model's wire protocol and must be supplied for an unknown (gateway-served) model; when omitted Pi inherits a built-in model's native api.",
+      "properties": {
+        "api": {
+          "type": "string",
+          "enum": [
+            "openai-completions",
+            "openai-responses",
+            "azure-openai-responses",
+            "openai-codex-responses",
+            "anthropic-messages",
+            "bedrock-converse-stream",
+            "google-generative-ai",
+            "google-vertex",
+            "mistral-conversations",
+            "pi-messages"
+          ],
+          "description": "The wire protocol Pi uses to talk to this model."
+        },
+        "context_window": {"type": "integer", "minimum": 1},
+        "max_tokens": {"type": "integer", "minimum": 1},
+        "cost": {
+          "type": "object",
+          "description": "Per-million-token pricing. All four rates are required and non-negative.",
+          "properties": {
+            "input": {"type": "number", "minimum": 0},
+            "output": {"type": "number", "minimum": 0},
+            "cacheRead": {"type": "number", "minimum": 0},
+            "cacheWrite": {"type": "number", "minimum": 0}
+          },
+          "required": ["input", "output", "cacheRead", "cacheWrite"],
+          "additionalProperties": false
+        },
+        "reasoning": {"type": "boolean"},
+        "input": {"type": "array", "items": {"type": "string", "enum": ["text", "image"]}},
+        "name": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "run_result": {
+      "type": "object",
+      "properties": {
+        "pi_turn_count": {"type": "integer", "minimum": 0},
+        "pi_turn_started": {"type": "boolean"}
+      },
+      "required": ["pi_turn_count", "pi_turn_started"],
+      "additionalProperties": false
+    }
+  },
+  "tool_definition_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "kind": {"const": "module"},
+      "ref": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[^#]+(?:#[A-Za-z_$][A-Za-z0-9_$]*)?$"
+      },
+      "settings": {"type": "object"}
+    },
+    "required": ["kind", "ref"],
+    "additionalProperties": false
+  },
+  "telemetry": {
+    "providers": {
+      "relay": {
+        "outputs": ["atif", "otel", "openinference"]
+      }
+    }
+  },
+  "capabilities": {
+    "streaming": false,
+    "cancellation": false,
+    "updates": false,
+    "service": false
+  }
+}

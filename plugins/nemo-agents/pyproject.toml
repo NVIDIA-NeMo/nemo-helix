@@ -99,6 +99,9 @@ packages = [
     "src/nemo_agents_plugin",
 ]
 
+# Host-side mirror of the adapter's contract; refresh when PI_ADAPTER_NPM_SPEC in container/template.py is bumped.
+[tool.hatch.build.targets.wheel.shared-data]
+"pi.fabric-adapter.json" = "share/nemo-fabric/adapters/pi/pi.fabric-adapter.json"
 
 [tool.uv.sources]
 
