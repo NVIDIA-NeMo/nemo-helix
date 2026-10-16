@@ -162,10 +162,10 @@ auth:
   admin_email:
   # Name of the default workspace where all authenticated users get Editor role | default: 'default'
   default_workspace: default
-  # CPU budget for embedded PDP policy evaluation, in millions of WASM fuel units. Default of 200 provides headroom for full plugin-merged authorization data. | default: 200
-  embedded_pdp_cpu_limit: 200
-  # Maximum linear memory (MB) the embedded PDP WASM runtime can consume. | default: 32
-  embedded_pdp_memory_limit_mb: 32
+  # CPU budget for embedded PDP policy evaluation, in millions of WASM fuel units. Default of 1500 keeps a platform-scoped service-principal check within budget on a production-sized route/scope table (full plugin-merged authorization data). | default: 1500
+  embedded_pdp_cpu_limit: 1500
+  # Maximum linear memory (MB) the embedded PDP WASM runtime can consume. Default of 256 accommodates the allocation the scope-family scan makes over a production-sized authorization-data document. | default: 256
+  embedded_pdp_memory_limit_mb: 256
   # Fail-mode for a plugin that contributes invalid HTTP authz. | default: 'hard_fail' | values: 'deny_route' | 'quarantine' | 'hard_fail'
   on_invalid_plugin: hard_fail
   # Additional service principal names allowed for stable account materialization. Built-in Helix services and installed plugin services are allowed automatically.
