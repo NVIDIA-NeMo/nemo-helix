@@ -664,6 +664,18 @@ jobs:
           IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
         run: e2e/k8s/scripts/prepull_kind_images.sh "${IMAGE_REGISTRY}/nhx-gym-tasks:${IMAGE_TAG}"
 
+      - name: Run GRPO sandbox workspace permissions regression
+        shell: bash
+        env:
+          NHX_GYM_WORKSPACE_KIND: ${{ env.KIND_CLUSTER_NAME }}
+        run: |
+          uv run --frozen pytest \
+            -c pytest.ini \
+            services/rl/tests/test_gym_workspace_kubernetes_integration.py \
+            -v -s \
+            --no-cov \
+            --junitxml=report-kubernetes-gym-workspace.xml
+
       - name: Run Gym agent-evaluate e2e test
         shell: bash
         env:
@@ -686,7 +698,7 @@ jobs:
         with:
           kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
           artifact-name: kind-gym-e2e-kubernetes-artifacts
-          junit-report: report-kubernetes-gym-e2e.xml
+          junit-report: report-kubernetes-gym-*.xml
           services-log-dir: ${{ runner.temp }}/e2e-services-logs
   
   kind-network-policy-smoke:

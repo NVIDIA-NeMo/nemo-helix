@@ -127,6 +127,25 @@ class SandboxMounts(BaseModel):
     workspace_sub_path: str
 
 
+def prepare_sandbox_workspace(storage_root: Path) -> Path:
+    """Create scratch before Kubernetes can create the subPath as root.
+
+    Match the Jobs permissions init container's writable job storage, including
+    when the sandbox image uses a different UID from the training process.
+    Set the mode explicitly on new directories so the training process's umask
+    cannot remove that access. Leave existing directories and their contents intact.
+    """
+    workspace = storage_root / "gym-work"
+    try:
+        workspace.mkdir(mode=0o777)
+    except FileExistsError:
+        if workspace.is_symlink() or not workspace.is_dir():
+            raise NotADirectoryError(f"Gym workspace must be a directory: {workspace}") from None
+    else:
+        workspace.chmod(0o777)
+    return workspace
+
+
 def build_sandbox_mounts(
     *,
     pvc_claim: str,
