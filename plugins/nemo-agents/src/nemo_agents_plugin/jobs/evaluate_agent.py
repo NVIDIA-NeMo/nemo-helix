@@ -148,6 +148,7 @@ class EvaluateAgentJob(NemoJob):
     """
 
     name: ClassVar[str] = "evaluate"
+    runs_as_service: ClassVar[str | None] = "agents"
     description: ClassVar[str] = "Evaluate an agent workflow against a dataset as a scheduled platform job."
     container: ClassVar[str] = "cpu-tasks"
     spec_schema: ClassVar[type[BaseModel]] = EvaluateAgentSpec

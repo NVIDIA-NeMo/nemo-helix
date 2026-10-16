@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from threading import RLock
@@ -160,6 +161,11 @@ class DependencyProvider:
             self.get_service_nemo_client(self._service_name, on_behalf_of=on_behalf_of)
         )
 
+    def get_service_nemo_client_factory(self) -> Callable[[str], AsyncNemoClient]:
+        """Return a factory for clients authenticated as a service acting for the current caller."""
+        on_behalf_of = self._entity_client_on_behalf_of()
+        return lambda service_name: self.get_service_nemo_client(service_name, on_behalf_of=on_behalf_of)
+
     def get_service_entity_client(self, service_name: str) -> EntityClient:
         """Return an entity client authenticated as ``service:{service_name}``."""
         return self._entity_client_from_nemo_client(self.get_service_nemo_client(service_name))
@@ -258,7 +264,7 @@ class DependencyProvider:
             - Expose the effective principal, entity client, and platform configuration.
             - Register the service configuration only when this service owns one.
         """
-        from nemo_helix_plugin.dependencies import get_request_authorizer
+        from nemo_helix_plugin.dependencies import get_request_authorizer, get_service_nemo_client_factory
         from nhx.common.auth.dependencies import get_request_authorizer as request_authorizer
         from nhx.common.service.dependencies import (
             get_effective_principal_id,
@@ -273,6 +279,7 @@ class DependencyProvider:
         app.dependency_overrides[get_nemo_client] = self.get_request_scoped_nemo_client
         app.dependency_overrides[get_sync_nemo_client] = self.get_request_scoped_sync_nemo_client
         app.dependency_overrides[get_entity_client] = self.get_entity_client
+        app.dependency_overrides[get_service_nemo_client_factory] = self.get_service_nemo_client_factory
         app.dependency_overrides[get_effective_principal_id] = self.get_effective_principal_id
         app.dependency_overrides[get_platform_config] = self.get_platform_config
         if service._service_config is not None:

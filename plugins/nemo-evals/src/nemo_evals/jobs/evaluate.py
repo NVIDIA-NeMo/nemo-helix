@@ -233,6 +233,7 @@ class _EvaluateJobBase(NemoJob):
     """Run evals SDK metrics against inline rows or FilesetRef datasets."""
 
     name: ClassVar[str] = "evaluate"
+    runs_as_service: ClassVar[str | None] = "evals"
     description: ClassVar[str] = "Run evals SDK metrics against inline rows or FilesetRef datasets."
     container: ClassVar[str] = "cpu-tasks"
     input_spec_schema: ClassVar[type[BaseModel] | None] = EvaluateInputSpec
