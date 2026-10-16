@@ -43,6 +43,7 @@ from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from harbor.agents.capabilities import AgentCapabilities
 from harbor.agents.installed.base import BaseInstalledAgent
 from harbor.agents.options import InstalledAgentOptions
 from harbor.environments.base import BaseEnvironment
@@ -150,7 +151,7 @@ class FabricInstalledAgent(BaseInstalledAgent):
     a property is itself an incompatible override.
     """
 
-    SUPPORTS_ATIF = True
+    capabilities = AgentCapabilities(atif=True)
 
     #: Declared, never assigned here: Harbor attaches the resolved skill list at dispatch time and
     #: ``BaseAgent`` does not declare it, so this is the only place it is typed. Leaving it unset

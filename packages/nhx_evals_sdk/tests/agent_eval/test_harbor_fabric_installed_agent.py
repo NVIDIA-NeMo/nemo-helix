@@ -92,7 +92,7 @@ def test_it_is_an_installed_agent_wrapping_a_fabric_agent(tmp_path: Path) -> Non
     # Composition, so FabricAgent.setup() -- the `python3 -m venv` step that cannot run on a bare
     # image -- is never reached, and the model config still comes from the wrapped agent.
     assert type(agent).setup is BaseInstalledAgent.setup
-    assert agent.SUPPORTS_ATIF is True
+    assert agent.capabilities.atif is True
     assert agent.fabric._build_spec("write hello.txt").config.models["default"].api_key_env == "NVIDIA_API_KEY"
 
 
