@@ -10,6 +10,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from kubernetes import client
 from kubernetes.client.rest import ApiException
+from nemo_helix_plugin.jobs.execution_profiles import KubernetesKeyToPath
 from nhx.common.auth import (
     KUBERNETES_POD_UID_REFERENCE_NAME,
     NHX_PRINCIPAL_ENVVAR,
@@ -64,7 +65,6 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     KubernetesConfigMapVolume,
     KubernetesEmptyDirVolume,
     KubernetesJobStorageConfig,
-    KubernetesKeyToPath,
     KubernetesObjectMetadata,
     KubernetesPersistentVolumeClaim,
     KubernetesSecretVolume,
