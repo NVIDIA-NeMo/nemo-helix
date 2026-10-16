@@ -119,8 +119,11 @@ const mockAgents = (workspace: unknown) => {
  * but tests can override these with `server.use`.
  */
 export const handlers = [
-  // Platform readiness probe gating the whole app (HelixGuard)
-  http.get(`${PLATFORM_BASE_URL}/health/ready`, () => HttpResponse.json({ status: 'ready' })),
+  // Platform liveness probe gating the whole app (PlatformGuard)
+  http.get(`${PLATFORM_BASE_URL}/health/live`, () => HttpResponse.json({ status: 'live' })),
+  http.get(`${PLATFORM_BASE_URL}/apis/auth/discovery`, () =>
+    HttpResponse.json({ auth_enabled: false, oidc: null })
+  ),
 
   ...sampleDatasetsHandlers,
 
@@ -178,6 +181,10 @@ export const handlers = [
         prev_page: '',
       });
     }
+  ),
+  http.get(
+    `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/:workspace/evaluate/jobs/:name/results`,
+    () => HttpResponse.json({ data: [], pagination: {} })
   ),
 
   // Projects V2 (Platform) — fixtures loaded on first use

@@ -23,7 +23,7 @@ Unsloth is **Jobs-service-only, single-GPU inside the training container**. Ther
 | `model` | **Object** — base model entity ref + how to load it (4-bit, dtype, max_seq_length) |
 | `dataset` | Single fileset ref (`path`) + optional `validation_path`; row shape selector (`text_field`, `apply_chat_template`, `packing`) |
 | `training` | Method (`sft`), adapter shape (`lora`/`full`), LoRA hyperparams, gradient checkpointing |
-| `schedule` | `epochs` xor `max_steps`; `warmup_steps` xor `warmup_ratio`; logging / save / eval cadence; LR scheduler |
+| `schedule` | `epochs` (default 1) and optional `max_steps`, which overrides `epochs` when set; `warmup_steps` xor `warmup_ratio`; logging / save / eval cadence; LR scheduler |
 | `batch` | `per_device_train_batch_size` × `gradient_accumulation_steps` = effective batch |
 | `optimizer` | LR, weight decay, optimizer choice (`adamw_8bit` default) |
 | `hardware` | GPU selection (`CUDA_VISIBLE_DEVICES`) + mixed precision (`bf16` / `fp16`) |
@@ -178,8 +178,8 @@ See `references/dataset-formats.md` § Unsloth for row-shape rules.
 
 | Field | Default | Notes |
 |-------|---------|-------|
-| `epochs` | `null` | Full passes. **`epochs` xor `max_steps`** — exactly one is required. |
-| `max_steps` | `null` | Global step cap. Use alone for smoke tests; do not combine with `epochs`. |
+| `epochs` | `1` | Full passes over the training data. Ignored when `max_steps` is set. |
+| `max_steps` | `null` | Total optimizer steps. When set, it overrides `epochs` and the trainer runs exactly this many steps. Setting both is valid. Use it for smoke tests; omit it for real runs so `epochs` controls duration. |
 | `warmup_steps` | `0` | Linear warmup. Mutex with `warmup_ratio`. |
 | `warmup_ratio` | `null` | Fractional warmup over total steps. Mutex with `warmup_steps`. |
 | `lr_scheduler_type` | `"linear"` | `"linear"`, `"cosine"`, `"constant"`, `"constant_with_warmup"`, `"cosine_with_restarts"`. |
@@ -189,7 +189,7 @@ See `references/dataset-formats.md` § Unsloth for row-shape rules.
 | `eval_steps` | `null` | If set with `validation_path`, eval every N steps. When `null` and `validation_path` is set, the training driver defaults to **one validation pass per effective epoch** at `max(1, effective_steps - 1)` (same effective-step cap as automodel's default `val_check_interval`). |
 | `seed` | `3407` | Trainer seed (`TrainingArguments.seed`). |
 
-**Hard mutex enforced by the schema:** `epochs` xor `max_steps`; `warmup_steps` xor `warmup_ratio`. Validation errors surface at submit time.
+**Hard mutex enforced by the schema:** `warmup_steps` xor `warmup_ratio`. Validation errors surface at submit time. `epochs` and `max_steps` are not mutually exclusive; keep both when a user sets both.
 
 ### Unsloth `batch`
 

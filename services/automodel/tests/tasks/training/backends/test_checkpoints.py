@@ -16,6 +16,7 @@ from nhx.automodel.tasks.training.backends.checkpoints import (
     _probe_bidirectional_mask,
     _restructure_encoder_output,
     find_selected_checkpoints,
+    merge_lora_cross_encoder_adapter,
     process_checkpoint,
     process_selected_checkpoints,
     sanitize_encoder_hf,
@@ -332,6 +333,73 @@ def test_embedding_pooling_supports_both_padding_sides(
     actual = export_model._pool(hidden, torch.tensor(mask))
 
     torch.testing.assert_close(actual[:, 0], torch.tensor(expected))
+
+
+class TestMergeLoraCrossEncoderAdapter:
+    """Real merge on a tiny sequence-classification model (runs where torch and peft are installed)."""
+
+    @staticmethod
+    def _base_and_adapter(tmp_path: Path, *, train_head: bool):
+        torch = pytest.importorskip("torch")
+        peft = pytest.importorskip("peft")
+        pytest.importorskip("accelerate")
+        transformers = pytest.importorskip("transformers")
+
+        torch.manual_seed(0)
+        config = transformers.LlamaConfig(
+            vocab_size=128,
+            hidden_size=32,
+            intermediate_size=64,
+            num_hidden_layers=2,
+            num_attention_heads=4,
+            num_key_value_heads=4,
+            num_labels=1,
+            pad_token_id=0,
+        )
+        transformers.LlamaForSequenceClassification(config).save_pretrained(tmp_path / "base")
+
+        lora = peft.LoraConfig(
+            r=4, lora_alpha=8, target_modules=["q_proj", "v_proj"], modules_to_save=["score"] if train_head else None
+        )
+        model = peft.get_peft_model(
+            transformers.LlamaForSequenceClassification.from_pretrained(tmp_path / "base"), lora
+        )
+        for name, param in model.named_parameters():
+            if "lora_B" in name or (train_head and "modules_to_save" in name):
+                torch.nn.init.normal_(param, std=0.5)
+        trained_score = (
+            model.base_model.model.score.modules_to_save["default"].weight.detach().clone() if train_head else None
+        )
+        model.save_pretrained(tmp_path / "adapter")
+
+        # Automodel labels every sequence-classification adapter SEQ_CLS.
+        adapter_config = tmp_path / "adapter" / "adapter_config.json"
+        adapter_config.write_text(json.dumps({**json.loads(adapter_config.read_text()), "task_type": "SEQ_CLS"}))
+        return torch, transformers, trained_score
+
+    def test_frozen_head_adapter_merges_and_keeps_the_base_head(self, tmp_path: Path) -> None:
+        """Automodel freezes the score head, so the SEQ_CLS adapter holds LoRA weights only."""
+        torch, transformers, _ = self._base_and_adapter(tmp_path, train_head=False)
+
+        merge_lora_cross_encoder_adapter(tmp_path / "adapter", str(tmp_path / "base"), tmp_path / "out", False)
+
+        base = transformers.LlamaForSequenceClassification.from_pretrained(tmp_path / "base")
+        merged = transformers.AutoModelForSequenceClassification.from_pretrained(tmp_path / "out")
+        torch.testing.assert_close(merged.score.weight.float(), base.score.weight.float(), atol=1e-3, rtol=1e-3)
+        assert not torch.allclose(
+            merged.model.layers[0].self_attn.q_proj.weight.float(),
+            base.model.layers[0].self_attn.q_proj.weight.float(),
+            atol=1e-3,
+        )
+        assert not any("lora_" in name for name, _ in merged.named_parameters())
+
+    def test_adapter_with_a_saved_head_keeps_the_trained_head(self, tmp_path: Path) -> None:
+        torch, transformers, trained_score = self._base_and_adapter(tmp_path, train_head=True)
+
+        merge_lora_cross_encoder_adapter(tmp_path / "adapter", str(tmp_path / "base"), tmp_path / "out", False)
+
+        merged = transformers.AutoModelForSequenceClassification.from_pretrained(tmp_path / "out")
+        torch.testing.assert_close(merged.score.weight.float(), trained_score.float(), atol=1e-3, rtol=1e-3)
 
 
 class TestSanitizeEncoderHf:

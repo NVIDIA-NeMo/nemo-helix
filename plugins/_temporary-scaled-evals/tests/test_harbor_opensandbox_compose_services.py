@@ -1,14 +1,16 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""NemoOpenSandboxEnvironment with Compose services, against a fake SDK and a fake server extension."""
+"""NemoOpenSandboxEnvironment with Compose services, against a mock OpenSandbox SDK and a fake server extension."""
 
 from __future__ import annotations
 
 import base64
 import io
-import itertools
 import json
+import os
+import subprocess
+import sys
 import tarfile
 import time
 from pathlib import Path
@@ -18,18 +20,18 @@ from typing import Any
 import httpx
 import pytest
 
-pytest.importorskip("harbor.environments.opensandbox")
+pytest.importorskip("harbor.environments.base")
 pytest.importorskip("nhx_sandbox")
 pytest.importorskip("scaled_evals", reason="scaled-evals plugin not installed")
 
-import harbor.environments.opensandbox as harbor_opensandbox
-from harbor.environments.base import ExecResult, ServiceOperationsUnsupportedError
+from harbor.environments.base import ExecResult
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.paths import TrialPaths
+from opensandbox_mocks import SandboxApiException, Server, mock_sdk
 from scaled_evals import harbor_opensandbox_environment as environment_module
-from scaled_evals.harbor_opensandbox_environment import NemoOpenSandboxEnvironment
+from scaled_evals.harbor_opensandbox_driver import OpenSandboxDriver
+from scaled_evals.harbor_opensandbox_environment import NemoOpenSandboxEnvironment, ServiceOperationsUnsupportedError
 from scaled_evals.harbor_opensandbox_services import EXTENSION_KEY, ComposeServices, parse_compose_services
-from tenacity import wait_none
 
 API_KEY = "test-key"
 COMPOSE_SERVICES: dict[str, Any] = {
@@ -53,10 +55,6 @@ COMPOSE_SERVICES: dict[str, Any] = {
 }
 
 
-class SandboxApiException(Exception):
-    """Name-matched by Harbor as a transient SDK error."""
-
-
 class _Extension:
     """The server extension's routes, answering from what a test queues.
 
@@ -68,6 +66,7 @@ class _Extension:
         self.healthy = True
         self.requests: list[httpx.Request] = []
         self.exec_results: list[httpx.Response] = []
+        # Answers for the services status route; once empty, every service is ready.
         self.statuses: list[dict[str, Any]] = []
         # Answers (or errors to raise) that come before the routes, for any request, one per request.
         self.preempt: list[httpx.Response | Exception] = []
@@ -88,7 +87,8 @@ class _Extension:
                 return httpx.Response(404, json={"detail": "Not Found"})
             return httpx.Response(200, json={"status": "ok", "extension": "nemo-compose-services"})
         if path.endswith("/services"):
-            return httpx.Response(200, json=self.statuses.pop(0))
+            status = self.statuses.pop(0) if self.statuses else {"failure": None, "not_ready": []}
+            return httpx.Response(200, json=status)
         if path.endswith("/exec"):
             return self.exec_results.pop(0)
         return httpx.Response(404)
@@ -98,103 +98,12 @@ class _Extension:
         return [json.loads(r.content) for r in self.requests if r.url.path.endswith("/exec")]
 
 
-class _Sandbox:
-    """An SDK sandbox handle whose applied egress policy is the one it was created with."""
-
-    def __init__(self, sandbox_id: str, policy: dict[str, Any]) -> None:
-        self.id = sandbox_id
-        self._policy = policy
-
-    async def get_egress_policy(self) -> SimpleNamespace:
-        rules = [SimpleNamespace(**rule) for rule in self._policy["egress"]]
-        return SimpleNamespace(default_action=self._policy["defaultAction"], egress=rules)
-
-    async def get_info(self) -> SimpleNamespace:
-        return SimpleNamespace(status=SimpleNamespace(state="Running"))
-
-    async def is_healthy(self) -> bool:
-        return True
-
-    async def kill(self) -> None:
-        pass
-
-    async def close(self) -> None:
-        pass
-
-
-class _Server:
-    """The sandbox API behind the fake SDK: records creates, and raises queued create failures."""
-
-    def __init__(self) -> None:
-        self.creates: list[dict[str, Any]] = []
-        self.create_failures: list[BaseException] = []
-        self._ids = (f"sbx-{n}" for n in itertools.count(1))
-
-
-class _ConnectionConfig:
-    """The SDK's ``ConnectionConfig``: what ``_ServerClient`` reads the server URL, key and headers from."""
-
-    def __init__(self, **kwargs: Any) -> None:
-        self.kwargs = kwargs
-        self.headers = {"X-Client": "harbor"}
-
-    def get_api_key(self) -> str:
-        return self.kwargs["api_key"]
-
-    def get_base_url(self) -> str:
-        return f"{self.kwargs['protocol']}://{self.kwargs['domain']}/v1"
-
-
-def _fake_sdk(server: _Server) -> dict[str, Any]:
-    """The parts of the OpenSandbox SDK the environment loads, backed by ``server``.
-
-    ``Sandbox.create`` records its kwargs and raises the next queued failure, if any; the manager
-    lists no sandboxes, so cleanup finds nothing to delete.
-    """
-
-    class Sandbox:
-        @staticmethod
-        async def create(image: Any, **kwargs: Any) -> _Sandbox:
-            server.creates.append(kwargs)
-            if server.create_failures:
-                raise server.create_failures.pop(0)
-            return _Sandbox(next(server._ids), kwargs["network_policy"].payload)
-
-    class _Manager:
-        async def list_sandbox_infos(self, selector: Any) -> SimpleNamespace:
-            return SimpleNamespace(sandbox_infos=[], pagination=SimpleNamespace(has_next_page=False))
-
-        async def close(self) -> None:
-            pass
-
-    class SandboxManager:
-        @staticmethod
-        async def create(connection_config: Any) -> _Manager:
-            return _Manager()
-
-    return {
-        "Sandbox": Sandbox,
-        "ConnectionConfig": _ConnectionConfig,
-        "NetworkPolicy": SimpleNamespace(model_validate=lambda payload: SimpleNamespace(payload=payload)),
-        "SandboxManager": SandboxManager,
-        "SandboxFilter": lambda metadata, page: SimpleNamespace(metadata=metadata, page=page),
-    }
-
-
 @pytest.fixture
-def server(monkeypatch: pytest.MonkeyPatch) -> _Server:
-    """Point the environment at the fake SDK, with Harbor's create retries not waiting."""
-    server = _Server()
-    monkeypatch.setattr(harbor_opensandbox, "_HAS_OPENSANDBOX", True)
-    monkeypatch.setattr(
-        harbor_opensandbox.OpenSandboxEnvironment._create_sandbox.retry,  # ty: ignore[unresolved-attribute]  # tenacity
-        "wait",
-        wait_none(),
-    )
-    monkeypatch.setattr(NemoOpenSandboxEnvironment, "_load_opensandbox", lambda self: _fake_sdk(server))
+def server(monkeypatch: pytest.MonkeyPatch) -> Server:
+    """A fresh mock OpenSandbox server, with the environment's polls and retries not waiting."""
     monkeypatch.setattr(environment_module, "COMPOSE_READY_POLL_SEC", 0)
     monkeypatch.setattr(environment_module, "SERVER_RETRY_BASE_SEC", 0)
-    return server
+    return Server()
 
 
 @pytest.fixture
@@ -220,10 +129,10 @@ def _task(tmp_path: Path, *, compose: bool = True) -> Path:
     return environment_dir
 
 
-def _environment(environment_dir: Path, **kwargs: Any) -> NemoOpenSandboxEnvironment:
-    """The environment for ``environment_dir`` with the test's compose services; ``kwargs`` override any argument."""
+def _environment(environment_dir: Path, server: Server, **kwargs: Any) -> NemoOpenSandboxEnvironment:
+    """The environment for ``environment_dir`` on the mock server, with the test's compose services; ``kwargs`` override any argument."""
     kwargs.setdefault("compose_services", COMPOSE_SERVICES)
-    return NemoOpenSandboxEnvironment(
+    environment = NemoOpenSandboxEnvironment(
         environment_dir=environment_dir,
         environment_name="compose-task",
         session_id="compose-task__abc",
@@ -235,14 +144,34 @@ def _environment(environment_dir: Path, **kwargs: Any) -> NemoOpenSandboxEnviron
         protocol="http",
         trusted_allowed_hosts=["10.96.0.20"],
         resolver_addresses=["10.96.0.10"],
+        health_check_poll_interval_sec=0,
         **kwargs,
     )
+    environment._driver = OpenSandboxDriver(
+        environment._connection, sdk=mock_sdk(server), logger=environment.logger, retry_wait=lambda attempt: 0
+    )
+    return environment
 
 
-async def test_create_sends_services_and_main_settings(tmp_path: Path, server: _Server, extension: _Extension) -> None:
-    environment = _environment(_task(tmp_path))
+def test_environment_loads_on_a_harbor_without_per_service_operations() -> None:
+    """Harbor 0.13.2 has no ServiceOperationsUnsupportedError; the module still imports and raises RuntimeError instead."""
+    # Removed here to simulate 0.13.2 on a newer Harbor; on 0.13.2 itself it is already absent.
+    script = (
+        "import harbor.environments.base as base\n"
+        "if hasattr(base, 'ServiceOperationsUnsupportedError'): del base.ServiceOperationsUnsupportedError\n"
+        "import scaled_evals.harbor_opensandbox_environment as module\n"
+        "assert module.ServiceOperationsUnsupportedError is RuntimeError\n"
+    )
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(path for path in sys.path if path)}
+    result = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, text=True, check=False)
 
-    await environment._create_sandbox(environment._load_opensandbox())
+    assert result.returncode == 0, result.stderr
+
+
+async def test_create_sends_services_and_main_settings(tmp_path: Path, server: Server, extension: _Extension) -> None:
+    environment = _environment(_task(tmp_path), server)
+
+    await environment._create_sandbox()
 
     create = server.creates[-1]
     assert ComposeServices.model_validate_json(create["extensions"][EXTENSION_KEY]) == parse_compose_services(
@@ -255,15 +184,15 @@ async def test_create_sends_services_and_main_settings(tmp_path: Path, server: _
     health = extension.requests[0]
     assert str(health.url) == "http://opensandbox.example/v1/nemo-ext/health"
     assert health.headers["OPEN-SANDBOX-API-KEY"] == API_KEY
-    assert health.headers["X-Client"] == "harbor"
+    assert health.headers["X-Client"] == "opensandbox-sdk"
 
 
 async def test_verifier_environment_without_compose_file_gets_a_plain_sandbox(
-    tmp_path: Path, server: _Server, extension: _Extension
+    tmp_path: Path, server: Server, extension: _Extension
 ) -> None:
-    environment = _environment(_task(tmp_path, compose=False))
+    environment = _environment(_task(tmp_path, compose=False), server)
 
-    await environment._create_sandbox(environment._load_opensandbox())
+    await environment._create_sandbox()
 
     assert EXTENSION_KEY not in server.creates[-1]["extensions"]
     assert server.creates[-1]["entrypoint"] is None
@@ -271,12 +200,12 @@ async def test_verifier_environment_without_compose_file_gets_a_plain_sandbox(
     assert extension.requests == []
 
 
-def test_compose_task_without_services_is_still_rejected(tmp_path: Path, server: _Server) -> None:
+def test_compose_task_without_services_is_still_rejected(tmp_path: Path, server: Server) -> None:
     with pytest.raises(ValueError, match="docker-compose"):
-        _environment(_task(tmp_path), compose_services=None)
+        _environment(_task(tmp_path), server, compose_services=None)
 
 
-def test_compose_task_still_needs_a_prebuilt_image(tmp_path: Path, server: _Server) -> None:
+def test_compose_task_still_needs_a_prebuilt_image(tmp_path: Path, server: Server) -> None:
     with pytest.raises(FileNotFoundError, match="docker_image"):
         NemoOpenSandboxEnvironment(
             environment_dir=_task(tmp_path),
@@ -289,81 +218,98 @@ def test_compose_task_still_needs_a_prebuilt_image(tmp_path: Path, server: _Serv
 
 
 async def test_server_without_the_extension_fails_before_creating(
-    tmp_path: Path, server: _Server, extension: _Extension
+    tmp_path: Path, server: Server, extension: _Extension
 ) -> None:
     extension.healthy = False
-    environment = _environment(_task(tmp_path))
+    environment = _environment(_task(tmp_path), server)
 
     with pytest.raises(RuntimeError, match="does not run the NeMo compose services extension"):
-        await environment._create_sandbox(environment._load_opensandbox())
+        await environment._create_sandbox()
 
     assert server.creates == []
 
 
-async def test_transient_create_errors_are_still_retried(
-    tmp_path: Path, server: _Server, extension: _Extension
-) -> None:
+async def test_transient_create_errors_are_still_retried(tmp_path: Path, server: Server, extension: _Extension) -> None:
     server.create_failures = [SandboxApiException("HTTP 503")]
-    environment = _environment(_task(tmp_path))
+    environment = _environment(_task(tmp_path), server)
 
-    await environment._create_sandbox(environment._load_opensandbox())
+    await environment._create_sandbox()
 
     assert len(server.creates) == 2
 
 
-async def test_failed_service_ends_the_readiness_wait(tmp_path: Path, server: _Server, extension: _Extension) -> None:
-    environment = _environment(_task(tmp_path))
-    sandbox = _Sandbox("sbx-1", {})
+async def test_failed_service_ends_the_readiness_wait(tmp_path: Path, server: Server, extension: _Extension) -> None:
+    environment = _environment(_task(tmp_path), server)
+    sandbox = SimpleNamespace(id="sbx-1")
     extension.statuses = [
         {"failure": None, "not_ready": ["db", "seed"]},
         {"failure": "service 'seed' exited with code 1 (Error). Last log lines:\nboom", "not_ready": ["seed"]},
     ]
 
-    assert await environment._terminal_provisioning_failure(sandbox) is None
-    failure = await environment._terminal_provisioning_failure(sandbox)
+    assert await environment._services_failure(sandbox) is None
+    failure = await environment._services_failure(sandbox)
 
     assert failure == "OpenSandbox sandbox sbx-1: service 'seed' exited with code 1 (Error). Last log lines:\nboom"
     assert extension.requests[-1].url.path == "/v1/nemo-ext/sandboxes/sbx-1/services"
 
 
-async def test_unreadable_service_status_keeps_waiting(
-    tmp_path: Path, server: _Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch
+async def test_failed_service_fails_the_create_and_kills_the_sandbox(
+    tmp_path: Path, server: Server, extension: _Extension
 ) -> None:
-    environment = _environment(_task(tmp_path))
+    server.healthy = False  # main never starts while a service it waits for has failed
+    extension.statuses = [{"failure": "service 'seed' exited with code 1 (Error)", "not_ready": ["seed"]}]
+    environment = _environment(_task(tmp_path), server)
+
+    with pytest.raises(RuntimeError, match="service 'seed' exited with code 1"):
+        await environment._create_sandbox()
+
+    # Not a transient error, so the create isn't retried, and nothing is left running.
+    assert len(server.creates) == 1
+    assert server.live() == set()
+
+
+async def test_unreadable_service_status_keeps_waiting(
+    tmp_path: Path, server: Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environment = _environment(_task(tmp_path), server)
 
     # As for a sandbox whose pod doesn't exist yet.
     monkeypatch.setattr(
         extension, "handle", lambda request: httpx.Response(404, json={"detail": {"code": "NEMO::NOT_FOUND"}})
     )
 
-    assert await environment._terminal_provisioning_failure(_Sandbox("sbx-1", {})) is None
+    assert await environment._services_failure(SimpleNamespace(id="sbx-1")) is None
 
 
 async def _started(environment: NemoOpenSandboxEnvironment) -> NemoOpenSandboxEnvironment:
-    """``environment`` with a created sandbox, skipping Harbor's start waits."""
-    environment._sandbox = await environment._create_sandbox(environment._load_opensandbox())
+    """``environment`` with a created sandbox, skipping the rest of ``start``."""
+    environment._sandbox = await environment._create_sandbox()
     return environment
 
 
 async def test_start_waits_for_main_then_the_services(
-    tmp_path: Path, server: _Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, server: Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    environment = await _started(_environment(_task(tmp_path)))
+    environment = _environment(_task(tmp_path), server)
     results = [ExecResult(stdout="", stderr="refused", return_code=7), ExecResult(stdout="ok", return_code=0)]
     commands: list[str] = []
 
     async def exec_(command: str, **kwargs: Any) -> ExecResult:
+        # start() also opens up the log directories; only main's readiness check is scripted.
+        if command.startswith("chmod "):
+            return ExecResult(stdout="", stderr="", return_code=0)
         commands.append(command)
         assert kwargs["user"] == "root"
         assert kwargs["cwd"] == "/"
         return results.pop(0)
 
-    async def harbor_start(self: Any, force_build: bool) -> None:
-        pass
-
-    monkeypatch.setattr(harbor_opensandbox.OpenSandboxEnvironment, "start", harbor_start)
     monkeypatch.setattr(environment, "exec", exec_)
-    extension.statuses = [{"failure": None, "not_ready": ["db"]}, {"failure": None, "not_ready": []}]
+    # The first status is read by the create's readiness wait, the rest by start's own wait.
+    extension.statuses = [
+        {"failure": None, "not_ready": ["db"]},
+        {"failure": None, "not_ready": ["db"]},
+        {"failure": None, "not_ready": []},
+    ]
 
     await environment.start(force_build=False)
 
@@ -372,9 +318,9 @@ async def test_start_waits_for_main_then_the_services(
 
 
 async def test_main_readiness_timeout_reports_last_output(
-    tmp_path: Path, server: _Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, server: Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    environment = _environment(_task(tmp_path))
+    environment = _environment(_task(tmp_path), server)
 
     async def exec_(command: str, **kwargs: Any) -> ExecResult:
         return ExecResult(stdout="", stderr="connection refused", return_code=7)
@@ -385,8 +331,8 @@ async def test_main_readiness_timeout_reports_last_output(
         await environment._wait_for_main(["false"], deadline=0)
 
 
-async def test_services_wait_fails_on_a_failed_service(tmp_path: Path, server: _Server, extension: _Extension) -> None:
-    environment = await _started(_environment(_task(tmp_path)))
+async def test_services_wait_fails_on_a_failed_service(tmp_path: Path, server: Server, extension: _Extension) -> None:
+    environment = await _started(_environment(_task(tmp_path), server))
     extension.statuses = [{"failure": "service 'db' exited with code 1 (Error)", "not_ready": ["db"]}]
 
     with pytest.raises(RuntimeError, match="service 'db' exited with code 1"):
@@ -398,8 +344,8 @@ def _exec_ok(stdout: str = "", exit_code: int = 0) -> httpx.Response:
     return httpx.Response(200, json={"exit_code": exit_code, "stdout": stdout, "stderr": ""})
 
 
-async def test_service_exec_goes_through_the_exec_route(tmp_path: Path, server: _Server, extension: _Extension) -> None:
-    environment = await _started(_environment(_task(tmp_path)))
+async def test_service_exec_goes_through_the_exec_route(tmp_path: Path, server: Server, extension: _Extension) -> None:
+    environment = await _started(_environment(_task(tmp_path), server))
     extension.exec_results = [_exec_ok("PONG\n")]
 
     result = await environment.service_exec(
@@ -416,8 +362,8 @@ async def test_service_exec_goes_through_the_exec_route(tmp_path: Path, server: 
     }
 
 
-async def test_service_exec_timeout_and_errors(tmp_path: Path, server: _Server, extension: _Extension) -> None:
-    environment = await _started(_environment(_task(tmp_path)))
+async def test_service_exec_timeout_and_errors(tmp_path: Path, server: Server, extension: _Extension) -> None:
+    environment = await _started(_environment(_task(tmp_path), server))
     busy = httpx.Response(429, json={"detail": {"code": "NEMO::EXEC_BUSY", "message": "busy"}})
     extension.exec_results = [
         httpx.Response(504, json={"detail": {"code": "NEMO::EXEC_TIMEOUT", "message": "t"}}),
@@ -433,8 +379,8 @@ async def test_service_exec_timeout_and_errors(tmp_path: Path, server: _Server, 
     assert len(extension.exec_bodies()) == 1 + environment_module.SERVER_RETRY_ATTEMPTS
 
 
-async def test_service_exec_retries_a_busy_server(tmp_path: Path, server: _Server, extension: _Extension) -> None:
-    environment = await _started(_environment(_task(tmp_path)))
+async def test_service_exec_retries_a_busy_server(tmp_path: Path, server: Server, extension: _Extension) -> None:
+    environment = await _started(_environment(_task(tmp_path), server))
     busy = httpx.Response(429, json={"detail": {"code": "NEMO::EXEC_BUSY", "message": "busy"}})
     extension.exec_results = [busy, busy, _exec_ok("PONG\n")]
 
@@ -444,8 +390,8 @@ async def test_service_exec_retries_a_busy_server(tmp_path: Path, server: _Serve
     assert len(extension.exec_bodies()) == 3
 
 
-async def test_gateway_504_is_not_a_command_timeout(tmp_path: Path, server: _Server, extension: _Extension) -> None:
-    environment = await _started(_environment(_task(tmp_path)))
+async def test_gateway_504_is_not_a_command_timeout(tmp_path: Path, server: Server, extension: _Extension) -> None:
+    environment = await _started(_environment(_task(tmp_path), server))
     extension.exec_results = [httpx.Response(504, text="upstream timed out")]
 
     with pytest.raises(RuntimeError, match=r"failed \(504\)"):
@@ -455,9 +401,9 @@ async def test_gateway_504_is_not_a_command_timeout(tmp_path: Path, server: _Ser
 
 
 async def test_service_exec_retries_only_connections_that_never_opened(
-    tmp_path: Path, server: _Server, extension: _Extension
+    tmp_path: Path, server: Server, extension: _Extension
 ) -> None:
-    environment = await _started(_environment(_task(tmp_path)))
+    environment = await _started(_environment(_task(tmp_path), server))
     started = len(extension.requests)
     extension.preempt = [httpx.ConnectError("refused")]
     extension.exec_results = [_exec_ok("ok")]
@@ -471,8 +417,8 @@ async def test_service_exec_retries_only_connections_that_never_opened(
     assert len(extension.requests) - started == 3  # the refused exec, its retry, the one that timed out
 
 
-async def test_status_reads_retry_transient_errors(tmp_path: Path, server: _Server, extension: _Extension) -> None:
-    environment = await _started(_environment(_task(tmp_path)))
+async def test_status_reads_retry_transient_errors(tmp_path: Path, server: Server, extension: _Extension) -> None:
+    environment = await _started(_environment(_task(tmp_path), server))
     started = len(extension.requests)
     extension.preempt = [httpx.Response(503), httpx.ConnectError("reset")]
     extension.statuses = [{"failure": None, "not_ready": []}]
@@ -484,9 +430,9 @@ async def test_status_reads_retry_transient_errors(tmp_path: Path, server: _Serv
 
 
 async def test_status_reads_stop_retrying_at_the_deadline(
-    tmp_path: Path, server: _Server, extension: _Extension
+    tmp_path: Path, server: Server, extension: _Extension
 ) -> None:
-    environment = await _started(_environment(_task(tmp_path)))
+    environment = await _started(_environment(_task(tmp_path), server))
     started = len(extension.requests)
     extension.preempt = [httpx.Response(503)] * environment_module.SERVER_RETRY_ATTEMPTS
 
@@ -498,9 +444,9 @@ async def test_status_reads_stop_retrying_at_the_deadline(
 
 
 async def test_status_read_timeouts_are_capped_by_the_deadline(
-    tmp_path: Path, server: _Server, extension: _Extension
+    tmp_path: Path, server: Server, extension: _Extension
 ) -> None:
-    environment = await _started(_environment(_task(tmp_path)))
+    environment = await _started(_environment(_task(tmp_path), server))
     extension.timeouts.clear()
     extension.statuses = [{"failure": None, "not_ready": []}]
 
@@ -510,24 +456,24 @@ async def test_status_read_timeouts_are_capped_by_the_deadline(
 
 
 async def test_ready_status_is_accepted_after_the_deadline(
-    tmp_path: Path, server: _Server, extension: _Extension
+    tmp_path: Path, server: Server, extension: _Extension
 ) -> None:
-    environment = await _started(_environment(_task(tmp_path)))
+    environment = await _started(_environment(_task(tmp_path), server))
     extension.statuses = [{"failure": None, "not_ready": []}]
 
     await environment._wait_for_services(time.monotonic() - 1)  # returns, doesn't raise
 
 
-async def test_status_reads_give_up_after_the_attempts(tmp_path: Path, server: _Server, extension: _Extension) -> None:
-    environment = await _started(_environment(_task(tmp_path)))
+async def test_status_reads_give_up_after_the_attempts(tmp_path: Path, server: Server, extension: _Extension) -> None:
+    environment = await _started(_environment(_task(tmp_path), server))
     extension.preempt = [httpx.Response(503)] * environment_module.SERVER_RETRY_ATTEMPTS
 
     with pytest.raises(RuntimeError, match=r"reading compose services failed \(503\)"):
         await environment._wait_for_services(time.monotonic() + 30)
 
 
-async def test_unknown_service_and_stop_are_unsupported(tmp_path: Path, server: _Server, extension: _Extension) -> None:
-    environment = await _started(_environment(_task(tmp_path)))
+async def test_unknown_service_and_stop_are_unsupported(tmp_path: Path, server: Server, extension: _Extension) -> None:
+    environment = await _started(_environment(_task(tmp_path), server))
 
     with pytest.raises(ServiceOperationsUnsupportedError, match="'cache' is not one of"):
         await environment.service_exec("true", service="cache")
@@ -543,8 +489,8 @@ def _dd(path: str, skip: int, count: int = 8) -> list[str]:
     return ["sh", "-c", f"dd if={path} bs=1048576 skip={skip} count={count} 2>/dev/null | base64"]
 
 
-async def test_downloads_decode_exec_output(tmp_path: Path, server: _Server, extension: _Extension) -> None:
-    environment = await _started(_environment(_task(tmp_path)))
+async def test_downloads_decode_exec_output(tmp_path: Path, server: Server, extension: _Extension) -> None:
+    environment = await _started(_environment(_task(tmp_path), server))
     archive = io.BytesIO()
     with tarfile.open(fileobj=archive, mode="w:gz") as tar:
         info = tarfile.TarInfo("logs/app.log")
@@ -575,11 +521,11 @@ async def test_downloads_decode_exec_output(tmp_path: Path, server: _Server, ext
 
 
 async def test_large_downloads_are_read_in_chunks(
-    tmp_path: Path, server: _Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, server: Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(environment_module, "SERVICE_DOWNLOAD_BLOCK_BYTES", 2)
     monkeypatch.setattr(environment_module, "SERVICE_DOWNLOAD_CHUNK_BLOCKS", 2)
-    environment = await _started(_environment(_task(tmp_path)))
+    environment = await _started(_environment(_task(tmp_path), server))
     data = b"0123456789"
     extension.exec_results = [
         _exec_ok("10\n"),

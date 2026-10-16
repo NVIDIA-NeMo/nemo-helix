@@ -8,7 +8,6 @@ import { logger } from '@nemo/common/src/utils/logger';
 import { type FileSampleMethod } from '@nemo/common/src/utils/sampleTextLines';
 import { filesDownloadFile } from '@nemo/sdk/generated/platform/files';
 import { SAMPLE_DATASETS } from '@studio/components/chat/sampleDatasets';
-import type { DatasetInputFileResult } from '@studio/components/DatasetInputFile';
 import {
   DEFAULT_SAMPLE_SIZE,
   FILESET_PICKER_VALUE,
@@ -26,6 +25,7 @@ import type {
   ResponseResult,
   ResponseStats,
 } from '@studio/components/ModelComparePrompts/types';
+import type { DatasetInputFileResult } from '@studio/types/dataset';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type UseModelComparePromptsArgs = Pick<

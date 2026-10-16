@@ -57,6 +57,9 @@ navigation:
             contents:
               - page: Run the Agent Optimizer
                 path: ../../agents/optimization.mdx
+              - page: Analyze Agent Telemetry with Insights
+                path: ../../agents/insights-analysis.mdx
+                slug: insights-analysis
           - page: Plugins and Skills
             path: ../../agents/plugins.mdx
       - section: Evaluate Agents & Models

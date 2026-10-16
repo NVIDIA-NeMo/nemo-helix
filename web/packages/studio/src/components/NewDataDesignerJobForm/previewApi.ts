@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { DataDesignerConfig } from '@nemo/sdk/generated/data-designer/schema';
+import { platformFetch } from '@nemo/sdk/src/utils/platformRequest';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { asRecord } from '@studio/util/guards';
 import { readLineDelimitedStream } from '@studio/util/lineStream';
@@ -119,12 +120,11 @@ export async function streamPreview(
   signal: AbortSignal,
   handlers: PreviewStreamHandlers
 ): Promise<void> {
-  const response = await fetch(`${PLATFORM_BASE_URL}${path}`, {
+  const response = await platformFetch(`${PLATFORM_BASE_URL}${path}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      'X-Source': 'NeMo Studio',
     },
     body: JSON.stringify(requestBody),
     signal,

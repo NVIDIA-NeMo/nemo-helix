@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# TEST INPUT FOR CI ONLY. This is not an example and not for deployment.
+# tools/lint/lint-helm.sh renders the chart with this file and validates the output with kubeconform, so the
+# OpenSandbox compose services objects, which are off by default, are checked against the Kubernetes schemas.
+# The values are made up: do not copy them into a real install. For a real one, see
+# k8s/helm/examples/opensandbox/README.md ("Compose services").
+sandboxClusterCapable: true
+opensandbox:
+  namespace: opensandbox-system
+  composeServices:
+    enabled: true
+    sandboxNamespace: nemo-sandboxes
+    kataServerServiceAccount: opensandbox-server-kata

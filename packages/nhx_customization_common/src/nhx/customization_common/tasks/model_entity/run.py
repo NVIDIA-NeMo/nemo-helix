@@ -453,7 +453,7 @@ class ModelEntityRunner:
 
         return self._create_or_update_config(
             me=me,
-            engine=Engine.NIM,
+            engine=Engine(deploy_params.engine),
             model_spec=model_spec,
             executor_config=executor_config,
         )

@@ -207,6 +207,34 @@ otel_explicit_empty_output=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER
 grep -Fq "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT" <<<"${otel_explicit_empty_output}"
 grep -Fq "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT" <<<"${otel_explicit_empty_output}"
 
+# The OpenSandbox compose services extension renders nothing by default.
+if helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" | grep -Fq "nemo-opensandbox-ext"; then
+  echo "The OpenSandbox compose services extension rendered while disabled" >&2
+  exit 1
+fi
+
+# Enabled, it puts the ConfigMap in the server's namespace and the Role and RoleBinding in the sandbox namespace.
+opensandbox_ext_output=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" \
+  --namespace release-ns \
+  --show-only templates/opensandbox-ext.yaml \
+  --set sandboxClusterCapable=true \
+  --set opensandbox.namespace=os-ns \
+  --set opensandbox.composeServices.enabled=true)
+test "$(grep -c "namespace: release-ns" <<<"${opensandbox_ext_output}")" = 2   # the Role and the RoleBinding
+test "$(grep -c "namespace: os-ns" <<<"${opensandbox_ext_output}")" = 2        # the ConfigMap, and the RoleBinding's subject
+if grep -Fq "opensandbox-server-kata" <<<"${opensandbox_ext_output}"; then
+  echo "The Kata server was bound without opensandbox.composeServices.kataServerServiceAccount" >&2
+  exit 1
+fi
+
+# It needs sandboxClusterCapable.
+opensandbox_ext_no_capable=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" \
+  --set opensandbox.composeServices.enabled=true 2>&1) && {
+  echo "The compose services extension rendered without sandboxClusterCapable" >&2
+  exit 1
+}
+grep -Fq "opensandbox.composeServices.enabled needs sandboxClusterCapable" <<<"${opensandbox_ext_no_capable}"
+
 # Validate the Helm chart by rendering templates with all values files in ci/ directory
 shopt -s nullglob
 for value_file in "${HELM_FOLDER}"/ci/*.yaml; do

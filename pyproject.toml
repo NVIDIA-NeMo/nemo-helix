@@ -376,7 +376,7 @@ constraint-dependencies = [
 
 override-dependencies = [
   # unsloth requires a later version but will never be used on macos. mostly useful for dev
-  "datasets>=3.3.1, <=4.3.0",
+  "datasets>=3.3.1, <6",
   "jsonpath-ng>=1.6.1",
   "grpcio>=1.71.0",
   "huggingface-hub>=1.0.1,<2.0.0",

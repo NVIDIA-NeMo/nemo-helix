@@ -36,7 +36,7 @@ export const ExistingDataset: FC = () => {
   if (files.length === 0 && selectedFiles.length === 0) {
     return (
       <Stack gap="density-md">
-        <Text kind="label/regular/md">File</Text>
+        <Text kind="label/bold/sm">File</Text>
         <Text kind="label/regular/sm">There are no files found in this dataset.</Text>
         <FileUpload error={errors?.file} />
       </Stack>
@@ -46,7 +46,7 @@ export const ExistingDataset: FC = () => {
   // Show dataset files
   return (
     <Stack gap="density-md" className="min-h-0 flex-1 overflow-hidden">
-      <Text kind="label/regular/md">Files</Text>
+      <Text kind="label/bold/sm">Files</Text>
       <SimpleFilesTable />
     </Stack>
   );

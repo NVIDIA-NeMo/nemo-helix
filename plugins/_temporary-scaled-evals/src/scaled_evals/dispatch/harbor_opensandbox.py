@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``harbor_opensandbox`` runtime: Harbor 0.20 trials in OpenSandbox sandboxes.
+"""``harbor_opensandbox`` runtime: Harbor trials in OpenSandbox sandboxes.
 
 Harbor runs as a detached child of the evaluation Job, exactly as the ``sandbox_k8s`` process
-path does, but its environment is ``NemoOpenSandboxEnvironment``. That subclass creates one
+path does, but its environment is ``NemoOpenSandboxEnvironment``. That environment creates one
 OpenSandbox sandbox per trial under a default-deny egress policy and verifies the applied
 policy before the trial starts.
 
@@ -36,7 +36,7 @@ from nhx_sandbox.opensandbox_policy import canonical_egress_target
 from tomlkit.items import InlineTable, Table
 
 from scaled_evals.api.build.task_image_identity import TaskImageIdentityError, validate_task_image_request
-from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_HARBOR_VERSION, HARBOR_OPENSANDBOX_RUNTIME
+from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_HARBOR_VERSIONS, HARBOR_OPENSANDBOX_RUNTIME
 from scaled_evals.api.settings import settings
 from scaled_evals.dispatch.credentials import merged_env_file
 from scaled_evals.dispatch.paths import setting_evaluation_dir
@@ -98,7 +98,7 @@ SUPPORTED_NETWORK_POLICIES = ("default_deny",)
 # Module the terminator runs, with the Harbor runner's interpreter, to kill an evaluation's sandboxes.
 CLEANUP_MODULE = "scaled_evals.harbor_opensandbox_cleanup"
 
-# Template kwargs that tune Harbor's adapter without touching isolation. Everything else in the
+# Template kwargs that tune NemoOpenSandboxEnvironment without touching isolation. Everything else in the
 # environment block is set by this backend or rejected.
 _TEMPLATE_ENVIRONMENT_KWARGS = frozenset(
     {"use_server_proxy", "request_timeout_sec", "ready_timeout_sec", "health_check_poll_interval_sec"}
@@ -159,12 +159,12 @@ def trusted_allowed_hosts() -> list[str]:
 
 def preflight(spec: LaunchSpec) -> None:
     """Reject evaluations this runtime cannot isolate before any work is staged."""
-    # NemoOpenSandboxEnvironment subclasses one specific Harbor release.
+    # Only these runners carry NemoOpenSandboxEnvironment and the OpenSandbox SDK.
     if spec.framework != "harbor":
         raise ValueError(f"{HARBOR_OPENSANDBOX_RUNTIME} runs Harbor evaluations only, not {spec.framework!r}")
-    if spec.framework_version != HARBOR_OPENSANDBOX_HARBOR_VERSION:
+    if spec.framework_version not in HARBOR_OPENSANDBOX_HARBOR_VERSIONS:
         raise ValueError(
-            f"{HARBOR_OPENSANDBOX_RUNTIME} requires Harbor {HARBOR_OPENSANDBOX_HARBOR_VERSION}, "
+            f"{HARBOR_OPENSANDBOX_RUNTIME} requires Harbor {' or '.join(HARBOR_OPENSANDBOX_HARBOR_VERSIONS)}, "
             f"got {spec.framework_version!r}"
         )
 
@@ -213,7 +213,7 @@ def _verifier_mode(verifier: Any) -> str | None:
 
 
 def uses_separate_verifier(document: Mapping[str, Any]) -> bool:
-    """True when any verify pass of the task runs in its own sandbox, as Harbor 0.20 resolves it."""
+    """True when any verify pass of the task runs in its own sandbox, as Harbor 0.13.2 and 0.20 resolve it."""
     # Harbor's default is "shared": the verifier runs inside the agent's sandbox.
     task_mode = _verifier_mode(document.get("verifier")) or "shared"
 
@@ -966,7 +966,7 @@ def register_runtime_backends(registry: Any) -> None:
             name=HARBOR_OPENSANDBOX_RUNTIME,
             factory=build_backend,
             validate=validate_settings,
-            description="Harbor 0.20 trials in default-deny OpenSandbox sandboxes.",
+            description="Harbor trials in default-deny OpenSandbox sandboxes.",
             capabilities=RuntimeBackendCapabilities(
                 artifact_root=_artifact_root,
                 dispatch_work_dir=setting_evaluation_dir(settings, "harbor_opensandbox_work_dir"),

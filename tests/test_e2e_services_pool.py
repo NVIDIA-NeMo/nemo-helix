@@ -4,10 +4,41 @@
 from types import SimpleNamespace
 from typing import cast
 
+import httpx
 import pytest
+import yaml
+from nemo_helix_plugin.jobs.execution_profiles import DockerJobExecutionProfile
 
 import e2e.services_pool as services_pool
 import e2e.services_pool_fixtures as services_pool_fixtures
+
+
+def test_docker_quickstart_runs_cpu_jobs_in_task_containers() -> None:
+    config = yaml.safe_load((services_pool._E2E_REPO_ROOT / "e2e/quickstart/default.yaml").read_text())
+    assert config["jobs"]["enable_subprocess_executor"] is False
+    profiles = config["jobs"]["executors"]
+    assert not any(profile["provider"] == "subprocess" and profile["profile"] == "default" for profile in profiles)
+    default = next(profile for profile in profiles if (profile["provider"], profile["profile"]) == ("cpu", "default"))
+    profile = DockerJobExecutionProfile.model_validate(default)
+    assert profile.config.launcher_tool_path == "/tools/jobs-launcher"
+
+
+def test_services_readiness_allows_slow_plugin_startup(monkeypatch) -> None:
+    elapsed = 0.0
+
+    def get_status(url: str, *, timeout: float) -> httpx.Response:
+        nonlocal elapsed
+        assert url == "http://localhost:8080/status"
+        if elapsed == 0:
+            elapsed = 90.0
+            return httpx.Response(503)
+        return httpx.Response(200)
+
+    monkeypatch.setattr(services_pool, "time", SimpleNamespace(monotonic=lambda: elapsed, sleep=lambda _: None))
+    monkeypatch.setattr(services_pool.httpx, "get", get_status)
+    proc = SimpleNamespace(poll=lambda: None)
+
+    assert services_pool._wait_for_healthy("http://localhost:8080", proc)
 
 
 def test_render_e2e_config_for_docker_preserves_container_paths(tmp_path) -> None:

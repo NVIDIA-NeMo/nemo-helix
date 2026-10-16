@@ -12,7 +12,7 @@ Use customization jobs to fine-tune a [model](/documentation/customizer-referenc
 
 A customization job references a **Model Entity** that contains the base model checkpoint, and is submitted to one of two backends — **automodel** (default, multi-GPU) or **unsloth** (single-GPU, with optional quantized loading for LoRA). The job then runs on the platform's GPU cluster. When training completes:
 
--   **LoRA jobs**: Create an **Adapter** attached to the original Model Entity. Adapters can be auto-deployed to NIMs.
+-   **LoRA jobs**: Create an **Adapter** attached to the original Model Entity. Adapters can be auto-deployed to existing deployments.
 -   **Full fine-tuning jobs**: Create a **new Model Entity** with the customized weights, linked to the base model.
 
 This design keeps adapters organized with their parent models and simplifies deployment workflows.

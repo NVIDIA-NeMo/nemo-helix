@@ -93,7 +93,7 @@ def _build_router() -> APIRouter:
             return await jobs_client.create_job(workspace=workspace, body=request)
 
         async def get_job_fields(name: str):
-            return (await jobs_client.retrieve(name, workspace=workspace)).custom_fields or {}
+            return (await jobs_client.get_job(workspace=workspace, name=name)).data().custom_fields or {}
 
         secrets_client = AsyncSecretsClient.from_client(client)
 

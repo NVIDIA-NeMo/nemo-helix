@@ -96,6 +96,22 @@ opensandbox:
   apiKeySecret: "opensandbox-server-api-key"
   # -- Key inside apiKeySecret.
   apiKeySecretKey: "api-key"
+  # -- Namespace of the OpenSandbox server, which is where `composeServices` puts the extension ConfigMap.
+  # The default matches the default `domain`.
+  namespace: "opensandbox-system"
+  # -- Compose services for `harbor_opensandbox` tasks that ship a `docker-compose.yaml`. The extension is a
+  # ConfigMap the stock OpenSandbox server loads at start, so enabling it also takes a server restart. The server's
+  # Helm values must mount the ConfigMap; see k8s/helm/examples/opensandbox. Needs `sandboxClusterCapable`.
+  composeServices:
+    # -- Render the extension ConfigMap into `opensandbox.namespace`, and the RBAC it needs into the sandbox namespace.
+    enabled: false
+    # -- Namespace the server runs sandboxes in, which is `[kubernetes] namespace` in the server values.
+    # Empty is the release namespace.
+    sandboxNamespace: ""
+    # -- The server's ServiceAccount, in `opensandbox.namespace`.
+    serverServiceAccount: "opensandbox-server"
+    # -- The Kata server's ServiceAccount. Empty if you don't run one.
+    kataServerServiceAccount: ""
 
 # -- RBAC configuration settings for optional dependencies
 rbac:

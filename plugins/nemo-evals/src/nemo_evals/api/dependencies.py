@@ -5,17 +5,25 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from urllib.parse import quote
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException, status
 from nemo_evals.api.service.metric_service import MetricService
 from nemo_evals.api.service.result_service import ResultService
 from nemo_evals.api.service.task_service import TaskService
 from nemo_evals.api.service.taskset_service import TasksetService
+from nemo_evals.image_builds.service import ImageBuildForbiddenError, ImageBuildService, JobsServiceBuildJobs
+from nemo_helix_plugin.auth import current_auth_context
 from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.dependencies import RequestAuthorizer, get_nemo_client, get_request_authorizer
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, get_entity_client
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+
+_EVALS_SERVICE = "evals"
 
 
 def get_metric_service(
@@ -43,6 +51,34 @@ def get_task_service(
     return TaskService(entity_client, metric_service, AsyncFilesClient.from_client(async_client))
 
 
+def get_image_build_service(
+    workspace: str,
+    entity_client: NemoEntitiesClient = Depends(get_entity_client),
+    async_client: AsyncNemoClient = Depends(get_nemo_client),
+    authorize: RequestAuthorizer = Depends(get_request_authorizer),
+) -> ImageBuildService:
+    """Provide an ImageBuildService whose task-builder Jobs are created as the caller.
+
+    Builder admits the task-builder Job on evals' own permissions, so the caller's permission to build is checked here.
+    """
+
+    async def authorize_builds(build_workspace: str) -> None:
+        try:
+            await authorize("POST", f"/apis/builder/v2/workspaces/{quote(build_workspace, safe='')}/builds")
+        except HTTPException as e:
+            if e.status_code != status.HTTP_403_FORBIDDEN:
+                raise
+            raise ImageBuildForbiddenError(
+                f"You may not submit container image builds in workspace {build_workspace}"
+            ) from e
+
+    return ImageBuildService(
+        entity_client,
+        JobsServiceBuildJobs(AsyncJobsClient.from_client(async_client), workspace=workspace),
+        authorize_builds,
+    )
+
+
 def get_taskset_service(
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
     task_service: TaskService = Depends(get_task_service),
@@ -64,3 +100,21 @@ def get_taskset_service(
         await authorize("GET", f"/apis/evals/v2/workspaces/{quote(workspace, safe='')}/tasks/{quote(name, safe='')}")
 
     return TasksetService(entity_client, task_service, authorize_task_read=authorize_task_read)
+
+
+@asynccontextmanager
+async def delegated_service_client(request_client: AsyncNemoClient) -> AsyncIterator[AsyncNemoClient]:
+    """Yield a client that calls the platform as the evals service, delegating the request's caller.
+
+    Use it for calls only a service principal may make, such as reading a secret value; the target
+    service still authorizes the delegated caller. Without a request principal there is nobody to
+    delegate, so the request-scoped client is used rather than an undelegated service client.
+    """
+    caller = current_auth_context()
+    if caller is None:
+        yield request_client
+        return
+    async with get_async_nemo_client(
+        as_service=_EVALS_SERVICE, internal=True, on_behalf_of=caller.to_principal()
+    ) as service_client:
+        yield service_client

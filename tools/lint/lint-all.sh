@@ -16,6 +16,7 @@ declare -a scripts=(
   "lint-licenses:tools/lint/lint-licenses.sh"
   "lint-openapi:tools/lint/lint-openapi.sh"
   "lint-config-reference-docs:tools/lint/lint-config-reference-docs.sh"
+  "lint-opensandbox-ext:tools/lint/lint-opensandbox-ext.sh"
   "lint-python-style:tools/lint/lint-python-style.sh"
   "lint-python-types:tools/lint/lint-python-types.sh"
   "lint-sdk-vendored:tools/lint/lint-sdk-vendored.sh"

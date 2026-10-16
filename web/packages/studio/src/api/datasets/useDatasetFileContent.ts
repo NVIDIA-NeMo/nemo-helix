@@ -7,12 +7,11 @@ import {
   filesDownloadFile,
   getFilesDownloadFileQueryKey,
 } from '@nemo/sdk/generated/platform/files';
+import { platformFetch } from '@nemo/sdk/src/utils/platformRequest';
 import type { EntityIdentifier } from '@studio/api/common/types';
 import { getDatasetFileContentQueryKey } from '@studio/api/datasets/invalidateDatasetCaches';
-import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { isBinaryExtension } from '@studio/util/binaryFile';
 import { queryOptions, useQuery, UseQueryOptions, useSuspenseQuery } from '@tanstack/react-query';
-import axios from 'axios';
 import { parquetRead } from 'hyparquet';
 
 /** Parquet INT64 (and similar) columns decode as BigInt; JSON.stringify rejects those by default. */
@@ -83,8 +82,9 @@ export const datasetFileContentQueryOptions = ({
 
       let fileSize: number | null = null;
       try {
-        const headResponse = await axios.head(`${PLATFORM_BASE_URL}${fileUrl}`);
-        fileSize = parseContentLength(headResponse.headers['content-length']);
+        const headResponse = await platformFetch(fileUrl, { method: 'HEAD' });
+        if (!headResponse.ok) throw new Error('Unable to find base file.');
+        fileSize = parseContentLength(headResponse.headers.get('content-length'));
       } catch {
         throw new Error('Unable to find base file.');
       }

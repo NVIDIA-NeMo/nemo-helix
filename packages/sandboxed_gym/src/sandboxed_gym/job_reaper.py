@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from sandboxed_gym.host.provider import get_host_provider
+from sandboxed_gym.run_sync import run_coro_sync
 
 LOGGER = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ def reap_job_sandboxes(
         return await asyncio.wait_for(provider.destroy_job_sandboxes(job_id), timeout=30)
 
     try:
-        removed = asyncio.run(_destroy())
+        removed = run_coro_sync(_destroy())
     except Exception:
         LOGGER.exception("failed to reap sandboxes for job %s", job_id)
         return ()

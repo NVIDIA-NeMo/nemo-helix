@@ -1,188 +1,78 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""NemoOpenSandboxEnvironment against a fake OpenSandbox SDK."""
+"""NemoOpenSandboxEnvironment against a mock OpenSandbox SDK.
+
+Written to the Harbor environment API that Harbor 0.13.2 and 0.20.0 share, so the same tests run
+against either runner's Harbor.
+"""
 
 from __future__ import annotations
 
 import hashlib
-import itertools
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-pytest.importorskip("harbor.environments.opensandbox")
+pytest.importorskip("harbor.environments.base")
 pytest.importorskip("nhx_sandbox")
 pytest.importorskip("scaled_evals", reason="scaled-evals plugin not installed")
 
-import harbor.environments.opensandbox as harbor_opensandbox
+from harbor.environments.base import BaseEnvironment
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.paths import TrialPaths
+from opensandbox_mocks import Sandbox, Server, execution, mock_sdk
 from scaled_evals.harbor_opensandbox_cleanup import APPLIED_EGRESS_GLOB, applied_egress_filename
+from scaled_evals.harbor_opensandbox_driver import OpenSandboxDriver
 from scaled_evals.harbor_opensandbox_environment import (
     CREATE_ATTEMPT_METADATA_KEY,
     MANAGED_BY_METADATA_KEY,
     MANAGED_BY_METADATA_VALUE,
     NemoOpenSandboxEnvironment,
-    _sandbox_role,
+    sandbox_role,
 )
-from tenacity import wait_none
 
+# The runner's trusted egress allowlist: an IP, a wildcard hostname and an IPv6 CIDR, one of each form.
 TRUSTED = ["10.96.0.20", "*.nvidia.com", "2001:db8::/48"]
+# Trial name, which Harbor also uses for the trial directory and the sandbox session IDs.
 TRIAL = "hello-world__abc"
 
 
-class SandboxApiException(Exception):
-    """Name-matched by Harbor as a transient SDK error."""
-
-
-class _Server:
-    def __init__(self) -> None:
-        self.sandboxes: dict[str, dict[str, str]] = {}
-        self.killed: list[str] = []
-        self.creates: list[dict[str, Any]] = []
-        self.create_failures: list[BaseException] = []
-        self.applied_default: str | None = None
-        self.readback = True
-        self._ids = (f"sbx-{n}" for n in itertools.count(1))
-
-    def live(self) -> set[str]:
-        return set(self.sandboxes) - set(self.killed)
-
-
-class _Sandbox:
-    def __init__(self, server: _Server, sandbox_id: str, policy: dict[str, Any]) -> None:
-        self._server = server
-        self.id = sandbox_id
-        self._policy = policy
-        if server.readback:
-            self.get_egress_policy = self._get_egress_policy
-
-    async def _get_egress_policy(self) -> SimpleNamespace:
-        default = self._server.applied_default or self._policy["defaultAction"]
-        rules = [SimpleNamespace(**rule) for rule in self._policy["egress"]]
-        return SimpleNamespace(default_action=default, egress=rules)
-
-    async def get_info(self) -> SimpleNamespace:
-        return SimpleNamespace(status=SimpleNamespace(state="Running"))
-
-    async def is_healthy(self) -> bool:
-        return True
-
-    async def kill(self) -> None:
-        self._server.killed.append(self.id)
-
-    async def close(self) -> None:
-        pass
-
-
-class _Manager:
-    def __init__(self, server: _Server) -> None:
-        self._server = server
-
-    async def list_sandbox_infos(self, selector: SimpleNamespace) -> SimpleNamespace:
-        matches = [
-            SimpleNamespace(id=sandbox_id)
-            for sandbox_id, metadata in self._server.sandboxes.items()
-            if sandbox_id not in self._server.killed and selector.metadata.items() <= metadata.items()
-        ]
-        return SimpleNamespace(sandbox_infos=matches, pagination=SimpleNamespace(has_next_page=False))
-
-    async def kill_sandbox(self, sandbox_id: str) -> None:
-        self._server.killed.append(sandbox_id)
-
-    async def close(self) -> None:
-        pass
-
-
-class _RunCommandOpts:
-    model_fields = {"working_directory": None, "timeout": None, "envs": None, "uid": None}
-
-    def __init__(self, **kwargs: Any) -> None:
-        self.kwargs = kwargs
-
-
-class _Commands:
-    """``sandbox.commands`` whose default user is ``image_uid``; ``None`` makes ``id -u`` fail."""
-
-    def __init__(self, image_uid: int | None) -> None:
-        self.image_uid = image_uid
-        self.runs: list[tuple[str, dict[str, Any]]] = []
-
-    async def run(self, command: str, opts: _RunCommandOpts) -> SimpleNamespace:
-        self.runs.append((command, opts.kwargs))
-        stdout = []
-        if command == "id -u":
-            if self.image_uid is None:
-                raise SandboxApiException("execd unavailable")
-            stdout = [SimpleNamespace(text=f"{self.image_uid}\n")]
-        return SimpleNamespace(logs=SimpleNamespace(stdout=stdout, stderr=[]), exit_code=0, error=None)
-
-    def uids_sent(self, command: str) -> list[int | None]:
-        return [opts.get("uid") for run, opts in self.runs if run == command]
-
-    def probes(self) -> int:
-        return sum(run == "id -u" for run, _ in self.runs)
-
-
-def _fake_sdk(server: _Server) -> dict[str, Any]:
-    class Sandbox:
-        @staticmethod
-        async def create(image: Any, **kwargs: Any) -> _Sandbox:
-            server.creates.append(kwargs)
-            sandbox_id = next(server._ids)
-            server.sandboxes[sandbox_id] = dict(kwargs["metadata"])
-            if server.create_failures:
-                # The server created the sandbox, but the client never got a handle for it.
-                raise server.create_failures.pop(0)
-            return _Sandbox(server, sandbox_id, kwargs["network_policy"].payload)
-
-    class SandboxManager:
-        @staticmethod
-        async def create(connection_config: Any) -> _Manager:
-            return _Manager(server)
-
-    return {
-        "Sandbox": Sandbox,
-        "RunCommandOpts": _RunCommandOpts,
-        "ConnectionConfig": lambda **kwargs: SimpleNamespace(**kwargs),
-        "NetworkPolicy": SimpleNamespace(model_validate=lambda payload: SimpleNamespace(payload=payload)),
-        "SandboxManager": SandboxManager,
-        "SandboxFilter": lambda metadata, page: SimpleNamespace(metadata=metadata, page=page),
-    }
-
-
 @pytest.fixture
-def server(monkeypatch: pytest.MonkeyPatch) -> _Server:
-    server = _Server()
-    monkeypatch.setattr(harbor_opensandbox, "_HAS_OPENSANDBOX", True)
-    monkeypatch.setattr(
-        harbor_opensandbox.OpenSandboxEnvironment._create_sandbox.retry,  # ty: ignore[unresolved-attribute]  # tenacity
-        "wait",
-        wait_none(),
-    )
-    monkeypatch.setattr(NemoOpenSandboxEnvironment, "_load_opensandbox", lambda self: _fake_sdk(server))
-    return server
+def server() -> Server:
+    """A fresh mock OpenSandbox server."""
+    return Server()
 
 
 def _environment(
     tmp_path: Path,
+    server: Server,
     mode: NetworkMode,
     allowed_hosts: list[str] | None = None,
     *,
+    task: dict[str, Any] | None = None,
     trial_name: str = TRIAL,
     session_id: str | None = None,
     **kwargs: Any,
 ) -> NemoOpenSandboxEnvironment:
-    return NemoOpenSandboxEnvironment(
-        environment_dir=tmp_path,
+    """An environment for a hello-world task on the mock server, with the trusted allowlist above.
+
+    ``task`` adds fields to the task's ``[environment]``; ``kwargs`` go to the environment. The
+    session ID defaults to the agent's under Harbor 0.13.2 naming: the bare trial name.
+    """
+    environment_dir = tmp_path / "environment"
+    environment_dir.mkdir(exist_ok=True)
+    environment = NemoOpenSandboxEnvironment(
+        environment_dir=environment_dir,
         environment_name="hello-world",
-        session_id=session_id or f"{trial_name}__env",
+        session_id=session_id or trial_name,
         trial_paths=TrialPaths(trial_dir=tmp_path / trial_name),
-        task_env_config=EnvironmentConfig(docker_image="registry.example/hello:1"),
+        task_env_config=EnvironmentConfig(docker_image="registry.example/hello:1", **(task or {})),
         network_policy=NetworkPolicy(network_mode=mode, allowed_hosts=allowed_hosts or []),
         domain="opensandbox.example",
         api_key="",
@@ -191,42 +81,65 @@ def _environment(
         resolver_addresses=["10.96.0.10"],
         **kwargs,
     )
+    environment._driver = OpenSandboxDriver(
+        environment._connection, sdk=mock_sdk(server), logger=environment.logger, retry_wait=lambda attempt: 0
+    )
+    return environment
 
 
-def test_harbor_private_hooks_still_exist() -> None:
-    """The subclass overrides Harbor internals; an upgrade that moves them must fail here, not in a cluster."""
-    import inspect
-    from importlib.metadata import version
-
-    base = harbor_opensandbox.OpenSandboxEnvironment
-    assert version("harbor") == "0.20.0"
-    assert list(inspect.signature(base._build_network_policy).parameters) == ["self", "sdk"]
-    assert list(inspect.signature(base._create_sandbox).parameters) == ["self", "sdk"]
-    assert "self._metadata" in inspect.getsource(base._create_sandbox)
-    assert "self._build_network_policy(sdk)" in inspect.getsource(base._create_sandbox)
-    assert hasattr(base, "_safe_kill")
-    assert hasattr(base, "_build_connection_config")
-    assert list(inspect.signature(base._resolve_uid).parameters) == ["self", "user"]
-    assert "self._resolve_uid(" in inspect.getsource(base._build_run_command_opts)
-    assert "self._sandbox.commands.run(" in inspect.getsource(base.exec)
-
-
-def _policy_sent(server: _Server) -> dict[str, Any]:
+def _policy_sent(server: Server) -> dict[str, Any]:
+    """The egress policy payload the last create sent."""
     return server.creates[-1]["network_policy"].payload
 
 
-async def test_no_network_is_deny_all(tmp_path: Path, server: _Server) -> None:
-    environment = _environment(tmp_path, NetworkMode.NO_NETWORK)
+def _sandbox(environment: NemoOpenSandboxEnvironment) -> Sandbox:
+    """The environment's live sandbox, which in these tests is always the mock's."""
+    sandbox = environment._sandbox
+    assert isinstance(sandbox, Sandbox)
+    return sandbox
 
-    await environment._create_sandbox(environment._load_opensandbox())
+
+def _imports_with_blocked_modules(module: str, blocked: list[str]) -> subprocess.CompletedProcess[str]:
+    """Import ``module`` in a fresh interpreter where importing any of ``blocked`` fails."""
+    # A None entry in sys.modules makes Python raise ImportError for that module and its submodules.
+    script = "import sys\nfor name in sys.argv[2:]: sys.modules[name] = None\nimport importlib; importlib.import_module(sys.argv[1])"
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(path for path in sys.path if path)}
+    return subprocess.run(
+        [sys.executable, "-c", script, module, *blocked], env=env, capture_output=True, text=True, check=False
+    )
+
+
+def test_environment_does_not_need_harbors_own_opensandbox_environment() -> None:
+    """The point of this class: it loads on a Harbor release that has no OpenSandbox environment."""
+    result = _imports_with_blocked_modules(
+        "scaled_evals.harbor_opensandbox_environment", ["harbor.environments.opensandbox"]
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert NemoOpenSandboxEnvironment.__mro__[1] is BaseEnvironment
+
+
+def test_driver_does_not_need_harbor() -> None:
+    """The driver is Harbor-free, so it can move into a shared package as is."""
+    result = _imports_with_blocked_modules("scaled_evals.harbor_opensandbox_driver", ["harbor"])
+
+    assert result.returncode == 0, result.stderr
+
+
+async def test_no_network_is_deny_all(tmp_path: Path, server: Server) -> None:
+    """A ``no-network`` task gets a deny-all policy with no exceptions."""
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+
+    await environment._create_sandbox()
 
     assert _policy_sent(server) == {"defaultAction": "deny", "egress": []}
 
 
-async def test_public_gets_the_trusted_allowlist_not_unrestricted_access(tmp_path: Path, server: _Server) -> None:
-    environment = _environment(tmp_path, NetworkMode.PUBLIC)
+async def test_public_gets_the_trusted_allowlist_not_unrestricted_access(tmp_path: Path, server: Server) -> None:
+    """A ``public`` task gets the trusted allowlist plus the resolver, never unrestricted egress."""
+    environment = _environment(tmp_path, server, NetworkMode.PUBLIC)
 
-    await environment._create_sandbox(environment._load_opensandbox())
+    await environment._create_sandbox()
 
     policy = _policy_sent(server)
     allowed = {rule["target"] for rule in policy["egress"] if rule["action"] == "allow"}
@@ -237,26 +150,32 @@ async def test_public_gets_the_trusted_allowlist_not_unrestricted_access(tmp_pat
     assert "10.0.0.0/8" not in denied
 
 
-async def test_records_the_verified_policy_for_the_supervisor(tmp_path: Path, server: _Server) -> None:
-    environment = _environment(tmp_path, NetworkMode.PUBLIC)
+async def test_records_the_verified_policy_for_the_supervisor(tmp_path: Path, server: Server) -> None:
+    """The verified policy, its hash, the session and the role are recorded in the trial directory."""
+    environment = _environment(tmp_path, server, NetworkMode.PUBLIC)
 
-    sandbox = await environment._create_sandbox(environment._load_opensandbox())
+    sandbox = await environment._create_sandbox()
 
     record = json.loads((tmp_path / TRIAL / applied_egress_filename(sandbox.id)).read_text())
     canonical = json.dumps(record["policy"], sort_keys=True, separators=(",", ":"))
     assert record["sandbox_id"] == sandbox.id
+    assert record["session_id"] == TRIAL
     assert record["role"] == "agent"
     assert record["network_mode"] == "public"
     assert record["policy"] == _policy_sent(server)
     assert record["policy_sha256"] == hashlib.sha256(canonical.encode()).hexdigest()
 
 
-async def test_agent_and_separate_verifier_each_keep_their_record(tmp_path: Path, server: _Server) -> None:
-    agent = _environment(tmp_path, NetworkMode.PUBLIC)
-    verifier = _environment(tmp_path, NetworkMode.NO_NETWORK, session_id=f"{TRIAL}__verifier__task")
+@pytest.mark.parametrize("agent_session", [TRIAL, f"{TRIAL}__env"], ids=["harbor-0.13", "harbor-0.20"])
+async def test_agent_and_separate_verifier_each_keep_their_record(
+    tmp_path: Path, server: Server, agent_session: str
+) -> None:
+    """An agent and a separate verifier in one trial each keep their own egress record, under either release's naming."""
+    agent = _environment(tmp_path, server, NetworkMode.PUBLIC, session_id=agent_session)
+    verifier = _environment(tmp_path, server, NetworkMode.NO_NETWORK, session_id=f"{TRIAL}__verifier__task")
 
-    agent_sandbox = await agent._create_sandbox(agent._load_opensandbox())
-    verifier_sandbox = await verifier._create_sandbox(verifier._load_opensandbox())
+    agent_sandbox = await agent._create_sandbox()
+    verifier_sandbox = await verifier._create_sandbox()
 
     records = {
         record["sandbox_id"]: record
@@ -271,149 +190,278 @@ async def test_agent_and_separate_verifier_each_keep_their_record(tmp_path: Path
 @pytest.mark.parametrize(
     ("trial_name", "session_id", "role"),
     [
+        # Harbor 0.13.2 names the agent's session after the trial; 0.20 adds __env.
+        ("trial-1", "trial-1", "agent"),
         ("trial-1", "trial-1__env", "agent"),
         ("trial-1", "trial-1__verifier__task", "verifier"),
         ("trial-1", "trial-1__verifier__env", "verifier"),
         ("trial-1-with-a-long-name", "trial-1-with-a-long-name__verifier__step-o__1a2b3c4d", "verifier"),
+        # A trial name may itself contain __verifier__; only an exact match is the agent.
+        ("a__verifier__b__xyz", "a__verifier__b__xyz", "agent"),
         ("a__verifier__b__xyz", "a__verifier__b__xyz__env", "agent"),
         ("a__verifier__b__xyz", "a__verifier__b__xyz__verifier__env", "verifier"),
     ],
 )
 def test_sandbox_role_from_harbor_session_id(trial_name: str, session_id: str, role: str) -> None:
-    assert _sandbox_role(session_id, trial_name) == role
+    """Only the agent's exact session ID counts as the agent; every other session is a verifier."""
+    assert sandbox_role(session_id, trial_name) == role
 
 
-async def test_agent_is_recorded_as_agent_when_the_trial_name_contains_verifier(
-    tmp_path: Path, server: _Server
-) -> None:
-    environment = _environment(tmp_path, NetworkMode.PUBLIC, trial_name="task__verifier__x__Ab12Cd3")
+async def test_agent_is_recorded_as_agent_when_the_trial_name_contains_verifier(tmp_path: Path, server: Server) -> None:
+    """A trial name containing ``__verifier__`` doesn't make the agent look like a verifier."""
+    trial = "task__verifier__x__Ab12Cd3"
+    environment = _environment(tmp_path, server, NetworkMode.PUBLIC, trial_name=trial)
 
-    sandbox = await environment._create_sandbox(environment._load_opensandbox())
+    sandbox = await environment._create_sandbox()
 
-    record = json.loads((tmp_path / "task__verifier__x__Ab12Cd3" / applied_egress_filename(sandbox.id)).read_text())
+    record = json.loads((tmp_path / trial / applied_egress_filename(sandbox.id)).read_text())
     assert record["role"] == "agent"
 
 
 def test_harbor_session_naming_still_matches_sandbox_role() -> None:
-    """``_sandbox_role`` relies on Harbor's session ID naming; an upgrade that changes it must fail here."""
+    """``sandbox_role`` relies on the installed Harbor's session naming; a release that changes it must fail here."""
     import inspect
 
     from harbor.trial.trial import Trial
 
+    source = inspect.getsource(Trial)
     assert "}__verifier__{" in inspect.getsource(Trial._separate_verifier_session_id)
-    assert '}__env"' in inspect.getsource(Trial)
+    # The agent's session: the bare trial name (0.13.2) or the trial name plus __env (0.20).
+    assert "session_id=self.config.trial_name," in source or 'session_id=f"{self.config.trial_name}__env"' in source
 
 
-async def test_allowlist_task_narrows_the_trusted_allowlist(tmp_path: Path, server: _Server) -> None:
-    environment = _environment(tmp_path, NetworkMode.ALLOWLIST, ["*.NVIDIA.com"])
+async def test_allowlist_task_narrows_the_trusted_allowlist(tmp_path: Path, server: Server) -> None:
+    """An ``allowlist`` task gets only the hosts it asked for, plus the resolver."""
+    environment = _environment(tmp_path, server, NetworkMode.ALLOWLIST, ["*.NVIDIA.com"])
 
-    await environment._create_sandbox(environment._load_opensandbox())
+    await environment._create_sandbox()
 
     allowed = {rule["target"] for rule in _policy_sent(server)["egress"] if rule["action"] == "allow"}
     assert allowed == {"*.NVIDIA.com", "10.96.0.10"}
 
 
-def test_allowlist_task_cannot_extend_the_trusted_allowlist(tmp_path: Path, server: _Server) -> None:
+def test_allowlist_task_cannot_extend_the_trusted_allowlist(tmp_path: Path, server: Server) -> None:
+    """A task asking for a host outside the trusted allowlist is rejected before any sandbox exists."""
     with pytest.raises(ValueError, match=r"\['pypi.org'\].*does not include"):
-        _environment(tmp_path, NetworkMode.ALLOWLIST, ["*.nvidia.com", "pypi.org"])
+        _environment(tmp_path, server, NetworkMode.ALLOWLIST, ["*.nvidia.com", "pypi.org"])
 
     assert server.creates == []
 
 
-def test_advertises_static_allowlist_support(tmp_path: Path, server: _Server) -> None:
-    capabilities = _environment(tmp_path, NetworkMode.PUBLIC).capabilities
+def test_advertises_static_allowlist_support(tmp_path: Path, server: Server) -> None:
+    """Harbor sees allowlist support for every entry form, but no dynamic policy changes."""
+    capabilities = _environment(tmp_path, server, NetworkMode.PUBLIC).capabilities
 
     assert capabilities.network_allowlist
-    assert capabilities.network_allowlist_wildcard_hostnames
-    assert capabilities.network_allowlist_ipv6_cidrs
+    assert capabilities.disable_internet
     assert not capabilities.dynamic_network_policy
+    # Per-entry-type fields exist only on Harbor 0.20; where they exist, every type is supported.
+    for name in type(capabilities).model_fields:
+        if name.startswith("network_allowlist_"):
+            assert getattr(capabilities, name), name
 
 
-async def test_labels_every_create_and_restores_caller_metadata(tmp_path: Path, server: _Server) -> None:
-    environment = _environment(tmp_path, NetworkMode.NO_NETWORK)
+def test_reports_the_opensandbox_type(tmp_path: Path, server: Server) -> None:
+    """The environment reports Harbor's ``opensandbox`` type."""
+    assert _environment(tmp_path, server, NetworkMode.PUBLIC).type() == "opensandbox"
 
-    await environment._create_sandbox(environment._load_opensandbox())
+
+async def test_labels_every_create(tmp_path: Path, server: Server) -> None:
+    """Every create carries the caller's labels, the session, the managed-by label and an attempt ID."""
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+
+    await environment._create_sandbox()
 
     metadata = server.creates[-1]["metadata"]
     assert metadata["nemo-scaled-evals-run"] == "run-1"
-    assert metadata["session_id"] == "hello-world__abc__env"
+    assert metadata["session_id"] == TRIAL
     assert metadata[MANAGED_BY_METADATA_KEY] == MANAGED_BY_METADATA_VALUE
     assert len(metadata[CREATE_ATTEMPT_METADATA_KEY]) == 32
     assert environment._metadata == {"nemo-scaled-evals-run": "run-1"}
 
 
-async def test_kills_sandboxes_orphaned_by_a_retried_create(tmp_path: Path, server: _Server) -> None:
-    server.create_failures.append(SandboxApiException("lost response"))
-    environment = _environment(tmp_path, NetworkMode.NO_NETWORK)
-
-    sandbox = await environment._create_sandbox(environment._load_opensandbox())
-
-    assert len(server.creates) == 2
-    assert (
-        server.creates[0]["metadata"][CREATE_ATTEMPT_METADATA_KEY]
-        == (server.creates[1]["metadata"][CREATE_ATTEMPT_METADATA_KEY])
+async def test_sends_task_resources_env_and_gpu_types(tmp_path: Path, server: Server) -> None:
+    """Task CPU, memory, GPU, GPU types, env and the sandbox lifetime reach the create call."""
+    environment = _environment(
+        tmp_path,
+        server,
+        NetworkMode.NO_NETWORK,
+        task={"cpus": 2, "memory_mb": 4096, "gpus": 1, "gpu_types": ["h100"], "env": {"TASK_VAR": "x"}},
+        sandbox_timeout_sec=600,
     )
-    assert server.live() == {sandbox.id}
+
+    await environment._create_sandbox()
+
+    sent = server.creates[-1]
+    assert sent["image"] == "registry.example/hello:1"
+    assert sent["resource"] == {"cpu": "2", "memory": "4096Mi", "gpu": "1"}
+    assert sent["extensions"] == {"harbor.gpu_types": "h100"}
+    assert sent["env"]["TASK_VAR"] == "x"
+    assert sent["timeout"].total_seconds() == 600
 
 
-async def test_failed_create_kills_everything_the_attempt_made(tmp_path: Path, server: _Server) -> None:
-    server.create_failures.append(ValueError("bad request"))
-    environment = _environment(tmp_path, NetworkMode.NO_NETWORK)
-
-    with pytest.raises(ValueError, match="bad request"):
-        await environment._create_sandbox(environment._load_opensandbox())
-
-    assert server.sandboxes and server.live() == set()
-    assert environment._metadata == {"nemo-scaled-evals-run": "run-1"}
-
-
-async def test_kills_the_sandbox_when_the_applied_default_is_wrong(tmp_path: Path, server: _Server) -> None:
+async def test_kills_the_sandbox_when_the_applied_default_is_wrong(tmp_path: Path, server: Server) -> None:
+    """A sandbox whose applied default action differs from the requested one is killed."""
     server.applied_default = "allow"
-    environment = _environment(tmp_path, NetworkMode.PUBLIC)
+    environment = _environment(tmp_path, server, NetworkMode.PUBLIC)
 
     with pytest.raises(RuntimeError, match="applied egress default_action='allow'"):
-        await environment._create_sandbox(environment._load_opensandbox())
+        await environment._create_sandbox()
 
     assert server.live() == set()
 
 
-async def test_kills_the_sandbox_when_the_policy_cannot_be_read_back(tmp_path: Path, server: _Server) -> None:
+async def test_kills_the_sandbox_when_the_policy_cannot_be_read_back(tmp_path: Path, server: Server) -> None:
+    """A sandbox that can't report its applied policy is killed rather than trusted."""
     server.readback = False
-    environment = _environment(tmp_path, NetworkMode.NO_NETWORK)
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
 
     with pytest.raises(RuntimeError, match="cannot report its applied egress policy"):
-        await environment._create_sandbox(environment._load_opensandbox())
+        await environment._create_sandbox()
 
     assert server.live() == set()
 
 
-async def test_strict_verification_rejects_a_dropped_rule(tmp_path: Path, server: _Server) -> None:
-    environment = _environment(tmp_path, NetworkMode.PUBLIC, egress_verification="strict")
-    sdk = environment._load_opensandbox()
+async def test_strict_verification_rejects_a_dropped_rule(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Strict verification kills a sandbox that applied fewer rules than requested."""
+    environment = _environment(tmp_path, server, NetworkMode.PUBLIC, egress_verification="strict")
+    sdk = environment._driver.sdk
     create = sdk["Sandbox"].create
 
-    async def drop_rules(image: Any, **kwargs: Any) -> _Sandbox:
+    async def drop_rules(image: Any, **kwargs: Any) -> Sandbox:
+        """Create normally, but apply the policy without its first rule."""
         sandbox = await create(image, **kwargs)
         sandbox._policy = {**sandbox._policy, "egress": sandbox._policy["egress"][1:]}
         return sandbox
 
-    sdk["Sandbox"].create = drop_rules
+    monkeypatch.setattr(sdk["Sandbox"], "create", drop_rules)
 
     with pytest.raises(RuntimeError, match="did not apply 1 requested egress rule"):
-        await environment._create_sandbox(sdk)
+        await environment._create_sandbox()
 
     assert server.live() == set()
 
 
-def _started(tmp_path: Path, image_uid: int | None) -> tuple[NemoOpenSandboxEnvironment, _Commands]:
-    environment = _environment(tmp_path, NetworkMode.NO_NETWORK)
-    commands = _Commands(image_uid)
-    environment._sandbox = SimpleNamespace(commands=commands)
-    return environment, commands
+def test_rejects_compose_tasks_and_missing_images(tmp_path: Path, server: Server) -> None:
+    """Compose tasks and tasks without a prebuilt image are rejected at construction."""
+    (tmp_path / "environment").mkdir()
+    (tmp_path / "environment" / "docker-compose.yaml").write_text("services: {}\n")
+    with pytest.raises(ValueError, match="docker-compose"):
+        _environment(tmp_path, server, NetworkMode.PUBLIC)
+
+    (tmp_path / "environment" / "docker-compose.yaml").unlink()
+    with pytest.raises(FileNotFoundError, match="prebuilt image"):
+        NemoOpenSandboxEnvironment(
+            environment_dir=tmp_path / "environment",
+            environment_name="hello-world",
+            session_id="s",
+            trial_paths=TrialPaths(trial_dir=tmp_path / "trial"),
+            task_env_config=EnvironmentConfig(),
+            trusted_allowed_hosts=TRUSTED,
+        )
 
 
-async def test_root_commands_run_as_the_image_user_on_a_non_root_image(tmp_path: Path, server: _Server) -> None:
-    environment, commands = _started(tmp_path, image_uid=10001)
+async def test_start_prepares_logs_and_uploads_the_environment(tmp_path: Path, server: Server) -> None:
+    """``start`` creates the log and work directories, opens them up as root, and uploads the environment directory with its file modes."""
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK, task={"workdir": "/app"})
+    script = tmp_path / "environment" / "setup.sh"
+    script.write_text("echo hi\n")
+    script.chmod(0o755)
+
+    await environment.start(force_build=False)
+
+    sandbox = _sandbox(environment)
+    assert {"/logs/agent", "/logs/verifier", "/logs/artifacts", "/app"} <= set(sandbox.files.tree)
+    chmod = next(opts for command, opts in sandbox.commands.runs if command.startswith("chmod 777"))
+    assert chmod["uid"] == 0
+    assert chmod["working_directory"] == "/"
+    assert sandbox.files.tree["/app/setup.sh"] == b"echo hi\n"
+    assert sandbox.files.modes["/app/setup.sh"] == 755
+
+
+async def test_stop_deletes_and_closes(tmp_path: Path, server: Server) -> None:
+    """``stop(delete=True)`` kills the sandbox and releases the client."""
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    await environment.start(force_build=False)
+    sandbox = _sandbox(environment)
+
+    await environment.stop(delete=True)
+
+    assert server.live() == set()
+    assert sandbox.closed
+    assert environment._sandbox is None
+
+
+async def test_file_transfers_round_trip(tmp_path: Path, server: Server) -> None:
+    """Files and directories upload and download intact, and an unreadable entry is skipped."""
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    await environment.start(force_build=False)
+    source = tmp_path / "upload"
+    (source / "nested").mkdir(parents=True)
+    (source / "a.txt").write_text("a")
+    (source / "nested" / "b.txt").write_text("b")
+
+    await environment.upload_dir(source, "/data")
+    await environment.upload_file(source / "a.txt", "/single/a.txt")
+    files = _sandbox(environment).files
+    files.tree["/data/broken-link"] = b""
+    files.unreadable.add("/data/broken-link")
+    await environment.download_dir("/data", tmp_path / "out")
+    await environment.download_file("/single/a.txt", tmp_path / "one" / "a.txt")
+
+    assert (tmp_path / "out" / "a.txt").read_text() == "a"
+    assert (tmp_path / "out" / "nested" / "b.txt").read_text() == "b"
+    assert not (tmp_path / "out" / "broken-link").exists()
+    assert (tmp_path / "one" / "a.txt").read_text() == "a"
+
+
+async def test_download_dir_asks_the_sandbox_for_untyped_entries(tmp_path: Path, server: Server) -> None:
+    """Entries the search returns without a type are checked with ``test -d`` and ``test -f``."""
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    await environment.start(force_build=False)
+    files = _sandbox(environment).files
+    files.tree.update({"/data/sub": None, "/data/sub/c.txt": b"c"})
+    files.untyped.update({"/data/sub", "/data/sub/c.txt"})
+
+    await environment.download_dir("/data", tmp_path / "out")
+
+    assert (tmp_path / "out" / "sub").is_dir()
+    assert (tmp_path / "out" / "sub" / "c.txt").read_text() == "c"
+    asked = [command for command, _ in _sandbox(environment).commands.runs if command.startswith("test -")]
+    assert asked == ["test -d /data/sub", "test -d /data/sub/c.txt", "test -f /data/sub/c.txt"]
+
+
+async def test_exec_falls_back_to_the_task_workdir_and_merges_env(tmp_path: Path, server: Server) -> None:
+    """``exec`` defaults to the task's workdir, merges env, and returns stderr and the exit code."""
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK, task={"workdir": "/app"})
+    await environment.start(force_build=False)
+    commands = _sandbox(environment).commands
+    commands.results["false"] = execution(stderr=["nope"], exit_code=1)
+
+    result = await environment.exec("false", env={"EXTRA": "1"}, timeout_sec=5)
+    await environment.exec("pwd", cwd="/tmp")
+
+    assert (result.stderr, result.return_code) == ("nope", 1)
+    opts = dict(commands.runs)
+    assert opts["false"]["working_directory"] == "/app"
+    assert opts["false"]["envs"]["EXTRA"] == "1"
+    assert opts["pwd"]["working_directory"] == "/tmp"
+
+
+async def _started(tmp_path: Path, server: Server, image_uid: int | None) -> NemoOpenSandboxEnvironment:
+    """An environment holding a live mock sandbox whose image runs as ``image_uid``, without running ``start``."""
+    server.image_uid = image_uid
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    environment._sandbox = Sandbox(server, "sbx-test", None)
+    return environment
+
+
+async def test_root_commands_run_as_the_image_user_on_a_non_root_image(tmp_path: Path, server: Server) -> None:
+    """On a non-root image, root commands run as the image's user, and the image is probed only once."""
+    environment = await _started(tmp_path, server, image_uid=10001)
+    commands = _sandbox(environment).commands
 
     await environment.exec("tmux -V", user="root")
     await environment.exec("chmod 777 /logs/agent", user=0)
@@ -423,35 +471,42 @@ async def test_root_commands_run_as_the_image_user_on_a_non_root_image(tmp_path:
     assert commands.probes() == 1
 
 
-async def test_a_root_default_user_is_mapped_too(tmp_path: Path, server: _Server) -> None:
-    environment, commands = _started(tmp_path, image_uid=10001)
+async def test_a_root_default_user_is_mapped_too(tmp_path: Path, server: Server) -> None:
+    """A default user of ``root`` is mapped the same way as an explicit one."""
+    environment = await _started(tmp_path, server, image_uid=10001)
     environment.default_user = "root"
 
     await environment.exec("mkdir -p /installed-agent")
 
-    assert commands.uids_sent("mkdir -p /installed-agent") == [None]
+    assert _sandbox(environment).commands.uids_sent("mkdir -p /installed-agent") == [None]
 
 
-async def test_root_images_keep_uid_0(tmp_path: Path, server: _Server) -> None:
-    environment, commands = _started(tmp_path, image_uid=0)
+async def test_root_images_keep_uid_0(tmp_path: Path, server: Server) -> None:
+    """On a root image, root commands keep uid 0."""
+    environment = await _started(tmp_path, server, image_uid=0)
 
     await environment.exec("apt-get install -y curl", user="root")
 
-    assert commands.uids_sent("apt-get install -y curl") == [0]
+    assert _sandbox(environment).commands.uids_sent("apt-get install -y curl") == [0]
 
 
-async def test_non_root_requests_do_not_probe(tmp_path: Path, server: _Server) -> None:
-    environment, commands = _started(tmp_path, image_uid=10001)
+async def test_non_root_requests_do_not_probe(tmp_path: Path, server: Server) -> None:
+    """Commands that don't ask for root never trigger the image probe."""
+    environment = await _started(tmp_path, server, image_uid=10001)
+    commands = _sandbox(environment).commands
 
     await environment.exec("whoami")
     await environment.exec("whoami", user=1234)
+    await environment.exec("whoami", user="agent")
 
-    assert commands.uids_sent("whoami") == [None, 1234]
+    assert commands.uids_sent("whoami") == [None, 1234, None]
     assert commands.probes() == 0
 
 
-async def test_a_failed_probe_keeps_harbor_behavior(tmp_path: Path, server: _Server) -> None:
-    environment, commands = _started(tmp_path, image_uid=None)
+async def test_a_failed_probe_keeps_uid_0(tmp_path: Path, server: Server) -> None:
+    """When the image probe fails, root commands keep uid 0, and the probe isn't retried."""
+    environment = await _started(tmp_path, server, image_uid=None)
+    commands = _sandbox(environment).commands
 
     await environment.exec("tmux -V", user="root")
     await environment.exec("tmux -V", user="root")

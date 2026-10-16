@@ -2113,6 +2113,186 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/tasks/{name}/revisions/{revision}/image-builds:
+    post:
+      tags:
+      - Evals Plugin Task Image Build Routes
+      summary: Request Task Image Build
+      description: 'Build every container image a Harbor task revision needs.
+
+
+        Repeating the request while a build is running, or after it succeeded, returns
+        that build.
+
+        After a failed build, it starts the next attempt.'
+      operationId: request_task_image_build_apis_evals_v2_workspaces__workspace__tasks__name__revisions__revision__image_builds_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 255
+          pattern: ^[\w\-\.]+$
+          title: Name
+      - name: revision
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 255
+          pattern: ^[\w\-\.]+$
+          description: Revision digest or tag.
+          title: Revision
+        description: Revision digest or tag.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/ImageBuildRequest'
+              title: Request
+      responses:
+        '202':
+          description: The build started, or the one already running or done
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImageBuild'
+        '403':
+          description: The caller may not submit container image builds
+        '404':
+          description: Task or revision not found
+        '409':
+          description: The build's Job name is held by another Job
+        '422':
+          description: The task's images can't be built
+    get:
+      tags:
+      - Evals Plugin Task Image Build Routes
+      summary: List Task Image Builds
+      description: List the container image builds of a task revision.
+      operationId: list_task_image_builds_apis_evals_v2_workspaces__workspace__tasks__name__revisions__revision__image_builds_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 255
+          pattern: ^[\w\-\.]+$
+          title: Name
+      - name: revision
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 255
+          pattern: ^[\w\-\.]+$
+          description: Revision digest or tag.
+          title: Revision
+        description: Revision digest or tag.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
+      responses:
+        '200':
+          description: The revision's builds, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImageBuildsPage'
+        '404':
+          description: Task or revision not found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/tasks/{name}/revisions/{revision}/image-builds/{build_id}:
+    get:
+      tags:
+      - Evals Plugin Task Image Build Routes
+      summary: Get Task Image Build
+      description: Get one container image build of a task revision.
+      operationId: get_task_image_build_apis_evals_v2_workspaces__workspace__tasks__name__revisions__revision__image_builds__build_id__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 255
+          pattern: ^[\w\-\.]+$
+          title: Name
+      - name: revision
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 255
+          pattern: ^[\w\-\.]+$
+          description: Revision digest or tag.
+          title: Revision
+        description: Revision digest or tag.
+      - name: build_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Build Id
+      responses:
+        '200':
+          description: One build and the status of each image
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImageBuild'
+        '404':
+          description: Task, revision or build not found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/evals/v2/workspaces/{workspace}/tasks/{name}/tags/{tag}:
     put:
       tags:
@@ -3079,6 +3259,12 @@ components:
         name:
           title: Name
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -3521,6 +3707,66 @@ components:
       - scores
       title: AggregatedMetricResult
       description: Result of aggregating metric scores with full statistics.
+    BuildImage:
+      properties:
+        role:
+          type: string
+          title: Role
+          description: 'The container the image runs as, named as Harbor names it:
+            `main`, the agent''s container; a compose service''s own name; or `verifier`,
+            for a separate verifier.'
+        source:
+          type: string
+          enum:
+          - dockerfile
+          - prebuilt
+          title: Source
+          description: '`dockerfile` when built from the task archive, `prebuilt`
+            when the task names an image.'
+        context_path:
+          title: Context Path
+          description: Build context inside the task archive, for a `dockerfile` image.
+          type: string
+        dockerfile:
+          title: Dockerfile
+          description: Dockerfile path relative to `context_path`, for a `dockerfile`
+            image.
+          type: string
+        image:
+          title: Image
+          description: The image the task names, for a `prebuilt` image.
+          type: string
+        status:
+          type: string
+          enum:
+          - pending
+          - building
+          - ready
+          - failed
+          title: Status
+          default: pending
+        builder_image:
+          title: Builder Image
+          description: The Builder container image record.
+          type: string
+        build_job:
+          title: Build Job
+          description: The Builder job building this image.
+          type: string
+        image_ref:
+          title: Image Ref
+          description: '`<registry>/<repository>@<digest>` once the image is ready.'
+          type: string
+        error:
+          title: Error
+          type: string
+      additionalProperties: false
+      type: object
+      required:
+      - role
+      - source
+      title: BuildImage
+      description: One container image a task needs, and where its build stands.
     BundledMetricOutputSpec:
       properties:
         name:
@@ -3827,6 +4073,12 @@ components:
         name:
           title: Name
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -5179,6 +5431,100 @@ components:
       - count
       title: HistogramBin
       description: A single bin in a histogram.
+    ImageBuild:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: The build's attempt number for this revision.
+        task:
+          type: string
+          title: Task
+        revision:
+          type: string
+          title: Revision
+          description: Digest of the task revision being built.
+        status:
+          type: string
+          enum:
+          - pending
+          - running
+          - ready
+          - failed
+          title: Status
+        job:
+          type: string
+          title: Job
+        allowed_registries:
+          items:
+            type: string
+          type: array
+          title: Allowed Registries
+        images:
+          items:
+            $ref: '#/components/schemas/BuildImage'
+          type: array
+          title: Images
+        error:
+          title: Error
+          type: string
+        created_at:
+          title: Created At
+          type: string
+          format: date-time
+        updated_at:
+          title: Updated At
+          type: string
+          format: date-time
+      type: object
+      required:
+      - id
+      - task
+      - revision
+      - status
+      - job
+      - allowed_registries
+      - images
+      title: ImageBuild
+      description: An image build of one task revision.
+    ImageBuildRequest:
+      properties:
+        allowed_registries:
+          items:
+            type: string
+          type: array
+          title: Allowed Registries
+          description: Registry hosts a prebuilt image named by the task may be copied
+            from, e.g. `docker.io`. A prebuilt image from any other registry fails
+            the build.
+      additionalProperties: false
+      type: object
+      title: ImageBuildRequest
+      description: Options for an image build of one task revision.
+    ImageBuildsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/ImageBuild'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: ImageBuildsPage
     InferenceParams:
       properties:
         temperature:
@@ -6504,6 +6850,12 @@ components:
         name:
           title: Name
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
         description:
           title: Description
           type: string
