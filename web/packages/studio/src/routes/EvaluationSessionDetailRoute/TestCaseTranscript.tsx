@@ -2,14 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { formatDurationMs } from '@nemo/common/src/utils/date';
-import { type Span, SpanKind } from '@nemo/sdk/generated/platform/schema';
+import { type Span } from '@nemo/sdk/generated/platform/schema';
 import { useGetSpan } from '@nemo/sdk/generated/platform/spans';
 import { Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { SpanPayloadFormatToggle } from '@studio/components/IntakeDetail/IntakeComponents/SpanPayloadFormatToggle';
 import { SpanPayloadView } from '@studio/components/IntakeDetail/IntakeComponents/SpanPayloadView';
 import { useSpanPayloadFormat } from '@studio/components/IntakeDetail/IntakeComponents/useSpanPayloadFormat';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
-import { findReplySpan } from '@studio/routes/EvaluationSessionDetailRoute/findReplySpan';
+import {
+  findReplySpan,
+  findToolCallSpans,
+} from '@studio/routes/EvaluationSessionDetailRoute/transcriptSpans';
 import type { SessionTrajectory } from '@studio/util/intakeTelemetry';
 import { Wrench } from 'lucide-react';
 import { type FC, useCallback, useMemo } from 'react';
@@ -42,11 +45,13 @@ const AgentReply: FC<{ workspace: string; replySpanId: string | undefined }> = (
           Loading the reply…
         </Text>
       ) : (
-        <SpanPayloadView
-          value={replySpan?.output}
-          format={outputFormat.format}
-          emptyMessage="No reply was recorded for this test."
-        />
+        <div className="max-h-[360px] overflow-auto">
+          <SpanPayloadView
+            value={replySpan?.output}
+            format={outputFormat.format}
+            emptyMessage="No reply was recorded for this test."
+          />
+        </div>
       )}
     </Stack>
   );
@@ -102,7 +107,7 @@ export const TestCaseTranscript: FC<{
     [trajectories]
   );
   const replySpanId = useMemo(() => findReplySpan(spans)?.span_id, [spans]);
-  const toolSpans = useMemo(() => spans.filter((span) => span.kind === SpanKind.TOOL), [spans]);
+  const toolSpans = useMemo(() => findToolCallSpans(spans), [spans]);
 
   return (
     <Stack
