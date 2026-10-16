@@ -149,8 +149,11 @@ def add_agent_bundle(pod_spec: dict[str, Any], bundle: SandboxAgentBundle, image
     containers, init = _pod_containers(pod_spec)
     if AGENT_BUNDLE_CONTAINER in {c.get("name") for c in [*containers, *init]}:
         raise ValueError(f"the sandbox pod already has a container named {AGENT_BUNDLE_CONTAINER!r}")
+
+    # The installer runs under the sandbox's egress rules, like everything else in the pod.
     _egress_first(containers, init)
 
+    # main reads the agent from /installed-agent: reuse the template's volume there, or add an emptyDir.
     sandbox = containers[0]
     mounts: list[dict[str, Any]] = sandbox.setdefault("volumeMounts", [])
     installed_agent_mount: dict[str, Any] | None = next(
@@ -162,6 +165,7 @@ def add_agent_bundle(pod_spec: dict[str, Any], bundle: SandboxAgentBundle, image
         pod_spec.setdefault("volumes", []).append({"name": INSTALLED_AGENT_VOLUME, "emptyDir": {}})
     installed_agent_mount["readOnly"] = True
 
+    # The installer gets the same volume writable, and copies the agent into it.
     bundle_container: dict[str, Any] = {
         "name": AGENT_BUNDLE_CONTAINER,
         "image": bundle.image,
@@ -182,12 +186,15 @@ def agent_bundle_state(pod: Any) -> tuple[str | None, bool]:
     # Kubernetes hasn't reached it yet.
     if st is None or st.state is None:
         return None, False
+
     waiting, term = st.state.waiting, st.state.terminated
     # An image that can't be pulled never clears on its own.
     if waiting is not None and waiting.reason in FATAL_WAITING_REASONS:
         return f"{waiting.reason}: {waiting.message or ''}".strip(), False
+    # Still pulling or copying.
     if term is None:
         return None, False
+
     # A BatchSandbox pod never restarts its containers, so a non-zero exit is final.
     if term.exit_code != 0:
         return f"exited with code {term.exit_code} ({term.reason})", False

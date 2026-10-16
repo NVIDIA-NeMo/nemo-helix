@@ -130,11 +130,13 @@ data:
             template = batchsandbox["spec"]["template"]
             annotations = (template.get("metadata") or {}).get("annotations", {})
             pull_policy = self.image_pull_policy or "IfNotPresent"
+
             # pydantic's ValidationError is a ValueError, so the client gets a 400 with every problem listed.
             # The bundle goes first, so the agent is installed before any service starts.
             raw_bundle = annotations.get(AGENT_BUNDLE_POD_ANNOTATION)
             if raw_bundle is not None:
                 add_agent_bundle(template["spec"], SandboxAgentBundle.model_validate_json(raw_bundle), pull_policy)
+
             raw = annotations.get(POD_ANNOTATION)
             if raw is not None:
                 services = ComposeServices.model_validate_json(raw)
@@ -169,6 +171,7 @@ data:
             A pooled pod already exists, so there is no pod spec to add services to.
             """
             annotations = kwargs.get("annotations") or {}
+
             if POD_ANNOTATION in annotations:
                 raise ValueError(f"extensions[{EXTENSION_KEY!r}] can't be combined with poolRef")
             if AGENT_BUNDLE_POD_ANNOTATION in annotations:
@@ -181,8 +184,11 @@ data:
             annotations = (pods[0].metadata.annotations or {}) if pods else {}
             raw_services = annotations.get(POD_ANNOTATION)
             raw_bundle = annotations.get(AGENT_BUNDLE_POD_ANNOTATION)
+
+            # A sandbox the extension added nothing to isn't one these routes know about.
             if raw_services is None and raw_bundle is None:
                 raise _error(404, "NOT_FOUND", f"sandbox {sandbox_id} has no pod with compose services or an agent bundle")
+
             return (
                 pods[0],
                 ComposeServices.model_validate_json(raw_services) if raw_services is not None else None,
@@ -198,6 +204,8 @@ data:
             """
             pod, services, bundle = self.find_pod(sandbox_id)
             not_ready: list[str] = []
+
+            # The bundle's init container runs before any service, so it's checked first.
             if bundle is not None:
                 bundle_failure, installed = agent_bundle_state(pod)
                 if bundle_failure is not None:
@@ -207,6 +215,7 @@ data:
                     }
                 if not installed:
                     not_ready.append(AGENT_BUNDLE_CONTAINER)
+
             if services is not None:
                 failure, services_not_ready = service_states(pod, services)
                 not_ready.extend(services_not_ready)
@@ -513,8 +522,11 @@ data:
         containers, init = _pod_containers(pod_spec)
         if AGENT_BUNDLE_CONTAINER in {c.get("name") for c in [*containers, *init]}:
             raise ValueError(f"the sandbox pod already has a container named {AGENT_BUNDLE_CONTAINER!r}")
+
+        # The installer runs under the sandbox's egress rules, like everything else in the pod.
         _egress_first(containers, init)
 
+        # main reads the agent from /installed-agent: reuse the template's volume there, or add an emptyDir.
         sandbox = containers[0]
         mounts: list[dict[str, Any]] = sandbox.setdefault("volumeMounts", [])
         installed_agent_mount: dict[str, Any] | None = next(
@@ -526,6 +538,7 @@ data:
             pod_spec.setdefault("volumes", []).append({"name": INSTALLED_AGENT_VOLUME, "emptyDir": {}})
         installed_agent_mount["readOnly"] = True
 
+        # The installer gets the same volume writable, and copies the agent into it.
         bundle_container: dict[str, Any] = {
             "name": AGENT_BUNDLE_CONTAINER,
             "image": bundle.image,
@@ -546,12 +559,15 @@ data:
         # Kubernetes hasn't reached it yet.
         if st is None or st.state is None:
             return None, False
+
         waiting, term = st.state.waiting, st.state.terminated
         # An image that can't be pulled never clears on its own.
         if waiting is not None and waiting.reason in FATAL_WAITING_REASONS:
             return f"{waiting.reason}: {waiting.message or ''}".strip(), False
+        # Still pulling or copying.
         if term is None:
             return None, False
+
         # A BatchSandbox pod never restarts its containers, so a non-zero exit is final.
         if term.exit_code != 0:
             return f"exited with code {term.exit_code} ({term.reason})", False

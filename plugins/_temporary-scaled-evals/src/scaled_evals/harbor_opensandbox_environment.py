@@ -506,6 +506,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         ``PATH`` set at create would replace it. The runtime always gives a container a ``PATH``,
         so failing to read one means the sandbox can't run commands, and the trial fails here.
         """
+        # Read the image's PATH as the default user, the same user Harbor's agents run as.
         path_probe = await self.exec('printf %s "$PATH"', cwd="/", timeout_sec=AGENT_BUNDLE_EXEC_TIMEOUT_SEC)
         entries = [entry for entry in (path_probe.stdout or "").split(":") if entry]
         if path_probe.return_code != 0 or not entries:
@@ -513,9 +514,13 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 f"Agent bundle setup failed: could not read the sandbox's PATH (exit {path_probe.return_code}): "
                 f"{(path_probe.stderr or '').strip()[-2000:]}"
             )
+
+        # The bundle's directory goes first, so it wins over any copy of the agent the image already has.
+        # Every later exec, including Harbor's install check and the agent's run, merges in _persistent_env.
         bundle_dir = bundle.executable.rsplit("/", 1)[0]
         self._persistent_env["PATH"] = ":".join([bundle_dir, *(entry for entry in entries if entry != bundle_dir)])
 
+        # Run the agent once, so a bundle built for another platform fails here with a clear cause.
         version_check = await self.exec(
             f"{shlex.quote(bundle.executable)} --version", cwd="/", timeout_sec=AGENT_BUNDLE_EXEC_TIMEOUT_SEC
         )
@@ -547,6 +552,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 f"GET /v1/nemo-ext/health returned {response.status_code}. See "
                 "k8s/helm/examples/opensandbox/README.md, 'Compose services'."
             )
+
+        # An extension from before agent bundles answers the health check too, but would drop the bundle.
         if self._agent_bundle is not None and AGENT_BUNDLE_FEATURE not in (response.json().get("features") or []):
             raise RuntimeError(
                 "The OpenSandbox server's NeMo compose services extension doesn't support agent bundles; upgrade it to "

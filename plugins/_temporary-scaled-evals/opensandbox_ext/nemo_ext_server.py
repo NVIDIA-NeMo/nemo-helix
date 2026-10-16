@@ -95,11 +95,13 @@ class NemoComposeProvider(BatchSandboxProvider):
         template = batchsandbox["spec"]["template"]
         annotations = (template.get("metadata") or {}).get("annotations", {})
         pull_policy = self.image_pull_policy or "IfNotPresent"
+
         # pydantic's ValidationError is a ValueError, so the client gets a 400 with every problem listed.
         # The bundle goes first, so the agent is installed before any service starts.
         raw_bundle = annotations.get(AGENT_BUNDLE_POD_ANNOTATION)
         if raw_bundle is not None:
             add_agent_bundle(template["spec"], SandboxAgentBundle.model_validate_json(raw_bundle), pull_policy)
+
         raw = annotations.get(POD_ANNOTATION)
         if raw is not None:
             services = ComposeServices.model_validate_json(raw)
@@ -134,6 +136,7 @@ class NemoComposeProvider(BatchSandboxProvider):
         A pooled pod already exists, so there is no pod spec to add services to.
         """
         annotations = kwargs.get("annotations") or {}
+
         if POD_ANNOTATION in annotations:
             raise ValueError(f"extensions[{EXTENSION_KEY!r}] can't be combined with poolRef")
         if AGENT_BUNDLE_POD_ANNOTATION in annotations:
@@ -146,8 +149,11 @@ class NemoComposeProvider(BatchSandboxProvider):
         annotations = (pods[0].metadata.annotations or {}) if pods else {}
         raw_services = annotations.get(POD_ANNOTATION)
         raw_bundle = annotations.get(AGENT_BUNDLE_POD_ANNOTATION)
+
+        # A sandbox the extension added nothing to isn't one these routes know about.
         if raw_services is None and raw_bundle is None:
             raise _error(404, "NOT_FOUND", f"sandbox {sandbox_id} has no pod with compose services or an agent bundle")
+
         return (
             pods[0],
             ComposeServices.model_validate_json(raw_services) if raw_services is not None else None,
@@ -163,6 +169,8 @@ class NemoComposeProvider(BatchSandboxProvider):
         """
         pod, services, bundle = self.find_pod(sandbox_id)
         not_ready: list[str] = []
+
+        # The bundle's init container runs before any service, so it's checked first.
         if bundle is not None:
             bundle_failure, installed = agent_bundle_state(pod)
             if bundle_failure is not None:
@@ -172,6 +180,7 @@ class NemoComposeProvider(BatchSandboxProvider):
                 }
             if not installed:
                 not_ready.append(AGENT_BUNDLE_CONTAINER)
+
         if services is not None:
             failure, services_not_ready = service_states(pod, services)
             not_ready.extend(services_not_ready)

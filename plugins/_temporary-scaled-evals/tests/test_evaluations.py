@@ -24,7 +24,7 @@ from scaled_evals.api.db import Database, get_conn, get_stream_database_factory
 from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
 from scaled_evals.api.routers import evaluations as evaluations_router
 from scaled_evals.api.schemas.common import decode_cursor
-from scaled_evals.api.schemas.evaluations import CreateEvaluationRequest
+from scaled_evals.api.schemas.evaluations import CreateEvaluationRequest, Framework
 from scaled_evals.api.settings import settings
 from scaled_evals.dispatch import (
     LaunchHandle,
@@ -326,7 +326,7 @@ def test_create_accepts_agent_bundle_on_bundle_runtimes(runtime: str) -> None:
 
 
 @pytest.mark.parametrize(("framework", "runtime"), [("harbor", "docker"), ("nemo_gym", "harbor_opensandbox")])
-def test_create_rejects_agent_bundle_elsewhere(framework: str, runtime: str) -> None:
+def test_create_rejects_agent_bundle_elsewhere(framework: Framework, runtime: str) -> None:
     with pytest.raises(ValueError, match="agent_bundle currently requires"):
         CreateEvaluationRequest(
             name="x",

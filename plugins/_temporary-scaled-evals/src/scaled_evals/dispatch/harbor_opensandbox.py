@@ -455,6 +455,7 @@ def environment_agent_bundle(bundle: Mapping[str, Any]) -> SandboxAgentBundle:
         installer=settings.agent_bundle_installer_path,
         entrypoint=str(bundle.get("entrypoint") or ""),
     )
+
     # The bundle runs in the task's pod, so like service images it gets the task image registry policy.
     try:
         validate_task_image_request(sandbox_bundle.image)
@@ -470,6 +471,8 @@ def _check_agent_version_pins(config: Mapping[str, Any], bundle: Mapping[str, An
     they were given, so a different pin would ignore the bundle and attempt the root install.
     """
     agent_name, agent_version = bundle.get("agent_name"), str(bundle.get("agent_version") or "")
+
+    # Only the bundle's own agent matters; an unpinned agent accepts whatever version it finds.
     for agent in config.get("agents") or []:
         if not isinstance(agent, Mapping) or agent.get("name") != agent_name:
             continue
@@ -548,6 +551,7 @@ def render_harbor_config(
         config["environment"]["kwargs"]["compose_services"] = compose_services.model_dump(
             mode="json", by_alias=True, exclude_defaults=True
         )
+    # The environment installs the bundle into the agent's sandbox; Harbor then finds the agent and skips its install.
     if spec.agent_bundle:
         _check_agent_version_pins(config, spec.agent_bundle)
         config["environment"]["kwargs"]["agent_bundle"] = environment_agent_bundle(spec.agent_bundle).model_dump(
