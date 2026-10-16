@@ -32,8 +32,11 @@ class TestAsyncPollUntilTerminal:
     async def test_logs_each_non_terminal_and_terminal_status_as_json(
         self,
         caplog: pytest.LogCaptureFixture,
+        mocker: MockerFixture,
     ) -> None:
         """Every poll attempt should emit a JSON info log with the current status."""
+        mocker.patch("nhx_evals_sdk.execution.job_poll.monotonic", return_value=0.0)
+
         with caplog.at_level(logging.INFO, logger="nhx_evals_sdk.execution.job_poll"):
             result = await async_poll_until_terminal(
                 _status_getter(iter(["running", "active", "completed"])),
