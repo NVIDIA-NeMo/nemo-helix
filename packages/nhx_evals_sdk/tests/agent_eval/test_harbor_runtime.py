@@ -1939,6 +1939,7 @@ def _stub_harbor(
         "harbor.models.trial.config",
         AgentConfig=_anything,
         ArtifactConfig=_anything,
+        EnvironmentConfig=_anything,
         VerifierConfig=_verifier_config,
     )
 
@@ -2149,7 +2150,9 @@ _STAMP_COVERED_HARBOR_FIELDS = {
 # Left at Harbor's defaults by _build_native_job, so two SDK-built configs can never
 # disagree on them. (A dir written by the Harbor CLI could, but it carries no SDK cache
 # stamp, so it is stale and gets discarded before Harbor ever sees it.)
-_SDK_NEVER_SETS = {"install_only", "environment", "metrics", "tasks", "extra_instruction_paths"}
+_SDK_NEVER_SETS = {"install_only", "metrics", "tasks", "extra_instruction_paths"}
+# A fixed bundled Compose override, independent of SDK runtime configuration.
+_SDK_CONSTANT_FIELDS = {"environment"}
 # Compared by Harbor, deliberately *not* keyed by the SDK stamp. Harbor asks "can I
 # resume this directory?"; the stamp asks "did these inputs produce these results?".
 # Where the answers diverge, _build_native_job absorbs Harbor's refusal.
@@ -2217,7 +2220,11 @@ def test_every_harbor_job_config_field_is_classified_against_the_sdk_stamp() -> 
         )
 
     classified = (
-        set(_HARBOR_EQ_IGNORED_FIELDS) | _SDK_NEVER_SETS | set(_STAMP_COVERED_HARBOR_FIELDS) | set(_KNOWINGLY_LOOSER)
+        set(_HARBOR_EQ_IGNORED_FIELDS)
+        | _SDK_NEVER_SETS
+        | _SDK_CONSTANT_FIELDS
+        | set(_STAMP_COVERED_HARBOR_FIELDS)
+        | set(_KNOWINGLY_LOOSER)
     )
     actual = set(job_config.JobConfig.model_fields)
     assert not actual - classified, (
@@ -3400,6 +3407,35 @@ def test_build_native_job_requires_templates_for_exactly_the_env_secrets(tmp_pat
     config = HarborRuntimeConfig(jobs_dir=tmp_path, env_secrets={"OPENAI_API_KEY": _WS_REF})
     with pytest.raises(ValueError, match="don't match env_secrets keys"):
         _build_native_job(config, tmp_path / "dataset", None, job_name="j", env_templates={})
+
+
+@pytest.mark.asyncio
+async def test_harbor_task_containers_have_a_docker_host_gateway_alias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import harbor.job
+    import yaml
+
+    created: list[Any] = []
+
+    class FakeJob:
+        @classmethod
+        async def create(cls, job_config: Any) -> "FakeJob":
+            created.append(job_config)
+            return cls()
+
+        async def run(self) -> None:
+            return None
+
+    monkeypatch.setattr(harbor.job, "Job", FakeJob)
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs")
+    _, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="j", env_templates={})
+    await run_job()
+
+    overrides = created[0].environment.extra_docker_compose
+    assert len(overrides) == 1
+    compose = yaml.safe_load(overrides[0].read_text())
+    assert compose == {"services": {"main": {"extra_hosts": {"host.docker.internal": "host-gateway"}}}}
 
 
 @pytest.mark.asyncio
