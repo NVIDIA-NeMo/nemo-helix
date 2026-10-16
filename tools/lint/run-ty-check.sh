@@ -44,4 +44,4 @@ for rule in "${ci_ignored_rules[@]}"; do
 	ignore_args+=(--ignore "$rule")
 done
 
-uv run --frozen --group typecheck ty check --exit-zero-on-warning "${ignore_args[@]}" "${filtered_files[@]}"
+uv run --frozen --group insights --group typecheck --group scaled-evals ty check --exit-zero-on-warning "${ignore_args[@]}" "${filtered_files[@]}"
