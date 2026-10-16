@@ -103,7 +103,7 @@ def test_compose_config_enables_relay_via_current_signature(tmp_path: Path) -> N
     ``_relay_config``) rather than executing a harness, so it needs only the Fabric wheels — no codex
     CLI, relay gateway, or model. The dropped ``config=`` keyword would raise a ``TypeError`` here.
     """
-    from nemo_fabric import (  # ty: ignore[unresolved-import]
+    from nemo_fabric import (
         FabricConfig,
         RelayConfig,
         RelayObservabilityConfig,
@@ -150,7 +150,7 @@ def test_compose_config_is_a_complete_config_fabric_accepts(tmp_path: Path) -> N
     the runtime's composed config carries the evaluator-owned settings itself and round-trips through
     Fabric's own validator, which is the whole contract now.
     """
-    from nemo_fabric import Fabric, FabricConfig  # ty: ignore[unresolved-import]
+    from nemo_fabric import Fabric, FabricConfig
 
     runtime = FabricAgentRuntime(config=_CODEX_CONFIG, model="openai/gpt-5.4", capture_trajectory=False)
     evidence_dir = tmp_path / "evidence"
@@ -178,7 +178,7 @@ def test_runtime_adapter_id_resolves_against_registry() -> None:
     only the installed adapter package. A retired ``nvidia.fabric.codex.cli`` id would raise a
     ``FabricConfigError`` instead of resolving.
     """
-    from nemo_fabric import Fabric, FabricConfig  # ty: ignore[unresolved-import]
+    from nemo_fabric import Fabric, FabricConfig
 
     plan = Fabric().plan(FabricConfig.from_mapping(_CODEX_CONFIG))
 
@@ -198,7 +198,7 @@ def test_hermes_routes_skills_natively_per_the_real_planner() -> None:
     Drives our own ``resolve_skill_mode`` over a real ``RunPlan`` so the assertion covers the code
     the runtime actually executes, not just Fabric's output shape.
     """
-    from nemo_fabric import Fabric, FabricConfig  # ty: ignore[unresolved-import]
+    from nemo_fabric import Fabric, FabricConfig
     from nhx_evals_sdk.agent_eval.runtimes.fabric.skills import SKILL_MODE_NATIVE, resolve_skill_mode
 
     # A skill path must be attached for the planner to emit a skills route at all — the sentinel need
@@ -225,7 +225,7 @@ def test_codex_also_routes_skills_natively_so_the_workspace_branch_is_a_fallback
     and would catch a revert, which would change where bundles are staged and whether the workspace
     needs post-run cleanup.
     """
-    from nemo_fabric import Fabric, FabricConfig  # ty: ignore[unresolved-import]
+    from nemo_fabric import Fabric, FabricConfig
     from nhx_evals_sdk.agent_eval.runtimes.fabric.skills import SKILL_MODE_NATIVE, resolve_skill_mode
 
     probe = FabricConfig.from_mapping(_CODEX_CONFIG)
@@ -254,7 +254,7 @@ _CONTAINER_CONFIG = {
 
 
 def _composed_container_config() -> Any:
-    from nemo_fabric import FabricConfig  # ty: ignore[unresolved-import]
+    from nemo_fabric import FabricConfig
 
     # A real provider, never used: composing the config touches no sandbox.
     execution = crt.SandboxExecution(
@@ -323,7 +323,7 @@ def test_sandbox_driver_calls_an_api_installed_fabric_still_has() -> None:
     """
     # Importing the driver is itself the check: its module-level ``from nemo_fabric import Fabric,
     # FabricConfig`` is the line a rename retires, and nothing else imports this module.
-    from nemo_fabric import Fabric, RunResult  # ty: ignore[unresolved-import]
+    from nemo_fabric import Fabric, RunResult
     from nhx_evals_sdk.agent_eval.runtimes.fabric import sandbox_driver
 
     assert callable(sandbox_driver.main)
@@ -355,7 +355,7 @@ def test_otlp_endpoint_lands_on_relays_declared_opentelemetry_field() -> None:
     and because the whole block is optional, dropping it entirely also leaves a trial that runs to
     success with an ATIF trajectory and no OTLP at all.
     """
-    from nemo_fabric import RelayOpenTelemetryConfig  # ty: ignore[unresolved-import]
+    from nemo_fabric import RelayOpenTelemetryConfig
 
     observability = _common.relay_observability(
         relay_dir="/out/relay",

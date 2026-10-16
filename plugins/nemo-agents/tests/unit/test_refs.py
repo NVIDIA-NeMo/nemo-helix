@@ -89,13 +89,13 @@ class TestPydanticIntegration:
         # ``ty`` doesn't see through the StrRef Pydantic core schema that
         # accepts a bare ``str`` and wraps it in the subclass; the runtime
         # assertion below is the actual behaviour we care about.
-        assert _M(target="http://localhost:8080").target == "http://localhost:8080"  # ty: ignore[invalid-argument-type]
+        assert _M(target="http://localhost:8080").target == "http://localhost:8080"
 
     def test_union_field_accepts_bare_name(self) -> None:
         class _M(BaseModel):
             target: AgentTarget | None = None
 
-        assert _M(target="calculator").target == "calculator"  # ty: ignore[invalid-argument-type]
+        assert _M(target="calculator").target == "calculator"
 
     def test_union_field_accepts_none(self) -> None:
         class _M(BaseModel):

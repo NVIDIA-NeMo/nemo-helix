@@ -12,6 +12,7 @@ from typing import TypeVar, cast
 
 import httpx
 from nemo_evals.jobs.secret_env import JobSecretResolver
+from nemo_helix_plugin.client.adapter import AsyncHelixClient
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nhx_evals_sdk import Evaluator
 from nhx_evals_sdk.execution.backends.local.backend import LocalBackend
@@ -24,6 +25,17 @@ type _SyncRequestHook = Callable[[httpx.Request], None]
 type _SyncResponseHook = Callable[[httpx.Response], None]
 type _AsyncRequestHook = Callable[[httpx.Request], Awaitable[None]]
 type _AsyncResponseHook = Callable[[httpx.Response], Awaitable[None]]
+
+
+def require_platform_client(client: AsyncHelixClient | None, purpose: str) -> AsyncHelixClient:
+    """Return ``client``, or raise if a step that needs the platform was given none.
+
+    Job hooks receive the client as optional so they can pass a job context's handle straight
+    through; *purpose* names the step in the error, e.g. ``"resolving a registered agent"``.
+    """
+    if client is None:
+        raise ValueError(f"{purpose} requires a platform client")
+    return client
 
 
 def job_evaluator(secret_refs: Iterable[tuple[str, str]]) -> Evaluator:

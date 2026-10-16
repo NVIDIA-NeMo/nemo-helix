@@ -30,7 +30,7 @@ from nemo_evals.jobs.evaluate import (
 )
 from nemo_evals.jobs.metric_resolution import HelixMetricModelResolver
 from nemo_evals.jobs.secret_env import build_task_environment
-from nemo_evals.jobs.utils import job_evaluator, run_with_isolated_async_client
+from nemo_evals.jobs.utils import job_evaluator, require_platform_client, run_with_isolated_async_client
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.job import NemoJob
@@ -341,18 +341,24 @@ async def _resolve_retrieval(
     async_client: AsyncHelixClient | None,
 ) -> Retrieval:
     if isinstance(value, ModelRef):
-        models_client = client_from_platform(async_client, AsyncModelsClient)
+        models_client = client_from_platform(
+            require_platform_client(async_client, "resolving a model reference"), AsyncModelsClient
+        )
         return Retrieval(embeddings=await HelixMetricModelResolver(models_client).resolve_model(value))
     if isinstance(value, Model):
         return Retrieval(embeddings=value)
     embeddings = value.embeddings
     reranker = value.reranker
     if isinstance(embeddings, ModelRef):
-        models_client = client_from_platform(async_client, AsyncModelsClient)
+        models_client = client_from_platform(
+            require_platform_client(async_client, "resolving a model reference"), AsyncModelsClient
+        )
         embeddings = await HelixMetricModelResolver(models_client).resolve_model(embeddings)
     if isinstance(reranker, ModelRef):
         reranker_ref = reranker.root
-        models_client = client_from_platform(async_client, AsyncModelsClient)
+        models_client = client_from_platform(
+            require_platform_client(async_client, "resolving a model reference"), AsyncModelsClient
+        )
         reranker = await HelixMetricModelResolver(models_client).resolve_model(reranker)
         try:
             async with asyncio.timeout(15.0):

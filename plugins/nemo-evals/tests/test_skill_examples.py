@@ -175,7 +175,10 @@ def test_skill_python_examples_import_and_build_agent_spec() -> None:
     assert not isinstance(spec.tasks, TasksetRef)
     assert len(spec.tasks) == 1
     assert isinstance(spec.target, FabricRunnerTarget)
-    assert spec.target.config["harness"]["adapter_id"] == "nvidia.fabric.codex"
+    assert spec.target.config is not None
+    harness = spec.target.config["harness"]
+    assert isinstance(harness, dict)
+    assert harness["adapter_id"] == "nvidia.fabric.codex"
     assert spec.target.model is None
 
     reference = (_repo_root() / "skills/nemo-evals-plugin/references/agent-evaluation.md").read_text(encoding="utf-8")

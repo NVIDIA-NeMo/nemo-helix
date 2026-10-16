@@ -257,13 +257,13 @@ async def test_puller_server_prerequisite_chain(k8s_registry: ExecutorRegistry) 
     puller_cfg = DeploymentConfig(
         name="puller-cfg",
         workspace="itest",
-        restart_policy="Never",  # ty: ignore[unknown-argument]  # pyright: ignore[reportCallIssue]
+        restart_policy="Never",  # pyright: ignore[reportCallIssue]
         containers=[Container(name="puller", image=ALPINE_IMAGE, command=["sh", "-c"], args=["echo pulled"])],
     )
     server_cfg = DeploymentConfig(
         name="server-cfg",
         workspace="itest",
-        restart_policy="Always",  # ty: ignore[unknown-argument]  # pyright: ignore[reportCallIssue]
+        restart_policy="Always",  # pyright: ignore[reportCallIssue]
         containers=[Container(name="server", image=NGINX_IMAGE, ports=[ContainerPort(name="http", containerPort=80)])],
     )
 

@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from typing import Any
+
 import pytest
 from nhx_evals_sdk.agent_eval.runtimes.callable_runtime import (
     CallableAgentTaskRunner,
@@ -48,8 +50,10 @@ async def test_callable_runtime_captures_exception_as_failed_trial_but_rejects_b
     assert failed.output is None
     assert "RuntimeError: nope" in failed.metadata["error"]
 
-    async def bad_return_fn(task: AgentEvalTask) -> str:
-        return 123  # type: ignore[return-value]  # invalid agent output is a programming error, not a failed trial
+    # Invalid agent output is a programming error, not a failed trial. ``Any`` lets the test
+    # break the callable's contract on purpose.
+    async def bad_return_fn(task: AgentEvalTask) -> Any:
+        return 123
 
     with pytest.raises(TypeError, match="TrialDraft, AgentOutput, or str"):
         await CallableAgentTaskRunner(bad_return_fn).run_tasks([_task("bad")])

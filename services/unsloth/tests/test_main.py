@@ -117,7 +117,7 @@ class TestEntrypointCachePaths:
         monkeypatch.delenv("UNSLOTH_COMPILE_LOCATION", raising=False)
         monkeypatch.delenv("HF_HOME", raising=False)
 
-        captured: dict[str, str | None] = {}
+        captured: dict[str, object] = {}
 
         def _stub_train_sft(*_args: object, **kwargs: object) -> dict[str, object]:
             captured.update(

@@ -115,7 +115,7 @@ class _StubGymHostHandler(BaseHTTPRequestHandler):
     peak_in_flight = 0
     _lock = threading.Lock()
 
-    def log_message(self, *args: Any) -> None:  # keep pytest output readable
+    def log_message(self, format: str, *args: Any) -> None:  # keep pytest output readable
         return
 
     def do_GET(self) -> None:

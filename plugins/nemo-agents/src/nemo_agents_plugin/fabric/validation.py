@@ -15,7 +15,7 @@ from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.fabric.translator import FabricTranslationError, translate_agent_config
 
 # CI type-checks this plugin via ty extra-paths without installing nemo-agents deps.
-from nemo_fabric import Fabric, FabricConfig, FabricConfigError  # ty: ignore[unresolved-import]
+from nemo_fabric import Fabric, FabricConfig, FabricConfigError
 from pydantic import ValidationError
 
 FABRIC_VALIDATION_TIMEOUT_SECONDS = 60.0

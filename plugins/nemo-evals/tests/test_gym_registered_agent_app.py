@@ -79,7 +79,7 @@ def app():
     return module
 
 
-_REGISTERED = {
+_REGISTERED: dict[str, Any] = {
     "metadata": {"name": "calculator-agent"},
     "harness": {"adapter_id": "nvidia.fabric.langchain.deepagents", "settings": {"x": 1}},
     "instructions": {"system": {"content": "You add numbers.", "mode": "replace"}},
