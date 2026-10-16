@@ -16,10 +16,13 @@ describe('getTestCaseVerdict', () => {
     ).toBe('failed');
   });
 
-  it('fails a score above 1 rather than guessing the scale', () => {
-    expect(getTestCaseVerdict({ status: 'success', evaluator_scores: { judge: 5 } })).toBe(
-      'failed'
-    );
+  it('reads scores above 1 as percentages', () => {
+    expect(
+      getTestCaseVerdict({ status: 'success', evaluator_scores: { check: 1, judge: 100 } })
+    ).toBe('passed');
+    expect(
+      getTestCaseVerdict({ status: 'success', evaluator_scores: { check: 1, judge: 50 } })
+    ).toBe('failed');
   });
 
   it('reports an error when the run errored', () => {

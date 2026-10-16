@@ -207,7 +207,7 @@ export const EvaluationSessionsDataView: FC<EvaluationSessionsDataViewProps> = (
         id: `score-${index}`,
         header: snakeCaseToTitleCase(name),
         enableSorting: false,
-        size: 130,
+        size: 210,
         meta: { alignment: 'right' },
         cell: ({ row }) => {
           const value = row.original.evaluator_scores?.[name];

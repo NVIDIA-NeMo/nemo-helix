@@ -1,15 +1,22 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { snakeCaseToTitleCase } from '@nemo/common/src/utils/formatters';
+import { formatEvaluatorScore, snakeCaseToTitleCase } from '@nemo/common/src/utils/formatters';
 import type { EvaluationSessionResponse } from '@nemo/sdk/generated/platform/schema';
-import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { MetricScoreChip } from '@studio/components/evaluation/MetricScoreChip';
-import { getTestCaseVerdict } from '@studio/components/evaluation/testCaseVerdict';
+import { Badge, Flex, Stack, Text } from '@nvidia/foundations-react-core';
+import { getTestCaseVerdict, normalizeScore } from '@studio/components/evaluation/testCaseVerdict';
 import { TestCaseVerdictBadge } from '@studio/components/evaluation/TestCaseVerdictBadge';
-import { type FC } from 'react';
+import { scoreColor } from '@studio/components/evaluation/utils';
+import { type FC, type ReactNode } from 'react';
 
-const FAILED_TO_SCORE = 'failed';
+const SummaryItem: FC<{ label: string; children: ReactNode }> = ({ label, children }) => (
+  <Stack gap="density-xs" className="min-w-0">
+    <Text kind="body/regular/sm" className="truncate text-secondary">
+      {label}
+    </Text>
+    {children}
+  </Stack>
+);
 
 export const TestCaseResultSummary: FC<{ run: EvaluationSessionResponse }> = ({ run }) => {
   const scores = Object.entries(run.evaluator_scores ?? {});
@@ -23,17 +30,22 @@ export const TestCaseResultSummary: FC<{ run: EvaluationSessionResponse }> = ({ 
       className="flex-wrap rounded-sm border border-base bg-surface-raised p-density-lg"
       data-testid="test-case-result-summary"
     >
-      <Stack gap="density-xs">
-        <Text kind="body/regular/sm" className="text-secondary">
-          Result
-        </Text>
+      <SummaryItem label="Result">
         <TestCaseVerdictBadge verdict={getTestCaseVerdict(run)} />
-      </Stack>
+      </SummaryItem>
       {scores.map(([name, score]) => (
-        <MetricScoreChip key={name} label={snakeCaseToTitleCase(name)} value={score} />
+        <SummaryItem key={name} label={snakeCaseToTitleCase(name)}>
+          <Badge kind="solid" color={scoreColor(score == null ? score : normalizeScore(score))}>
+            {formatEvaluatorScore(score)}
+          </Badge>
+        </SummaryItem>
       ))}
       {unscoredFailures.map((name) => (
-        <MetricScoreChip key={name} label={snakeCaseToTitleCase(name)} value={FAILED_TO_SCORE} />
+        <SummaryItem key={name} label={snakeCaseToTitleCase(name)}>
+          <Badge kind="outline" color="red">
+            Failed
+          </Badge>
+        </SummaryItem>
       ))}
     </Flex>
   );
