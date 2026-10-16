@@ -203,6 +203,12 @@ The embedding uplift recipe was validated on the full mined set; `--max-train-ro
 `--max-eval-queries` subsample for quicker local runs, but then the uplift floor and
 `warmup_steps` no longer apply.
 
+The public Kind Gym CI job also runs
+`services/rl/tests/test_gym_workspace_kubernetes_integration.py`: a restrictive PVC root
+reproduces the original `PermissionError`, then workspace preparation must allow real wheel
+installation as both the training UID and a different sandbox UID. This CPU regression check
+does not require GPUs or OpenSandbox.
+
 **Environment variables for customizer tests:**
 
 | Variable | Description | Default |
