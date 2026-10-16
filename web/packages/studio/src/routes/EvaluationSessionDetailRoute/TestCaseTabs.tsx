@@ -53,22 +53,21 @@ const AgentReply: FC<{ workspace: string; replySpanId: string | undefined }> = (
           Loading the reply…
         </Text>
       ) : (
-        <div className="max-h-[360px] overflow-auto">
-          <SpanPayloadView
-            value={replySpan?.output}
-            format={outputFormat.format}
-            emptyMessage="No reply was recorded for this test."
-          />
-        </div>
+        <SpanPayloadView
+          value={replySpan?.output}
+          format={outputFormat.format}
+          emptyMessage="No reply was recorded for this test."
+        />
       )}
     </Stack>
   );
 };
 
-const ToolCalls: FC<{ toolSpans: readonly Span[]; openSpan: (span: Span) => void }> = ({
-  toolSpans,
-  openSpan,
-}) => {
+const ToolCalls: FC<{
+  toolSpans: readonly Span[];
+  openSpan: (span: Span) => void;
+  selectedSpanId: string | null;
+}> = ({ toolSpans, openSpan, selectedSpanId }) => {
   if (toolSpans.length === 0) {
     return (
       <Text kind="body/regular/sm" className="text-secondary">
@@ -77,9 +76,15 @@ const ToolCalls: FC<{ toolSpans: readonly Span[]; openSpan: (span: Span) => void
     );
   }
   return (
-    <Flex gap="density-sm" className="flex-wrap">
+    <Flex align="center" gap="density-sm" className="flex-wrap">
+      <Text kind="label/semibold/md">Tool calls ({toolSpans.length})</Text>
       {toolSpans.map((span) => (
-        <Button key={span.span_id} kind="secondary" size="small" onClick={() => openSpan(span)}>
+        <Button
+          key={span.span_id}
+          kind={span.span_id === selectedSpanId ? 'primary' : 'secondary'}
+          size="small"
+          onClick={() => openSpan(span)}
+        >
           <Wrench size={14} aria-hidden />
           {span.tool_name ?? span.name ?? 'tool'}
           {spanDuration(span) ? <span className="text-secondary">{spanDuration(span)}</span> : null}
@@ -89,11 +94,9 @@ const ToolCalls: FC<{ toolSpans: readonly Span[]; openSpan: (span: Span) => void
   );
 };
 
-type TestCaseTab = 'reply' | 'tools' | 'trace';
+type TestCaseTab = 'reply' | 'trace';
 
-const PANEL_CLASS = 'rounded-sm border border-base bg-surface-raised p-density-lg';
-
-/** The agent's reply, the tools it called, and the full trace, one tab each. */
+/** The agent's reply, and the full trace with shortcuts to each tool call. */
 export const TestCaseTabs: FC<{
   workspace: string;
   trajectories: readonly SessionTrajectory[];
@@ -120,7 +123,6 @@ export const TestCaseTabs: FC<{
         next.set(QUERY_PARAMETERS.spanId, span.span_id);
         return next;
       });
-      setTab('trace');
     },
     [setSearchParams]
   );
@@ -129,21 +131,20 @@ export const TestCaseTabs: FC<{
     <TabsRoot value={tab} onValueChange={(value) => setTab(value as TestCaseTab)}>
       <TabsList aria-label="Test case details">
         <TabsTrigger value="reply">Agent reply</TabsTrigger>
-        <TabsTrigger value="tools">Tool calls ({toolSpans.length})</TabsTrigger>
         <TabsTrigger value="trace">Trace</TabsTrigger>
       </TabsList>
       <TabsContent value="reply" className="items-stretch p-0 pt-density-lg">
-        <div className={PANEL_CLASS}>
-          <AgentReply workspace={workspace} replySpanId={replySpanId} />
-        </div>
-      </TabsContent>
-      <TabsContent value="tools" className="items-stretch p-0 pt-density-lg">
-        <div className={PANEL_CLASS}>
-          <ToolCalls toolSpans={toolSpans} openSpan={openSpan} />
-        </div>
+        <AgentReply workspace={workspace} replySpanId={replySpanId} />
       </TabsContent>
       <TabsContent value="trace" className="items-stretch p-0 pt-density-lg">
-        {traceView}
+        <Stack gap="density-2xl" className="min-w-0">
+          <ToolCalls
+            toolSpans={toolSpans}
+            openSpan={openSpan}
+            selectedSpanId={searchParams.get(QUERY_PARAMETERS.spanId)}
+          />
+          {traceView}
+        </Stack>
       </TabsContent>
     </TabsRoot>
   );

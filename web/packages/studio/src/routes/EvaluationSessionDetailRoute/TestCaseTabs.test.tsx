@@ -72,12 +72,14 @@ describe('TestCaseTabs', () => {
     );
 
     expect(await screen.findByText('The plan is 61% above demand.')).toBeInTheDocument();
-    await user.click(screen.getByRole('tab', { name: 'Tool calls (2)' }));
+    await user.click(screen.getByRole('tab', { name: 'Trace' }));
+    expect(await screen.findByText('Tool calls (2)')).toBeInTheDocument();
+    expect(screen.getByText('Span tree')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /score_schedule/ })).toBeInTheDocument();
 
-    await user.click(await screen.findByRole('button', { name: /get_demand/ }));
-    expect(screen.getByRole('tab', { name: 'Trace' })).toHaveAttribute('aria-selected', 'true');
-    expect(await screen.findByText('Span tree')).toBeInTheDocument();
+    const getDemand = screen.getByRole('button', { name: /get_demand/ });
+    await user.click(getDemand);
+    expect(getDemand).toHaveClass('nv-button--kind-primary');
   });
 
   it('says when no reply or tool calls were recorded', async () => {
@@ -93,7 +95,7 @@ describe('TestCaseTabs', () => {
     );
 
     expect(await screen.findByText('No reply was recorded for this test.')).toBeInTheDocument();
-    await user.click(screen.getByRole('tab', { name: 'Tool calls (0)' }));
+    await user.click(screen.getByRole('tab', { name: 'Trace' }));
     expect(
       await screen.findByText('No tool calls were recorded for this test.')
     ).toBeInTheDocument();
