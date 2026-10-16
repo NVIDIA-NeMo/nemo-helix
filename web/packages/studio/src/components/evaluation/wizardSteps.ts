@@ -4,7 +4,7 @@
 import { MODE_DEFAULT, MODE_EXPERIMENT } from '@studio/components/evaluation/submitEvaluationJob';
 
 /** One screen of the Run Evaluation wizard. */
-export type WizardStep = 'start' | 'experiment' | 'evaluation';
+export type WizardStep = 'start' | 'experiment' | 'configuration' | 'evaluation';
 
 export type EvaluationMode = typeof MODE_DEFAULT | typeof MODE_EXPERIMENT;
 
@@ -15,11 +15,14 @@ export type EvaluationMode = typeof MODE_DEFAULT | typeof MODE_EXPERIMENT;
  * single page that shows both sets — most of them irrelevant — is what made the old form hard to
  * read. Splitting the choice out front means each later step only ever shows fields that apply.
  *
- * Re-running has no experiment to set up, so it skips that step: which run to base this one on
- * and what to call the new run are one decision, made on one screen.
+ * A new experiment then takes its dataset and eval config on their own step, leaving the last one
+ * to name the run. Re-running has no experiment or config to set up, so it skips both: which run
+ * to base this one on and what to call the new run are one decision, made on one screen.
  */
 export const stepsFor = (mode: EvaluationMode): WizardStep[] =>
-  mode === MODE_DEFAULT ? ['start', 'experiment', 'evaluation'] : ['start', 'evaluation'];
+  mode === MODE_DEFAULT
+    ? ['start', 'experiment', 'configuration', 'evaluation']
+    : ['start', 'evaluation'];
 
 /** Label shown under each step's dot in the stepper. */
 export const stepHeading = (step: WizardStep): string => {
@@ -28,6 +31,8 @@ export const stepHeading = (step: WizardStep): string => {
       return 'Begin';
     case 'experiment':
       return 'Create experiment';
+    case 'configuration':
+      return 'Configuration';
     case 'evaluation':
       return 'Run Evaluation';
   }

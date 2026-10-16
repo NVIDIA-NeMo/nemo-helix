@@ -19,6 +19,27 @@ import { http, HttpResponse } from 'msw';
 
 const AGENT = 'my-agent';
 
+/** A minimal eval config: parsed locally, never submitted. */
+const EVAL_CONFIG = `prompt_template: "{{ item.prompt }}"
+metrics:
+  - bundle_kind: metric-bundle
+    bundle_format_version: v1
+    metric_type: string-check
+    metadata: {}
+    outputs:
+      - name: string-check
+        value_json_schema:
+          type: number
+    secrets: {}
+    payload:
+      kind: inline
+      metric:
+        type: string-check
+        operation: equals
+        left_template: "{{ sample.output_text }}"
+        right_template: "{{ item.expected }}"
+`;
+
 const emptyPage = { data: [], pagination: { total: 0, page: 1, page_size: 100 } };
 
 const experiment = (id: string, name: string): ExperimentResponse => ({
@@ -131,8 +152,24 @@ describe('AgentEvaluationWizard', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Next' }));
 
+    // The run is named on the last step, past the dataset and eval config.
+    await user.upload(
+      await screen.findByLabelText('Add Dataset'),
+      new File(['{"prompt": "hi", "expected": "hi"}\n'], 'dataset.jsonl', {
+        type: 'application/json',
+      })
+    );
+    await user.upload(
+      screen.getByLabelText('Select Evaluator Config'),
+      new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
+    );
+    await waitFor(async () => {
+      await user.click(screen.getByRole('button', { name: 'Next' }));
+      expect(screen.getByLabelText('Evaluation Name')).toBeInTheDocument();
+    });
+
     // A borrowed name would say this run is a repeat of some other experiment's run.
-    expect(await screen.findByLabelText<HTMLInputElement>('Evaluation Name')).toHaveValue('');
+    expect(screen.getByLabelText<HTMLInputElement>('Evaluation Name')).toHaveValue('');
   });
 
   it('offers a parallel-requests setting that defaults to 4', async () => {

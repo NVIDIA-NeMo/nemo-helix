@@ -4,7 +4,7 @@
 import { ControlledCheckbox } from '@nemo/common/src/components/form/ControlledCheckbox';
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
-import { Anchor, Banner, Block, Card, Flex, Stack, Text } from '@nvidia/foundations-react-core';
+import { Anchor, Banner, Block, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { ScoreDefinitions } from '@studio/components/evaluation/Jobs/form/ScoreDefinitions';
 import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect';
 import { LINK_EVAL_DOCS_METRICS } from '@studio/constants/links';
@@ -93,73 +93,71 @@ export const MetricPanel: FC = () => {
         </Banner>
       ) : null}
 
-      <Card className="min-w-0 p-density-lg">
-        <Stack gap="density-lg" className="min-w-0">
-          {SELECTABLE_METRICS.map(({ type, label }) => (
-            <Stack key={type} gap="density-sm" className="min-w-0">
-              <ControlledCheckbox
-                useControllerProps={{ name: `body.metrics.${type}` as const, control }}
-                slotLabel={<Text kind="body/bold/lg">{label}</Text>}
-                disabled={noGroundTruth && GROUND_TRUTH_METRICS.includes(type)}
-              />
+      <Stack gap="density-lg" className="min-w-0">
+        {SELECTABLE_METRICS.map(({ type, label }) => (
+          <Stack key={type} gap="density-sm" className="min-w-0">
+            <ControlledCheckbox
+              useControllerProps={{ name: `body.metrics.${type}` as const, control }}
+              slotLabel={<Text kind="body/bold/lg">{label}</Text>}
+              disabled={noGroundTruth && GROUND_TRUTH_METRICS.includes(type)}
+            />
 
-              {metrics?.[type] && !REFERENCE_METRICS.includes(type) ? (
-                <Stack gap="density-lg" className="min-w-0 pl-density-lg">
-                  {type === 'string-check' ? (
-                    <OperandRelation>
-                      <ControlledSelect
-                        useControllerProps={{ name: 'body.stringCheck.operation', control }}
-                        items={toItems(STRING_CHECK_OPERATIONS)}
+            {metrics?.[type] && !REFERENCE_METRICS.includes(type) ? (
+              <Stack gap="density-lg" className="min-w-0 pl-density-lg">
+                {type === 'string-check' ? (
+                  <OperandRelation>
+                    <ControlledSelect
+                      useControllerProps={{ name: 'body.stringCheck.operation', control }}
+                      items={toItems(STRING_CHECK_OPERATIONS)}
+                    />
+                  </OperandRelation>
+                ) : null}
+
+                {type === 'number-check' ? (
+                  <>
+                    <ControlledSelect
+                      useControllerProps={{ name: 'body.numberCheck.operation', control }}
+                      formFieldProps={{ slotLabel: 'Operation' }}
+                      items={toItems(NUMBER_CHECK_OPERATIONS)}
+                    />
+                    {numberCheckOperation === 'absolute difference' ? (
+                      <ControlledTextInput
+                        useControllerProps={{ name: 'body.numberCheck.epsilon', control }}
+                        formFieldProps={{ slotLabel: 'Tolerance' }}
+                        type="number"
                       />
-                    </OperandRelation>
-                  ) : null}
+                    ) : null}
+                  </>
+                ) : null}
 
-                  {type === 'number-check' ? (
-                    <>
-                      <ControlledSelect
-                        useControllerProps={{ name: 'body.numberCheck.operation', control }}
-                        formFieldProps={{ slotLabel: 'Operation' }}
-                        items={toItems(NUMBER_CHECK_OPERATIONS)}
-                      />
-                      {numberCheckOperation === 'absolute difference' ? (
-                        <ControlledTextInput
-                          useControllerProps={{ name: 'body.numberCheck.epsilon', control }}
-                          formFieldProps={{ slotLabel: 'Tolerance' }}
-                          type="number"
-                        />
-                      ) : null}
-                    </>
-                  ) : null}
+                {type === 'llm-judge' ? (
+                  <>
+                    <JudgeModelSelect<EvaluationFormValues>
+                      formFieldName="body.judgeModel"
+                      slotLabel="Judge Model"
+                      placeholder="Select a judge model"
+                    />
 
-                  {type === 'llm-judge' ? (
-                    <>
-                      <JudgeModelSelect<EvaluationFormValues>
-                        formFieldName="body.judgeModel"
-                        slotLabel="Judge Model"
-                        placeholder="Select a judge model"
-                      />
+                    <JudgePromptSection />
 
-                      <JudgePromptSection />
-
-                      {/* ScoreDefinitions directly rather than MetricScoreSection:
+                    {/* ScoreDefinitions directly rather than MetricScoreSection:
                           that wrapper heads the list at body/bold/lg, the same size
                           as this column's own title, which inverts the hierarchy. */}
-                      <Stack gap="density-sm" className="min-w-0">
-                        <Text kind="label/bold/md">Score Definitions</Text>
-                        <Text kind="body/regular/md" className="text-secondary">
-                          Scores extracted from the judge&apos;s output. These also tell the judge
-                          what to grade.
-                        </Text>
-                        <ScoreDefinitions />
-                      </Stack>
-                    </>
-                  ) : null}
-                </Stack>
-              ) : null}
-            </Stack>
-          ))}
-        </Stack>
-      </Card>
+                    <Stack gap="density-sm" className="min-w-0">
+                      <Text kind="label/bold/md">Score Definitions</Text>
+                      <Text kind="body/regular/md" className="text-secondary">
+                        Scores extracted from the judge&apos;s output. These also tell the judge
+                        what to grade.
+                      </Text>
+                      <ScoreDefinitions />
+                    </Stack>
+                  </>
+                ) : null}
+              </Stack>
+            ) : null}
+          </Stack>
+        ))}
+      </Stack>
 
       {metricsError ? (
         <Text kind="body/regular/md" className="text-feedback-danger">

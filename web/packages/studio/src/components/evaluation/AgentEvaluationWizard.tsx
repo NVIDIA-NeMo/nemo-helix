@@ -102,7 +102,13 @@ import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
 import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Info } from 'lucide-react';
 import { type FC, useEffect, useRef, useState } from 'react';
-import { FormProvider, type SubmitHandler, useForm, useWatch } from 'react-hook-form';
+import {
+  FormProvider,
+  type SubmitErrorHandler,
+  type SubmitHandler,
+  useForm,
+  useWatch,
+} from 'react-hook-form';
 import { useNavigate } from 'react-router';
 import { useDebounce } from 'use-debounce';
 import { z } from 'zod';
@@ -434,7 +440,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     mode: 'onSubmit',
     reValidateMode: 'onChange',
   });
-  const { control, setValue, handleSubmit, clearErrors, formState } = methods;
+  const { control, setValue, handleSubmit, clearErrors, trigger, formState } = methods;
   const { errors } = formState;
 
   const mode = useWatch({ control, name: 'mode' }) as EvaluationMode;
@@ -835,8 +841,15 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   };
   const blocker = stepBlocker();
 
-  const goNext = () => {
+  // The configuration step's files are checked here rather than at Submit: once past it, their
+  // errors would land on a step that is no longer on screen.
+  const goNext = async () => {
     if (blocker) return;
+    if (step === 'configuration') {
+      setSubmitAttempted(true);
+      const valid = await trigger(['judgeModel', 'parallelism']);
+      if (!valid || !uploads || (isLlmJudge && isJudgeModelsLoading)) return;
+    }
     setStep(nextStep(steps, step));
   };
 
@@ -850,7 +863,11 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     // isJudgeModelsLoading blocks too: invalidModelRefs is empty while the list is in flight, so
     // submitting inside that window would skip the check entirely.
     if (hasNameConflict) return;
-    if (mode === MODE_DEFAULT && (!uploads || (isLlmJudge && isJudgeModelsLoading))) return;
+    if (mode === MODE_DEFAULT && !uploads) {
+      setStep('configuration');
+      return;
+    }
+    if (mode === MODE_DEFAULT && isLlmJudge && isJudgeModelsLoading) return;
     if (
       mode === MODE_EXPERIMENT &&
       (isValidatingEvaluation || !selectedEvaluation || evaluationConfigIssue)
@@ -863,19 +880,40 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     }
   };
 
+  // Fields that live on the configuration step report there, not on the step that submitted.
+  const onInvalid: SubmitErrorHandler<SubmitEvaluationFormData> = (invalid) => {
+    if (steps.includes('configuration') && ('judgeModel' in invalid || 'parallelism' in invalid)) {
+      setStep('configuration');
+    }
+  };
+
   const onLastStep = isLastStep(steps, step);
 
   // Enter on an intermediate step means "next", not "submit the half-filled form".
   const handleContinue = () => {
     if (!onLastStep) {
-      goNext();
+      void goNext();
       return;
     }
     setSubmitAttempted(true);
-    void handleSubmit(onSubmit)();
+    void handleSubmit(onSubmit, onInvalid)();
   };
 
   const errorMessage = submitErrorMessage(submitError);
+
+  const parallelismField = (
+    <ControlledTextInput
+      useControllerProps={{ control, name: 'parallelism' }}
+      name="parallelism"
+      label="Parallel requests"
+      type="number"
+      formFieldProps={{
+        slotInfo:
+          'Rows sent to the agent at once. Lower it for a slow agent: a deployment that answers one request at a time fails rows that wait too long in its queue.',
+        slotError: errors.parallelism?.message,
+      }}
+    />
+  );
 
   return (
     <EvalWizardPage
@@ -944,6 +982,20 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
 
           {step === 'experiment' && (
             <>
+              <Text kind="label/bold/xl">Experiment</Text>
+              <Text className="text-secondary" kind="body/regular/md">
+                Learn more in the{' '}
+                <Anchor
+                  kind="inline"
+                  textKind="body/regular/md"
+                  href={LINK_DOCS_STUDIO_EXPERIMENTS}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  experiments documentation
+                </Anchor>
+                .
+              </Text>
               <ControlledTextInput
                 useControllerProps={{ control, name: 'newName' }}
                 placeholder="e.g. model-update-tests"
@@ -963,12 +1015,117 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
                   showEvaluationsOverTime: 'showEvaluationsOverTime',
                 }}
                 disabled={isPending}
+                collapseAdvanced
               />
+            </>
+          )}
+
+          {step === 'configuration' && (
+            <>
+              <Text kind="label/bold/xl">Configuration</Text>
+              <SegmentedControl
+                aria-label="Dataset source"
+                size="tiny"
+                className="w-full"
+                value={datasetSource}
+                onValueChange={(value) => {
+                  clearDatasetPick();
+                  setValue('datasetFileset', '');
+                  setValue('datasetFile', '');
+                  setValue('datasetBatchGlob', '');
+                  setDatasetSource(value as FileSource);
+                }}
+                items={FILE_SOURCE_ITEMS}
+              />
+
+              {datasetSource === FILE_SOURCE_FILESET ? (
+                <FilesetDatasetPicker<SubmitEvaluationFormData>
+                  workspace={workspace}
+                  control={control}
+                  filesetName="datasetFileset"
+                  fileName="datasetFile"
+                  batchGlobName="datasetBatchGlob"
+                  disabled={isPending}
+                  loading={isLoadingFilesetFile}
+                  error={datasetError}
+                />
+              ) : (
+                <Upload
+                  accept={DATASET_FILE_ACCEPT}
+                  multiple
+                  onValueChange={handleDatasetPicked}
+                  status={datasetError ? 'error' : undefined}
+                  renderInput={(slotInput) => (
+                    <FormField
+                      name="dataset"
+                      slotLabel="Add Dataset"
+                      slotHelp="JSONL, a JSON array of objects, CSV, or Parquet. Select several Parquet files to combine them."
+                      slotError={datasetError}
+                      status={datasetError ? 'error' : undefined}
+                    >
+                      {datasetPick ? null : slotInput}
+                    </FormField>
+                  )}
+                />
+              )}
+
+              <SegmentedControl
+                aria-label="Evaluator config source"
+                size="tiny"
+                className="w-full"
+                value={configSource}
+                onValueChange={handleConfigSourceChanged}
+                items={FILE_SOURCE_ITEMS}
+              />
+
+              {isConfigFromFileset ? (
+                <FilesetConfigPicker<SubmitEvaluationFormData>
+                  workspace={workspace}
+                  control={control}
+                  filesetName="configFileset"
+                  fileName="configFile"
+                  onPick={() => setValue('judgeModel', '')}
+                  disabled={isPending}
+                  loading={isLoadingFilesetConfig}
+                  error={configError}
+                />
+              ) : (
+                <Upload
+                  accept={EVAL_CONFIG_FILE_ACCEPT}
+                  onValueChange={handleConfigPicked}
+                  onFileRemove={clearConfigPick}
+                  status={configError ? 'error' : undefined}
+                  renderInput={(slotInput) => (
+                    <FormField
+                      name="evalConfig"
+                      slotLabel="Select Evaluator Config"
+                      slotHelp="Select a JSON or YAML config."
+                      slotError={configError}
+                      status={configError ? 'error' : undefined}
+                    >
+                      {configPick ? null : slotInput}
+                    </FormField>
+                  )}
+                />
+              )}
+
+              {isLlmJudge && (
+                <JudgeModelSelect<SubmitEvaluationFormData>
+                  formFieldName="judgeModel"
+                  slotLabel={
+                    judgeRequired ? 'Override All LLM Models' : 'Override All LLM Models (Optional)'
+                  }
+                  slotError={invalidModelsError}
+                />
+              )}
+
+              {parallelismField}
             </>
           )}
 
           {step === 'evaluation' && (
             <>
+              {mode === MODE_EXPERIMENT && <Text kind="label/bold/xl">Configuration</Text>}
               {/* Which run to base this one on, and what to call the result, are one decision:
                   the name is derived from the pick, so the two belong on the same screen. */}
               {mode === MODE_EXPERIMENT &&
@@ -999,145 +1156,12 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
                   ...recordNameSlots,
                 }}
               />
-
-              {isCreateMode && (
-                <>
-                  <Text className="text-secondary" kind="label/bold/sm">
-                    Select evaluation set
-                  </Text>
-                  <Text className="text-secondary" kind="body/regular/md">
-                    Learn more about evaluation set requirements in the{' '}
-                    <Anchor
-                      kind="inline"
-                      textKind="body/regular/md"
-                      href={LINK_DOCS_STUDIO_EXPERIMENTS}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      evaluation documentation
-                    </Anchor>
-                    .
-                  </Text>
-
-                  <SegmentedControl
-                    aria-label="Dataset source"
-                    size="tiny"
-                    className="w-full"
-                    value={datasetSource}
-                    onValueChange={(value) => {
-                      clearDatasetPick();
-                      setValue('datasetFileset', '');
-                      setValue('datasetFile', '');
-                      setValue('datasetBatchGlob', '');
-                      setDatasetSource(value as FileSource);
-                    }}
-                    items={FILE_SOURCE_ITEMS}
-                  />
-
-                  {datasetSource === FILE_SOURCE_FILESET ? (
-                    <FilesetDatasetPicker<SubmitEvaluationFormData>
-                      workspace={workspace}
-                      control={control}
-                      filesetName="datasetFileset"
-                      fileName="datasetFile"
-                      batchGlobName="datasetBatchGlob"
-                      disabled={isPending}
-                      loading={isLoadingFilesetFile}
-                      error={datasetError}
-                    />
-                  ) : (
-                    <Upload
-                      accept={DATASET_FILE_ACCEPT}
-                      multiple
-                      onValueChange={handleDatasetPicked}
-                      status={datasetError ? 'error' : undefined}
-                      renderInput={(slotInput) => (
-                        <FormField
-                          name="dataset"
-                          slotLabel="Add Dataset"
-                          slotHelp="JSONL, a JSON array of objects, CSV, or Parquet. Select several Parquet files to combine them."
-                          slotError={datasetError}
-                          status={datasetError ? 'error' : undefined}
-                        >
-                          {datasetPick ? null : slotInput}
-                        </FormField>
-                      )}
-                    />
-                  )}
-
-                  <Text className="text-secondary" kind="label/bold/sm">
-                    Select evaluator config
-                  </Text>
-
-                  <SegmentedControl
-                    aria-label="Evaluator config source"
-                    size="tiny"
-                    className="w-full"
-                    value={configSource}
-                    onValueChange={handleConfigSourceChanged}
-                    items={FILE_SOURCE_ITEMS}
-                  />
-
-                  {isConfigFromFileset ? (
-                    <FilesetConfigPicker<SubmitEvaluationFormData>
-                      workspace={workspace}
-                      control={control}
-                      filesetName="configFileset"
-                      fileName="configFile"
-                      onPick={() => setValue('judgeModel', '')}
-                      disabled={isPending}
-                      loading={isLoadingFilesetConfig}
-                      error={configError}
-                    />
-                  ) : (
-                    <Upload
-                      accept={EVAL_CONFIG_FILE_ACCEPT}
-                      onValueChange={handleConfigPicked}
-                      onFileRemove={clearConfigPick}
-                      status={configError ? 'error' : undefined}
-                      renderInput={(slotInput) => (
-                        <FormField
-                          name="evalConfig"
-                          slotLabel="Select Evaluator Config"
-                          slotHelp="Select a JSON or YAML config."
-                          slotError={configError}
-                          status={configError ? 'error' : undefined}
-                        >
-                          {configPick ? null : slotInput}
-                        </FormField>
-                      )}
-                    />
-                  )}
-
-                  {isLlmJudge && (
-                    <JudgeModelSelect<SubmitEvaluationFormData>
-                      formFieldName="judgeModel"
-                      slotLabel={
-                        judgeRequired
-                          ? 'Override All LLM Models'
-                          : 'Override All LLM Models (Optional)'
-                      }
-                      slotError={invalidModelsError}
-                    />
-                  )}
-                </>
-              )}
-
-              <ControlledTextInput
-                useControllerProps={{ control, name: 'parallelism' }}
-                name="parallelism"
-                label="Parallel requests"
-                type="number"
-                formFieldProps={{
-                  slotInfo:
-                    'Rows sent to the agent at once. Lower it for a slow agent: a deployment that answers one request at a time fails rows that wait too long in its queue.',
-                  slotError: errors.parallelism?.message,
-                }}
-              />
+              {mode === MODE_EXPERIMENT && parallelismField}
             </>
           )}
 
-          {blocker && step !== 'start' && (
+          {/* The experiment step's blockers already show under its Name field. */}
+          {blocker && step === 'evaluation' && (
             <Text className="text-secondary" kind="body/regular/sm">
               {blocker}
             </Text>

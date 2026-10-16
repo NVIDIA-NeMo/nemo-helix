@@ -157,7 +157,6 @@ describe('AgentEvaluationWizard parallel requests', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Next' }));
 
-    await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
     await user.upload(
       screen.getByLabelText('Add Dataset'),
       new File(['{"prompt": "hi", "expected": "hi"}\n'], 'dataset.jsonl', {
@@ -170,9 +169,11 @@ describe('AgentEvaluationWizard parallel requests', () => {
     );
     await setParallelism(user, '2');
 
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled()
-    );
+    await waitFor(async () => {
+      await user.click(screen.getByRole('button', { name: 'Next' }));
+      expect(screen.getByLabelText('Evaluation Name')).toBeInTheDocument();
+    });
+    await user.type(screen.getByLabelText('Evaluation Name'), 'run-1');
     await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 
     await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
