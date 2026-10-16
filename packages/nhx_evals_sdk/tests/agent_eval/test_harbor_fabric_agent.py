@@ -330,13 +330,13 @@ def test_harbor_preflight_refuses_a_fabric_package_pinned_to_another_release() -
         NemoFabricAgent.preflight(
             {"fabric_config": _registered_agent_config(), "fabric_package": "nemo-fabric[deepagents]==0.4.0"}
         )
-    with pytest.raises(ValueError, match="task-side Fabric runner must match"):
-        NemoFabricAgent.preflight(
-            {
-                "fabric_config": _registered_agent_config(),
-                "fabric_package": "nemo-fabric[deepagents,relay]==0.4.0 mcp==1.29.0",
-            }
-        )
+    for package in (
+        "nemo-fabric[deepagents,relay]==0.4.0 mcp==1.29.0",
+        "'nemo-fabric[deepagents]==0.4.0; python_version<\"3.13\"'",
+        "nemo-fabric==0.4.0,!=0.4.1",
+    ):
+        with pytest.raises(ValueError, match="task-side Fabric runner must match"):
+            NemoFabricAgent.preflight({"fabric_config": _registered_agent_config(), "fabric_package": package})
 
     host = importlib.metadata.version("nemo-fabric")
     for package in (

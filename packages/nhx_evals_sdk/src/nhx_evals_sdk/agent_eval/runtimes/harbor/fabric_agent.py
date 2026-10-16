@@ -111,7 +111,9 @@ PLATFORM_GATEWAY_API_KEY_ENV = "NEMO_AGENTS_IGW_API_KEY"
 PLATFORM_GATEWAY_API_KEY_PLACEHOLDER = "not-used"
 
 #: An exact ``nemo-fabric`` pin inside ``fabric_package``, with or without extras.
-_FABRIC_DISTRIBUTION_PIN = re.compile(r"nemo[-_]fabric(?:\[[^\]]*\])?\s*==\s*(?P<version>[^\s,;]+)\Z", re.IGNORECASE)
+_FABRIC_DISTRIBUTION_PIN = re.compile(
+    r"nemo[-_]fabric(?:\[[^\]]*\])?\s*==\s*(?P<version>[^\s,;]+)(?:\s*[,;].*)?\Z", re.IGNORECASE | re.DOTALL
+)
 
 
 def _parse_fabric_config(fabric_config: Mapping[str, Any]) -> FabricConfig:
