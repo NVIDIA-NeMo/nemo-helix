@@ -11,9 +11,8 @@ For deployment instructions, see https://docs.nvidia.com/nemo-helix/documentatio
 ## Ingress and Gateway API routing
 
 The default `ingress.hosts[0].paths` and `httpRoute.pathRules` route
-`/openapi.json`, `/health/ready`, and `/health/live` with exact matches. Studio
-probes `/health/live` before it renders, so custom route lists, which replace the
-defaults, must include these paths explicitly.
+`/openapi.json` and `/health/ready` with exact matches. Custom route lists replace
+the defaults, so include these paths explicitly when overriding them.
 
 ## Upgrading installations from before the rename
 
