@@ -7,7 +7,9 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import jwt
+import respx
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
@@ -925,3 +927,76 @@ def test_access_key_specific_authenticate_route_is_removed(tmp_path):
         response = client.post("/v2/access-keys/authenticate")
 
     assert response.status_code == 404
+
+
+def _workload_access_token(config: AuthConfig) -> str:
+    signing_key = WorkloadTokenExchangeService().workload_signing_key(config)
+    now = datetime.now(tz=UTC)
+    return jwt.encode(
+        {
+            "iss": "http://testserver/apis/auth",
+            "sub": "system:serviceaccount:nemo:job",
+            "aud": "nemo-helix",
+            "iat": now,
+            "nbf": now,
+            "exp": now + timedelta(minutes=5),
+            "scope": "openid",
+        },
+        signing_key.private_key,
+        algorithm="RS256",
+        headers={"kid": signing_key.kid},
+    )
+
+
+def test_ext_authz_reuses_idp_discovery_and_jwks_across_requests(tmp_path):
+    """Every gateway request runs this callout under Envoy's 5s timeout, so it must not refetch
+    the IdP's discovery document and JWKS each time; a slow IdP turned that into 503s."""
+    config = _auth_config_with_workload_exchange(tmp_path, oidc_jwks_uri=None)
+    token = _workload_access_token(config)
+
+    with respx.mock(assert_all_called=False) as idp:
+        discovery = idp.get("https://sso.example.com/.well-known/openid-configuration").mock(
+            return_value=httpx.Response(200, json={"jwks_uri": "https://sso.example.com/jwks"})
+        )
+        idp_jwks = idp.get("https://sso.example.com/jwks").mock(return_value=httpx.Response(200, json={"keys": []}))
+        with _test_client(config, workload_token_exchange_service=WorkloadTokenExchangeService()) as client:
+            for _ in range(3):
+                response = client.get("/ext-authz", headers={"Authorization": f"Bearer {token}"})
+                assert response.status_code == 200, response.text
+
+    assert discovery.call_count == 1
+    assert idp_jwks.call_count == 1
+
+
+def test_ext_authz_does_not_wait_on_an_unreachable_idp_for_every_request(tmp_path):
+    """The issuer check is skipped when the IdP cannot be read, as before, but retried only after a
+    pause, so an unavailable IdP costs one request its timeout instead of every request."""
+    config = _auth_config_with_workload_exchange(tmp_path, oidc_jwks_uri=None)
+    token = _workload_access_token(config)
+
+    with respx.mock(assert_all_called=False) as idp:
+        discovery = idp.get("https://sso.example.com/.well-known/openid-configuration").mock(
+            side_effect=httpx.ConnectTimeout("IdP is not answering")
+        )
+        with _test_client(config, workload_token_exchange_service=WorkloadTokenExchangeService()) as client:
+            for _ in range(3):
+                response = client.get("/ext-authz", headers={"Authorization": f"Bearer {token}"})
+                assert response.status_code == 200, response.text
+
+    assert discovery.call_count == 1
+
+
+def test_authenticate_keeps_failing_closed_while_a_misconfiguration_is_cached(tmp_path):
+    config = _auth_config_with_workload_exchange(tmp_path)
+    service = WorkloadTokenExchangeService()
+    mirrored_jwk = {**service.public_jwk(config), "kid": "idp-key"}
+    idp_jwks = AsyncMock(return_value={"keys": [mirrored_jwk]})
+
+    with (
+        _test_client(config, workload_token_exchange_service=service) as client,
+        patch.object(JWTValidator, "jwks", new=idp_jwks),
+    ):
+        responses = [client.get("/authenticate", headers={"Authorization": "Bearer token"}) for _ in range(2)]
+
+    assert [response.status_code for response in responses] == [500, 500]
+    assert idp_jwks.await_count == 1

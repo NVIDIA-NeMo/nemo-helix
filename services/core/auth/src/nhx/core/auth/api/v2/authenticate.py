@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import Annotated, Any
 
@@ -122,9 +124,13 @@ async def _validate_token_issuer_boundary(
     config: AuthConfig,
     workload_token_exchange_service: WorkloadTokenExchangeService,
     jwt_validator: JWTValidator,
-) -> None:
+) -> bool:
+    """Raise if IdP and NeMo-issued tokens could be confused; return whether the check finished.
+
+    ``False`` means the IdP or the signing key could not be read, so the check was skipped.
+    """
     if not (config.oidc.enabled and config.oidc.workload is not None):
-        return
+        return True
 
     workload_issuer = _normalize_url(workload_token_issuer(config))
     idp_issuers = {_normalize_url(issuer) for issuer in [config.oidc.issuer, *config.oidc.additional_issuers] if issuer}
@@ -134,7 +140,7 @@ async def _validate_token_issuer_boundary(
     try:
         idp_jwks_uri = _normalize_url(await jwt_validator.jwks_uri())
     except (httpx.HTTPError, jwt.PyJWTError):
-        return
+        return False
 
     nemo_jwks_uri = _normalize_url(workload_jwks_url())
     if idp_jwks_uri == nemo_jwks_uri:
@@ -143,26 +149,81 @@ async def _validate_token_issuer_boundary(
     try:
         signing_key = await workload_token_exchange_service.public_jwk_async(config)
     except (OSError, RuntimeError, ValueError):
-        return
+        return False
 
     nemo_material = _normalize_jwk_public_material(signing_key)
     if nemo_material is None:
-        return
+        return True
 
     try:
         idp_jwks = await jwt_validator.jwks()
     except (httpx.HTTPError, jwt.PyJWTError):
-        return
+        return False
 
     idp_keys = idp_jwks.get("keys", [])
     if not isinstance(idp_keys, list):
-        return
+        return True
 
     for jwk in idp_keys:
         if isinstance(jwk, dict) and _normalize_jwk_public_material(jwk) == nemo_material:
             raise TokenIssuerBoundaryMisconfigurationError(
                 "OIDC JWKS must not contain the NeMo workload token signing key"
             )
+    return True
+
+
+# How long an issuer-boundary verdict is reused before the IdP is consulted again. A consistent
+# verdict lasts as long as the validator's cached JWKS, so a key the IdP adds later is still caught.
+# A misconfigured or unverifiable verdict is retried sooner: the first so a fix on the IdP side is
+# picked up, the second so a slow IdP costs one request a timeout rather than every request.
+_ISSUER_BOUNDARY_CONSISTENT_SECONDS = 3600.0
+_ISSUER_BOUNDARY_RETRY_SECONDS = 30.0
+
+
+class _IssuerBoundary:
+    """One auth config's shared JWT validator and its memoized issuer-boundary verdict.
+
+    The ext-authz callout runs on every gateway request under Envoy's timeout, so it must not pay
+    for IdP discovery and JWKS fetches each time. Sharing the validator keeps its discovery and
+    JWKS caches; the verdict cache keeps the boundary check from re-fetching between them.
+    """
+
+    def __init__(self, config: AuthConfig) -> None:
+        self.config = config
+        self.jwt_validator = JWTValidator(config)
+        self._lock = asyncio.Lock()
+        self._misconfiguration: TokenIssuerBoundaryMisconfigurationError | None = None
+        self._recheck_at = 0.0
+
+    async def check(self, workload_token_exchange_service: WorkloadTokenExchangeService) -> None:
+        # Concurrent requests wait for one in-flight check instead of each fetching from the IdP.
+        async with self._lock:
+            if time.monotonic() < self._recheck_at:
+                if self._misconfiguration is not None:
+                    raise self._misconfiguration
+                return
+            try:
+                finished = await _validate_token_issuer_boundary(
+                    self.config, workload_token_exchange_service, self.jwt_validator
+                )
+            except TokenIssuerBoundaryMisconfigurationError as exc:
+                self._misconfiguration = exc
+                self._recheck_at = time.monotonic() + _ISSUER_BOUNDARY_RETRY_SECONDS
+                raise
+            self._misconfiguration = None
+            reuse_for = _ISSUER_BOUNDARY_CONSISTENT_SECONDS if finished else _ISSUER_BOUNDARY_RETRY_SECONDS
+            self._recheck_at = time.monotonic() + reuse_for
+
+
+_issuer_boundary: _IssuerBoundary | None = None
+
+
+def _issuer_boundary_for(config: AuthConfig) -> _IssuerBoundary:
+    """Return the shared validator state for ``config``, starting afresh when the config changes."""
+    global _issuer_boundary
+    if _issuer_boundary is None or _issuer_boundary.config is not config:
+        _issuer_boundary = _IssuerBoundary(config)
+    return _issuer_boundary
 
 
 def _actor_from_claims(claims: dict[str, object]) -> ActorClaims | None:
@@ -290,7 +351,8 @@ async def _resolve_authenticated_bearer_token(
 ) -> ResolvedBearerToken:
     token = _bearer_token_from_request(request)
     config = get_auth_config()
-    jwt_validator = JWTValidator(config)
+    issuer_boundary = _issuer_boundary_for(config)
+    jwt_validator = issuer_boundary.jwt_validator
 
     async def resolve_workload_access(candidate: str) -> ResolvedBearerToken | None:
         return await _resolve_workload_access_token(config, workload_token_exchange_service, candidate)
@@ -299,7 +361,7 @@ async def _resolve_authenticated_bearer_token(
         return await _resolve_workload_subject_token(config, workload_token_exchange_service, candidate)
 
     try:
-        await _validate_token_issuer_boundary(config, workload_token_exchange_service, jwt_validator)
+        await issuer_boundary.check(workload_token_exchange_service)
     except TokenIssuerBoundaryMisconfigurationError as exc:
         logger.error("Authentication token issuer boundary is misconfigured: %s", exc)
         raise HTTPException(
