@@ -100,6 +100,10 @@ class _IssuerBoundary:
         # Concurrent requests wait for one in-flight check instead of each fetching from the IdP.
         async with self._lock:
             if self._verdict is None or time.monotonic() >= self._reuse_verdict_until:
+                if self._verdict is not None:
+                    # Recheck against the IdP as it is now. The validator caches discovery and
+                    # JWKS for an hour, so reusing it would replay what the IdP served last time.
+                    self.jwt_validator = JWTValidator(self.config)
                 self._verdict, self._misconfiguration = await self._evaluate(workload_token_exchange_service)
                 self._reuse_verdict_until = time.monotonic() + _REUSE_VERDICT_SECONDS[self._verdict]
             if self._misconfiguration is not None:
