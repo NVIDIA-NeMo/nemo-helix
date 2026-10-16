@@ -3,12 +3,12 @@
 
 """Reach the platform from inside a job with the executing job's identity.
 
-The agent process an execute job runs reaches the platform two ways: its
-inference goes to Inference Gateway, and Relay posts the run's trajectory to
-Intake. Neither carries a platform credential, so both travel through one
-loopback proxy, which authenticates every forwarded request with the job's own
-identity. The task around it needs none of this -- it holds an SDK that
-authenticates its own calls.
+The agent process an execute job runs reaches the platform three ways: its
+inference goes to Inference Gateway, and Relay posts the run's trajectory and
+its OpenTelemetry signals to Intake. None carries a platform credential, so all
+travel through one loopback proxy, which authenticates every forwarded request
+with the job's own identity. The task around it needs none of this -- it holds
+an SDK that authenticates its own calls.
 
 A proxy rather than credentials in the agent's environment is what makes a
 long-running job work at all: the token provider exchanges on demand, so a run
@@ -26,10 +26,11 @@ import time
 from collections.abc import Generator, Iterator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 import uvicorn
-from nemo_agents_plugin.agent_config import AgentConfig, ModelConfig
+from nemo_agents_plugin.agent_config import AgentConfig, ModelConfig, TelemetryConfig
 from nemo_helix_plugin.auth import platform_auth_enabled
 from nemo_helix_plugin.client.auth import TokenProviderAuth
 from nemo_helix_plugin.client.auth_proxy import build_auth_proxy_app
@@ -76,6 +77,44 @@ def rewrite_gateway_models(config: AgentConfig, origin: str | None) -> AgentConf
     for model, original_url in _gateway_models(runtime_config):
         model.base_url = urlsplit(original_url)._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()
         model.settings.pop("base_url", None)
+    return runtime_config
+
+
+def _intake_otlp_endpoints(telemetry: TelemetryConfig) -> Iterator[dict[str, Any]]:
+    opentelemetry = telemetry.opentelemetry
+    if not isinstance(opentelemetry, dict):
+        return
+    for section in (opentelemetry, opentelemetry.get("logs"), opentelemetry.get("metrics")):
+        endpoints = section.get("endpoints") if isinstance(section, dict) else None
+        for endpoint_config in endpoints if isinstance(endpoints, list) else []:
+            endpoint = endpoint_config.get("endpoint") if isinstance(endpoint_config, dict) else None
+            if isinstance(endpoint, str) and urlsplit(endpoint).path.startswith("/apis/intake/"):
+                yield endpoint_config
+
+
+def exports_otlp_to_intake(config: AgentConfig) -> bool:
+    """Whether any of *config*'s OpenTelemetry trace, log or metric endpoints point at Intake.
+
+    The third reason to run a proxy, alongside gateway inference and the ATIF export.
+    """
+    return any(_intake_otlp_endpoints(config.telemetry))
+
+
+def rewrite_intake_otlp_endpoints(config: AgentConfig, origin: str | None) -> AgentConfig:
+    """Return *config* with its Intake OpenTelemetry endpoints pointed at *origin*.
+
+    The same contract as :func:`rewrite_gateway_models`: the config itself when
+    there is nothing to route or no proxy to route through, otherwise a deep
+    copy. A collector the agent chose for itself is left alone.
+    """
+    if origin is None or not exports_otlp_to_intake(config):
+        return config
+
+    proxy = urlsplit(origin)
+    runtime_config = config.model_copy(deep=True)
+    for endpoint_config in _intake_otlp_endpoints(runtime_config.telemetry):
+        endpoint = urlsplit(endpoint_config["endpoint"])
+        endpoint_config["endpoint"] = endpoint._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()
     return runtime_config
 
 

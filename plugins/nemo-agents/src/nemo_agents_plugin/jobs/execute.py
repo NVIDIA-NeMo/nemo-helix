@@ -45,9 +45,11 @@ from nemo_agents_plugin.jobs.execute_extensions import (
     validate_execute_agent_extension_config,
 )
 from nemo_agents_plugin.jobs.gateway_proxy import (
+    exports_otlp_to_intake,
     optional_platform_auth_proxy,
     platform_auth_proxy,
     rewrite_gateway_models,
+    rewrite_intake_otlp_endpoints,
     routes_inference_through_gateway,
 )
 from nemo_agents_plugin.jobs.job_usage import fabric_output_token_usage
@@ -447,11 +449,12 @@ class ExecuteAgentJob(NemoJob):
 
         fabric_dirs = FabricDirectories.create(agent_config, ctx.storage.ephemeral)
 
-        # One loopback proxy serves both ways the *agent process* reaches the
-        # platform: its inference calls and Relay's trajectory export. This task's
-        # own calls -- staging a workdir, saving results -- need none of it; they
-        # go through an SDK that authenticates them. The proxy stays open through
-        # result saving, so an export posted as the agent exits still lands.
+        # One loopback proxy serves every way the *agent process* reaches the
+        # platform: its inference calls, Relay's trajectory export and its
+        # OpenTelemetry exports. This task's own calls -- staging a workdir, saving
+        # results -- need none of it; they go through an SDK that authenticates
+        # them. The proxy stays open through result saving, so an export posted
+        # as the agent exits still lands.
         # A job that opted out of ATIF, or already named its own destination, should
         # not pay for the Fabric plan probe, nor for the proxy that probe would justify.
         exports_telemetry = (
@@ -465,7 +468,7 @@ class ExecuteAgentJob(NemoJob):
         # at all, which inference cannot say.
         if routes_inference_through_gateway(agent_config):
             proxy = platform_auth_proxy()
-        elif exports_telemetry:
+        elif exports_telemetry or exports_otlp_to_intake(agent_config):
             proxy = optional_platform_auth_proxy()
         else:
             proxy = nullcontext(None)
@@ -494,7 +497,9 @@ class ExecuteAgentJob(NemoJob):
                 result = asyncio.run(
                     invoke_agent_config_request_once(
                         AgentConfigInvocationRequest(
-                            agent_config=rewrite_gateway_models(agent_config, proxy_origin),
+                            agent_config=rewrite_intake_otlp_endpoints(
+                                rewrite_gateway_models(agent_config, proxy_origin), proxy_origin
+                            ),
                             input=step_config.request.input,
                             base_dir=fabric_dirs.base,
                             request_id=ctx.job_id,
