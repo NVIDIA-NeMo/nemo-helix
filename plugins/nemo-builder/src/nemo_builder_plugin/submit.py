@@ -119,7 +119,7 @@ def _upstream_image(image: PlannedImage) -> UpstreamImage | None:
 
 
 async def _resolve_copies(
-    plan: BuildPlan, entity_client: _EntityWriter, resolve_upstream: ResolveUpstream
+    plan: BuildPlan, entity_client: _EntityWriter, resolve_upstream: ResolveUpstream, build_set: BuildSet, digest: str
 ) -> BuildPlan:
     """Pin each copy to a manifest digest: the one its row already holds, or the registry's now.
 
@@ -130,7 +130,7 @@ async def _resolve_copies(
     for image in plan.copies:
         upstream = image.upstream
         assert upstream is not None
-        pinned = await _pinned_digest(entity_client, image.name, plan.workspace)
+        pinned = await _pinned_digest(entity_client, image.name, plan.workspace, build_set, digest)
         if pinned is not None:
             digests[image.name] = pinned
             continue
@@ -143,15 +143,19 @@ async def _resolve_copies(
     return plan.with_upstream(digests)
 
 
-async def _pinned_digest(entity_client: _EntityWriter, name: str, workspace: str) -> str | None:
+async def _pinned_digest(
+    entity_client: _EntityWriter, name: str, workspace: str, build_set: BuildSet, digest: str
+) -> str | None:
     """The manifest digest the copy's row already pinned, if it has a row.
 
-    A row written for a different request makes the submit a conflict further on, whatever is pinned here.
+    A row written for a different request makes the submit a conflict, whatever the registry would say.
     """
     try:
         row = await entity_client.get(ContainerImage, name=name, workspace=workspace)
     except EntityNotFoundError:
         return None
+    if row.provenance.request_digest != digest:
+        raise _different_request(build_set)
     upstream = row.provenance.upstream
     return upstream.manifest_digest if upstream is not None else None
 
@@ -168,11 +172,12 @@ async def submit_build_set(
     resolve_upstream: ResolveUpstream,
 ) -> SubmitResult:
     """Resolve, check, place, compile; then write the rows and create the job. In that order."""
+    digest = request_digest(build_set)
     # Everything that can refuse the request runs before anything is written.
     try:
         plan = BuildPlan.resolve(build_set, workspace=workspace)
         backend.check(plan)
-        plan = await _resolve_copies(plan, entity_client, resolve_upstream)
+        plan = await _resolve_copies(plan, entity_client, resolve_upstream, build_set, digest)
         plan = plan.with_destinations(backend.destination)
         platform_spec = backend.compile(plan)
     except BackendRejectedError:
@@ -189,7 +194,6 @@ async def submit_build_set(
         raise MissingSecrets(
             "the push step needs platform secrets that don't exist, or that you can't read: " + ", ".join(missing)
         )
-    digest = request_digest(build_set)
 
     images: list[ContainerImage] = []
     created: list[ContainerImage] = []
@@ -271,8 +275,12 @@ async def _adopt(
 ) -> ContainerImage:
     existing = await entity_client.get(ContainerImage, name=row.name, workspace=workspace)
     if existing.provenance.request_digest != digest:
-        raise BuildConflict(
-            f"build set {build_set.name!r} revision {build_set.revision} was already submitted with a "
-            "different request. Submit a new revision; a revision names one request."
-        )
+        raise _different_request(build_set)
     return existing
+
+
+def _different_request(build_set: BuildSet) -> BuildConflict:
+    return BuildConflict(
+        f"build set {build_set.name!r} revision {build_set.revision} was already submitted with a "
+        "different request. Submit a new revision; a revision names one request."
+    )

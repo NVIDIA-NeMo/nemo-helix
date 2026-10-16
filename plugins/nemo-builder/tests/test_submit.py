@@ -404,6 +404,23 @@ class TestCopies:
         assert [i.ref for i in fetch.imports] == [f"docker.io/library/ubuntu@{UBUNTU_AMD64}"]
 
     @pytest.mark.asyncio
+    async def test_a_copy_whose_name_another_request_holds_conflicts_without_asking_the_registry(self) -> None:
+        """The request is a conflict whatever the registry says, so a registry failure mustn't hide it."""
+        built_first = BuildSet(
+            name="demo", revision=1, build_specs=[BuildSpec(name="copy0", source=FileSetSource(fileset="fs-a"))]
+        )
+        entities = FakeEntityClient()
+        await _submit(entities, build_set=built_first)
+        events_before = list(entities.events)
+
+        with pytest.raises(BuildConflict, match="different request"):
+            await _submit(
+                entities, build_set=_copy_set("ubuntu:24.04"), upstream={UBUNTU: UpstreamError("429 rate limited")}
+            )
+
+        assert entities.events[len(events_before) :] == ["get:demo-1.copy0"]
+
+    @pytest.mark.asyncio
     async def test_a_new_revision_resolves_its_copies_again(self) -> None:
         entities = FakeEntityClient()
         await _submit(entities, build_set=_copy_set("ubuntu:24.04"), upstream={UBUNTU: UBUNTU_AMD64})
