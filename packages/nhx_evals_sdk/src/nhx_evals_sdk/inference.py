@@ -58,6 +58,10 @@ def redact_request_for_logging(request_body: dict[str, Any]) -> dict[str, Any]:
     return redacted_request
 
 
+class StreamingNotSupportedError(ValueError):
+    """The inference server returned a stream, which ``make_inference_request`` can't log or return."""
+
+
 class ClientInferenceError(RuntimeError):
     def __init__(self, e: openai.APIStatusError, context: str | None = None):
         self.status_code: int = e.status_code
@@ -377,7 +381,10 @@ async def make_inference_request(
         )
         if not isinstance(completion, (ChatCompletion, Completion)):
             # A request with ``stream`` set gets a stream back, which this function can't log or return.
-            raise ValueError(f"streaming is not supported here; the server returned a {type(completion).__name__}")
+            await completion.close()
+            raise StreamingNotSupportedError(
+                f"streaming is not supported here; the server returned a {type(completion).__name__}"
+            )
         logged_request_body = redact_request_for_logging(request_body)
         requests_log.append({"request": logged_request_body, "response": completion.model_dump()})
         return completion.model_dump()
@@ -400,8 +407,9 @@ async def make_inference_request(
         exception = ClientInferenceError(e, f"base_url: {base_url}, model_id: {model_id}")
         log.warning("%s", escape_log_value(str(exception)))
         raise exception
-    except ResilienceCancelledError:
-        # Preserve cancellation semantics for callers coordinating task/group shutdown.
+    except (ResilienceCancelledError, StreamingNotSupportedError):
+        # Preserve cancellation semantics for callers coordinating task/group shutdown, and the
+        # streaming error, which says what to change in the request.
         raise
     except Exception as e:
         # TODO: it maybe is sharing too much information to expose this error if it
