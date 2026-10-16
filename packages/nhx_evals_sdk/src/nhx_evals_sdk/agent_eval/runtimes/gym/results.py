@@ -27,7 +27,14 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.records import (
     read_jsonl,
 )
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
-from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput, TrialMeasurements
+from nhx_evals_sdk.agent_eval.trials import (
+    UNKNOWN_ERROR_TYPE,
+    AgentEvalTrial,
+    AgentEvalTrialStatus,
+    AgentOutput,
+    TrialError,
+    TrialMeasurements,
+)
 from nhx_evals_sdk.agent_eval.usage_keys import (
     CACHE_CREATION_INPUT_TOKENS_KEY,
     CACHE_READ_INPUT_TOKENS_KEY,
@@ -62,6 +69,27 @@ _TOKEN_USAGE_KEYS = ("total_tokens", "input_tokens", "output_tokens", "prompt_to
 #: The subset that proves a call happened. A model call always consumes input tokens, so zero on any
 #: of these is evidence the model was never reached; zero output tokens only means an empty answer.
 _INPUT_TOKEN_KEYS = ("total_tokens", "input_tokens", "prompt_tokens")
+#: Where a failures-sidecar record may say why the attempt failed. Gym's failure-record schema isn't
+#: contractual, so this probes the keys agents write, then Gym's own (0.6+, and its judge failsafe).
+_FAILURE_MESSAGE_KEYS = (
+    "error",
+    "exception",
+    "failure_reason",
+    "error_message",
+    "_ng_failure_message",
+    "_ng_failure_judge_error",
+)
+#: The exception Gym caught (0.6+), else the failure class Gym routed the record to the sidecar by.
+_FAILURE_TYPE_KEYS = ("_ng_failure_type", "_ng_failure_class")
+
+
+def _first_text(record: Mapping[str, Any], keys: Sequence[str]) -> str | None:
+    """The first of ``keys`` holding a non-blank string, or ``None``.
+
+    Strings only, because ``TrialError`` takes nothing else and an odd record must not sink the run.
+    A non-string under an earlier key is skipped, so it cannot hide a usable value under a later one.
+    """
+    return next((value for value in map(record.get, keys) if isinstance(value, str) and value.strip()), None)
 
 
 def _agent_never_ran(record: Mapping[str, Any]) -> bool:
@@ -663,11 +691,7 @@ def trials_from_rollouts(
     failures_path = _failures_path_for(rollouts_path)
     unattributed_failures = 0
     if failures_path.exists():
-        failure_evidence = CandidateEvidence(
-            descriptors={
-                "rollout_failures": EvidenceDescriptor(kind="filesystem", format="file", ref=str(failures_path))
-            }
-        )
+        failures_file = EvidenceDescriptor(kind="filesystem", format="file", ref=str(failures_path))
         # tolerant: a truncated line in the abnormal-termination sidecar must not sink the good trials.
         for record in read_jsonl(failures_path, tolerant=True):
             # strict=False to match this loop's tolerant read: an odd record is counted, not fatal.
@@ -677,6 +701,19 @@ def trials_from_rollouts(
                 unattributed_failures += 1
                 continue
             raw_rollout_index = record.get(NG_ROLLOUT_INDEX)
+            descriptors = {"rollout_failures": failures_file}
+            capture_path = _capture_path(record, capture_dir)
+            if capture_path is not None:
+                # By reference only: an OTLP trace would move publication off the ATIF fallback, which
+                # records the run's agent identity.
+                descriptors[NG_TRAJECTORY_EVIDENCE] = EvidenceDescriptor(
+                    kind="filesystem", format="file", ref=str(capture_path)
+                )
+            failure = next((value for value in map(record.get, _FAILURE_MESSAGE_KEYS) if value), None)
+            error = TrialError(
+                type=_first_text(record, _FAILURE_TYPE_KEYS) or UNKNOWN_ERROR_TYPE,
+                message=_first_text(record, _FAILURE_MESSAGE_KEYS),
+            )
             trials.append(
                 AgentEvalTrial(
                     id=_rollout_trial_id(
@@ -691,12 +728,12 @@ def trials_from_rollouts(
                     output=AgentOutput(
                         response=record.get("response"), metadata={"agent_ref": record.get("agent_ref")}
                     ),
-                    evidence=failure_evidence,
+                    evidence=CandidateEvidence(descriptors=descriptors),
+                    error=error,
                     measurements=_usage_measurements(record),
                     metadata={
                         "reward": None,
-                        # best-effort: Gym's failure-record schema isn't contractual, so probe common keys.
-                        "gym_failure": record.get("error") or record.get("exception") or record.get("failure_reason"),
+                        "gym_failure": failure,
                         NG_TASK_INDEX: record.get(NG_TASK_INDEX),
                         NG_ROLLOUT_INDEX: raw_rollout_index,
                     },
