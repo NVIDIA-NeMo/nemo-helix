@@ -26,7 +26,7 @@ A customization job is submitted with a backend-specific spec (`AutomodelJobInpu
 | `spec.training.lora` | No | LoRA configuration (`{"rank": 16, "alpha": 32, ...}`). Auto-filled with defaults for LoRA regimes |
 | `spec.output` | No | Output artifact configuration (`{"name": "..."}`). Auto-generated if not provided |
 | `spec.integrations` | No | Optional W&B / MLflow tracking configuration (see below) |
-| `spec.deployment_config` | No | Auto-deploy the trained model. Pass a string to reference an existing config by name (recommended; see [Set up automatic deployment](#set-up-automatic-deployment)), or an object with inline deployment parameters (e.g., `{"lora_enabled": true}`), deployed with NIM unless `engine` is `vllm`. Omit to skip deployment. A referenced config that names no model (neither `model_entity_id` nor `model_spec.model_name`) is an unbound template: its engine and executor settings are copied onto a config for the trained model at deploy time, so it works for full-weight training, whose output model does not exist at submit time. For a LoRA job, the deployment is created against the **base** model with `lora_enabled: true`, and the adapter is served from it. The RL backend accepts the same field — see [GRPO and Reward Environments](/documentation/customizer-reference/grpo-and-reward-environments) |
+| `spec.deployment_config` | No | Auto-deploy the trained model. Pass a string to reference an existing config by name (recommended; see [Set up automatic deployment](#set-up-automatic-deployment)), or an object with inline deployment parameters (e.g., `{"lora_enabled": true}`), deployed with vLLM unless `engine` is `nim`. Omit to skip deployment. A referenced config that names no model (neither `model_entity_id` nor `model_spec.model_name`) is an unbound template: its engine and executor settings are copied onto a config for the trained model at deploy time, so it works for full-weight training, whose output model does not exist at submit time. For a LoRA job, the deployment is created against the **base** model with `lora_enabled: true`, and the adapter is served from it. The RL backend accepts the same field — see [GRPO and Reward Environments](/documentation/customizer-reference/grpo-and-reward-environments) |
 
 ### Deployment config validation
 
@@ -56,7 +56,9 @@ nemo inference deployment-configs create customizer-vllm --workspace default \
 
 Then set `"deployment_config": "default/customizer-vllm"` on the job. `lora_enabled: true` lets the same template serve LoRA adapters as well as full-weight and merged outputs.
 
-Inline parameters also work. They deploy with NIM by default; set `"engine": "vllm"` to deploy with vLLM. `tool_call_config` is only accepted with `"engine": "nim"`. A NIM deployment that omits `image_name` or `image_tag` uses the platform default, `nvcr.io/nim/nvidia/model-free-nim:2.0.13`.
+Inline parameters also work. They deploy with vLLM by default. Set `"engine": "nim"` only if you know that the NIM image you use supports the model, or that the model works with the default multi-LLM NIM. A NIM deployment that omits `image_name` or `image_tag` uses the platform default, the multi-LLM NIM `nvcr.io/nim/nvidia/llm-nim:latest`. `tool_call_config` is only accepted with `"engine": "nim"`.
+
+vLLM loads LoRA adapters up to rank 16. To serve a higher `spec.training.lora.rank`, add `"additional_args": ["--max-lora-rank", "<rank>"]` to the template's `executor_config`; inline parameters cannot set it.
 
 ---
 

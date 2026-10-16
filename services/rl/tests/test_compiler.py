@@ -599,7 +599,9 @@ async def test_tool_call_plugin_without_an_auth_context_is_rejected(
     monkeypatch.setattr("nhx.rl.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: None))
     job = _make_job_output().model_copy(
         update={
-            "deployment_config": DeploymentParams(tool_call_config=ToolCallParams(tool_call_plugin="default/my-plugin"))
+            "deployment_config": DeploymentParams(
+                engine="nim", tool_call_config=ToolCallParams(tool_call_plugin="default/my-plugin")
+            )
         }
     )
 
@@ -620,7 +622,9 @@ async def test_inline_tool_call_plugin_requires_permission(
     authorized.has_permissions = AsyncMock(return_value=False)
     job = _make_job_output().model_copy(
         update={
-            "deployment_config": DeploymentParams(tool_call_config=ToolCallParams(tool_call_plugin="default/my-plugin"))
+            "deployment_config": DeploymentParams(
+                engine="nim", tool_call_config=ToolCallParams(tool_call_plugin="default/my-plugin")
+            )
         }
     )
 

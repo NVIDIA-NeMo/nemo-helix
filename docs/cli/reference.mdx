@@ -9631,7 +9631,7 @@ nemo customization automodel.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--integrations.mlflow.name`: MLflow run name. Defaults to job_id if not provided.
 * `--integrations.mlflow.description`: MLflow run description.
 * `--integrations.mlflow.tracking-uri`: MLflow tracking server URI (e.g., 'http://mlflow.mycompany.com:5000'). Can also be set via MLFLOW_TRACKING_URI environment variable.
-* `--deployment-config`: Deployment configuration for auto-deploying the model after training. Pass a string to reference an existing ModelDeploymentConfig by name ('my-config' or 'workspace/my-config'). An object provides inline deployment parameters, deployed with NIM unless engine is 'vllm'. Omit to skip deployment. This flag accepts the string form only; use --spec or --spec-file for the other union form(s).
+* `--deployment-config`: Deployment configuration for auto-deploying the model after training. Pass a string to reference an existing ModelDeploymentConfig by name ('my-config' or 'workspace/my-config'). An object provides inline deployment parameters, deployed with vLLM unless engine is 'nim'. Omit to skip deployment. This flag accepts the string form only; use --spec or --spec-file for the other union form(s).
 
 **Spec Source:**
 
@@ -9703,7 +9703,7 @@ nemo customization rl.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--integrations.mlflow.description`: MLflow run description.
 * `--integrations.mlflow.tracking-uri`: MLflow tracking server URI (e.g., 'http://mlflow.mycompany.com:5000'). Can also be set via MLFLOW_TRACKING_URI environment variable.
 * `--output.name`: Override `output.name` in the spec.
-* `--deployment-config`: Deployment configuration for auto-deploying the model after training. Pass a string to reference an existing ModelDeploymentConfig by name ('my-config' or 'workspace/my-config'). An object provides inline deployment parameters, deployed with NIM unless engine is 'vllm'. Omit to skip deployment. This flag accepts the string form only; use --spec or --spec-file for the other union form(s).
+* `--deployment-config`: Deployment configuration for auto-deploying the model after training. Pass a string to reference an existing ModelDeploymentConfig by name ('my-config' or 'workspace/my-config'). An object provides inline deployment parameters, deployed with vLLM unless engine is 'nim'. Omit to skip deployment. This flag accepts the string form only; use --spec or --spec-file for the other union form(s).
 
 **Spec Source:**
 
@@ -9811,7 +9811,7 @@ nemo customization unsloth.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--integrations.mlflow.tracking-uri`: MLflow tracking server URI (e.g., 'http://mlflow.mycompany.com:5000'). Can also be set via MLFLOW_TRACKING_URI environment variable.
 * `--output.name`: Override `output.name` in the spec.
 * `--output.description`: Override `output.description` in the spec.
-* `--deployment-config`: Deployment configuration for auto-deploying the model after training. Pass a string to reference an existing ModelDeploymentConfig by name ('my-config' or 'workspace/my-config'). An object provides inline deployment parameters, deployed with NIM unless engine is 'vllm'. Omit to skip deployment. This flag accepts the string form only; use --spec or --spec-file for the other union form(s).
+* `--deployment-config`: Deployment configuration for auto-deploying the model after training. Pass a string to reference an existing ModelDeploymentConfig by name ('my-config' or 'workspace/my-config'). An object provides inline deployment parameters, deployed with vLLM unless engine is 'nim'. Omit to skip deployment. This flag accepts the string form only; use --spec or --spec-file for the other union form(s).
 
 **Spec Source:**
 
