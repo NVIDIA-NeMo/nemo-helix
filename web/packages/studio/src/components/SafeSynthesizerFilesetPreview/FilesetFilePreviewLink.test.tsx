@@ -73,6 +73,29 @@ describe('FilesetFilePreviewLink', () => {
 
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
+
+    it('trigger element is a native button, not an anchor or link', () => {
+      renderComponent({
+        url: 'fileset://myorg/mydataset/data/train.csv',
+        children: <span>Preview file</span>,
+      });
+
+      // The component changed from <Anchor role="button"> to <Button kind="tertiary">
+      // A proper <button> must be used for interactive controls (a11y requirement)
+      const trigger = screen.getByText('Preview file').closest('button');
+      expect(trigger).not.toBeNull();
+      expect(trigger?.tagName).toBe('BUTTON');
+    });
+
+    it('trigger element is NOT an anchor element', () => {
+      renderComponent({
+        url: 'fileset://myorg/mydataset/data/train.csv',
+        children: <span>Preview file</span>,
+      });
+
+      // Previously was an <Anchor> (renders as <a>); now should be a <button>
+      expect(screen.getByText('Preview file').closest('a')).toBeNull();
+    });
   });
 
   describe('CSV file preview', () => {
