@@ -13,6 +13,7 @@ import { QuickstartSamplePanel } from '@studio/routes/WorkspaceDashboardHomeRout
 import { QuickstartSamplePanelError } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel/QuickstartSamplePanelError';
 import { QuickstartSamplePanelSkeleton } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel/QuickstartSamplePanelSkeleton';
 import { QuickstartSection } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSection';
+import { RecentJobsTable } from '@studio/routes/WorkspaceDashboardHomeRoute/RecentJobsTable';
 import { StatTileRow } from '@studio/routes/WorkspaceDashboardHomeRoute/StatTileRow';
 import {
   isSampleWorkspace,
@@ -82,6 +83,13 @@ export const WorkspaceDashboardHomeRoute: FC = () => {
                 onDismiss={() => getStartedRef.current?.focus()}
               />
             )}
+          </Stack>
+          <Stack gap="density-lg">
+            <Text kind="title/md">Recent Jobs</Text>
+            <Text kind="body/regular/sm" className="text-secondary">
+              Jobs in progress and jobs that finished in the last 48 hours.
+            </Text>
+            <RecentJobsTable />
           </Stack>
         </Stack>
       </AccessibleTitle>

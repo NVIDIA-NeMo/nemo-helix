@@ -140,6 +140,14 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     subheading:
       'Jobs from customization, evaluation, anonymization, and data generation appear here once submitted.',
   },
+  recentJobs: {
+    heading: 'No recent jobs',
+    subheading:
+      'Jobs from customization, evaluation, anonymization, and data generation appear here once submitted.',
+    // Fine-tuning is the entry point offered for starting a job. It is feature-flagged, so the
+    // callsite supplies `onCreate` only when fine-tuning is enabled.
+    createAction: { label: 'Fine-tune a Model' },
+  },
   anonymizerJobs: {
     heading: 'No anonymizer jobs yet',
     subheading:

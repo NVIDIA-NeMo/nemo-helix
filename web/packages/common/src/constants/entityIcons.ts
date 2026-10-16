@@ -91,6 +91,8 @@ export const ENTITY_ICONS = {
 
   // System
   jobs: ListChecks,
+  // The dashboard's recent jobs are the same jobs, narrowed to a time window.
+  recentJobs: ListChecks,
   secrets: LockKeyhole,
   members: UsersRound,
 } as const satisfies Record<string, LucideIcon>;
