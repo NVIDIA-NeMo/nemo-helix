@@ -42,6 +42,7 @@ WORD_OVERRIDES = {
     "sdk": "SDK",
 }
 COMPONENT_DISPLAY_NAMES = {
+    "nhx-agent-hardener-tasks": "Agent Hardener Tasks",
     "nhx-garak-tasks": "Garak Tasks",
     "nhx-safe-synthesizer-tasks": "Safe Synthesizer Tasks",
     "nhx-tasks-openshell": "OpenShell Tasks",

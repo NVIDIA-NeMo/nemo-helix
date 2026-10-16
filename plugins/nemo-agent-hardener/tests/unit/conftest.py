@@ -27,6 +27,8 @@ from nemo_agent_hardener_plugin.api.v2 import events as events_module
 from nemo_agent_hardener_plugin.cli import _shared as shared_module
 from nemo_agent_hardener_plugin.jobs import manifest as manifest_module
 from nemo_agent_hardener_plugin.jobs import records as records_module
+from nemo_helix_plugin.jobs import executor as executor_module
+from nemo_helix_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
 
 _REAL_AGENT_HARDENER_RESOURCE = sdk_module.AgentHardenerPluginResource
 
@@ -90,3 +92,20 @@ def _fake_entities_client_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
         classmethod(lambda cls, platform: _fake_entities_client(platform, cls)),
     )
     monkeypatch.setattr(shared_module, "AgentHardenerPluginResource", _fake_agent_hardener_resource)
+
+
+@pytest.fixture
+def execution_profiles() -> list[Any]:
+    """The profiles the fake Jobs service registers; a local platform's subprocess default unless overridden."""
+    return [SubprocessJobExecutionProfile(profile="default")]
+
+
+@pytest.fixture(autouse=True)
+def _fake_jobs_profiles(monkeypatch: pytest.MonkeyPatch, execution_profiles: list[Any]) -> None:
+    """Answer the executor resolver's profile lookup from :func:`execution_profiles`."""
+
+    async def _get_execution_profiles() -> Any:
+        return SimpleNamespace(data=lambda: list(execution_profiles))
+
+    jobs_client = SimpleNamespace(get_execution_profiles=_get_execution_profiles)
+    monkeypatch.setattr(executor_module, "client_from_platform", lambda *_a: jobs_client)
