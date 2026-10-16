@@ -33,6 +33,23 @@ def test_workflow_parser_finds_gated_test_commands() -> None:
     assert jobs["python-unit-test-scaled-evals"].referenced_outputs == ("deps", "scaled-evals")
     assert jobs["python-unit-test-scaled-evals"].run_blocks == (
         "uv run --frozen --group scaled-evals pytest plugins/_temporary-scaled-evals/tests -v",
+        r"""set -eu
+for requirements in plugins/_temporary-scaled-evals/harbor-runners/*.txt; do
+  grep -q '^opensandbox==' "$requirements" || continue
+  version="$(basename "$requirements" .txt)"
+  venv="$RUNNER_TEMP/harbor-$version"
+  uv venv --python 3.12 "$venv"
+  # --python, not VIRTUAL_ENV: setup-uv exports UV_PYTHON, which would otherwise send the
+  # install to the workspace .venv.
+  uv pip install --python "$venv/bin/python" -r "$requirements" packages/nhx_sandbox pytest pytest-asyncio
+  echo "::group::Harbor $version"
+  "$venv/bin/python" -m pytest -p no:cacheprovider -v \
+    plugins/_temporary-scaled-evals/tests/test_harbor_opensandbox_environment.py \
+    plugins/_temporary-scaled-evals/tests/test_harbor_opensandbox_driver.py \
+    plugins/_temporary-scaled-evals/tests/test_harbor_opensandbox_compose_services.py
+  echo "::endgroup::"
+done
+""",
     )
     assert jobs["deployments-openshell-tests"].referenced_outputs == ("deps", "deployments-openshell")
     assert jobs["deployments-openshell-tests"].run_blocks == ("make test-deployments-openshell",)
