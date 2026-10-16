@@ -86,7 +86,7 @@ from nemo_helix_plugin.jobs.types import (
     HelixJobResponse as HelixJob,
 )
 from nemo_helix_plugin.schema import DatetimeFilter, Filter, Page, PaginationData, StringFilter
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -1143,6 +1143,16 @@ def job_route_factory(
             f"""Get a job by name for the {service_name} microservice."""
 
             job_resp = (await AsyncJobsClient.from_client(async_client).get_job(name=name, workspace=workspace)).data()
+            # The Jobs service resolves the name across every source in the workspace, so the record
+            # may belong to another collection (e.g. a taskset run's task Job read through the
+            # agent-evaluate route). ``source`` alone can't decide: records from before a source
+            # rename carry the old tag but are still this collection's. A foreign source whose spec
+            # doesn't fit this collection is not this collection's Job: 404, not a render 500.
+            if job_resp.source != service_name:
+                try:
+                    TypeAdapter(job_output).validate_python(job_resp.spec)
+                except ValidationError:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job '{name}' not found")
             return from_response(job_resp)
 
         # Status
