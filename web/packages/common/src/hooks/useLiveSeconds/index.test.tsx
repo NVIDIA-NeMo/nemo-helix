@@ -5,6 +5,8 @@ import { act, renderHook } from '@testing-library/react';
 
 import { useLiveSeconds } from './index';
 
+const START = new Date('2025-01-01T00:00:00.000Z');
+
 describe('useLiveSeconds', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -14,14 +16,18 @@ describe('useLiveSeconds', () => {
     vi.useRealTimers();
   });
 
-  it('should update the live seconds', () => {
-    const { result } = renderHook(() =>
-      useLiveSeconds({ startDate: new Date('2025-01-01T00:00:00.000Z') })
-    );
-    // Set the system time to a known value
-    vi.setSystemTime(new Date('2025-01-01T00:00:00.000Z'));
+  it('starts at the time already elapsed rather than 0', () => {
+    vi.setSystemTime(new Date('2025-01-01T00:01:30.000Z'));
 
-    // Initial render should calculate difference: 1 second
+    const { result } = renderHook(() => useLiveSeconds({ startDate: START }));
+
+    expect(result.current).toBe(90);
+  });
+
+  it('should update the live seconds', () => {
+    vi.setSystemTime(START);
+    const { result } = renderHook(() => useLiveSeconds({ startDate: START }));
+
     expect(result.current).toBe(0);
 
     // Advance timers by 1 second (triggers interval + advances system time)
@@ -30,13 +36,11 @@ describe('useLiveSeconds', () => {
     });
     expect(result.current).toBe(1);
 
-    // Advance timers by 1 second (triggers interval + advances system time)
     act(() => {
       vi.advanceTimersByTime(1000);
     });
     expect(result.current).toBe(2);
 
-    // Advance another second
     act(() => {
       vi.advanceTimersByTime(1000);
     });
@@ -44,13 +48,10 @@ describe('useLiveSeconds', () => {
   });
 
   it('should lock the startDate value to prevent desync when startDate is provided asynchronously', () => {
-    const { result, rerender } = renderHook(() =>
-      useLiveSeconds({ startDate: new Date('2025-01-01T00:00:00.000Z') })
-    );
-    // Set the system time to a known value
-    vi.setSystemTime(new Date('2025-01-01T00:00:00.000Z'));
-
-    // Initial render
+    vi.setSystemTime(START);
+    const { result, rerender } = renderHook(({ startDate }) => useLiveSeconds({ startDate }), {
+      initialProps: { startDate: START },
+    });
     expect(result.current).toBe(0);
 
     // Try to change the startDate - should be ignored (locked)
@@ -59,22 +60,18 @@ describe('useLiveSeconds', () => {
     act(() => {
       vi.advanceTimersByTime(1000);
     });
-    // Should still be calculating from original startDate (00:00:00)
-    // Now at 00:00:02, so difference is 2 seconds
+    // Still counting from the original startDate (00:00:00); now at 00:00:01
     expect(result.current).toBe(1);
 
     act(() => {
       vi.advanceTimersByTime(1000);
     });
-    // Now at 00:00:03, so difference is 3 seconds
     expect(result.current).toBe(2);
   });
 
   it('should handle long durations', () => {
-    const { result } = renderHook(() =>
-      useLiveSeconds({ startDate: new Date('2025-01-01T00:00:00.000Z') })
-    );
-    vi.setSystemTime(new Date('2025-01-01T00:00:00.000Z'));
+    vi.setSystemTime(START);
+    const { result } = renderHook(() => useLiveSeconds({ startDate: START }));
     for (let i = 0; i < 50; i++) {
       act(() => {
         vi.advanceTimersByTime(1000);
@@ -90,5 +87,38 @@ describe('useLiveSeconds', () => {
       vi.advanceTimersByTime(1000);
     });
     expect(result.current).toBeUndefined();
+  });
+
+  it('returns undefined while disabled, then the time already elapsed once enabled', () => {
+    vi.setSystemTime(new Date('2025-01-01T00:00:10.000Z'));
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useLiveSeconds({ startDate: START, enabled }),
+      { initialProps: { enabled: false } }
+    );
+    expect(result.current).toBeUndefined();
+
+    rerender({ enabled: true });
+
+    expect(result.current).toBe(10);
+  });
+
+  it('catches up at once when re-enabled instead of resuming from the paused count', () => {
+    vi.setSystemTime(START);
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useLiveSeconds({ startDate: START, enabled }),
+      { initialProps: { enabled: true } }
+    );
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(result.current).toBe(10);
+
+    rerender({ enabled: false });
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    rerender({ enabled: true });
+
+    expect(result.current).toBe(70);
   });
 });
