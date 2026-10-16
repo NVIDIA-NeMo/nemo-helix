@@ -58,19 +58,80 @@ _AUTHENTICATE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
 }
 
 
+# How long an issuer-boundary verdict is reused before the IdP is consulted again. A consistent
+# verdict lasts as long as the validator's cached JWKS, so a key the IdP adds later is still caught.
+# A misconfigured or unverifiable verdict is retried sooner: the first so a fix on the IdP side is
+# picked up, the second so a slow IdP costs one request a timeout rather than every request.
+_ISSUER_BOUNDARY_CONSISTENT_SECONDS = 3600.0
+_ISSUER_BOUNDARY_RETRY_SECONDS = 30.0
+
+
+class _IssuerBoundary:
+    """One auth config's shared JWT validator and its memoized issuer-boundary verdict.
+
+    The ext-authz callout runs on every gateway request under Envoy's timeout, so it must not pay
+    for IdP discovery and JWKS fetches each time. Sharing the validator keeps its discovery and
+    JWKS caches; the verdict cache keeps the boundary check from re-fetching between them.
+    """
+
+    def __init__(self, config: AuthConfig) -> None:
+        self.config = config
+        self.jwt_validator = JWTValidator(config)
+        self._lock = asyncio.Lock()
+        self._misconfiguration: TokenIssuerBoundaryMisconfigurationError | None = None
+        self._recheck_at = 0.0
+
+    async def check(self, workload_token_exchange_service: WorkloadTokenExchangeService) -> None:
+        # Concurrent requests wait for one in-flight check instead of each fetching from the IdP.
+        async with self._lock:
+            if time.monotonic() < self._recheck_at:
+                if self._misconfiguration is not None:
+                    raise self._misconfiguration
+                return
+            try:
+                finished = await _validate_token_issuer_boundary(
+                    self.config, workload_token_exchange_service, self.jwt_validator
+                )
+            except TokenIssuerBoundaryMisconfigurationError as exc:
+                self._misconfiguration = exc
+                self._recheck_at = time.monotonic() + _ISSUER_BOUNDARY_RETRY_SECONDS
+                raise
+            self._misconfiguration = None
+            reuse_for = _ISSUER_BOUNDARY_CONSISTENT_SECONDS if finished else _ISSUER_BOUNDARY_RETRY_SECONDS
+            self._recheck_at = time.monotonic() + reuse_for
+
+
+_ISSUER_BOUNDARY_STATE_KEY = "issuer_boundary"
+
+
+def get_issuer_boundary(request: Request) -> _IssuerBoundary:
+    """Return this app's shared validator state, starting afresh when the auth config changes."""
+    config = get_auth_config()
+    issuer_boundary = getattr(request.app.state, _ISSUER_BOUNDARY_STATE_KEY, None)
+    if isinstance(issuer_boundary, _IssuerBoundary) and issuer_boundary.config is config:
+        return issuer_boundary
+
+    issuer_boundary = _IssuerBoundary(config)
+    setattr(request.app.state, _ISSUER_BOUNDARY_STATE_KEY, issuer_boundary)
+    return issuer_boundary
+
+
 @dataclass(frozen=True)
 class AuthenticateDependencies:
     workload_token_exchange_service: WorkloadTokenExchangeService
     access_key_registry: AccessKeyRegistry
+    issuer_boundary: _IssuerBoundary
 
 
 def get_authenticate_dependencies(
     workload_token_exchange_service: WorkloadTokenExchangeService = Depends(get_workload_token_exchange_service),
     access_key_registry: AccessKeyRegistry = Depends(get_access_key_registry),
+    issuer_boundary: _IssuerBoundary = Depends(get_issuer_boundary),
 ) -> AuthenticateDependencies:
     return AuthenticateDependencies(
         workload_token_exchange_service=workload_token_exchange_service,
         access_key_registry=access_key_registry,
+        issuer_boundary=issuer_boundary,
     )
 
 
@@ -170,60 +231,6 @@ async def _validate_token_issuer_boundary(
                 "OIDC JWKS must not contain the NeMo workload token signing key"
             )
     return True
-
-
-# How long an issuer-boundary verdict is reused before the IdP is consulted again. A consistent
-# verdict lasts as long as the validator's cached JWKS, so a key the IdP adds later is still caught.
-# A misconfigured or unverifiable verdict is retried sooner: the first so a fix on the IdP side is
-# picked up, the second so a slow IdP costs one request a timeout rather than every request.
-_ISSUER_BOUNDARY_CONSISTENT_SECONDS = 3600.0
-_ISSUER_BOUNDARY_RETRY_SECONDS = 30.0
-
-
-class _IssuerBoundary:
-    """One auth config's shared JWT validator and its memoized issuer-boundary verdict.
-
-    The ext-authz callout runs on every gateway request under Envoy's timeout, so it must not pay
-    for IdP discovery and JWKS fetches each time. Sharing the validator keeps its discovery and
-    JWKS caches; the verdict cache keeps the boundary check from re-fetching between them.
-    """
-
-    def __init__(self, config: AuthConfig) -> None:
-        self.config = config
-        self.jwt_validator = JWTValidator(config)
-        self._lock = asyncio.Lock()
-        self._misconfiguration: TokenIssuerBoundaryMisconfigurationError | None = None
-        self._recheck_at = 0.0
-
-    async def check(self, workload_token_exchange_service: WorkloadTokenExchangeService) -> None:
-        # Concurrent requests wait for one in-flight check instead of each fetching from the IdP.
-        async with self._lock:
-            if time.monotonic() < self._recheck_at:
-                if self._misconfiguration is not None:
-                    raise self._misconfiguration
-                return
-            try:
-                finished = await _validate_token_issuer_boundary(
-                    self.config, workload_token_exchange_service, self.jwt_validator
-                )
-            except TokenIssuerBoundaryMisconfigurationError as exc:
-                self._misconfiguration = exc
-                self._recheck_at = time.monotonic() + _ISSUER_BOUNDARY_RETRY_SECONDS
-                raise
-            self._misconfiguration = None
-            reuse_for = _ISSUER_BOUNDARY_CONSISTENT_SECONDS if finished else _ISSUER_BOUNDARY_RETRY_SECONDS
-            self._recheck_at = time.monotonic() + reuse_for
-
-
-_issuer_boundary: _IssuerBoundary | None = None
-
-
-def _issuer_boundary_for(config: AuthConfig) -> _IssuerBoundary:
-    """Return the shared validator state for ``config``, starting afresh when the config changes."""
-    global _issuer_boundary
-    if _issuer_boundary is None or _issuer_boundary.config is not config:
-        _issuer_boundary = _IssuerBoundary(config)
-    return _issuer_boundary
 
 
 def _actor_from_claims(claims: dict[str, object]) -> ActorClaims | None:
@@ -348,10 +355,10 @@ async def _resolve_authenticated_bearer_token(
     request: Request,
     workload_token_exchange_service: WorkloadTokenExchangeService,
     access_key_registry: AccessKeyRegistry,
+    issuer_boundary: _IssuerBoundary,
 ) -> ResolvedBearerToken:
     token = _bearer_token_from_request(request)
-    config = get_auth_config()
-    issuer_boundary = _issuer_boundary_for(config)
+    config = issuer_boundary.config
     jwt_validator = issuer_boundary.jwt_validator
 
     async def resolve_workload_access(candidate: str) -> ResolvedBearerToken | None:
@@ -392,11 +399,13 @@ async def _authenticate_bearer_token(
     request: Request,
     workload_token_exchange_service: WorkloadTokenExchangeService,
     access_key_registry: AccessKeyRegistry,
+    issuer_boundary: _IssuerBoundary,
 ) -> AuthenticateResponse:
     resolved = await _resolve_authenticated_bearer_token(
         request,
         workload_token_exchange_service,
         access_key_registry,
+        issuer_boundary,
     )
     return _response_from_resolved(resolved)
 
@@ -405,6 +414,7 @@ async def _ext_authz_bearer_token(
     request: Request,
     workload_token_exchange_service: WorkloadTokenExchangeService,
     access_key_registry: AccessKeyRegistry,
+    issuer_boundary: _IssuerBoundary,
     credential_store: AccountCredentialStore,
 ) -> Response:
     if request.headers.get("authorization") is None and request.cookies.get(WEB_SESSION_COOKIE):
@@ -433,6 +443,7 @@ async def _ext_authz_bearer_token(
         request,
         workload_token_exchange_service,
         access_key_registry,
+        issuer_boundary,
     )
     if get_auth_config().oidc.workload is not None:
         return Response(status_code=status.HTTP_200_OK)
@@ -453,6 +464,7 @@ async def authenticate_bearer_token_get(
         request,
         dependencies.workload_token_exchange_service,
         dependencies.access_key_registry,
+        dependencies.issuer_boundary,
     )
 
 
@@ -470,6 +482,7 @@ async def authenticate_bearer_token_post(
         request,
         dependencies.workload_token_exchange_service,
         dependencies.access_key_registry,
+        dependencies.issuer_boundary,
     )
 
 
@@ -487,6 +500,7 @@ async def ext_authz_bearer_token(
         request,
         dependencies.workload_token_exchange_service,
         dependencies.access_key_registry,
+        dependencies.issuer_boundary,
         credential_store,
     )
 
@@ -507,5 +521,6 @@ async def ext_authz_bearer_token_prefixed(
         request,
         dependencies.workload_token_exchange_service,
         dependencies.access_key_registry,
+        dependencies.issuer_boundary,
         credential_store,
     )

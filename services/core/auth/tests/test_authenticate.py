@@ -1000,3 +1000,20 @@ def test_authenticate_keeps_failing_closed_while_a_misconfiguration_is_cached(tm
 
     assert [response.status_code for response in responses] == [500, 500]
     assert idp_jwks.await_count == 1
+
+
+def test_ext_authz_keeps_idp_caches_per_app(tmp_path):
+    config = _auth_config_with_workload_exchange(tmp_path, oidc_jwks_uri=None)
+    token = _workload_access_token(config)
+
+    with respx.mock(assert_all_called=False) as idp:
+        discovery = idp.get("https://sso.example.com/.well-known/openid-configuration").mock(
+            return_value=httpx.Response(200, json={"jwks_uri": "https://sso.example.com/jwks"})
+        )
+        idp.get("https://sso.example.com/jwks").mock(return_value=httpx.Response(200, json={"keys": []}))
+        for _ in range(2):
+            with _test_client(config, workload_token_exchange_service=WorkloadTokenExchangeService()) as client:
+                response = client.get("/ext-authz", headers={"Authorization": f"Bearer {token}"})
+                assert response.status_code == 200, response.text
+
+    assert discovery.call_count == 2
