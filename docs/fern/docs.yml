@@ -24,6 +24,11 @@ versions:
   slug: latest
 
 redirects:
+  # The retired rolling release-note URL now opens the versioned release index.
+  - source: "/documentation/reference/release-notes/current-release"
+    destination: "/documentation/reference/release-notes"
+  - source: "/latest/documentation/reference/release-notes/current-release"
+    destination: "/latest/documentation/reference/release-notes"
   # Evals troubleshooting URL rename.
   - source: "/documentation/reference/troubleshooting/evaluator"
     destination: "/documentation/reference/troubleshooting/evals"
