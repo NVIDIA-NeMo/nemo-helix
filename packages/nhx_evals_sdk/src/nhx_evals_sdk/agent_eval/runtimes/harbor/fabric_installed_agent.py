@@ -24,7 +24,7 @@ It accepts every :class:`NemoFabricAgent` keyword -- ``fabric_config`` plus Fabr
 keywords -- and this class's ``fabric_python_version`` and ``fabric_uv_version``. ``fabric_package`` is
 required: the harness extra to install cannot be derived from the config. It is split like a shell
 command line, so a caller can pin a harness's own dependencies next to the Fabric distribution
-(``"nemo-fabric[deepagents,relay]==0.3.0 mcp==1.29.0"``); a specifier that contains spaces, such as
+(``"nemo-fabric[deepagents,relay]==0.5.0 mcp==1.29.0"``); a specifier that contains spaces, such as
 one with an environment marker, must be quoted (``"'pkg==1.0; python_version<\"3.13\"'"``).
 
 Three things the task image must still provide: bash, a supported package manager (apt-get, dnf,
