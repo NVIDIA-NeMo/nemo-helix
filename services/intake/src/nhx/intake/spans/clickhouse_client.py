@@ -100,6 +100,8 @@ class ClickHouseSpanClient:
             return None
         await self.bootstrap_schema()
         raw_client = await self._get_raw_client()
+        # A lost response is retried, so the same rows can be stored twice.
+        # Reads that users see collapse those rows with FINAL or argMax.
         return await raw_client.insert(table, rows, column_names=column_names, database=self.database)
 
     async def close(self) -> None:
