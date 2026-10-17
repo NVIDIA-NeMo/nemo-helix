@@ -4,6 +4,7 @@
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { Button, Flex, Spinner, Text } from '@nvidia/foundations-react-core';
 import { GlobalNav } from '@studio/components/Layouts/GlobalNav';
+import { SuspenseOutlet } from '@studio/components/Layouts/SuspenseOutlet';
 import { ASSISTANT_STUDIO_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPathIfExists } from '@studio/hooks/useWorkspaceFromPath';
 import { useAuthAutoLogin } from '@studio/providers/auth';
@@ -13,7 +14,6 @@ import { AssistantChatProvider } from '@studio/routes/agents/AssistantChatRoute/
 import { WorkspaceGuard } from '@studio/routes/RootLayout/WorkspaceGuard';
 import { CircleAlert, LogIn, RefreshCw } from 'lucide-react';
 import { ReactNode } from 'react';
-import { Outlet } from 'react-router';
 
 const SignedOutView = ({ onSignIn }: { onSignIn: () => void }) => (
   <main className="flex min-h-screen items-center justify-center bg-surface-sunken px-6 text-primary">
@@ -91,7 +91,7 @@ export const PageLayout = ({ sideNav }: { sideNav?: (collapsed: boolean) => Reac
       <GlobalNav sideNav={hideSideNav ? undefined : sideNav} />
       <div className="bg-surface-sunken transition-colors relative h-full max-h-[calc(100vh-var(--nv-app-bar-height))] overflow-y-auto [grid-area:content]">
         <WorkspaceGuard>
-          <Outlet />
+          <SuspenseOutlet />
         </WorkspaceGuard>
       </div>
     </>

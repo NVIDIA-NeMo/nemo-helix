@@ -15,16 +15,13 @@ const WorkspaceBaseModelsRoute = lazy(() =>
   }))
 );
 
-export const baseModelsRoutes: RouteObject[] = gateBaseModelsRoutes([
-  {
-    path: ROUTES.workspace.baseModels,
-    element: <WorkspaceBaseModelsRoute />,
-  },
-  {
-    path: ROUTES.workspace.baseModelsModel,
-    element: <WorkspaceBaseModelsRoute />,
-  },
-]);
+export const baseModelsRoutes: RouteObject[] = gateBaseModelsRoutes({
+  element: <WorkspaceBaseModelsRoute />,
+  children: [
+    { path: ROUTES.workspace.baseModels, element: null },
+    { path: ROUTES.workspace.baseModelsModel, element: null },
+  ],
+});
 
 export const getBaseModelsSideNavItems = (workspace: string) =>
   BASE_MODELS_ENABLED
