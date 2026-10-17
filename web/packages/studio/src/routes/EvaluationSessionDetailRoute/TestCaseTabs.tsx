@@ -14,6 +14,7 @@ import {
   TabsTrigger,
   Text,
 } from '@nvidia/foundations-react-core';
+import { PayloadPending } from '@studio/components/IntakeDetail/IntakeComponents/PayloadPending';
 import { SpanPayloadFormatToggle } from '@studio/components/IntakeDetail/IntakeComponents/SpanPayloadFormatToggle';
 import { SpanPayloadView } from '@studio/components/IntakeDetail/IntakeComponents/SpanPayloadView';
 import { useSpanPayloadFormat } from '@studio/components/IntakeDetail/IntakeComponents/useSpanPayloadFormat';
@@ -49,9 +50,7 @@ const AgentReply: FC<{ workspace: string; replySpanId: string | undefined }> = (
         <SpanPayloadFormatToggle state={outputFormat} payloadLabel="reply" />
       </Flex>
       {isLoading ? (
-        <Text kind="body/regular/sm" className="text-secondary">
-          Loading the reply…
-        </Text>
+        <PayloadPending />
       ) : (
         <SpanPayloadView
           value={replySpan?.output}
@@ -68,29 +67,38 @@ const ToolCalls: FC<{
   openSpan: (span: Span) => void;
   selectedSpanId: string | null;
 }> = ({ toolSpans, openSpan, selectedSpanId }) => {
-  if (toolSpans.length === 0) {
-    return (
-      <Text kind="body/regular/sm" className="text-secondary">
-        No tool calls were recorded for this test.
-      </Text>
-    );
-  }
   return (
-    <Flex align="center" gap="density-sm" className="flex-wrap">
-      <Text kind="label/semibold/md">Tool calls ({toolSpans.length})</Text>
-      {toolSpans.map((span) => (
-        <Button
-          key={span.span_id}
-          kind={span.span_id === selectedSpanId ? 'primary' : 'secondary'}
-          size="small"
-          onClick={() => openSpan(span)}
-        >
-          <Wrench size={14} aria-hidden />
-          {span.tool_name ?? span.name ?? 'tool'}
-          {spanDuration(span) ? <span className="text-secondary">{spanDuration(span)}</span> : null}
-        </Button>
-      ))}
-    </Flex>
+    <Stack
+      gap="density-xs"
+      className="rounded-sm border border-base bg-surface-raised p-density-lg"
+      data-testid="test-case-tool-calls"
+    >
+      <Text kind="label/regular/md" className="text-secondary">
+        Tool calls ({toolSpans.length})
+      </Text>
+      {toolSpans.length === 0 ? (
+        <Text kind="body/regular/sm" className="text-secondary">
+          No tool calls were recorded for this test.
+        </Text>
+      ) : (
+        <Flex align="center" gap="density-sm" className="flex-wrap">
+          {toolSpans.map((span) => (
+            <Button
+              key={span.span_id}
+              kind={span.span_id === selectedSpanId ? 'primary' : 'secondary'}
+              size="small"
+              onClick={() => openSpan(span)}
+            >
+              <Wrench size={14} aria-hidden />
+              {span.tool_name ?? span.name ?? 'tool'}
+              {spanDuration(span) ? (
+                <span className="text-secondary">{spanDuration(span)}</span>
+              ) : null}
+            </Button>
+          ))}
+        </Flex>
+      )}
+    </Stack>
   );
 };
 
