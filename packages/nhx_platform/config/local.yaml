@@ -220,3 +220,6 @@ studio:
   sandbox_enabled: true
   feature_flags:
     assistant_studio_enabled: true
+    # Allows localStorage flag overrides (window.__flags / the flag-override
+    # Chrome extension). Left off by default in shipped deployments.
+    flag_overrides_enabled: true
