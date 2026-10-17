@@ -15,7 +15,7 @@ Select it with ``agent_import_path`` and hand it the agent through ``agent_kwarg
         agent_import_path="nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_installed_agent:FabricInstalledAgent",
         agent_kwargs={
             "fabric_config": {...},  # a Fabric agent.yaml as a mapping; see NemoFabricAgent
-            "fabric_package": "nemo-fabric[deepagents,relay]==0.4.0",
+            "fabric_package": "nemo-fabric[deepagents,relay]==0.5.0",
         },
         env_secrets={"NVIDIA_API_KEY": SecretRef("NVIDIA_API_KEY")},
     )
@@ -24,7 +24,7 @@ It accepts every :class:`NemoFabricAgent` keyword -- ``fabric_config`` plus Fabr
 keywords -- and this class's ``fabric_python_version`` and ``fabric_uv_version``. ``fabric_package`` is
 required: the harness extra to install cannot be derived from the config. It is split like a shell
 command line, so a caller can pin a harness's own dependencies next to the Fabric distribution
-(``"nemo-fabric[deepagents,relay]==0.3.0 mcp==1.29.0"``); a specifier that contains spaces, such as
+(``"nemo-fabric[deepagents,relay]==0.5.0 mcp==1.29.0"``); a specifier that contains spaces, such as
 one with an environment marker, must be quoted (``"'pkg==1.0; python_version<\"3.13\"'"``).
 
 Three things the task image must still provide: bash, a supported package manager (apt-get, dnf,
@@ -32,17 +32,20 @@ yum, or apk) when it has no curl, and glibc. Bash because Harbor's ``BaseInstall
 prefixes ``set -o pipefail`` onto every command it runs for every installed agent, so a ``/bin/sh``
 backend cannot run any of them; Docker and Daytona execute through bash, Harbor's HF sandbox does
 not. glibc because ``nemo-fabric-runtime`` publishes no musllinux wheels, so Alpine-based tasks fail
-at the final ``uv pip install`` with an unsatisfiable resolution -- 0.4.0 publishes macOS arm64, Windows, and
+at the final ``uv pip install`` with an unsatisfiable resolution -- 0.5.0 publishes macOS arm64, Windows, and
 manylinux wheels only, and this is not something the agent can work around.
 """
 
 from __future__ import annotations
 
 import shlex
+from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from harbor.agents.capabilities import AgentCapabilities
 from harbor.agents.installed.base import BaseInstalledAgent
+from harbor.agents.options import InstalledAgentOptions
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from harbor.models.task.config import MCPServerConfig
@@ -68,6 +71,14 @@ DEFAULT_FABRIC_MAX_TURNS = 50
 #: at execution time. Pass ``fabric_uv_version`` to move it.
 DEFAULT_UV_VERSION = "0.12.17"
 _UV_INSTALLER_URL_TEMPLATE = "https://astral.sh/uv/{version}/install.sh"
+_FABRIC_PACKAGE_REQUIRED = (
+    "fabric_package is required: name the Fabric distribution and harness extra to "
+    'install into the task container, e.g. "nemo-fabric[deepagents,relay]==0.5.0"'
+)
+#: Versions this class resolves itself; everything else in ``agent_kwargs`` is the wrapped agent's.
+_VERSION_KWARGS = ("fabric_python_version", "fabric_uv_version")
+#: Keywords consumed here or by Harbor's installed-agent base before the rest reach ``NemoFabricAgent``.
+_INSTALLED_AGENT_KWARGS = frozenset({*_VERSION_KWARGS, *InstalledAgentOptions.model_fields})
 #: Attempts allowed for the package-manager step, which is the install's most fragile network call:
 #: an archive mirror that rate-limits or blips takes the whole trial with it, and Harbor's own retry
 #: works at trial granularity. Backoff between attempts is ``attempt * _RETRY_BACKOFF_SEC``.
@@ -140,7 +151,7 @@ class FabricInstalledAgent(BaseInstalledAgent):
     a property is itself an incompatible override.
     """
 
-    SUPPORTS_ATIF = True
+    capabilities = AgentCapabilities(atif=True)
 
     #: Declared, never assigned here: Harbor attaches the resolved skill list at dispatch time and
     #: ``BaseAgent`` does not declare it, so this is the only place it is typed. Leaving it unset
@@ -184,10 +195,23 @@ class FabricInstalledAgent(BaseInstalledAgent):
             **fabric_kwargs,
         )
         if not self.fabric.fabric_package:
-            raise ValueError(
-                "fabric_package is required: name the Fabric distribution and harness extra to "
-                'install into the task container, e.g. "nemo-fabric[deepagents,relay]==0.4.0"'
-            )
+            raise ValueError(_FABRIC_PACKAGE_REQUIRED)
+
+    @classmethod
+    def preflight(cls, kwargs: dict[str, Any] | None = None, env: Mapping[str, str] | None = None) -> None:
+        """The wrapped agent's checks, on the keywords it will be handed, plus this class's own.
+
+        Without an ``options_model`` Harbor's ``Job.create`` would validate nothing here, and every
+        error ``NemoFabricAgent`` raises at construction would surface from the first ``Trial.create``
+        as a job-aborting traceback instead of Harbor's preflight error.
+        """
+        kwargs = dict(kwargs or {})
+        for name in _VERSION_KWARGS:
+            if name in kwargs:
+                _version_string(name, kwargs[name])
+        NemoFabricAgent.preflight({k: v for k, v in kwargs.items() if k not in _INSTALLED_AGENT_KWARGS}, env)
+        if not kwargs.get("fabric_package"):
+            raise ValueError(_FABRIC_PACKAGE_REQUIRED)
 
     @staticmethod
     def name() -> str:
@@ -232,10 +256,11 @@ class FabricInstalledAgent(BaseInstalledAgent):
     async def _ensure_curl(self, environment: BaseEnvironment) -> None:
         """Install curl and CA certificates through whichever package manager the image has.
 
-        Harbor 0.23 offers ``ensure_system_dependencies()`` for this; the repository pins 0.20, so
-        the same walk lives here. Every package-manager branch installs CA certificates even when
-        curl is already present: ``ubuntu:24.04`` ships neither, and without the certificates the uv
-        installer's HTTPS fetch fails with a bare curl exit code that reads like a network outage.
+        Harbor's ``ensure_system_dependencies("curl")`` is not used: it skips the install when curl
+        is already present, never installs CA certificates, and only warns when no package manager
+        exists. Every package-manager branch here installs CA certificates even when curl is already
+        present: ``ubuntu:24.04`` ships neither, and without the certificates the uv installer's HTTPS
+        fetch fails with a bare curl exit code that reads like a network outage.
         The last branch -- curl present, no package manager -- is the one exception, because there
         is nothing left to install certificates *with*; such an image has to bring its own CA store,
         and the uv fetch fails with a TLS error if it does not.

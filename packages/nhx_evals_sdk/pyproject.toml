@@ -44,7 +44,7 @@ dependencies = [
   # agent-eval runtimes compose against. The metapackage includes nemo-fabric-runtime; the harness
   # adapters are the weight (codex ~299 MB, claude ~231 MB) and stay in the `fabric` extra below, so
   # only *resolving and running* a harness pulls them.
-  "nemo-fabric>=0.4.0,<0.5.0",
+  "nemo-fabric>=0.5.0,<0.6.0",
   "opentelemetry-proto>=1.27.0",
   "pytrec-eval-terrier==0.5.10",
 ]
@@ -64,7 +64,8 @@ engine = []
 # the SDK and constructing Harbor configuration work without the extra; execution and result
 # adaptation do not.
 harbor = [
-  "harbor>=0.20,<0.21",
+  "harbor>=0.23,<0.24",
+  "nemo-fabric[harbor]>=0.5.0,<0.6.0",
 ]
 # NeMo Fabric HARNESS ADAPTERS for the agent-eval runtime (FabricAgentRuntime, host or
 # sandbox mode). The Fabric SDK itself is a base dependency above; this extra adds the
@@ -92,8 +93,8 @@ harbor = [
 #   * deepagents is omitted to match plugins/nemo-agents (its adapter does not support
 #     the Relay observability v2 config Fabric streaming generates). Nothing here exercises it.
 fabric = [
-  "nemo-fabric[claude,codex]>=0.4.0,<0.5.0",
-  "nemo-fabric-adapters-hermes>=0.4.0,<0.5.0; python_version < '3.14'",
+  "nemo-fabric[claude,codex]>=0.5.0,<0.6.0",
+  "nemo-fabric-adapters-hermes>=0.5.0,<0.6.0; python_version < '3.14'",
 ]
 
 [build-system]

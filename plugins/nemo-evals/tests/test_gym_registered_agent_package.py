@@ -261,3 +261,18 @@ def test_fabric_config_strings_are_escaped_for_omegaconf_and_the_spec_keeps_the_
     assert fabric_config["instructions"]["system"]["content"] == "Fill \\${slot} and \\\\\\${raw}."
     assert fabric_config["skills"] == _CONFIG["skills"]
     assert spec.resolved_config["mcp"]["servers"]["qa"]["env"] == {"QA_TOKEN": "${QA_TOKEN}"}
+
+
+def test_a_config_resolved_under_an_older_fabric_is_written_at_the_running_ones_relay_version(tmp_path: Path) -> None:
+    """The package is assembled by the staging step inside the job, under whatever Fabric runs the platform
+    then, from a config the spec persisted at submit."""
+    root = tmp_path / "environment"
+    root.mkdir()
+    spec = _spec(resolved_config={**_CONFIG, "relay": {"observability": {"version": 3, "atif": {"enabled": True}}}})
+
+    config_path = write_registered_agent_package(root, spec, agent_files=None, download=_fake_download([]))
+
+    written = yaml.safe_load((root / config_path).read_text())
+    fabric_config = written["registered_calc_agent"]["responses_api_agents"]["nemo_registered_agent"]["fabric_config"]
+    assert fabric_config["relay"] == {"observability": {"version": 4, "atif": {"enabled": True}}}
+    assert spec.resolved_config["relay"]["observability"]["version"] == 3

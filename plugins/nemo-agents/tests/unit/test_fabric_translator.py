@@ -12,7 +12,11 @@ from typing import Any
 import pytest
 from nemo_agents_plugin.agent_config import AgentConfig, load_agent_config
 from nemo_agents_plugin.fabric.gateway_credentials import PLATFORM_IGW_API_KEY_ENV, PLATFORM_IGW_API_KEY_PLACEHOLDER
-from nemo_agents_plugin.fabric.translator import FabricTranslationError, translate_agent_config
+from nemo_agents_plugin.fabric.translator import (
+    FabricTranslationError,
+    translate_agent_config,
+    upgrade_relay_observability_version,
+)
 from nemo_agents_plugin.telemetry.intake_export import configure_intake_atif_export
 from nemo_fabric.models import RelayAtifConfig, RelayHttpStorageConfig
 
@@ -596,7 +600,7 @@ class TestTranslateAgentConfig:
         assert relay.project == "example-agent"
         assert relay.output_dir == "./artifacts/relay"
         assert observability.model_dump(exclude_none=True) == {
-            "version": 3,
+            "version": 4,
             "enable_full_payloads": False,
             "atif": {
                 "enabled": True,
@@ -886,3 +890,25 @@ def test_mini_swe_agent_example(kind: str) -> None:
     assert translated.runtime is not None
     assert translated.runtime.max_turns == 50
     assert translated.runtime.timeout_seconds == 1800
+
+
+def test_a_relay_config_persisted_under_fabric_0_4_is_raised_to_the_current_observability_version() -> None:
+    """Only the number changed between 3 and 4 for what this translator emits; nothing else is touched."""
+    persisted = {"metadata": {"name": "a"}, "relay": {"observability": {"version": 3, "atif": {"enabled": True}}}}
+
+    upgraded = upgrade_relay_observability_version(persisted)
+
+    assert upgraded["relay"]["observability"] == {"version": 4, "atif": {"enabled": True}}
+    assert persisted["relay"]["observability"]["version"] == 3
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"metadata": {"name": "a"}},
+        {"metadata": {"name": "a"}, "relay": {"project": "a"}},
+        {"metadata": {"name": "a"}, "relay": {"observability": {"version": 4}}},
+    ],
+)
+def test_a_config_with_nothing_to_raise_is_returned_as_is(config: dict[str, Any]) -> None:
+    assert upgrade_relay_observability_version(config) is config

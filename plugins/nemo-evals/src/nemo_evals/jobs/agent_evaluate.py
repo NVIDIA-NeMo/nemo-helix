@@ -59,7 +59,11 @@ from nemo_evals.jobs.gym_submission import gym_runtime_target, prepare_gym_submi
 from nemo_evals.jobs.kinds.registry import KIND_ADAPTERS, get_adapter
 from nemo_evals.jobs.kinds.types import PrepareContext, SubmitContext, TaskKindAdapter
 from nemo_evals.jobs.publication import publish_agent_eval_result
-from nemo_evals.jobs.registered_agent_resolution import expand_mcp_secret_env, resolve_registered_agent
+from nemo_evals.jobs.registered_agent_resolution import (
+    expand_mcp_secret_env,
+    resolve_registered_agent,
+    upgrade_registered_agent_config,
+)
 from nemo_evals.jobs.result_persistence import persist_agent_eval_result
 from nemo_evals.jobs.run_outcome import STATUS_DETAILS_KEY, agent_eval_outcome, report_run_outcome
 from nemo_evals.jobs.secret_env import JobEnvSecretSource
@@ -466,6 +470,7 @@ class _AgentEvalJobBase(NemoJob):
             return target.agent, None, target.params or RunConfigOnline()
         if isinstance(target, FabricRunnerTarget):
             _require_fabric_env_secrets_resolved(target)
+            target = upgrade_registered_agent_config(target)
             assert target.config is not None  # canonical spec guarantees resolution ran
             fabric_runtime = FabricAgentRuntime(
                 config=expand_mcp_secret_env(target.config, os.environ),
@@ -480,6 +485,7 @@ class _AgentEvalJobBase(NemoJob):
         if isinstance(target, GymRunnerTarget):
             return gym_runtime_target(target, ctx), None, None
         if isinstance(target, HarborRunnerTarget):
+            target = upgrade_registered_agent_config(target)
             agent_kwargs = dict(target.agent_kwargs)
             staged = _staged_agent_files(target, ctx)
             if staged is not None:

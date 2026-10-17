@@ -23,7 +23,7 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_installed_agent import (
 )
 
 _DEEPAGENTS = "nvidia.fabric.langchain.deepagents"
-_PACKAGE = "nemo-fabric[deepagents,relay]==0.4.0"
+_PACKAGE = "nemo-fabric[deepagents,relay]==0.5.0"
 _CONFIG: dict[str, Any] = {
     "metadata": {"name": "hello-world"},
     "harness": {"adapter_id": _DEEPAGENTS},
@@ -92,7 +92,7 @@ def test_it_is_an_installed_agent_wrapping_a_fabric_agent(tmp_path: Path) -> Non
     # Composition, so FabricAgent.setup() -- the `python3 -m venv` step that cannot run on a bare
     # image -- is never reached, and the model config still comes from the wrapped agent.
     assert type(agent).setup is BaseInstalledAgent.setup
-    assert agent.SUPPORTS_ATIF is True
+    assert agent.capabilities.atif is True
     assert agent.fabric._build_spec("write hello.txt").config.models["default"].api_key_env == "NVIDIA_API_KEY"
 
 
@@ -166,14 +166,14 @@ async def test_fabric_package_may_carry_several_requirements(tmp_path: Path) -> 
     """A harness's companions can be pinned next to Fabric; a quoted specifier with a marker stays whole."""
     agent = _agent(
         tmp_path,
-        fabric_package="""nemo-fabric[deepagents,relay]==0.3.0 mcp==1.29.0 'pkg==1.0; python_version<"3.13"'""",
+        fabric_package="""nemo-fabric[deepagents,relay]==0.5.0 mcp==1.29.0 'pkg==1.0; python_version<"3.13"'""",
     )
     environment = _RecordingEnvironment()
 
     await agent.install(cast(BaseEnvironment, environment))
 
     install = _ran(environment, "astral.sh/uv")
-    assert install.endswith("""'nemo-fabric[deepagents,relay]==0.3.0' mcp==1.29.0 'pkg==1.0; python_version<"3.13"'""")
+    assert install.endswith("""'nemo-fabric[deepagents,relay]==0.5.0' mcp==1.29.0 'pkg==1.0; python_version<"3.13"'""")
 
 
 async def test_a_blank_fabric_package_fails_before_any_install_command(tmp_path: Path) -> None:
@@ -304,6 +304,33 @@ def test_an_explicit_turn_budget_wins_including_unbounded(tmp_path: Path) -> Non
     budgeted = {**_CONFIG, "runtime": {"max_turns": 5}}
     assert _agent(tmp_path, fabric_config=budgeted).fabric._build_config().runtime.max_turns == 5
     assert _agent(tmp_path, fabric_default_max_turns=None).fabric._build_config().runtime.max_turns is None
+
+
+def test_preflight_runs_the_wrapped_agents_checks_on_the_keywords_it_will_be_handed() -> None:
+    """Without an ``options_model`` Harbor validates nothing for this class; every error below would
+    otherwise surface from the first ``Trial.create`` as a job-aborting traceback."""
+    FabricInstalledAgent.preflight(
+        {
+            "fabric_config": _CONFIG,
+            "fabric_package": _PACKAGE,
+            "fabric_workspace": "/app",
+            "fabric_python_version": "3.12",
+            "fabric_uv_version": DEFAULT_UV_VERSION,
+            "version": None,
+            "prompt_template_path": None,
+        }
+    )
+
+    with pytest.raises(ValueError, match="harness.adapter_id"):
+        FabricInstalledAgent.preflight({"fabric_config": {"metadata": {"name": "x"}}, "fabric_package": _PACKAGE})
+    with pytest.raises(ValueError, match="fabric_max_turns"):
+        FabricInstalledAgent.preflight({"fabric_config": _CONFIG, "fabric_package": _PACKAGE, "fabric_max_turns": 3})
+    with pytest.raises(ValueError, match="fabric_package is required"):
+        FabricInstalledAgent.preflight({"fabric_config": _CONFIG})
+    with pytest.raises(ValueError, match="quote it as '3.1'"):
+        FabricInstalledAgent.preflight(
+            {"fabric_config": _CONFIG, "fabric_package": _PACKAGE, "fabric_python_version": 3.1}
+        )
 
 
 def test_the_version_probe_reads_the_venv_not_the_host(tmp_path: Path) -> None:

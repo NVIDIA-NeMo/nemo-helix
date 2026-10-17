@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Pin Harbor 0.20.0 resume behavior and the aligned SDK cache contract."""
+"""Pin Harbor 0.23.0 resume behavior and the aligned SDK cache contract."""
 
 from __future__ import annotations
 
@@ -113,7 +113,7 @@ def _sdk_errored_job(
 def test_harbor_cli_resume_defaults_to_cancelled_error_and_hides_it() -> None:
     from typer.testing import CliRunner
 
-    assert harbor.__version__ == "0.20.0"
+    assert harbor.__version__ == "0.23.0"
     parameter = inspect.signature(resume).parameters["filter_error_types"]
     assert parameter.default == ["CancelledError"]
     source = inspect.getsource(resume)
@@ -364,7 +364,7 @@ def _plant_result_validity_case(job_dir: Path, case: str) -> None:
 
 @pytest.mark.parametrize("case", _RESULT_VALIDITY_CASES)
 def test_harbor_result_validity_is_shared_by_loader_cache_and_adaptation(tmp_path: Path, case: str) -> None:
-    assert harbor.__version__ == "0.20.0"
+    assert harbor.__version__ == "0.23.0"
     job_dir = tmp_path / "job"
     job_dir.mkdir()
     _plant_result_validity_case(job_dir, case)
@@ -399,7 +399,7 @@ def test_sdk_does_not_expose_resume_filter_error_types_today() -> None:
 
 
 def test_in_run_retry_and_cli_resume_filter_are_separate_surfaces() -> None:
-    assert harbor.__version__ == "0.20.0"
+    assert harbor.__version__ == "0.23.0"
     fields = RetryConfig.model_fields
     assert set(fields) >= {"max_retries", "include_exceptions", "exclude_exceptions"}
     default_exclude = RetryConfig().exclude_exceptions

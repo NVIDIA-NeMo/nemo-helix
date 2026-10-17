@@ -29,6 +29,10 @@ _ENV_TEMPLATE = re.compile(r"\$\{[^}]+\}")
 _SECRET_KEY_MARKER_RE = re.compile(
     r"(?<![a-z0-9])(?:" + "|".join(re.escape(marker) for marker in _SECRET_KEY_MARKERS) + r")s?(?![a-z0-9])"
 )
+#: A path segment that counts tokens rather than holding one: ``max_tokens``, ``max_output_tokens``. The
+#: plural alone is not enough -- ``api_tokens`` and ``GITHUB_TOKENS`` hold credentials, and Harbor's own
+#: scrubber exempts every ``*TOKENS`` key, so this check is all that stands before them.
+_TOKEN_BUDGET_SEGMENT_RE = re.compile(r"(?:max|min|num|n|total|limit)_(?:[a-z0-9]+_)*tokens")
 #: Issued-token shapes, for values whose key says nothing. A prefix ending in ``-`` or ``_`` delimits
 #: itself and needs no length: nothing ordinary reads as ``glpat-`` at the start of a value. A prefix
 #: that is a bare run of letters does not, and runs into real words — ``ASIA`` a region, ``AIza`` the
@@ -142,9 +146,15 @@ def _exposed_paths(path: str, value: Any) -> list[str]:
         return [nested for item in value for nested in _exposed_paths(path, item)]
     if not isinstance(value, str) or not value or _ENV_TEMPLATE.fullmatch(value):
         return []
-    if not _names_a_variable(path, value) and _SECRET_KEY_MARKER_RE.search(path.casefold()):
+    if not _names_a_variable(path, value) and _marks_a_credential(path):
         return [path]
     return [path] if is_credential_value(value) else []
+
+
+def _marks_a_credential(path: str) -> bool:
+    """Whether a marker stands as a word somewhere in ``path``, token-budget segments set aside."""
+    segments = [segment for segment in path.casefold().split(".") if not _TOKEN_BUDGET_SEGMENT_RE.fullmatch(segment)]
+    return _SECRET_KEY_MARKER_RE.search(".".join(segments)) is not None
 
 
 def is_credential_value(value: Any) -> bool:

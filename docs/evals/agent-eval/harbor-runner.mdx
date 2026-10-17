@@ -48,7 +48,7 @@ To add Harbor to an environment you already have, install it against the same co
 declares:
 
 ```bash
-uv pip install "harbor>=0.20,<0.21"
+uv pip install "harbor>=0.23,<0.24"
 ```
 
 Use `pip install` in place of `uv pip install` if you prefer; both work here.
@@ -615,12 +615,12 @@ completed
   - The agent receives each entry through Harbor's agent env (`self.extra_env`, and the env of its
     `environment.exec` calls). A custom agent should read it from there, not from `os.getenv`.
   - Harbor scrubs a secret's value from trial files only under keys matching `KEY`, `SECRET`,
-    `TOKEN`, `PASSWORD`, `CREDENTIAL` or `AUTH`; other keys log a warning. A very short or common
+    `TOKEN` (but not `TOKENS`), `PASSWORD`, `CREDENTIAL` or `AUTH`; other keys log a warning. A very short or common
     secret value (for example `1`) is scrubbed everywhere it appears, which can corrupt JSON.
 - **`env_vars`** — non-secret settings for the agent, as literal values that reach only the agent.
   Rejected: `${MY_ENV_VAR}` templates, credential-shaped values, and keys Harbor treats as secrets
-  (matching `KEY`, `SECRET`, `TOKEN`, `PASSWORD`, `CREDENTIAL` or `AUTH`, case-insensitively, such
-  as `MAX_TOKENS`), since Harbor would mask them in `config.json` and scrub their values from every
+  (matching `KEY`, `SECRET`, `TOKEN` but not `TOKENS`, `PASSWORD`, `CREDENTIAL` or `AUTH`,
+  case-insensitively, such as `TOKENIZERS_PARALLELISM`), since Harbor would mask them in `config.json` and scrub their values from every
   trial file.
 
 <Warning>
@@ -653,7 +653,7 @@ Loose wrapper source through `agent_dir` is supported only by standalone `nhx-ev
 It is not supported by submitted `nemo-evals` plugin jobs.
 
 For example, NeMo Fabric's
-[`FabricAgent`](https://github.com/NVIDIA/NeMo-Fabric/blob/v0.4.0/sdk/python/nemo-fabric-runtime/src/nemo_fabric/integrations/harbor/fabric_agent.py)
+[`FabricAgent`](https://github.com/NVIDIA/NeMo-Fabric/blob/v0.5.0/sdk/python/nemo-fabric-runtime/src/nemo_fabric/integrations/harbor/fabric_agent.py)
 is one of Harbor's [existing agents](https://www.harborframework.com/docs/agents#existing-agents);
 its constructor requires `fabric_adapter_id` and accepts `fabric_package` and `fabric_telemetry`. For a
 complete, runnable version with a Nemotron model, see
@@ -665,7 +665,7 @@ config = HarborRuntimeConfig(
     agent_import_path="nemo_fabric.integrations.harbor:FabricAgent",
     agent_kwargs={
         "fabric_adapter_id": "nvidia.fabric.codex",
-        "fabric_package": "nemo-fabric[codex]==0.4.0",
+        "fabric_package": "nemo-fabric[codex]==0.5.0",
         "fabric_telemetry": "relay",
     },
 )
@@ -686,7 +686,7 @@ source directory:
     "source": {"import_path": "nemo_fabric.integrations.harbor:FabricAgent"},
     "agent_kwargs": {
       "fabric_adapter_id": "nvidia.fabric.codex",
-      "fabric_package": "nemo-fabric[codex]==0.4.0"
+      "fabric_package": "nemo-fabric[codex]==0.5.0"
     },
     "env_secrets": {
       "OPENAI_API_KEY": "my-workspace/openai-key"
@@ -823,7 +823,7 @@ The error changes `a2`'s status and error rollup; it does not discard or replace
 
 - **`max_retries`** — maximum extra attempts per trial during the current Harbor run; defaults to `0`.
 - **Error policy** — Harbor retries only allowed errors. Its
-  [default non-retryable errors](https://github.com/harbor-framework/harbor/blob/v0.20.0/src/harbor/models/job/config.py#L288-L301)
+  [default non-retryable errors](https://github.com/harbor-framework/harbor/blob/v0.23.0/src/harbor/models/job/config.py#L299-L310)
   include `AgentTimeoutError`.
 - **Repeated SDK calls** — `max_retries` never reopens cached errored trials. Cache behavior is
   described below.
