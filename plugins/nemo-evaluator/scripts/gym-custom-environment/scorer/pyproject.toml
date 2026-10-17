@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Build metadata used by prepare.py to create the wheel delivered in the environment FileSet.
+# This project is not published independently.
+
+[project]
+name = "nmp-ascii-tree-evaluator"
+version = "0.1.0"
+description = "Custom ASCII Tree scorer for thenmp-ascii-tree-evaluator Gym environment workflow"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nmp_ascii_tree_evaluator"]
