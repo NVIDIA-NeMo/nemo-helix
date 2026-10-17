@@ -5,9 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -16,7 +14,6 @@ pytest.importorskip("scaled_evals")
 from api_test_fixture import client, v1
 from scaled_evals.api.auth import current_principal
 from scaled_evals.api.benchmark_store import BenchmarkStore, TaskRef
-from scaled_evals.api.db import get_conn
 from scaled_evals.api.evaluation_store import EvaluationStore
 from scaled_evals.dispatch.sandbox_k8s import apply_agent_timeout_floor
 from scaled_evals.dispatch.worker import (
@@ -31,12 +28,7 @@ from task_fixtures import seed_benchmark, seed_benchmark_run, seed_task_revision
 
 @pytest.fixture(autouse=True)
 def _override_db():
-    def _empty() -> Iterator[MagicMock]:
-        yield MagicMock()
-
-    v1.dependency_overrides[get_conn] = _empty
     yield
-    v1.dependency_overrides.pop(get_conn, None)
     v1.dependency_overrides.pop(current_principal, None)
 
 

@@ -27,9 +27,7 @@ from nemo_scaled_evals_plugin.submitter import EvaluationSubmitter
 from scaled_evals.api import entity_store
 from scaled_evals.api.benchmark_archive_store import BenchmarkArchiveStore
 from scaled_evals.api.build.queue_worker import TaskBuildWorker
-from scaled_evals.api.db import pooled_connection
 from scaled_evals.api.evaluation_store import EvaluationStore
-from scaled_evals.api.repositories.ops_repository import OperationsRepository
 from scaled_evals.api.settings import settings
 from scaled_evals.api.task_store import TaskBuildJob, TaskStore
 from scaled_evals.dispatch.worker import Dispatcher, _retry_delay_seconds, teardown_orphaned_execution
@@ -72,10 +70,8 @@ class ScaledEvalsJobsController(NemoController):
         self._submitter: EvaluationSubmitter | None = None
         self._entities: SyncEntityClient | None = None
         self._worker_id = f"scaled-evals-jobs:{socket.gethostname()}:{time.time_ns()}"
-        self._healthy = True
         self._background: dict[str, asyncio.Task[None]] = {}
         self._dispatcher = Dispatcher(
-            connect=pooled_connection,
             worker_id=self._worker_id,
             claim_timeout=FINALIZE_CLAIM_TIMEOUT_SECONDS,
         )
@@ -91,10 +87,6 @@ class ScaledEvalsJobsController(NemoController):
         if self._submitter is None:
             self._submitter = EvaluationSubmitter(self.jobs, self._worker_id, self._entities)
         return self._submitter
-
-    @property
-    def is_healthy(self) -> bool:
-        return self._healthy
 
     async def on_startup(self) -> None:
         client = get_async_nemo_client(as_service="scaled-evals", internal=True)
@@ -117,17 +109,8 @@ class ScaledEvalsJobsController(NemoController):
             try:
                 await phase()
             except Exception:
-                # One unprocessable row must not abort the pass, skip the
-                # heartbeat, or mark this controller unhealthy. Readiness gates
-                # the API, so a poison-pill row would otherwise take it offline.
+                # One unprocessable row must not abort the pass.
                 LOG.exception("scaled-evals Platform Jobs phase %s failed", name)
-        try:
-            await asyncio.to_thread(self._heartbeat)
-        except Exception:
-            self._healthy = False
-            LOG.exception("scaled-evals Platform Jobs heartbeat failed")
-        else:
-            self._healthy = True
 
     def _phases(self) -> list[tuple[str, Callable[[], Awaitable[None]]]]:
         """Return the reconciliation phases, in execution order."""
@@ -245,9 +228,8 @@ class ScaledEvalsJobsController(NemoController):
         """Return a phase that drains ``step`` in the background, one drain at a time.
 
         Teardowns can wait minutes on kubectl or OpenSandbox, and archive builds
-        on object storage. Inside the pass they would delay submissions and the
-        heartbeat, and a heartbeat older than ``platform_jobs_controller_stale_seconds``
-        fails API readiness.
+        on object storage. Inside the pass they would delay submissions and
+        stall the controller loop the platform watches.
         """
 
         async def start() -> None:
@@ -444,10 +426,6 @@ class ScaledEvalsJobsController(NemoController):
             )
             return
         store.record_cancel_teardown_succeeded(str(row["id"]))
-
-    def _heartbeat(self) -> None:
-        with pooled_connection() as conn:
-            OperationsRepository(conn).heartbeat_service("platform_jobs_controller", self._worker_id)
 
 
 def _log_background_failure(task: asyncio.Task[None]) -> None:

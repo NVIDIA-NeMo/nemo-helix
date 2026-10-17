@@ -3,42 +3,14 @@
 
 import re
 from typing import Any, Literal
-from urllib.parse import quote
 
-from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-# Development default when SCALED_EVALS_DATABASE_URL is unset. Matches upstream.
-# Deployments always set the DSN explicitly; leaving this reachable keeps a local
-# `docker run postgres` the only setup step, as in the standalone repo.
-_STANDALONE_DATABASE_URL = "postgresql://scaled_evals:scaled_evals@localhost:5432/scaled_evals"
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # scaled-evals owns its own Postgres, so this names it. Deliberately not
-    # `DATABASE_URL`: the platform injects that into the same process, and reusing
-    # it would run these migrations and claim queues inside the platform database.
-    database_url: str = Field(default="", validation_alias="SCALED_EVALS_DATABASE_URL")
-    # Every scaled-evals table lives here. Redundant in a dedicated database, but
-    # it costs one connect-time option and keeps the vendored SQL safe to point at
-    # a shared database without touching 19 table names. Unqualified SQL resolves
-    # through search_path.
-    database_schema: str = Field(default="scaled_evals", validation_alias="SCALED_EVALS_DATABASE_SCHEMA")
-    # Applied by the plugin at startup and by `scaled-evals-migrate`. Turn off
-    # where an external Job owns schema rollout.
-    run_migrations: bool = Field(default=True, validation_alias="SCALED_EVALS_RUN_MIGRATIONS")
-    # How long migrations wait for a database that is still starting. Covers
-    # `initdb` on a fresh volume, which is what makes an unordered Kubernetes
-    # start lose the race. Also the ceiling on how long a wrong DSN delays
-    # startup, since the two are indistinguishable at connect time.
-    migration_wait_seconds: float = Field(default=30.0, validation_alias="SCALED_EVALS_MIGRATION_WAIT_SECONDS")
-    database_ssl_mode: str = "verify-full"
-    database_ssl_root_cert: str | None = None
-    database_pool_min_size: int = 2
-    database_pool_max_size: int = 20
-    database_pool_timeout_seconds: float = 10.0
     # Server-sent event guardrails are process-local. The deployment-wide
     # ceiling is this value multiplied by the number of API replicas.
     api_sse_max_connections: int = 20
@@ -129,12 +101,6 @@ class Settings(BaseSettings):
     cloud_build_service_account: str = ""
     cloud_build_timeout_seconds: float = 2100.0
     cloud_build_poll_interval_seconds: float = 5.0
-    # Staleness bound for the Platform Jobs controller heartbeat in readyz.
-    # Hosted charts still set the old BUILD_WORKER_STALE_SECONDS name.
-    platform_jobs_controller_stale_seconds: float = Field(
-        default=60.0,
-        validation_alias=AliasChoices("PLATFORM_JOBS_CONTROLLER_STALE_SECONDS", "BUILD_WORKER_STALE_SECONDS"),
-    )
     # Target platform for finalize image builds. Pinned to the runtime cluster's
     # arch (hosted nodes are amd64) so an arm64 build host (Apple Silicon under
     # Colima) does not produce images that `exec format error` on amd64 nodes.
@@ -175,10 +141,6 @@ class Settings(BaseSettings):
     platform_jobs_image: str = Field(
         default="",
         validation_alias="SCALED_EVALS_PLATFORM_JOBS_IMAGE",
-    )
-    platform_jobs_postgres_password_secret: str = Field(
-        default="",
-        validation_alias="SCALED_EVALS_PLATFORM_JOBS_POSTGRES_PASSWORD_SECRET",
     )
     platform_jobs_registry_auth_secret: str = Field(
         default="",
@@ -501,22 +463,6 @@ class Settings(BaseSettings):
 
     def resolved_object_store_bucket(self) -> str:
         return self.gcs_bucket
-
-    def resolved_database_url(self) -> str:
-        base = self.database_url or _STANDALONE_DATABASE_URL
-        params = [f"sslmode={self.database_ssl_mode}"]
-        if self.database_ssl_root_cert:
-            params.append(f"sslrootcert={self.database_ssl_root_cert}")
-        if self.database_schema:
-            # libpq hands this to the backend at connect time, so every pooled
-            # connection, worker, and migration run resolves the vendored SQL's
-            # unqualified table names into our schema before `public`.
-            options = quote(f"-c search_path={self.database_schema},public", safe="")
-            params.append(f"options={options}")
-        if not params:
-            return base
-        sep = "&" if "?" in base else "?"
-        return f"{base}{sep}{'&'.join(params)}"
 
 
 class _LazySettings:

@@ -3,11 +3,8 @@
 
 """Unit tests for the config-profiles router.
 
-Profiles live in the conftest's in-memory Entity Store. The mocked psycopg
-connection only answers whether an active evaluation references a profile.
+Profiles live in the conftest's in-memory Entity Store.
 """
-
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -15,7 +12,6 @@ pytest.importorskip("scaled_evals")
 
 from api_test_fixture import client, v1
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
-from scaled_evals.api.db import get_conn
 from scaled_evals.api.tenancy import caller_is_admin
 from task_fixtures import seed_evaluation
 
@@ -26,19 +22,9 @@ _VALID_GYM_CONFIG = {
 }
 
 
-@pytest.fixture
-def in_use() -> MagicMock:
-    """Connection whose active-evaluation lookup finds nothing unless a test says so."""
-    conn = MagicMock()
-    conn.cursor.return_value.__enter__.return_value.fetchone.return_value = None
-    return conn
-
-
 @pytest.fixture(autouse=True)
-def _override_db(in_use: MagicMock):
-    v1.dependency_overrides[get_conn] = lambda: in_use
+def _override_db():
     yield
-    v1.dependency_overrides.pop(get_conn, None)
     v1.dependency_overrides.pop(current_principal, None)
     v1.dependency_overrides[caller_is_admin] = lambda: True
 

@@ -3,7 +3,7 @@
 
 """Unit tests for the evaluations router and the dispatch worker.
 
-In-process FastAPI TestClient with a mocked psycopg connection, plus direct
+In-process FastAPI TestClient over in-memory entity stores, plus direct
 unit tests of the Dispatcher/backend with an injected fake backend. No cluster,
 no compose — end-to-end coverage lives in tests/integration/.
 """
@@ -23,7 +23,7 @@ pytest.importorskip("scaled_evals")
 from api_test_fixture import client, v1
 from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from scaled_evals.api.config_profile_store import ConfigProfileStore
-from scaled_evals.api.db import Database, get_conn, get_stream_database_factory
+from scaled_evals.api.db import Database, get_stream_database_factory
 from scaled_evals.api.evaluation_store import EvaluationStore
 from scaled_evals.api.routers import evaluations as evaluations_router
 from scaled_evals.api.runnability import caller_secret_readable
@@ -113,7 +113,6 @@ def _eval_row(**overrides) -> dict:
 
 def _seed_archive(**overrides) -> None:
     _seed(_eval_row(status="succeeded", **{"archive_status": "missing", **overrides}))
-    _override_conn(_conn())
 
 
 def _seed(row: dict) -> None:
@@ -145,46 +144,10 @@ def _profile(profile_id: str, profile_type: str, config: dict | None = None) -> 
     ConfigProfileStore().create(profile_id, name=profile_id, type=profile_type, config=config or {})
 
 
-def _conn_with_fetchone(*results) -> MagicMock:
-    """Mock connection whose successive fetchone() calls return `results`."""
-    conn = MagicMock()
-    cur = conn.cursor.return_value.__enter__.return_value
-    cur.fetchone.side_effect = list(results)
-    cur.fetchall.return_value = []
-    return conn
-
-
-def _create_conn(revision: dict | None, *results) -> MagicMock:
-    """Seed `task_abc` revisions 1 and 2 with `revision`'s fields (absent when None); mock the rest."""
-    if revision is not None:
-        for number in (1, 2):
-            seed_task_revision("task_abc", number, **revision)
-    return _conn_with_fetchone(*results)
-
-
-def _conn(fetchone=(), fetchall=()) -> MagicMock:  # noqa: ANN001
-    """Mock connection with explicit fetchone() and fetchall() sequences.
-
-    For the POST path: fetchone serves the revision-status check then the
-    INSERT ... RETURNING.
-    """
-    conn = MagicMock()
-    cur = conn.cursor.return_value.__enter__.return_value
-    cur.fetchone.side_effect = list(fetchone)
-    cur.fetchall.side_effect = list(fetchall)
-    return conn
-
-
-def _override_conn(conn: MagicMock) -> None:
-    def _gen() -> Iterator[MagicMock]:
-        yield conn
-
-    @contextmanager
-    def _stream_gen() -> Iterator[Database]:
-        yield Database(conn)
-
-    v1.dependency_overrides[get_conn] = _gen
-    v1.dependency_overrides[get_stream_database_factory] = lambda: _stream_gen
+def _seed_revisions(revision: dict) -> None:
+    """Seed `task_abc` revisions 1 and 2 with `revision`'s fields."""
+    for number in (1, 2):
+        seed_task_revision("task_abc", number, **revision)
 
 
 def _sse_events(text: str) -> list[dict]:
@@ -209,7 +172,6 @@ def _sse_events(text: str) -> list[dict]:
 def _cleanup_overrides() -> Iterator[None]:
     evaluations_router._sse_active_connections = 0
     yield
-    v1.dependency_overrides.pop(get_conn, None)
     v1.dependency_overrides.pop(get_stream_database_factory, None)
     evaluations_router._sse_active_connections = 0
 
@@ -266,29 +228,8 @@ def _stub_execution_snapshot(monkeypatch) -> None:  # noqa: ANN001
 # ---------- POST happy path -----------------------------------------------
 
 
-def test_create_commits_before_returning() -> None:
-    """The evaluation row must be committed before the API responds.
-
-    The dispatch worker opens its own connection to load the row; get_conn
-    defers COMMIT to connection teardown (after the response) and the INSERT
-    runs in a SAVEPOINT (the validation SELECTs already opened a txn), so
-    without an explicit commit the worker can't see the queued row promptly.
-    """
-    conn = _create_conn({"status": "ready"}, _eval_row())
-    _override_conn(conn)
-
-    response = client.post(
-        "/v1/evaluations",
-        json={"name": "run 8", "task_id": "task_abc", "task_revision": 1},
-    )
-
-    assert response.status_code == 202, response.text
-    assert conn.commit.called, "router must commit the evaluation row"
-
-
 def test_preflight_reports_runnable_without_creating_evaluation() -> None:
-    conn = _create_conn({"status": "ready"})
-    _override_conn(conn)
+    _seed_revisions({"status": "ready"})
 
     response = client.post(
         "/v1/evaluations/preflight",
@@ -298,16 +239,11 @@ def test_preflight_reports_runnable_without_creating_evaluation() -> None:
     assert response.status_code == 200, response.text
     assert response.json()["runnable"] is True
     assert response.json()["kind"] == "evaluation"
-    assert not any(
-        "INSERT INTO evaluations" in call.args[0]
-        for call in conn.cursor.return_value.__enter__.return_value.execute.call_args_list
-    )
-    assert not conn.commit.called
+    assert client.get("/v1/evaluations").json()["data"] == []
 
 
 def test_preflight_reports_create_blocker_with_http_200() -> None:
-    conn = _create_conn({"status": "building"})
-    _override_conn(conn)
+    _seed_revisions({"status": "building"})
 
     response = client.post(
         "/v1/evaluations/preflight",
@@ -345,8 +281,7 @@ def test_create_rejects_initial_user_turns_for_non_harbor_framework() -> None:
 
 
 def test_create_409_when_revision_not_ready() -> None:
-    conn = _create_conn({"status": "building"})
-    _override_conn(conn)
+    _seed_revisions({"status": "building"})
 
     response = client.post(
         "/v1/evaluations",
@@ -367,16 +302,14 @@ def test_create_allows_ready_gcs_revision_when_pack_exists(
         "scaled_evals.api.routers.evaluations.artifacts.object_exists",
         lambda key: checked.append(key) or True,
     )
-    conn = _create_conn(
+    _seed_revisions(
         {
             "status": "ready",
             "image_ref": "us-central1-docker.pkg.dev/project/repo/task:rev1",
             "image_digest": "sha256:" + "a" * 64,
             "tarball_object_key": "task_abc/rev/1/tarball.tar.gz",
-        },
-        _eval_row(),
+        }
     )
-    _override_conn(conn)
 
     response = client.post(
         "/v1/evaluations",
@@ -392,7 +325,7 @@ def test_create_409_when_ready_revision_pack_missing_local_rustfs(
 ) -> None:
     monkeypatch.setattr(settings, "object_store_backend", "artifacts")
     monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.object_exists", lambda _key: False)
-    conn = _create_conn(
+    _seed_revisions(
         {
             "status": "ready",
             "image_ref": "registry.example/task_abc:rev1",
@@ -400,7 +333,6 @@ def test_create_409_when_ready_revision_pack_missing_local_rustfs(
             "tarball_object_key": "task_abc/rev/1/tarball.tar.gz",
         }
     )
-    _override_conn(conn)
 
     response = client.post(
         "/v1/evaluations",
@@ -409,15 +341,10 @@ def test_create_409_when_ready_revision_pack_missing_local_rustfs(
 
     assert response.status_code == 409
     assert response.json()["detail"]["error"]["code"] == "task_object_missing"
-    assert not any(
-        "INSERT INTO evaluations" in call.args[0]
-        for call in conn.cursor.return_value.__enter__.return_value.execute.call_args_list
-    )
+    assert client.get("/v1/evaluations").json()["data"] == []
 
 
 def test_create_404_when_revision_missing() -> None:
-    conn = _conn_with_fetchone(None)
-    _override_conn(conn)
 
     response = client.post(
         "/v1/evaluations",
@@ -433,14 +360,13 @@ def test_create_rejects_task_image_from_unapproved_registry(
 ) -> None:
     monkeypatch.setattr(settings, "task_image_validation_mode", "resolve")
     monkeypatch.setattr(settings, "task_image_allowed_registries", "us-central1-docker.pkg.dev")
-    conn = _create_conn(
+    _seed_revisions(
         {
             "status": "ready",
             "image_ref": "artifactory.nvidia.com/team/task:rev2",
             "image_digest": "sha256:" + "a" * 64,
         }
     )
-    _override_conn(conn)
 
     response = client.post(
         "/v1/evaluations",
@@ -453,14 +379,10 @@ def test_create_rejects_task_image_from_unapproved_registry(
     assert error["message"] == (
         "task image registry 'artifactory.nvidia.com' is not approved; allowed registries: us-central1-docker.pkg.dev"
     )
-    assert not any(
-        "INSERT INTO evaluations" in call.args[0]
-        for call in conn.cursor.return_value.__enter__.return_value.execute.call_args_list
-    )
+    assert client.get("/v1/evaluations").json()["data"] == []
 
 
 def test_create_422_on_malformed_profile_id() -> None:
-    _override_conn(_conn_with_fetchone({"status": "ready"}, _eval_row()))
 
     response = client.post(
         "/v1/evaluations",
@@ -477,7 +399,7 @@ def test_create_422_on_malformed_profile_id() -> None:
 
 
 def test_create_records_default_deny() -> None:
-    _override_conn(_create_conn({"status": "ready"}))
+    _seed_revisions({"status": "ready"})
 
     response = client.post(
         "/v1/evaluations",
@@ -496,7 +418,7 @@ def test_create_records_default_deny() -> None:
 
 
 def test_create_resolves_harbor_version_before_queueing() -> None:
-    _override_conn(_create_conn({"status": "ready"}))
+    _seed_revisions({"status": "ready"})
 
     response = client.post(
         "/v1/evaluations",
@@ -535,7 +457,7 @@ def test_create_gym_runtime_persists_runtime_runner_identity(monkeypatch) -> Non
     monkeypatch.setattr(settings, "gym_runner_image_digest", digest)
     monkeypatch.setattr(settings, "gym_source_revision", source_revision)
     monkeypatch.setattr(settings, "gym_package_version", "0.4.0")
-    _override_conn(_create_conn({"status": "ready"}))
+    _seed_revisions({"status": "ready"})
 
     response = client.post(
         "/v1/evaluations",
@@ -559,7 +481,7 @@ def test_create_gym_runtime_persists_runtime_runner_identity(monkeypatch) -> Non
 
 def test_create_resolves_and_persists_agent_bundle(monkeypatch) -> None:
     _profile("cfg_h", "harbor")
-    _override_conn(_create_conn({"status": "ready"}))
+    _seed_revisions({"status": "ready"})
     resolved = {
         "bundle_id": "ab_claude",
         "agent_name": "claude-code",
@@ -589,7 +511,6 @@ def test_create_resolves_and_persists_agent_bundle(monkeypatch) -> None:
 
 
 def test_create_rejects_unsupported_harbor_version_with_choices() -> None:
-    _override_conn(_conn())
 
     response = client.post(
         "/v1/evaluations",
@@ -610,7 +531,6 @@ def test_create_rejects_unsupported_harbor_version_with_choices() -> None:
 
 
 def test_create_rejects_scoped_egress_without_rules() -> None:
-    _override_conn(MagicMock())
     response = client.post(
         "/v1/evaluations",
         json={
@@ -625,7 +545,6 @@ def test_create_rejects_scoped_egress_without_rules() -> None:
 
 
 def test_create_rejects_zero_parallelism() -> None:
-    _override_conn(_conn_with_fetchone({"status": "ready"}))
     response = client.post(
         "/v1/evaluations",
         json={"name": "x", "task_id": "task_abc", "task_revision": 1, "parallelism": 0},
@@ -638,8 +557,7 @@ def test_create_rejects_zero_parallelism() -> None:
 
 def test_create_202_with_valid_profile_and_credential() -> None:
     _profile("cfg_h", "harbor")
-    conn = _create_conn({"status": "ready"}, _eval_row())
-    _override_conn(conn)
+    _seed_revisions({"status": "ready"})
 
     response = client.post(
         "/v1/evaluations",
@@ -657,8 +575,7 @@ def test_create_202_with_valid_profile_and_credential() -> None:
 
 def test_create_202_with_nemo_gym_framework_profile() -> None:
     _profile("cfg_g", "gym")
-    conn = _create_conn({"status": "ready"}, _eval_row(framework="nemo_gym", framework_profile_id="cfg_g"))
-    _override_conn(conn)
+    _seed_revisions({"status": "ready"})
 
     response = client.post(
         "/v1/evaluations",
@@ -676,8 +593,7 @@ def test_create_202_with_nemo_gym_framework_profile() -> None:
 
 def test_create_202_treats_framework_profile_as_harbor_alias() -> None:
     _profile("cfg_h", "harbor")
-    conn = _create_conn({"status": "ready"}, _eval_row(framework_profile_id="cfg_h", harbor_profile_id="cfg_h"))
-    _override_conn(conn)
+    _seed_revisions({"status": "ready"})
 
     response = client.post(
         "/v1/evaluations",
@@ -693,8 +609,7 @@ def test_create_202_treats_framework_profile_as_harbor_alias() -> None:
 
 
 def test_create_422_when_profile_missing() -> None:
-    conn = _create_conn({"status": "ready"})
-    _override_conn(conn)
+    _seed_revisions({"status": "ready"})
 
     response = client.post(
         "/v1/evaluations",
@@ -713,8 +628,7 @@ def test_create_422_when_profile_missing() -> None:
 def test_create_422_when_profile_wrong_type() -> None:
     # harbor_profile_id points at an intake-typed profile.
     _profile("cfg_sw", "intake")
-    conn = _create_conn({"status": "ready"})
-    _override_conn(conn)
+    _seed_revisions({"status": "ready"})
 
     response = client.post(
         "/v1/evaluations",
@@ -732,8 +646,7 @@ def test_create_422_when_profile_wrong_type() -> None:
 
 def test_create_422_when_nemo_gym_profile_wrong_type() -> None:
     _profile("cfg_h", "harbor")
-    conn = _create_conn({"status": "ready"})
-    _override_conn(conn)
+    _seed_revisions({"status": "ready"})
 
     response = client.post(
         "/v1/evaluations",
@@ -751,7 +664,6 @@ def test_create_422_when_nemo_gym_profile_wrong_type() -> None:
 
 
 def test_create_422_when_harbor_aliases_conflict() -> None:
-    _override_conn(_conn_with_fetchone({"status": "ready"}))
 
     response = client.post(
         "/v1/evaluations",
@@ -768,7 +680,6 @@ def test_create_422_when_harbor_aliases_conflict() -> None:
 
 
 def test_create_422_when_harbor_alias_used_for_nemo_gym() -> None:
-    _override_conn(_conn_with_fetchone({"status": "ready"}))
 
     response = client.post(
         "/v1/evaluations",
@@ -785,7 +696,7 @@ def test_create_422_when_harbor_alias_used_for_nemo_gym() -> None:
 
 
 def test_create_422_when_credential_secret_unusable() -> None:
-    _override_conn(_create_conn({"status": "ready"}))
+    _seed_revisions({"status": "ready"})
     body = {"name": "x", "task_id": "task_abc", "task_revision": 1}
 
     unqualified = client.post("/v1/evaluations", json={**body, "credentials": {"anthropic": "cred_ghost"}})
@@ -832,14 +743,12 @@ def test_caller_secret_readable_maps_platform_denials_to_false(monkeypatch) -> N
 
 
 def test_list_returns_envelope_shape() -> None:
-    _override_conn(_conn_with_fetchone())
     response = client.get("/v1/evaluations")
     assert response.status_code == 200
     assert response.json() == {"data": [], "next_cursor": None}
 
 
 def test_get_404_when_missing() -> None:
-    _override_conn(_conn_with_fetchone(None))
     response = client.get("/v1/evaluations/ev_nope")
     assert response.status_code == 404
     assert response.json()["detail"]["error"]["code"] == "not_found"
@@ -856,7 +765,6 @@ def test_get_returns_result_envelope_for_terminal_run() -> None:
         result=SAMPLE_HARBOR_RESULT,
     )
     _seed(row)
-    _override_conn(_conn())
 
     response = client.get("/v1/evaluations/ev_test123")
 
@@ -885,7 +793,6 @@ def test_get_projects_boolean_reward_value_without_changing_result_envelope() ->
         result=raw_result,
     )
     _seed(row)
-    _override_conn(_conn())
 
     response = client.get("/v1/evaluations/ev_test123")
 
@@ -898,7 +805,6 @@ def test_get_projects_boolean_reward_value_without_changing_result_envelope() ->
 def test_get_result_is_none_before_terminal() -> None:
     # A still-running row has no result yet; the field is present and null.
     _seed(_eval_row(status="running"))
-    _override_conn(_conn())
     response = client.get("/v1/evaluations/ev_test123")
     assert response.status_code == 200
     body = response.json()
@@ -950,7 +856,6 @@ def test_get_telemetry_returns_attempt_aware_usage_and_raw_handoff_links() -> No
         "cpu_limit_cores": 2.0,
     }
     _seed(_eval_row(current_execution=2, intake_profile_id="cfg_intake", telemetry=[execution], resource_usage=[usage]))
-    _override_conn(_conn())
 
     response = client.get("/v1/evaluations/ev_test123/telemetry")
 
@@ -999,7 +904,6 @@ def test_get_telemetry_returns_attempt_aware_usage_and_raw_handoff_links() -> No
 
 
 def test_reproduce_returns_safe_rerun_request_and_command() -> None:
-    _override_conn(_conn())
     _seed(
         _eval_row(
             status="failed",
@@ -1058,7 +962,6 @@ def test_reproduce_returns_safe_rerun_request_and_command() -> None:
 
 
 def test_reproduce_404_when_missing() -> None:
-    _override_conn(_conn_with_fetchone(None))
     response = client.get("/v1/evaluations/ev_nope/reproduce")
     assert response.status_code == 404
 
@@ -1079,8 +982,6 @@ def test_retry_queues_next_execution_on_same_benchmark_member() -> None:
         }
     )
     _seed(_eval_row(status="failed", benchmark_run_id="bmr_1", max_executions=3))
-    conn = _conn()
-    _override_conn(conn)
 
     response = client.post("/v1/evaluations/ev_test123/retry")
 
@@ -1097,7 +998,6 @@ def test_retry_queues_next_execution_on_same_benchmark_member() -> None:
 
 def test_retry_rejects_non_failed_evaluation() -> None:
     _seed(_eval_row(status="running"))
-    _override_conn(_conn())
 
     response = client.post("/v1/evaluations/ev_test123/retry")
 
@@ -1107,7 +1007,6 @@ def test_retry_rejects_non_failed_evaluation() -> None:
 
 def test_retry_reports_terminal_artifact_finalization() -> None:
     _seed(_eval_row(status="failed", archive_claimed_by="worker-1"))
-    _override_conn(_conn())
 
     response = client.post("/v1/evaluations/ev_test123/retry")
 
@@ -1119,7 +1018,6 @@ def test_retry_reports_terminal_artifact_finalization() -> None:
 
 def test_retry_reports_unavailable_benchmark() -> None:
     _seed(_eval_row(status="failed", benchmark_run_id="bmr_cancelled"))
-    _override_conn(_conn())
 
     response = client.post("/v1/evaluations/ev_test123/retry")
 
@@ -1130,7 +1028,6 @@ def test_retry_reports_unavailable_benchmark() -> None:
 
 
 def test_retry_404_when_missing() -> None:
-    _override_conn(_conn_with_fetchone(None, None))
 
     response = client.post("/v1/evaluations/ev_nope/retry")
 
@@ -1161,7 +1058,6 @@ class _CancelBackend:
 
 def test_cancel_not_yet_launched_marks_cancelled_without_teardown() -> None:
     _seed(_eval_row())
-    _override_conn(_conn())
     response = client.post("/v1/evaluations/ev_test123/cancel")
     assert response.status_code == 200
     assert response.json()["status"] == "cancelled"
@@ -1179,7 +1075,6 @@ def test_cancel_launched_tears_down_backend(monkeypatch: pytest.MonkeyPatch) -> 
         lambda runtime: backend,
     )
     _seed(_eval_row(status="running", backend_handle=json.dumps({"backend": "sandbox_k8s", "external_id": "job-123"})))
-    _override_conn(_conn())
 
     response = client.post("/v1/evaluations/ev_test123/cancel")
 
@@ -1211,7 +1106,6 @@ def test_cancel_job_backed_evaluation_defers_teardown_to_owning_job(
             ),
         )
     )
-    _override_conn(_conn())
 
     response = client.post("/v1/evaluations/ev_test123/cancel")
 
@@ -1232,7 +1126,6 @@ def test_cancel_terminal_returns_unchanged_without_teardown(
     _seed(
         _eval_row(status="succeeded", backend_handle=json.dumps({"backend": "sandbox_k8s", "external_id": "job-123"}))
     )
-    _override_conn(_conn())
 
     response = client.post("/v1/evaluations/ev_test123/cancel")
 
@@ -1248,7 +1141,6 @@ def test_cancel_records_teardown_failure(monkeypatch: pytest.MonkeyPatch) -> Non
         lambda runtime: backend,
     )
     _seed(_eval_row(status="running", backend_handle=json.dumps({"backend": "sandbox_k8s", "external_id": "job-123"})))
-    _override_conn(_conn())
 
     response = client.post("/v1/evaluations/ev_test123/cancel")
 
@@ -1261,7 +1153,6 @@ def test_cancel_records_teardown_failure(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_cancel_404_when_missing() -> None:
     # UPDATE matches nothing, then the existence SELECT also returns nothing.
-    _override_conn(_conn_with_fetchone(None, None))
     response = client.post("/v1/evaluations/ev_nope/cancel")
     assert response.status_code == 404
 
@@ -1271,14 +1162,12 @@ def test_cancel_404_when_missing() -> None:
 
 def test_delete_soft_deletes() -> None:
     _seed(_eval_row(status="succeeded"))
-    _override_conn(_conn())
     response = client.delete("/v1/evaluations/ev_test123")
     assert response.status_code == 200
     assert response.json() == {"id": "ev_test123", "deleted": True}
 
 
 def test_delete_404_when_missing() -> None:
-    _override_conn(_conn_with_fetchone(None))
     response = client.delete("/v1/evaluations/ev_nope")
     assert response.status_code == 404
 
@@ -1288,7 +1177,6 @@ def test_delete_404_when_missing() -> None:
 
 def test_logs_tail_result_lines() -> None:
     _seed(_eval_row(status="succeeded", result={"logs": ["a", "b", "c"]}))
-    _override_conn(_conn())
 
     response = client.get("/v1/evaluations/ev_test123/logs", params={"tail_lines": 2})
 
@@ -1305,7 +1193,6 @@ def test_logs_tail_backend_log_file(tmp_path) -> None:
     log_path = tmp_path / "harbor.log"
     log_path.write_text("one\ntwo\nthree\n")
     _seed(_eval_row(status="running", backend_handle=json.dumps({"raw": {"log": str(log_path)}})))
-    _override_conn(_conn())
 
     response = client.get("/v1/evaluations/ev_test123/logs", params={"tail_lines": 2})
 
@@ -1326,7 +1213,6 @@ def test_logs_redact_api_keys_from_result_lines() -> None:
             },
         )
     )
-    _override_conn(_conn())
 
     response = client.get("/v1/evaluations/ev_test123/logs")
 
@@ -1343,7 +1229,6 @@ def test_events_returns_persisted_transition_history() -> None:
         {"id": 2, "type": "status", "status": "running", "detail": "launched", "created_at": NOW},
     ]
     _seed(_eval_row(events=events))
-    _override_conn(_conn())
 
     response = client.get("/v1/evaluations/ev_test123/events", params={"limit": 2, "offset": 0})
 
@@ -1373,7 +1258,6 @@ def test_events_returns_next_cursor_for_more_history() -> None:
         },
     ]
     _seed(_eval_row(events=events))
-    _override_conn(_conn())
 
     response = client.get("/v1/evaluations/ev_test123/events", params={"limit": 2})
 
@@ -1384,7 +1268,6 @@ def test_events_returns_next_cursor_for_more_history() -> None:
 
 
 def test_events_404_when_evaluation_missing() -> None:
-    _override_conn(_conn_with_fetchone(None))
 
     response = client.get("/v1/evaluations/ev_nope/events")
 
@@ -1412,7 +1295,6 @@ def test_events_stream_emits_live_persisted_events_until_terminal(monkeypatch) -
         "created_at": NOW + timedelta(microseconds=2),
     }
     _stream_polls(monkeypatch, [[queued], [], [running], [succeeded]])
-    _override_conn(_conn())
 
     response = client.get("/v1/evaluations/ev_test123/events/stream")
 
@@ -1449,7 +1331,6 @@ def test_events_stream_emits_terminal_event_after_status_flip(monkeypatch) -> No
         "created_at": NOW,
     }
     _stream_polls(monkeypatch, [[], [succeeded]], ("succeeded",))
-    _override_conn(_conn())
 
     response = client.get("/v1/evaluations/ev_test123/events/stream")
 
@@ -1478,7 +1359,6 @@ def test_events_stream_does_not_stop_on_lifecycle_event(monkeypatch) -> None:  #
         "created_at": NOW + timedelta(microseconds=1),
     }
     _stream_polls(monkeypatch, [[lifecycle], [succeeded]])
-    _override_conn(_conn())
 
     response = client.get("/v1/evaluations/ev_test123/events/stream")
 
@@ -1491,7 +1371,6 @@ def test_events_stream_does_not_stop_on_lifecycle_event(monkeypatch) -> None:  #
 
 
 def test_events_stream_404_when_evaluation_missing() -> None:
-    _override_conn(_conn_with_fetchone(None))
 
     response = client.get("/v1/evaluations/ev_nope/events/stream")
 
@@ -1502,7 +1381,6 @@ def test_events_stream_returns_429_at_process_connection_limit(monkeypatch) -> N
     monkeypatch.setattr(settings, "api_sse_max_connections", 1)
     evaluations_router._sse_active_connections = 1
     _seed(_eval_row())
-    _override_conn(_conn())
 
     response = client.get("/v1/evaluations/ev_test123/events/stream")
 
@@ -1524,7 +1402,6 @@ def test_events_stream_releases_database_between_polls(monkeypatch) -> None:  # 
         "created_at": NOW + timedelta(microseconds=1),
     }
     _stream_polls(monkeypatch, [[queued], [], [succeeded]])
-    conn = _conn()
     active = 0
     checkouts = 0
 
@@ -1535,7 +1412,7 @@ def test_events_stream_releases_database_between_polls(monkeypatch) -> None:  # 
         active += 1
         checkouts += 1
         try:
-            yield Database(conn)
+            yield Database()
         finally:
             active -= 1
 
@@ -1552,7 +1429,6 @@ def test_events_stream_releases_database_between_polls(monkeypatch) -> None:  # 
 
 
 def test_get_artifact_rejects_traversal_path() -> None:
-    _override_conn(_conn_with_fetchone({"id": "ev_test123"}))
 
     # Percent-encoded so the traversal reaches the route instead of being
     # normalized away by the HTTP client.
@@ -1564,7 +1440,6 @@ def test_get_artifact_rejects_traversal_path() -> None:
 
 def test_list_artifacts_reads_s3_and_supports_prefix(monkeypatch) -> None:  # noqa: ANN001
     _seed(_eval_row())
-    _override_conn(_conn())
 
     listed_prefixes: list[str] = []
 
@@ -1600,7 +1475,6 @@ def test_list_artifacts_reads_s3_and_supports_prefix(monkeypatch) -> None:  # no
 
 
 def test_list_artifacts_404_when_evaluation_unknown(monkeypatch) -> None:  # noqa: ANN001
-    _override_conn(_conn_with_fetchone(None))
     list_objects = MagicMock(return_value=[])
     monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.list_objects", list_objects)
 
@@ -1613,8 +1487,6 @@ def test_list_artifacts_404_when_evaluation_unknown(monkeypatch) -> None:  # noq
 
 def test_get_artifact_streams_content(monkeypatch) -> None:  # noqa: ANN001
     _seed(_eval_row())
-    conn = _conn()
-    _override_conn(conn)
     checkout_active = False
 
     @contextmanager
@@ -1622,7 +1494,7 @@ def test_get_artifact_streams_content(monkeypatch) -> None:  # noqa: ANN001
         nonlocal checkout_active
         checkout_active = True
         try:
-            yield Database(conn)
+            yield Database()
         finally:
             checkout_active = False
 
@@ -1645,12 +1517,10 @@ def test_get_artifact_streams_content(monkeypatch) -> None:  # noqa: ANN001
 
 def test_get_artifact_missing_object_returns_404(monkeypatch) -> None:  # noqa: ANN001
     _seed(_eval_row())
-    conn = _conn()
-    _override_conn(conn)
 
     @contextmanager
     def stream_db() -> Iterator[Database]:
-        yield Database(conn)
+        yield Database()
 
     v1.dependency_overrides[get_stream_database_factory] = lambda: stream_db
     # The object does not exist in the backing Files store; the route must map that
@@ -1716,7 +1586,6 @@ def test_get_archive_ready_streams_download(monkeypatch) -> None:  # noqa: ANN00
 
 
 def test_get_archive_404_when_evaluation_unknown() -> None:
-    _override_conn(_conn_with_fetchone(None))
 
     response = client.get("/v1/evaluations/ev_missing/archive")
 
@@ -1725,7 +1594,6 @@ def test_get_archive_404_when_evaluation_unknown() -> None:
 
 
 def test_post_archive_404_when_evaluation_unknown() -> None:
-    _override_conn(_conn_with_fetchone(None))
 
     response = client.post("/v1/evaluations/ev_missing/archive", json={})
 
@@ -1775,7 +1643,6 @@ def test_logs_fallback_dispatch_log_path(monkeypatch, tmp_path) -> None:  # noqa
     log_path.parent.mkdir()
     log_path.write_text("launched gym-runner\n")
     _seed(_eval_row(status="running", runtime="gym_sandbox_daytona", backend_handle="ev_test123"))
-    _override_conn(_conn())
 
     response = client.get("/v1/evaluations/ev_test123/logs")
 
@@ -1790,7 +1657,6 @@ def test_logs_include_ng_run_for_gym(monkeypatch, tmp_path) -> None:  # noqa: AN
     (work / "gym.log").write_text("meta\n")
     (work / "ng_run.log").write_text("ray start\nharbor_agent ready\n")
     _seed(_eval_row(status="running", runtime="gym_sandbox_daytona", backend_handle="ev_test123"))
-    _override_conn(_conn())
 
     response = client.get("/v1/evaluations/ev_test123/logs", params={"tail_lines": 10})
 
@@ -1804,7 +1670,6 @@ def test_logs_include_ng_run_for_gym(monkeypatch, tmp_path) -> None:  # noqa: AN
 
 def test_log_stream_returns_sse_snapshot() -> None:
     _seed(_eval_row(status="succeeded", result={"logs": ["done"]}))
-    _override_conn(_conn())
 
     response = client.get("/v1/evaluations/ev_test123/logs/stream")
 
@@ -1815,7 +1680,6 @@ def test_log_stream_returns_sse_snapshot() -> None:
 
 
 def test_log_stream_returns_404_before_starting_unknown_stream() -> None:
-    _override_conn(_conn_with_fetchone(None))
 
     response = client.get("/v1/evaluations/ev_missing/logs/stream")
 
@@ -1874,43 +1738,25 @@ class _FakeBackend:
         return summarize_harbor_result(result)
 
 
-def _worker_conn(row: dict | None) -> tuple[MagicMock, list]:
-    """Connection whose load returns `row`; returns (conn, executed-calls)."""
-    if row is not None:
-        seed_task_revision(
-            row["task_id"],
-            row["task_revision"],
-            image_ref=row.get("image_ref"),
-            image_digest=row.get("image_digest"),
-            tarball_object_key=row.get("tarball_object_key"),
-        )
-        seed_evaluation(row)
-    conn = MagicMock()
-    cur = conn.cursor.return_value.__enter__.return_value
-    cur.fetchone.return_value = row
-    cur.fetchall.return_value = []
-    return conn, cur.execute.call_args_list
+def _seed_worker_row(row: dict) -> None:
+    """Store `row`'s evaluation and the task revision the dispatcher resolves."""
+    seed_task_revision(
+        row["task_id"],
+        row["task_revision"],
+        image_ref=row.get("image_ref"),
+        image_digest=row.get("image_digest"),
+        tarball_object_key=row.get("tarball_object_key"),
+    )
+    seed_evaluation(row)
 
 
-def _dispatcher(backend: _FakeBackend, conn: MagicMock) -> Dispatcher:
-    @contextmanager
-    def connect():
-        yield conn
-
+def _dispatcher(backend: _FakeBackend) -> Dispatcher:
     # Fail loudly if the poll loop ever sleeps in a unit test (it shouldn't —
     # the fake reaches a terminal status without waiting).
     def no_sleep(_seconds: float) -> None:
         raise AssertionError("unit tests must not sleep in the poll loop")
 
-    return Dispatcher(resolve=lambda runtime: backend, connect=connect, sleep=no_sleep)
-
-
-def _context(conn: MagicMock):
-    @contextmanager
-    def connect():
-        yield conn
-
-    return connect
+    return Dispatcher(resolve=lambda runtime: backend, sleep=no_sleep)
 
 
 # ---------- sandbox_k8s backend (no cluster) ------------------------------
@@ -2040,8 +1886,8 @@ def test_status_read_failure_tears_down_before_syncing_artifacts(monkeypatch: py
         "credentials": {},
         "submission_identity": {},
     }
-    conn, _ = _worker_conn(_eval_row(status="queued", runtime="gym_daytona", execution_snapshot=snapshot, image_ref=""))
-    worker = _dispatcher(backend, conn)
+    _seed_worker_row(_eval_row(status="queued", runtime="gym_daytona", execution_snapshot=snapshot, image_ref=""))
+    worker = _dispatcher(backend)
     for method, step in (
         ("_write_provenance_warn", "provenance"),
         ("_sync_artifacts_warn", "sync"),
@@ -2072,8 +1918,8 @@ def test_status_read_failure_tears_down_before_syncing_artifacts(monkeypatch: py
 
 def test_dispatch_fails_retired_switchyard_evaluation_without_launch(monkeypatch: pytest.MonkeyPatch) -> None:
     backend = _FakeBackend()
-    conn, _ = _worker_conn(_eval_row(status="queued", switchyard_profile_id="cfg_sw"))
-    worker = _dispatcher(backend, conn)
+    _seed_worker_row(_eval_row(status="queued", switchyard_profile_id="cfg_sw"))
+    worker = _dispatcher(backend)
     for method in ("_sync_artifacts_warn", "_build_archive_warn", "_write_provenance_warn"):
         monkeypatch.setattr(worker, method, lambda *args, **kwargs: None)
 
