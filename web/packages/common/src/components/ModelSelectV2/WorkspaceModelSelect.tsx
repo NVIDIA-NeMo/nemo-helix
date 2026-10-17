@@ -41,12 +41,13 @@ export const WorkspaceModelSelect: FC<WorkspaceModelSelectProps> = ({
   ...selectProps
 }) => {
   const [open, setOpen] = useState(false);
-  const { groups, loading, onSearchChange, onLoadMore, hasMore, isLoadingMore } = useModelSearch({
-    workspace,
-    filter,
-    include,
-    enabled: enabled && open,
-  });
+  const { groups, loading, onSearchChange, onLoadMore, hasMore, isLoadingMore, modelFilters } =
+    useModelSearch({
+      workspace,
+      filter,
+      include,
+      enabled: enabled && open,
+    });
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
@@ -62,6 +63,7 @@ export const WorkspaceModelSelect: FC<WorkspaceModelSelectProps> = ({
       onLoadMore={onLoadMore}
       hasMore={hasMore}
       isLoadingMore={isLoadingMore}
+      modelFilters={modelFilters}
       onOpenChange={handleOpenChange}
     />
   );

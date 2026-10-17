@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { hasActiveModelFilters } from '@nemo/common/src/api/models/modelFilters';
+import { ModelDropdownFilters } from '@nemo/common/src/components/ModelSelectV2/ModelDropdownFilters';
 import { ModelDropdownList } from '@nemo/common/src/components/ModelSelectV2/ModelDropdownList';
 import { ModelDropdownSearch } from '@nemo/common/src/components/ModelSelectV2/ModelDropdownSearch';
 import type {
@@ -32,6 +34,8 @@ const MODEL_TYPE_ITEMS = [
 
 const DEFAULT_SEARCH_DEBOUNCE_MS = 300;
 
+const NO_FILTER_MATCHES_MESSAGE = 'No models match these filters';
+
 const isCustomModel = (model: ModelEntity): boolean => !isBaseModel(model);
 
 type ModelDropdownProps = Omit<
@@ -59,6 +63,7 @@ export const ModelDropdown: FC<ModelDropdownProps> = ({
   showModelTypeToggle = false,
   defaultModelType = 'custom',
   onModelTypeChange,
+  modelFilters,
   hideAdapters = false,
   fullWidth = false,
   dropdownSide = 'bottom',
@@ -194,6 +199,7 @@ export const ModelDropdown: FC<ModelDropdownProps> = ({
                 />
               </Flex>
             )}
+            {modelFilters ? <ModelDropdownFilters {...modelFilters} /> : null}
             <ModelDropdownList
               groups={filteredGroups}
               value={value}
@@ -204,7 +210,11 @@ export const ModelDropdown: FC<ModelDropdownProps> = ({
               hasMore={hasMore}
               isLoadingMore={isLoadingMore}
               doneLoadingMessage={doneLoadingMessage}
-              emptyMessage={emptyMessage}
+              emptyMessage={
+                modelFilters && hasActiveModelFilters(modelFilters.values)
+                  ? NO_FILTER_MATCHES_MESSAGE
+                  : emptyMessage
+              }
             />
           </>
         )}
