@@ -36,7 +36,7 @@ export interface IntakeTraceColumnOptions {
 }
 
 const TRACE_STATUS_FILTER_OPTIONS = [
-  { value: 'success', label: 'Success' },
+  { value: 'success', label: 'Completed' },
   { value: 'error', label: 'Error' },
   { value: 'cancelled', label: 'Cancelled' },
   { value: 'unknown', label: 'Unknown' },

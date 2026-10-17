@@ -6,7 +6,7 @@ import { render, screen } from '@studio/tests/util/render';
 
 describe('IntakeTelemetryStatusBadge', () => {
   it.each([
-    ['success', 'Success'],
+    ['success', 'Completed'],
     ['error', 'Error'],
     ['cancelled', 'Cancelled'],
     ['unknown', 'Unknown'],

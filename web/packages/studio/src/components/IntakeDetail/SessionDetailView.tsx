@@ -3,6 +3,7 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { PageHeader, Stack, StatusMessage } from '@nvidia/foundations-react-core';
+import { NoSpanSelected } from '@studio/components/IntakeDetail/NoSpanSelected';
 import { TraceDetailLayout } from '@studio/components/IntakeDetail/TraceDetailLayout';
 import { TraceSpanTree } from '@studio/components/IntakeDetail/TraceDetailSpanTree';
 import {
@@ -24,7 +25,7 @@ import {
 } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { getIntakeSessionRoute, getIntakeTracesRoute } from '@studio/routes/utils';
-import { getTraceDisplayName } from '@studio/util/intakeTelemetry';
+import { getTraceDisplayName, type SessionTrajectory } from '@studio/util/intakeTelemetry';
 import { CircleAlert } from 'lucide-react';
 import { type FC, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
@@ -36,6 +37,10 @@ export type SessionDetailRouteContext =
       readonly parentBreadcrumbs: BreadcrumbsItemProps[];
       readonly getSessionHref: (sessionId: string) => string;
       readonly headerActions?: ReactNode;
+      readonly renderBody?: (body: {
+        trajectories: readonly SessionTrajectory[];
+        traceView: ReactNode;
+      }) => ReactNode;
     };
 
 interface SessionDetailViewProps {
@@ -171,6 +176,72 @@ export const SessionDetailView: FC<SessionDetailViewProps> = ({
 
   if (!session) return null;
 
+  const traceView = (
+    <Stack gap="density-2xl" className="min-w-0">
+      {!traceId ? (
+        <div data-testid="session-summary-header" className="w-full min-w-0">
+          <SessionSummaryHeader session={session} />
+        </div>
+      ) : null}
+      {traceId ? (
+        <TraceDetailView
+          workspace={workspace}
+          traceId={traceId}
+          sessionId={sessionId}
+          parentBreadcrumbs={traceParentBreadcrumbs}
+          traceSummary={selectedTrajectory?.trace}
+          traceSummaryStatus={
+            explorer.spansLoaded ? 'resolved' : explorer.spansError ? 'error' : 'loading'
+          }
+          traceSummaryErrorMessage={explorer.spansError?.message}
+        >
+          {(trace) => (
+            <>
+              <div data-testid="session-summary-header" className="w-full min-w-0">
+                <TraceSummaryHeader trace={trace} />
+              </div>
+              <TraceSpanAccordions
+                workspace={workspace}
+                trace={trace}
+                explorer={explorer}
+                onSelectSession={handleSelectSession}
+                onSelectTrace={handleSelectTrace}
+                sessionDurationMs={session.duration_ms}
+                sessionErrored={session.status === 'error'}
+                viewMode={viewMode}
+                onViewModeChange={setViewMode}
+              />
+            </>
+          )}
+        </TraceDetailView>
+      ) : (
+        <Stack gap="density-lg" className="min-w-0">
+          <TraceViewToolbar
+            viewMode={viewMode === 'graph' ? 'tree' : viewMode}
+            onViewModeChange={setViewMode}
+            showGraph={false}
+          />
+          <TraceDetailLayout
+            navigation={
+              <TraceSpanTree
+                trajectories={trajectories}
+                sessionDurationMs={session.duration_ms}
+                sessionErrored={session.status === 'error'}
+                sessionActive
+                activeSpanId={null}
+                onSelectSpan={handleSelectSidebarSpan}
+                onSelectTrace={handleSelectTrace}
+                onSelectSession={handleSelectSession}
+              />
+            }
+          >
+            <NoSpanSelected />
+          </TraceDetailLayout>
+        </Stack>
+      )}
+    </Stack>
+  );
+
   return (
     <AccessibleTitle title={title}>
       <Stack gap="density-2xl" padding="density-2xl" className="h-full overflow-auto">
@@ -179,67 +250,9 @@ export const SessionDetailView: FC<SessionDetailViewProps> = ({
           slotHeading={title}
           slotActions={routeContext?.kind === 'evaluation' ? routeContext.headerActions : undefined}
         />
-        {!traceId ? (
-          <div data-testid="session-summary-header" className="w-full min-w-0">
-            <SessionSummaryHeader session={session} />
-          </div>
-        ) : null}
-        {traceId ? (
-          <TraceDetailView
-            workspace={workspace}
-            traceId={traceId}
-            sessionId={sessionId}
-            parentBreadcrumbs={traceParentBreadcrumbs}
-            traceSummary={selectedTrajectory?.trace}
-            traceSummaryStatus={
-              explorer.spansLoaded ? 'resolved' : explorer.spansError ? 'error' : 'loading'
-            }
-            traceSummaryErrorMessage={explorer.spansError?.message}
-          >
-            {(trace) => (
-              <>
-                <div data-testid="session-summary-header" className="w-full min-w-0">
-                  <TraceSummaryHeader trace={trace} />
-                </div>
-                <TraceSpanAccordions
-                  workspace={workspace}
-                  trace={trace}
-                  explorer={explorer}
-                  onSelectSession={handleSelectSession}
-                  onSelectTrace={handleSelectTrace}
-                  sessionDurationMs={session.duration_ms}
-                  sessionErrored={session.status === 'error'}
-                  viewMode={viewMode}
-                  onViewModeChange={setViewMode}
-                />
-              </>
-            )}
-          </TraceDetailView>
-        ) : (
-          <Stack gap="density-lg" className="min-w-0">
-            <TraceViewToolbar
-              viewMode={viewMode === 'graph' ? 'tree' : viewMode}
-              onViewModeChange={setViewMode}
-              showGraph={false}
-            />
-            <TraceDetailLayout
-              navigation={
-                <TraceSpanTree
-                  trajectories={trajectories}
-                  sessionDurationMs={session.duration_ms}
-                  sessionErrored={session.status === 'error'}
-                  sessionActive
-                  activeSpanId={null}
-                  onSelectSpan={handleSelectSidebarSpan}
-                  onSelectTrace={handleSelectTrace}
-                  onSelectSession={handleSelectSession}
-                />
-              }
-            >
-              {null}
-            </TraceDetailLayout>
-          </Stack>
-        )}
+        {routeContext?.kind === 'evaluation' && routeContext.renderBody
+          ? routeContext.renderBody({ trajectories, traceView })
+          : traceView}
       </Stack>
     </AccessibleTitle>
   );
