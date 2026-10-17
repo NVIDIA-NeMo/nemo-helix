@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "Observe Agents"
+title: "Collect Agent Traces"
 description: "Ingest, store, and query agent telemetry with NeMo Intake, including supported ingest paths, annotations, evaluator results, and review in NeMo Studio."
 ---
 
@@ -34,6 +34,18 @@ diagnose failures from traces, in a production system or in offline evaluation f
 
 You do not need to deploy your agents on NeMo Helix. To start, run the platform, post one
 representative interaction, and confirm that it appears.
+
+NeMo Helix wires trace export for `nemo-agents-spec-v1` agents that it deploys or runs as jobs: their
+ATIF trajectories go to Intake under the agent's name. This applies to the DeepAgents, Claude Code,
+Codex, Hermes, and NOOA harnesses, and only when the `agent.yaml` leaves the destination open:
+
+- `telemetry.enabled: false` or `telemetry.atif.enabled: false` opts out.
+- A `telemetry.atif.storage` destination is used as written instead.
+
+Legacy NAT workflows, remote agents, and agents that run elsewhere send their own traces. Tag every
+span with the agent's name (`gen_ai.agent.name` for OTLP) so the traces can be
+[registered](/documentation/agents/register-agents#register-from-traces) and
+[analyzed](/documentation/agents/traces-and-insights/insights-from-traces).
 
 ## How It Works
 
@@ -371,7 +383,7 @@ for interactive reads over recent traces and periodic aggregate queries.
 
 - [Experiments](/documentation/evaluate-models/experiments): roll evaluation runs up into a comparable
   leaderboard built from this telemetry.
+- [Insights from Traces](/documentation/agents/traces-and-insights/insights-from-traces): find
+  recurring failures in these traces.
 - [Optimize Agents](/documentation/agents/optimize-agents): use captured traces as the baseline for
   optimization.
-- [Scan Trace Data](/documentation/agents/scan-trace-data): check recent telemetry for PII and leaked
-  credentials.

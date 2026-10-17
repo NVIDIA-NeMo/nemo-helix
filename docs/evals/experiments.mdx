@@ -13,7 +13,7 @@ of changes to a harness, infrastructure, tools, or agent code. It provides one p
 compare evaluation results from Harbor, the NeMo Optimizer, NeMo Helix Evals, or your own runner. You
 can rank these results by cost, latency, evaluator scores, and other metrics.
 
-Those metrics are derived from [NeMo Intake](/documentation/agents/observe-agents) observability data,
+Those metrics are derived from [NeMo Intake](/documentation/agents/traces-and-insights/collect-agent-traces) observability data,
 the same traces and evaluator results your runs already produce, so any runner that lands telemetry in
 Intake feeds the same comparison.
 
@@ -245,8 +245,8 @@ session with the Evaluation's identity:
 The per-evaluator scores on the leaderboard come from **evaluator results** captured on those
 sessions. Intake can derive them from ATIF verifier rewards. OTLP traces carry session telemetry, so
 the framework or caller must publish their scores through the evaluator-results endpoint. Refer to
-[Capture Evaluator Results](/documentation/agents/observe-agents#capture-evaluator-results) for both
-paths, and [Observe Agents](/documentation/agents/observe-agents) for the ingestion paths themselves.
+[Capture Evaluator Results](/documentation/agents/traces-and-insights/collect-agent-traces#capture-evaluator-results) for both
+paths, and [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces) for the ingestion paths themselves.
 The `nemo-experiments-upload` skill walks this through end to end.
 
 <Warning>
@@ -482,11 +482,13 @@ curl -g --fail-with-body \
 
 You typically do not create Evaluations manually. Common producers include:
 
-- **Optimizer**: records each run as an Experiment and its candidates as Evaluations, so results land
-  automatically. Refer to [Optimize Agents](/documentation/agents/optimize-agents).
+- **Agent evaluation jobs**: publish each run's trials and scores to the Evaluation named by
+  `publication.intake.evaluation_id`. The **Run Evaluation** wizard in
+  [NeMo Studio Agents](/documentation/studio/agents#evaluate-an-agent) creates the Experiment and
+  Evaluation for you. Refer to [Optimize Agents](/documentation/agents/optimize-agents).
 - **Evaluation framework**: a framework like Harbor sends trajectories through Intake's ATIF or OTLP
   ingest, publishes its scores as evaluator results, and records each run as an Evaluation. Refer to
-  [Observe Agents](/documentation/agents/observe-agents).
+  [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces).
 - **Direct API**: create the Experiment and Evaluations, then ingest their sessions, for a custom
   evaluation pipeline.
 
@@ -547,9 +549,9 @@ window.
 
 ## Related Topics
 
-- [Observe Agents](/documentation/agents/observe-agents): the telemetry these leaderboards are
+- [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces): the telemetry these leaderboards are
   computed from, and how to ingest it.
 - [Agent Evaluation](/documentation/evaluate-models/agent-eval): the task-driven evaluation model that
   produces these runs.
-- [Optimize Agents](/documentation/agents/optimize-agents): the optimizer that creates Experiments and
-  Evaluations automatically.
+- [Optimize Agents](/documentation/agents/optimize-agents): the optimization loop that compares
+  candidate agents in Experiments.
