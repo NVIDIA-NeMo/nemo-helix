@@ -25,6 +25,7 @@ export interface NebulaState {
   canvas: HTMLCanvasElement | null;
   ctx: CanvasRenderingContext2D | null;
   appearance: NebulaAppearance;
+  animationFrameId: number | null;
 }
 
 const CONNECTION_OPACITY = 0.15;
@@ -129,7 +130,21 @@ export const animate = (nebulaState: RefObject<NebulaState>) => (): void => {
     particle.update(nebulaState.current.lastSphereSize);
     particle.draw(ctx);
   });
-  requestAnimationFrame(animate(nebulaState));
+  nebulaState.current.animationFrameId = requestAnimationFrame(animate(nebulaState));
+};
+
+export const destroy = (nebulaState: RefObject<NebulaState>): void => {
+  if (!nebulaState.current) return;
+
+  if (nebulaState.current.animationFrameId !== null) {
+    cancelAnimationFrame(nebulaState.current.animationFrameId);
+  }
+
+  nebulaState.current.animationFrameId = null;
+  nebulaState.current.initialized = false;
+  nebulaState.current.particles = [];
+  nebulaState.current.canvas = null;
+  nebulaState.current.ctx = null;
 };
 
 export const initialize = (
@@ -159,5 +174,5 @@ export const initialize = (
         : new AmbientParticle(canvas, appearance);
     nebulaState.current.particles.push(particle);
   }
-  requestAnimationFrame(animate(nebulaState));
+  nebulaState.current.animationFrameId = requestAnimationFrame(animate(nebulaState));
 };
