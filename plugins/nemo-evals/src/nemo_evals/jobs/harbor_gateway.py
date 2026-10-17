@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from nemo_agents_plugin.runner.deployments_backend import rewrite_fabric_config_base_urls
+from nemo_agents_plugin.telemetry.container_urls import telemetry_url_fields
 from nemo_evals.jobs.harbor_forwarder import _docker_bridge_host, loopback_forwarder
 from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
 
@@ -27,14 +28,7 @@ def _uses_local_platform(fabric: dict[str, Any]) -> bool:
             settings = model.get("settings")
             if isinstance(settings, dict):
                 urls.append(settings.get("base_url", ""))
-    relay = fabric.get("relay") or {}
-    for telemetry in (fabric.get("telemetry") or {}, relay.get("observability") or {}):
-        atif = telemetry.get("atif") or {}
-        urls.extend(
-            storage.get("endpoint", "")
-            for storage in (atif.get("storage") or [])
-            if isinstance(storage, dict) and storage.get("type") == "http"
-        )
+    urls.extend(exporter.get(key, "") for exporter, key in telemetry_url_fields(fabric))
     return any(
         isinstance(url, str)
         and urlsplit(url).hostname in (*LOOPBACK_ADDRESSES, "host.docker.internal")

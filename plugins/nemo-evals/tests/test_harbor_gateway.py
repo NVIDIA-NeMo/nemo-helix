@@ -326,3 +326,18 @@ def test_shutdown_waits_for_handlers_connecting_upstream(loopback_platform, monk
         release.set()
         thread.join(timeout=5)
     assert not thread.is_alive()
+
+
+@pytest.mark.parametrize("translated", [False, True])
+@pytest.mark.parametrize("format", ["opentelemetry", "atof"])
+def test_gateway_detection_includes_non_atif_platform_exporters(translated, format):
+    """Detect platform-bound OTLP/ATOF destinations before deciding whether routing is needed."""
+    from nemo_evals.jobs.harbor_gateway import _uses_local_platform
+
+    url = "http://localhost:8080/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces"
+    exporter = (
+        {"endpoints": [{"endpoint": url}]} if format == "opentelemetry" else {"sinks": [{"type": "stream", "url": url}]}
+    )
+    telemetry = {format: exporter}
+    config = {"relay": {"observability": telemetry}} if translated else {"telemetry": telemetry}
+    assert _uses_local_platform(config)
