@@ -260,7 +260,7 @@ def lazy_command_loader(import_path: str) -> Callable[[], click.Command]:
         holder_name = "__lazy_command_holder__"
         command = resolve_name(import_path)
         holder_app = Typer()
-        holder_app.command()(command)
+        holder_app.command(context_settings=getattr(command, "__nhx_context_settings__", None))(command)
         temp_app = Typer()
         temp_app.add_typer(holder_app, name=holder_name)
         root_command = typer_get_command(temp_app)
