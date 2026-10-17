@@ -122,6 +122,7 @@ test_create_workspace_allowed if {
         with data.authz.principals as {
             "*": {"workspaces": {"system": ["WorkspaceCreator"]}}
         }
+        with data.authz.scope_families as scope_families_fixture
     
     result.allowed == true
 }
@@ -194,6 +195,7 @@ test_creator_get_workspace_middleware_allowed if {
         with data.authz.endpoints as workspace_access_test_data.endpoints
         with data.authz.workspaces as workspace_access_test_data.workspaces
         with data.authz.principals as workspace_access_test_data.principals
+        with data.authz.scope_families as scope_families_fixture
     
     result.allowed == true
 }
@@ -254,6 +256,7 @@ test_creator_list_workspaces_allowed if {
         with data.authz.endpoints as workspace_access_test_data.endpoints
         with data.authz.workspaces as workspace_access_test_data.workspaces
         with data.authz.principals as workspace_access_test_data.principals
+        with data.authz.scope_families as scope_families_fixture
     
     result.allowed == true
 }
@@ -301,6 +304,7 @@ test_list_workspaces_missing_scope if {
         with data.authz.endpoints as workspace_access_test_data.endpoints
         with data.authz.workspaces as workspace_access_test_data.workspaces
         with data.authz.principals as workspace_access_test_data.principals
+        with data.authz.scope_families as scope_families_fixture
     
     result.allowed == false
 }
@@ -338,6 +342,7 @@ test_list_multiple_workspaces if {
                 }
             }
         }
+        with data.authz.scope_families as scope_families_fixture
 
     result.allowed == true
 }
