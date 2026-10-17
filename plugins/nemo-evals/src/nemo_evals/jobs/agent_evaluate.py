@@ -56,6 +56,7 @@ from nemo_evals.jobs.gym_sandbox import (
     require_fileset_sandbox_storage_identity,
 )
 from nemo_evals.jobs.gym_submission import gym_runtime_target, prepare_gym_submission
+from nemo_evals.jobs.harbor_gateway import harbor_gateway_config
 from nemo_evals.jobs.kinds.registry import KIND_ADAPTERS, get_adapter
 from nemo_evals.jobs.kinds.types import PrepareContext, SubmitContext, TaskKindAdapter
 from nemo_evals.jobs.publication import publish_agent_eval_result
@@ -516,6 +517,21 @@ class _AgentEvalJobBase(NemoJob):
             return self._run_with_client(config, ctx=ctx, platform_client=client, async_client=async_client)
 
     def _run_with_client(
+        self,
+        config: dict,
+        *,
+        ctx: JobContext,
+        platform_client: NemoClient | AsyncNemoClient,
+        async_client: AsyncNemoClient,
+    ) -> dict:
+        """Keep any Linux Docker forwarder alive through execution and result persistence."""
+        base_url = str(getattr(platform_client, "base_url", ""))
+        with harbor_gateway_config(config, platform_base_url=base_url) as reachable:
+            return self._run_with_reachable_client(
+                reachable, ctx=ctx, platform_client=platform_client, async_client=async_client
+            )
+
+    def _run_with_reachable_client(
         self,
         config: dict,
         *,

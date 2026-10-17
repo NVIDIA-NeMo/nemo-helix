@@ -40,6 +40,7 @@ from nemo_agents_plugin.runner.fabric_artifact_staging import (
     stage_fabric_ethos_config_files,
 )
 from nemo_agents_plugin.spec_revision import SpecRevision, stage_with_spec_revision
+from nemo_agents_plugin.telemetry.container_urls import telemetry_url_fields
 from nemo_agents_plugin.telemetry.intake_export import (
     configure_intake_atif_export,
     supports_intake_atif_export,
@@ -233,9 +234,9 @@ def rewrite_fabric_config_base_urls(agent_config: dict[str, Any], gateway_url: s
 
     Rewrites ``models.*.base_url`` and harness ``model.base_url`` when the URL
     points at the Inference Gateway. Legacy ``settings.base_url`` values are
-    also supported. Loopback ATIF HTTP storage endpoints are rewritten so they
-    remain reachable from container deployments. Third-party URLs are left
-    unchanged.
+    also supported. Local Intake destinations in ATIF, ATOF and OpenTelemetry
+    exporters are rewritten in both authoring and translated configs. Custom
+    collector origins and file/S3 destinations are left unchanged.
     """
     reachable = urlsplit(gateway_url.rstrip("/"))
     reachable_origin = f"{reachable.scheme}://{reachable.netloc}"
@@ -268,20 +269,24 @@ def rewrite_fabric_config_base_urls(agent_config: dict[str, Any], gateway_url: s
         parts = urlsplit(current)
         settings["base_url"] = f"{reachable_origin}{parts.path}"
 
-    telemetry = config.get("telemetry")
-    atif = telemetry.get("atif") if isinstance(telemetry, dict) else None
-    storage_configs = atif.get("storage", []) if isinstance(atif, dict) else []
-    for storage_config in storage_configs:
-        if not isinstance(storage_config, dict) or storage_config.get("type") != "http":
-            continue
-        endpoint = storage_config.get("endpoint")
+    # Only platform Intake destinations belong on the platform gateway. Custom
+    # host collectors retain their own ports and require separate host routing.
+    for exporter, key in telemetry_url_fields(config):
+        endpoint = exporter.get(key)
         if not isinstance(endpoint, str):
             continue
         parts = urlsplit(endpoint)
-        if parts.hostname not in LOOPBACK_ADDRESSES:
+        if parts.hostname not in (*LOOPBACK_ADDRESSES, "host.docker.internal"):
             continue
-        scheme = "https" if "https" in (parts.scheme, reachable.scheme) else reachable.scheme
-        storage_config["endpoint"] = parts._replace(scheme=scheme, netloc=reachable.netloc).geturl()
+        if not parts.path.startswith("/apis/intake/"):
+            continue
+        if parts.scheme in {"ws", "wss"}:
+            scheme = "wss" if parts.scheme == "wss" or reachable.scheme == "https" else "ws"
+        elif parts.scheme in {"http", "https"}:
+            scheme = "https" if "https" in (parts.scheme, reachable.scheme) else reachable.scheme
+        else:
+            scheme = parts.scheme
+        exporter[key] = parts._replace(scheme=scheme, netloc=reachable.netloc).geturl()
     return config
 
 
