@@ -270,7 +270,13 @@ def rewrite_fabric_config_base_urls(agent_config: dict[str, Any], gateway_url: s
 
     telemetry = config.get("telemetry")
     atif = telemetry.get("atif") if isinstance(telemetry, dict) else None
-    storage_configs = atif.get("storage", []) if isinstance(atif, dict) else []
+    storage_configs = list(atif.get("storage", [])) if isinstance(atif, dict) else []
+    # Translation moves telemetry into Fabric's Relay observability configuration.
+    relay = config.get("relay")
+    observability = relay.get("observability") if isinstance(relay, dict) else None
+    relay_atif = observability.get("atif") if isinstance(observability, dict) else None
+    if isinstance(relay_atif, dict):
+        storage_configs.extend(relay_atif.get("storage") or [])
     for storage_config in storage_configs:
         if not isinstance(storage_config, dict) or storage_config.get("type") != "http":
             continue
@@ -278,7 +284,7 @@ def rewrite_fabric_config_base_urls(agent_config: dict[str, Any], gateway_url: s
         if not isinstance(endpoint, str):
             continue
         parts = urlsplit(endpoint)
-        if parts.hostname not in LOOPBACK_ADDRESSES:
+        if parts.hostname not in (*LOOPBACK_ADDRESSES, "host.docker.internal"):
             continue
         scheme = "https" if "https" in (parts.scheme, reachable.scheme) else reachable.scheme
         storage_config["endpoint"] = parts._replace(scheme=scheme, netloc=reachable.netloc).geturl()
