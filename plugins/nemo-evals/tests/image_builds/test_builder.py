@@ -11,7 +11,8 @@ from typing import Literal
 import httpx
 import pytest
 from nemo_builder_plugin.entities import ContainerImage, Provenance
-from nemo_builder_plugin.schema import FileSetSource, ImageSource, SubmitBuildResponse
+from nemo_builder_plugin.schema import BuildSet, BuildSpec, FileSetSource, ImageSource, SubmitBuildResponse
+from nemo_builder_plugin.submit import request_digest
 from nemo_evals.image_builds.builder import (
     HttpImageBuilder,
     archive_source,
@@ -93,13 +94,40 @@ async def test_ensure_build_resubmits_the_newest_revision_unless_it_failed(
 
 
 def test_builder_name_depends_on_every_build_input() -> None:
-    base = {"archive_digest": "a" * 64, "context_path": "sort/environment", "dockerfile": "Dockerfile"}
-    name = builder_name(**base)
+    digest = "a" * 64
+    name = builder_name(archive_digest=digest, source=_SOURCE, dockerfile="Dockerfile")
 
-    assert name == builder_name(**base)
+    assert name == builder_name(archive_digest=digest, source=_SOURCE, dockerfile="Dockerfile")
     assert name.startswith("harbor-env-") and len(name) == len("harbor-env-") + 12
-    for field, other in [("archive_digest", "b" * 64), ("context_path", "sort/tests"), ("dockerfile", "D2")]:
-        assert builder_name(**{**base, field: other}) != name
+    assert builder_name(archive_digest="b" * 64, source=_SOURCE, dockerfile="Dockerfile") != name
+    assert builder_name(archive_digest=digest, source=_SOURCE, dockerfile="D2") != name
+    for field, other in [("fileset", "default/other"), ("archive", "other/task_archive"), ("context_path", "sort/app")]:
+        assert (
+            builder_name(
+                archive_digest=digest, source=_SOURCE.model_copy(update={field: other}), dockerfile="Dockerfile"
+            )
+            != name
+        )
+
+
+def test_equivalent_fileset_references_have_the_same_builder_identity() -> None:
+    sources = [
+        archive_source(ref, "sort/tests")
+        for ref in [
+            "default/harbor-tasks#sort/abc/task_archive",
+            "fileset://default/harbor-tasks#sort/abc/task_archive",
+            "default/harbor-tasks/sort/abc/task_archive",
+        ]
+    ]
+    names = {builder_name(archive_digest="a" * 64, source=source, dockerfile="Dockerfile") for source in sources}
+    assert len(names) == 1
+
+
+def test_builder_request_fingerprint_distinguishes_archive_locations() -> None:
+    def fingerprint(source: FileSetSource) -> str:
+        return request_digest(BuildSet(name="shared-name", revision=1, build_specs=[BuildSpec(source=source)]))
+
+    assert fingerprint(_SOURCE) != fingerprint(_SOURCE.model_copy(update={"archive": "elsewhere/task_archive"}))
 
 
 def test_archive_source_splits_a_fileset_reference() -> None:

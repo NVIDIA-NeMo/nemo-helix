@@ -41,10 +41,10 @@ class ImageBuilder(Protocol):
         ...
 
 
-def builder_name(*, archive_digest: str, context_path: str, dockerfile: str) -> str:
-    """Builder build-set name for one image of one task archive."""
+def builder_name(*, archive_digest: str, source: FileSetSource, dockerfile: str) -> str:
+    """Name an image build by its archive contents and the exact source Builder receives."""
     key = json.dumps(
-        {"v": 1, "archive": archive_digest, "context": context_path, "dockerfile": dockerfile},
+        {"v": 1, "archive": archive_digest, "source": source.model_dump(mode="json"), "dockerfile": dockerfile},
         sort_keys=True,
         separators=(",", ":"),
     )

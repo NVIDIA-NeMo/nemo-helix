@@ -186,12 +186,18 @@ def _verifier_image(environment: EnvironmentConfig, archive: TaskArchive) -> Bui
 
 
 def _build_options(service: str, build: object) -> tuple[str, str]:
-    if not isinstance(build, dict):
+    if not isinstance(build, dict) or any(not isinstance(key, str) for key in build):
         raise ImagePlanError("invalid_compose_file", f"service {service} has an unreadable build section")
     context = build.get("context", ".")
     dockerfile = build.get("dockerfile", "Dockerfile")
     if not isinstance(context, str) or not isinstance(dockerfile, str):
         raise ImagePlanError("invalid_compose_file", f"service {service} has an unreadable build section")
+    unsupported = sorted(set(build) - {"context", "dockerfile"})
+    if unsupported:
+        raise ImagePlanError(
+            "unsupported_compose_build_option",
+            f"service {service} sets build options the image builder can't apply: {', '.join(unsupported)}",
+        )
     return context, dockerfile
 
 

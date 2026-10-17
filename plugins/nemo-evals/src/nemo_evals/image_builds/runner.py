@@ -34,11 +34,11 @@ from nemo_evals.image_builds.models import (
     build_entity_name,
 )
 from nemo_evals.image_builds.planning import ImagePlanError, TaskArchive, plan_images
-from nemo_evals.revisions import get_revision
+from nemo_evals.revisions import get_revision_by_id
 from nemo_helix_plugin.client.errors import InternalServerError, NemoClientError, NemoTransportError
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +53,7 @@ class TaskImageBuildSpec(BaseModel):
 
     workspace: str
     task: str
+    revision_id: str = Field(min_length=1)
     revision_digest: str
     attempt: int
 
@@ -69,14 +70,20 @@ async def run_task_image_build(
     clock: Callable[[], float] = time.monotonic,
 ) -> TaskImageBuildEntity:
     """Plan, submit and follow every image of one build, recording progress on its record."""
-    head = await entities.get(TaskEntity, name=spec.task, workspace=spec.workspace)
-    revision = await get_revision(entities, TaskRevisionEntity, head, spec.revision_digest)
     build = await entities.get(
-        TaskImageBuildEntity, name=build_entity_name(spec.attempt), workspace=spec.workspace, parent=revision.id
+        TaskImageBuildEntity, name=build_entity_name(spec.attempt), workspace=spec.workspace, parent=spec.revision_id
     )
+    if build.task != f"{spec.workspace}/{spec.task}":
+        raise ValueError("The image-build Job names a different task from its attempt")
     if build.status in TERMINAL_BUILD_STATUSES:
         return build
+    error_prefix = "revision_validation_failed"
     try:
+        head = await entities.get(TaskEntity, name=spec.task, workspace=spec.workspace)
+        revision = await get_revision_by_id(entities, TaskRevisionEntity, head, spec.revision_id)
+        if revision.content_hash != spec.revision_digest or build.revision_digest != spec.revision_digest:
+            raise ValueError("The revision digest does not match the image-build Job and attempt")
+        error_prefix = "task-builder error"
         return await _build(
             build,
             revision,
@@ -91,11 +98,11 @@ async def run_task_image_build(
     except Exception as exc:
         logger.exception("Image build %s of %s raised", build.name, build.task)
         current = await entities.get(
-            TaskImageBuildEntity, name=build.name, workspace=build.workspace, parent=revision.id
+            TaskImageBuildEntity, name=build.name, workspace=build.workspace, parent=build.parent
         )
         if current.status in TERMINAL_BUILD_STATUSES:
             return current
-        return await _fail(entities, current, f"task-builder error: {exc}")
+        return await _fail(entities, current, f"{error_prefix}: {exc}")
 
 
 async def _build(
@@ -174,10 +181,8 @@ async def _submit(builder: ImageBuilder, image: BuildImage, definition: HarborTa
         source, dockerfile = ImageSource(image=reference), None
     else:
         assert image.context_path is not None and image.dockerfile is not None
-        name = builder_name(
-            archive_digest=definition.source.files_hash, context_path=image.context_path, dockerfile=image.dockerfile
-        )
         source, dockerfile = archive_source(definition.source.fileset_ref, image.context_path), image.dockerfile
+        name = builder_name(archive_digest=definition.source.files_hash, source=source, dockerfile=dockerfile)
     try:
         submitted = await ensure_build(builder, name=name, source=source, dockerfile=dockerfile)
     except NemoClientError as exc:

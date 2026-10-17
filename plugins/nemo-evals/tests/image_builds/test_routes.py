@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from nemo_evals.api.dependencies import get_image_build_service
 from nemo_evals.api.v2 import image_builds as image_builds_routes
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
-from nemo_evals.image_builds.models import TaskImageBuildEntity, build_job_name
+from nemo_evals.image_builds.models import ImageBuildRequest, TaskImageBuildEntity, build_job_name
 from nemo_evals.image_builds.runner import TaskImageBuildSpec
 from nemo_evals.image_builds.service import BuildJob, ImageBuildForbiddenError, ImageBuildService
 from nemo_evals.jobs.task_image_build import task_image_build_job_request
@@ -106,12 +106,19 @@ def test_request_starts_a_build_and_its_job(client, store_task, jobs) -> None:
     assert body["revision"] == digest
     assert body["status"] == "pending"
     assert body["allowed_registries"] == ["docker.io"]
-    assert body["job"] == build_job_name("default/sort-task", digest, 1)
     request = jobs.created[body["job"]]
+    revision_id = request.spec["revision_id"]
+    assert body["job"] == build_job_name("default/sort-task", revision_id, 1)
     step = request.platform_spec.steps[0]
     assert step.executor.container.command == ["nemo_evals.tasks.task_image_build"]
     assert step.executor.resources.requests.memory == "128Mi"
-    assert request.spec == {"workspace": "default", "task": "sort-task", "revision_digest": digest, "attempt": 1}
+    assert request.spec == {
+        "workspace": "default",
+        "task": "sort-task",
+        "revision_id": revision_id,
+        "revision_digest": digest,
+        "attempt": 1,
+    }
 
 
 def test_a_caller_who_may_not_build_is_forbidden_before_anything_starts(
@@ -165,6 +172,35 @@ def test_repeating_a_request_returns_the_running_build(client, store_task, jobs)
     assert list(jobs.created) == [first["job"]]
 
 
+async def test_concurrent_requests_converge_on_one_attempt_and_job(
+    entity_store, store_task, jobs, authorizer, monkeypatch
+) -> None:
+    digest = await store_task()
+    service = ImageBuildService(entity_store, jobs, authorizer)
+    newest = service._newest
+    arrived = 0
+    both_arrived = asyncio.Event()
+
+    async def read_before_either_creates(revision):
+        nonlocal arrived
+        result = await newest(revision)
+        arrived += 1
+        if arrived == 2:
+            both_arrived.set()
+        await both_arrived.wait()
+        return result
+
+    monkeypatch.setattr(service, "_newest", read_before_either_creates)
+    first, second = await asyncio.gather(
+        service.request_build("default", "sort-task", digest, ImageBuildRequest()),
+        service.request_build("default", "sort-task", digest, ImageBuildRequest()),
+    )
+
+    assert first is not None and second is not None
+    assert first.id == second.id == "1" and first.job == second.job
+    assert len(jobs.created) == 1
+
+
 def test_a_ready_build_is_returned_rather_than_rebuilt(client, store_task, entity_store) -> None:
     digest = _store(store_task)
     client.post(f"{_BASE}/{digest}/image-builds")
@@ -183,7 +219,7 @@ def test_after_a_failed_build_the_next_attempt_starts(client, store_task, entity
     retry = client.post(f"{_BASE}/{digest}/image-builds").json()
 
     assert retry["id"] == "2"
-    assert retry["job"] == build_job_name("default/sort-task", digest, 2)
+    assert retry["job"] == build_job_name("default/sort-task", jobs.created[retry["job"]].spec["revision_id"], 2)
     assert len(jobs.created) == 2
 
 
@@ -224,10 +260,18 @@ def test_a_caller_jobs_refuses_is_forbidden(client, store_task, jobs) -> None:
     assert "may not create jobs" in response.json()["detail"]
 
 
-def test_a_job_name_held_by_another_job_is_a_conflict(client, store_task, jobs) -> None:
+def test_a_job_name_held_by_another_job_is_a_conflict(client, store_task, jobs, entity_store) -> None:
     digest = _store(store_task)
-    name = build_job_name("default/sort-task", digest, 1)
-    other = TaskImageBuildSpec(workspace="default", task="other-task", revision_digest=digest, attempt=1)
+
+    async def revision_id() -> str:
+        head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
+        return (await get_revision(entity_store, TaskRevisionEntity, head)).id
+
+    parent = asyncio.run(revision_id())
+    name = build_job_name("default/sort-task", parent, 1)
+    other = TaskImageBuildSpec(
+        workspace="default", task="other-task", revision_id=parent, revision_digest=digest, attempt=1
+    )
     jobs.created[name] = task_image_build_job_request(other, name=name)
 
     response = client.post(f"{_BASE}/{digest}/image-builds")
