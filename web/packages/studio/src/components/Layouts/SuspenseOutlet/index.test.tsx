@@ -3,7 +3,7 @@
 
 import { SuspenseOutlet } from '@studio/components/Layouts/SuspenseOutlet';
 import { act, render, screen } from '@testing-library/react';
-import { use } from 'react';
+import { use, useEffect } from 'react';
 import { createMemoryRouter, useParams } from 'react-router';
 import { RouterProvider } from 'react-router/dom';
 
@@ -16,8 +16,18 @@ const Suspends = () => {
 
 const Item = () => {
   const { id } = useParams();
-  if (id === 'pending') return <Suspends />;
+  if (id === 'pending') {
+    return <Suspends />;
+  }
   return <div>Item {id}</div>;
+};
+
+const onListMount = vi.fn();
+
+const List = () => {
+  const { id } = useParams();
+  useEffect(() => onListMount(), []);
+  return <div>List {id ?? 'all'}</div>;
 };
 
 const mountRouter = (initialPath: string) => {
@@ -29,6 +39,13 @@ const mountRouter = (initialPath: string) => {
           { path: '/a', element: <div>Page A</div> },
           { path: '/b', element: <Suspends /> },
           { path: '/items/:id', element: <Item /> },
+          {
+            element: <List />,
+            children: [
+              { path: '/list', element: null },
+              { path: '/list/:id', element: null },
+            ],
+          },
         ],
       },
     ],
@@ -57,5 +74,16 @@ describe('SuspenseOutlet', () => {
 
     expect(screen.getByText('Item 1')).toBeInTheDocument();
     expect(screen.queryByText('fallback')).not.toBeInTheDocument();
+  });
+
+  it('keeps a pathless route element mounted when moving between its child paths', async () => {
+    onListMount.mockClear();
+    const router = mountRouter('/list');
+    expect(await screen.findByText('List all')).toBeInTheDocument();
+
+    await act(() => router.navigate('/list/1'));
+
+    expect(screen.getByText('List 1')).toBeInTheDocument();
+    expect(onListMount).toHaveBeenCalledTimes(1);
   });
 });

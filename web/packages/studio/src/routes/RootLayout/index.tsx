@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ToastProvider } from '@nemo/common/src/providers/toast/ToastProvider';
-import { SuspenseOutlet } from '@studio/components/Layouts/SuspenseOutlet';
+import { Loading } from '@studio/components/Layouts/Loading';
 import { isLocalDevelopmentEnv, REACT_QUERY_DEVTOOLS_ENABLED } from '@studio/constants/environment';
 import { BreadcrumbsProvider } from '@studio/providers/breadcrumbs/BreadcrumbsProvider';
 import { WorkersProvider } from '@studio/providers/workers/WorkersProvider';
 import { WorkspaceProvider } from '@studio/providers/workspace';
 import { Suspense, lazy } from 'react';
+import { Outlet } from 'react-router';
 
 const ReactQueryDevtools =
   isLocalDevelopmentEnv && REACT_QUERY_DEVTOOLS_ENABLED
@@ -25,8 +26,8 @@ export const RootLayout = () => {
       <ToastProvider>
         <WorkersProvider>
           <BreadcrumbsProvider>
-            <SuspenseOutlet />
-            <Suspense>
+            <Suspense fallback={<Loading />}>
+              <Outlet />
               <ReactQueryDevtools initialIsOpen={false} />
             </Suspense>
           </BreadcrumbsProvider>

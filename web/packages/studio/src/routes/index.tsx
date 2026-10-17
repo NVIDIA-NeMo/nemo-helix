@@ -99,10 +99,7 @@ export const routes: RouteObject[] = [
             element: <WorkspaceIndexRoute />,
           },
           {
-            element: (
-              // Suspense queries will show loader in panel area
-              <SuspenseOutlet />
-            ),
+            element: <SuspenseOutlet />,
             errorElement: <RouteErrorPanel title="Entity Store" />,
             children: [
               ...dashboardRoutes,
