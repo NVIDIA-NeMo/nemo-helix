@@ -16,11 +16,25 @@ from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
 
 
 def _uses_local_platform(fabric: dict[str, Any]) -> bool:
-    models = (fabric.get("models") or {}).values()
-    urls = [model.get("base_url", "") for model in models if isinstance(model, dict)]
+    model_configs = list((fabric.get("models") or {}).values())
+    for harness in (fabric.get("harnesses") or {}).values():
+        if isinstance(harness, dict):
+            model_configs.append(harness.get("model"))
+    urls = []
+    for model in model_configs:
+        if isinstance(model, dict):
+            urls.append(model.get("base_url", ""))
+            settings = model.get("settings")
+            if isinstance(settings, dict):
+                urls.append(settings.get("base_url", ""))
     relay = fabric.get("relay") or {}
-    atif = (relay.get("observability") or {}).get("atif") or {}
-    urls.extend(storage.get("endpoint", "") for storage in (atif.get("storage") or []) if isinstance(storage, dict))
+    for telemetry in (fabric.get("telemetry") or {}, relay.get("observability") or {}):
+        atif = telemetry.get("atif") or {}
+        urls.extend(
+            storage.get("endpoint", "")
+            for storage in (atif.get("storage") or [])
+            if isinstance(storage, dict) and storage.get("type") == "http"
+        )
     return any(
         isinstance(url, str)
         and urlsplit(url).hostname in (*LOOPBACK_ADDRESSES, "host.docker.internal")

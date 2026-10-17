@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 class _Forwarder(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
-    daemon_threads = True
+    daemon_threads = False
 
     def __init__(self, bind_host: str, upstream: tuple[str, int]) -> None:
         self.upstream = upstream

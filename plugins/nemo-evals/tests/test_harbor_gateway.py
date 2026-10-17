@@ -5,7 +5,7 @@ import copy
 import json
 import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Thread
+from threading import Event, Thread
 from urllib.parse import urlsplit
 
 import httpx
@@ -236,3 +236,93 @@ def test_offline_harbor_scoring_does_not_require_docker(monkeypatch):
     }
     with harbor_gateway_config(config, platform_base_url="http://127.0.0.1:8080") as reachable:
         assert reachable is config
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        ("models", "default", "base_url"),
+        ("models", "default", "settings", "base_url"),
+        ("harnesses", "main", "model", "base_url"),
+        ("harnesses", "main", "model", "settings", "base_url"),
+        ("telemetry", "atif", "storage"),
+        ("relay", "observability", "atif", "storage"),
+    ],
+)
+def test_forwarding_detects_each_supported_local_endpoint(location, loopback_platform, monkeypatch):
+    """Reach local services when the only URL lives in any supported config location."""
+    base, received = loopback_platform
+    monkeypatch.setattr("nemo_evals.jobs.harbor_gateway.platform.system", lambda: "Linux")
+    monkeypatch.setattr("nemo_evals.jobs.harbor_gateway._docker_bridge_host", lambda: "127.0.0.1")
+    telemetry = location[-1] == "storage"
+    url = base + (
+        "/apis/intake/v2/workspaces/default/ingest/atif"
+        if telemetry
+        else "/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
+    )
+    fabric = {}
+    cursor = fabric
+    for key in location[:-1]:
+        cursor = cursor.setdefault(key, {})
+    cursor[location[-1]] = [{"type": "http", "endpoint": url}] if telemetry else url
+    config = {"target": {"kind": "harbor", "agent_kwargs": {"fabric_config": fabric}}}
+    with harbor_gateway_config(config, platform_base_url=base) as reachable:
+        cursor = reachable["target"]["agent_kwargs"]["fabric_config"]
+        for key in location:
+            cursor = cursor[key]
+        endpoint = cursor[0]["endpoint"] if telemetry else cursor
+        assert urlsplit(endpoint).port != urlsplit(base).port
+        httpx.post(endpoint, json={"probe": "ok"}, trust_env=False).raise_for_status()
+    assert len(received) == 1
+
+
+def test_shutdown_waits_for_handlers_connecting_upstream(loopback_platform, monkeypatch):
+    """Drain handlers that have accepted clients but have not connected upstream yet."""
+    from nemo_evals.jobs.harbor_forwarder import _Forwarder
+
+    base, _ = loopback_platform
+    connecting, release, stop, listening, closing, exited = (Event() for _ in range(6))
+    original_connect = socket.create_connection
+    original_close = _Forwarder.server_close
+    workers = []
+    ports = []
+
+    def stalled_connect(address, timeout):
+        from threading import current_thread
+
+        workers.append(current_thread())
+        connecting.set()
+        assert release.wait(5), "Test did not release the upstream handshake"
+        return original_connect(address, timeout=timeout)
+
+    def tracked_close(server):
+        closing.set()
+        original_close(server)
+
+    monkeypatch.setattr("nemo_evals.jobs.harbor_forwarder.socket.create_connection", stalled_connect)
+    monkeypatch.setattr(_Forwarder, "server_close", tracked_close)
+
+    def run():
+        with loopback_forwarder(base, "127.0.0.1") as gateway:
+            ports.append(urlsplit(gateway).port)
+            listening.set()
+            assert stop.wait(5)
+        exited.set()
+
+    thread = Thread(target=run, daemon=True)
+    thread.start()
+    try:
+        assert listening.wait(5)
+        with original_connect(("127.0.0.1", ports[0]), timeout=5):
+            assert connecting.wait(5)
+            stop.set()
+            assert closing.wait(5)
+            assert not exited.wait(0.2), "Shutdown returned with an upstream handshake still blocked"
+            release.set()
+            assert exited.wait(5)
+            assert all(not worker.is_alive() for worker in workers)
+    finally:
+        stop.set()
+        release.set()
+        thread.join(timeout=5)
+    assert not thread.is_alive()
