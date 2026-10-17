@@ -29,7 +29,7 @@ You need:
 - A default and fast model pair. `nemo setup` stores one, or you can pass
   `--default-model` and `--fast-model` (Model Entity refs such as
   `default/<model>`) on each command. The fast model reviews traces in each
-  evidence stream; the default model compiles the findings into Insights.
+  Compass signal; the default model compiles the findings into Insights.
 
 <Note>
 
@@ -54,28 +54,28 @@ the agent's traces must match the `--agent` you pass. For OTLP, set
 
 1. **Load traces.** The run reads the agent's traces and their spans from
    Intake. `--since` and `--evaluation-id` narrow which traces are read.
-1. **Collect evidence.** Several evidence streams examine the traces in
+1. **Collect evidence.** Several Compass signals (evidence streams) examine the traces in
    parallel. Each stream either reports the problems it found or is skipped with a
    reason.
 1. **Apply recurrence thresholds.** Isolated failures are dropped. Only
    observations that recur often enough become Insight candidates. See
    [Recurrence Thresholds](#recurrence-thresholds).
 1. **Compile Insights.** The default model turns candidates into Insights and
-   compares them with the agent's existing Open Insights. A new problem becomes a
+   compares them with the agent's existing unresolved Insights. A new problem becomes a
    new Insight; more evidence for an existing problem is appended to that
-   Insight's trace references. The Analyst does not change the title,
+   Insight's evidence. The Analyst does not change the title,
    description, or status of an existing Insight.
 1. **Save the report.** The run files the Insights and saves an
    `analysis-report` result that records what the run created, updated, and
    left out.
 
-### Evidence Streams
+### Compass Signals
 
 | Stream | Looks for | Skipped when |
 | ------ | --------- | ------------ |
 | `tool-issues` | Problems in tool calls, such as explicit tool failures, grouped by tool and issue type. | The traces contain no tool calls. |
 | `anomaly-and-patterns` | Statistical outliers, clusters of similar trajectories, and failures that recur with the same signature. | — |
-| `eval-failure-patterns` | Patterns among traces linked to failed evaluation results. | The traces have no evaluator results. |
+| `grader-failure-patterns` | Patterns among traces linked to failed evaluation results. | The traces have no evaluator results. |
 | `ethos-divergence` | Behavior that diverges from the agent's intended behavior, as described in an Ethos document. | No `--ethos` file was given. |
 | `user-sentiment` | User complaints in recorded user messages. | No embedding backend is configured. Analysis runs do not configure one, so this stream is always skipped. |
 
@@ -165,7 +165,7 @@ Analyzed 6 traces: 0 new insights, 0 existing insights with new evidence. Some o
 - no insights created or updated
 - below threshold: tool-issues knowledge_search explicit_tool_failure (2 of 3 independent cases)
 - skipped: ethos-divergence (No ethos document)
-- skipped: eval-failure-patterns (No evaluator results)
+- skipped: grader-failure-patterns (No evaluator results)
 - skipped: user-sentiment (No embedding backend configured)
 ```
 
@@ -277,13 +277,33 @@ client = NemoClient.from_config()
 insights_client = InsightsPluginResource(client)
 page = insights_client.insights.list_insights(workspace="default", agent="my-agent", status="open")
 for insight in page.data:
-    print(f"[{insight.status}] {insight.title} ({len(insight.trace_refs)} traces)")
+    print(f"[{insight.status}] {insight.title} ({len(insight.evidence)} traces)")
 ```
 
 Each Insight has a `title`, a `description`, the `agent` it is about, a
-`status` (`open`, `resolved`, or `deleted`), and `trace_refs`, the Intake trace
-IDs cited as evidence. Later runs do not add evidence to resolved Insights, so a
-resolved problem that comes back can be filed as a new Insight.
+`status` (`open`, `resolved`, or `deleted`), and `evidence`: traces cited to
+support the finding, optionally with specific spans:
+
+```yaml
+evidence:
+  - trace_id: trace-a
+    spans:
+      - span_id: span-123
+  - trace_id: trace-b
+```
+
+Each trace or span may also have an optional `url` supplied by the trace provider.
+Without spans, an entry refers to the whole trace. Existing stored Insights using
+`trace_refs`/`trace_links` and `span_refs`/`span_links` are read as this structured
+format automatically; no data migration is required.
+
+Insights can also include `severity` and `confidence` (`low`, `med`, or `high`)
+and `updated_date`, the timestamp supplied by Compass. These fields are optional.
+When a later run adds evidence, Helix merges it by trace and span ID and updates
+`updated_date`, while preserving the existing Insight's identity, title,
+description, status, severity, and confidence. Resolved Insights are excluded
+from reconciliation, so a resolved problem that comes back can be filed as a
+new Insight.
 
 ## Troubleshooting
 

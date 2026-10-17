@@ -73,15 +73,16 @@ ETHOS = "# Ethos\n\nAnswer only from retrieved context; say so when there is non
 def _return_result_cell() -> str:
     """The Python cell the mocked model 'writes' to end the CodeAct run.
 
-    Compilation returns the package's list of Insights; the Platform adapter
-    translates it to the persisted change-set.
+    The model returns evidence completions; Compass produces Insights and the
+    Platform adapter translates them to the persisted change-set.
     """
     return (
-        "return_result(result=[{"
+        "return_result(result=[{'insight': {"
         f"'name': {INSIGHT_TITLE!r}, "
         f"'description': {INSIGHT_DESCRIPTION!r}, "
-        f"'trace_refs': {TRACE_REFS!r}"
-        "}])"
+        f"'evidence': {[{'trace_id': ref} for ref in TRACE_REFS]!r}, "
+        "'updated_date': run_timestamp}, "
+        "'unresolved_reason': 'This deterministic fixture cites only the two seeded traces.'}])"
     )
 
 
@@ -360,4 +361,4 @@ def test_analysis_run_persists_insights_and_saves_its_report(
     assert filed.title == INSIGHT_TITLE
     assert filed.description == INSIGHT_DESCRIPTION
     assert filed.agent == target_agent
-    assert filed.trace_refs == TRACE_REFS
+    assert [item.trace_id for item in filed.evidence] == TRACE_REFS

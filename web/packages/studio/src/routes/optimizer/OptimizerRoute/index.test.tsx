@@ -26,7 +26,7 @@ const makeInsight = (id: string, title: string): InsightListItem => ({
   description: `${title} description`,
   agent: 'research-agent',
   status: 'open',
-  trace_refs: ['trace-1'],
+  evidence: [{ trace_id: 'trace-1' }],
   created_at: '2026-07-20T12:00:00Z',
   created_by: 'user@example.com',
   updated_at: '2026-07-20T12:00:00Z',

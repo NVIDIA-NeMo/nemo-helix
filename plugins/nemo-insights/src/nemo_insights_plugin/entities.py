@@ -5,9 +5,20 @@
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Annotated, Literal
 
 from nemo_helix_plugin.entity import NemoEntity
-from pydantic import Field
+from nemo_insights_plugin.evidence import EvidenceCompatibility, TraceEvidence
+from pydantic import Field, WithJsonSchema
+
+InsightRating = Literal["low", "med", "high"]
+# The shared OpenAPI normalizer collapses nullable anyOf unions. Express the
+# nullable enum directly so generated clients match the JSON response/PATCH.
+NullableInsightRating = Annotated[
+    InsightRating | None,
+    WithJsonSchema({"type": ["string", "null"], "enum": ["low", "med", "high", None]}),
+]
+NullableInsightDate = Annotated[datetime | None, WithJsonSchema({"type": ["string", "null"], "format": "date-time"})]
 
 
 class InsightStatus(StrEnum):
@@ -24,7 +35,7 @@ class AnalysisConfigStatus(StrEnum):
     ERROR = "error"
 
 
-class Insight(NemoEntity, entity_type="insights_insight"):
+class Insight(NemoEntity, EvidenceCompatibility, entity_type="insights_insight"):
     """A persistent problem, theme, or category of issues in the agent under test."""
 
     title: str = Field(
@@ -57,15 +68,16 @@ class Insight(NemoEntity, entity_type="insights_insight"):
             "not a good insight for their domain."
         ),
     )
-    trace_refs: list[str] = Field(
+    severity: NullableInsightRating = Field(default=None, description="Observed consequence after recovery.")
+    confidence: NullableInsightRating = Field(
+        default=None, description="How well codebase evidence supports the insight."
+    )
+    updated_date: NullableInsightDate = Field(
+        default=None, description="UTC timestamp when Compass last added trace evidence."
+    )
+    evidence: list[TraceEvidence] = Field(
         default_factory=list,
-        description=(
-            "Intake trace ids the analyst identified as evidence for this "
-            "insight. This is used as evidence for the insight UI to "
-            "communicate to the developer what traces triggered the issue, and "
-            "can also be used to identify other similar traces that might "
-            "experience the same issue."
-        ),
+        description="Supporting traces, with optional source URLs and relevant spans. No spans means whole-trace evidence.",
     )
 
 
