@@ -32,6 +32,10 @@ Every container in the pod shares one network, so services reach each other and 
 on 127.0.0.1. The same model is used by the dispatch backend, by ``NemoOpenSandboxEnvironment``
 inside the Harbor runner, and by the server extension, which re-validates what it receives. It
 only depends on pydantic and must stay importable on Python 3.10 (the server image's version).
+
+The extension also delivers agent bundles (``SandboxAgentBundle``): an init container from the bundle
+image copies a prebuilt agent into ``/installed-agent`` before ``main`` starts, so agents run on
+images that can't install them, such as images with a non-root ``USER``.
 """
 
 from __future__ import annotations
@@ -50,9 +54,22 @@ MAIN_SERVICE = "main"
 # File names, in the task's environment/ directory, that mark a Compose task.
 COMPOSE_FILENAMES = ("docker-compose.yaml", "docker-compose.yml", "compose.yaml", "compose.yml")
 
-# Names the sandbox pod already uses: its containers (sandbox, egress, execd-installer), and
-# ``main``, which every container resolves to 127.0.0.1.
-RESERVED_NAMES = frozenset({MAIN_SERVICE, "sandbox", "egress", "execd-installer"})
+# What the server extension can do, as its health route reports it. Clients check for the feature
+# they need, since an older extension would ignore a key it doesn't know.
+COMPOSE_SERVICES_FEATURE = "compose-services"
+AGENT_BUNDLE_FEATURE = "agent-bundle"
+EXTENSION_FEATURES = (COMPOSE_SERVICES_FEATURE, AGENT_BUNDLE_FEATURE)
+
+# The agent bundle's extensions key and pod annotation, copied the same way as the services'.
+AGENT_BUNDLE_EXTENSION_KEY = "opensandbox.extensions.nemo-agent-bundle"
+AGENT_BUNDLE_POD_ANNOTATION = "opensandbox.io/extensions.nemo-agent-bundle"
+# The init container that installs the bundle, and where it puts the agent in ``main``.
+AGENT_BUNDLE_CONTAINER = "agent-bundle"
+INSTALLED_AGENT_DIR = "/installed-agent"
+
+# Names the sandbox pod already uses: its containers (sandbox, egress, execd-installer, and the
+# agent bundle's), and ``main``, which every container resolves to 127.0.0.1.
+RESERVED_NAMES = frozenset({MAIN_SERVICE, "sandbox", "egress", "execd-installer", AGENT_BUNDLE_CONTAINER})
 # Ports the sandbox pod already listens on: execd (44772), the egress DNS proxy (15353) and the
 # egress policy API (18080). Every container shares the pod network, so a service can't use them.
 RESERVED_PORTS = frozenset({44772, 15353, 18080})
@@ -235,6 +252,39 @@ class ComposeServices(_Strict):
     def to_json(self) -> str:
         """The value sent in ``extensions[EXTENSION_KEY]``."""
         return self.model_dump_json(by_alias=True, exclude_defaults=True)
+
+
+class SandboxAgentBundle(_Strict):
+    """An agent bundle for one sandbox: the image, its installer, and the agent's executable.
+
+    The extension runs ``installer /installed-agent`` from ``image`` in an init container, so the
+    agent is in place before ``main`` starts; ``main`` mounts it read-only.
+    """
+
+    # Pinned by digest, since a tag could move under a run; like services, it must name its registry.
+    image: str = Field(
+        pattern=r"^([a-z0-9-]+(\.[a-z0-9-]+)+(:[0-9]+)?|localhost(:[0-9]+)?)/[^\s@]+@sha256:[0-9a-f]{64}$",
+        max_length=512,
+    )
+    installer: AbsolutePath
+    # Relative to /installed-agent, e.g. ``bin/claude``.
+    entrypoint: str = Field(pattern=r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$", max_length=300)
+
+    @model_validator(mode="after")
+    def _check(self) -> SandboxAgentBundle:
+        """Keep the executable inside ``/installed-agent``."""
+        if ".." in self.entrypoint.split("/"):
+            raise ValueError("entrypoint must not contain '..'")
+        return self
+
+    @property
+    def executable(self) -> str:
+        """The agent's executable in ``main``."""
+        return f"{INSTALLED_AGENT_DIR}/{self.entrypoint}"
+
+    def to_json(self) -> str:
+        """The value sent in ``extensions[AGENT_BUNDLE_EXTENSION_KEY]``."""
+        return self.model_dump_json(exclude_defaults=True)
 
 
 def parse_compose_services(raw: object) -> ComposeServices:

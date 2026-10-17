@@ -31,7 +31,13 @@ from opensandbox_mocks import SandboxApiException, Server, mock_sdk
 from scaled_evals import harbor_opensandbox_environment as environment_module
 from scaled_evals.harbor_opensandbox_driver import OpenSandboxDriver
 from scaled_evals.harbor_opensandbox_environment import NemoOpenSandboxEnvironment, ServiceOperationsUnsupportedError
-from scaled_evals.harbor_opensandbox_services import EXTENSION_KEY, ComposeServices, parse_compose_services
+from scaled_evals.harbor_opensandbox_services import (
+    AGENT_BUNDLE_EXTENSION_KEY,
+    EXTENSION_KEY,
+    ComposeServices,
+    SandboxAgentBundle,
+    parse_compose_services,
+)
 
 API_KEY = "test-key"
 COMPOSE_SERVICES: dict[str, Any] = {
@@ -64,6 +70,8 @@ class _Extension:
 
     def __init__(self) -> None:
         self.healthy = True
+        # What the health route reports; None leaves the key out, like an extension from before agent bundles.
+        self.features: list[str] | None = ["compose-services", "agent-bundle"]
         self.requests: list[httpx.Request] = []
         self.exec_results: list[httpx.Response] = []
         # Answers for the services status route; once empty, every service is ready.
@@ -85,7 +93,10 @@ class _Extension:
         if path == "/v1/nemo-ext/health":
             if not self.healthy:
                 return httpx.Response(404, json={"detail": "Not Found"})
-            return httpx.Response(200, json={"status": "ok", "extension": "nemo-compose-services"})
+            body: dict[str, Any] = {"status": "ok", "extension": "nemo-compose-services"}
+            if self.features is not None:
+                body["features"] = self.features
+            return httpx.Response(200, json=body)
         if path.endswith("/services"):
             status = self.statuses.pop(0) if self.statuses else {"failure": None, "not_ready": []}
             return httpx.Response(200, json=status)
@@ -132,11 +143,11 @@ def _task(tmp_path: Path, *, compose: bool = True) -> Path:
 def _environment(environment_dir: Path, server: Server, **kwargs: Any) -> NemoOpenSandboxEnvironment:
     """The environment for ``environment_dir`` on the mock server, with the test's compose services; ``kwargs`` override any argument."""
     kwargs.setdefault("compose_services", COMPOSE_SERVICES)
+    kwargs.setdefault("session_id", "compose-task__abc")
+    kwargs.setdefault("trial_paths", TrialPaths(trial_dir=environment_dir.parent / "trial"))
     environment = NemoOpenSandboxEnvironment(
         environment_dir=environment_dir,
         environment_name="compose-task",
-        session_id="compose-task__abc",
-        trial_paths=TrialPaths(trial_dir=environment_dir.parent / "trial"),
         task_env_config=EnvironmentConfig(docker_image="registry.example/task:1", env={"SHARED": "from-task"}),
         network_policy=NetworkPolicy(network_mode=NetworkMode.NO_NETWORK),
         domain="opensandbox.example",
@@ -246,8 +257,8 @@ async def test_failed_service_ends_the_readiness_wait(tmp_path: Path, server: Se
         {"failure": "service 'seed' exited with code 1 (Error). Last log lines:\nboom", "not_ready": ["seed"]},
     ]
 
-    assert await environment._services_failure(sandbox) is None
-    failure = await environment._services_failure(sandbox)
+    assert await environment._provisioning_failure(sandbox) is None
+    failure = await environment._provisioning_failure(sandbox)
 
     assert failure == "OpenSandbox sandbox sbx-1: service 'seed' exited with code 1 (Error). Last log lines:\nboom"
     assert extension.requests[-1].url.path == "/v1/nemo-ext/sandboxes/sbx-1/services"
@@ -278,7 +289,7 @@ async def test_unreadable_service_status_keeps_waiting(
         extension, "handle", lambda request: httpx.Response(404, json={"detail": {"code": "NEMO::NOT_FOUND"}})
     )
 
-    assert await environment._services_failure(SimpleNamespace(id="sbx-1")) is None
+    assert await environment._provisioning_failure(SimpleNamespace(id="sbx-1")) is None
 
 
 async def _started(environment: NemoOpenSandboxEnvironment) -> NemoOpenSandboxEnvironment:
@@ -544,3 +555,174 @@ async def test_large_downloads_are_read_in_chunks(
 
     with pytest.raises(RuntimeError, match="got 4 of 10 bytes"):
         await environment.service_download_file("/data/big", tmp_path / "short", service="db")
+
+
+# Agent bundles go through the same extension, so they're tested here with the same fakes.
+
+BUNDLE: dict[str, Any] = {
+    "image": "registry.example.com/bundles/claude@sha256:" + "a" * 64,
+    "installer": "/opt/agent-bundle/copy-agent",
+    "entrypoint": "bin/claude",
+}
+
+
+def _bundle_environment(
+    tmp_path: Path, server: Server, *, role: str = "agent", compose: bool = False
+) -> NemoOpenSandboxEnvironment:
+    """An environment with the test bundle, for the agent's sandbox or a separate verifier's."""
+    environment_dir = _task(tmp_path, compose=compose)
+    trial = "bundle-task__abc"
+    return _environment(
+        environment_dir,
+        server,
+        compose_services=COMPOSE_SERVICES if compose else None,
+        agent_bundle=BUNDLE,
+        session_id=f"{trial}__env" if role == "agent" else f"{trial}__verifier__tests",
+        trial_paths=TrialPaths(trial_dir=tmp_path / trial),
+    )
+
+
+async def test_agent_sandbox_create_sends_the_bundle(tmp_path: Path, server: Server, extension: _Extension) -> None:
+    environment = _bundle_environment(tmp_path, server)
+
+    await environment._create_sandbox()
+
+    sent = server.creates[-1]["extensions"]
+    assert SandboxAgentBundle.model_validate_json(
+        sent[AGENT_BUNDLE_EXTENSION_KEY]
+    ) == SandboxAgentBundle.model_validate(BUNDLE)
+    assert EXTENSION_KEY not in sent
+    assert extension.requests[0].url.path == "/v1/nemo-ext/health"
+
+
+async def test_bundle_and_services_ride_on_the_same_create(
+    tmp_path: Path, server: Server, extension: _Extension
+) -> None:
+    environment = _bundle_environment(tmp_path, server, compose=True)
+
+    await environment._create_sandbox()
+
+    assert {AGENT_BUNDLE_EXTENSION_KEY, EXTENSION_KEY} <= server.creates[-1]["extensions"].keys()
+
+
+async def test_separate_verifier_gets_no_bundle(tmp_path: Path, server: Server, extension: _Extension) -> None:
+    environment = _bundle_environment(tmp_path, server, role="verifier")
+
+    await environment._create_sandbox()
+
+    assert AGENT_BUNDLE_EXTENSION_KEY not in (server.creates[-1].get("extensions") or {})
+    # A plain sandbox needs no extension.
+    assert extension.requests == []
+
+
+async def test_extension_without_bundle_support_fails_before_creating(
+    tmp_path: Path, server: Server, extension: _Extension
+) -> None:
+    extension.features = None
+    environment = _bundle_environment(tmp_path, server)
+
+    with pytest.raises(RuntimeError, match="doesn't support agent bundles"):
+        await environment._create_sandbox()
+
+    assert server.creates == []
+
+
+def test_bundle_must_be_pinned_by_digest(tmp_path: Path, server: Server) -> None:
+    with pytest.raises(ValueError, match="image"):
+        _environment(
+            _task(tmp_path, compose=False),
+            server,
+            compose_services=None,
+            agent_bundle={**BUNDLE, "image": "registry.example.com/bundles/claude:2.1.301"},
+            session_id="bundle-task__abc__env",
+            trial_paths=TrialPaths(trial_dir=tmp_path / "bundle-task__abc"),
+        )
+
+
+async def test_failed_bundle_fails_the_create(tmp_path: Path, server: Server, extension: _Extension) -> None:
+    server.healthy = False  # main never starts while the bundle's init container has failed
+    extension.statuses = [{"failure": "agent bundle exited with code 1 (Error)", "not_ready": []}]
+    environment = _bundle_environment(tmp_path, server)
+
+    # The create's readiness wait polls the extension, so it fails with the cause instead of timing out.
+    with pytest.raises(RuntimeError, match="agent bundle exited with code 1"):
+        await environment._create_sandbox()
+
+    # Not a transient error, so the create isn't retried, and nothing is left running.
+    assert len(server.creates) == 1
+    assert server.live() == set()
+
+
+def _scripted_exec(
+    environment: NemoOpenSandboxEnvironment, monkeypatch: pytest.MonkeyPatch, results: dict[str, ExecResult]
+) -> list[tuple[str, dict[str, Any]]]:
+    """Answer ``environment.exec`` from ``results`` by command, recording each call."""
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def exec_(command: str, **kwargs: Any) -> ExecResult:
+        # start() also opens up the log directories; only the bundle's commands are scripted.
+        if command.startswith("chmod "):
+            return ExecResult(stdout="", stderr="", return_code=0)
+        calls.append((command, kwargs))
+        return results[command]
+
+    monkeypatch.setattr(environment, "exec", exec_)
+    return calls
+
+
+async def test_start_puts_the_bundle_first_on_the_image_path_and_checks_it(
+    tmp_path: Path, server: Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environment = _bundle_environment(tmp_path, server)
+    calls = _scripted_exec(
+        environment,
+        monkeypatch,
+        {
+            'printf %s "$PATH"': ExecResult(stdout="/home/agent/.local/bin:/usr/bin:/bin", return_code=0),
+            "/installed-agent/bin/claude --version": ExecResult(stdout="2.1.301 (Claude Code)\n", return_code=0),
+        },
+    )
+
+    await environment.start(force_build=False)
+
+    assert [command for command, _ in calls] == ['printf %s "$PATH"', "/installed-agent/bin/claude --version"]
+    # Both run as the default user, like Harbor's own install check.
+    assert all("user" not in kwargs for _, kwargs in calls)
+    assert environment._persistent_env["PATH"] == "/installed-agent/bin:/home/agent/.local/bin:/usr/bin:/bin"
+
+
+@pytest.mark.parametrize(
+    "path_probe",
+    [ExecResult(stdout="", stderr="sh: not found", return_code=127), ExecResult(stdout="", return_code=0)],
+)
+async def test_start_fails_when_the_path_cannot_be_read(
+    tmp_path: Path, server: Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch, path_probe: ExecResult
+) -> None:
+    environment = _bundle_environment(tmp_path, server)
+    calls = _scripted_exec(environment, monkeypatch, {'printf %s "$PATH"': path_probe})
+
+    with pytest.raises(RuntimeError, match=r"could not read the sandbox's PATH"):
+        await environment.start(force_build=False)
+
+    # The agent's version check never runs, and PATH is left alone.
+    assert [command for command, _ in calls] == ['printf %s "$PATH"']
+    assert "PATH" not in environment._persistent_env
+
+
+async def test_start_fails_when_the_bundle_does_not_run(
+    tmp_path: Path, server: Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environment = _bundle_environment(tmp_path, server)
+    _scripted_exec(
+        environment,
+        monkeypatch,
+        {
+            'printf %s "$PATH"': ExecResult(stdout="/usr/bin:/bin", return_code=0),
+            "/installed-agent/bin/claude --version": ExecResult(
+                stderr="/installed-agent/bin/claude: not found", return_code=127
+            ),
+        },
+    )
+
+    with pytest.raises(RuntimeError, match=r"Agent bundle check failed: .* exited 127: .*not found"):
+        await environment.start(force_build=False)

@@ -23,17 +23,33 @@ import nemo_ext_server as ext
 import opensandbox_server
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from kubernetes.client import V1ObjectMeta, V1Pod, V1PodStatus
+from kubernetes.client import (
+    V1ContainerState,
+    V1ContainerStateTerminated,
+    V1ContainerStatus,
+    V1ObjectMeta,
+    V1Pod,
+    V1PodStatus,
+)
 from opensandbox_server.api.schema import ImageSpec, NetworkPolicy, NetworkRule
 from opensandbox_server.extensions import apply_extensions_to_annotations
 from opensandbox_server.services.k8s import provider_factory
 from opensandbox_server.services.k8s.batchsandbox_provider import BatchSandboxProvider
-from scaled_evals.harbor_opensandbox_services import EXTENSION_KEY, POD_ANNOTATION
+from scaled_evals.harbor_opensandbox_services import (
+    AGENT_BUNDLE_EXTENSION_KEY,
+    AGENT_BUNDLE_POD_ANNOTATION,
+    EXTENSION_KEY,
+    POD_ANNOTATION,
+)
 
 SANDBOX_ID = "sbx-1"
 SPEC = (
     '{"services":[{"name":"db","image":"docker.io/library/postgres:16","ports":[5432],'
     '"readiness":{"exec":["pg_isready"]}}],"main":{"add_capabilities":["SYS_PTRACE"]}}'
+)
+BUNDLE_SPEC = (
+    '{"image":"registry.example.com/bundles/claude@sha256:' + "a" * 64 + '",'
+    '"installer":"/opt/agent-bundle/copy-agent","entrypoint":"bin/claude"}'
 )
 EXT_DIR = Path(__file__).resolve().parents[2] / "opensandbox_ext"
 SRC_DIR = Path(__file__).resolve().parents[2] / "src"
@@ -91,10 +107,10 @@ def _create(provider: BatchSandboxProvider, annotations: dict[str, str] | None, 
     )
 
 
-def test_stock_server_turns_the_extension_into_the_pod_annotation() -> None:
+def test_stock_server_turns_the_extensions_into_pod_annotations() -> None:
     annotations: dict[str, str] = {}
-    apply_extensions_to_annotations(annotations, {EXTENSION_KEY: SPEC})
-    assert annotations == {POD_ANNOTATION: SPEC}
+    apply_extensions_to_annotations(annotations, {EXTENSION_KEY: SPEC, AGENT_BUNDLE_EXTENSION_KEY: BUNDLE_SPEC})
+    assert annotations == {POD_ANNOTATION: SPEC, AGENT_BUNDLE_POD_ANNOTATION: BUNDLE_SPEC}
 
 
 def test_services_are_added_to_the_stock_manifest(provider: ext.NemoComposeProvider, k8s: FakeK8sClient) -> None:
@@ -122,9 +138,34 @@ def test_invalid_spec_is_a_value_error_and_creates_nothing(
     assert k8s.created == []
 
 
-def test_pool_mode_is_rejected(provider: ext.NemoComposeProvider, k8s: FakeK8sClient) -> None:
+@pytest.mark.parametrize("annotation", [{POD_ANNOTATION: SPEC}, {AGENT_BUNDLE_POD_ANNOTATION: BUNDLE_SPEC}])
+def test_pool_mode_is_rejected(
+    provider: ext.NemoComposeProvider, k8s: FakeK8sClient, annotation: dict[str, str]
+) -> None:
     with pytest.raises(ValueError, match="can't be combined with poolRef"):
-        _create(provider, {POD_ANNOTATION: SPEC}, extensions={"poolRef": "pool-1"})
+        _create(provider, annotation, extensions={"poolRef": "pool-1"})
+    assert k8s.created == []
+
+
+def test_bundle_is_added_to_the_stock_manifest_before_the_services(
+    provider: ext.NemoComposeProvider, k8s: FakeK8sClient
+) -> None:
+    _create(provider, {AGENT_BUNDLE_POD_ANNOTATION: BUNDLE_SPEC, POD_ANNOTATION: SPEC})
+
+    pod_spec = k8s.created[0]["spec"]["template"]["spec"]
+    assert [c["name"] for c in pod_spec["initContainers"]] == ["execd-installer", "egress", "agent-bundle", "db"]
+    bundle = pod_spec["initContainers"][2]
+    assert bundle["image"] == "registry.example.com/bundles/claude@sha256:" + "a" * 64
+    assert bundle["command"] == ["/opt/agent-bundle/copy-agent", "/installed-agent"]
+    sandbox_mounts = pod_spec["containers"][0]["volumeMounts"]
+    assert {"name": "nemo-installed-agent", "mountPath": "/installed-agent", "readOnly": True} in sandbox_mounts
+
+
+def test_invalid_bundle_is_a_value_error_and_creates_nothing(
+    provider: ext.NemoComposeProvider, k8s: FakeK8sClient
+) -> None:
+    with pytest.raises(ValueError, match="image"):
+        _create(provider, {AGENT_BUNDLE_POD_ANNOTATION: BUNDLE_SPEC.replace("@sha256:", ":")})
     assert k8s.created == []
 
 
@@ -174,7 +215,11 @@ def api(provider: ext.NemoComposeProvider, k8s: FakeK8sClient) -> TestClient:
 
 
 def test_health(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    assert api.get("/v1/nemo-ext/health").json() == {"status": "ok", "extension": "nemo-compose-services"}
+    assert api.get("/v1/nemo-ext/health").json() == {
+        "status": "ok",
+        "extension": "nemo-compose-services",
+        "features": ["compose-services", "agent-bundle"],
+    }
     monkeypatch.setattr(ext, "_provider", None)
     assert api.get("/v1/nemo-ext/health").status_code == 503
 
@@ -187,6 +232,48 @@ def test_services_status(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> No
         "failure": "service 'db' exited with code 1 (Error). Last log lines:\nFATAL: bad config",
         "not_ready": ["db"],
     }
+
+
+def _bundle_pod(k8s: FakeK8sClient, *init_statuses: V1ContainerStatus, services: bool = False) -> None:
+    """Make the test pod carry the agent bundle, and the services if asked, with these init container statuses."""
+    annotations = {AGENT_BUNDLE_POD_ANNOTATION: BUNDLE_SPEC, **({POD_ANNOTATION: SPEC} if services else {})}
+    k8s.pods[0].metadata.annotations = annotations
+    k8s.pods[0].status = V1PodStatus(init_container_statuses=list(init_statuses), container_statuses=[])
+
+
+def _bundle_status(name: str, **state: Any) -> V1ContainerStatus:
+    return V1ContainerStatus(
+        name=name, image="i", image_id="", ready=False, restart_count=0, state=V1ContainerState(**state)
+    )
+
+
+def test_bundle_status(api: TestClient, k8s: FakeK8sClient) -> None:
+    url = f"/v1/nemo-ext/sandboxes/{SANDBOX_ID}/services"
+    _bundle_pod(k8s)
+    assert api.get(url).json() == {"failure": None, "not_ready": ["agent-bundle"]}
+
+    _bundle_pod(k8s, _bundle_status("agent-bundle", terminated=V1ContainerStateTerminated(exit_code=0)))
+    assert api.get(url).json() == {"failure": None, "not_ready": []}
+
+    _bundle_pod(k8s, _bundle_status("agent-bundle", terminated=V1ContainerStateTerminated(exit_code=1, reason="Error")))
+    assert api.get(url).json() == {
+        "failure": "agent bundle exited with code 1 (Error). Last log lines:\nFATAL: bad config",
+        "not_ready": [],
+    }
+
+
+def test_bundle_is_reported_before_the_services(api: TestClient, k8s: FakeK8sClient) -> None:
+    _bundle_pod(k8s, services=True)
+    assert api.get(f"/v1/nemo-ext/sandboxes/{SANDBOX_ID}/services").json() == {
+        "failure": None,
+        "not_ready": ["agent-bundle", "db"],
+    }
+
+
+def test_exec_never_reaches_the_bundle(api: TestClient, k8s: FakeK8sClient) -> None:
+    _bundle_pod(k8s)
+    response = api.post(f"/v1/nemo-ext/sandboxes/{SANDBOX_ID}/services/agent-bundle/exec", json={"command": ["id"]})
+    assert response.status_code == 404
 
 
 def test_sandbox_without_services_is_not_found(api: TestClient, k8s: FakeK8sClient) -> None:
