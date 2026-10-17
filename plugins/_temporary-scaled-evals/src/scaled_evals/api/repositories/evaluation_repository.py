@@ -13,6 +13,7 @@ import psycopg
 from psycopg.types.json import Json
 
 from scaled_evals.api import config_profile_store
+from scaled_evals.api.benchmark_store import BenchmarkStore
 from scaled_evals.api.failure_diagnostics import failure_category_for_code
 from scaled_evals.api.redaction import redact_secret_text
 from scaled_evals.api.repositories.base_repository import (
@@ -393,18 +394,13 @@ class EvaluationRepository:
         if not benchmark_run_id:
             return None
         cur.execute(
-            """
-            SELECT brv.derived_from_benchmark_id, brv.derived_from_revision, brv.operational_policy
-            FROM benchmark_runs br
-            JOIN benchmark_revisions brv
-              ON brv.benchmark_id = br.benchmark_id
-             AND brv.revision = br.benchmark_revision
-            WHERE br.id = %s AND br.deleted_at IS NULL
-            FOR KEY SHARE OF brv
-            """,
+            "SELECT benchmark_id, benchmark_revision FROM benchmark_runs WHERE id = %s AND deleted_at IS NULL",
             (benchmark_run_id,),
         )
-        row = cur.fetchone()
+        run = cur.fetchone()
+        if run is None:
+            return None
+        row = BenchmarkStore().get_revision_meta(run["benchmark_id"], run["benchmark_revision"])
         if row is None:
             return None
         policy = row["operational_policy"] if isinstance(row["operational_policy"], dict) else {}

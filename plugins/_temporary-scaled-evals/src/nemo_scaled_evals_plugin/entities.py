@@ -3,7 +3,7 @@
 
 """Entity Store entities for scaled-evals metadata.
 
-Tasks, config profiles and agent bundles live only here. `ScaledEvaluation` is a derived
+Tasks, benchmarks, benchmark imports, config profiles and agent bundles live only here. `ScaledEvaluation` is a derived
 read model with exactly one writer (the controller's projection phase), which is
 what makes it safe on a store that offers per-entity optimistic locking but no
 multi-entity transaction and no atomic dequeue.
@@ -160,6 +160,84 @@ class ScaledEvalsTask(NemoEntity, entity_type="scaled_evals_task"):
     current_revision: int | None = None
     deleted_at: datetime | None = None
     revisions: list[ScaledEvalsTaskRevision] = Field(default_factory=list)
+
+
+class ScaledEvalsBenchmarkMember(BaseModel):
+    """One member task of a benchmark revision; a None `task_revision` floats to the latest."""
+
+    task_id: str
+    task_revision: int | None = None
+    position: int
+
+
+class ScaledEvalsBenchmarkRevision(BaseModel):
+    """One immutable benchmark revision: its member set, lineage and policy."""
+
+    revision: int
+    description: str | None = None
+    derived_from_benchmark_id: str | None = None
+    derived_from_revision: int | None = None
+    operational_policy: dict[str, Any] = Field(default_factory=dict)
+    members: list[ScaledEvalsBenchmarkMember] = Field(default_factory=list)
+    created_at: datetime
+
+
+class ScaledEvalsBenchmark(NemoEntity, entity_type="scaled_evals_benchmark"):
+    """A benchmark, named by its benchmark id, with every revision embedded."""
+
+    owner_id: str | None = None
+    display_name: str
+    slug: str
+    description: str | None = None
+    visibility: str = "private"
+    qualification_status: str = "registered"
+    qualification_evidence: dict[str, Any] = Field(default_factory=dict)
+    qualified_at: datetime | None = None
+    qualified_by: str | None = None
+    current_revision: int | None = None
+    deleted_at: datetime | None = None
+    revisions: list[ScaledEvalsBenchmarkRevision] = Field(default_factory=list)
+
+
+class ScaledEvalsBenchmarkImportTask(BaseModel):
+    """One manifest task of an import and the task revision it materialized into."""
+
+    position: int
+    slug: str
+    task_id: str
+    task_revision: int
+    pack_path: str
+    pack_sha256: str
+    image_ref: str | None = None
+    image_digest: str | None = None
+    image_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ScaledEvalsBenchmarkImportBenchmark(BaseModel):
+    """One manifest benchmark of an import and the revision it published to."""
+
+    position: int
+    slug: str
+    name: str
+    task_slugs: list[str] = Field(default_factory=list)
+    benchmark_id: str | None = None
+    benchmark_revision: int | None = None
+
+
+class ScaledEvalsBenchmarkImport(NemoEntity, entity_type="scaled_evals_benchmark_import"):
+    """A materialized benchmark import, named after its (owner, manifest, visibility) identity.
+
+    The deterministic name makes a repeated create of the same manifest
+    conflict instead of starting a second import.
+    """
+
+    owner_id: str
+    manifest_sha256: str
+    manifest: dict[str, Any] = Field(default_factory=dict)
+    visibility: str = "private"
+    description: str | None = None
+    tasks: list[ScaledEvalsBenchmarkImportTask] = Field(default_factory=list)
+    benchmarks: list[ScaledEvalsBenchmarkImportBenchmark] = Field(default_factory=list)
 
 
 def searchable_blob(row: dict[str, Any]) -> str:
