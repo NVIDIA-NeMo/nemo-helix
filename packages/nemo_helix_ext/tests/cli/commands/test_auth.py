@@ -17,6 +17,7 @@ from nemo_helix_ext.auth.helpers import decode_jwt_claims, generate_unsigned_jwt
 from nemo_helix_ext.cli.app import app
 from nemo_helix_ext.cli.core.context import CLIContext
 from nemo_helix_plugin.auth.access_keys.types import (
+    AccessKeyBoundWorkspace,
     AccessKeyCreateRequest,
     AccessKeyCreateResponse,
     AccessKeyListResponse,
@@ -715,6 +716,181 @@ def test_auth_access_keys_create_sends_service_account(monkeypatch: pytest.Monke
     fake_access_keys_client.create_access_key.assert_called_once_with(
         body=AccessKeyCreateRequest(name="otel", service_account_id="otel-collector")
     )
+
+
+def _create_bound_key(monkeypatch: pytest.MonkeyPatch, *args: str):
+    fake_access_keys_client = MagicMock()
+    fake_access_keys_client.create_access_key.return_value.data.return_value = _created_access_key("otel")
+    monkeypatch.setattr("nemo_helix_ext.cli.core.context.CLIContext.get_client", lambda self: MagicMock())
+    monkeypatch.setattr(
+        "nemo_helix_ext.cli.commands.auth.client_from_platform",
+        lambda platform, client_cls: fake_access_keys_client,
+    )
+    result = runner.invoke(
+        app, ["auth", "access-keys", "create", "--name", "otel", "--service-account", "otel-collector", *args]
+    )
+    return result, fake_access_keys_client
+
+
+def test_auth_access_keys_create_sends_every_bound_workspace(monkeypatch: pytest.MonkeyPatch):
+    result, fake_access_keys_client = _create_bound_key(
+        monkeypatch,
+        "--bound-workspace",
+        "team-a:Editor",
+        "--bound-workspace",
+        "team-b:Viewer,Auditor",
+    )
+
+    assert_exit_code(result, 0)
+    fake_access_keys_client.create_access_key.assert_called_once_with(
+        body=AccessKeyCreateRequest(
+            name="otel",
+            service_account_id="otel-collector",
+            bound_workspaces=[
+                AccessKeyBoundWorkspace(workspace="team-a", roles=["Editor"]),
+                AccessKeyBoundWorkspace(workspace="team-b", roles=["Viewer", "Auditor"]),
+            ],
+        )
+    )
+
+
+@pytest.mark.parametrize("value", ["team-a", "team-a:", ":Editor"])
+def test_auth_access_keys_create_requires_an_explicit_role_for_each_bound_workspace(
+    monkeypatch: pytest.MonkeyPatch, value: str
+):
+    # A bare name would fall back to a default role, which a bound workspace never gets.
+    result, fake_access_keys_client = _create_bound_key(monkeypatch, "--bound-workspace", value)
+
+    assert result.exit_code != 0
+    assert "--bound-workspace" in result.output
+    fake_access_keys_client.create_access_key.assert_not_called()
+
+
+def test_auth_access_keys_create_rejects_workspace_grants_with_a_bound_workspace(monkeypatch: pytest.MonkeyPatch):
+    result, fake_access_keys_client = _create_bound_key(
+        monkeypatch, "--bound-workspace", "team-a:Editor", "--workspace", "team-b:Viewer"
+    )
+
+    assert result.exit_code != 0
+    fake_access_keys_client.create_access_key.assert_not_called()
+
+
+def _workspace_bound_keys_conflict():
+    from nemo_helix_plugin.client.errors import NemoHTTPError
+
+    return NemoHTTPError(
+        httpx.Response(
+            409,
+            json={
+                "detail": "Service account 'otel-collector' already has live keys bound to workspace(s) 'team-a'.",
+                "code": "workspace_bound_keys_exist",
+            },
+            request=httpx.Request("POST", "https://platform.example.com/apis/auth/v2/access-keys"),
+        )
+    )
+
+
+def _patch_prompt(monkeypatch: pytest.MonkeyPatch, *, interactive: bool, answer: bool | None = None) -> MagicMock:
+    prompt = MagicMock(return_value=answer)
+    monkeypatch.setattr("nemo_helix_ext.ui.prompts.is_interactive", lambda: interactive)
+    monkeypatch.setattr("nemo_helix_ext.ui.prompts.prompt_confirm", prompt)
+    return prompt
+
+
+def test_auth_access_keys_create_with_yes_acknowledges_workspace_bound_keys_upfront(monkeypatch: pytest.MonkeyPatch):
+    prompt = _patch_prompt(monkeypatch, interactive=True)
+    result, fake_access_keys_client = _create_bound_key(monkeypatch, "--yes")
+
+    assert_exit_code(result, 0)
+    fake_access_keys_client.create_access_key.assert_called_once_with(
+        body=AccessKeyCreateRequest(
+            name="otel", service_account_id="otel-collector", acknowledge_workspace_bound_keys=True
+        )
+    )
+    prompt.assert_not_called()
+
+
+def test_auth_access_keys_create_rejects_yes_without_a_service_account(monkeypatch: pytest.MonkeyPatch):
+    fake_access_keys_client = MagicMock()
+    monkeypatch.setattr("nemo_helix_ext.cli.core.context.CLIContext.get_client", lambda self: MagicMock())
+    monkeypatch.setattr(
+        "nemo_helix_ext.cli.commands.auth.client_from_platform",
+        lambda platform, client_cls: fake_access_keys_client,
+    )
+
+    result = runner.invoke(app, ["auth", "access-keys", "create", "--name", "personal", "--yes"])
+
+    assert result.exit_code != 0
+    assert "--yes" in result.output
+    fake_access_keys_client.create_access_key.assert_not_called()
+
+
+def test_auth_access_keys_create_warns_and_retries_when_the_user_confirms(monkeypatch: pytest.MonkeyPatch):
+    prompt = _patch_prompt(monkeypatch, interactive=True, answer=True)
+    fake_access_keys_client = MagicMock()
+    created = MagicMock()
+    created.data.return_value = _created_access_key("otel")
+    fake_access_keys_client.create_access_key.side_effect = [_workspace_bound_keys_conflict(), created]
+    monkeypatch.setattr("nemo_helix_ext.cli.core.context.CLIContext.get_client", lambda self: MagicMock())
+    monkeypatch.setattr(
+        "nemo_helix_ext.cli.commands.auth.client_from_platform",
+        lambda platform, client_cls: fake_access_keys_client,
+    )
+
+    result = runner.invoke(
+        app, ["auth", "access-keys", "create", "--name", "otel", "--service-account", "otel-collector"]
+    )
+
+    assert_exit_code(result, 0)
+    assert "Warning:" in result.output
+    # Rich wraps the warning to the terminal width.
+    assert "already has live keys bound to workspace(s) 'team-a'" in " ".join(result.output.split())
+    assert result.output.rstrip().endswith("signed.jwt.token")
+    prompt.assert_called_once_with("Create the key anyway?", default=False)
+    assert [call.kwargs["body"] for call in fake_access_keys_client.create_access_key.call_args_list] == [
+        AccessKeyCreateRequest(name="otel", service_account_id="otel-collector"),
+        AccessKeyCreateRequest(name="otel", service_account_id="otel-collector", acknowledge_workspace_bound_keys=True),
+    ]
+
+
+def test_auth_access_keys_create_cancels_when_the_user_declines(monkeypatch: pytest.MonkeyPatch):
+    _patch_prompt(monkeypatch, interactive=True, answer=False)
+    fake_access_keys_client = MagicMock()
+    fake_access_keys_client.create_access_key.side_effect = _workspace_bound_keys_conflict()
+    monkeypatch.setattr("nemo_helix_ext.cli.core.context.CLIContext.get_client", lambda self: MagicMock())
+    monkeypatch.setattr(
+        "nemo_helix_ext.cli.commands.auth.client_from_platform",
+        lambda platform, client_cls: fake_access_keys_client,
+    )
+
+    result = runner.invoke(
+        app, ["auth", "access-keys", "create", "--name", "otel", "--service-account", "otel-collector"]
+    )
+
+    assert result.exit_code == 1
+    assert "Cancelled; no key was created." in result.output
+    assert "signed.jwt.token" not in result.output
+    fake_access_keys_client.create_access_key.assert_called_once()
+
+
+def test_auth_access_keys_create_without_a_terminal_requires_yes(monkeypatch: pytest.MonkeyPatch):
+    prompt = _patch_prompt(monkeypatch, interactive=False)
+    fake_access_keys_client = MagicMock()
+    fake_access_keys_client.create_access_key.side_effect = _workspace_bound_keys_conflict()
+    monkeypatch.setattr("nemo_helix_ext.cli.core.context.CLIContext.get_client", lambda self: MagicMock())
+    monkeypatch.setattr(
+        "nemo_helix_ext.cli.commands.auth.client_from_platform",
+        lambda platform, client_cls: fake_access_keys_client,
+    )
+
+    result = runner.invoke(
+        app, ["auth", "access-keys", "create", "--name", "otel", "--service-account", "otel-collector"]
+    )
+
+    assert result.exit_code == 1
+    assert "Re-run with --yes" in result.output
+    prompt.assert_not_called()
+    fake_access_keys_client.create_access_key.assert_called_once()
 
 
 def test_auth_access_keys_create_sends_scope_rotation_and_workspace_grants(

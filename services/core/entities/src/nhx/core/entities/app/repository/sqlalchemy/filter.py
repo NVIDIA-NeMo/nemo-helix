@@ -103,6 +103,12 @@ class SQLAlchemyFilterRepository(FilterRepository):
             path = field.split(".")[1:]
             return self._get_json_element(column, path), isinstance(column.type, JSON)
 
+        # a path into any other JSON column, e.g. "public_metadata.key"
+        column_name, _, rest = field.partition(".")
+        column = getattr(self.model, column_name, None) if rest else None
+        if column is not None and isinstance(getattr(column, "type", None), JSON):
+            return self._get_json_element(column, rest.split(".")), True
+
         raise ValueError(f"Field '{field}' does not exist on model {self.model.__name__}")
 
     def _coerce_value_for_column(self, column: ColumnElement, value: Any) -> Any:

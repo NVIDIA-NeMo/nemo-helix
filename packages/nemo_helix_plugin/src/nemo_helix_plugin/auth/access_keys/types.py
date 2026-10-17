@@ -50,6 +50,23 @@ class AccessKeyWorkspaceGrant(BaseModel):
         return self
 
 
+class AccessKeyBoundWorkspace(AccessKeyWorkspaceGrant):
+    """A workspace a service-bound key is bound to, with the roles its service account gets there.
+
+    Unlike a plain grant, the roles are required: binding a key to a workspace never grants a
+    role implicitly.
+    """
+
+    roles: list[str] = Field(
+        json_schema_extra={
+            # Blank entries get dropped by the base class, but at least one non-blank role must remain.
+            "contains": {"pattern": _NON_BLANK_PATTERN},
+            "minContains": 1,
+        },
+        description="Roles to grant the key's service account in the workspace. Required.",
+    )
+
+
 class AccessKeyListQueryParams(TypedDict, total=False):
     """Pagination parameters for Scoped Access Key listing."""
 
@@ -91,8 +108,36 @@ class AccessKeyCreateRequest(BaseModel):
         pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._+/-]*$",
         json_schema_extra={"nullable": True},
         description=(
-            "Optional non-human service account to bind the key to. Service-bound keys can only be "
-            "created by a HelixAdmin and authenticate as service-account:<id>."
+            "Optional non-human service account to bind the key to. Service-bound keys can be "
+            "created by a HelixAdmin, or by an Admin of every workspace named in `bound_workspaces` for a "
+            "service account named `<workspace>/<name>` after one of them, and authenticate as "
+            "service-account:<id>."
+        ),
+    )
+    bound_workspaces: list[AccessKeyBoundWorkspace] | None = Field(
+        default=None,
+        min_length=1,
+        json_schema_extra={"nullable": True},
+        description=(
+            "Workspaces to bind a service-bound key to, each with the roles the key's service account "
+            "gets there (no role is granted implicitly). Requires service_account_id and cannot be "
+            "combined with `workspaces`. A key bound to several workspaces is managed by someone who is "
+            "Admin of all of them, or by a HelixAdmin. A caller who is not a HelixAdmin must be Admin of "
+            "every bound workspace, must name the service account `<workspace>/<name>` after one of them, "
+            "and can only use a service account whose existing keys and role bindings are all within these "
+            "workspaces (checked when the key is created or rotated, not continuously). The key is bound "
+            "to each workspace's ID, so if a bound workspace is deleted and recreated under the same name, "
+            "only a HelixAdmin can manage the key."
+        ),
+    )
+    acknowledge_workspace_bound_keys: bool = Field(
+        default=False,
+        description=(
+            "Confirm creating a service-bound key for an account that already has live keys bound to "
+            "workspaces, when the new key grants roles in a workspace outside those a live key is bound "
+            "to. Roles belong to the service account, so those keys gain the new roles too, while being "
+            "managed by the bound workspaces' Admins. Without it, such a request fails with 409 and code "
+            "`workspace_bound_keys_exist`."
         ),
     )
     scope: list[str] | None = Field(
@@ -128,6 +173,20 @@ class AccessKeyCreateRequest(BaseModel):
         if any(char.isspace() or char == ":" for service in normalized for char in service):
             raise ValueError("scope service names must not contain whitespace or ':' characters")
         self.scope = normalized
+        return self
+
+    @model_validator(mode="after")
+    def _validate_workspace_binding(self) -> Self:
+        """Require a service account for a bound key, and take its grants only from the bound workspaces."""
+        if self.bound_workspaces is None:
+            return self
+        if self.service_account_id is None:
+            raise ValueError("bound_workspaces requires service_account_id")
+        if self.workspaces:
+            raise ValueError("workspaces cannot be combined with bound_workspaces; grant roles in bound_workspaces")
+        names = [bound.workspace for bound in self.bound_workspaces]
+        if len(set(names)) != len(names):
+            raise ValueError("bound_workspaces must not contain duplicate workspace names")
         return self
 
     @model_validator(mode="after")
@@ -173,6 +232,21 @@ class AccessKeyMetadataResponse(BaseModel):
     entity_type: AccessKeyEntityType = Field(
         default="USER",
         description="Whether the key is bound to a user or a non-human service account.",
+    )
+    bound_workspaces: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Current names of the workspaces a service-bound key is bound to, aligned with "
+            "`bound_workspace_ids`; a workspace that no longer exists, or that the caller can't see, is "
+            "shown by its ID. Empty for personal and unbound keys."
+        ),
+    )
+    bound_workspace_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "IDs of the workspaces a service-bound key is bound to. The key stays bound to these IDs: a "
+            "workspace deleted and recreated under the same name has a new ID and doesn't manage the key."
+        ),
     )
     status: AccessKeyStatus
     issuer: str = Field(description="Issuer stamped into the Scoped Access Key JWT.")
@@ -271,10 +345,13 @@ class AccessKeyErrorResponse(BaseModel):
     """Scoped Access Key error response."""
 
     detail: str
-    code: Literal["access_keys_disabled"] | None = Field(
+    code: Literal["access_keys_disabled", "workspace_bound_keys_exist"] | None = Field(
         default=None,
         json_schema_extra={"nullable": True},
-        description="Set to access_keys_disabled when the Scoped Access Key feature is disabled.",
+        description=(
+            "Set to access_keys_disabled when the Scoped Access Key feature is disabled, or to "
+            "workspace_bound_keys_exist when creating the key needs acknowledge_workspace_bound_keys."
+        ),
     )
 
 
