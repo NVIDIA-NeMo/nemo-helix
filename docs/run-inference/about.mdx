@@ -28,6 +28,8 @@ Models service manages model entities and model providers.
 
 **ModelProvider** — A routable inference host registered for an external API (NVIDIA Build, OpenAI, and so on). All inference requests route through a ModelProvider which serves one or more **Models**.
 
+**VirtualModel** — A named inference route in the Inference Gateway. Each model has a passthrough virtual model; create your own to route across models or apply guardrails. See [Virtual Models](/documentation/models-and-inference/virtual-models).
+
 ---
 
 ## Model Providers

@@ -20,7 +20,7 @@ bundle portable when the platform sees only the files you staged into a fileset.
 | **MCP** | Tunes temperature / top_p on a phishing agent that calls the email-phishing-analyzer MCP server, scoring accuracy, exactly-one tool call, and verbatim tool input | [`optimize-mcp.yaml`](optimize-mcp.yaml) | [`dataset-mcp.json`](dataset-mcp.json), `PHISHING_MCP_BIN` |
 | **MCP, mock analyzer** | The same study against a bundled fixture that replays recorded analyzer results; needs no checkout or analyzer credential | [`optimize-mcp-mock.yaml`](optimize-mcp-mock.yaml) | [`phishing_analyzer_mcp/`](phishing_analyzer_mcp/) |
 
-Official docs: [Optimize Agents](../../../../docs/agents/optimization.mdx).
+Official docs: [Optimize Agents](../../../../docs/agents/optimize-agents.mdx).
 
 ---
 
@@ -324,7 +324,7 @@ profile when the platform registers one, and otherwise to the `cpu` profile
 (docker or `kubernetes_job`, whichever the deployment registered) using the
 `nhx-tasks` image. Either way the fileset is the only input, so both
 backends see the same tree. See
-[Operator notes](../../../../docs/agents/optimization.mdx) for what each backend
+[Operator notes](../../../../docs/agents/optimize-agents.mdx) for what each backend
 needs installed.
 
 ---

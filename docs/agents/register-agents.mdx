@@ -1,0 +1,264 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Register Agents"
+description: "Register an agent on NeMo Helix from code, a container image, a remote endpoint, or its traces."
+---
+
+<a id="register-agents"></a>
+
+Registering an agent creates an `agent` entity in a workspace. Choose the method that matches what you have:
+
+| Method | You provide | Use when |
+|---|---|---|
+| [Code](#register-with-code) | An `agent.yaml` and the files beside it | NeMo Helix should run the agent. |
+| [Container image](#register-with-a-container-image) | An `agent.yaml` and an image | The agent is already packaged, or the image runs its own server. |
+| [Remote endpoint](#register-a-remote-endpoint) | An `agent.yaml` that points at a URL | The agent runs elsewhere behind an OpenAI- or Anthropic-compatible API. |
+| [Traces](#register-from-traces) | A name | You only want to analyze traces the agent already sends. |
+
+Agent names can contain letters, digits, underscores, hyphens, and dots.
+
+<Markdown src="/snippets/_snippets/tutorials/cli-sdk-setup.mdx" />
+
+## Register with Code
+
+An agent is defined by an `agent.yaml` in the `nemo-agents-spec-v1` format. This calculator agent ships with the source checkout:
+
+```yaml
+config_format: nemo-agents-spec-v1
+name: calculator-agent
+description: Calculator agent executed with DeepAgents
+
+instructions:
+  system:
+    content: |
+      You are a concise calculator agent. Solve arithmetic and numeric
+      comparison requests yourself and return only the answer.
+
+default_harness: deepagents
+harnesses:
+  deepagents:
+    kind: deepagents
+
+models:
+  default:
+    provider: nvidia
+    model: ${NEMO_DEFAULT_MODEL}
+```
+
+Register it:
+
+<Tabs>
+
+<Tab title="CLI">
+
+```bash
+nemo agents create \
+  --name calculator-agent \
+  --agent-config plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml
+```
+
+</Tab>
+<Tab title="Python SDK">
+
+```python
+import yaml
+from nemo_agents_plugin.sdk import AgentsResource
+from nemo_helix_plugin.client.client import NemoClient
+
+agents = AgentsResource(NemoClient.from_config())
+
+with open("plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml") as f:
+    config = yaml.safe_load(f)
+
+agents.create(name="calculator-agent", config=config, config_format=config["config_format"])
+```
+
+</Tab>
+<Tab title="Studio">
+
+Open **Agents**, select **Register Agent**, and choose one of:
+
+- **Register with code upload**: drop the folder that contains `agent.yaml`.
+- **Register from GitHub**: enter `github.com/owner/repo`, optionally with `@branch` and
+  `#sub/directory`. Studio reads the files from GitHub on demand. Select an access-token secret
+  for a private repository.
+
+</Tab>
+
+</Tabs>
+
+The CLI validates the config, replaces `${NEMO_DEFAULT_MODEL}` with the default model from
+`nemo setup`, creates the agent, and uploads the text files in the config's directory (skills,
+prompts, MCP server scripts) to the `<name>-ethos` fileset, up to 500 files and 900 KB.
+Deployments and evaluations stage that fileset beside `agent.yaml`, so relative paths keep
+working. The Python SDK registers the config only; use the CLI or Studio when the agent has other
+files.
+
+### `agent.yaml` Reference
+
+| Field | Purpose |
+|---|---|
+| `config_format` | Always `nemo-agents-spec-v1`. |
+| `name`, `description` | Agent metadata. |
+| `default_harness`, `harnesses` | The harness that runs the agent. Each entry sets a `kind` (`deepagents`, `claude`, `codex`, `hermes`, `nooa-bench-agent`, `remote-agent`), plus optional `settings` and a harness-specific `model`. |
+| `models` | Named model bindings. A harness uses `models.default` unless it sets its own `model`. |
+| `instructions.system.content` | The system prompt, shared by every harness. |
+| `skills.paths` | Skill directories relative to `agent.yaml`; each must contain a `SKILL.md`. |
+| `mcp.servers` | MCP servers that expose tools to the harness. |
+| `tools.blocked` | Tool names the harness must not call. |
+| `runtime` | `timeout_seconds` and `max_turns`. |
+| `environment` | Workspace and artifacts directories, and environment variables. |
+| `telemetry` | Relay telemetry settings. When unset, deployments and execute jobs export ATIF trajectories to Intake for every harness that supports it (not `remote-agent`); set `enabled: false` to opt out. |
+
+See the [examples directory](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/plugins/nemo-agents/examples/nemo-agent-config)
+for a config per harness.
+
+<Note>
+`nemo agents create` also accepts legacy NeMo Agent Toolkit (NAT) workflow configs
+(`config_format: nat-workflow-v1`, the default when `config_format` is omitted). Use
+`nemo-agents-spec-v1` for new agents; registered-agent evaluation targets and the optimization
+strategies require it.
+</Note>
+
+### Model Access
+
+Platform-routed models go through the [Inference Gateway](/documentation/models-and-inference),
+which holds the provider credentials:
+
+- Set `provider` to `nvidia`, `openai`, or `openai-compatible`, and leave `base_url` unset. NeMo
+  Helix fills in the gateway URL when it runs the agent.
+- Set `model` to a model entity from `nemo models list` (for example,
+  `nvidia-nemotron-3-5-lightning-30b-a3b`) or a
+  [virtual model](/documentation/models-and-inference/virtual-models) in the same workspace.
+- `api_key_env` is optional. The platform supplies a placeholder for gateway-routed models.
+
+To route a model to a provider directly instead, set `base_url` and name the environment variable
+that holds its key in `api_key_env`.
+
+### Install Harness Support
+
+The Agents plugin includes Fabric and every harness adapter, but not the third-party harness
+packages. Install the extra for the harness you use:
+
+| Harness | Package | Source checkout |
+|---|---|---|
+| DeepAgents | `nemo-helix[nemo-agents-plugin-deepagents]` | `uv sync --package nemo-agents-plugin --extra deepagents` |
+| Claude Code | `nemo-helix[nemo-agents-plugin-claude]` | `uv sync --package nemo-agents-plugin --extra claude` |
+| Codex | `nemo-helix[nemo-agents-plugin-codex]` | `uv sync --package nemo-agents-plugin --extra codex` |
+| NOOA (Python 3.12–3.13) | `nemo-helix[nemo-agents-plugin-nooa]` | `uv sync --package nemo-agents-plugin --extra nooa` |
+| Remote agent | `nemo-helix[nemo-agents-plugin]` | Included |
+
+```bash
+uv tool install "nemo-helix[nemo-agents-plugin-deepagents]"
+```
+
+Hermes conflicts with NeMo Helix's dependencies, so it runs from a separate Python 3.14
+environment. From a source checkout, run `script/dev-install-hermes.sh` and export the
+`ADAPTER_PYTHON` it prints before starting NeMo Helix. Otherwise, follow the
+[Hermes Agent installation guide](https://hermes-agent.nousresearch.com/docs/installation) and
+install the matching `nemo-fabric[relay]` and `nemo-fabric-adapters-hermes` versions into that
+environment.
+
+## Register with a Container Image
+
+The image is chosen when you deploy, so register the agent's `agent.yaml` as in
+[Register with Code](#register-with-code), then deploy it with `--image`:
+
+```bash
+nemo agents deploy --agent calculator-agent --mode docker --image calculator-agent:local
+```
+
+`nemo agents package` builds an image from an `agent.yaml`; see
+[Build and Publish Agent Images](/documentation/agents/deploy-agents#build-and-publish-agent-images).
+
+For an image that already runs its own server, add `--use-image-entrypoint` so the deployment keeps
+the image's `ENTRYPOINT` and `CMD`. The server must:
+
+- Listen on `0.0.0.0:$PORT`.
+- Serve `GET /health`.
+- Serve `POST /v1/chat/completions` to work with `nemo agents invoke` and `nemo agents chat`.
+
+The deployment writes the stored config into the container and sets `AGENT_CONFIG_PATH` to its path.
+
+## Register a Remote Endpoint
+
+The `remote-agent` harness forwards each request to an agent that runs elsewhere. The endpoint
+must stream Server-Sent Events (SSE) and speak OpenAI Responses (`openai-responses`, the default),
+OpenAI Chat Completions (`openai-completions`), or Anthropic Messages (`anthropic-messages`).
+
+```yaml
+config_format: nemo-agents-spec-v1
+name: support-agent
+default_harness: remote-agent
+harnesses:
+  remote-agent:
+    kind: remote-agent
+    settings:
+      base_url: https://agent.example.com/v1   # API root, including /v1
+      api_type: openai-responses
+models:
+  default:
+    provider: remote
+    model: support-agent                      # model name the endpoint expects
+    api_key_env: REMOTE_AGENT_API_KEY          # omit for an unauthenticated endpoint
+telemetry:
+  enabled: false
+```
+
+Register and deploy it like any other agent. Skills, MCP servers, tool policy, and tracing stay
+configured on the remote agent; tag its traces with the agent's name so they match. For live streaming and sessions, see the
+[Remote Agent example](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/plugins/nemo-agents/examples/nemo-agent-config#remote-agent).
+
+## Register from Traces
+
+To analyze an agent that already sends traces to Intake, register its name with an empty config.
+The name must match the agent name on its traces (`agent.name` in ATIF, `gen_ai.agent.name` in
+OTLP); see [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces).
+
+<Tabs>
+
+<Tab title="CLI">
+
+```bash
+echo '{}' > no-config.yaml
+nemo agents create --name support-agent --agent-config no-config.yaml
+```
+
+</Tab>
+<Tab title="Python SDK">
+
+```python
+from nemo_agents_plugin.sdk import AgentsResource
+from nemo_helix_plugin.client.client import NemoClient
+
+agents = AgentsResource(NemoClient.from_config())
+agents.create(name="support-agent", config={})
+```
+
+</Tab>
+<Tab title="Studio">
+
+Open **Agents**, select **Register Agent** > **Register from traces**, and choose an unregistered
+agent name found in ingested traces.
+
+</Tab>
+
+</Tabs>
+
+A trace-only agent works with [Insights](/documentation/agents/traces-and-insights/insights-from-traces),
+but has nothing to deploy or evaluate. To run it on NeMo Helix, delete it and register it again
+under the same name with a config.
+
+## Manage Registered Agents
+
+```bash
+nemo agents list
+nemo agents get calculator-agent
+nemo agents delete calculator-agent
+```
+
+An agent's config cannot be edited in place. To change it, register a new agent, or use
+`nemo agents redeploy` to replace a deployed agent; see
+[Update a Deployed Agent](/documentation/agents/deploy-agents#update-a-deployed-agent).

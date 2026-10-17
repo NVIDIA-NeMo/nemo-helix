@@ -1,0 +1,131 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Sandboxed Deployments"
+description: "Deploy a prepared Fabric agent through OpenShell and verify inference and network policy."
+---
+
+Deploy a registered Fabric agent with `--mode openshell` to run it in an OpenShell
+sandbox under the executor's network and filesystem policy. This mode is independent
+of the gateway's Docker or Kubernetes compute driver. Requests still go through the
+platform's Agents gateway.
+
+## Prerequisites
+
+- A CLI context connected to your platform.
+- A running OpenShell gateway. The platform API image includes the OpenShell client;
+  a source checkout also needs the `openshell` extra of `nemo-deployments-plugin`.
+- A Fabric `agent.yaml` with a model available through the platform's Inference
+  Gateway. See [Register Agents](/documentation/agents/register-agents).
+- An agent image packaged with `nemo agents package --sandbox-runtime openshell`,
+  compatible with your platform version and compute-node architecture, and already
+  accessible to the gateway's compute nodes. See
+  [Build and Publish Agent Images](/documentation/agents/deploy-agents#build-and-publish-agent-images).
+
+## Configure the Executor
+
+Add an `openshell` executor to the platform configuration and select it for agent
+deployments. Keep your existing executors: the list replaces the defaults.
+
+```yaml
+agents:
+  deployments:
+    openshell_executor: openshell
+
+deployments:
+  executors:
+    - name: openshell
+      backend: openshell
+      config:
+        gateway_endpoint: http://127.0.0.1:17670   # the OpenShell gateway
+        platform_egress:                         # the platform address sandboxes reach
+          host: host.docker.internal
+          port: 8080
+        serve_workdir: /tmp                       # a directory the sandbox can write
+```
+
+The agent reaches the Inference Gateway through `platform_egress`, so the platform
+must listen on an address the sandbox can reach, for example with
+`nemo services run --host 0.0.0.0`. For a TLS gateway, use an `https` endpoint and set
+`tls.ca_cert_path`, `tls.client_cert_path`, and `tls.client_key_path`.
+
+The generated policy allows `platform_egress` and denies other network destinations.
+If tools need external services, provide your own policy with `default_policy_path`;
+the platform egress rule is always kept. Filesystem confinement uses Landlock with
+`landlock_compatibility: best_effort`, which does not confine on unsupported kernels.
+Set `hard_requirement` to fail the deployment instead.
+
+The examples below register and deploy an agent in `WORKSPACE`. `AGENT_CONFIG`
+is the path to your existing local `agent.yaml` file, and `IMAGE_TAG` is the
+reference to the prepared image:
+
+```sh
+export WORKSPACE=default
+export AGENT_NAME=sandbox-hello
+export AGENT_CONFIG="<path-to-agent.yaml>"
+export IMAGE_TAG="<accessible-agent-image>"
+```
+
+## Register and Deploy
+
+```sh
+nemo agents create --name "$AGENT_NAME" \
+  --agent-config "$AGENT_CONFIG" --workspace "$WORKSPACE"
+
+nemo agents deploy --agent "$AGENT_NAME" \
+  --name "$AGENT_NAME-sandbox" --mode openshell \
+  --image "$IMAGE_TAG" --workspace "$WORKSPACE" --timeout 600
+```
+
+The deployment reaches `running` when the agent service is ready.
+`--use-image-entrypoint` is not supported: the sandbox supervisor ignores the image
+entrypoint.
+
+## Invoke and Verify Policy
+
+```sh
+nemo agents invoke --agent-deployment "$AGENT_NAME-sandbox" \
+  --workspace "$WORKSPACE" --input "Reply with a short greeting."
+```
+
+The invocation returns the agent's response through the platform's Agents gateway.
+A deployment can be ready while invocation fails because of model access or
+platform-to-gateway routing. Check the agent's output on its **Logs** tab in
+[NeMo Studio](/documentation/studio/agents), and check sandbox-to-platform access separately.
+
+### Network Policy
+
+OpenShell associates each sandbox with deployment-name and deployment-workspace
+labels. With the OpenShell CLI connected to the deployment's gateway and gateway
+workspace, those labels identify the sandbox:
+
+```sh
+openshell sandbox list --selector \
+  "nemo.nvidia.com/deployment-name=$AGENT_NAME-sandbox,nemo.nvidia.com/deployment-workspace=$WORKSPACE"
+```
+
+In the following examples, `SANDBOX_NAME` is the name from that listing and
+`PLATFORM_API_URL` is the endpoint configured by `platform_egress`:
+
+```sh
+openshell sandbox exec --name "$SANDBOX_NAME" -- \
+  curl --fail --show-error --max-time 10 "$PLATFORM_API_URL/health/ready"
+openshell sandbox exec --name "$SANDBOX_NAME" -- \
+  curl --fail --show-error --max-time 10 https://example.com
+```
+
+With the default policy, the health request succeeds and the external request is
+denied. The gateway's audit logs record policy denials; connection failures alone
+can also result from DNS or network problems. Custom policies may allow additional
+destinations, including the external host in this example.
+
+## Clean Up
+
+```sh
+nemo agents undeploy "$AGENT_NAME-sandbox" --workspace "$WORKSPACE" --yes
+nemo agents delete "$AGENT_NAME" --workspace "$WORKSPACE" --yes
+```
+
+Undeploying removes the deployment and its sandbox. Deleting the agent removes
+the registration. The agent image is retained.
