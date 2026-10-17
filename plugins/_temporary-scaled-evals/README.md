@@ -53,8 +53,9 @@ The DSN resolves in this order:
 2. A `localhost:5432` development default, matching the standalone repo, so a local
    `docker run postgres:16` is the only setup step.
 
-**Postgres is required** until benchmark-run archives move to entities; it now holds
-only the archive queue. That queue needs `FOR UPDATE SKIP LOCKED`, plus JSONB,
+**Postgres is still required at startup**, although no plugin data lives in it anymore:
+only the service heartbeat and the readiness probes read it, until it is removed. The
+vendored schema uses JSONB,
 advisory locks, and enum types, so the platform's own SQLite default is not a usable
 target — which is a second reason not to inherit it. When the database is unreachable
 the plugin degrades rather than failing the boot: the platform starts normally, other
@@ -165,17 +166,18 @@ one `scaled-evals.benchmark-archive-build` Job per claim attempt, and the Job ta
 the lease when it starts. Each evaluation Job builds its own evidence and archive;
 the controller rebuilds any a Job left behind. Leases survive restarts, and changed member executions/archives
 prevent publication of the in-progress export. Upload failures and lease loss
-trigger cleanup of unpublished claim-token objects. Cleanup rechecks the archive
-row under a lock before deleting: a lost commit acknowledgement must not delete
-a successfully published archive. If the database or object store is unavailable,
+trigger cleanup of unpublished claim-token objects. Cleanup rereads the archive's
+references before deleting: a lost write acknowledgement must not delete a
+successfully published archive. If the entity store or object store is unavailable,
 cleanup defers rather than guessing.
 
 The controller also reconciles archive prefixes periodically, retaining the
 published object and the current building claim's object. This recovers objects
 left by process crashes, failed deletions, superseded generations, or an upload
-that completed after a revoked worker exited. The per-run throttle is persisted
-in Postgres (`BENCHMARK_ARCHIVE_CLEANUP_INTERVAL_SECONDS`, default 300 seconds);
-sweeps repeat, rather than treating an initially empty prefix as permanently clean.
+that completed after a revoked worker exited. The per-run throttle is stored
+on the run's archive (`BENCHMARK_ARCHIVE_CLEANUP_INTERVAL_SECONDS`, default 300 seconds),
+and sweeps also reach deleted runs. They repeat, rather than treating an initially
+empty prefix as permanently clean.
 The dispatcher handles evaluation/archive work before these maintenance sweeps.
 
 The API records the completed
@@ -414,6 +416,10 @@ Postgres version:
 - A superseded execution is detected with a check, not a lock, so it can
   publish once more if a retry lands in between.
 - Cleanup ids are strings (`<evaluation>/<execution>`), not integers.
+- A run's combined archive and its build lease are embedded in the run entity.
+  Claims, heartbeats and publication are fenced by the claim token. Object
+  cleanup reads the archive's references without a lock: objects are listed
+  first, so a later claim's upload is never a candidate.
 - `SCALED_EVALS_ENTITY_STORE_PROJECTION_ENABLED`, `_READS_ENABLED`,
   `_WORKSPACE`, and `_PROJECTION_BATCH_SIZE` are gone with the projection.
 
