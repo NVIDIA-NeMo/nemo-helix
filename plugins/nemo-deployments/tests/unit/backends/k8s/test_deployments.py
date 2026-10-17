@@ -1194,11 +1194,12 @@ async def test_list_managed_deployment_names_includes_always(k8s_backend, mock_k
 async def test_get_deployment_logs(k8s_backend, mock_k8s_clients: MagicMock, always_deployment_context: None) -> None:
     pod = mock_pod()
     mock_k8s_clients.core_v1.list_namespaced_pod.return_value = MagicMock(items=[pod])
-    mock_k8s_clients.core_v1.read_namespaced_pod_log.return_value = "listening\n"
+    mock_k8s_clients.core_v1.read_namespaced_pod_log.return_value = MagicMock(data=b"starting\nlistening\n")
 
     result = await k8s_backend.get_logs(workspace="default", name="task", tail=10)
 
-    assert result.lines == ["listening"]
+    assert result.lines == ["starting", "listening"]
+    assert mock_k8s_clients.core_v1.read_namespaced_pod_log.call_args.kwargs["_preload_content"] is False
 
 
 @pytest.mark.asyncio
