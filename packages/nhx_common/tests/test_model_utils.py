@@ -14,3 +14,8 @@ def test_is_embedding_model_detects_embed_substring_case_insensitive() -> None:
 
 def test_is_embedding_model_returns_false_for_non_embedding_name() -> None:
     assert is_embedding_model("meta/llama-3.1-8b-instruct") is False
+
+
+def test_is_embedding_model_detects_additional_markers() -> None:
+    assert is_embedding_model("BAAI/bge-large-en-v1.5") is True
+    assert is_embedding_model("thenlper/gte-base") is True
