@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { filesDownloadFile } from '@nemo/sdk/generated/platform/files';
+import { filesDownloadFile, filesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import type { EvaluationResponse } from '@nemo/sdk/generated/platform/schema';
+import { readParquetRows } from '@studio/api/datasets/filesetParquetRows';
 import {
   evaluationFilesetName,
   findEvalConfigFile,
@@ -22,7 +23,9 @@ export interface StudyEvaluation {
 }
 
 const DATASET_REF = /^([\w\-.]+)\/([\w\-.]+)#(.+)$/;
-const BINARY_DATASET = /\.(parquet|feather|arrow|orc|gz|gzip)$/i;
+const BINARY_DATASET = /\.(feather|arrow|orc)$/i;
+const PARQUET_DATASET = /\.parquet$/i;
+const GZIP_DATASET = /\.(gz|gzip)$/i;
 
 /** Read the evaluator's text dataset formats without discarding the judge's row context. */
 export const parseDatasetRecords = (text: string, path = ''): Record<string, unknown>[] => {
@@ -63,9 +66,94 @@ export const parseDatasetRecords = (text: string, path = ''): Record<string, unk
   });
 };
 
+const gunzip = async (blob: Blob, path: string): Promise<Blob> => {
+  try {
+    return await new Response(blob.stream().pipeThrough(new DecompressionStream('gzip'))).blob();
+  } catch {
+    throw new Error(`Could not decompress ${path} as gzip.`);
+  }
+};
+
+/** Decode a downloaded dataset the way the evaluator's loader does: gzip wraps any format. */
+export const readDatasetRecords = async (
+  blob: Blob,
+  path: string
+): Promise<Record<string, unknown>[]> => {
+  if (GZIP_DATASET.test(path))
+    return readDatasetRecords(await gunzip(blob, path), path.replace(GZIP_DATASET, ''));
+  if (PARQUET_DATASET.test(path)) return readParquetRows(blob);
+  return parseDatasetRecords(await blob.text(), path);
+};
+
+const GLOB_SEGMENT = /[*?[\]]/;
+
+/** Python's `Path.glob` over fileset paths: `*` and `?` stay within a segment, `**` spans them. */
+export const globToRegExp = (pattern: string): RegExp => {
+  let source = '';
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index];
+    if (pattern.startsWith('**/', index)) {
+      source += '(?:[^/]*/)*';
+      index += 2;
+    } else if (pattern.startsWith('**', index)) {
+      source += '.*';
+      index += 1;
+    } else if (char === '*') {
+      source += '[^/]*';
+    } else if (char === '?') {
+      source += '[^/]';
+    } else if (char === '[' && pattern.indexOf(']', index + 2) > 0) {
+      const end = pattern.indexOf(']', index + 2);
+      const body = pattern.slice(index + 1, end).replace(/\\/g, '\\\\');
+      source += `[${body.startsWith('!') ? `^${body.slice(1)}` : body}]`;
+      index = end;
+    } else {
+      source += char.replace(/[.+^${}()|[\]\\/]/g, '\\$&');
+    }
+  }
+  return new RegExp(`^${source}$`);
+};
+
+const globPrefix = (pattern: string): string | undefined => {
+  const segments = pattern.split('/');
+  const literal = segments.slice(
+    0,
+    segments.findIndex((segment) => GLOB_SEGMENT.test(segment))
+  );
+  return literal.length > 0 ? `${literal.join('/')}/` : undefined;
+};
+
+export interface DatasetSource {
+  listFiles: (workspace: string, fileset: string, prefix?: string) => Promise<string[]>;
+  download: (workspace: string, fileset: string, path: string) => Promise<Blob>;
+}
+
+/** A glob ref concatenates its matches in sorted order, as the evaluator's loader does. */
+const readDatasetRef = async (
+  source: DatasetSource,
+  workspace: string,
+  fileset: string,
+  path: string
+): Promise<Record<string, unknown>[]> => {
+  if (!GLOB_SEGMENT.test(path))
+    return readDatasetRecords(await source.download(workspace, fileset, path), path);
+  const matcher = globToRegExp(path);
+  const matches = (await source.listFiles(workspace, fileset, globPrefix(path)))
+    .filter((file) => matcher.test(file))
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  if (matches.length === 0)
+    throw new Error(`No files in fileset "${fileset}" match the evaluation's dataset ${path}.`);
+  const parts = await Promise.all(
+    matches.map(async (file) =>
+      readDatasetRecords(await source.download(workspace, fileset, file), file)
+    )
+  );
+  return parts.flat();
+};
+
 export const studyEvaluationFromSpec = async (
   spec: EvalSpec,
-  readDataset: (workspace: string, fileset: string, path: string) => Promise<string>
+  source: DatasetSource
 ): Promise<StudyEvaluation> => {
   if (!isDatasetEvalSpec(spec)) return { spec, records: spec.tasks.map((task) => ({ ...task })) };
   if (Array.isArray(spec.dataset)) return { spec, records: spec.dataset };
@@ -75,13 +163,21 @@ export const studyEvaluationFromSpec = async (
       `The evaluation's dataset "${spec.dataset}" is not a workspace/fileset#path ref.`
     );
   const [, workspace, fileset, path] = ref;
-  return { spec, records: parseDatasetRecords(await readDataset(workspace, fileset, path), path) };
+  return { spec, records: await readDatasetRef(source, workspace, fileset, path) };
 };
 
-const downloadText = async (workspace: string, fileset: string, path: string): Promise<string> => {
+const downloadFile = async (workspace: string, fileset: string, path: string): Promise<Blob> => {
   const blob = await filesDownloadFile(workspace, fileset, path);
   if (!blob) throw new Error(`Could not read ${path} from fileset "${fileset}".`);
-  return blob.text();
+  return blob;
+};
+
+const filesetSource: DatasetSource = {
+  listFiles: async (workspace, fileset, prefix) =>
+    (
+      await filesListFilesetFiles(workspace, fileset, prefix ? { path: prefix } : undefined)
+    ).data.map((file) => file.path),
+  download: downloadFile,
 };
 
 /** Intake omits grading context; use the exact config saved on the selected evaluation. */
@@ -99,8 +195,8 @@ export const loadStudyEvaluation = async (
   if (!configFile)
     throw new Error(`Could not find the eval config for evaluation "${evaluation.name}".`);
   const evaluationData = await studyEvaluationFromSpec(
-    parseEvalConfig(await downloadText(workspace, filesetName, configFile)),
-    downloadText
+    parseEvalConfig(await (await downloadFile(workspace, filesetName, configFile)).text()),
+    filesetSource
   );
   if (evaluationData.records.length === 0)
     throw new Error(`Evaluation "${evaluation.name}" has no rows.`);

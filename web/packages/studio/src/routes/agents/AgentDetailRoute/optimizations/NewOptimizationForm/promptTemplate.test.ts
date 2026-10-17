@@ -51,6 +51,10 @@ describe('renderPromptTemplate', () => {
     ).toBe('3 2 True None');
   });
 
+  it('renders a Parquet INT64 BigInt without losing precision', () => {
+    expect(renderPromptTemplate('{{ id }}', { id: 9007199254740993n })).toBe('9007199254740993');
+  });
+
   it('ignores comments', () => {
     expect(renderPromptTemplate('{# note #}{{ q }}', { q: 'hi' })).toBe('hi');
   });
