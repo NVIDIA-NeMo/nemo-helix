@@ -4,7 +4,7 @@
 # hadolint global ignore=DL3059
 # The final image copies BusyBox shell utilities for parity with the task runtime.
 
-ARG GARAK_PYTHON_IMAGE=python:3.13.15-slim-trixie
+ARG GARAK_PYTHON_IMAGE=python:3.13.16-slim-trixie
 
 ARG CACHE_HOME=/tmp/.cache
 
