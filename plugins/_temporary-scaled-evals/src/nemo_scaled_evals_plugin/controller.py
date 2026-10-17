@@ -11,7 +11,6 @@ import socket
 import time
 from collections.abc import Awaitable, Callable, Coroutine
 from contextlib import suppress
-from datetime import datetime
 from typing import Any
 
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
@@ -24,13 +23,12 @@ from nemo_scaled_evals_plugin.jobs.benchmark_archive_build import BenchmarkArchi
 from nemo_scaled_evals_plugin.jobs.naming import benchmark_archive_job_name, task_image_build_job_name
 from nemo_scaled_evals_plugin.jobs.specs import BenchmarkArchiveBuildSpec, TaskImageBuildSpec
 from nemo_scaled_evals_plugin.jobs.task_image_build import TaskImageBuildJob
-from nemo_scaled_evals_plugin.projection import EvaluationProjectionWriter, platform_entities
 from nemo_scaled_evals_plugin.submitter import EvaluationSubmitter
+from scaled_evals.api import entity_store
 from scaled_evals.api.build.queue_worker import TaskBuildWorker
 from scaled_evals.api.db import pooled_connection
+from scaled_evals.api.evaluation_store import EvaluationStore
 from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
-from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
-from scaled_evals.api.repositories.execution_cleanup_repository import ExecutionCleanupRepository
 from scaled_evals.api.repositories.ops_repository import OperationsRepository
 from scaled_evals.api.settings import settings
 from scaled_evals.api.task_store import TaskBuildJob, TaskStore
@@ -75,9 +73,6 @@ class ScaledEvalsJobsController(NemoController):
         self._entities: SyncEntityClient | None = None
         self._worker_id = f"scaled-evals-jobs:{socket.gethostname()}:{time.time_ns()}"
         self._healthy = True
-        self._projection: EvaluationProjectionWriter | None = None
-        self._projection_watermark: datetime | None = None
-        self._projection_resumed = False
         self._background: dict[str, asyncio.Task[None]] = {}
         self._dispatcher = Dispatcher(
             connect=pooled_connection,
@@ -106,9 +101,7 @@ class ScaledEvalsJobsController(NemoController):
         self._jobs = AsyncJobsClient.from_client(client)
         if settings.platform_jobs_provider == "cpu" and not settings.platform_jobs_image:
             raise RuntimeError("SCALED_EVALS_PLATFORM_JOBS_IMAGE is required for the cpu Platform Jobs provider")
-        self._entities = platform_entities()
-        if settings.entity_store_projection_enabled:
-            self._projection = EvaluationProjectionWriter(self._entities, workspace=settings.entity_store_workspace)
+        self._entities = entity_store.entity_client()
 
     async def list_objects(self) -> list:
         """Return no objects because reconciliation is queue-oriented."""
@@ -138,7 +131,7 @@ class ScaledEvalsJobsController(NemoController):
 
     def _phases(self) -> list[tuple[str, Callable[[], Awaitable[None]]]]:
         """Return the reconciliation phases, in execution order."""
-        phases: list[tuple[str, Callable[[], Awaitable[None]]]] = [
+        return [
             ("submit_build", self._drain(self._submit_one_build)),
             ("reconcile_builds", self._reconcile_builds),
             ("submit_evaluation", self._drain(self._submit_one_evaluation)),
@@ -150,9 +143,6 @@ class ScaledEvalsJobsController(NemoController):
             self._in_background("build_archives", self._build_one_archive),
             self._in_background("cleanup_benchmark_archives", self._cleanup_one_benchmark_archive),
         ]
-        if self._projection is not None:
-            phases.append(("project_evaluations", self._project_evaluations))
-        return phases
 
     def _drain(self, step: Callable[[], Awaitable[bool]]) -> Callable[[], Coroutine[Any, Any, None]]:
         """Wrap a single-row step so one pass drains a bounded batch of rows."""
@@ -169,29 +159,6 @@ class ScaledEvalsJobsController(NemoController):
                     return
 
         return drained
-
-    async def _project_evaluations(self) -> None:
-        """Project one bounded batch of changed evaluation rows into entities."""
-        writer = self._projection
-        if writer is None:
-            return
-        if not self._projection_resumed:
-            self._projection_watermark = await asyncio.to_thread(writer.watermark)
-            self._projection_resumed = True
-        rows = await asyncio.to_thread(
-            self._changed_evaluations,
-            self._projection_watermark,
-            settings.entity_store_projection_batch_size,
-        )
-        for row in rows:
-            await asyncio.to_thread(writer.project, row)
-            # Advance only past rows that were actually written, so a failure
-            # mid-batch resumes at the first unprojected row on the next pass.
-            self._projection_watermark = row["updated_at"]
-
-    def _changed_evaluations(self, updated_after: datetime | None, limit: int) -> list[dict[str, Any]]:
-        with pooled_connection() as conn:
-            return EvaluationRepository(conn).list_changed_since(updated_after, limit=limit)
 
     async def _submit_one_build(self) -> bool:
         """Submit one claimed build; return False only when the queue is empty."""
@@ -297,14 +264,12 @@ class ScaledEvalsJobsController(NemoController):
         return await asyncio.to_thread(self._cleanup_execution)
 
     def _cleanup_execution(self) -> bool:
-        with pooled_connection() as conn:
-            cleanup = ExecutionCleanupRepository(conn).claim_one(
-                worker_id=self._worker_id,
-                claim_timeout=CLEANUP_CLAIM_TIMEOUT_SECONDS,
-            )
+        cleanup = EvaluationStore().claim_cleanup(
+            worker_id=self._worker_id, claim_timeout=CLEANUP_CLAIM_TIMEOUT_SECONDS
+        )
         if cleanup is None:
             return False
-        teardown_orphaned_execution(cleanup, worker_id=self._worker_id, connect=pooled_connection)
+        teardown_orphaned_execution(cleanup, worker_id=self._worker_id)
         return True
 
     # ponytail: evidence and archives are built by the evaluation Job itself.
@@ -446,46 +411,42 @@ class ScaledEvalsJobsController(NemoController):
         )
 
     def _claim_stale_evaluation(self) -> dict[str, Any] | None:
-        with pooled_connection() as conn:
-            return EvaluationRepository(conn).claim_stale_dispatch_job(
-                stale_seconds=settings.dispatch_job_reconcile_stale_seconds,
-                claim_timeout=TaskBuildWorker.claim_timeout,
-                worker_id=self._worker_id,
-            )
+        return EvaluationStore().claim_stale_dispatch_job(
+            stale_seconds=settings.dispatch_job_reconcile_stale_seconds,
+            claim_timeout=TaskBuildWorker.claim_timeout,
+            worker_id=self._worker_id,
+        )
 
     def _fail_evaluation_job(self, row: dict[str, Any], detail: str) -> None:
         evaluation_id = str(row["id"])
         execution_number = int(row["current_execution"])
-        with pooled_connection() as conn:
-            EvaluationRepository(conn).record_dispatch_job_infrastructure_failure(
-                evaluation_id,
-                execution_number=execution_number,
-                dispatch_job_name=str(row["dispatch_job_name"]),
-                reconcile_worker_id=self._worker_id,
-                failure_code="HelixJobInfrastructureError",
-                detail=detail,
-                retry_delay_seconds=_retry_delay_seconds(evaluation_id, execution_number),
-            )
+        EvaluationStore().record_dispatch_job_infrastructure_failure(
+            evaluation_id,
+            execution_number=execution_number,
+            dispatch_job_name=str(row["dispatch_job_name"]),
+            reconcile_worker_id=self._worker_id,
+            failure_code="HelixJobInfrastructureError",
+            detail=detail,
+            retry_delay_seconds=_retry_delay_seconds(evaluation_id, execution_number),
+        )
 
     def _list_cancelled_evaluations(self) -> list[dict[str, Any]]:
-        with pooled_connection() as conn:
-            return EvaluationRepository(conn).list_cancelled_platform_jobs()
+        return EvaluationStore().list_cancelled_platform_jobs()
 
     def _settle_cancel_teardown(self, row: dict[str, Any], job_name: str) -> None:
         """Terminalize teardown for a cancelled evaluation whose Job has ended."""
-        with pooled_connection() as conn:
-            repo = EvaluationRepository(conn)
-            if row.get("backend_handle"):
-                # The Job is gone, so no task will release the sandbox. Record
-                # the failure rather than leaving the row pending forever at the
-                # head of the teardown window, where it would also crowd out
-                # later cancellations.
-                repo.record_cancel_teardown_failure(
-                    str(row["id"]),
-                    f"Platform evaluation job {job_name} ended before releasing its runtime",
-                )
-                return
-            repo.record_cancel_teardown_succeeded(str(row["id"]))
+        store = EvaluationStore()
+        if row.get("backend_handle"):
+            # The Job is gone, so no task will release the sandbox. Record the
+            # failure rather than leaving the evaluation pending forever at the
+            # head of the teardown window, where it would also crowd out later
+            # cancellations.
+            store.record_cancel_teardown_failure(
+                str(row["id"]),
+                f"Platform evaluation job {job_name} ended before releasing its runtime",
+            )
+            return
+        store.record_cancel_teardown_succeeded(str(row["id"]))
 
     def _heartbeat(self) -> None:
         with pooled_connection() as conn:

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-from contextlib import nullcontext
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -14,8 +13,6 @@ try:
     import httpx
     from click.testing import CliRunner
     from scaled_evals.api.auth import CurrentPrincipal
-    from scaled_evals.api.repositories.benchmark_run_repository import BenchmarkRunRepository
-    from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
     from scaled_evals.api.routers import benchmark_runs as benchmark_runs_router
     from scaled_evals.api.routers.benchmark_runs import _create_command, _reproduce_request
     from scaled_evals.api.runnability import (
@@ -146,64 +143,6 @@ def test_member_dataset_profiles_receive_image_and_builder_checks(
         "cfg_default",
         "cfg_member",
     }
-
-
-def test_member_profile_selection_and_metadata_are_persisted(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    created: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        EvaluationRepository,
-        "create",
-        lambda _self, _evaluation_id, **kwargs: created.append(kwargs),
-    )
-    connection = MagicMock()
-    connection.transaction.return_value = nullcontext()
-    cursor = connection.cursor.return_value.__enter__.return_value
-    cursor.fetchone.return_value = {"id": "bmr_1"}
-    metadata = {"member_framework_profile_ids": {"task_0": "cfg_member"}}
-
-    BenchmarkRunRepository(connection).create_run(
-        "bmr_1",
-        name="suite",
-        framework="harbor",
-        requested_framework_version=None,
-        framework_version="1",
-        runner_image_ref=None,
-        runner_image_digest=None,
-        framework_adapter_version=None,
-        sandbox_k8s_version=None,
-        runner_metadata=metadata,
-        benchmark_id="bm_suite",
-        benchmark_revision=1,
-        members=[
-            {
-                "id": "ev_0",
-                "task_id": "task_0",
-                "task_revision": 1,
-                "framework_profile_id": "cfg_member",
-            },
-            {"id": "ev_1", "task_id": "task_1", "task_revision": 1},
-        ],
-        framework_profile_id="cfg_default",
-        harbor_profile_id="cfg_default",
-        intake_profile_id=None,
-        credentials={},
-        runtime="sandbox_k8s",
-        network_policy="unrestricted",
-        network_policy_config={},
-        parallelism=1,
-        max_concurrent_members=None,
-        visibility="private",
-        owner_id="dev",
-    )
-
-    insert = next(call for call in cursor.execute.call_args_list if "INSERT INTO benchmark_runs" in call.args[0])
-    assert insert.args[1][10].obj == metadata
-    assert [(member["framework_profile_id"], member["harbor_profile_id"]) for member in created] == [
-        ("cfg_member", "cfg_member"),
-        ("cfg_default", "cfg_default"),
-    ]
 
 
 def test_create_routes_overrides_into_member_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:

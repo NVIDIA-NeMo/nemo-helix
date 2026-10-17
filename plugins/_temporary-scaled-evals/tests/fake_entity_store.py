@@ -10,8 +10,20 @@ from types import SimpleNamespace
 from typing import Any
 
 from nemo_helix_plugin.entities.base import EntityConflictError, EntityNotFoundError
+from nemo_helix_plugin.filter_ops import FilterOperator
 
 _EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+def _matches(entity: Any, operation: Any) -> bool:
+    """Evaluate the `$in` and `$and` filters `entity_store.list_all` builds."""
+    if operation is None:
+        return True
+    if operation.operator == FilterOperator.AND:
+        return all(_matches(entity, item) for item in operation.operations)
+    if operation.operator == FilterOperator.IN:
+        return getattr(entity, operation.field.removeprefix("data.")) in operation.value
+    raise NotImplementedError(operation.operator)
 
 
 class FakeEntityStore:
@@ -82,12 +94,21 @@ class FakeEntityStore:
         del self.stored[key]
 
     def list(
-        self, entity_type: Any, *, workspace: str = "default", page: int = 1, page_size: int = 100, **_: Any
+        self,
+        entity_type: Any,
+        *,
+        workspace: str = "default",
+        page: int = 1,
+        page_size: int = 100,
+        filter_operation: Any = None,
+        **_: Any,
     ) -> Any:
         matches = [
             self._copy(entity)
             for (kind, entity_workspace, _name), entity in self.stored.items()
-            if kind == entity_type.__entity_type__ and entity_workspace == workspace
+            if kind == entity_type.__entity_type__
+            and entity_workspace == workspace
+            and _matches(entity, filter_operation)
         ]
         total_pages = max(1, -(-len(matches) // page_size))
         data = matches[(page - 1) * page_size : page * page_size]

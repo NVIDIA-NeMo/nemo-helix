@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import functools
+from collections.abc import Mapping, Sequence
 from threading import Lock
 from typing import Any
 
@@ -13,6 +14,7 @@ from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.client_provider import get_nemo_client
 from nemo_helix_plugin.entities.base import EntityT, SyncEntityClient
 from nemo_helix_plugin.entities.client import EntitiesClient
+from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
@@ -60,12 +62,29 @@ def private_workspace() -> str:
     return name
 
 
-def list_all(client: SyncEntityClient, entity_type: type[EntityT]) -> list[EntityT]:
-    """Return every entity of `entity_type` in the private workspace."""
+def list_all(
+    client: SyncEntityClient,
+    entity_type: type[EntityT],
+    where: Mapping[str, Sequence[str | bool]] | None = None,
+) -> list[EntityT]:
+    """Return every entity of `entity_type` in the private workspace.
+
+    `where` keeps only entities whose field holds one of the listed values. The
+    values must not be None: the store does not promise to match a JSON null.
+    """
+    operations: list[FilterOperation] = [
+        ComparisonOperation(operator=FilterOperator.IN, field=f"data.{field}", value=list(values))
+        for field, values in (where or {}).items()
+    ]
+    match = operations[0] if len(operations) == 1 else None
+    if len(operations) > 1:
+        match = LogicalOperation(operator=FilterOperator.AND, operations=operations)
     items: list[EntityT] = []
     page = 1
     while True:
-        response = client.list(entity_type, workspace=private_workspace(), page=page, page_size=100)
+        response = client.list(
+            entity_type, workspace=private_workspace(), page=page, page_size=100, filter_operation=match
+        )
         items.extend(response.data)
         if page >= response.pagination.total_pages:
             return items

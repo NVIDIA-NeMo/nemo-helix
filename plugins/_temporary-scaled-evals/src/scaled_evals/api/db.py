@@ -13,18 +13,12 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 
 from scaled_evals.api.agent_bundle_store import AgentBundleStore
 from scaled_evals.api.benchmark_import_store import BenchmarkImportStore
+from scaled_evals.api.benchmark_run_store import BenchmarkRunStore
 from scaled_evals.api.benchmark_store import BenchmarkStore
 from scaled_evals.api.config_profile_store import ConfigProfileStore
-from scaled_evals.api.repositories import (
-    BenchmarkRunRepository,
-    EvaluationRepository,
-    ExecutionCleanupRepository,
-    ExecutionTelemetryRepository,
-    OperationsRepository,
-    ResourceUsageRepository,
-    UserRepository,
-)
+from scaled_evals.api.evaluation_store import EvaluationStore
 from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
+from scaled_evals.api.repositories.ops_repository import OperationsRepository
 from scaled_evals.api.settings import settings
 from scaled_evals.api.task_store import TaskStore
 
@@ -95,36 +89,20 @@ class Database:
         return BenchmarkArchiveRepository(self.conn)
 
     @property
-    def benchmark_runs(self) -> BenchmarkRunRepository:
-        return BenchmarkRunRepository(self.conn)
+    def benchmark_runs(self) -> BenchmarkRunStore:
+        return BenchmarkRunStore()
 
     @property
     def config_profiles(self) -> ConfigProfileStore:
         return ConfigProfileStore()
 
     @property
-    def evaluations(self) -> EvaluationRepository:
-        return EvaluationRepository(self.conn)
-
-    @property
-    def execution_cleanups(self) -> ExecutionCleanupRepository:
-        return ExecutionCleanupRepository(self.conn)
-
-    @property
-    def execution_telemetry(self) -> ExecutionTelemetryRepository:
-        return ExecutionTelemetryRepository(self.conn)
+    def evaluations(self) -> EvaluationStore:
+        return EvaluationStore()
 
     @property
     def ops(self) -> OperationsRepository:
         return OperationsRepository(self.conn)
-
-    @property
-    def resource_usage(self) -> ResourceUsageRepository:
-        return ResourceUsageRepository(self.conn)
-
-    @property
-    def users(self) -> UserRepository:
-        return UserRepository(self.conn)
 
     def commit(self) -> None:
         self.conn.commit()

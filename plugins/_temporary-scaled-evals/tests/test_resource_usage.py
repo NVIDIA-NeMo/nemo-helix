@@ -1,7 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from contextlib import contextmanager
 from datetime import UTC, datetime
 from subprocess import CompletedProcess
 from unittest.mock import MagicMock
@@ -9,12 +8,13 @@ from unittest.mock import MagicMock
 import pytest
 
 try:
-    from scaled_evals.api.repositories.resource_usage_repository import ResourceUsageRepository
+    from scaled_evals.api.evaluation_store import EvaluationStore
     from scaled_evals.dispatch import sandbox_k8s
     from scaled_evals.dispatch import worker as worker_module
     from scaled_evals.dispatch.worker import Dispatcher
     from scaled_evals.models.resource_usage import ResourceUsageSample
     from scaled_evals.models.runtime import LaunchHandle
+    from task_fixtures import seed_evaluation, seed_task_revision
 except ImportError as exc:
     pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
 
@@ -106,65 +106,41 @@ def test_kubernetes_sampler_keeps_requests_when_metrics_are_unavailable(
     assert sample.collection_error == "metrics unavailable"
 
 
-def test_resource_usage_repository_upserts_bounded_aggregates() -> None:
-    conn = MagicMock()
-    cur = conn.cursor.return_value.__enter__.return_value
-    observed_at = datetime(2026, 8, 7, tzinfo=UTC)
-    sample = ResourceUsageSample(
-        source="kubernetes_metrics_api",
-        observed_at=observed_at,
-        cpu_usage_cores=0.25,
-        memory_usage_bytes=1024,
-        cpu_request_cores=1,
-    )
+def test_resource_samples_fold_into_attempt_aware_aggregates() -> None:
+    seed_task_revision("task_x")
+    seed_evaluation({"id": "ev_1"})
+    first, last = datetime(2026, 8, 7, tzinfo=UTC), datetime(2026, 8, 7, 0, 1, tzinfo=UTC)
+    store = EvaluationStore()
 
-    ResourceUsageRepository(conn).record_samples("ev_1", execution_number=2, samples=[sample])
-
-    sql, rows = cur.executemany.call_args.args
-    assert "ON CONFLICT (evaluation_id, execution_number, component) DO UPDATE" in sql
-    assert "sample_count = evaluation_resource_usage.sample_count + 1" in sql
-    assert rows[0][:8] == (
+    store.record_resource_samples(
         "ev_1",
-        2,
-        "sandbox",
-        "kubernetes_metrics_api",
-        "sampled",
-        None,
-        observed_at,
-        observed_at,
+        execution_number=2,
+        samples=[
+            ResourceUsageSample(
+                source="kubernetes_metrics_api", observed_at=last, cpu_usage_cores=0.25, cpu_request_cores=1
+            ),
+            ResourceUsageSample(source="kubernetes_metrics_api", observed_at=first, cpu_usage_cores=0.75),
+        ],
     )
-    assert rows[0][8:11] == (1, 0.25, 0.25)
+    store.record_resource_samples("ev_1", execution_number=1, samples=[ResourceUsageSample(source="test")])
 
-
-def test_resource_usage_repository_lists_attempt_aware_averages() -> None:
-    conn = MagicMock()
-    cur = conn.cursor.return_value.__enter__.return_value
-    cur.fetchall.return_value = [{"execution_number": 2, "avg_cpu_cores": 0.25}]
-
-    rows = ResourceUsageRepository(conn).list_for_evaluation("ev_1")
-
-    sql, params = cur.execute.call_args.args
-    assert "cpu_usage_cores_sum / NULLIF(cpu_sample_count, 0)" in sql
-    assert "ORDER BY execution_number ASC, component ASC" in sql
-    assert params == ("ev_1",)
-    assert rows == [{"execution_number": 2, "avg_cpu_cores": 0.25}]
+    first_execution, second_execution = store.resource_usage_for("ev_1")
+    assert (first_execution["execution_number"], first_execution["avg_cpu_cores"]) == (1, None)
+    assert (second_execution["component"], second_execution["sample_count"]) == ("sandbox", 2)
+    assert (second_execution["first_observed_at"], second_execution["last_observed_at"]) == (first, last)
+    assert (second_execution["avg_cpu_cores"], second_execution["peak_cpu_cores"]) == (0.5, 0.75)
+    assert second_execution["cpu_request_cores"] == 1
 
 
 def test_dispatcher_persists_optional_backend_samples(monkeypatch: pytest.MonkeyPatch) -> None:
-    conn = MagicMock()
-
-    @contextmanager
-    def connect():
-        yield conn
-
-    repository = MagicMock()
-    monkeypatch.setattr(worker_module, "ResourceUsageRepository", lambda _conn: repository)
+    store = MagicMock()
+    monkeypatch.setattr(worker_module, "EvaluationStore", lambda *_: store)
     sample = ResourceUsageSample(source="test", cpu_usage_cores=0.5)
     backend = MagicMock()
     backend.sample_resources.return_value = [sample]
     handle = LaunchHandle(backend="test", external_id="run-1")
 
-    Dispatcher(connect=connect)._capture_resource_usage("ev_1", execution_number=3, backend=backend, handle=handle)
+    Dispatcher()._capture_resource_usage("ev_1", execution_number=3, backend=backend, handle=handle)
 
     backend.sample_resources.assert_called_once_with(handle)
-    repository.record_samples.assert_called_once_with("ev_1", execution_number=3, samples=[sample])
+    store.record_resource_samples.assert_called_once_with("ev_1", execution_number=3, samples=[sample])

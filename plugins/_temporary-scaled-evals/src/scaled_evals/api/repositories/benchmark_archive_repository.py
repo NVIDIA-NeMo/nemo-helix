@@ -6,18 +6,24 @@ from uuid import uuid4
 
 import psycopg
 from psycopg.types.json import Jsonb
-
+from scaled_evals.api.benchmark_run_store import BenchmarkRunStore
+from scaled_evals.api.evaluation_store import EvaluationStore
 from scaled_evals.api.repositories.base_repository import Conflict, NotFound
 from scaled_evals.models.benchmark_archives import BenchmarkArchiveMember
 
-_MEMBER_COLUMNS = """
-    id, task_id, task_revision, status, current_execution,
-    archive_object_key, archive_built_at, archive_size_bytes
-"""
 _CLAIMABLE = """
-    b.deleted_at IS NULL AND (a.status = 'queued' OR
+    (a.status = 'queued' OR
         (a.status = 'building' AND a.claimed_at < NOW() - (%s * INTERVAL '1 second')))
 """
+
+
+def _members(run_id: str) -> list[dict]:
+    """Return the run's live member evaluations by id, with the task slug and name they ran."""
+    rows = sorted(EvaluationStore().list_for_runs([run_id]), key=lambda row: row["id"])
+    for row in rows:
+        task = (row.get("execution_snapshot") or {}).get("task") or {}
+        row["task_slug"], row["task_name"] = task.get("slug"), task.get("name")
+    return rows
 
 
 class BenchmarkArchiveRepository:
@@ -25,21 +31,17 @@ class BenchmarkArchiveRepository:
         self.conn = conn
 
     def get(self, run_id: str) -> dict | None:
+        if not BenchmarkRunStore().exists(run_id):
+            return None
         with self.conn.cursor() as cur:
-            cur.execute(
-                "SELECT a.* FROM benchmark_run_archives a JOIN benchmark_runs b "
-                "ON b.id = a.benchmark_run_id WHERE b.id = %s AND b.deleted_at IS NULL",
-                (run_id,),
-            )
+            cur.execute("SELECT * FROM benchmark_run_archives WHERE benchmark_run_id = %s", (run_id,))
             return cur.fetchone()
 
     def request(self, run_id: str, *, force: bool = False) -> dict:
+        # ponytail: members are read without a lock, so one may change before the
+        # queue row is written. validate_members re-checks them before publishing.
         with self.conn.transaction(), self.conn.cursor() as cur:
-            cur.execute(
-                "SELECT framework FROM benchmark_runs WHERE id = %s AND deleted_at IS NULL FOR UPDATE",
-                (run_id,),
-            )
-            run = cur.fetchone()
+            run = BenchmarkRunStore().get(run_id)
             if run is None:
                 raise NotFound("benchmark_run", "benchmark run not found")
             if run["framework"] != "harbor":
@@ -49,16 +51,7 @@ class BenchmarkArchiveRepository:
                 existing["status"] in {"queued", "building"} or (existing["status"] == "ready" and not force)
             ):
                 return existing
-            cur.execute(
-                f"SELECT {_MEMBER_COLUMNS}, "
-                "execution_snapshot #>> '{task,slug}' AS task_slug, "
-                "execution_snapshot #>> '{task,name}' AS task_name, "
-                "archive_status, evidence_status, "
-                "cancel_teardown_status FROM evaluations "
-                "WHERE benchmark_run_id = %s AND deleted_at IS NULL ORDER BY id FOR SHARE",
-                (run_id,),
-            )
-            rows = cur.fetchall()
+            rows = _members(run_id)
             if not rows:
                 raise Conflict("empty_run", "benchmark run has no evaluations")
             for row in rows:
@@ -96,29 +89,32 @@ class BenchmarkArchiveRepository:
 
     def list_claimable(self, *, claim_timeout: float, limit: int) -> list[dict]:
         """Return archives a builder may claim, without claiming them."""
+        # ponytail: reads every claimable archive to skip deleted runs. Upgrade
+        # path: the archive moves into Entity Store beside its run.
         with self.conn.cursor() as cur:
             cur.execute(
                 f"""
                 SELECT a.benchmark_run_id, a.generation, a.attempts FROM benchmark_run_archives a
-                JOIN benchmark_runs b ON b.id = a.benchmark_run_id
-                WHERE {_CLAIMABLE} ORDER BY a.requested_at LIMIT %s
+                WHERE {_CLAIMABLE} ORDER BY a.requested_at
                 """,
-                (claim_timeout, limit),
+                (claim_timeout,),
             )
-            return cur.fetchall()
+            rows = cur.fetchall()
+        runs = BenchmarkRunStore()
+        return [row for row in rows if runs.exists(str(row["benchmark_run_id"]))][:limit]
 
-    def claim(self, *, claim_timeout: float, run_id: str | None = None) -> dict | None:
-        # A targeted claim waits out short locks (cleanup sweeps) instead of
-        # skipping: its caller is a Job whose name is fixed for this attempt.
-        lock = "FOR UPDATE OF a" if run_id else "FOR UPDATE OF a SKIP LOCKED"
+    def claim(self, *, claim_timeout: float, run_id: str) -> dict | None:
+        if not BenchmarkRunStore().exists(run_id):
+            return None
+        # Waits out short locks (cleanup sweeps) instead of skipping: the caller
+        # is a Job whose name is fixed for this attempt.
         with self.conn.cursor() as cur:
             cur.execute(
                 f"""
                 WITH candidate AS (
                     SELECT a.benchmark_run_id FROM benchmark_run_archives a
-                    JOIN benchmark_runs b ON b.id = a.benchmark_run_id
-                    WHERE {_CLAIMABLE} AND (%s::text IS NULL OR a.benchmark_run_id = %s)
-                    ORDER BY a.requested_at {lock} LIMIT 1
+                    WHERE {_CLAIMABLE} AND a.benchmark_run_id = %s
+                    FOR UPDATE OF a
                 )
                 UPDATE benchmark_run_archives a SET
                     status = CASE WHEN a.attempts >= 3 THEN 'failed' ELSE 'building' END,
@@ -128,7 +124,7 @@ class BenchmarkArchiveRepository:
                 FROM candidate c WHERE a.benchmark_run_id = c.benchmark_run_id
                 RETURNING a.*
                 """,
-                (claim_timeout, run_id, run_id, str(uuid4())),
+                (claim_timeout, run_id, str(uuid4())),
             )
             return cur.fetchone()
 
@@ -190,21 +186,14 @@ class BenchmarkArchiveRepository:
 
     def validate_members(self, run_id: str, members: list[dict]) -> None:
         """Called before reading sources and again under locks before publication."""
-        with self.conn.cursor() as cur:
-            cur.execute(
-                f"SELECT {_MEMBER_COLUMNS}, archive_status FROM evaluations "
-                "WHERE benchmark_run_id = %s AND deleted_at IS NULL ORDER BY id FOR SHARE",
-                (run_id,),
-            )
-            rows = cur.fetchall()
-            actual = [
-                BenchmarkArchiveMember.model_validate(row).model_dump(mode="json", exclude={"task_slug", "task_name"})
-                for row in rows
-                if row["archive_status"] == "ready"
-            ]
-            expected = [{k: v for k, v in member.items() if k not in {"task_slug", "task_name"}} for member in members]
-            if actual != expected:
-                raise Conflict("members_changed", "member executions or archives changed; rebuild export")
+        actual = [
+            BenchmarkArchiveMember.model_validate(row).model_dump(mode="json", exclude={"task_slug", "task_name"})
+            for row in _members(run_id)
+            if row["archive_status"] == "ready"
+        ]
+        expected = [{k: v for k, v in member.items() if k not in {"task_slug", "task_name"}} for member in members]
+        if actual != expected:
+            raise Conflict("members_changed", "member executions or archives changed; rebuild export")
 
     def finish(
         self,
