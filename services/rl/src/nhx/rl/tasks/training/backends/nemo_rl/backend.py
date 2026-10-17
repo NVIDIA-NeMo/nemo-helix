@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Optional, cast
 
 from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
+from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.service.context import NHXJobContext
 from nhx.customization_common.training.nccl import get_nccl_ib_env
 from nhx.customization_common.training.progress import JobsServiceProgressReporter
@@ -129,7 +130,7 @@ class NemoRLBackend(TrainingBackend):
         Returns:
             TrainingMetrics with results from the training run
         """
-        progress.report_running("training", backend=self.backend_type.value)
+        progress.report_running(TrainingPhase.TRAINING, backend=self.backend_type.value)
 
         # Get the workspace directory from config path
         workspace_dir = library_config.config_path.parent

@@ -346,6 +346,11 @@ class AutomodelRecipeWrapper:
         best_metric_key: str = "default",
     ) -> None:
         """Wrapped save_checkpoint with Jobs-service reporting."""
+        if self.callback:
+            try:
+                self.callback.report_checkpoint_saving(step=step + 1, epoch=epoch + 1)  # Convert to 1-based
+            except Exception as e:
+                logger.warning(f"Failed to report checkpoint save start: {e}")
         self._original_save_checkpoint(epoch, step, train_loss, val_loss, best_metric_key)
         checkpoint_dir = getattr(
             getattr(self._recipe.checkpointer, "config", None),

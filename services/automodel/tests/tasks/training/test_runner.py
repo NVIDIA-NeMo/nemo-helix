@@ -15,7 +15,7 @@ sys.modules["nemo_automodel"] = MagicMock()
 sys.modules["nemo_automodel._transformers"] = MagicMock()
 sys.modules["nemo_automodel._transformers.registry"] = MagicMock()
 
-from nhx.automodel.entities.values import TrainingType  # noqa: E402
+from nhx.automodel.entities.values import FinetuningType, TrainingType  # noqa: E402
 from nhx.automodel.tasks.training.runner import TrainingRunner  # noqa: E402
 from nhx.automodel.tasks.training.schemas import (  # noqa: E402
     DistillationConfig,
@@ -75,7 +75,7 @@ def test_normalizes_legacy_job_storage_paths_to_runtime_mount(tmp_path: Path) ->
 
 def runner_with_duration(tmp_path: Path, duration: float | None) -> TrainingRunner:
     runner = TrainingRunner.__new__(TrainingRunner)
-    runner._config = SimpleNamespace(seed=1)
+    runner._config = SimpleNamespace(seed=1, training=SimpleNamespace(finetuning_type=FinetuningType.LORA))
     runner._progress = SimpleNamespace(
         training_duration_seconds=duration,
         report_running=lambda *args, **kwargs: None,
@@ -104,6 +104,7 @@ def test_result_json_copies_the_recorded_training_duration(tmp_path: Path, monke
 
     result = runner.run()
 
+    assert result.success is True
     assert result.training_duration_seconds == 17.5
     assert written_duration(tmp_path) == 17.5
 
@@ -134,3 +135,27 @@ def test_result_json_omits_duration_when_training_never_started(
 
     assert result.training_duration_seconds is None
     assert written_duration(tmp_path) is None
+
+
+@pytest.mark.parametrize(
+    ("finetuning_type", "phase"),
+    [
+        (FinetuningType.LORA_MERGED, "merging_adapter"),
+        (FinetuningType.LORA, "finalizing_checkpoint"),
+        (FinetuningType.ALL_WEIGHTS, "finalizing_checkpoint"),
+    ],
+)
+def test_postprocessing_reports_the_work_it_is_doing(
+    tmp_path: Path, finetuning_type: FinetuningType, phase: str
+) -> None:
+    """A LoRA merge loads the whole base model and can take as long as training did."""
+    runner = runner_with_duration(tmp_path, 1.0)
+    runner._config.training.finetuning_type = finetuning_type
+    sent: list[str] = []
+    runner._progress.report_running = lambda reported, **details: sent.append(reported)
+    runner._backend.find_checkpoints.return_value = {}
+    runner._backend.process_checkpoints.side_effect = lambda *a, **k: sent.append("process")
+
+    runner._postprocess_phase(None, TrainingMetrics(), MagicMock())
+
+    assert sent == [phase, "process"]

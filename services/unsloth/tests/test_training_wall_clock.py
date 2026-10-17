@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unsloth's wall clock covers model load and training, and stops before save."""
+"""Unsloth's wall clock covers model load and training, and stops before save, which reports its own phase."""
 
 from __future__ import annotations
 
@@ -35,11 +35,17 @@ class Reporter:
     def training_wall_clock(self) -> Clock:
         return Clock(self.events)
 
+    def report_completed(self, message: str = "Completed") -> None:
+        self.events.append("completed")
+
 
 class Callback:
     def __init__(self, events: list[str]) -> None:
         self.reporter = Reporter(events)
         self.events = events
+
+    def report_phase(self, phase: str) -> None:
+        self.events.append(phase)
 
     def close(self) -> None:
         self.events.append("close")
@@ -113,5 +119,11 @@ def test_wall_clock_wraps_load_and_train_but_not_save(tmp_path: Path, monkeypatc
     )
 
     assert events.index("clock-start") < events.index("load") < events.index("train") < events.index("clock-end")
-    assert events.index("clock-end") < events.index("close") < events.index("save")
+    assert (
+        events.index("clock-end")
+        < events.index("merging_adapter")
+        < events.index("save")
+        < events.index("completed")
+        < events.index("close")
+    )
     assert result["loss"] == 0.2
