@@ -120,7 +120,7 @@ const mockAgents = (workspace: unknown) => {
  */
 export const handlers = [
   // Platform liveness probe gating the whole app (PlatformGuard)
-  http.get(`${PLATFORM_BASE_URL}/health/live`, () => HttpResponse.json({ status: 'live' })),
+  http.get(`${PLATFORM_BASE_URL}/apis/health/live`, () => HttpResponse.json({ status: 'live' })),
   http.get(`${PLATFORM_BASE_URL}/apis/auth/discovery`, () =>
     HttpResponse.json({ auth_enabled: false, oidc: null })
   ),
