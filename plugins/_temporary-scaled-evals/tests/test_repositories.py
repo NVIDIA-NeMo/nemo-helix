@@ -10,6 +10,7 @@ import pytest
 
 try:
     from nemo_scaled_evals_plugin import migrations
+    from scaled_evals.api.config_profile_store import ConfigProfileStore
     from scaled_evals.api.repositories.base_repository import (
         order_by_clause,
         patch_set_clause,
@@ -17,7 +18,6 @@ try:
     )
     from scaled_evals.api.repositories.benchmark_repository import BenchmarkRepository
     from scaled_evals.api.repositories.benchmark_run_repository import BenchmarkRunRepository
-    from scaled_evals.api.repositories.config_profile_repository import ConfigProfileRepository
     from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
     from scaled_evals.api.repositories.execution_cleanup_repository import (
         ExecutionCleanupRepository,
@@ -191,21 +191,6 @@ def test_task_prebuilt_finalize_persists_verifier_image() -> None:
     assert params[2:4] == (MALICIOUS, "sha256:" + "b" * 64)
 
 
-def test_config_profile_create_parameterizes_name() -> None:
-    conn, cur = _conn()
-
-    ConfigProfileRepository(conn).create(
-        "cfg_safe",
-        name=MALICIOUS,
-        type="intake",
-        config={"route": MALICIOUS},
-    )
-
-    sql, params = _executed_sql_and_params(cur)
-    assert MALICIOUS not in sql
-    assert params[1] == MALICIOUS
-
-
 def test_evaluation_list_parameterizes_filters_and_cursor() -> None:
     conn, cur = _conn()
     created_at = datetime(2026, 6, 23, tzinfo=UTC)
@@ -240,11 +225,6 @@ def test_evaluation_list_parameterizes_filters_and_cursor() -> None:
             BenchmarkRunRepository,
             {"benchmark_id": None, "shared": False},
             "benchmark_id ILIKE %s",
-        ),
-        (
-            ConfigProfileRepository,
-            {"type": None, "owner_id": None},
-            "type::text ILIKE %s",
         ),
     ],
 )
@@ -814,17 +794,7 @@ def test_evaluation_snapshot_locks_and_captures_mutable_inputs() -> None:
         "status": "ready",
         "build_payload": {"source_ref": "abc123"},
     }
-    cur.fetchall.side_effect = [
-        [
-            {
-                "id": "cfg_safe",
-                "name": "profile",
-                "type": "harbor",
-                "config": {"env": {"SAFE": "1"}},
-                "updated_at": None,
-            }
-        ],
-    ]
+    ConfigProfileStore().create("cfg_safe", name="profile", type="harbor", config={"env": {"SAFE": "1"}})
 
     snapshot = EvaluationRepository._capture_execution_snapshot(
         cur,

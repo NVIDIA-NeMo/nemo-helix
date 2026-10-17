@@ -53,6 +53,14 @@ def _validate_profile_config(profile_type: ConfigProfileType, config: dict[str, 
         raise _http_error(422, "invalid_config", str(exc)) from exc
 
 
+def _reject_if_in_use(db: Database, profile_id: str) -> None:
+    # ponytail: checked before the write rather than under a lock, so a run
+    # submitted in between still starts; it runs from its own snapshot, so the
+    # edit cannot change it.
+    if db.evaluations.profile_in_active_use(profile_id):
+        raise _http_error(409, "profile_in_use", "config profile is referenced by an active evaluation")
+
+
 @router.post("", status_code=201, response_model=ConfigProfile)
 def create_profile(body: ConfigProfileCreate, db: Db, current: Principal) -> ConfigProfile:
     """Create a reusable config profile owned by the caller.
@@ -124,18 +132,15 @@ def patch_profile(
     Writes are owner-scoped: 404 if not found, or if the caller neither owns
     the profile nor is an admin.
     """
+    owner_id = _write_owner_scope(current, admin)
     existing = db.config_profiles.get(profile_id)
-    if existing is None:
+    if existing is None or (owner_id is not None and existing["owner_id"] != owner_id):
         raise _http_error(404, "not_found", "config profile not found")
     if body.config is not None:
         _validate_profile_config(existing["type"], body.config)
+        _reject_if_in_use(db, profile_id)
     try:
-        row = db.config_profiles.update(
-            profile_id,
-            name=body.name,
-            config=body.config,
-            owner_id=_write_owner_scope(current, admin),
-        )
+        row = db.config_profiles.update(profile_id, name=body.name, config=body.config, owner_id=owner_id)
     except Conflict as exc:
         raise _http_error(409, exc.code, exc.message) from exc
     if row is None:
@@ -145,14 +150,15 @@ def patch_profile(
 
 @router.delete("/{profile_id}", status_code=200, response_model=DeleteResponse)
 def delete_profile(profile_id: str, db: Db, current: Principal, admin: IsAdmin) -> DeleteResponse:
-    """Soft-delete a config profile (sets `deleted_at`).
+    """Delete a config profile.
 
-    Writes are owner-scoped: 404 if not found, already deleted, or the caller
-    neither owns the profile nor is an admin; 409 if an active evaluation
-    still references it.
+    Writes are owner-scoped: 404 if not found or the caller neither owns the
+    profile nor is an admin; 409 if an active evaluation still references it.
+    Evaluations already submitted keep the snapshot they captured.
     """
+    _reject_if_in_use(db, profile_id)
     try:
-        deleted = db.config_profiles.soft_delete(profile_id, owner_id=_write_owner_scope(current, admin))
+        deleted = db.config_profiles.delete(profile_id, owner_id=_write_owner_scope(current, admin))
     except Conflict as exc:
         raise _http_error(409, exc.code, exc.message) from exc
     if not deleted:

@@ -15,12 +15,10 @@ from typing import Any
 
 import anyio.from_thread
 from nemo_helix_plugin.client.errors import ConflictError
-from nemo_helix_plugin.client_provider import get_async_nemo_client, get_nemo_client
+from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.entities.base import EntityConflictError, SyncEntityClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
-from nemo_helix_plugin.workspaces.client import WorkspacesClient
-from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from nemo_scaled_evals_plugin.entities import ScaledEvaluationExecution
 from nemo_scaled_evals_plugin.jobs.benchmark_archive_build import BenchmarkArchiveBuildJob
 from nemo_scaled_evals_plugin.jobs.evaluation_execution import EvaluationExecutionJob
@@ -30,6 +28,7 @@ from nemo_scaled_evals_plugin.jobs.task_image_build import TaskImageBuildJob
 from nemo_scaled_evals_plugin.projection import jsonable, platform_entities
 from scaled_evals.api.build.queue_worker import TaskBuildWorker
 from scaled_evals.api.db import pooled_connection
+from scaled_evals.api.entity_store import private_workspace
 from scaled_evals.api.repositories.evaluation_repository import DISPATCH_STATE_COLUMNS, EvaluationRepository
 from scaled_evals.api.settings import settings
 from scaled_evals.dispatch.worker import _retry_delay_seconds, evaluation_run_budget_seconds
@@ -41,26 +40,6 @@ SERVICE_NAME = "scaled-evals"
 IMMEDIATE_SUBMIT_TIMEOUT_SECONDS = 10.0
 # The event loop holds tasks weakly; keep in-flight submissions alive until they finish.
 _pending: set[concurrent.futures.Future[None]] = set()
-
-
-@functools.cache
-def private_workspace() -> str:
-    """Return the workspace only this service can read, creating it on first use.
-
-    Raises:
-        RuntimeError: if someone else created a workspace with that name first.
-
-    """
-    name = settings.entity_store_private_workspace
-    client = WorkspacesClient.from_client(get_nemo_client(as_service=SERVICE_NAME, internal=True))
-    try:
-        client.create_workspace(body=CreateWorkspaceRequest(name=name))
-    except ConflictError:
-        # Its creator is its Admin; a user who claimed the name first could read every input.
-        owner = client.get_workspace(name=name).data().created_by
-        if owner != f"service:{SERVICE_NAME}":
-            raise RuntimeError(f"workspace {name!r} belongs to {owner!r}, not the {SERVICE_NAME} service") from None
-    return name
 
 
 class EvaluationSubmitter:

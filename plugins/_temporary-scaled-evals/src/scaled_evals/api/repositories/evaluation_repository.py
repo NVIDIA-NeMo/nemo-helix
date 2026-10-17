@@ -12,6 +12,7 @@ from typing import Any, Literal, cast
 import psycopg
 from psycopg.types.json import Json
 
+from scaled_evals.api import config_profile_store
 from scaled_evals.api.failure_diagnostics import failure_category_for_code
 from scaled_evals.api.redaction import redact_secret_text
 from scaled_evals.api.repositories.base_repository import (
@@ -355,21 +356,21 @@ class EvaluationRepository:
             )
             return cur.fetchone()
 
-    def validate_profile_references(self, profile_slots: builtins.list[tuple[str, str]]) -> None:
-        if not profile_slots:
-            return
+    def profile_in_active_use(self, profile_id: str) -> bool:
+        """Return whether an unfinished evaluation references the config profile."""
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT id, type FROM config_profiles WHERE id = ANY(%s) AND deleted_at IS NULL",
-                ([profile_id for profile_id, _ in profile_slots],),
+                """
+                SELECT id
+                FROM evaluations
+                WHERE deleted_at IS NULL
+                  AND status NOT IN ('succeeded', 'failed', 'cancelled')
+                  AND %s IN (framework_profile_id, harbor_profile_id, intake_profile_id)
+                LIMIT 1
+                """,
+                (profile_id,),
             )
-            found = {row["id"]: row["type"] for row in cur.fetchall()}
-        for profile_id, expected_type in profile_slots:
-            if profile_id not in found:
-                raise InvalidReference(f"config profile not found: {profile_id}")
-            actual_type = found[profile_id]
-            if actual_type != expected_type:
-                raise InvalidReference(f"{profile_id} is a '{actual_type}' profile, expected '{expected_type}'")
+            return cur.fetchone() is not None
 
     @staticmethod
     def _benchmark_variant_snapshot(cur: psycopg.Cursor, benchmark_run_id: str | None) -> dict[str, Any] | None:
@@ -419,8 +420,14 @@ class EvaluationRepository:
         task_revision: int,
         profile_ids: dict[str, str | None],
         credentials: dict[str, str],
+        profiles_by_id: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        """Capture mutable execution inputs under row locks in the insert transaction."""
+        """Capture mutable execution inputs in the insert transaction.
+
+        Task rows are read under row locks. Config profiles live in Entity
+        Store, so they are copied as read; `profiles_by_id` lets a caller
+        inserting many evaluations read them once.
+        """
         cur.execute(
             """
             SELECT
@@ -440,23 +447,14 @@ class EvaluationRepository:
             raise InvalidReference(f"task revision not found: {task_id} rev {task_revision}")
 
         wanted_profiles = {role: value for role, value in profile_ids.items() if value}
-        profiles_by_id: dict[str, dict[str, Any]] = {}
-        if wanted_profiles:
-            cur.execute(
-                """
-                SELECT id, name, type, config, updated_at
-                FROM config_profiles
-                WHERE id = ANY(%s) AND deleted_at IS NULL
-                FOR KEY SHARE
-                """,
-                (sorted(set(wanted_profiles.values())),),
-            )
-            profiles_by_id = {str(row["id"]): row for row in cur.fetchall()}
+        if profiles_by_id is None:
+            profiles_by_id = config_profile_store.ConfigProfileStore().get_many(wanted_profiles.values())
         profiles: dict[str, dict[str, Any]] = {}
         for role, profile_id in wanted_profiles.items():
             if profile_id not in profiles_by_id:
                 raise InvalidReference(f"config profile not found: {profile_id}")
-            profiles[role] = dict(profiles_by_id[profile_id])
+            profile = profiles_by_id[profile_id]
+            profiles[role] = {key: profile[key] for key in ("id", "name", "type", "config", "updated_at")}
 
         variant = EvaluationRepository._benchmark_variant_snapshot(cur, evaluation.get("benchmark_run_id"))
         if variant is not None:
@@ -504,6 +502,7 @@ class EvaluationRepository:
         parallelism: int,
         visibility: str,
         owner_id: str | None,
+        profiles_by_id: dict[str, dict[str, Any]] | None = None,
     ) -> dict:
         if owner_id is not None:
             cur.execute(
@@ -543,6 +542,7 @@ class EvaluationRepository:
                 "intake": intake_profile_id,
             },
             credentials=credentials,
+            profiles_by_id=profiles_by_id,
         )
         cur.execute(
             f"""
@@ -634,6 +634,7 @@ class EvaluationRepository:
         visibility: str,
         benchmark_run_id: str | None = None,
         owner_id: str | None = None,
+        profiles_by_id: dict[str, dict[str, Any]] | None = None,
     ) -> dict:
         """Insert a queued task run (standalone, or a member of a benchmark run).
 
@@ -673,6 +674,7 @@ class EvaluationRepository:
                 parallelism=parallelism,
                 visibility=visibility,
                 owner_id=owner_id,
+                profiles_by_id=profiles_by_id,
             )
 
     def list(
@@ -1931,43 +1933,6 @@ class EvaluationRepository:
                 type="retry",
             )
             return row
-
-    def load_intake_profile(self, profile_id: str) -> dict | None:
-        with self.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT config
-                FROM config_profiles
-                WHERE id = %s AND type = 'intake' AND deleted_at IS NULL
-                """,
-                (profile_id,),
-            )
-            return cur.fetchone()
-
-    def load_harbor_profile(self, profile_id: str) -> dict | None:
-        with self.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT config
-                FROM config_profiles
-                WHERE id = %s AND type = 'harbor' AND deleted_at IS NULL
-                """,
-                (profile_id,),
-            )
-            return cur.fetchone()
-
-    def load_framework_profile(self, profile_id: str) -> dict | None:
-        """Load either supported framework profile for legacy unsnapshotted rows."""
-        with self.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT config
-                FROM config_profiles
-                WHERE id = %s AND type IN ('harbor', 'gym') AND deleted_at IS NULL
-                """,
-                (profile_id,),
-            )
-            return cur.fetchone()
 
     def set_status(
         self,

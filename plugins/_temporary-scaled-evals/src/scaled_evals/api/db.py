@@ -11,12 +11,12 @@ from fastapi import Depends, HTTPException
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool, PoolTimeout
 
+from scaled_evals.api.agent_bundle_store import AgentBundleStore
+from scaled_evals.api.config_profile_store import ConfigProfileStore
 from scaled_evals.api.repositories import (
-    AgentBundleRepository,
     BenchmarkImportRepository,
     BenchmarkRepository,
     BenchmarkRunRepository,
-    ConfigProfileRepository,
     EvaluationRepository,
     ExecutionCleanupRepository,
     ExecutionTelemetryRepository,
@@ -75,8 +75,8 @@ class Database:
         self.conn = conn
 
     @property
-    def agent_bundles(self) -> AgentBundleRepository:
-        return AgentBundleRepository(self.conn)
+    def agent_bundles(self) -> AgentBundleStore:
+        return AgentBundleStore()
 
     @property
     def tasks(self) -> TaskRepository:
@@ -99,8 +99,8 @@ class Database:
         return BenchmarkRunRepository(self.conn)
 
     @property
-    def config_profiles(self) -> ConfigProfileRepository:
-        return ConfigProfileRepository(self.conn)
+    def config_profiles(self) -> ConfigProfileStore:
+        return ConfigProfileStore()
 
     @property
     def evaluations(self) -> EvaluationRepository:

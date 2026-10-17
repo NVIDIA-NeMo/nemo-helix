@@ -22,6 +22,7 @@ import pytest
 pytest.importorskip("scaled_evals")
 from api_test_fixture import client, v1
 from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
+from scaled_evals.api.config_profile_store import ConfigProfileStore
 from scaled_evals.api.db import Database, get_conn, get_stream_database_factory
 from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
 from scaled_evals.api.routers import evaluations as evaluations_router
@@ -122,6 +123,10 @@ def _archive_row(**overrides) -> dict:
     return row
 
 
+def _profile(profile_id: str, profile_type: str, config: dict | None = None) -> None:
+    ConfigProfileStore().create(profile_id, name=profile_id, type=profile_type, config=config or {})
+
+
 def _conn_with_fetchone(*results) -> MagicMock:
     """Mock connection whose successive fetchone() calls return `results`."""
     conn = MagicMock()
@@ -135,8 +140,7 @@ def _conn(fetchone=(), fetchall=()) -> MagicMock:  # noqa: ANN001
     """Mock connection with explicit fetchone() and fetchall() sequences.
 
     For the POST path: fetchone serves the revision-status check then the
-    INSERT ... RETURNING; fetchall serves the config_profiles then credentials
-    existence queries (skipped when there are no such references).
+    INSERT ... RETURNING.
     """
     conn = MagicMock()
     cur = conn.cursor.return_value.__enter__.return_value
@@ -560,14 +564,8 @@ def test_create_gym_runtime_persists_runtime_runner_identity(monkeypatch) -> Non
 
 
 def test_create_resolves_and_persists_agent_bundle(monkeypatch) -> None:
-    conn = _conn(
-        fetchone=[
-            {"status": "ready"},
-            {"config": {}},
-            _eval_row(framework_profile_id="cfg_h", harbor_profile_id="cfg_h"),
-        ],
-        fetchall=[[{"id": "cfg_h", "type": "harbor"}]],
-    )
+    _profile("cfg_h", "harbor")
+    conn = _conn_with_fetchone({"status": "ready"}, _eval_row(framework_profile_id="cfg_h", harbor_profile_id="cfg_h"))
     _override_conn(conn)
     resolved = {
         "bundle_id": "ab_claude",
@@ -648,12 +646,8 @@ def test_create_rejects_zero_parallelism() -> None:
 
 
 def test_create_202_with_valid_profile_and_credential() -> None:
-    # fetchone: ready revision, then the inserted row.
-    # fetchall: config_profiles existence.
-    conn = _conn(
-        fetchone=[{"status": "ready"}, {"config": {}}, _eval_row()],
-        fetchall=[[{"id": "cfg_h", "type": "harbor"}]],
-    )
+    _profile("cfg_h", "harbor")
+    conn = _conn_with_fetchone({"status": "ready"}, _eval_row())
     _override_conn(conn)
 
     response = client.post(
@@ -671,13 +665,8 @@ def test_create_202_with_valid_profile_and_credential() -> None:
 
 
 def test_create_202_with_nemo_gym_framework_profile() -> None:
-    conn = _conn(
-        fetchone=[
-            {"status": "ready"},
-            _eval_row(framework="nemo_gym", framework_profile_id="cfg_g"),
-        ],
-        fetchall=[[{"id": "cfg_g", "type": "gym"}]],
-    )
+    _profile("cfg_g", "gym")
+    conn = _conn_with_fetchone({"status": "ready"}, _eval_row(framework="nemo_gym", framework_profile_id="cfg_g"))
     _override_conn(conn)
 
     response = client.post(
@@ -695,14 +684,8 @@ def test_create_202_with_nemo_gym_framework_profile() -> None:
 
 
 def test_create_202_treats_framework_profile_as_harbor_alias() -> None:
-    conn = _conn(
-        fetchone=[
-            {"status": "ready"},
-            {"config": {}},
-            _eval_row(framework_profile_id="cfg_h", harbor_profile_id="cfg_h"),
-        ],
-        fetchall=[[{"id": "cfg_h", "type": "harbor"}]],
-    )
+    _profile("cfg_h", "harbor")
+    conn = _conn_with_fetchone({"status": "ready"}, _eval_row(framework_profile_id="cfg_h", harbor_profile_id="cfg_h"))
     _override_conn(conn)
 
     response = client.post(
@@ -719,8 +702,7 @@ def test_create_202_treats_framework_profile_as_harbor_alias() -> None:
 
 
 def test_create_422_when_profile_missing() -> None:
-    # Revision ready, but the config_profiles lookup returns no row.
-    conn = _conn(fetchone=[{"status": "ready"}], fetchall=[[]])
+    conn = _conn_with_fetchone({"status": "ready"})
     _override_conn(conn)
 
     response = client.post(
@@ -739,10 +721,8 @@ def test_create_422_when_profile_missing() -> None:
 
 def test_create_422_when_profile_wrong_type() -> None:
     # harbor_profile_id points at an intake-typed profile.
-    conn = _conn(
-        fetchone=[{"status": "ready"}],
-        fetchall=[[{"id": "cfg_sw", "type": "intake"}]],
-    )
+    _profile("cfg_sw", "intake")
+    conn = _conn_with_fetchone({"status": "ready"})
     _override_conn(conn)
 
     response = client.post(
@@ -760,10 +740,8 @@ def test_create_422_when_profile_wrong_type() -> None:
 
 
 def test_create_422_when_nemo_gym_profile_wrong_type() -> None:
-    conn = _conn(
-        fetchone=[{"status": "ready"}],
-        fetchall=[[{"id": "cfg_h", "type": "harbor"}]],
-    )
+    _profile("cfg_h", "harbor")
+    conn = _conn_with_fetchone({"status": "ready"})
     _override_conn(conn)
 
     response = client.post(

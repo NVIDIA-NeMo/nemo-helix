@@ -369,6 +369,15 @@ the private execution snapshot, they are stored in
 The service creates that workspace itself, so only the service has a role in
 it, and it refuses to use a workspace of that name that someone else created.
 
+Config profiles (`scaled_evals_config_profile`) and agent bundles
+(`scaled_evals_agent_bundle`) are also stored as entities in that workspace,
+so the plugin's owner and admin checks cannot be bypassed through the Entities
+API. Deleting either one removes the entity. Editing a profile or bundle that
+changed since it was read returns `409 profile_changed` or
+`409 agent_bundle_changed`. A profile referenced by a non-terminal evaluation
+can be renamed, but its config cannot change and it cannot be deleted
+(`409 profile_in_use`).
+
 Each evaluation Job may run for every sequential trial wave
 (`ceil(n_attempts / parallelism)`) times the profile's sandbox
 `lifecycle_timeout` plus a grace, and never less than
