@@ -73,11 +73,60 @@ RUN find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}" \
     && test -z "$(find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}" \
       -path '*/ray/jars/*' -print -quit)"
 
-FROM ${NHX_PYTHON_IMAGE} AS runtime
+# Sources of the host venv, each prefetched component venv, CPython, uv and its crates, and the Go
+# modules of every wandb-core binary. The uv cache holds the same package versions as the venvs, plus
+# the setuptools uv built sdists with. docker/sources/nhx-gym-host.json pins ray, which has no sdist,
+# the packages ray bundles, that setuptools, and the source of distlib's Windows launchers.
+ARG NHX_COLLECT_SOURCES=0
+ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+COPY docker/sources/ /tmp/nhx-sources/
+RUN --mount=type=cache,target=/root/.cache/uv \
+    UV_CACHE_DIR=/root/.cache/uv uv run --no-project --python /opt/gym-host-venv/bin/python \
+        /usr/local/bin/collect-python-sdists.py \
+        --python /opt/gym-host-venv/bin/python \
+        --output /source-distributions/nhx-gym-host \
+        --lock-file /app/docker/locks/nhx-gym-host/uv.lock \
+        --label gym-host-venv && \
+    find "${NEMO_GYM_VENV_DIR}" -mindepth 3 -maxdepth 3 -type d -name .venv | sort | while IFS= read -r venv; do \
+        label="$(dirname "${venv#"${NEMO_GYM_VENV_DIR}"/}" | tr / -)"; \
+        UV_CACHE_DIR=/root/.cache/uv uv run --no-project --python "${venv}/bin/python" \
+            /usr/local/bin/collect-python-sdists.py \
+            --python "${venv}/bin/python" \
+            --output /source-distributions/nhx-gym-host \
+            --label "${label}" || exit 1; \
+    done && \
+    UV_CACHE_DIR=/root/.cache/uv uv run --no-project --python /opt/gym-host-venv/bin/python \
+        /usr/local/bin/collect-cpython-source.py \
+        --python /opt/gym-host-venv/bin/python \
+        --output /source-distributions/nhx-gym-host && \
+    python3 /usr/local/bin/collect-pinned-sources.py \
+        --manifest /tmp/nhx-sources/uv.json \
+        --manifest /tmp/nhx-sources/nhx-gym-host.json \
+        --installed-in /opt/gym-host-venv/bin/python \
+        $(find "${NEMO_GYM_VENV_DIR}" -mindepth 3 -maxdepth 3 -type d -name .venv -printf '--installed-in %p/bin/python ') \
+        --output /source-distributions/nhx-gym-host && \
+    python3 /usr/local/bin/collect-cargo-crate-sources.py \
+        --binary /bin/uv \
+        --cargo-lock /source-distributions/nhx-gym-host/pinned/uv-0.11.26.tar.gz \
+        --output /source-distributions/nhx-gym-host && \
+    find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}" -type f -path '*/wandb/bin/wandb-core' \
+        -printf '--binary\n%p\n' | xargs -d '\n' python3 /usr/local/bin/collect-go-module-sources.py \
+        --output /source-distributions/nhx-gym-host
+
+FROM ${NHX_PYTHON_IMAGE} AS runtime-base
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git curl \
     && rm -rf /var/lib/apt/lists/*
+
+# The runtime's own Debian packages, not the builder's build tools.
+FROM runtime-base AS apt-sources
+ARG NHX_COLLECT_SOURCES=0
+ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+COPY docker/scripts/collect-apt-sources.sh /usr/local/bin/
+RUN bash /usr/local/bin/collect-apt-sources.sh /source-distributions/nhx-gym-host/apt --installed
+
+FROM runtime-base AS runtime
 
 # Copy uv because Gym uses it to launch component environments.
 COPY --from=builder /bin/uv /bin/uv
@@ -87,6 +136,8 @@ COPY --from=builder /opt/gym-host-venv /opt/gym-host-venv
 COPY --from=builder /opt/gym_venvs /opt/gym_venvs
 # Copy the matching uv cache used by those component environments.
 COPY --from=builder /home/ubuntu/.cache/uv /home/ubuntu/.cache/uv
+COPY --from=builder /source-distributions/nhx-gym-host/ /usr/share/nemo-helix/source-distributions/nhx-gym-host/
+COPY --from=apt-sources /source-distributions/nhx-gym-host/ /usr/share/nemo-helix/source-distributions/nhx-gym-host/
 
 ENV PATH="/opt/gym-host-venv/bin:$PATH" \
     VIRTUAL_ENV=/opt/gym-host-venv \

@@ -18,6 +18,7 @@ import json
 import os
 import struct
 import sys
+import tarfile
 import time
 import tomllib
 import urllib.error
@@ -105,6 +106,34 @@ def lock_checksums(cargo_lock: str) -> dict[Crate, str]:
     }
 
 
+def local_lock_packages(cargo_lock: str) -> set[Crate]:
+    """The project's own workspace crates: ``Cargo.lock`` packages with no source."""
+    return {
+        Crate(package["name"], package["version"])
+        for package in tomllib.loads(cargo_lock)["package"]
+        if "source" not in package
+    }
+
+
+def read_cargo_lock(path: Path) -> str:
+    """A ``Cargo.lock`` file, or the top-level one inside a project's source archive (``.tar.gz``)."""
+    if not path.name.endswith((".tar.gz", ".tgz")):
+        return path.read_text(encoding="utf-8")
+    with tarfile.open(path, "r:gz") as archive:
+        member = next(
+            (
+                member
+                for member in archive.getmembers()
+                if member.name.count("/") == 1 and member.name.endswith("/Cargo.lock")
+            ),
+            None,
+        )
+        handle = archive.extractfile(member) if member is not None else None
+        if handle is None:
+            raise RuntimeError(f"{path} has no top-level Cargo.lock")
+        return handle.read().decode("utf-8")
+
+
 def download_crate(crate: Crate, sha256: str, destination: Path) -> None:
     url = f"{CRATES_IO_DOWNLOAD}/{crate.name}/{crate.filename}"
     last_error: Exception | None = None
@@ -139,7 +168,11 @@ def record_source_collection_disabled(output_dir: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", required=True, help="Rust binary built with cargo-auditable")
-    parser.add_argument("--cargo-lock", required=True, help="Cargo.lock of the project the binary was built from")
+    parser.add_argument(
+        "--cargo-lock",
+        required=True,
+        help="Cargo.lock of the project the binary was built from, or the project's .tar.gz source archive",
+    )
     parser.add_argument("--output", required=True, help="Source distribution output directory")
     args = parser.parse_args()
 
@@ -156,7 +189,12 @@ def main() -> int:
         raise RuntimeError(f"{args.binary} uses crates this collector can't fetch: {', '.join(uncollectable)}")
     crates = audited_crates(binary)
     local_crates = audited_crates(binary, source="local")
-    checksums = lock_checksums(Path(args.cargo_lock).read_text(encoding="utf-8"))
+    cargo_lock = read_cargo_lock(Path(args.cargo_lock))
+    checksums = lock_checksums(cargo_lock)
+    lock_local = local_lock_packages(cargo_lock)
+    mismatched = [f"{crate.name} {crate.version}" for crate in local_crates if crate not in lock_local]
+    if mismatched:
+        raise RuntimeError(f"{args.cargo_lock} is not the source the binary was built from: {', '.join(mismatched)}")
     unlocked = [f"{crate.name} {crate.version}" for crate in crates if crate not in checksums]
     if unlocked:
         raise RuntimeError(f"{args.cargo_lock} has no checksum for crates the binary uses: {', '.join(unlocked)}")

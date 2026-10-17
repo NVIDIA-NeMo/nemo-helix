@@ -166,3 +166,29 @@ def test_a_crate_from_git_or_another_registry_fails_the_build(
 
     with pytest.raises(RuntimeError, match=rf"can't fetch: forked 0.1.0 \({source}\)"):
         run(module, monkeypatch, tmp_path, lock, CRATES, packages)
+
+
+def test_a_cargo_lock_from_another_release_of_the_project_fails_the_build(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    module = load_module()
+    lock = cargo_lock({name: hashlib.sha256(body).hexdigest() for name, body in CRATES.items()})
+
+    with pytest.raises(RuntimeError, match="not the source the binary was built from: uv 0.11.26"):
+        run(module, monkeypatch, tmp_path, lock.replace('version = "0.11.26"', 'version = "0.11.27"'), CRATES)
+
+
+def test_cargo_lock_is_read_from_a_project_source_archive(tmp_path: Path) -> None:
+    import io
+    import tarfile
+
+    module = load_module()
+    lock = cargo_lock({"anyhow": "a" * 64})
+    archive = tmp_path / "uv-0.11.26.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        for name, content in [("uv-0.11.26/crates/uv/Cargo.lock", "nested"), ("uv-0.11.26/Cargo.lock", lock)]:
+            info = tarfile.TarInfo(name)
+            info.size = len(content.encode())
+            tar.addfile(info, io.BytesIO(content.encode()))
+
+    assert module.read_cargo_lock(archive) == lock

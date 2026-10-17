@@ -25,7 +25,8 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.26 /uv /bin/uv
-COPY docker/scripts/collect-python-sdists.py /usr/local/bin/
+COPY docker/scripts/collect-python-sdists.py docker/scripts/collect-pinned-sources.py /usr/local/bin/
+COPY docker/sources/nhx-garak-tasks.json /tmp/nhx-garak-tasks.json
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_HTTP_TIMEOUT=120 \
@@ -67,7 +68,7 @@ RUN uv venv --no-project --python /usr/local/bin/python /app/.garak_venv
 # litellm: CVE-2026-35029 (affects <1.83.0)
 # langchain-core: CVE-2025-68664 (affects <1.2.5) + GHSA-qh6h-p6c9-ff54 (affects <1.2.22)
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip --no-config install garak==0.17.0 --python /app/.garak_venv/bin/python && \
+    uv pip --no-config install garak==0.17.0 torch==2.14.1 triton==3.8.0 --python /app/.garak_venv/bin/python && \
     uv pip install --python /app/.garak_venv/bin/python "setuptools>=78.1.1" && \
     uv pip install --no-deps --python /app/.garak_venv/bin/python \
     "litellm>=1.83.0" \
@@ -92,6 +93,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "cryptography>=50.0.0,<51" \
     "nltk>=3.10.3"
 
+# docker/sources/nhx-garak-tasks.json pins torch and triton, which publish no sdist; their versions
+# are held in the garak install above, so a new release can't outrun the pinned source. They go in their
+# own directory: the base stage's pinned-source manifest is copied over this stage's at the same path.
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -106,7 +110,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --python /app/.garak_venv/bin/python \
         --output /source-distributions/nhx-garak-tasks \
         --lock-file /app/uv.lock \
-        --label garak-venv
+        --label garak-venv && \
+    python3 /usr/local/bin/collect-pinned-sources.py \
+        --manifest /tmp/nhx-garak-tasks.json \
+        --installed-in /app/.garak_venv/bin/python \
+        --output /source-distributions/nhx-garak-tasks/garak-venv
 
 FROM ${GARAK_PYTHON_IMAGE} AS base
 ARG USERNAME=nvs
@@ -117,8 +125,11 @@ ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
 WORKDIR /app
 COPY --from=ghcr.io/astral-sh/uv:0.11.26 /uv /bin/uv
 COPY docker/scripts/collect-apt-sources.sh \
+    docker/scripts/collect-cargo-crate-sources.py \
     docker/scripts/collect-cpython-source.py \
+    docker/scripts/collect-pinned-sources.py \
     /usr/local/bin/
+COPY docker/sources/ /tmp/nhx-sources/
 RUN apt-get update && apt-get upgrade -y && \
     list_installed_perl_cve_packages() { \
     dpkg-query -W -f='${binary:Package} ${db:Status-Abbrev}\n' \
@@ -141,6 +152,15 @@ RUN mkdir -p /source-distributions/nhx-garak-tasks && \
     uv run --no-project --python /usr/local/bin/python \
         /usr/local/bin/collect-cpython-source.py \
         --python /usr/local/bin/python \
+        --output /source-distributions/nhx-garak-tasks && \
+    python3 /usr/local/bin/collect-pinned-sources.py \
+        --manifest /tmp/nhx-sources/busybox-1.37.0-musl.json \
+        --manifest /tmp/nhx-sources/alpine-3.23-musl.json \
+        --manifest /tmp/nhx-sources/uv.json \
+        --output /source-distributions/nhx-garak-tasks && \
+    python3 /usr/local/bin/collect-cargo-crate-sources.py \
+        --binary /bin/uv \
+        --cargo-lock /source-distributions/nhx-garak-tasks/pinned/uv-0.11.26.tar.gz \
         --output /source-distributions/nhx-garak-tasks
 
 # Copying handful commands into the destination image

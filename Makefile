@@ -69,7 +69,7 @@ docker-load: ## Build and load single-platform Docker bake TARGET, default docke
 
 .PHONY: docker-check-sources
 docker-check-sources: ## Check a loaded IMAGE (e.g. nhx-kaniko), built with NHX_COLLECT_SOURCES=1, carries every component's source
-	docker/scripts/check-image-source-coverage.sh "$(or $(IMAGE_REGISTRY),my-registry)/$(IMAGE):$(or $(BAKE_TAG),local)" "$(IMAGE)"
+	docker/scripts/check-image-source-coverage.sh "$(or $(IMAGE_REGISTRY),my-registry)/$(IMAGE):$(or $(BAKE_TAG),local)"
 
 .PHONY: docker-push
 docker-push: ## Build and push Docker bake TARGET, default docker-cpu
