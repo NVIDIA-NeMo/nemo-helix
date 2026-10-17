@@ -3,12 +3,14 @@
 
 import { useState, useEffect } from 'react';
 
-import { getDifferenceInMilliseconds } from '../../utils/date';
-
 interface UseLiveSecondsProps {
   startDate?: Date;
   enabled?: boolean;
 }
+
+/** Whole seconds from `start` to now. */
+const secondsSince = (start: Date): number => Math.floor((Date.now() - start.getTime()) / 1000);
+
 /**
  * Use this hook to get the live seconds since the start time.
  * If startDate is not provided, the hook returns undefined (so you don't render a non-relative time).
@@ -28,8 +30,8 @@ export const useLiveSeconds = ({ startDate, enabled = true }: UseLiveSecondsProp
     if (lockedStartDate === undefined) {
       // Lock the startDate value to prevent desync when startDate is provided asynchronously
       setLockedStartDate(startDate);
-      // Reset counter when startDate changes
-      setLiveSeconds(0);
+      // Start from the time already elapsed, not 0, so the first second doesn't read as `0s`
+      setLiveSeconds(secondsSince(startDate));
     }
   }, [startDate, lockedStartDate, enabled]);
 
@@ -39,15 +41,14 @@ export const useLiveSeconds = ({ startDate, enabled = true }: UseLiveSecondsProp
       return;
     }
 
-    const interval = setInterval(() => {
-      const diff = getDifferenceInMilliseconds(
-        lockedStartDate.toISOString(),
-        new Date().toISOString()
-      );
-      setLiveSeconds(diff ? Math.floor(diff / 1000) : 0);
-    }, 1000);
+    // Catch up at once: after a pause the count is stale until the first tick.
+    setLiveSeconds(secondsSince(lockedStartDate));
+    const interval = setInterval(() => setLiveSeconds(secondsSince(lockedStartDate)), 1000);
     return () => clearInterval(interval);
   }, [lockedStartDate, enabled]);
 
-  return lockedStartDate !== undefined ? liveSeconds : undefined;
+  if (lockedStartDate !== undefined) return liveSeconds;
+  // The effect above locks the start only after the first render; read the clock until then so
+  // that render shows the elapsed time rather than nothing.
+  return startDate !== undefined && enabled ? secondsSince(startDate) : undefined;
 };

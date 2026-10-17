@@ -26,33 +26,15 @@ import {
   JOB_SOURCE,
   SOURCE_OPTIONS,
 } from '@studio/components/dataViews/JobsDataView/constants';
+import { SOURCE_DISPLAY } from '@studio/components/dataViews/JobsDataView/sourceDisplay';
 import { getJobDetailRoute } from '@studio/components/dataViews/JobsDataView/utils';
 import { CUSTOMIZER_ENABLED } from '@studio/constants/environment';
 import { STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { iconColorClass } from '@studio/routes/constants';
 import { keepPreviousData } from '@tanstack/react-query';
-import { ChartBar, Cog, LayoutList, Sliders, Sparkles } from 'lucide-react';
-import { ComponentProps, type ReactNode, useRef } from 'react';
-
-const SOURCE_DISPLAY: Record<string, { label: string; icon: ReactNode }> = {
-  [JOB_SOURCE.CUSTOMIZATION]: {
-    label: 'Fine-tuning',
-    icon: <Sliders className={iconColorClass} size={14} />,
-  },
-  [JOB_SOURCE.DATA_DESIGNER]: {
-    label: 'Data Designer',
-    icon: <LayoutList className={iconColorClass} size={14} />,
-  },
-  [JOB_SOURCE.SAFE_SYNTHESIZER]: {
-    label: 'Safe Synthesizer',
-    icon: <Sparkles className={iconColorClass} size={14} />,
-  },
-  [JOB_SOURCE.EVALUATOR_METRICS]: {
-    label: 'Evaluator',
-    icon: <ChartBar className={iconColorClass} size={14} />,
-  },
-};
+import { Cog } from 'lucide-react';
+import { ComponentProps, useRef } from 'react';
 
 const STATUS_OPTIONS_WITH_ALL = [{ value: '', label: 'All' }, ...STATUS_FILTER_OPTIONS];
 
