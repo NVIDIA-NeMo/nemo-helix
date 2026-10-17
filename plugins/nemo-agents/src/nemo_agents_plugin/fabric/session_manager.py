@@ -275,6 +275,7 @@ class FabricSessionManager:
             input=request.input,
             request_id=request.request_id,
             caller_context=request.caller_context,
+            relay_session_root=request.relay_session_root,
             timeout_seconds=request.timeout_seconds,
         )
 
