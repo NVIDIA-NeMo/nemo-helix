@@ -4,6 +4,8 @@
 
 name: workspace
 description: NeMo Helix workspace CRUD playbook through `nemo_api(resource='workspaces')`. Use for workspace creation, listing, retrieval, or deletion.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 # Workspace tasks
 

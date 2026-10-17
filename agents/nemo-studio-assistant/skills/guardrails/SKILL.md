@@ -4,6 +4,8 @@
 
 name: guardrails
 description: Create, validate, attach, inspect, update, or remove NeMo Guardrails configurations through the NeMo Helix SDK.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 # Guardrails service
 

@@ -1,6 +1,8 @@
 ---
 name: nhx-cli
 description: Use when developing the NeMo Helix CLI - adding or changing command groups, wiring a service's typed client into commands, output formatting, pagination, error mapping, or the `--output-format code` snippet generator. Covers core groups in nemo_helix_ext and plugin-hosted `nemo.cli` groups.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # NeMo Helix CLI Development

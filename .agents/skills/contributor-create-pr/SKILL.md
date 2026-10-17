@@ -1,6 +1,8 @@
 ---
 name: contributor-create-pr
 description: Create, publish, or advance a GitHub pull request for NVIDIA-NeMo/nemo-helix with repository-aware branch checks, targeted validation, DCO sign-off enforcement, trusted PR-template completion and post-push description refresh, conventional titles, safe pushes, draft or ready-for-review creation, CI and CodeRabbit follow-up, and merge-conflict handling. Use when the user asks to commit and push work, create or open a PR, submit changes for review, mark a draft ready, monitor a PR, address automated review or CI feedback, or update a conflicted PR in nemo-helix.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
@@ -184,44 +186,10 @@ Never run `git commit`, `git commit --amend`, or a fixup commit without `-s`. If
 
 ## 6. Audit every PR commit for DCO
 
-Run this gate after any commit, amend, rebase, cherry-pick, conflict resolution, or automated fix, and before every push or `gh pr create`. It requires a syntactically valid sign-off whose email matches the commit author's email, case-insensitively:
+Run this gate after any commit, amend, rebase, cherry-pick, conflict resolution, or automated fix, and before every push or `gh pr create`. [scripts/dco-audit.sh](scripts/dco-audit.sh) requires complete branch ancestry (it unshallows when needed) and, for every commit in `$NHX_BASE_REF..HEAD`, a syntactically valid sign-off whose email matches the commit author's email, case-insensitively. Run it from the PR worktree; `<skill-dir>` is this skill's directory:
 
 ```bash
-if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
-  git fetch --unshallow "$NHX_PUSH_REMOTE"
-fi
-if [ "$(git rev-parse --is-shallow-repository)" = true ] \
-  || ! git merge-base "$NHX_BASE_REF" HEAD >/dev/null; then
-  printf 'DCO audit requires complete feature-branch ancestry\n' >&2
-  exit 1
-fi
-
-NHX_BASE_REF="$NHX_BASE_REF" bash -euo pipefail <<'BASH'
-: "${NHX_BASE_REF:?set NHX_BASE_REF to the refreshed canonical upstream default branch}"
-NHX_DCO_FAILED=0
-NHX_COMMIT_COUNT=0
-
-while IFS= read -r NHX_SHA; do
-  NHX_COMMIT_COUNT=$((NHX_COMMIT_COUNT + 1))
-  NHX_AUTHOR_EMAIL="$(git show -s --format=%ae "$NHX_SHA")"
-  NHX_SIGNOFF_EMAILS="$(
-    git show -s --format=%B "$NHX_SHA" \
-      | git interpret-trailers --parse \
-      | awk -F '[<>]' 'tolower($1) ~ /^signed-off-by:[[:space:]]/ && NF >= 3 { print $2 }'
-  )"
-
-  if ! printf '%s\n' "$NHX_SIGNOFF_EMAILS" \
-    | awk -v want="$NHX_AUTHOR_EMAIL" 'tolower($0) == tolower(want) { found=1 } END { exit(found ? 0 : 1) }'; then
-    printf 'DCO FAIL %s: no Signed-off-by trailer matches author email %s\n' "$NHX_SHA" "$NHX_AUTHOR_EMAIL" >&2
-    NHX_DCO_FAILED=1
-  else
-    printf 'DCO OK   %s\n' "$NHX_SHA"
-  fi
-done < <(git rev-list --reverse "$NHX_BASE_REF..HEAD")
-
-test "$NHX_COMMIT_COUNT" -gt 0
-test "$NHX_DCO_FAILED" -eq 0
-BASH
+NHX_BASE_REF="$NHX_BASE_REF" NHX_PUSH_REMOTE="$NHX_PUSH_REMOTE" bash <skill-dir>/scripts/dco-audit.sh
 ```
 
 Do not treat a PR-body declaration or GitHub's cryptographic `Verified` badge as a substitute for commit trailers. Nemo-Helix's required gate is DCO sign-off.

@@ -45,6 +45,12 @@ SKILL_GLOBS = [
     "plugins/*/skills/**/SKILL.md",
     "plugins/*/src/*/skills/**/SKILL.md",
     "packages/*/src/*/.agents/skills/**/SKILL.md",
+    # Reference docs a SKILL.md points to carry copy-paste commands too.
+    "packages/nemo_helix_ext/src/nemo_helix_ext/skills/**/references/*.md",
+    ".agents/skills/**/references/*.md",
+    "plugins/*/skills/**/references/*.md",
+    "plugins/*/src/*/skills/**/references/*.md",
+    "packages/*/src/*/.agents/skills/**/references/*.md",
 ]
 
 
@@ -204,14 +210,14 @@ def main() -> int:
             all_violations.extend(lint_command(skill, line, command, cache))
 
     if not all_violations:
-        print(f"OK: {len(skill_files)} skills, no CLI hallucinations.")
+        print(f"OK: {len(skill_files)} skill files, no CLI hallucinations.")
         return 0
 
     if args.format == "github":
         for v in all_violations:
             print(f"::error file={v.file},line={v.line}::{v.issue}")
     else:
-        print(f"Found {len(all_violations)} issues across {len({v.file for v in all_violations})} skills:\n")
+        print(f"Found {len(all_violations)} issues across {len({v.file for v in all_violations})} skill files:\n")
         current_file: Path | None = None
         for v in all_violations:
             if v.file != current_file:

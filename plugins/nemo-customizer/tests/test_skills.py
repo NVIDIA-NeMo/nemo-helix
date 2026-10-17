@@ -14,10 +14,15 @@ def test_nemo_customizer_skill_present() -> None:
     skill_dir = get_skills_path() / "nemo-customizer"
     skill = skill_dir / "SKILL.md"
     tests = skill_dir / "tests.json"
+    sft_fast_path = skill_dir / "references" / "fast-path-sft.md"
     assert skill.is_file()
     assert tests.is_file()
+    assert sft_fast_path.is_file()
     text = skill.read_text()
     assert "name: nemo-customizer" in text
     assert "nemo customization automodel --job-json" in text
-    assert "nemo customization unsloth --job-json" in text
-    assert "run --venv" not in text
+    # The unsloth submit command lives in the SFT fast path that SKILL.md points to.
+    assert "references/fast-path-sft.md" in text
+    assert "nemo customization unsloth --job-json" in sft_fast_path.read_text()
+    for doc in [skill, *sorted((skill_dir / "references").glob("*.md"))]:
+        assert "run --venv" not in doc.read_text(), doc.name

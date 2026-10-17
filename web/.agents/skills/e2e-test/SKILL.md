@@ -4,6 +4,8 @@
 
 name: e2e-test
 description: End-to-end testing workflow with Playwright. Use when writing, running, or debugging E2E tests for Studio user flows.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # E2E Testing Workflow

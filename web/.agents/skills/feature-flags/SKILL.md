@@ -4,6 +4,8 @@
 
 name: feature-flags
 description: Inspect and manage Studio feature flags. Use when working with feature flags, adding new flags, checking flag state across environments, or debugging why a feature is enabled/disabled.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Feature Flags
