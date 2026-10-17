@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getErrorMessage } from '@nemo/common/src/api/common/utils';
+import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { formatDurationMs } from '@nemo/common/src/utils/date';
 import { type Span } from '@nemo/sdk/generated/platform/schema';
 import { useGetSpan } from '@nemo/sdk/generated/platform/spans';
@@ -39,7 +41,11 @@ const AgentReply: FC<{ workspace: string; replySpanId: string | undefined }> = (
   workspace,
   replySpanId,
 }) => {
-  const { data: replySpan, isLoading } = useGetSpan(workspace, replySpanId ?? '', {
+  const {
+    data: replySpan,
+    isLoading,
+    error,
+  } = useGetSpan(workspace, replySpanId ?? '', {
     query: { enabled: Boolean(replySpanId) },
   });
   const outputFormat = useSpanPayloadFormat(replySpan?.output);
@@ -49,15 +55,17 @@ const AgentReply: FC<{ workspace: string; replySpanId: string | undefined }> = (
       <Flex justify="end">
         <SpanPayloadFormatToggle state={outputFormat} payloadLabel="reply" />
       </Flex>
-      {isLoading ? (
-        <PayloadPending />
-      ) : (
+      {isLoading ? <PayloadPending /> : null}
+      {!isLoading && error ? (
+        <ErrorMessage message={`The reply couldn't be loaded: ${getErrorMessage(error)}`} />
+      ) : null}
+      {!isLoading && !error ? (
         <SpanPayloadView
           value={replySpan?.output}
           format={outputFormat.format}
           emptyMessage="No reply was recorded for this test."
         />
-      )}
+      ) : null}
     </Stack>
   );
 };

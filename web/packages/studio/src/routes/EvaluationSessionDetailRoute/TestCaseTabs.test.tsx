@@ -100,4 +100,23 @@ describe('TestCaseTabs', () => {
       await screen.findByText('No tool calls were recorded for this test.')
     ).toBeInTheDocument();
   });
+
+  it('reports a failed reply fetch instead of a missing reply', async () => {
+    server.use(
+      http.get(mockApiUrl(getGetSpanQueryKey, ':workspace', ':spanId'), () =>
+        HttpResponse.json({ detail: 'Span store unavailable' }, { status: 500 })
+      )
+    );
+
+    render(
+      <TestCaseTabs
+        workspace="default"
+        trajectories={trajectoryOf([span({ span_id: 'agent', kind: SpanKind.AGENT })])}
+        traceView={null}
+      />
+    );
+
+    expect(await screen.findByText(/The reply couldn't be loaded/)).toBeInTheDocument();
+    expect(screen.queryByText('No reply was recorded for this test.')).not.toBeInTheDocument();
+  });
 });
