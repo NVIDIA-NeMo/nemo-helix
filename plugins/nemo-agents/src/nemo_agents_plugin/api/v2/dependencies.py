@@ -7,7 +7,12 @@ Re-exports the standard NeMo Helix dependencies so route handlers can import fro
 a single location.
 """
 
+from collections.abc import AsyncIterator
+
+import httpx
 from fastapi import Depends
+from nemo_agents_plugin.config import AgentsConfig
+from nemo_agents_plugin.container.image_bundle import RegistryPolicy
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entity_client import get_entity_client
@@ -19,4 +24,15 @@ def get_files_client(client: AsyncNemoClient = Depends(get_nemo_client)) -> Asyn
     return AsyncFilesClient.from_client(client)
 
 
-__all__ = ["get_entity_client", "get_files_client"]
+async def get_registry_http_client() -> AsyncIterator[httpx.AsyncClient]:
+    """Provide an HTTP client for container registries; image_bundle follows redirects itself."""
+    async with httpx.AsyncClient(follow_redirects=False, timeout=httpx.Timeout(30.0)) as http:
+        yield http
+
+
+def get_image_registry_policy() -> RegistryPolicy:
+    """Provide the registries agents may be read from, per the plugin configuration."""
+    return RegistryPolicy.from_entries(AgentsConfig.get().deployments.image_registries)
+
+
+__all__ = ["get_entity_client", "get_files_client", "get_image_registry_policy", "get_registry_http_client"]

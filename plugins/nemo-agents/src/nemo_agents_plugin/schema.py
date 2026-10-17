@@ -117,6 +117,29 @@ class DeploymentModeList(BaseModel):
     data: list[DeploymentModeAvailability]
 
 
+class ReadAgentImageBundleRequest(BaseModel):
+    """Request for ``POST /v2/workspaces/{workspace}/agent-images/bundle``."""
+
+    image: str = Field(description="Image reference, e.g. docker.io/org/agent:1.0, built by nemo agents package.")
+
+
+class AgentImageBundleFile(BaseModel):
+    path: str = Field(description="Path relative to the directory holding agent.yaml.")
+    content: str = Field(description="Base64-encoded file content.")
+
+
+class AgentImageBundle(BaseModel):
+    """The agent directory that ``nemo agents package`` copied into an image."""
+
+    image: str = Field(description="The image reference that was read.")
+    digest: str = Field(description="Digest of the manifest the reference resolved to when it was read.")
+    pinned_image: str = Field(
+        description="The image pinned to that digest. Deploy it so the deployment runs the files that were read."
+    )
+    config_path: str = Field(description="AGENT_CONFIG_PATH inside the image, resolved against its WorkingDir.")
+    files: list[AgentImageBundleFile] = Field(description="Every file of the agent bundle, including agent.yaml.")
+
+
 # ---------------------------------------------------------------------------
 # List response type aliases
 # ---------------------------------------------------------------------------
