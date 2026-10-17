@@ -194,6 +194,19 @@ export const EvaluationSessionsDataView: FC<EvaluationSessionsDataViewProps> = (
         );
       },
     }),
+    ...evaluatorNames.map((name, index) =>
+      accessor((original) => original.evaluator_scores?.[name], {
+        id: `score-${index}`,
+        header: snakeCaseToTitleCase(name),
+        enableSorting: false,
+        size: 210,
+        meta: { alignment: 'right' },
+        cell: ({ row }) => {
+          const value = row.original.evaluator_scores?.[name];
+          return <Text>{formatEvaluatorScore(value)}</Text>;
+        },
+      })
+    ),
     accessor('status', {
       header: 'Status',
       enableSorting: true,
@@ -248,19 +261,6 @@ export const EvaluationSessionsDataView: FC<EvaluationSessionsDataViewProps> = (
           return <Text>{formatInteger((input_tokens ?? 0) + (output_tokens ?? 0))}</Text>;
         },
       }
-    ),
-    ...evaluatorNames.map((name, index) =>
-      accessor((original) => original.evaluator_scores?.[name], {
-        id: `score-${index}`,
-        header: snakeCaseToTitleCase(name),
-        enableSorting: false,
-        size: 130,
-        meta: { alignment: 'right' },
-        cell: ({ row }) => {
-          const value = row.original.evaluator_scores?.[name];
-          return <Text>{formatEvaluatorScore(value)}</Text>;
-        },
-      })
     ),
   ];
 

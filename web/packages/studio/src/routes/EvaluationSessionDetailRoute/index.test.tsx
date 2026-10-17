@@ -7,6 +7,7 @@ import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { EvaluationSessionDetailRoute } from '@studio/routes/EvaluationSessionDetailRoute';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
+import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
 const renderSessionDetail = (search = '') =>
@@ -51,10 +52,12 @@ describe('EvaluationSessionDetailRoute', () => {
   });
 
   it('retains evaluation context while rendering a selected trace', async () => {
+    const user = userEvent.setup();
     renderSessionDetail('?traceId=trace-agent-run-001');
 
     expect(await screen.findByText('Test case: case-0042')).toBeInTheDocument();
-    expect(screen.getByText('Evaluation Context')).toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: 'Trace' }));
+    expect(await screen.findByText('Evaluation Context')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Intake' })).not.toBeInTheDocument();
   });
 
