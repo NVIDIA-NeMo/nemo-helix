@@ -525,7 +525,8 @@ class _AgentEvalJobBase(NemoJob):
         async_client: AsyncNemoClient,
     ) -> dict:
         """Keep any Linux Docker forwarder alive through execution and result persistence."""
-        with harbor_gateway_config(config, platform_base_url=str(platform_client.base_url)) as reachable:
+        base_url = str(getattr(platform_client, "base_url", ""))
+        with harbor_gateway_config(config, platform_base_url=base_url) as reachable:
             return self._run_with_reachable_client(
                 reachable, ctx=ctx, platform_client=platform_client, async_client=async_client
             )
