@@ -8,6 +8,8 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Jsonb
 
+from scaled_evals.api.task_store import TaskStore
+
 
 class BenchmarkImportRepository:
     def __init__(self, conn: psycopg.Connection) -> None:
@@ -118,13 +120,20 @@ class BenchmarkImportRepository:
         """Attach one immutable image identity, accepting exact idempotent replays."""
         with self.conn.cursor() as cur:
             cur.execute(
+                "SELECT task_id, task_revision FROM benchmark_import_tasks WHERE import_id = %s AND slug = %s",
+                (import_id, slug),
+            )
+            row = cur.fetchone()
+            # ponytail: the uploading check and the update are not atomic; a
+            # finalize landing in between leaves an unused requested image.
+            revision = row and TaskStore().revision(row["task_id"], row["task_revision"])
+            if not revision or revision["status"] != "uploading":
+                return False
+            cur.execute(
                 """
                 UPDATE benchmark_import_tasks i
                 SET image_ref = %s, image_digest = %s, image_metadata = %s
-                FROM task_revisions r
                 WHERE i.import_id = %s AND i.slug = %s
-                  AND r.task_id = i.task_id AND r.revision = i.task_revision
-                  AND r.status = 'uploading'
                   AND (i.image_ref IS NULL OR (i.image_ref = %s AND i.image_digest = %s))
                 RETURNING i.slug
                 """,
@@ -166,18 +175,21 @@ class BenchmarkImportRepository:
                 SELECT i.position, i.slug, i.task_id, i.task_revision, i.pack_path,
                        i.pack_sha256, i.image_ref AS requested_image_ref,
                        i.image_digest AS requested_image_digest,
-                       i.image_metadata AS requested_image_metadata,
-                       r.status, r.image_ref, r.image_digest, r.build_error,
-                       r.tarball_object_key
+                       i.image_metadata AS requested_image_metadata
                 FROM benchmark_import_tasks i
-                JOIN task_revisions r
-                  ON r.task_id = i.task_id AND r.revision = i.task_revision
                 WHERE i.import_id = %s
                 ORDER BY i.position
                 """,
                 (import_id,),
             )
-            return cur.fetchall()
+            rows = cur.fetchall()
+        revisions = TaskStore().revisions((row["task_id"], row["task_revision"]) for row in rows)
+        fields = ("status", "image_ref", "image_digest", "build_error", "tarball_object_key")
+        return [
+            {**row, **{field: revision[field] for field in fields}}
+            for row in rows
+            if (revision := revisions.get((row["task_id"], row["task_revision"])))
+        ]
 
     def lock_benchmark_slug(self, slug: str) -> None:
         with self.conn.cursor() as cur:

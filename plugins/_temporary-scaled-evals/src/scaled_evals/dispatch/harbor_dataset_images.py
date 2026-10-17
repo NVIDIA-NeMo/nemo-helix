@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import psycopg
 import yaml
 
 from scaled_evals.api import artifacts
@@ -26,8 +25,8 @@ from scaled_evals.api.build.task_image_identity import (
     resolve_upstream_image,
 )
 from scaled_evals.api.repositories.base_repository import Conflict
-from scaled_evals.api.repositories.task_repository import TaskRepository
 from scaled_evals.api.settings import settings
+from scaled_evals.api.task_store import TaskStore
 from scaled_evals.api.utils import make_id
 from scaled_evals.harbor_dataset_import import (
     HarborDatasetImageImport,
@@ -136,7 +135,6 @@ def _runtime_image(image_ref: str, image_digest: str) -> str:
 
 
 def _queue_import_revision(
-    conn: psycopg.Connection,
     *,
     member: Mapping[str, Any],
     source_image: str,
@@ -162,7 +160,7 @@ def _queue_import_revision(
     ).hexdigest()
     slug = f"harbor-{task_name[:28]}-{identity[:24]}"[:63]
     description = f"managed Harbor dataset image import {identity}"
-    repo = TaskRepository(conn)
+    repo = TaskStore()
     task = repo.get_by_slug(slug)
     if task is None:
         task_id = make_id("task")
@@ -241,7 +239,6 @@ def _queue_import_revision(
 
 
 def prepare_dataset_images(
-    conn: psycopg.Connection,
     *,
     datasets: list[dict[str, Any]],
     harbor_dir: str,
@@ -255,14 +252,13 @@ def prepare_dataset_images(
             raise RuntimeError(f"Harbor dataset task has no images: {member.get('name')}")
         for source_image in images:
             task_id, revision, immutable = _queue_import_revision(
-                conn,
                 member=member,
                 source_image=str(source_image),
             )
             pending[(task_id, revision)] = (str(source_image), immutable)
 
     deadline = time.monotonic() + settings.harbor_dataset_image_prepare_timeout_seconds
-    repo = TaskRepository(conn)
+    repo = TaskStore()
     while True:
         if renew is not None:
             renew()

@@ -29,11 +29,11 @@ from nemo_scaled_evals_plugin.submitter import EvaluationSubmitter
 from scaled_evals.api.build.queue_worker import TaskBuildWorker
 from scaled_evals.api.db import pooled_connection
 from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
-from scaled_evals.api.repositories.build_repository import TaskBuildJob, TaskBuildRepository
 from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
 from scaled_evals.api.repositories.execution_cleanup_repository import ExecutionCleanupRepository
 from scaled_evals.api.repositories.ops_repository import OperationsRepository
 from scaled_evals.api.settings import settings
+from scaled_evals.api.task_store import TaskBuildJob, TaskStore
 from scaled_evals.dispatch.worker import Dispatcher, _retry_delay_seconds, teardown_orphaned_execution
 
 LOG = logging.getLogger(__name__)
@@ -399,33 +399,29 @@ class ScaledEvalsJobsController(NemoController):
             await asyncio.to_thread(self._settle_cancel_teardown, row, name)
 
     def _claim_build(self) -> TaskBuildJob | None:
-        with pooled_connection() as conn:
-            return TaskBuildRepository(conn).claim_next(
-                worker_id=self._worker_id,
-                claim_timeout=TaskBuildWorker.claim_timeout,
-                max_attempts=TaskBuildWorker.max_attempts,
-            )
+        return TaskStore().claim_next(
+            worker_id=self._worker_id,
+            claim_timeout=TaskBuildWorker.claim_timeout,
+            max_attempts=TaskBuildWorker.max_attempts,
+        )
 
     def _bind_build(self, job: TaskBuildJob, name: str) -> bool:
-        with pooled_connection() as conn:
-            return TaskBuildRepository(conn).bind_platform_job(
-                job.task_id,
-                job.revision,
-                worker_id=self._worker_id,
-                job_name=name,
-            )
+        return TaskStore().bind_platform_job(
+            job.task_id,
+            job.revision,
+            worker_id=self._worker_id,
+            job_name=name,
+        )
 
     def _list_builds(self) -> list[dict[str, Any]]:
-        with pooled_connection() as conn:
-            return TaskBuildRepository(conn).list_platform_jobs()
+        return TaskStore().list_platform_jobs()
 
     def _heartbeat_build(self, row: dict[str, Any]) -> bool:
-        with pooled_connection() as conn:
-            return TaskBuildRepository(conn).heartbeat(
-                str(row["task_id"]),
-                int(row["revision"]),
-                worker_id=str(row["job_name"]),
-            )
+        return TaskStore().heartbeat(
+            str(row["task_id"]),
+            int(row["revision"]),
+            worker_id=str(row["job_name"]),
+        )
 
     def _fail_build(self, job: TaskBuildJob, name: str, detail: str) -> bool:
         return self._fail_build_row(
@@ -439,16 +435,15 @@ class ScaledEvalsJobsController(NemoController):
         )
 
     def _fail_build_row(self, row: dict[str, Any], detail: str) -> bool:
-        with pooled_connection() as conn:
-            return TaskBuildRepository(conn).retry_or_fail(
-                str(row["task_id"]),
-                int(row["revision"]),
-                worker_id=str(row["job_name"]),
-                build_error=detail,
-                attempt=int(row["build_attempts"]),
-                max_attempts=TaskBuildWorker.max_attempts,
-                retry_delay=TaskBuildWorker.retry_delay,
-            )
+        return TaskStore().retry_or_fail(
+            str(row["task_id"]),
+            int(row["revision"]),
+            worker_id=str(row["job_name"]),
+            build_error=detail,
+            attempt=int(row["build_attempts"]),
+            max_attempts=TaskBuildWorker.max_attempts,
+            retry_delay=TaskBuildWorker.retry_delay,
+        )
 
     def _claim_stale_evaluation(self) -> dict[str, Any] | None:
         with pooled_connection() as conn:
