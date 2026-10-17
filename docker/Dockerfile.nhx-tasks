@@ -34,6 +34,10 @@ RUN mkdir -p /app/.runtime-home/nvs
 # Job steps and plugin tasks may shell out to small POSIX utilities. Keep the
 # runtime distroless while preserving that command surface in one final layer.
 # NVIDIA distroless maps /bin to /usr/bin, so merge utilities into /usr/bin.
+# Patch any W&B installed by the CPU task group after the final sync.
+RUN --mount=from=wandb-core-artifacts,source=/wandb-core,target=/tmp/wandb-core,readonly \
+    /app/.venv/bin/python /tmp/wandb-core/install.py --artifact /tmp/wandb-core --optional /app
+
 FROM scratch AS cpu-task-runtime-tools
 COPY --from=root-busybox /bin/chmod /usr/bin/chmod
 COPY --from=root-busybox /bin/sh /usr/bin/sh

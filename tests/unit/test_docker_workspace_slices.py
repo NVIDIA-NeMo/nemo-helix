@@ -109,9 +109,9 @@ def _workspace_sources(pyproject: dict) -> set[str]:
     "path",
     [pytest.param(ROOT / path, id=str(path)) for path in DOCKER_IMAGE_WANDB_CONFIG_PATHS],
 )
-def test_distributed_image_wandb_specs_use_notice_floor(path: Path) -> None:
-    """Docker image wandb constraints must use the reviewed wandb-core floor."""
-    expected = f"wandb>={_notice_wandb_version()}"
+def test_distributed_image_wandb_specs_match_rebuilt_core(path: Path) -> None:
+    """The Python SDK must match the centrally rebuilt core, not just a floor."""
+    expected = f"wandb=={_notice_wandb_version()}"
     assert path.exists()
 
     specs = _wandb_package_specs(path)

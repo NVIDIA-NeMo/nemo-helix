@@ -238,4 +238,7 @@ RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/r
 ENTRYPOINT ["/opt/venv/bin/python"]
 CMD ["-m", "nhx.unsloth.tasks.training", "--help"]
 
+RUN --mount=from=wandb-core-artifacts,source=/wandb-core,target=/tmp/wandb-core,readonly \
+    ${VIRTUAL_ENV}/bin/python /tmp/wandb-core/install.py --artifact /tmp/wandb-core /opt /usr/local/lib /home /root/.cache
+
 USER ${USER_UID}:${USER_GID}

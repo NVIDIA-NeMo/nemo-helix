@@ -128,6 +128,9 @@ ENV PATH="/opt/nemo_rl_venv/bin:${PATH}" \
 ENTRYPOINT ["/opt/venv/bin/python"]
 CMD ["-m", "nhx.rl.tasks.training", "--help"]
 
+RUN --mount=from=wandb-core-artifacts,source=/wandb-core,target=/tmp/wandb-core,readonly \
+    /opt/nemo_rl_venv/bin/python /tmp/wandb-core/install.py --artifact /tmp/wandb-core /opt /usr/local/lib /home /root/.cache
+
 USER ${USER_UID}:${USER_GID}
 
 # Smoke-test stage: CPU-only import checks (tests/smoke_gpu/test_rl_training.py, pytest marker

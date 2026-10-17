@@ -35,6 +35,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     && find /opt/gym-venv -type d -path '*/site-packages/ray/jars' -prune -exec rm -rf {} + \
     && test -z "$(find /opt/gym-venv -path '*/site-packages/ray/jars/*' -print -quit)"
 
+RUN --mount=from=wandb-core-artifacts,source=/wandb-core,target=/tmp/wandb-core,readonly \
+    /opt/gym-venv/bin/python /tmp/wandb-core/install.py --artifact /tmp/wandb-core /opt/gym-venv
+
 FROM cpu-tasks AS runtime
 COPY --chown=1000:1000 --from=gym-builder /opt/gym-venv /opt/gym-venv
 COPY --from=gym-builder /usr/local/bin/python* /usr/local/bin/

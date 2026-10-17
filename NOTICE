@@ -148,8 +148,15 @@ wandb-core MPL-2.0 Go dependencies
     https://files.pythonhosted.org/packages/86/10/c4481d12b26f57606d1ef7c8d56825ad6af769cbb8cd29ee501ac6bbbc2d/wandb-0.30.0.tar.gz
   wandb upstream source:
     https://github.com/wandb/wandb
-  wandb-core source at reported build commit:
-    https://github.com/wandb/wandb/tree/v0.30.0
+  wandb-core source at pinned build commit:
+    https://github.com/wandb/wandb/tree/e5ec9dc9236d1a4fbb9fe7c0795bbccdff1e0e77
+  Container builds replace the upstream wheel's executable with a rebuild
+  using Go 1.27.2 and golang.org/x/net v0.60.0. All other vendored sources,
+  including the MPL-covered modules below, are preserved unmodified.
+  Replacement x/net module source:
+    https://proxy.golang.org/golang.org/x/net/@v/v0.60.0.zip
+  Rebuild recipe: docker/base/Dockerfile.wandb-core and
+    docker/scripts/build-wandb-core.py
   License: MPL-2.0
   License text: LICENSES/MPL-2.0.txt
 

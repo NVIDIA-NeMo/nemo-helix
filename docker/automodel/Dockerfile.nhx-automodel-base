@@ -140,7 +140,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "sqlparse>=0.6.0,<0.7" \
     "grpcio>=1.81.1,<2" \
     "thrift>=0.24.0" \
-    "wandb>=0.30.0"
+    "wandb==0.30.0"
 
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
@@ -152,6 +152,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --label base-venv
 
 # Published base image (same filesystem as builder).
+# Patch the published base as well as downstream training images.
+RUN --mount=from=wandb-core-artifacts,source=/wandb-core,target=/tmp/wandb-core,readonly \
+    /opt/venv/bin/python /tmp/wandb-core/install.py --artifact /tmp/wandb-core /opt/venv
+
 FROM ${PYTORCH_BASE} AS nhx-automodel-base
 ARG PYTORCH_BASE
 COPY --from=nhx-automodel-base-builder /opt/venv /opt/venv
