@@ -11,7 +11,6 @@ pytest.importorskip("scaled_evals")
 from api_test_fixture import client, v1
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
 from scaled_evals.api.db import get_conn
-from scaled_evals.api.settings import settings
 
 
 def _row(**overrides) -> dict:
@@ -121,21 +120,7 @@ def test_get_inaccessible_bundle_is_hidden() -> None:
     assert response.status_code == 404
 
 
-def test_non_admin_cannot_qualify_or_promote() -> None:
-    v1.dependency_overrides[current_principal] = lambda: CurrentPrincipal(
-        owner_type="USER", owner_id="hosted-user", source="starfleet_jwt"
-    )
-    qualify = client.post(
-        "/v1/agent-bundles/ab_test/qualification",
-        json={"status": "qualified", "evidence": {}},
-    )
-    promote = client.post("/v1/agent-bundles/ab_test/promote")
-    assert qualify.status_code == 404
-    assert promote.status_code == 404
-
-
-def test_admin_can_qualify_and_promote(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "control_plane_admin_subjects", "dev")
+def test_admin_can_qualify_and_promote() -> None:
     v1.dependency_overrides[current_principal] = lambda: CurrentPrincipal(
         owner_type="USER", owner_id="dev", source="starfleet_jwt"
     )

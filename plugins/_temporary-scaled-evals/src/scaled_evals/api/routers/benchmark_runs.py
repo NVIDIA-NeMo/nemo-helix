@@ -4,6 +4,7 @@
 import json
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
+from functools import partial
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -33,6 +34,7 @@ from scaled_evals.api.schemas.benchmark_runs import (
 from scaled_evals.api.schemas.common import DeleteResponse, ListEnvelope, page_from_rows
 from scaled_evals.api.schemas.evaluations import Evaluation
 from scaled_evals.api.schemas.runnability import RunnabilityReport
+from scaled_evals.api.tenancy import IsAdmin
 from scaled_evals.api.utils import make_id
 
 router = APIRouter(prefix="/benchmark-runs", tags=["benchmark-runs"])
@@ -169,6 +171,7 @@ def preflight_benchmark_run_request(
     db: Db,
     current: Principal,
     secrets: Secrets,
+    admin: IsAdmin,
 ) -> RunnabilityReport:
     """Check whether a benchmark-run request is runnable without creating it."""
     result = preflight_benchmark_run(
@@ -176,7 +179,7 @@ def preflight_benchmark_run_request(
         body,
         current,
         object_exists=artifacts.object_exists,
-        resolve_bundle=accessible_bundle_for_run,
+        resolve_bundle=partial(accessible_bundle_for_run, include_all=admin),
         secret_readable=secrets,
     )
     return result.report
@@ -184,7 +187,7 @@ def preflight_benchmark_run_request(
 
 @router.post("", status_code=202, response_model=BenchmarkRunResponse)
 def create_benchmark_run(
-    body: CreateBenchmarkRunRequest, db: Db, current: Principal, secrets: Secrets
+    body: CreateBenchmarkRunRequest, db: Db, current: Principal, secrets: Secrets, admin: IsAdmin
 ) -> BenchmarkRunResponse:
     """Run a benchmark by aggregating one evaluation per member task.
 
@@ -201,7 +204,7 @@ def create_benchmark_run(
         body,
         current,
         object_exists=artifacts.object_exists,
-        resolve_bundle=accessible_bundle_for_run,
+        resolve_bundle=partial(accessible_bundle_for_run, include_all=admin),
         secret_readable=secrets,
     )
     if isinstance(preflight, BlockedPreflight):

@@ -5,6 +5,7 @@ from typing import Annotated
 
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Query
+from nemo_scaled_evals_plugin.authz import admin_only
 
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
 from scaled_evals.api.db import Database, get_db
@@ -15,14 +16,13 @@ from scaled_evals.api.schemas.agent_bundles import (
     AgentBundleVisibility,
 )
 from scaled_evals.api.schemas.common import DeleteResponse, ListEnvelope, page_from_rows
-from scaled_evals.api.tenancy import is_admin, require_admin
+from scaled_evals.api.tenancy import IsAdmin
 from scaled_evals.api.utils import make_id
 
 router = APIRouter(prefix="/agent-bundles", tags=["agent-bundles"])
 
 Db = Annotated[Database, Depends(get_db)]
 Principal = Annotated[CurrentPrincipal, Depends(current_principal)]
-Admin = Annotated[CurrentPrincipal, Depends(require_admin)]
 
 
 def _http_error(status: int, code: str, message: str) -> HTTPException:
@@ -54,6 +54,7 @@ def create_agent_bundle(body: AgentBundleCreate, db: Db, current: Principal) -> 
 def list_agent_bundles(
     db: Db,
     current: Principal,
+    admin: IsAdmin,
     mine: bool = False,
     visibility: AgentBundleVisibility | None = None,
     limit: int = Query(default=20, ge=1, le=100),
@@ -62,7 +63,7 @@ def list_agent_bundles(
 ) -> ListEnvelope[AgentBundle]:
     rows = db.agent_bundles.list_accessible(
         owner_id=current.owner_id,
-        include_all=current.source == "disabled" or is_admin(current),
+        include_all=admin,
         mine=mine,
         visibility=visibility,
         limit=limit,
@@ -73,11 +74,11 @@ def list_agent_bundles(
 
 
 @router.get("/{bundle_id}", response_model=AgentBundle)
-def get_agent_bundle(bundle_id: str, db: Db, current: Principal) -> AgentBundle:
+def get_agent_bundle(bundle_id: str, db: Db, current: Principal, admin: IsAdmin) -> AgentBundle:
     row = db.agent_bundles.get_accessible(
         bundle_id,
         owner_id=current.owner_id,
-        include_all=current.source == "disabled" or is_admin(current),
+        include_all=admin,
     )
     if row is None:
         raise _http_error(404, "not_found", "agent bundle not found")
@@ -85,11 +86,12 @@ def get_agent_bundle(bundle_id: str, db: Db, current: Principal) -> AgentBundle:
 
 
 @router.post("/{bundle_id}/qualification", response_model=AgentBundle)
+@admin_only
 def set_agent_bundle_qualification(
     bundle_id: str,
     body: AgentBundleQualificationUpdate,
     db: Db,
-    current: Admin,
+    current: Principal,
 ) -> AgentBundle:
     row = db.agent_bundles.set_qualification(
         bundle_id,
@@ -103,7 +105,8 @@ def set_agent_bundle_qualification(
 
 
 @router.post("/{bundle_id}/promote", response_model=AgentBundle)
-def promote_agent_bundle(bundle_id: str, db: Db, current: Admin) -> AgentBundle:
+@admin_only
+def promote_agent_bundle(bundle_id: str, db: Db, current: Principal) -> AgentBundle:
     row = db.agent_bundles.promote(bundle_id, qualified_by=current.owner_id)
     if row is None:
         existing = db.agent_bundles.get_accessible(bundle_id, owner_id=current.owner_id, include_all=True)
@@ -118,11 +121,11 @@ def promote_agent_bundle(bundle_id: str, db: Db, current: Admin) -> AgentBundle:
 
 
 @router.delete("/{bundle_id}", response_model=DeleteResponse)
-def delete_agent_bundle(bundle_id: str, db: Db, current: Principal) -> DeleteResponse:
+def delete_agent_bundle(bundle_id: str, db: Db, current: Principal, admin: IsAdmin) -> DeleteResponse:
     deleted = db.agent_bundles.soft_delete(
         bundle_id,
         owner_id=current.owner_id,
-        include_all=current.source == "disabled" or is_admin(current),
+        include_all=admin,
     )
     if not deleted:
         raise _http_error(404, "not_found", "agent bundle not found")

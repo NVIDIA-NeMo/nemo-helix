@@ -18,7 +18,7 @@ pytest.importorskip("scaled_evals")
 from api_test_fixture import client, v1
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
 from scaled_evals.api.db import get_conn
-from scaled_evals.api.settings import settings
+from scaled_evals.api.tenancy import caller_is_admin
 
 _VALID_GYM_CONFIG = {
     "command": "run_and_collect",
@@ -42,6 +42,7 @@ def _override_db():
     yield
     v1.dependency_overrides.pop(get_conn, None)
     v1.dependency_overrides.pop(current_principal, None)
+    v1.dependency_overrides[caller_is_admin] = lambda: True
 
 
 def _use_principal(owner_id: str) -> None:
@@ -344,6 +345,7 @@ def test_create_stamps_caller_as_owner() -> None:
 
 def test_patch_by_non_owner_returns_404() -> None:
     _use_principal("user-2")
+    v1.dependency_overrides[caller_is_admin] = lambda: False
     conn = MagicMock()
     cur = conn.cursor.return_value.__enter__.return_value
     # get() finds the profile; the owner-scoped UPDATE matches no row.
@@ -364,6 +366,7 @@ def test_patch_by_non_owner_returns_404() -> None:
 
 def test_delete_by_non_owner_returns_404() -> None:
     _use_principal("user-2")
+    v1.dependency_overrides[caller_is_admin] = lambda: False
     conn = MagicMock()
     cur = conn.cursor.return_value.__enter__.return_value
     # No active evaluation references it; the owner-scoped UPDATE matches no row.
@@ -381,8 +384,7 @@ def test_delete_by_non_owner_returns_404() -> None:
     assert "user-2" in update.args[1]
 
 
-def test_admin_patch_bypasses_owner_scope(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "control_plane_admin_subjects", "admin-1")
+def test_admin_patch_bypasses_owner_scope() -> None:
     _use_principal("admin-1")
     conn = MagicMock()
     cur = conn.cursor.return_value.__enter__.return_value

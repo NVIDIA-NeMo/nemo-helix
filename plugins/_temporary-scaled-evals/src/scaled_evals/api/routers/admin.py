@@ -5,51 +5,40 @@ from datetime import UTC, datetime, time, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from nemo_scaled_evals_plugin.authz import admin_only
 
-from scaled_evals.api.auth import CurrentPrincipal
+from scaled_evals.api import execution_analytics
 from scaled_evals.api.db import Database, get_db
 from scaled_evals.api.schemas.common import (
     AdminCapacityResponse,
     AdminComputeSummaryResponse,
     AdminFailureSummaryResponse,
     AdminUsageSummaryResponse,
-    AdminUserRecord,
     AdminUserSummaryResponse,
     ListEnvelope,
     page_from_rows,
 )
 from scaled_evals.api.schemas.evaluations import Evaluation
 from scaled_evals.api.settings import settings
-from scaled_evals.api.tenancy import require_admin
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 Db = Annotated[Database, Depends(get_db)]
-Admin = Annotated[CurrentPrincipal, Depends(require_admin)]
-
-
-@router.get("/users", response_model=ListEnvelope[AdminUserRecord])
-def admin_users(
-    db: Db,
-    _admin: Admin,
-    q: str = Query(default="", min_length=0, max_length=200),
-    limit: int = Query(default=20, ge=1, le=100),
-    cursor: str | None = None,
-) -> ListEnvelope[AdminUserRecord]:
-    rows = db.users.list(q=q.strip(), limit=limit, cursor=cursor)
-    return page_from_rows(rows, limit, AdminUserRecord)
+FromTime = Annotated[datetime | None, Query(alias="from")]
+ToTime = Annotated[datetime | None, Query(alias="to")]
 
 
 @router.get("/users/{user_id}/summary", response_model=AdminUserSummaryResponse)
-def admin_user_summary(user_id: str, db: Db, _admin: Admin) -> AdminUserSummaryResponse:
+@admin_only
+def admin_user_summary(user_id: str, db: Db) -> AdminUserSummaryResponse:
     summary = db.users.summary(user_id)
     return AdminUserSummaryResponse(user_id=user_id, **summary)
 
 
 @router.get("/users/{user_id}/evaluations", response_model=ListEnvelope[Evaluation])
+@admin_only
 def admin_user_evaluations(
     user_id: str,
     db: Db,
-    _admin: Admin,
     limit: int = Query(default=20, ge=1, le=100),
     cursor: str | None = None,
 ) -> ListEnvelope[Evaluation]:
@@ -66,21 +55,13 @@ def admin_user_evaluations(
 
 
 @router.get("/capacity", response_model=AdminCapacityResponse)
-def admin_capacity(db: Db, _admin: Admin) -> AdminCapacityResponse:
+@admin_only
+def admin_capacity(db: Db) -> AdminCapacityResponse:
     return AdminCapacityResponse(
         **db.users.capacity(),
         cluster_limit=settings.control_plane_cluster_run_limit,
         per_user_limit=settings.control_plane_per_user_run_limit,
     )
-
-
-@router.get("/usage", response_model=AdminUsageSummaryResponse)
-def admin_usage(
-    db: Db,
-    _admin: Admin,
-    limit: int = Query(default=20, ge=1, le=100),
-) -> AdminUsageSummaryResponse:
-    return AdminUsageSummaryResponse(**db.users.usage_by_actor(limit=limit))
 
 
 _FAILURE_CATEGORY_COPY = {
@@ -127,40 +108,59 @@ def _admin_window(
     return window_start, window_end, days
 
 
-@router.get("/compute", response_model=AdminComputeSummaryResponse)
-def admin_compute(
+def _records(window_start: datetime, window_end: datetime) -> list[dict]:
+    return execution_analytics.load_records(
+        workspace=settings.platform_jobs_workspace, window_start=window_start, window_end=window_end
+    )
+
+
+@router.get("/usage", response_model=AdminUsageSummaryResponse)
+@admin_only
+def admin_usage(
     db: Db,
-    _admin: Admin,
+    limit: int = Query(default=20, ge=1, le=100),
     days: int = Query(default=7, ge=1, le=90),
-    from_time: Annotated[datetime | None, Query(alias="from")] = None,
-    to_time: Annotated[datetime | None, Query(alias="to")] = None,
+    from_time: FromTime = None,
+    to_time: ToTime = None,
+) -> AdminUsageSummaryResponse:
+    window_start, window_end, window_days = _admin_window(days=days, from_time=from_time, to_time=to_time, noun="usage")
+    summary = execution_analytics.usage_summary(_records(window_start, window_end), db.users.live_usage(), limit=limit)
+    return AdminUsageSummaryResponse(
+        window_days=window_days, window_start=window_start, window_end=window_end, **summary
+    )
+
+
+@router.get("/compute", response_model=AdminComputeSummaryResponse)
+@admin_only
+def admin_compute(
+    days: int = Query(default=7, ge=1, le=90),
+    from_time: FromTime = None,
+    to_time: ToTime = None,
 ) -> AdminComputeSummaryResponse:
     window_start, window_end, window_days = _admin_window(
         days=days, from_time=from_time, to_time=to_time, noun="compute"
     )
+    summary = execution_analytics.compute_summary(
+        _records(window_start, window_end), window_start=window_start, window_end=window_end
+    )
     return AdminComputeSummaryResponse(
-        **db.users.compute_summary(
-            window_days=window_days,
-            window_start=window_start,
-            window_end=window_end,
-        )
+        window_days=window_days, window_start=window_start, window_end=window_end, **summary
     )
 
 
 @router.get("/failures", response_model=AdminFailureSummaryResponse)
+@admin_only
 def admin_failures(
-    db: Db,
-    _admin: Admin,
     days: int = Query(default=7, ge=1, le=90),
     examples: int = Query(default=3, ge=1, le=10),
-    from_time: Annotated[datetime | None, Query(alias="from")] = None,
-    to_time: Annotated[datetime | None, Query(alias="to")] = None,
+    from_time: FromTime = None,
+    to_time: ToTime = None,
 ) -> AdminFailureSummaryResponse:
     window_start, window_end, window_days = _admin_window(
         days=days, from_time=from_time, to_time=to_time, noun="failure"
     )
-    summary = db.users.failure_summary(
-        window_days=window_days,
+    summary = execution_analytics.failure_summary(
+        _records(window_start, window_end),
         window_start=window_start,
         window_end=window_end,
         examples_per_category=examples,
@@ -169,4 +169,6 @@ def admin_failures(
         label, description = _FAILURE_CATEGORY_COPY.get(category["key"], _FAILURE_CATEGORY_COPY["other"])
         category["label"] = label
         category["description"] = description
-    return AdminFailureSummaryResponse(**summary)
+    return AdminFailureSummaryResponse(
+        window_days=window_days, window_start=window_start, window_end=window_end, **summary
+    )
