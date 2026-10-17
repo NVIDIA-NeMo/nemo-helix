@@ -64,7 +64,7 @@ def _row(**overrides):  # noqa: ANN001, ANN202
         "framework_profile_id": "cfg_framework",
         "harbor_profile_id": "cfg_harbor",
         "intake_profile_id": "cfg_intake",
-        "credentials": {"openai": "cred_openai"},
+        "credentials": {"openai": "team-a/openai-key"},
         "harbor_config": {
             "env": {
                 "SAFE_PROFILE": "dev",
@@ -310,7 +310,7 @@ def test_run_provenance_manifest_redacts_secret_values(tmp_path, monkeypatch) ->
     monkeypatch.setenv("POLICY_API_KEY", "sk-policy-secret")
 
     manifest = build_run_provenance_manifest(
-        _row(credentials={"openai": "cred_openai"}),
+        _row(credentials={"openai": "team-a/openai-key"}),
         status="failed",
         artifact_prefix="evaluations/ev_test123/artifacts/",
         artifact_root=tmp_path,
@@ -320,8 +320,9 @@ def test_run_provenance_manifest_redacts_secret_values(tmp_path, monkeypatch) ->
     assert "sk-do-not-serialize" not in payload
     assert "sk-env-secret" not in payload
     assert "sk-policy-secret" not in payload
-    assert "cred_openai" in payload
-    assert manifest.credentials[0].fingerprint
+    assert [c.model_dump() for c in manifest.credentials] == [
+        {"provider": "openai", "secret_name": "team-a/openai-key"}
+    ]
     assert "harbor_config" in manifest.config.config_hashes
     assert "DAYTONA_API_KEY" not in manifest.environment.env_hashes
 

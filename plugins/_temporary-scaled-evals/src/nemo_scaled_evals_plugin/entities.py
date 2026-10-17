@@ -76,8 +76,8 @@ class ScaledEvaluationExecution(NemoEntity, entity_type="scaled_evals_execution"
     is created, so the Job launches from here rather than from Postgres. Unlike
     `ScaledEvaluation`, this carries prompt content and the private execution
     snapshot, because launching needs them, so it lives in a workspace only the
-    scaled-evals service can read. Credentials appear only as role to
-    credential-id references; the payloads stay encrypted in Postgres.
+    scaled-evals service can read. Credentials appear only as provider to
+    platform-secret references; the Job resolves the values at launch.
     """
 
     evaluation_id: str

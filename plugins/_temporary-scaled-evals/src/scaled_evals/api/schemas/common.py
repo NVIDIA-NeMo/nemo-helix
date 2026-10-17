@@ -9,10 +9,30 @@ import ipaddress
 import json
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from nemo_helix_plugin.refs import parse_entity_ref
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+
+# What a credential secret is for. The model providers hold an API key; 'nhx' holds an
+# NHX Intake workspace token as YAML; 'openshift' holds a user's cluster bearer token
+# that dispatch turns into a per-evaluation kubeconfig (see dispatch.sandbox_k8s).
+CredentialProvider = Literal["openai", "anthropic", "nvidia", "nhx", "openshift"]
+
+
+def _qualified_secret_ref(value: str) -> str:
+    # An unqualified name would resolve in the service's Jobs workspace, which holds operator secrets.
+    # The message omits the value: callers who paste a raw API key here must not see it echoed.
+    try:
+        ref = parse_entity_ref(value)
+    except ValueError:
+        raise ValueError("credential must be a platform secret reference 'workspace/name'") from None
+    return f"{ref.workspace}/{ref.name}"
+
+
+# provider -> platform Secret reference, e.g. {"anthropic": "my-team/anthropic-key"}.
+CredentialRefs = dict[CredentialProvider, Annotated[str, AfterValidator(_qualified_secret_ref)]]
 
 
 def validate_scoped_egress_config(config: dict[str, Any]) -> None:

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A rejected credential write must not echo the submitted secret back."""
+"""A rejected request must not echo a submitted secret back."""
 
 from __future__ import annotations
 
@@ -21,12 +21,11 @@ except ImportError as exc:
 SECRET = "sk-do-not-echo-this-value"
 
 
-def test_rejected_credential_write_does_not_echo_the_secret() -> None:
+def test_raw_key_in_credential_reference_is_not_echoed() -> None:
     """FastAPI's default 422 includes the offending value in ``input``.
 
-    On this route that value is the whole submitted model, so the plaintext
-    ``key`` lands in the response body. Sending both ``key`` and ``yaml``
-    trips the XOR validator and is the cheapest way to reach that path.
+    A caller who pastes the API key itself where a secret reference belongs
+    would get the plaintext key back in the response body.
     """
     app = NemoServiceAdapter(ScaledEvalsService()).create_app()
     # Body validation happens after dependency solving, so without this the
@@ -35,8 +34,8 @@ def test_rejected_credential_write_does_not_echo_the_secret() -> None:
     client = TestClient(app)
 
     response = client.post(
-        "/v1/credentials",
-        json={"name": "leak-probe", "provider": "openai", "key": SECRET, "yaml": "also-set"},
+        "/v1/evaluations",
+        json={"name": "leak-probe", "task_id": "task_1", "task_revision": 1, "credentials": {"openai": SECRET}},
     )
 
     assert response.status_code == 422, response.status_code

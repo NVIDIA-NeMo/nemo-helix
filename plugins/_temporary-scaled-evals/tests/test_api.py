@@ -12,7 +12,6 @@ import pytest
 pytest.importorskip("scaled_evals")
 
 from api_test_fixture import app, client, v1
-from cryptography.fernet import Fernet
 from pydantic import ValidationError
 from scaled_evals.api import auth
 from scaled_evals.api.db import get_db
@@ -47,7 +46,6 @@ def _clear_http_metrics() -> None:
     ("path", "repository"),
     [
         ("/v1/tasks", "tasks"),
-        ("/v1/credentials", "credentials"),
         ("/v1/config-profiles", "config_profiles"),
         ("/v1/benchmarks", "benchmarks"),
         ("/v1/benchmark-runs", "benchmark_runs"),
@@ -458,7 +456,6 @@ def test_hosted_task_image_settings_require_tag_runtime_references() -> None:
     ):
         Settings.model_validate(
             {
-                "credentials_encryption_key": Fernet.generate_key().decode(),
                 "task_image_hosted_mode": True,
                 "task_image_validation_mode": "resolve",
                 "task_image_allowed_registries": "artifactory.nvidia.com",
@@ -470,7 +467,6 @@ def test_hosted_task_image_settings_require_tag_runtime_references() -> None:
 def test_hosted_task_image_settings_accept_tag_references() -> None:
     configured = Settings.model_validate(
         {
-            "credentials_encryption_key": Fernet.generate_key().decode(),
             "task_image_hosted_mode": True,
             "task_image_validation_mode": "resolve",
             "task_image_allowed_registries": "artifactory.nvidia.com",

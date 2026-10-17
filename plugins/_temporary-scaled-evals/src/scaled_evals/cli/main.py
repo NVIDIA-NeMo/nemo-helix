@@ -3,7 +3,7 @@
 
 """scaled-evals — a thin command-line client for the control-plane API.
 
-Mirrors the creation flow from docs/API.md: register credentials, save config
+Mirrors the creation flow from docs/API.md: store credentials as platform secrets, save config
 profiles, publish a task (create + upload tarball), then start an
 evaluation. Auth and endpoint resolve as flag > env var > default.
 """
@@ -44,7 +44,6 @@ from .client import (
 )
 
 VISIBILITY = ["private", "team", "org", "public"]
-CREDENTIAL_PROVIDER = ["openai", "anthropic", "nvidia", "nhx", "openshift"]
 CONFIG_PROFILE_TYPE = ["harbor", "gym", "intake"]
 FRAMEWORK = ["harbor", "nemo_gym"]
 ORDER = ["asc", "desc"]
@@ -1268,165 +1267,6 @@ def benchmark_delete(ctx: click.Context, benchmark_id: str) -> None:
     emit(data, ctx.obj["json"], [f"deleted benchmark {data.get('id', benchmark_id)}"])
 
 
-# ---------- credentials ---------------------------------------------------
-
-
-@cli.group()
-def credential() -> None:
-    """Register BYOK credentials (write-once secrets)."""
-
-
-@credential.command("create")
-@click.option("--name", required=True, help="Display name.")
-@click.option(
-    "--provider",
-    type=click.Choice(CREDENTIAL_PROVIDER),
-    required=True,
-    help="Secret category; model providers carry a key, nhx/openshift carry yaml or key payloads.",
-)
-@click.option("--key", default=None, help="Single-string secret (model API key).")
-@click.option("--yaml", "yaml_", default=None, help="Structured secret blob, inline or @file.")
-@click.pass_context
-def credential_create(ctx: click.Context, name: str, provider: str, key: str | None, yaml_: str | None) -> None:
-    """Register a credential. The secret is never echoed back."""
-    if bool(key) == bool(yaml_):
-        raise click.ClickException("provide exactly one of --key or --yaml")
-
-    body: dict[str, object] = {"name": name, "provider": provider}
-    if key:
-        body["key"] = key
-    else:
-        assert yaml_ is not None  # The exclusive key/yaml check above guarantees this.
-        body["yaml"] = load_arg(yaml_)
-
-    data = request(ctx.obj["client"], "POST", "/credentials", json=body)
-    emit(
-        data,
-        ctx.obj["json"],
-        [
-            f"credential {data['id']}",
-            f"  name:        {data.get('name')}",
-            f"  provider:    {data.get('provider')}",
-            f"  kind:        {data.get('payload_kind')}",
-            f"  fingerprint: {data.get('fingerprint')}",
-        ],
-    )
-
-
-@credential.command("list")
-@click.option("--provider", type=click.Choice(CREDENTIAL_PROVIDER), default=None)
-@click.option("--cursor", default=None, help="Pagination cursor from a prior page.")
-@click.option("--limit", type=int, default=None, help="Page size (1-100, default 20).")
-@click.option("--order", type=click.Choice(ORDER), default=None, help="Sort order by creation time.")
-@click.pass_context
-def credential_list(
-    ctx: click.Context,
-    provider: str | None,
-    cursor: str | None,
-    limit: int | None,
-    order: str | None,
-) -> None:
-    """List caller-owned credential metadata; never includes plaintext secrets."""
-    params: dict[str, object] = {}
-    if provider:
-        params["provider"] = provider
-    if limit is not None:
-        params["limit"] = limit
-    if cursor:
-        params["cursor"] = cursor
-    if order:
-        params["order"] = order
-    data = request(ctx.obj["client"], "GET", "/credentials", params=params)
-    emit_list(
-        data,
-        ctx.obj["json"],
-        lambda c: (f"{c['id']}  {str(c.get('provider')):10}  {c.get('name')}  {c.get('fingerprint') or ''}").rstrip(),
-    )
-
-
-@credential.command("get")
-@click.argument("credential_id")
-@click.pass_context
-def credential_get(ctx: click.Context, credential_id: str) -> None:
-    """Show credential metadata; plaintext secrets are never available."""
-    data = request(ctx.obj["client"], "GET", f"/credentials/{credential_id}")
-    emit(data, ctx.obj["json"], _credential_summary(data))
-
-
-@credential.command("verify")
-@click.argument("credential_id")
-@click.pass_context
-def credential_verify(ctx: click.Context, credential_id: str) -> None:
-    """Ask the control plane to validate a stored credential upstream."""
-    data = request(ctx.obj["client"], "POST", f"/credentials/{credential_id}/verify")
-    verified = data.get("verified")
-    emit(
-        data,
-        ctx.obj["json"],
-        [
-            f"credential {data.get('id', credential_id)}",
-            f"  verified: {verified if verified is not None else 'inconclusive'}",
-            f"  reason:   {data.get('reason') or ''}",
-        ],
-    )
-
-
-@credential.command("rename")
-@click.argument("credential_id")
-@click.option("--name", required=True, help="New display name.")
-@click.pass_context
-def credential_rename(ctx: click.Context, credential_id: str, name: str) -> None:
-    """Rename a credential without changing its secret."""
-    data = request(ctx.obj["client"], "PATCH", f"/credentials/{credential_id}", json={"name": name})
-    emit(data, ctx.obj["json"], _credential_summary(data))
-
-
-@credential.command("rotate")
-@click.argument("credential_id")
-@click.option("--key", default=None, help="Replacement single-string secret.")
-@click.option(
-    "--yaml",
-    "yaml_",
-    default=None,
-    help="Replacement structured secret, inline or @file.",
-)
-@click.pass_context
-def credential_rotate(ctx: click.Context, credential_id: str, key: str | None, yaml_: str | None) -> None:
-    """Replace a credential secret in place. The new secret is never echoed."""
-    if bool(key) == bool(yaml_):
-        raise click.ClickException("provide exactly one of --key or --yaml")
-    body: dict[str, object] = {}
-    if key:
-        body["key"] = key
-    else:
-        assert yaml_ is not None  # The exclusive key/yaml check above guarantees this.
-        body["yaml"] = load_arg(yaml_)
-    data = request(ctx.obj["client"], "POST", f"/credentials/{credential_id}/rotate", json=body)
-    emit(data, ctx.obj["json"], _credential_summary(data))
-
-
-@credential.command("delete")
-@click.argument("credential_id")
-@click.pass_context
-def credential_delete(ctx: click.Context, credential_id: str) -> None:
-    """Revoke a credential."""
-    data = request(ctx.obj["client"], "DELETE", f"/credentials/{credential_id}")
-    emit(data, ctx.obj["json"], [f"deleted credential {data.get('id', credential_id)}"])
-
-
-def _credential_summary(data: dict[str, object]) -> list[str]:
-    summary = [
-        f"credential {data['id']}",
-        f"  name:        {data.get('name')}",
-        f"  provider:    {data.get('provider')}",
-        f"  kind:        {data.get('payload_kind')}",
-        f"  fingerprint: {data.get('fingerprint')}",
-    ]
-    if data.get("created_at"):
-        summary.append(f"  created:     {data['created_at']}")
-    return summary
-
-
 # ---------- config profiles -----------------------------------------------
 
 
@@ -1784,8 +1624,8 @@ def evaluation_preflight(ctx: click.Context, request_body: str) -> None:
     "--credential",
     "credentials",
     multiple=True,
-    metavar="KEY=cred_id",
-    help="Credential mapping, repeatable (e.g. --credential anthropic=cred_123).",
+    metavar="PROVIDER=workspace/secret",
+    help="Credential platform secret, repeatable (e.g. --credential anthropic=my-team/anthropic-key).",
 )
 @click.option(
     "--agent-bundle",
@@ -1870,7 +1710,7 @@ def evaluation_create(
     cred_map: dict[str, str] = {}
     for item in credentials:
         if "=" not in item:
-            raise click.ClickException(f"--credential must be KEY=cred_id, got {item!r}")
+            raise click.ClickException(f"--credential must be PROVIDER=workspace/secret, got {item!r}")
         k, v = item.split("=", 1)
         cred_map[k] = v
     if cred_map:
@@ -2269,8 +2109,8 @@ def _reproduce_command(body: dict[str, object]) -> list[str]:
             command.extend([option, str(value)])
     credentials = body.get("credentials")
     if isinstance(credentials, dict):
-        for role, credential_id in sorted(credentials.items()):
-            command.extend(["--credential", f"{role}={credential_id}"])
+        for provider, secret_ref in sorted(credentials.items()):
+            command.extend(["--credential", f"{provider}={secret_ref}"])
     return command
 
 
@@ -2769,7 +2609,7 @@ def benchmark_run_preflight(ctx: click.Context, request_body: str) -> None:
     "--credential",
     "credentials",
     multiple=True,
-    metavar="KEY=cred_id",
+    metavar="PROVIDER=workspace/secret",
     help="Credential mapping, repeatable.",
 )
 @click.option(
@@ -2855,7 +2695,7 @@ def benchmark_run_create(
     cred_map: dict[str, str] = {}
     for item in credentials:
         if "=" not in item:
-            raise click.ClickException(f"--credential must be KEY=cred_id, got {item!r}")
+            raise click.ClickException(f"--credential must be PROVIDER=workspace/secret, got {item!r}")
         k, v = item.split("=", 1)
         cred_map[k] = v
     if cred_map:
@@ -3124,8 +2964,8 @@ def _benchmark_reproduce_command(body: dict[str, object]) -> list[str]:
         command.extend(["--network-policy-config", json.dumps(network_config, separators=(",", ":"))])
     credentials = body.get("credentials")
     if isinstance(credentials, dict):
-        for role, credential_id in sorted(credentials.items()):
-            command.extend(["--credential", f"{role}={credential_id}"])
+        for provider, secret_ref in sorted(credentials.items()):
+            command.extend(["--credential", f"{provider}={secret_ref}"])
     for key, option in (
         ("extra_skill_object_keys", "--extra-skill-object-key"),
         ("initial_user_turns", "--initial-user-turn"),
