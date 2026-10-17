@@ -231,7 +231,10 @@ class InsightsCLI(NemoCLI):
             ethos: Path | None = typer.Option(
                 None,
                 "--ethos",
-                help="Path to the agent's Ethos Markdown. Its contents are sent with the run.",
+                help=(
+                    "Path to the agent's Ethos Markdown. Its contents are sent with the run. "
+                    "Defaults to the agent's stored ETHOS.md, if it has one."
+                ),
             ),
             evaluation_id: str | None = typer.Option(
                 None,

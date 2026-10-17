@@ -111,8 +111,10 @@ class CreateAnalysisRunRequest(BaseModel):
     ethos: NonBlankString | None = Field(
         default=None,
         description=(
-            "Optional Ethos Markdown for the agent under test. Sent inline rather than as a "
-            "reference: the execute job's Fabric adapter has no Files access."
+            "Optional Ethos Markdown for the agent under test. When omitted, the run uses the agent's "
+            "stored `<agent>-ethos#ETHOS.md`, or runs without an Ethos if none can be read; the run's "
+            "`ethos_source` records which. Sent inline rather than as a reference: the execute job's "
+            "Fabric adapter has no Files access."
         ),
     )
     since: datetime | None = Field(
