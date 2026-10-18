@@ -143,7 +143,7 @@ Plain bullets, no label prefixes. Cover failure paths, upgrade/compatibility, an
 
 ## Draft release notes
 
-Include only proposed or approved capabilities with sufficient evidence and resolved release-note coverage. Omit excluded and unresolved entries. Group the blocks under established product-area headings (for example Agents and Fabric, Agent Evaluation, Studio, Platform, CLI, and Deployment). The text must match `docs/about/release-notes/current-release.mdx`; point to it rather than rewriting it when it already covers the capability.
+Include only proposed or approved capabilities with sufficient evidence and resolved release-note coverage. Omit excluded and unresolved entries. Group the blocks under established product-area headings (for example Agents and Fabric, Agent Evaluation, Studio, Platform, CLI, and Deployment). The text must match the target version's `docs/about/release-notes/release-<major>-<minor>-<patch>.mdx`; point to it rather than rewriting it when it already covers the capability. When auditing a historical ref, cite the note path that actually exists at that ref.
 
 ### <Product area>
 

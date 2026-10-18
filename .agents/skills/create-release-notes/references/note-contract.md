@@ -3,7 +3,11 @@
 
 # Release-note contract
 
-Use this contract for both drafting and auditing `docs/about/release-notes/current-release.mdx`.
+Use this contract for both drafting and auditing versioned notes at
+`docs/about/release-notes/release-<major>-<minor>-<patch>.mdx`.
+Each version has its own file, version-number navigation label, and explicit
+`release-<major>-<minor>-<patch>` slug. Do not create a rolling release-note page
+or rename an earlier version's note when adding a release.
 
 ## Audience and voice
 

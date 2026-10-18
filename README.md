@@ -134,7 +134,7 @@ Things you can ask it to do, once the platform is running:
 
 ## Release notes
 
-See the [current release notes](https://docs.nvidia.com/nemo-helix/documentation/reference/release-notes/current-release) for the latest features, improvements, and known limitations.
+See the [release notes](https://docs.nvidia.com/nemo-helix/documentation/reference/release-notes) for version-specific features, improvements, and known limitations.
 
 ## Skills
 
