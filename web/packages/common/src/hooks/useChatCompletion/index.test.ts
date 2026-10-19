@@ -125,4 +125,54 @@ describe('createChatCompletion', () => {
       expect.objectContaining({ fetch: mocks.platformFetch })
     );
   });
+
+  it('caches separate clients for the same base URL with different default headers', async () => {
+    mocks.create.mockResolvedValue({ choices: [] });
+    const baseParams = {
+      baseURL: 'http://localhost/headers/v1',
+      accessToken: 'test-token',
+      model: 'default/agent',
+      messages: [{ role: 'user' as const, content: 'Hello.' }],
+      stream: false as const,
+    };
+
+    await createChatCompletion({
+      ...baseParams,
+      defaultHeaders: { 'X-Nemo-Session-Id': 'session-a' },
+    });
+    await createChatCompletion({
+      ...baseParams,
+      defaultHeaders: { 'X-Nemo-Session-Id': 'session-b' },
+    });
+    await createChatCompletion({
+      ...baseParams,
+      defaultHeaders: { 'X-Nemo-Session-Id': 'session-a' },
+    });
+
+    expect(mocks.openAIConstructor).toHaveBeenCalledTimes(2);
+    expect(mocks.openAIConstructor).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ defaultHeaders: { 'X-Nemo-Session-Id': 'session-a' } })
+    );
+    expect(mocks.openAIConstructor).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ defaultHeaders: { 'X-Nemo-Session-Id': 'session-b' } })
+    );
+  });
+
+  it('reuses a cached client when default headers match in a different key order', async () => {
+    mocks.create.mockResolvedValue({ choices: [] });
+    const baseParams = {
+      baseURL: 'http://localhost/header-order/v1',
+      accessToken: 'test-token',
+      model: 'default/agent',
+      messages: [{ role: 'user' as const, content: 'Hello.' }],
+      stream: false as const,
+    };
+
+    await createChatCompletion({ ...baseParams, defaultHeaders: { 'X-A': '1', 'X-B': '2' } });
+    await createChatCompletion({ ...baseParams, defaultHeaders: { 'X-B': '2', 'X-A': '1' } });
+
+    expect(mocks.openAIConstructor).toHaveBeenCalledTimes(1);
+  });
 });

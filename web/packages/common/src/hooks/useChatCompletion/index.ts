@@ -16,6 +16,8 @@ import type { ChatCompletionRequestReturn } from '../../types/chat';
 export type UseChatCompletionParams = ChatCompletionCreateParams & {
   workspace?: string;
   baseURL?: string;
+  /** Headers sent on every request made by the cached client, e.g. `X-Nemo-Session-Id`. */
+  defaultHeaders?: Record<string, string>;
   accessToken?: string;
   signal?: AbortSignal;
 };
@@ -25,22 +27,27 @@ export type UseChatCompletionOptions = Omit<
   'mutationFn'
 >;
 
-// Cache clients by baseURL to avoid creating new instances on every request
+// Cache clients by baseURL and defaultHeaders to avoid creating new instances on every request
 const clientCache = new Map<string, OpenAI>();
 
-const getClient = (baseURL: string): OpenAI => {
-  if (!clientCache.has(baseURL)) {
+const getClientCacheKey = (baseURL: string, defaultHeaders: Record<string, string>): string =>
+  JSON.stringify([baseURL, Object.entries(defaultHeaders).sort(([a], [b]) => a.localeCompare(b))]);
+
+const getClient = (baseURL: string, defaultHeaders: Record<string, string> = {}): OpenAI => {
+  const cacheKey = getClientCacheKey(baseURL, defaultHeaders);
+  if (!clientCache.has(cacheKey)) {
     clientCache.set(
-      baseURL,
+      cacheKey,
       new OpenAI({
         apiKey: '',
         baseURL,
+        defaultHeaders,
         dangerouslyAllowBrowser: true,
         fetch: platformFetch,
       })
     );
   }
-  return clientCache.get(baseURL)!;
+  return clientCache.get(cacheKey)!;
 };
 
 export const createChatCompletion = async (
@@ -50,6 +57,7 @@ export const createChatCompletion = async (
     model,
     workspace,
     baseURL,
+    defaultHeaders,
     max_tokens,
     messages,
     stream,
@@ -72,7 +80,7 @@ export const createChatCompletion = async (
     console.warn('Warning: No access token provided. Authentication may be required.');
   }
 
-  const client = getClient(resolvedBaseURL);
+  const client = getClient(resolvedBaseURL, defaultHeaders);
 
   const request = client.chat.completions.create(
     {
