@@ -44,7 +44,9 @@ export const useLiveSeconds = ({ startDate, enabled = true }: UseLiveSecondsProp
     return () => clearInterval(interval);
   }, [lockedStartDate, enabled]);
 
-  if (lockedStartDate !== undefined) return liveSeconds;
+  if (lockedStartDate !== undefined) {
+    return liveSeconds;
+  }
   // The start locks only after the first render; read the clock until then.
   return startDate !== undefined && enabled ? secondsSince(startDate) : undefined;
 };

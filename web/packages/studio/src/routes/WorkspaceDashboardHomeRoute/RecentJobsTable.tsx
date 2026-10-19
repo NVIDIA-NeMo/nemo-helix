@@ -66,7 +66,9 @@ const buildFilter = (finishedSince: string): HelixJobsListFilter =>
   });
 
 const isRecentJob = (job: HelixJobResponse, finishedSinceMs: number): boolean => {
-  if (IN_PROGRESS_JOB_STATUSES.includes(job.status)) return true;
+  if (IN_PROGRESS_JOB_STATUSES.includes(job.status)) {
+    return true;
+  }
   const finishedAt = utcToLocalDate(job.updated_at);
   return finishedAt !== undefined && finishedAt.getTime() >= finishedSinceMs;
 };
@@ -156,7 +158,9 @@ export const RecentJobsTable = () => {
       },
       cell: ({ row }) => {
         const sourceValue = row.original.source;
-        if (!sourceValue) return '-';
+        if (!sourceValue) {
+          return '-';
+        }
         const display = SOURCE_DISPLAY[sourceValue];
         return (
           <Tag kind="outline" color="gray" density="compact" readOnly>

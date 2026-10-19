@@ -19,14 +19,18 @@ export const ElapsedTime: FC<ElapsedTimeProps> = ({ start, end, running }) => {
   const startDate = utcToLocalDate(start);
   const liveSeconds = useLiveSeconds({ startDate, enabled: running });
 
-  if (!startDate) return <Text>{EM_DASH}</Text>;
+  if (!startDate) {
+    return <Text>{EM_DASH}</Text>;
+  }
 
   if (running) {
     return <Text className="tabular-nums">{formatTimeInSeconds(liveSeconds) || '0s'}</Text>;
   }
 
   const endDate = utcToLocalDate(end);
-  if (!endDate) return <Text>{EM_DASH}</Text>;
+  if (!endDate) {
+    return <Text>{EM_DASH}</Text>;
+  }
   const seconds = (endDate.getTime() - startDate.getTime()) / 1000;
   return <Text className="tabular-nums">{formatTimeInSeconds(seconds) || '0s'}</Text>;
 };
