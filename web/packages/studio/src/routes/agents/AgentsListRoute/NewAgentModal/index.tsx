@@ -104,13 +104,14 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const deployAfterCreate = useRef<DeployOnCreatePlan | null>(null);
   const deployOnCreate = useDeployOnCreate(workspace, { enabled: open });
 
-  const onAgentCreated = (agent: Agent) => {
+  // Stays open while the deployment is requested, so submit shows it is still working.
+  const onAgentCreated = async (agent: Agent) => {
     toast.success(`Agent "${agent.name}" created`);
     void queryClient.invalidateQueries({ queryKey: getAgentsListAgentsQueryKey(workspace) });
-    const deployment = deployAfterCreate.current;
+    if (agent.name) {
+      await deployOnCreate.openCreatedAgent(workspace, agent.name, deployAfterCreate.current);
+    }
     resetAndClose();
-    if (!agent.name) return;
-    deployOnCreate.openCreatedAgent(workspace, agent.name, deployment);
   };
 
   const {
@@ -142,7 +143,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   } = useForm({
     resolver: zodResolver(uploadAgentFormSchema),
     defaultValues: { ...UPLOAD_AGENT_FORM_DEFAULTS, name: initialName ?? '' },
-    disabled: isPending,
+    disabled: isPending || deployOnCreate.isDeploying,
     mode: 'onChange',
   });
 
@@ -358,8 +359,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
         ? getErrorMessage(failure) || 'Failed to create agent'
         : undefined;
 
-  const busy = isPending || isCreatingTraced;
-  const awaitingDeployModes = Boolean(watchedDeploy) && deployOnCreate.isLoading;
+  const busy = isPending || isCreatingTraced || deployOnCreate.isDeploying;
+  const awaitingDeployModes = deployOnCreate.blocksSubmit(Boolean(watchedDeploy));
 
   const deployFields = (
     <DeployOnCreateFields

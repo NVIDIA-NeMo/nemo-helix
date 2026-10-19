@@ -6,6 +6,7 @@ import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import {
   getAgentsListDeploymentsQueryKey,
   useAgentsCreateDeployment,
+  useAgentsListDeploymentModes,
 } from '@nemo/sdk/generated/agents/agent-deployments';
 import { buildThenDeployNavigation } from '@studio/api/agents/buildThenDeploy';
 import {
@@ -47,11 +48,23 @@ export interface DeployOnCreate {
   modes: readonly DeploymentMode[];
   isLoading: boolean;
   canDeploy: boolean;
+  /** Why the runtimes could not be read, or null. A requested deployment waits on a retry or opt-out. */
+  discoveryError: string | null;
+  isRetrying: boolean;
+  retry: () => void;
+  /** Whether submit must wait: a requested deployment cannot be planned until the runtimes are known. */
+  blocksSubmit: (deploy: boolean) => boolean;
   needsImageBuild: (mode: DeploymentMode) => boolean;
   /** The deployment to run once the agent exists, or null to only create it. */
   plan: (choice: DeployOnCreateFormData) => DeployOnCreatePlan | null;
+  /** Whether a deployment request is in flight; callers hold submit until it settles. */
+  isDeploying: boolean;
   /** Opens the new agent's page, deploying it first or handing an image build to that page. */
-  openCreatedAgent: (workspace: string, agentName: string, plan: DeployOnCreatePlan | null) => void;
+  openCreatedAgent: (
+    workspace: string,
+    agentName: string,
+    plan: DeployOnCreatePlan | null
+  ) => Promise<void>;
 }
 
 export const useDeployOnCreate = (
@@ -82,9 +95,26 @@ export const useDeployOnCreate = (
     [modeState]
   );
   const canDeploy = modes.length > 0;
+  const isLoading = modeState.status === 'loading';
+
+  // Shares the modes query's cache entry; read here for its error and a retry.
+  const {
+    error: modesError,
+    isFetching: isRetrying,
+    refetch,
+  } = useAgentsListDeploymentModes(workspace, { query: { enabled } });
+  let discoveryError: string | null = null;
+  if (modeState.status === 'unknown') {
+    discoveryError = (modesError && getErrorMessage(modesError)) || 'unknown error';
+  }
+  const retry = useCallback(() => void refetch(), [refetch]);
+  const blocksSubmit = useCallback(
+    (deploy: boolean) => deploy && (isLoading || discoveryError !== null),
+    [isLoading, discoveryError]
+  );
 
   // Toasts live on the hook, not on mutate(): opening the new agent unmounts the caller.
-  const { mutate: deployAgent } = useAgentsCreateDeployment({
+  const { mutateAsync: deployAgent, isPending: isDeploying } = useAgentsCreateDeployment({
     mutation: {
       onSuccess: (deployment, { workspace: deploymentWorkspace }) => {
         toast.success(`Deploying agent "${deployment.agent}"`);
@@ -110,7 +140,7 @@ export const useDeployOnCreate = (
   );
 
   const openCreatedAgent = useCallback(
-    (agentWorkspace: string, agentName: string, deployment: DeployOnCreatePlan | null) => {
+    async (agentWorkspace: string, agentName: string, deployment: DeployOnCreatePlan | null) => {
       if (deployment?.buildImage) {
         // The build outlives the caller, so the agent's page runs it and deploys the tag.
         navigate(
@@ -119,10 +149,11 @@ export const useDeployOnCreate = (
         return;
       }
       if (deployment) {
-        deployAgent({
+        // A failure is toasted by onError; the agent exists either way, so its page still opens.
+        await deployAgent({
           workspace: agentWorkspace,
           data: { agent: agentName, deployment_mode: deployment.mode },
-        });
+        }).catch(() => undefined);
       }
       navigate(getAgentDetailRoute(agentWorkspace, agentName));
     },
@@ -131,10 +162,15 @@ export const useDeployOnCreate = (
 
   return {
     modes,
-    isLoading: modeState.status === 'loading',
+    isLoading,
     canDeploy,
+    discoveryError,
+    isRetrying,
+    retry,
+    blocksSubmit,
     needsImageBuild,
     plan,
+    isDeploying,
     openCreatedAgent,
   };
 };

@@ -3,7 +3,7 @@
 
 import { ControlledCheckbox } from '@nemo/common/src/components/form/ControlledCheckbox';
 import type { UseControllerComponentProps } from '@nemo/common/src/types';
-import { Stack } from '@nvidia/foundations-react-core';
+import { Banner, Button, Stack } from '@nvidia/foundations-react-core';
 import type { DeployOnCreate } from '@studio/api/agents/useDeployOnCreate';
 import { DeploymentModeSelect } from '@studio/components/DeploymentModeSelect';
 import { ImageBuildFirstNotice } from '@studio/components/ImageBuildFirstNotice';
@@ -22,7 +22,15 @@ interface DeployOnCreateFieldsProps {
 
 /** The "Deploy after creating" checkbox and runtime picker for a flow that creates an agent. */
 export const DeployOnCreateFields: FC<DeployOnCreateFieldsProps> = ({
-  deployOnCreate: { modes, isLoading, canDeploy, needsImageBuild },
+  deployOnCreate: {
+    modes,
+    isLoading,
+    canDeploy,
+    needsImageBuild,
+    discoveryError,
+    isRetrying,
+    retry,
+  },
   deployControllerProps,
   modeControllerProps,
 }) => {
@@ -39,7 +47,7 @@ export const DeployOnCreateFields: FC<DeployOnCreateFieldsProps> = ({
     if (firstMode && !modes.includes(mode)) setMode(firstMode);
   }, [modes, mode, setMode]);
 
-  if (!canDeploy && !isLoading) return null;
+  if (!canDeploy && !isLoading && !discoveryError) return null;
 
   return (
     <Stack gap="density-md">
@@ -55,6 +63,20 @@ export const DeployOnCreateFields: FC<DeployOnCreateFieldsProps> = ({
         />
       ) : null}
       {deploy && needsImageBuild(mode) ? <ImageBuildFirstNotice mode={mode} /> : null}
+      {deploy && discoveryError ? (
+        <Banner
+          kind="inline"
+          status="error"
+          slotActions={
+            <Button kind="secondary" size="small" disabled={isRetrying} onClick={retry}>
+              {isRetrying ? 'Retrying…' : 'Retry'}
+            </Button>
+          }
+        >
+          Could not load the available runtimes: {discoveryError}. Retry, or uncheck &quot;Deploy
+          after creating&quot; to create the agent without deploying it.
+        </Banner>
+      ) : null}
     </Stack>
   );
 };

@@ -112,10 +112,15 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
         queryKey: getAgentsListAgentsQueryKey(targetWorkspace),
       });
       if (agent.name) {
-        deployOnCreate.openCreatedAgent(targetWorkspace, agent.name, deployAfterCreate.current);
+        void deployOnCreate.openCreatedAgent(
+          targetWorkspace,
+          agent.name,
+          deployAfterCreate.current
+        );
       }
     },
   });
+  const busy = isPending || deployOnCreate.isDeploying;
 
   const {
     control,
@@ -125,7 +130,7 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
   } = useForm<DeployTrialFormData>({
     resolver: zodResolver(deployTrialFormSchema),
     defaultValues: DEPLOY_TRIAL_FORM_DEFAULTS,
-    disabled: isPending,
+    disabled: busy,
     mode: 'onChange',
   });
   const watchedName = useWatch({ control, name: 'name' });
@@ -205,7 +210,7 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
     (applied?.ok === false ? applied.error : undefined) ??
     (createError ? getErrorMessage(createError, 'Failed to create agent') : undefined);
   const isLoading = isLoadingAgent || isLoadingStudyConfig;
-  const awaitingDeployModes = watchedDeploy && deployOnCreate.isLoading;
+  const awaitingDeployModes = deployOnCreate.blocksSubmit(Boolean(watchedDeploy));
 
   return (
     <FormModal
@@ -219,8 +224,8 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
       }
       submitButtonText={replaceOrphan ? 'Replace and deploy' : 'Deploy'}
       onSubmit={handleSubmit(onSubmit)}
-      disabled={isPending}
-      loading={isPending || isLoading}
+      disabled={busy}
+      loading={busy || isLoading}
       submitDisabled={!!loadError || !appliedConfig || awaitingDeployModes}
       errorText={errorText}
     >

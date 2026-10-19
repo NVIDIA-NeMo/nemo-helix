@@ -113,10 +113,15 @@ export const DeployRouteModal: FC<DeployRouteModalProps> = ({
         queryKey: getAgentsListAgentsQueryKey(targetWorkspace),
       });
       if (agent.name) {
-        deployOnCreate.openCreatedAgent(targetWorkspace, agent.name, deployAfterCreate.current);
+        void deployOnCreate.openCreatedAgent(
+          targetWorkspace,
+          agent.name,
+          deployAfterCreate.current
+        );
       }
     },
   });
+  const busy = isPending || deployOnCreate.isDeploying;
 
   const {
     control,
@@ -126,7 +131,7 @@ export const DeployRouteModal: FC<DeployRouteModalProps> = ({
   } = useForm<DeployRouteFormData>({
     resolver: zodResolver(deployRouteFormSchema),
     defaultValues: DEPLOY_ROUTE_FORM_DEFAULTS,
-    disabled: isPending,
+    disabled: busy,
     mode: 'onChange',
   });
   const watchedName = useWatch({ control, name: 'name' });
@@ -183,7 +188,7 @@ export const DeployRouteModal: FC<DeployRouteModalProps> = ({
     return undefined;
   };
   const loadError = getLoadError();
-  const awaitingDeployModes = watchedDeploy && deployOnCreate.isLoading;
+  const awaitingDeployModes = deployOnCreate.blocksSubmit(Boolean(watchedDeploy));
   const errorText =
     loadError ?? (createError ? getErrorMessage(createError, 'Failed to create agent') : undefined);
 
@@ -209,8 +214,8 @@ export const DeployRouteModal: FC<DeployRouteModalProps> = ({
       }
       submitButtonText={replaceOrphan ? 'Replace and deploy' : 'Deploy'}
       onSubmit={handleSubmit(onSubmit)}
-      disabled={isPending}
-      loading={isPending || isLoadingAgent || isLoadingConfig}
+      disabled={busy}
+      loading={busy || isLoadingAgent || isLoadingConfig}
       submitDisabled={!!loadError || !routeConfig || awaitingDeployModes}
       errorText={errorText}
     >
