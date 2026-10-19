@@ -469,7 +469,7 @@ nemo-rl-plugin = [
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-safe-synthesizer-plugin = [
-  "datasets>=3.3.1,<=4.3.0",
+  "datasets>=3.3.1",
   "fastapi>=0.115.8",
   "fsspec>=2024.10.0",
   "gunicorn>=23.0.0",

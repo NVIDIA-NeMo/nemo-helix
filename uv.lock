@@ -5889,10 +5889,10 @@ requires-dist = [
     { name = "data-designer-nemo", marker = "extra == 'nemo-data-designer-plugin'", editable = "packages/data_designer_nemo" },
     { name = "data-designer-nemo", marker = "extra == 'plugins'", editable = "packages/data_designer_nemo" },
     { name = "data-designer-nemo", marker = "extra == 'services'", editable = "packages/data_designer_nemo" },
-    { name = "datasets", marker = "extra == 'all'", specifier = ">=3.3.1,<=4.3.0" },
-    { name = "datasets", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = ">=3.3.1,<=4.3.0" },
-    { name = "datasets", marker = "extra == 'plugins'", specifier = ">=3.3.1,<=4.3.0" },
-    { name = "datasets", marker = "extra == 'services'", specifier = ">=3.3.1,<=4.3.0" },
+    { name = "datasets", marker = "extra == 'all'", specifier = ">=3.3.1" },
+    { name = "datasets", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = ">=3.3.1" },
+    { name = "datasets", marker = "extra == 'plugins'", specifier = ">=3.3.1" },
+    { name = "datasets", marker = "extra == 'services'", specifier = ">=3.3.1" },
     { name = "docker", marker = "extra == 'all'", specifier = ">=7.0.0" },
     { name = "docker", marker = "extra == 'all'", specifier = ">=7.1.0" },
     { name = "docker", marker = "extra == 'core-service'", specifier = ">=7.1.0" },
@@ -7145,7 +7145,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.88.0" },
-    { name = "datasets", specifier = ">=3.3.1,<=4.3.0" },
+    { name = "datasets", specifier = ">=3.3.1" },
     { name = "fastapi", specifier = ">=0.115.8" },
     { name = "fastapi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.115.4" },
     { name = "fastapi", marker = "extra == 'test'", specifier = ">=0.115" },
