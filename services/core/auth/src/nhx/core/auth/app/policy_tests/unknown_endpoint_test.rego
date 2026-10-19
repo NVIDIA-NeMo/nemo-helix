@@ -161,6 +161,7 @@ test_workspace_creation_allowed_with_creator_binding if {
 		with data.authz.principals as {
 			"*": {"workspaces": {"system": ["WorkspaceCreator"]}},
 		}
+		with data.authz.scope_families as scope_families_fixture
 
 	result.allowed == true
 }
@@ -179,6 +180,7 @@ test_workspace_creation_denied_with_wrong_scope if {
 		with data.authz.principals as {
 			"*": {"workspaces": {"system": ["WorkspaceCreator"]}},
 		}
+		with data.authz.scope_families as scope_families_fixture
 
 	result.allowed == false
 }
