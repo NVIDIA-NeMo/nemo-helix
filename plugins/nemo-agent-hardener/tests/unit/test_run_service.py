@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 from collections.abc import Generator
 from pathlib import Path
 from types import SimpleNamespace
@@ -126,7 +125,10 @@ def test_service_driven_flow_sequences_up_hitl_then_reuse_run(tmp_path: Path, mo
     result = job.run({"config": str(manifest), "driver": "service"}, ctx=_ctx(tmp_path), sdk=None)
 
     assert result["status"] == "completed"
-    assert hitl_calls == [str(manifest)]  # HITL ran once, for this manifest
+    assert len(hitl_calls) == 1
+    assert Path(hitl_calls[0]).parent == manifest.parent  # private sibling keeps project-relative paths stable
+    assert hitl_calls[0] != str(manifest)
+    assert not list(tmp_path.glob(".agent-hardener.nhx-agent-hardener-*.yaml"))
     # up first, then the war-game reusing the warm sandbox with the reviewed suite handed in as a file.
     assert commands[0][1] == "up"
     assert commands[1][1] == "run"
@@ -556,6 +558,72 @@ def test_failure_preserves_the_precreated_agent_and_port(tmp_path: Path, monkeyp
     assert uploaded == []
 
 
+def test_failed_native_invocation_does_not_publish_a_stale_local_hitlog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n", encoding="utf-8")
+    stale_hitlog = tmp_path / ".agent-hardener" / "run-logs" / "old" / "old.hitlog.jsonl"
+    stale_hitlog.parent.mkdir(parents=True)
+    stale_hitlog.write_text("old\n", encoding="utf-8")
+    monkeypatch.setattr(run_module.AgentHardenerConfig, "get", lambda: _provisioned_config(tmp_path))
+
+    def fail_before_new_hitlog(*_args: Any, **_kwargs: Any) -> Any:
+        raise AgentHardenerRunError("sandbox", "victim did not start")
+
+    monkeypatch.setattr(run_module, "_run_one_shot", fail_before_new_hitlog)
+    uploaded: list[Path] = []
+    monkeypatch.setattr(
+        artifacts,
+        "upload_file_to_fileset",
+        lambda _sdk, path, *, workspace: uploaded.append(path) or f"{workspace}/stale",
+    )
+    sdk, captured = _capturing_sdk()
+    job = run_module.AgentHardenerRunJob()
+    monkeypatch.setattr(job, "report_progress", lambda *a, **k: None)
+
+    job.run({"config": str(manifest)}, ctx=_ctx(tmp_path), sdk=sdk)
+
+    assert captured[-1]["status"] == "failed"
+    assert captured[-1]["hitlog_fileset"] == ""
+    assert uploaded == []
+
+
+def test_failed_native_invocation_publishes_a_hitlog_created_by_that_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n", encoding="utf-8")
+    monkeypatch.setattr(run_module.AgentHardenerConfig, "get", lambda: _provisioned_config(tmp_path))
+    current_hitlogs: list[Path] = []
+
+    def fail_after_hitlog(scoped_manifest: str, *_args: Any, **_kwargs: Any) -> Any:
+        scoped_data = yaml.safe_load(Path(scoped_manifest).read_text(encoding="utf-8"))
+        run_id = scoped_data["overrides"]["storage"]["run_id"]
+        current_hitlog = tmp_path / ".agent-hardener" / "run-logs" / run_id / "current.hitlog.jsonl"
+        current_hitlog.parent.mkdir(parents=True)
+        current_hitlog.write_text("current\n", encoding="utf-8")
+        current_hitlogs.append(current_hitlog)
+        raise AgentHardenerRunError("sandbox", "victim failed after attack")
+
+    monkeypatch.setattr(run_module, "_run_one_shot", fail_after_hitlog)
+    uploaded: list[Path] = []
+    monkeypatch.setattr(
+        artifacts,
+        "upload_file_to_fileset",
+        lambda _sdk, path, *, workspace: uploaded.append(path) or f"{workspace}/current",
+    )
+    sdk, captured = _capturing_sdk()
+    job = run_module.AgentHardenerRunJob()
+    monkeypatch.setattr(job, "report_progress", lambda *a, **k: None)
+
+    job.run({"config": str(manifest)}, ctx=_ctx(tmp_path), sdk=sdk)
+
+    assert captured[-1]["status"] == "failed"
+    assert captured[-1]["hitlog_fileset"] == "default/current"
+    assert uploaded == current_hitlogs
+
+
 def test_failure_without_a_precreated_record_has_no_agent_to_preserve(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -668,136 +736,28 @@ def test_service_driven_replay_appends_replay_to_run_command(tmp_path: Path, mon
     assert commands[0][commands[0].index("--replay") + 1] == "/tmp/hits.hitlog.jsonl"
 
 
-def test_save_hitlog_fileset_uploads_newest_hitlog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    manifest = tmp_path / "agent-hardener.yaml"
-    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n", encoding="utf-8")
-    ctx = _ctx(tmp_path)
-    capture = artifacts.ArtifactCapture()
-    artifacts._refresh_artifact_capture(capture, ctx, str(manifest))
-    hitlog = (
-        tmp_path / ".agent-hardener" / "run-logs" / "run-1" / "round_1" / "garak" / "agent-breaker.uuid.hitlog.jsonl"
-    )
-    hitlog.parent.mkdir(parents=True)
-    hitlog.write_text("{}\n", encoding="utf-8")
-
-    uploaded: dict[str, Any] = {}
-
-    def fake_upload(_sdk: Any, path: Path, *, workspace: str) -> str:
-        uploaded.update(path=path, workspace=workspace)
-        return f"{workspace}/hitlog-abc"
-
-    monkeypatch.setattr(artifacts, "upload_file_to_fileset", fake_upload)
-
-    ref = artifacts._save_hitlog_fileset(object(), ctx, "default", capture)
-
-    assert ref == "default/hitlog-abc"
-    assert uploaded["path"] == hitlog
-
-
-def test_save_hitlog_fileset_empty_when_no_hitlog(tmp_path: Path) -> None:
-    manifest = tmp_path / "agent-hardener.yaml"
-    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n", encoding="utf-8")
-    ctx = _ctx(tmp_path)
-    capture = artifacts.ArtifactCapture()
-    artifacts._refresh_artifact_capture(capture, ctx, str(manifest))
-
-    assert artifacts._save_hitlog_fileset(object(), ctx, "default", capture) == ""
-
-
-def test_local_manifest_artifacts_use_the_native_storage_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    job_root = tmp_path / "job"
-    config_root = tmp_path / "project"
-    manifest = config_root / "agent-hardener.yaml"
-    manifest.parent.mkdir()
-    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n", encoding="utf-8")
-    saved: dict[str, Path] = {}
-    uploaded: dict[str, Path] = {}
-    ctx = make_job_context(job_root, on_save=lambda name, path: saved.update({name: path}))
-    capture = artifacts.ArtifactCapture()
-    artifacts._refresh_artifact_capture(capture, ctx, str(manifest))
-    run_dir = config_root / ".agent-hardener" / "run-logs" / "run-1"
-    hitlog = run_dir / "round_1" / "garak" / "agent-breaker.uuid.hitlog.jsonl"
-    hitlog.parent.mkdir(parents=True)
-    hitlog.write_text("{}\n", encoding="utf-8")
-    mitigations = run_dir / "mitigations.json"
-    mitigations.write_text("{}\n", encoding="utf-8")
-
-    monkeypatch.setattr(
-        artifacts,
-        "upload_file_to_fileset",
-        lambda _sdk, path, *, workspace: uploaded.update({workspace: path}) or f"{workspace}/hits",
-    )
-
-    artifacts._save_mitigations(ctx, capture)
-    ref = artifacts._save_hitlog_fileset(object(), ctx, "default", capture)
-
-    assert saved == {"mitigations": mitigations}
-    assert ref == "default/hits"
-    assert uploaded == {"default": hitlog}
-
-
-def test_capture_does_not_publish_artifacts_from_a_previous_local_run(
+def test_scoped_manifest_pins_exact_native_run_and_publishes_its_artifacts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    manifest = tmp_path / "agent-hardener.yaml"
-    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n", encoding="utf-8")
-    run_dir = tmp_path / ".agent-hardener" / "run-logs" / "old-run"
-    hitlog = run_dir / "round_1" / "garak" / "agent-breaker.uuid.hitlog.jsonl"
-    hitlog.parent.mkdir(parents=True)
-    hitlog.write_text("{}\n", encoding="utf-8")
-    (run_dir / "mitigations.json").write_text("{}\n", encoding="utf-8")
-    (run_dir / "validation.json").write_text("{}\n", encoding="utf-8")
-
-    saved: list[str] = []
-    uploaded: list[Path] = []
-    ctx = make_job_context(tmp_path / "job", on_save=lambda name, _path: saved.append(name))
+    project = tmp_path / "project"
+    project.mkdir()
+    manifest = project / "agent-hardener.yaml"
+    original = "agent:\n  name: clockbot\n  port: 1\n"
+    manifest.write_text(original, encoding="utf-8")
     capture = artifacts.ArtifactCapture()
-    artifacts._refresh_artifact_capture(capture, ctx, str(manifest))
-    monkeypatch.setattr(
-        artifacts,
-        "upload_file_to_fileset",
-        lambda _sdk, path, *, workspace: uploaded.append(path) or f"{workspace}/hits",
-    )
 
-    artifacts._save_mitigations(ctx, capture)
-    artifacts._save_validation(ctx, capture)
-    ref = artifacts._save_hitlog_fileset(object(), ctx, "default", capture)
+    scoped = Path(artifacts._prepare_artifact_capture(capture, str(manifest)))
+    scoped_data = yaml.safe_load(scoped.read_text(encoding="utf-8"))
+    run_id = scoped_data["overrides"]["storage"]["run_id"]
 
-    assert saved == []
-    assert uploaded == []
-    assert ref == ""
+    assert scoped.parent == manifest.parent
+    assert scoped != manifest
+    assert scoped.stat().st_mode & 0o777 == 0o600
+    assert manifest.read_text(encoding="utf-8") == original
+    run_dir = capture.run_dir
+    assert run_dir is not None
+    assert run_dir == project / ".agent-hardener" / "run-logs" / run_id
 
-
-def test_refresh_resnapshots_files_materialized_into_the_same_saved_manifest_root(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path)
-    run_logs = tmp_path / ".agent-hardener" / "run-logs"
-    capture = artifacts.ArtifactCapture(active=True, run_logs=run_logs)
-    manifest = tmp_path / "agent-hardener.yaml"
-    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n", encoding="utf-8")
-    historical = run_logs / "bundled-run" / "mitigations.json"
-    historical.parent.mkdir(parents=True)
-    historical.write_text("bundled history\n", encoding="utf-8")
-
-    artifacts._refresh_artifact_capture(capture, ctx, str(manifest))
-
-    assert capture.active is True
-    assert capture.run_logs == run_logs
-    assert historical in capture.before
-    assert artifacts._changed_artifacts(capture, "*/mitigations.json") == []
-
-
-def test_capture_publishes_artifacts_created_by_the_current_local_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    manifest = tmp_path / "agent-hardener.yaml"
-    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n", encoding="utf-8")
-    saved: dict[str, Path] = {}
-    uploaded: list[Path] = []
-    ctx = make_job_context(tmp_path / "job", on_save=lambda name, path: saved.update({name: path}))
-    capture = artifacts.ArtifactCapture()
-    artifacts._refresh_artifact_capture(capture, ctx, str(manifest))
-
-    run_dir = tmp_path / ".agent-hardener" / "run-logs" / "current-run"
     hitlog = run_dir / "round_1" / "garak" / "agent-breaker.uuid.hitlog.jsonl"
     hitlog.parent.mkdir(parents=True)
     hitlog.write_text("{}\n", encoding="utf-8")
@@ -805,6 +765,9 @@ def test_capture_publishes_artifacts_created_by_the_current_local_run(
     mitigations.write_text("{}\n", encoding="utf-8")
     validation = run_dir / "validation.json"
     validation.write_text("{}\n", encoding="utf-8")
+    saved: dict[str, Path] = {}
+    uploaded: list[Path] = []
+    ctx = make_job_context(tmp_path / "job", on_save=lambda name, path: saved.update({name: path}))
     monkeypatch.setattr(
         artifacts,
         "upload_file_to_fileset",
@@ -813,99 +776,11 @@ def test_capture_publishes_artifacts_created_by_the_current_local_run(
 
     artifacts._save_mitigations(ctx, capture)
     artifacts._save_validation(ctx, capture)
-    ref = artifacts._save_hitlog_fileset(object(), ctx, "default", capture)
+    ref = artifacts._save_hitlog_fileset(object(), "default", capture)
 
     assert saved == {"mitigations": mitigations, "validation": validation}
     assert uploaded == [hitlog]
     assert ref == "default/hits"
-
-
-def test_capture_publishes_artifacts_rewritten_by_the_current_local_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    manifest = tmp_path / "agent-hardener.yaml"
-    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n", encoding="utf-8")
-    run_dir = tmp_path / ".agent-hardener" / "run-logs" / "reused-run"
-    hitlog = run_dir / "round_1" / "garak" / "agent-breaker.uuid.hitlog.jsonl"
-    hitlog.parent.mkdir(parents=True)
-    hitlog.write_text("old\n", encoding="utf-8")
-    mitigations = run_dir / "mitigations.json"
-    mitigations.write_text("old\n", encoding="utf-8")
-
-    saved: dict[str, Path] = {}
-    uploaded: list[Path] = []
-    ctx = make_job_context(tmp_path / "job", on_save=lambda name, path: saved.update({name: path}))
-    capture = artifacts.ArtifactCapture()
-    artifacts._refresh_artifact_capture(capture, ctx, str(manifest))
-    mitigations.write_text("current mitigation\n", encoding="utf-8")
-    hitlog.write_text("current hitlog\n", encoding="utf-8")
-    monkeypatch.setattr(
-        artifacts,
-        "upload_file_to_fileset",
-        lambda _sdk, path, *, workspace: uploaded.append(path) or f"{workspace}/hits",
-    )
-
-    artifacts._save_mitigations(ctx, capture)
-    ref = artifacts._save_hitlog_fileset(object(), ctx, "default", capture)
-
-    assert saved == {"mitigations": mitigations}
-    assert uploaded == [hitlog]
-    assert ref == "default/hits"
-
-
-def test_explicit_garak_report_dir_overrides_default_and_ignores_nested_hitlogs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    report_dir = tmp_path / "garak-reports"
-    manifest = tmp_path / "agent-hardener.yaml"
-    manifest.write_text(
-        yaml.safe_dump({"agent": {"name": "clockbot", "port": 1}, "garak": {"report_dir": str(report_dir)}}),
-        encoding="utf-8",
-    )
-    old_hitlog = report_dir / "old.hitlog.jsonl"
-    report_dir.mkdir()
-    old_hitlog.write_text("old\n", encoding="utf-8")
-    ctx = _ctx(tmp_path / "job")
-    capture = artifacts.ArtifactCapture()
-    artifacts._refresh_artifact_capture(capture, ctx, str(manifest))
-    current_hitlog = report_dir / "current.hitlog.jsonl"
-    current_hitlog.write_text("current\n", encoding="utf-8")
-    nested_hitlog = report_dir / "nested" / "newer.hitlog.jsonl"
-    nested_hitlog.parent.mkdir()
-    nested_hitlog.write_text("nested current\n", encoding="utf-8")
-    newer = current_hitlog.stat().st_mtime_ns + 1_000_000_000
-    os.utime(nested_hitlog, ns=(newer, newer))
-    default_hitlog = tmp_path / ".agent-hardener" / "run-logs" / "current" / "newest.hitlog.jsonl"
-    default_hitlog.parent.mkdir(parents=True)
-    default_hitlog.write_text("default current\n", encoding="utf-8")
-    newest = newer + 1_000_000_000
-    os.utime(default_hitlog, ns=(newest, newest))
-    uploaded: list[Path] = []
-    monkeypatch.setattr(
-        artifacts,
-        "upload_file_to_fileset",
-        lambda _sdk, path, *, workspace: uploaded.append(path) or f"{workspace}/hits",
-    )
-
-    ref = artifacts._save_hitlog_fileset(object(), ctx, "default", capture)
-
-    assert ref == "default/hits"
-    assert uploaded == [current_hitlog]
-
-
-def test_explicit_garak_report_dir_resolves_from_process_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    manifest = project / "agent-hardener.yaml"
-    manifest.write_text(
-        yaml.safe_dump({"agent": {"name": "clockbot", "port": 1}, "garak": {"report_dir": "reports"}}),
-        encoding="utf-8",
-    )
-    process_cwd = tmp_path / "worker"
-    process_cwd.mkdir()
-    monkeypatch.chdir(process_cwd)
-
-    assert artifacts._explicit_hitlog_dir(str(manifest)) == process_cwd / "reports"
 
 
 @pytest.mark.parametrize(
@@ -913,19 +788,115 @@ def test_explicit_garak_report_dir_resolves_from_process_cwd(tmp_path: Path, mon
     [
         ({"agent": {"name": "clockbot"}, "overrides": {"storage": {"root_dir": "artifacts"}}}, "artifacts"),
         ({"storage": {"root_dir": "sessions"}}, "sessions"),
+        ({"storage": "string-storage"}, "string-storage"),
         ({"storage_dir": "legacy"}, "legacy"),
     ],
 )
-def test_run_logs_dir_matches_native_relative_storage_resolution(
+def test_scoped_manifest_matches_native_relative_storage_resolution(
     tmp_path: Path, document: dict[str, Any], relative_root: str
 ) -> None:
     manifest = tmp_path / "project" / "config.yaml"
     manifest.parent.mkdir()
     manifest.write_text(yaml.safe_dump(document), encoding="utf-8")
+    capture = artifacts.ArtifactCapture()
 
-    assert artifacts._run_logs_dir(_ctx(tmp_path / "job"), str(manifest)) == (
-        manifest.parent / relative_root / "run-logs"
+    scoped = artifacts._prepare_artifact_capture(capture, str(manifest))
+
+    assert scoped != str(manifest)
+    assert capture.run_dir is not None
+    assert capture.run_dir.parent.parent == manifest.parent / relative_root
+
+
+def test_parallel_captures_of_one_local_root_cannot_cross_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text("agent:\n  name: clockbot\n", encoding="utf-8")
+    first = artifacts.ArtifactCapture()
+    second = artifacts.ArtifactCapture()
+    artifacts._prepare_artifact_capture(first, str(manifest))
+    artifacts._prepare_artifact_capture(second, str(manifest))
+    assert first.run_dir is not None and second.run_dir is not None and first.run_dir != second.run_dir
+
+    first_hitlog = first.run_dir / "round_1" / "garak" / "first.hitlog.jsonl"
+    second_hitlog = second.run_dir / "round_1" / "garak" / "second.hitlog.jsonl"
+    first_hitlog.parent.mkdir(parents=True)
+    second_hitlog.parent.mkdir(parents=True)
+    first_hitlog.write_text("first\n", encoding="utf-8")
+    second_hitlog.write_text("second\n", encoding="utf-8")
+    (second.run_dir / "mitigations.json").write_text("second\n", encoding="utf-8")
+    uploaded: list[Path] = []
+    saved: list[Path] = []
+    monkeypatch.setattr(
+        artifacts,
+        "upload_file_to_fileset",
+        lambda _sdk, path, *, workspace: uploaded.append(path) or f"{workspace}/hits",
     )
+
+    artifacts._save_mitigations(
+        make_job_context(tmp_path / "job", on_save=lambda _name, path: saved.append(path)), first
+    )
+    artifacts._save_hitlog_fileset(object(), "default", first)
+
+    assert saved == []
+    assert uploaded == [first_hitlog]
+
+
+def test_explicit_garak_report_dir_uses_an_invocation_unique_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report_dir = tmp_path / "garak-reports"
+    report_dir.mkdir()
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text(
+        yaml.safe_dump(
+            {
+                "agent": {"name": "clockbot", "port": 1},
+                "garak": {"report_dir": str(report_dir), "report_prefix": "custom"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    first = artifacts.ArtifactCapture()
+    second = artifacts.ArtifactCapture()
+    first_manifest = Path(artifacts._prepare_artifact_capture(first, str(manifest)))
+    second_manifest = Path(artifacts._prepare_artifact_capture(second, str(manifest)))
+    assert first.hitlog_prefix != second.hitlog_prefix
+    assert yaml.safe_load(first_manifest.read_text(encoding="utf-8"))["garak"]["report_prefix"] == first.hitlog_prefix
+    assert yaml.safe_load(second_manifest.read_text(encoding="utf-8"))["garak"]["report_prefix"] == second.hitlog_prefix
+
+    own_hitlog = report_dir / f"{first.hitlog_prefix}.uuid.hitlog.jsonl"
+    other_hitlog = report_dir / f"{second.hitlog_prefix}.uuid.hitlog.jsonl"
+    unrelated = report_dir / "custom-old.uuid.hitlog.jsonl"
+    for path in (own_hitlog, other_hitlog, unrelated):
+        path.write_text(f"{path.name}\n", encoding="utf-8")
+    uploaded: list[Path] = []
+    monkeypatch.setattr(
+        artifacts,
+        "upload_file_to_fileset",
+        lambda _sdk, path, *, workspace: uploaded.append(path) or f"{workspace}/hits",
+    )
+
+    artifacts._save_hitlog_fileset(object(), "default", first)
+
+    assert uploaded == [own_hitlog]
+
+
+def test_unscoped_capture_fails_closed_and_cleanup_removes_private_manifest(tmp_path: Path) -> None:
+    bad_manifest = tmp_path / "bad.yaml"
+    bad_manifest.write_text("- not\n- a mapping\n", encoding="utf-8")
+    capture = artifacts.ArtifactCapture()
+    assert artifacts._prepare_artifact_capture(capture, str(bad_manifest)) == str(bad_manifest)
+    assert capture.run_dir is None
+    assert artifacts._save_hitlog_fileset(object(), "default", capture) == ""
+
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text("agent:\n  name: clockbot\n", encoding="utf-8")
+    scoped = Path(artifacts._prepare_artifact_capture(capture, str(manifest)))
+    assert scoped.exists()
+    artifacts._cleanup_artifact_capture(capture)
+    assert not scoped.exists()
+    assert capture.run_dir is None
 
 
 def test_uploaded_benign_suite_downloads_fileset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1445,64 +1416,6 @@ def test_failed_run_records_the_hitlog_it_produced(tmp_path: Path, monkeypatch: 
     record = _failed_record(tmp_path, monkeypatch, {}, saved)
     assert record["status"] == "failed"
     assert record["hitlog_fileset"] == "hl-ref"
-
-
-def test_failed_native_invocation_does_not_publish_a_stale_local_hitlog(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    manifest = tmp_path / "agent-hardener.yaml"
-    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n", encoding="utf-8")
-    stale_hitlog = tmp_path / ".agent-hardener" / "run-logs" / "old" / "old.hitlog.jsonl"
-    stale_hitlog.parent.mkdir(parents=True)
-    stale_hitlog.write_text("old\n", encoding="utf-8")
-    monkeypatch.setattr(run_module.AgentHardenerConfig, "get", lambda: _provisioned_config(tmp_path))
-    monkeypatch.setattr(run_module, "_run_one_shot", _failing_one_shot)
-    uploaded: list[Path] = []
-    monkeypatch.setattr(
-        artifacts,
-        "upload_file_to_fileset",
-        lambda _sdk, path, *, workspace: uploaded.append(path) or f"{workspace}/stale",
-    )
-    sdk, captured = _capturing_sdk()
-    job = run_module.AgentHardenerRunJob()
-    monkeypatch.setattr(job, "report_progress", lambda *a, **k: None)
-
-    job.run({"config": str(manifest)}, ctx=_ctx(tmp_path), sdk=sdk)
-
-    assert captured[-1]["status"] == "failed"
-    assert captured[-1]["hitlog_fileset"] == ""
-    assert uploaded == []
-
-
-def test_failed_native_invocation_publishes_a_hitlog_created_by_that_attempt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    manifest = tmp_path / "agent-hardener.yaml"
-    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n", encoding="utf-8")
-    current_hitlog = tmp_path / ".agent-hardener" / "run-logs" / "current" / "current.hitlog.jsonl"
-    monkeypatch.setattr(run_module.AgentHardenerConfig, "get", lambda: _provisioned_config(tmp_path))
-
-    def fail_after_hitlog(*_args: Any, **_kwargs: Any) -> Any:
-        current_hitlog.parent.mkdir(parents=True)
-        current_hitlog.write_text("current\n", encoding="utf-8")
-        raise AgentHardenerRunError("sandbox", "victim failed after attack")
-
-    monkeypatch.setattr(run_module, "_run_one_shot", fail_after_hitlog)
-    uploaded: list[Path] = []
-    monkeypatch.setattr(
-        artifacts,
-        "upload_file_to_fileset",
-        lambda _sdk, path, *, workspace: uploaded.append(path) or f"{workspace}/current",
-    )
-    sdk, captured = _capturing_sdk()
-    job = run_module.AgentHardenerRunJob()
-    monkeypatch.setattr(job, "report_progress", lambda *a, **k: None)
-
-    job.run({"config": str(manifest)}, ctx=_ctx(tmp_path), sdk=sdk)
-
-    assert captured[-1]["status"] == "failed"
-    assert captured[-1]["hitlog_fileset"] == "default/current"
-    assert uploaded == [current_hitlog]
 
 
 @pytest.mark.parametrize("config", [{"stop_after_synth": True}, {"replay_hitlog_fileset": "ws/prior"}])

@@ -23,7 +23,8 @@ from nemo_agent_hardener_plugin.config import AgentHardenerConfig
 from nemo_agent_hardener_plugin.jobs import _common, benign_suite
 from nemo_agent_hardener_plugin.jobs.artifacts import (
     ArtifactCapture,
-    _refresh_artifact_capture,
+    _cleanup_artifact_capture,
+    _prepare_artifact_capture,
     _replay_args,
     _save_composed_guardrails,
     _save_events_fileset,
@@ -180,7 +181,7 @@ def _live_hitlog_fileset(config: dict, sdk: Any, ctx: JobContext, capture: Artif
     """Save the hitlog a live attack produced; empty for generation-only and replay runs, which have none."""
     if config.get("stop_after_synth") or config.get("replay_hitlog_fileset"):
         return ""
-    return _save_hitlog_fileset(sdk, ctx, ctx.workspace, capture)
+    return _save_hitlog_fileset(sdk, ctx.workspace, capture)
 
 
 class AgentHardenerRunJob(NemoJob):
@@ -272,6 +273,8 @@ class AgentHardenerRunJob(NemoJob):
                     "remediation": failure.remediation,
                 },
             }
+        finally:
+            _cleanup_artifact_capture(artifact_capture)
 
     def _record_failure(
         self, ctx: JobContext, sdk: Any, config: dict, failure: RunFailure, artifact_capture: ArtifactCapture
@@ -360,19 +363,26 @@ class AgentHardenerRunJob(NemoJob):
             raise ValueError(
                 "agent-hardener war-game requires a 'manifest_id' or a 'config' manifest path in the spec."
             )
+
         # Frozen sanity check: seed the chosen composed defenses as the victim baseline and force zero
         # defenders, so the replay measures the fixed defense without generating new mitigations. Always a
         # single round (validation, not iterative hardening).
         if validate_only:
             _seed_validation_manifest(manifest, config.get("defense_guardrails"), config.get("defense_policy"), ctx)
             rounds = 1
+        # Native Agent Hardener supports an explicit storage.run_id. Use it in a private sibling manifest so
+        # every output path belongs to this invocation, including when local jobs share one project root.
+        invocation_manifest = _prepare_artifact_capture(artifact_capture, manifest)
         # agent-hardener reads victim creds from the project dotenv, so write one from the operator env (which
         # carries the provisioned INFERENCE_API_KEY), the manifest's Secrets-store refs and any --env-file.
         _common.warn_shadowed_operator_env(plugin_config)
         _, env_file = _common.prepare_victim_env(
-            manifest, _build_native_subprocess_env(plugin_config), config.get("env_file"), secret_values
+            invocation_manifest,
+            _build_native_subprocess_env(plugin_config),
+            config.get("env_file"),
+            secret_values,
         )
-        agent_name, port = _manifest_facts(manifest)
+        agent_name, port = _manifest_facts(invocation_manifest)
 
         # Replay mode: skip the live garak attack and replay a recorded hitlog (uploaded, or a prior run's
         # saved hitlog) against the defended victim. The fileset is downloaded here and passed as `--replay <path>`.
@@ -385,9 +395,8 @@ class AgentHardenerRunJob(NemoJob):
         # `driver: "service"` (Studio) drives the interview/review HITL via the serve service; otherwise the
         # default one-shot `agent-hardener run` (TTY interview when interactive).
         if config.get("driver") == "service":
-            _refresh_artifact_capture(artifact_capture, ctx, manifest)
             outcome = _run_service_driven(
-                manifest,
+                invocation_manifest,
                 env_file,
                 plugin_config,
                 ctx,
@@ -412,9 +421,8 @@ class AgentHardenerRunJob(NemoJob):
                 suite_csv = ctx.storage.persistent / "benign-suite.csv"
                 benign_suite.write_suite(suite_csv, cached_suite)
                 suite_for_run = str(suite_csv)
-            _refresh_artifact_capture(artifact_capture, ctx, manifest)
             outcome = _run_one_shot(
-                manifest,
+                invocation_manifest,
                 env_file,
                 plugin_config,
                 ctx,
