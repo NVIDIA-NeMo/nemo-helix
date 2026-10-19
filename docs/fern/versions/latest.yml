@@ -68,7 +68,7 @@ navigation:
               - page: Review and Apply Mitigations
                 path: ../../agents/governance/apply-mitigations.mdx
                 slug: apply-mitigations
-              - page: Agent Hardener CLI Reference
+              - page: Agent Hardening CLI Reference
                 path: ../../agents/governance/cli-reference.mdx
                 slug: cli-reference
               - page: Troubleshooting
