@@ -43,12 +43,7 @@ from fastapi import APIRouter, HTTPException
 from kubernetes import client as k8s
 from kubernetes.stream import stream
 from nemo_ext_pod import add_agent_bundle, add_services, agent_bundle_state, service_states
-from opensandbox_server.config import CONFIG_ENV_VAR
-from opensandbox_server.services.constants import SANDBOX_ID_LABEL
-from opensandbox_server.services.k8s import provider_factory
-from opensandbox_server.services.k8s.batchsandbox_provider import BatchSandboxProvider
-from pydantic import BaseModel, ConfigDict, Field
-from scaled_evals.harbor_opensandbox_services import (
+from nhx_sandbox.harbor_opensandbox_services import (
     AGENT_BUNDLE_CONTAINER,
     AGENT_BUNDLE_EXTENSION_KEY,
     AGENT_BUNDLE_POD_ANNOTATION,
@@ -58,6 +53,11 @@ from scaled_evals.harbor_opensandbox_services import (
     ComposeServices,
     SandboxAgentBundle,
 )
+from opensandbox_server.config import CONFIG_ENV_VAR
+from opensandbox_server.services.constants import SANDBOX_ID_LABEL
+from opensandbox_server.services.k8s import provider_factory
+from opensandbox_server.services.k8s.batchsandbox_provider import BatchSandboxProvider
+from pydantic import BaseModel, ConfigDict, Field
 
 # Under the server's logger tree, which is the only one its logging config enables.
 logger = logging.getLogger("opensandbox_server.nemo_ext")

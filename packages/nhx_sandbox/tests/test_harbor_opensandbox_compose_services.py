@@ -22,22 +22,21 @@ import pytest
 
 pytest.importorskip("harbor.environments.base")
 pytest.importorskip("nhx_sandbox")
-pytest.importorskip("scaled_evals", reason="scaled-evals plugin not installed")
 
 from harbor.environments.base import ExecResult
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.paths import TrialPaths
-from opensandbox_mocks import SandboxApiException, Server, mock_sdk
-from scaled_evals import harbor_opensandbox_environment as environment_module
-from scaled_evals.harbor_opensandbox_driver import OpenSandboxDriver
-from scaled_evals.harbor_opensandbox_environment import NemoOpenSandboxEnvironment, ServiceOperationsUnsupportedError
-from scaled_evals.harbor_opensandbox_services import (
+from nhx_sandbox import harbor_opensandbox_environment as environment_module
+from nhx_sandbox.harbor_opensandbox_driver import OpenSandboxDriver
+from nhx_sandbox.harbor_opensandbox_environment import NemoOpenSandboxEnvironment, ServiceOperationsUnsupportedError
+from nhx_sandbox.harbor_opensandbox_services import (
     AGENT_BUNDLE_EXTENSION_KEY,
     EXTENSION_KEY,
     ComposeServices,
     SandboxAgentBundle,
     parse_compose_services,
 )
+from opensandbox_mocks import SandboxApiException, Server, mock_sdk
 
 API_KEY = "test-key"
 COMPOSE_SERVICES: dict[str, Any] = {
@@ -170,7 +169,7 @@ def test_environment_loads_on_a_harbor_without_per_service_operations() -> None:
     script = (
         "import harbor.environments.base as base\n"
         "if hasattr(base, 'ServiceOperationsUnsupportedError'): del base.ServiceOperationsUnsupportedError\n"
-        "import scaled_evals.harbor_opensandbox_environment as module\n"
+        "import nhx_sandbox.harbor_opensandbox_environment as module\n"
         "assert module.ServiceOperationsUnsupportedError is RuntimeError\n"
     )
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(path for path in sys.path if path)}

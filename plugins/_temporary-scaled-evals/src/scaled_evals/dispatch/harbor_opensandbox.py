@@ -33,6 +33,22 @@ from typing import Any
 
 import tomlkit
 import yaml
+from nhx_sandbox.harbor_opensandbox_cleanup import (
+    APPLIED_EGRESS_GLOB,
+    BENCHMARK_RUN_METADATA_KEY,
+    DEPLOYMENT_METADATA_KEY,
+    EVALUATION_METADATA_KEY,
+    ownership_selector,
+    validate_selector,
+)
+from nhx_sandbox.harbor_opensandbox_cleanup import connection_env as _sdk_connection_env
+from nhx_sandbox.harbor_opensandbox_services import (
+    COMPOSE_FILENAMES,
+    MAIN_SERVICE,
+    ComposeServices,
+    SandboxAgentBundle,
+    parse_compose_services,
+)
 from nhx_sandbox.opensandbox_policy import canonical_egress_target
 from tomlkit.items import InlineTable, Table
 
@@ -75,28 +91,12 @@ from scaled_evals.dispatch.sandbox_k8s import (
     make_sandbox_k8s_status_reader,
     summarize_harbor_result,
 )
-from scaled_evals.harbor_opensandbox_cleanup import (
-    APPLIED_EGRESS_GLOB,
-    BENCHMARK_RUN_METADATA_KEY,
-    DEPLOYMENT_METADATA_KEY,
-    EVALUATION_METADATA_KEY,
-    ownership_selector,
-    validate_selector,
-)
-from scaled_evals.harbor_opensandbox_cleanup import connection_env as _sdk_connection_env
-from scaled_evals.harbor_opensandbox_services import (
-    COMPOSE_FILENAMES,
-    MAIN_SERVICE,
-    ComposeServices,
-    SandboxAgentBundle,
-    parse_compose_services,
-)
 from scaled_evals.models.runtime import LaunchHandle, LaunchSpec, RuntimeStatus
 
 LOG = logging.getLogger(__name__)
 
 # Harbor environment class the rendered config loads for every trial.
-NEMO_OPENSANDBOX_IMPORT_PATH = "scaled_evals.harbor_opensandbox_environment:NemoOpenSandboxEnvironment"
+NEMO_OPENSANDBOX_IMPORT_PATH = "nhx_sandbox.harbor_opensandbox_environment:NemoOpenSandboxEnvironment"
 # Run-level artifact of per-sandbox egress records, read back by the evidence builder for provenance.
 APPLIED_EGRESS_SUMMARY_FILENAME = "scaled-evals-applied-egress.json"
 # Evaluation network policies this runtime accepts.
@@ -108,7 +108,7 @@ AGENT_BUNDLE_SUPPORTED_AGENTS = ("claude-code",)
 # A registered bundle's immutable identity, as the API stores it.
 _DIGEST_REF = re.compile(r"[^\s@]+@sha256:[0-9a-f]{64}")
 # Module the terminator runs, with the Harbor runner's interpreter, to kill an evaluation's sandboxes.
-CLEANUP_MODULE = "scaled_evals.harbor_opensandbox_cleanup"
+CLEANUP_MODULE = "nhx_sandbox.harbor_opensandbox_cleanup"
 
 # Template kwargs that tune NemoOpenSandboxEnvironment without touching isolation. Everything else in the
 # environment block is set by this backend or rejected.

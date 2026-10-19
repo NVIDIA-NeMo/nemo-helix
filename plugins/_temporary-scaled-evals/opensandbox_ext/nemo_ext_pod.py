@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from scaled_evals.harbor_opensandbox_services import (
+from nhx_sandbox.harbor_opensandbox_services import (
     AGENT_BUNDLE_CONTAINER,
     INSTALLED_AGENT_DIR,
     ComposeServices,

@@ -8,11 +8,8 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
-pytest.importorskip("scaled_evals", reason="scaled-evals plugin not installed")
-
+from nhx_sandbox.harbor_opensandbox_services import ComposeServices, parse_compose_services
 from pydantic import ValidationError
-from scaled_evals.harbor_opensandbox_services import ComposeServices, parse_compose_services
 
 
 def _spec(*services: dict[str, Any], **overrides: Any) -> dict[str, Any]:

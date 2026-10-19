@@ -10,7 +10,7 @@ from collections.abc import Mapping
 import pytest
 
 try:
-    from scaled_evals import harbor_opensandbox_cleanup as cleanup
+    from nhx_sandbox import harbor_opensandbox_cleanup as cleanup
 except ImportError as exc:
     pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
 

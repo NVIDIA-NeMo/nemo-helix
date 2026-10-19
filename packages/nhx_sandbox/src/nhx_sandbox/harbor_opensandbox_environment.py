@@ -4,7 +4,7 @@
 """NeMo's Harbor environment for running scaled-eval trials in OpenSandbox.
 
 This is a ``BaseEnvironment`` written directly on the OpenSandbox SDK (through
-``scaled_evals.harbor_opensandbox_driver``), not a subclass of Harbor's own OpenSandbox
+``nhx_sandbox.harbor_opensandbox_driver``), not a subclass of Harbor's own OpenSandbox
 environment. It uses only the parts of Harbor's environment API that every supported runner
 shares, so the same class runs on Harbor 0.13.2 and 0.20.0. What it adds over a plain sandbox:
 
@@ -23,7 +23,7 @@ shares, so the same class runs on Harbor 0.13.2 and 0.20.0. What it adds over a 
   ``execd`` runs as that user and the kernel refuses its switch to uid 0, so asking for root fails
   every such command before it starts, even checks like ``tmux -V``.
 * Compose tasks run when the runner passes ``compose_services`` (see
-  ``scaled_evals.harbor_opensandbox_services``). The server's NeMo extension adds the services to
+  ``nhx_sandbox.harbor_opensandbox_services``). The server's NeMo extension adds the services to
   the sandbox pod, and Kubernetes starts them before ``main``. This class gives ``main`` its
   entrypoint and env, fails the create early when a service can't start, waits for ``main``'s and
   the services' readiness, and runs per-service operations through the extension's exec route.
@@ -62,23 +62,15 @@ from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPol
 from harbor.models.trial.config import ResourceMode
 from harbor.models.trial.paths import EnvironmentPaths, TrialPaths
 from nhx_sandbox.egress import EgressAllowlist, EgressPolicy, build_egress_policy
-from nhx_sandbox.opensandbox_policy import (
-    EgressVerificationError,
-    EgressVerificationMode,
-    canonical_egress_target,
-    to_opensandbox_policy,
-    verify_applied_egress,
-)
-
-from scaled_evals.harbor_opensandbox_cleanup import applied_egress_filename
-from scaled_evals.harbor_opensandbox_driver import (
+from nhx_sandbox.harbor_opensandbox_cleanup import applied_egress_filename
+from nhx_sandbox.harbor_opensandbox_driver import (
     CREATE_ATTEMPT_METADATA_KEY,
     Connection,
     CreateRequest,
     OpenSandboxDriver,
     sandbox_id,
 )
-from scaled_evals.harbor_opensandbox_services import (
+from nhx_sandbox.harbor_opensandbox_services import (
     AGENT_BUNDLE_EXTENSION_KEY,
     AGENT_BUNDLE_FEATURE,
     COMPOSE_FILENAMES,
@@ -87,6 +79,13 @@ from scaled_evals.harbor_opensandbox_services import (
     ComposeServices,
     SandboxAgentBundle,
     parse_compose_services,
+)
+from nhx_sandbox.opensandbox_policy import (
+    EgressVerificationError,
+    EgressVerificationMode,
+    canonical_egress_target,
+    to_opensandbox_policy,
+    verify_applied_egress,
 )
 
 try:
