@@ -25,6 +25,7 @@ from nemo_evals.jobs.harbor_task_dispatch import (
     check_execution_deadline,
     check_sandbox_server,
     configure_runtime,
+    stage_agent_setup_network,
 )
 from nemo_evals.jobs.harbor_task_spec import (
     HarborTaskJobSpec,
@@ -204,6 +205,16 @@ def test_runtime_passes_request_overrides_as_harbor_override_kwargs(task_spec, t
     assert "override_memory_mb" not in kwargs
 
 
+def test_runtime_passes_the_frozen_agent_setup_hosts(task_spec, tmp_path):
+    policy = task_spec.sandbox_policy.model_copy(update={"agent_setup_egress": ("registry.npmjs.org",)})
+    spec = task_spec.model_copy(update={"sandbox_policy": policy})
+    ctx = MagicMock(spec=JobContext)
+    ctx.job_id = "run-0123456789abcdef-task-1"
+    configured = configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path), ctx, spec)
+    assert configured.environment is not None
+    assert configured.environment.kwargs["agent_setup_hosts"] == ["registry.npmjs.org"]
+
+
 def write_task(root: Path, toml: str, *, compose: bool = False) -> Path:
     (root / "environment").mkdir(parents=True)
     (root / "task.toml").write_text(toml)
@@ -238,3 +249,65 @@ def test_bind_rejects_compose_tasks(tmp_path):
     task = write_task(tmp_path / "t", "[environment]\n", compose=True)
     with pytest.raises(ValueError, match="compose tasks"):
         bind_task_image(task, AGENT.image_ref)
+
+
+SETUP_HOSTS = ("registry.npmjs.org", "*.pypi.org")
+
+
+def _phases(task: Path):
+    from harbor.models.task.config import TaskConfig
+
+    config = TaskConfig.model_validate_toml((task / "task.toml").read_text())
+    return (
+        config.environment.resolve_baseline(),
+        config.agent.explicit_phase_policy(),
+        config.verifier.explicit_phase_policy(),
+    )
+
+
+@pytest.mark.parametrize(
+    "environment", ['network_mode = "no-network"', "allow_internet = false"], ids=["network_mode", "allow_internet"]
+)
+def test_setup_network_opens_setup_and_closes_agent_and_verifier(tmp_path, environment):
+    from harbor.models.task.config import NetworkMode
+
+    task = write_task(tmp_path / "t", f"# keep me\n[environment]\n{environment}\n")
+    assert stage_agent_setup_network(task, SETUP_HOSTS) is True
+    baseline, agent, verifier = _phases(task)
+    assert baseline.network_mode == NetworkMode.ALLOWLIST and baseline.allowed_hosts == list(SETUP_HOSTS)
+    assert agent is not None and agent.network_mode == NetworkMode.NO_NETWORK
+    assert verifier is not None and verifier.network_mode == NetworkMode.NO_NETWORK
+    assert (task / "task.toml").read_text().startswith("# keep me")
+
+
+@pytest.mark.parametrize(
+    "toml",
+    [
+        "[environment]\n",
+        '[environment]\nnetwork_mode = "no-network"\n\n[agent]\nnetwork_mode = "no-network"\n',
+        '[environment]\nnetwork_mode = "no-network"\n\n[[steps]]\nname = "one"\n',
+    ],
+    ids=["public", "explicit-agent-phase", "steps"],
+)
+def test_setup_network_leaves_other_tasks_alone(tmp_path, toml):
+    task = write_task(tmp_path / "t", toml)
+    assert stage_agent_setup_network(task, SETUP_HOSTS) is False
+    assert (task / "task.toml").read_text() == toml
+
+
+def test_setup_network_is_off_without_setup_hosts(tmp_path):
+    toml = '[environment]\nnetwork_mode = "no-network"\n'
+    task = write_task(tmp_path / "t", toml)
+    assert stage_agent_setup_network(task, ()) is False
+    assert (task / "task.toml").read_text() == toml
+
+
+def test_setup_network_keeps_an_explicit_verifier_phase(tmp_path):
+    from harbor.models.task.config import NetworkMode
+
+    task = write_task(
+        tmp_path / "t", '[environment]\nnetwork_mode = "no-network"\n\n[verifier]\nnetwork_mode = "public"\n'
+    )
+    assert stage_agent_setup_network(task, SETUP_HOSTS) is True
+    _, _, verifier = _phases(task)
+    assert verifier is not None and verifier.network_mode == NetworkMode.PUBLIC

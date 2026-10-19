@@ -12,7 +12,7 @@ over the one task, with its images bound to the prepared digests and Harbor's en
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Mapping, MutableMapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
@@ -123,6 +123,7 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
         for task in tasks:
             task_dir = Path(str(task.metadata[HARBOR_TASK_DIR_KEY]))
             bind_task_image(task_dir, environment.agent.image_ref, verifier_image_ref=verifier)
+            stage_agent_setup_network(task_dir, self._task_spec.sandbox_policy.agent_setup_egress)
 
     def _configure_harbor_runtime(self, config: HarborRuntimeConfig, ctx: JobContext) -> HarborRuntimeConfig:
         return configure_runtime(config, ctx, self._task_spec)
@@ -175,6 +176,7 @@ def configure_runtime(config: HarborRuntimeConfig, ctx: JobContext, spec: Harbor
             "sandbox_timeout_sec": policy.max_sandbox_lifetime_s,
             "trusted_allowed_hosts": [*policy.egress_allow, *policy.request_egress_allow],
             "agent_channel_hosts": list(policy.agent_channel),
+            "agent_setup_hosts": list(policy.agent_setup_egress),
             "egress_verification": policy.egress_verification,
             "enforce_disk_limit": policy.enforce_disk_limit,
             "max_disk_mb": policy.max_disk_mb,
@@ -235,6 +237,53 @@ def bind_task_image(task_dir: Path, image_ref: str, *, verifier_image_ref: str |
     temporary.write_text(tomlkit.dumps(document), encoding="utf-8")
     os.replace(temporary, task_toml)
     return verifier_bound
+
+
+def stage_agent_setup_network(task_dir: Path, setup_hosts: Sequence[str]) -> bool:
+    """Let a no-network task's sandbox reach ``setup_hosts`` while the agent installs, and only then.
+
+    Rewrites task.toml so Harbor switches the policy itself: ``[environment]``, the sandbox's
+    baseline and so the policy agent setup runs under, becomes an allowlist of ``setup_hosts``;
+    ``[agent]`` and ``[verifier]`` become no-network, so Harbor narrows the sandbox before
+    ``agent.run()`` and again before verification. Returns whether the task was rewritten.
+
+    Leaves the task alone when no hosts are configured, when the task isn't no-network, when it
+    already sets an agent phase policy, or when it has steps.
+    """
+    if not setup_hosts:
+        return False
+    import tomlkit  # the cpu-tasks group installs it in the dispatcher image
+    from harbor.models.task.config import NetworkMode, TaskConfig
+
+    task_toml = task_dir / "task.toml"
+    text = task_toml.read_text(encoding="utf-8")
+    config = TaskConfig.model_validate_toml(text)
+    if config.environment.resolve_baseline().network_mode != NetworkMode.NO_NETWORK:
+        return False
+    if config.steps or config.agent.explicit_phase_policy() is not None:
+        return False
+
+    document = tomlkit.parse(text)
+    environment = document.get("environment")
+    if not isinstance(environment, MutableMapping):
+        raise ValueError(f"task [environment] must be a TOML table: {task_toml}")
+    environment.pop("allow_internet", None)
+    environment["network_mode"] = NetworkMode.ALLOWLIST.value
+    environment["allowed_hosts"] = list(setup_hosts)
+    phases = ["agent"] if config.verifier.explicit_phase_policy() is not None else ["agent", "verifier"]
+    for name in phases:
+        phase = document.get(name)
+        if phase is None:
+            phase = tomlkit.table()
+            document[name] = phase
+        if not isinstance(phase, MutableMapping):
+            raise ValueError(f"task [{name}] must be a TOML table: {task_toml}")
+        phase["network_mode"] = NetworkMode.NO_NETWORK.value
+
+    temporary = task_toml.with_suffix(".toml.tmp")
+    temporary.write_text(tomlkit.dumps(document), encoding="utf-8")
+    os.replace(temporary, task_toml)
+    return True
 
 
 def uses_separate_verifier(document: Mapping[str, Any]) -> bool:
