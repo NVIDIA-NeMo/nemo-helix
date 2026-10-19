@@ -19,8 +19,8 @@ defaults to `false`. It is read **only** from the build environment, never from
 an override — otherwise anyone could set it to `true` in production and unlock
 every other flag.
 
-| Environment             | How to enable                                                                                                |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Environment             | How to enable                                                                                                 |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------- |
 | Vite dev server         | `VITE_FF_FLAG_OVERRIDES_ENABLED='true'` in `env/.env.dev.local`                                               |
 | Local served build      | Already on — `studio.feature_flags.flag_overrides_enabled: true` in `packages/nhx_platform/config/local.yaml` |
 | Deployed (dev/internal) | `studio.feature_flags.flag_overrides_enabled: true` in that target's values yaml                              |
@@ -46,11 +46,11 @@ several flags costs a single reload.
 Three bulk actions act on the rows the filter is currently showing, so narrowing
 the filter first scopes them:
 
-| Action      | Effect                                                                     |
-| ----------- | -------------------------------------------------------------------------- |
-| All on      | Writes an explicit `true` override for every listed boolean/preview flag   |
-| All off     | Writes an explicit `false` override for the same                            |
-| Reset all   | Removes overrides entirely, so flags fall back to the deployment default   |
+| Action    | Effect                                                                   |
+| --------- | ------------------------------------------------------------------------ |
+| All on    | Writes an explicit `true` override for every listed boolean/preview flag |
+| All off   | Writes an explicit `false` override for the same                         |
+| Reset all | Removes overrides entirely, so flags fall back to the deployment default |
 
 "All off" and "Reset all" are not the same: the first pins flags off regardless
 of what the deployment ships, the second stops overriding them at all. String
@@ -100,7 +100,7 @@ overrides persist in a browser indefinitely.
 | localStorage unavailable (throws) | Treated as no overrides             |
 
 That last column matters: `parseFlags` treats a schema failure as a fatal
-"missing required flag", so bad entries are filtered out *before* they reach it.
+"missing required flag", so bad entries are filtered out _before_ they reach it.
 Reading `window.localStorage` is itself a throwing operation when storage is
 blocked, so a `typeof` guard is not safe — all access funnels through
 `safeStorage()`.
