@@ -8,9 +8,6 @@ Train a small open model to take over a decision that a large model makes inside
 
 **[Open the walkthrough site](https://nvidia-nemo.github.io/nemo-helix/gtc-berlin-2026-tutorial/)** • [Watch the demo](https://nvidia-nemo.github.io/nemo-helix/gtc-berlin-2026-tutorial/#watch-h) • [Read the tutorial](docs/tutorial.md) • [See the results](RESULTS.md)
 
-> [!NOTE]
-> **Draft for review.** Steps 7 to 9 haven't been run end to end on a single local GPU machine yet. The walkthrough site is at [nvidia-nemo.github.io/nemo-helix/gtc-berlin-2026-tutorial](https://nvidia-nemo.github.io/nemo-helix/gtc-berlin-2026-tutorial/).
-
 ## What you'll build
 
 Meridian Compute is a made-up company that runs GPU clusters. Its incident agent gets this message on Slack:

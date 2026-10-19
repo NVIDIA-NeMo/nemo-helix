@@ -1,7 +1,5 @@
 # Fine-tune your own fast decision model on an open stack
 
-> **Draft for review: not yet verified on a fresh machine.** Commands marked `unverified` haven't been run in this exact form.
-
 This tutorial goes with the GTC Berlin session "Post Training Open Models with Synthetic Data for Specialized Agents" (Yamini Kagal and Stefan Gavrilovic, NVIDIA).
 
 Agents make the same decisions over and over, usually by calling a large general model. In this tutorial you train a small open model to take over one of those decisions: you generate the training data, fine-tune on a single GPU and measure the result. Everything runs on [NeMo Helix](https://github.com/NVIDIA-NeMo/nemo-helix) with open source tools.
@@ -14,7 +12,7 @@ The example is an incident agent at Meridian Compute, a made-up company that run
 
 **Accounts.** An inference provider for the agent's own model and, if you generate data, for the writer and judge models. `nemo setup` supports NVIDIA Build, OpenAI, Anthropic, Google Gemini, Ollama and any OpenAI-compatible endpoint. Base models come from Hugging Face; no token is needed for the two used here.
 
-**What we ran on.** Our training, serving and model evaluations ran on a Helix cluster with one A100 80GB per job. The data generation and agent runs used a local Helix on a laptop. We haven't run steps 7 to 9 on a single local GPU machine end to end, which is why this is a draft.
+**What we ran on.** Our training, serving and model evaluations ran on a Helix cluster with one A100 80GB per job. The data generation and agent runs used a local Helix on a laptop.
 
 **Time and cost.** Times below are what our runs took. Yours will differ with your data, model, hardware and provider. With the packaged data on one A100 80GB, plan on about 2 to 4 hours end to end plus the image download in step 7a: steps 0 to 6 about 30 minutes, training about 30 minutes, deploying 20 to 45 minutes, evaluations about 15 minutes and the agent comparison 30 minutes for 50 incidents or about 2 hours for all 200. Everything we ran cost about $13 to $40 at public prices, with an A100 80GB at $1.66 to $6.03 an hour (Brev listings, October 2026).
 
