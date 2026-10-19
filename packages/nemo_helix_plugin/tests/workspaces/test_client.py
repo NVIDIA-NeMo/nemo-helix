@@ -77,6 +77,19 @@ def test_create_workspace_exist_ok_replays_get_on_conflict() -> None:
     ]
 
 
+def test_create_workspace_exist_ok_does_not_replay_a_deletion_conflict() -> None:
+    detail = "Workspace 'ml-team' is still being deleted (shared-weights: HTTP 409: still referenced)"
+    recorder = Recorder([httpx.Response(409, json={"detail": detail})])
+    client = make_client(recorder)
+
+    with pytest.raises(ConflictError) as exc:
+        client.create_workspace(body=CreateWorkspaceRequest(name="ml-team"), exist_ok=True)
+
+    assert exc.value.status_code == 409
+    assert "still being deleted" in str(exc.value)
+    assert [(r.method, r.url.path) for r in recorder.requests] == [("POST", "/apis/entities/v2/workspaces")]
+
+
 def test_create_workspace_conflict_raises_without_exist_ok() -> None:
     recorder = Recorder([httpx.Response(409, json={"detail": "exists"})])
     client = make_client(recorder)

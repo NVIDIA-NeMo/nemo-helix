@@ -68,6 +68,16 @@ def _exclude_deleting_workspaces(filter_op: FilterOperation | None) -> FilterOpe
     )
 
 
+def _workspace_name_conflict_detail(existing: Workspace) -> str:
+    """Distinguish a live workspace from a name reserved by cleanup."""
+    if existing._deletion_stage is None:
+        return f"Workspace '{existing.name}' already exists"
+    detail = f"Workspace '{existing.name}' is still being deleted"
+    if existing._deletion_error:
+        return f"{detail} ({existing._deletion_error})"
+    return detail
+
+
 def _principal_for_role_binding(principal: Principal) -> str | None:
     """Use the acting principal for role bindings, including on-behalf-of requests.
 
@@ -218,7 +228,7 @@ async def create_workspace(
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Workspace '{workspace.name}' already exists",
+            detail=_workspace_name_conflict_detail(existing),
         )
 
     try:
@@ -235,9 +245,14 @@ async def create_workspace(
         )
 
         if "duplicate key" in error_msg.lower() or "unique constraint" in error_msg.lower():
+            raced = await workspace_repository.get_workspace_by_name(name=workspace.name)
+            if raced is not None and raced._deletion_stage is not None:
+                detail = _workspace_name_conflict_detail(raced)
+            else:
+                detail = f"Workspace '{workspace.name}' already exists."
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Workspace '{workspace.name}' already exists.",
+                detail=detail,
             )
         else:
             raise HTTPException(
