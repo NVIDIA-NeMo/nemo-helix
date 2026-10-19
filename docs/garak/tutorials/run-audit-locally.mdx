@@ -28,7 +28,7 @@ This tutorial takes approximately **10 minutes** to complete, plus however long 
 
 - Install and start NeMo Helix using the [Setup guide](/documentation/get-started).
 - Install garak in a Python virtual environment so the plugin can shell out to it. By default the plugin invokes `~/.garak/.venv/bin/python -m garak`. Override the interpreter path with `NEMO_GARAK_PYTHON` if your install lives elsewhere.
-- Configure at least one Inference Gateway provider — this tutorial uses the `nvidia-inference-api` provider that is included in a default local setup, but any chat-completion-compatible provider works. Step 3 shows how to list the providers registered in your deployment. See [Inference Gateway](/documentation/vulnerability-scanning/targets/inference-gateway) for details on the `nhx_uri_spec` block used below.
+- Configure at least one Inference Gateway provider — this tutorial uses the `system/nvidia-build` provider, but any chat-completion-compatible provider works. Step 3 shows how to list the providers registered in your deployment. See [Inference Gateway](/documentation/vulnerability-scanning/targets/inference-gateway) for details on the `nhx_uri_spec` block used below.
 
 ---
 
@@ -41,6 +41,13 @@ This tutorial takes approximately **10 minutes** to complete, plus however long 
 ---
 
 ## 1. Initialize the SDK
+
+Install the local audit interpreter (the same garak version used by the task image). This runs on the notebook host, not inside the platform containers:
+
+```bash
+python3 -m venv "$HOME/.garak/.venv"
+"$HOME/.garak/.venv/bin/python" -m pip install "garak==0.17.0"
+```
 
 Connect to the running platform and reach the garak sub-resource:
 
@@ -94,28 +101,28 @@ For the full set of options on each sub-block, see [Configuration Schema](/docum
 First, list the providers registered in your deployment so you can pick one that exists:
 
 ```python
-providers = client.models.list_providers(workspace="default")
+providers = client.models.list_providers(workspace="system")
 for provider in providers.items():
     print(provider.name, provider.host_url)
 ```
 
 Use a `provider` name from this output in the target below. The model identifier format depends on the provider — check the provider's API documentation or served-model list if unsure.
 
-Define the model under test. This example uses garak's `nim.NVOpenAIChat` generator pointed at the `nvidia-inference-api` provider registered in a default local setup:
+Define the model under test. This example uses garak's `nim.NVOpenAIChat` generator pointed at the `system/nvidia-build` provider:
 
 ```python
 target = garak.targets.create(
     workspace="default",
     name="nemotron-3.5-lightning-30b",
     type="nim.NVOpenAIChat",
-    model="nvidia/nvidia/nemotron-3.5-lightning-30b-a3b",
+    model="nvidia/nemotron-3.5-lightning-30b-a3b",
     options={
         "nim": {
             "max_tokens": 1024,
             "nhx_uri_spec": {
                 "inference_gateway": {
-                    "workspace": "default",
-                    "provider": "nvidia-inference-api",
+                    "workspace": "system",
+                    "provider": "nvidia-build",
                 },
             },
         },
