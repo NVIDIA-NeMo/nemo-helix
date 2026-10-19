@@ -4,7 +4,7 @@
 # Sandboxed Gym host runtime for Evaluator agent-evaluation jobs.
 #
 ARG NHX_PYTHON_BASE=nhx-python-base
-ARG NHX_PYTHON_IMAGE=python:3.13.15-slim-trixie
+ARG NHX_PYTHON_IMAGE=python:3.13.16-slim-trixie
 
 FROM ${NHX_PYTHON_BASE} AS builder
 
