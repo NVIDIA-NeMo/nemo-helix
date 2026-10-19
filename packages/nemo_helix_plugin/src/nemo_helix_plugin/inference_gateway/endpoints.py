@@ -3,8 +3,9 @@
 
 """Typed endpoint definitions for the Inference Gateway proxy routes.
 
-Three proxy surfaces share the ``/-/{trailing_uri}`` convention, where
-``trailing_uri`` is the provider-relative path such as ``v1/chat/completions``:
+Three proxy surfaces share the ``/-/{trailing_uri:path}`` convention, where
+``trailing_uri`` is the provider-relative path such as ``v1/chat/completions``,
+sent with literal slashes (the gateway declares the same ``:path`` converter):
 
 - ``provider``: route straight to a registered ModelProvider by name.
 - ``model``: route through a model entity (``workspace/name``).
@@ -31,32 +32,32 @@ _BASE = "/apis/inference-gateway/v2/workspaces/{workspace}"
 # ---------------------------------------------------------------------------
 
 
-@get(f"{_BASE}/provider/{{name}}/-/{{trailing_uri}}")
+@get(f"{_BASE}/provider/{{name}}/-/{{trailing_uri:path}}")
 @abstractmethod
 def provider_get(*, workspace: str | None = None, name: str, trailing_uri: str) -> Any: ...
 
 
-@post(f"{_BASE}/provider/{{name}}/-/{{trailing_uri}}")
+@post(f"{_BASE}/provider/{{name}}/-/{{trailing_uri:path}}")
 @abstractmethod
 def provider_post(*, workspace: str | None = None, name: str, trailing_uri: str, body: JsonBody) -> Any: ...
 
 
-@put(f"{_BASE}/provider/{{name}}/-/{{trailing_uri}}")
+@put(f"{_BASE}/provider/{{name}}/-/{{trailing_uri:path}}")
 @abstractmethod
 def provider_put(*, workspace: str | None = None, name: str, trailing_uri: str, body: JsonBody) -> Any: ...
 
 
-@patch(f"{_BASE}/provider/{{name}}/-/{{trailing_uri}}")
+@patch(f"{_BASE}/provider/{{name}}/-/{{trailing_uri:path}}")
 @abstractmethod
 def provider_patch(*, workspace: str | None = None, name: str, trailing_uri: str, body: JsonBody) -> Any: ...
 
 
-@delete(f"{_BASE}/provider/{{name}}/-/{{trailing_uri}}")
+@delete(f"{_BASE}/provider/{{name}}/-/{{trailing_uri:path}}")
 @abstractmethod
 def provider_delete(*, workspace: str | None = None, name: str, trailing_uri: str) -> None: ...
 
 
-@post(f"{_BASE}/provider/{{name}}/-/{{trailing_uri}}")
+@post(f"{_BASE}/provider/{{name}}/-/{{trailing_uri:path}}")
 @abstractmethod
 def stream_provider(*, workspace: str | None = None, name: str, trailing_uri: str, body: JsonBody) -> BinaryContent: ...
 
@@ -76,32 +77,32 @@ def provider_ready(*, workspace: str | None = None, name: str) -> ProviderReadyR
 # ---------------------------------------------------------------------------
 
 
-@get(f"{_BASE}/model/{{name}}/-/{{trailing_uri}}")
+@get(f"{_BASE}/model/{{name}}/-/{{trailing_uri:path}}")
 @abstractmethod
 def model_get(*, workspace: str | None = None, name: str, trailing_uri: str) -> Any: ...
 
 
-@post(f"{_BASE}/model/{{name}}/-/{{trailing_uri}}")
+@post(f"{_BASE}/model/{{name}}/-/{{trailing_uri:path}}")
 @abstractmethod
 def model_post(*, workspace: str | None = None, name: str, trailing_uri: str, body: JsonBody) -> Any: ...
 
 
-@put(f"{_BASE}/model/{{name}}/-/{{trailing_uri}}")
+@put(f"{_BASE}/model/{{name}}/-/{{trailing_uri:path}}")
 @abstractmethod
 def model_put(*, workspace: str | None = None, name: str, trailing_uri: str, body: JsonBody) -> Any: ...
 
 
-@patch(f"{_BASE}/model/{{name}}/-/{{trailing_uri}}")
+@patch(f"{_BASE}/model/{{name}}/-/{{trailing_uri:path}}")
 @abstractmethod
 def model_patch(*, workspace: str | None = None, name: str, trailing_uri: str, body: JsonBody) -> Any: ...
 
 
-@delete(f"{_BASE}/model/{{name}}/-/{{trailing_uri}}")
+@delete(f"{_BASE}/model/{{name}}/-/{{trailing_uri:path}}")
 @abstractmethod
 def model_delete(*, workspace: str | None = None, name: str, trailing_uri: str) -> None: ...
 
 
-@post(f"{_BASE}/model/{{name}}/-/{{trailing_uri}}")
+@post(f"{_BASE}/model/{{name}}/-/{{trailing_uri:path}}")
 @abstractmethod
 def stream_model(*, workspace: str | None = None, name: str, trailing_uri: str, body: JsonBody) -> BinaryContent: ...
 
@@ -111,17 +112,17 @@ def stream_model(*, workspace: str | None = None, name: str, trailing_uri: str, 
 # ---------------------------------------------------------------------------
 
 
-@get(f"{_BASE}/openai/-/{{trailing_uri}}")
+@get(f"{_BASE}/openai/-/{{trailing_uri:path}}")
 @abstractmethod
 def openai_get(*, workspace: str | None = None, trailing_uri: str) -> Any: ...
 
 
-@post(f"{_BASE}/openai/-/{{trailing_uri}}")
+@post(f"{_BASE}/openai/-/{{trailing_uri:path}}")
 @abstractmethod
 def openai_post(*, workspace: str | None = None, trailing_uri: str, body: JsonBody) -> Any: ...
 
 
-@post(f"{_BASE}/openai/-/{{trailing_uri}}")
+@post(f"{_BASE}/openai/-/{{trailing_uri:path}}")
 @abstractmethod
 def stream_openai(*, workspace: str | None = None, trailing_uri: str, body: JsonBody) -> BinaryContent: ...
 

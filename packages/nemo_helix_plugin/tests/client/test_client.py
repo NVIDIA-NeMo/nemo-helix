@@ -158,7 +158,18 @@ def test_send_keeps_slashes_literal_in_path_placeholders() -> None:
     assert mock_http.request.call_args.args[1] == f"{BASE}/apis/test/v2/items/a%2Fb/-/dir/sub%20dir/file%3F.txt"
 
 
-@pytest.mark.parametrize("path", ["../x", "a/../b", "./x", "a//b", "/x", "x/"])
+def test_send_allows_one_trailing_slash_in_path_placeholders() -> None:
+    mock_http = MagicMock(spec=httpx.Client)
+    mock_http.request.return_value = httpx.Response(
+        200, request=httpx.Request("GET", BASE), json={"id": 1, "name": "x"}
+    )
+
+    NemoClient(base_url=BASE, http_client=mock_http).send(GET_ITEM_FILE(name="a", path="v1/models/"))
+
+    assert mock_http.request.call_args.args[1] == f"{BASE}/apis/test/v2/items/a/-/v1/models/"
+
+
+@pytest.mark.parametrize("path", ["../x", "a/../b", "./x", "a//b", "/x", "x//", "/"])
 def test_send_rejects_dot_and_empty_segments_in_path_placeholders(path: str) -> None:
     """A ``{path:path}`` value is sent with literal ``/``, so ``..`` would walk into a
     sibling route (``delete_file(name="a", path="../../victim")`` would hit

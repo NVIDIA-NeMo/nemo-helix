@@ -4,7 +4,7 @@
 """``nemo inference gateway`` command group, backed by the typed Inference Gateway client.
 
 The ``provider`` and ``model`` sub-groups proxy raw HTTP verbs to a provider or
-model-entity route (``.../-/{trailing_uri}``); ``openai v1 models`` exposes the
+model-entity route (``.../-/{trailing_uri:path}``); ``openai v1 models`` exposes the
 workspace's OpenAI-compatible model catalog.
 """
 
@@ -52,6 +52,15 @@ openai_app.add_typer(openai_v1_app, name="v1")
 openai_v1_app.add_typer(openai_v1_models_app, name="models")
 
 
+def _relative_trailing_uri(trailing_uri: str) -> str:
+    """Drop a leading ``/`` so ``/v1/models`` and ``v1/models`` address the same route.
+
+    The route's ``/-/`` separator already ends in a slash, and the client rejects a
+    path value that starts with an empty segment.
+    """
+    return trailing_uri.lstrip("/")
+
+
 def _proxy_body_request(
     ctx: typer.Context,
     *,
@@ -66,6 +75,7 @@ def _proxy_body_request(
     output_format: EntityOutputFormat | None,
 ) -> None:
     """Shared implementation of the ``patch`` / ``post`` / ``put`` proxy commands."""
+    trailing_uri = _relative_trailing_uri(trailing_uri)
     input_payload = read_input_payload(input_file, input_data)
 
     if workspace is not None:
@@ -120,6 +130,7 @@ def _proxy_get(
     workspace: str | None,
     output_format: EntityOutputFormat | None,
 ) -> None:
+    trailing_uri = _relative_trailing_uri(trailing_uri)
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 
@@ -140,6 +151,7 @@ def _proxy_get(
 
 
 def _proxy_delete(ctx: typer.Context, *, method: str, trailing_uri: str, name: str, workspace: str | None) -> None:
+    trailing_uri = _relative_trailing_uri(trailing_uri)
     state: CLIContext = ctx.obj
     send: Callable[..., Any] = getattr(state.typed_client(InferenceGatewayClient), method)
     send(name=name, trailing_uri=trailing_uri, workspace=workspace)
