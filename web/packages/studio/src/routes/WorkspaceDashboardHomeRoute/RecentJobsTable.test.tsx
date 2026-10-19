@@ -307,4 +307,82 @@ describe('RecentJobsTable', () => {
 
     expect(await screen.findByText(/boom/)).toBeInTheDocument();
   });
+
+  describe('polling', () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('polls every 5s while a job is running', async () => {
+      let requestCount = 0;
+      server.use(
+        http.get(JOBS_URL, () => {
+          requestCount += 1;
+          return HttpResponse.json(makeJobsPage([makeJob({ name: 'running-run' })]));
+        })
+      );
+
+      renderComponent();
+      await screen.findByText('running-run');
+      expect(requestCount).toBe(1);
+
+      await act(() => vi.advanceTimersByTimeAsync(5000));
+
+      expect(requestCount).toBe(2);
+    });
+
+    it('polls every 30s when nothing is running', async () => {
+      let requestCount = 0;
+      server.use(
+        http.get(JOBS_URL, () => {
+          requestCount += 1;
+          return HttpResponse.json(
+            makeJobsPage([makeJob({ name: 'done-run', status: HelixJobStatus.completed })])
+          );
+        })
+      );
+
+      renderComponent();
+      await screen.findByText('done-run');
+
+      await act(() => vi.advanceTimersByTimeAsync(29_000));
+      expect(requestCount).toBe(1);
+
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      expect(requestCount).toBe(2);
+    });
+
+    it('keeps the last rows when a poll fails and recovers on a later poll', async () => {
+      let requestCount = 0;
+      server.use(
+        http.get(JOBS_URL, () => {
+          requestCount += 1;
+          if (requestCount === 2) {
+            return HttpResponse.json({ detail: 'boom' }, { status: 503 });
+          }
+          return HttpResponse.json(
+            makeJobsPage([makeJob({ name: requestCount === 1 ? 'first-run' : 'second-run' })])
+          );
+        })
+      );
+
+      renderComponent();
+      await screen.findByText('first-run');
+
+      await act(() => vi.advanceTimersByTimeAsync(5000));
+
+      expect(requestCount).toBe(2);
+      expect(screen.getByText('first-run')).toBeInTheDocument();
+      expect(screen.queryByText(/boom/)).not.toBeInTheDocument();
+
+      await act(() => vi.advanceTimersByTimeAsync(30_000));
+
+      expect(await screen.findByText('second-run')).toBeInTheDocument();
+      expect(requestCount).toBe(3);
+    });
+  });
 });

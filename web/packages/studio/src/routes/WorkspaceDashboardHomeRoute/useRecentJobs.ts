@@ -8,6 +8,7 @@ import { useJobsListJobs } from '@nemo/sdk/generated/platform/jobs';
 import type { HelixJobListSortField } from '@nemo/sdk/generated/platform/schema';
 import {
   buildFilter,
+  isJobRunning,
   isRecentJob,
 } from '@studio/routes/WorkspaceDashboardHomeRoute/recentJobsUtils';
 import { keepPreviousData } from '@tanstack/react-query';
@@ -15,6 +16,9 @@ import { useEffect, useMemo, useState } from 'react';
 
 const RECENT_WINDOW_MS = 48 * 60 * 60 * 1000;
 const JOBS_FETCH_SIZE = 100;
+// Used when nothing is running or the last poll failed. It picks up jobs started elsewhere and
+// recovers from a jobs service restart without polling the full list every 5s.
+const SLOW_POLLING_INTERVAL_MS = 30 * 1000;
 
 export const useRecentJobs = (workspace: string, dataViewState: StudioDataViewState) => {
   // Fixed at mount to keep the query key stable across polls.
@@ -42,7 +46,10 @@ export const useRecentJobs = (workspace: string, dataViewState: StudioDataViewSt
         staleTime: 0,
         refetchOnWindowFocus: true,
         refetchInterval: (query) =>
-          query.state.status === 'error' ? false : JOB_POLLING_INTERVAL_MS,
+          query.state.status !== 'error' &&
+          query.state.data?.data.some((job) => isJobRunning(job.status))
+            ? JOB_POLLING_INTERVAL_MS
+            : SLOW_POLLING_INTERVAL_MS,
       },
     }
   );
@@ -73,6 +80,7 @@ export const useRecentJobs = (workspace: string, dataViewState: StudioDataViewSt
     pageRows,
     totalCount: recentJobs.length,
     isLoading: isLoading || isPlaceholderData,
-    error,
+    // A failed poll keeps the last rows; only an initial load failure has nothing to show.
+    error: jobsData === undefined ? error : null,
   };
 };
