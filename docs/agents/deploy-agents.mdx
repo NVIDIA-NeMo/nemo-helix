@@ -427,6 +427,16 @@ agents:
     # Restart the platform and redeploy agents to apply changes.
     readiness_probe_timeout_seconds: 1
     readiness_probe_failure_threshold: 12
+    # Optional: registries an agent can be registered from by reading its packaged image.
+    # Listed registries are trusted, so a private one may be added; "*" also allows any public registry.
+    image_registries:
+      - registry-1.docker.io
+      - ghcr.io
+      - nvcr.io
+      - quay.io
+      - public.ecr.aws
+      - gcr.io
+      - mcr.microsoft.com
 
 deployments:
   default_executor: local-docker
