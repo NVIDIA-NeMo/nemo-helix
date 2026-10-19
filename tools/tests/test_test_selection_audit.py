@@ -35,8 +35,8 @@ def test_workflow_parser_finds_gated_test_commands() -> None:
     assert scaled_evals.run_blocks[0] == (
         "uv run --frozen --group scaled-evals pytest plugins/_temporary-scaled-evals/tests -v"
     )
-    # The per-runner Harbor step runs from inside the plugin.
-    assert scaled_evals.run_block_working_directories == ("", "plugins/_temporary-scaled-evals")
+    # The per-runner Harbor step runs from the nhx-sandbox package, which owns harbor_opensandbox.
+    assert scaled_evals.run_block_working_directories == ("", "packages/nhx_sandbox")
     assert jobs["deployments-openshell-tests"].referenced_outputs == ("deps", "deployments-openshell")
     assert jobs["deployments-openshell-tests"].run_blocks == ("make test-deployments-openshell",)
 
