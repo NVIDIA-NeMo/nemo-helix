@@ -34,6 +34,14 @@ class HarborSandboxProfileConfig(BaseModel):
             "running in the sandbox can call its model. Empty keeps no-network tasks fully closed."
         ),
     )
+    agent_setup_egress: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Hosts a no-network task's sandbox may reach only while the agent installs itself (package "
+            "registries, release downloads). They are removed, and processes the install left running are "
+            "killed, before the agent runs. Empty keeps no-network tasks closed during setup too."
+        ),
+    )
     egress_verification: Literal["default_action", "strict"] = "strict"
     max_sandbox_lifetime_s: int = Field(
         default=8 * 3600 + 30 * 60, ge=1, description="OpenSandbox TTL backstop: longest trial plus margin."
