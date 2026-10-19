@@ -51,6 +51,7 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.records import NG_ATTEMPT_INDEX, NG_R
 from nhx_evals_sdk.agent_eval.runtimes.gym.results import (
     _INPUT_TOKEN_KEYS,
     _TOKEN_USAGE_KEYS,
+    AGENT_NEVER_RAN_ERROR_TYPE,
     GYM_FAILURE_RECORD,
     _agent_never_ran,
     _aggregate_metrics_path_for,
@@ -1587,7 +1588,10 @@ def test_some_rollouts_empty_fails_only_those_trials(tmp_path: Path) -> None:
     assert empty.metadata["reward"] is None
     # ...but the reason is recorded.
     assert "never called" in empty.metadata["gym_failure"]
+    # Without an error the summary leaves the trial out of error_trial_ids and Intake shows it as a success.
+    assert empty.error == TrialError(type=AGENT_NEVER_RAN_ERROR_TYPE, message=empty.metadata["gym_failure"])
     assert real.status is AgentEvalTrialStatus.COMPLETED
+    assert real.error is None
     assert real.measurements == TrialMeasurements(prompt_tokens=1, completion_tokens=1)
     assert real.metadata["reward"] == 1.0
 
