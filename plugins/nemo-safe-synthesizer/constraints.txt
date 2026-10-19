@@ -37,3 +37,26 @@ botocore>=1.40.46,<1.40.62
 gliner<0.2.27
 opacus==1.5.4
 transformers==5.12.0
+
+# Match the NSS v0.1.13 training lock, retaining Helix's Accelerate and
+# safetensors floors. The isolated engine needs datasets >=4.8.4; the host
+# workspace's datasets override must not downgrade it during plugin sync.
+datasets==4.8.4
+accelerate==1.15.0
+bitsandbytes==0.49.1
+peft==0.18.1
+trl==0.24.0
+kernels==0.12.1
+gliner==0.2.24
+huggingface-hub==1.17.0
+numpy==2.2.6
+opt-einsum==3.4.0
+prv-accountant==0.2.0
+safetensors==0.8.0
+sentence-transformers==5.2.3
+tokenizers==0.22.2
+triton==3.6.0
+torch==2.11.0+cu129
+torchaudio==2.11.0+cu129
+torchvision==0.26.0+cu129
+torchao==0.17.0+cu129

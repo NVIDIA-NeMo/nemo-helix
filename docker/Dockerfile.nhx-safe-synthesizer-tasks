@@ -14,10 +14,11 @@
 ARG PYTHON_VERSION=3.13
 ARG PYTHON_IMAGE=python:${PYTHON_VERSION}-slim-trixie
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.26
-ARG SAFE_SYNTHESIZER_RUNTIME_PACKAGE="nemo-safe-synthesizer[engine,cu129]==0.1.7"
+ARG SAFE_SYNTHESIZER_RUNTIME_PACKAGE="nemo-safe-synthesizer[engine,cu129]==0.1.13"
+ARG FLASHINFER_CUBIN_INDEX_URL="https://flashinfer.ai/whl/"
 ARG FLASHINFER_CU129_INDEX_URL="https://flashinfer.ai/whl/cu129"
 ARG PYTORCH_CU129_INDEX_URL="https://download.pytorch.org/whl/cu129"
-ARG VLLM_CU129_INDEX_URL="https://wheels.vllm.ai/ee0da84ab9e04ac7610e28580af62c365e898389/cu129"
+ARG VLLM_CU129_INDEX_URL="https://wheels.vllm.ai/0.26.0/cu129"
 
 # =============================================================================
 # uv binary
@@ -30,6 +31,7 @@ FROM ${UV_IMAGE} AS uv
 FROM ${PYTHON_IMAGE} AS runtime
 ARG PYTHON_IMAGE
 ARG SAFE_SYNTHESIZER_RUNTIME_PACKAGE
+ARG FLASHINFER_CUBIN_INDEX_URL
 ARG FLASHINFER_CU129_INDEX_URL
 ARG PYTORCH_CU129_INDEX_URL
 ARG VLLM_CU129_INDEX_URL
@@ -126,10 +128,15 @@ RUN printf '%s\n' \
         'aiohttp>=3.14.3,<4' \
         'cryptography>=50.0.0,<51' \
         'pyarrow>=23.0.1,<24' \
+        'vllm==0.26.0+cu129' \
+        'flashinfer-python==0.6.14' \
+        'flashinfer-cubin==0.6.14' \
+        'flashinfer-jit-cache==0.6.14+cu129' \
         > /tmp/safe-synthesizer-overrides.txt
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     UV_CACHE_DIR=/root/.cache/uv uv pip install --python /opt/venv/bin/python \
+        --extra-index-url "${FLASHINFER_CUBIN_INDEX_URL}" \
         --extra-index-url "${FLASHINFER_CU129_INDEX_URL}" \
         --extra-index-url "${PYTORCH_CU129_INDEX_URL}" \
         --index-strategy unsafe-best-match \
@@ -142,6 +149,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Add FlashInfer binary/cache wheels in their own layer.
 RUN --mount=type=cache,target=/root/.cache/uv \
     UV_CACHE_DIR=/root/.cache/uv uv pip install --python /opt/venv/bin/python \
+        --extra-index-url "${FLASHINFER_CUBIN_INDEX_URL}" \
         --extra-index-url "${FLASHINFER_CU129_INDEX_URL}" \
         --extra-index-url "${PYTORCH_CU129_INDEX_URL}" \
         --index-strategy unsafe-best-match \
@@ -154,6 +162,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Add PyTorch, TorchVision, TorchAudio, TorchAO, and Triton separately from vLLM.
 RUN --mount=type=cache,target=/root/.cache/uv \
     UV_CACHE_DIR=/root/.cache/uv uv pip install --python /opt/venv/bin/python \
+        --extra-index-url "${FLASHINFER_CUBIN_INDEX_URL}" \
         --extra-index-url "${FLASHINFER_CU129_INDEX_URL}" \
         --extra-index-url "${PYTORCH_CU129_INDEX_URL}" \
         --index-strategy unsafe-best-match \
@@ -166,6 +175,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Install the remaining runtime dependencies, currently dominated by vLLM.
 RUN --mount=type=cache,target=/root/.cache/uv \
     UV_CACHE_DIR=/root/.cache/uv uv pip install --python /opt/venv/bin/python \
+        --extra-index-url "${FLASHINFER_CUBIN_INDEX_URL}" \
         --extra-index-url "${FLASHINFER_CU129_INDEX_URL}" \
         --extra-index-url "${PYTORCH_CU129_INDEX_URL}" \
         --extra-index-url "${VLLM_CU129_INDEX_URL}" \
@@ -191,11 +201,56 @@ RUN mkdir -p docs && \
 # imports come from nemo-helix-plugin and nhx-common.
 # The runtime layer above installs CVE-patched cryptography/pyarrow; do not let
 # the workspace lock downgrade them during plugin sync.
+# Preserve the separately resolved training stack too: the workspace lock has
+# different PEFT/Accelerate versions. vLLM and FlashInfer match NSS 0.1.13's
+# cu129 generation extras.
 RUN --mount=type=cache,target=/root/.cache/uv \
     UV_CACHE_DIR=/root/.cache/uv uv sync --package nemo-safe-synthesizer-plugin --no-dev --no-editable --inexact \
         --no-install-package nemo-helix \
         --no-install-package cryptography \
-        --no-install-package pyarrow
+        --no-install-package pyarrow \
+        --no-install-package datasets \
+        --no-install-package accelerate \
+        --no-install-package bitsandbytes \
+        --no-install-package opacus \
+        --no-install-package peft \
+        --no-install-package torch \
+        --no-install-package torchaudio \
+        --no-install-package torchvision \
+        --no-install-package torchao \
+        --no-install-package transformers \
+        --no-install-package trl \
+        --no-install-package kernels \
+        --no-install-package gliner \
+        --no-install-package huggingface-hub \
+        --no-install-package numpy \
+        --no-install-package opt-einsum \
+        --no-install-package prv-accountant \
+        --no-install-package safetensors \
+        --no-install-package sentence-transformers \
+        --no-install-package tokenizers \
+        --no-install-package triton
+
+# Fail the image build if a later sync changes the pinned training versions.
+RUN python - <<'PY'
+from importlib.metadata import version
+from pathlib import Path
+
+from packaging.requirements import Requirement
+
+for filename in (
+    '/tmp/safe-synthesizer-constraints.txt',
+    '/tmp/safe-synthesizer-overrides.txt',
+    '/tmp/safe-synthesizer-runtime.txt',
+):
+    for line in Path(filename).read_text().splitlines():
+        if '==' not in line or line.startswith('#'):
+            continue
+        requirement = Requirement(line)
+        installed = version(requirement.name)
+        if installed not in requirement.specifier:
+            raise RuntimeError(f'{requirement.name}=={installed} does not satisfy {requirement}')
+PY
 
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
