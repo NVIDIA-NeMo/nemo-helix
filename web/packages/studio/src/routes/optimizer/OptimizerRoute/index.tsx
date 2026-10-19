@@ -3,10 +3,7 @@
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
-import {
-  ROW_ACTIONS_COLUMN_SIZE,
-  StudioDataView,
-} from '@nemo/common/src/components/DataView/StudioDataView';
+import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
@@ -14,14 +11,7 @@ import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { useInsightsListInsights } from '@nemo/sdk/generated/insights/insights-insights';
 import type { InsightListItem } from '@nemo/sdk/generated/insights/schema';
-import {
-  type DropdownEntry,
-  Flex,
-  PageHeader,
-  Stack,
-  Tag,
-  Text,
-} from '@nvidia/foundations-react-core';
+import { Flex, PageHeader, Stack, Tag, Text } from '@nvidia/foundations-react-core';
 import { FeatureFlagBadge } from '@studio/components/FeatureFlagBadge';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
@@ -56,10 +46,9 @@ export const OptimizerRoute: FC = () => {
     { query: { placeholderData: keepPreviousData } }
   );
 
-  const makeColumns: ComponentProps<typeof StudioDataView<InsightListItem>>['makeColumns'] = (
-    { accessor },
-    { rowActionsColumn }
-  ) => [
+  const makeColumns: ComponentProps<typeof StudioDataView<InsightListItem>>['makeColumns'] = ({
+    accessor,
+  }) => [
     accessor('status', {
       header: 'Status',
       enableSorting: false,
@@ -129,11 +118,6 @@ export const OptimizerRoute: FC = () => {
           <Text>—</Text>
         );
       },
-    }),
-    rowActionsColumn({
-      size: ROW_ACTIONS_COLUMN_SIZE,
-      enableResizing: false,
-      rowActions: (): DropdownEntry[] => [],
     }),
   ];
 
