@@ -122,6 +122,101 @@ for a config per harness.
 strategies require it.
 </Note>
 
+### Add Custom Python Code
+
+The harness builds the agent from `agent.yaml`; it does not import your Python modules. Give the
+agent custom Python tools through an MCP server that it starts over stdio, as in this calculator
+agent:
+
+```text
+calculator-agent/
+├── agent.yaml
+├── pyproject.toml
+└── mcps/
+    └── calculator.py
+```
+
+`mcps/calculator.py` defines the tools with the MCP SDK:
+
+```python
+from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("calculator")
+
+
+@mcp.tool()
+def multiply(numbers: list[float]) -> float:
+    """Multiply two or more numbers."""
+    result = 1.0
+    for number in numbers:
+        result *= number
+    return result
+
+
+def main() -> None:
+    mcp.run(transport="stdio")
+```
+
+`pyproject.toml` declares the tool's dependencies and installs the server as a command:
+
+```toml
+[project]
+name = "calculator-agent"
+version = "0.1.0"
+dependencies = ["mcp>=1.28.1,<2"]
+
+[project.scripts]
+calculator-server = "mcps.calculator:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mcps"]
+```
+
+`agent.yaml` starts that command as an MCP server:
+
+```yaml
+mcp:
+  servers:
+    calculator:
+      transport: stdio
+      url: calculator-server
+```
+
+The command must be installed wherever the agent runs:
+
+- **Subprocess deployments:** install the project into the Python environment that runs NeMo
+  Helix, so `calculator-server` is on the platform's `PATH`:
+
+  ```bash
+  uv pip install -e ./calculator-agent
+  ```
+
+- **Docker and Kubernetes deployments:** package the agent with `--pyproject` so the image installs
+  the project, then deploy that image:
+
+  ```bash
+  nemo agents package \
+    --agent calculator-agent/agent.yaml \
+    --pyproject calculator-agent/pyproject.toml \
+    --tag calculator-agent:local
+  ```
+
+  The `nemo agents package-agent` platform job does not install a project, so package custom code
+  with the CLI.
+
+`nemo agents create` uploads every text file in the agent's directory, so keep virtual environments
+and build output out of it. See the
+[calculator example](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/plugins/nemo-agents/examples/nemo-agent-config/calculator-agent)
+for the complete project.
+
+To run an agent loop you wrote yourself, such as your own LangGraph or Deep Agents graph, serve it
+behind an endpoint and [register a remote endpoint](#register-a-remote-endpoint), or ship it in an
+image with its own server and [register it with a container image](#register-with-a-container-image).
+
 ### Model Access
 
 Platform-routed models go through the [Inference Gateway](/documentation/models-and-inference),
