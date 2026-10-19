@@ -29,6 +29,9 @@ ATTACK_DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b"
 ATTACK_DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1/"
 ANALYSIS_DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b"
 ANALYSIS_DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
+# agent-hardener's guardrail judge falls back to the analysis model, endpoint and key.
+SAFETY_DEFAULT_MODEL = ANALYSIS_DEFAULT_MODEL
+SAFETY_DEFAULT_BASE_URL = ANALYSIS_DEFAULT_BASE_URL
 
 
 class JobsSortField(str, Enum):
@@ -59,8 +62,8 @@ class WarGameModels(BaseModel):
     )
     safety: ModelChoice | None = Field(
         default=None,
-        description="Guardrail middleware LLM (agent-hardener's `safety_llm`); unset copies the victim's own LLM. "
-        "Only `model` applies — agent-hardener pins this LLM's endpoint and key when it writes the guardrail.",
+        description="Guardrail judge LLM that runs inside the victim (agent-hardener's `safety_llm`); an unset "
+        "field falls back to the analysis group's.",
     )
 
 
@@ -76,6 +79,7 @@ class ModelConfigDefaults(BaseModel):
 
     attack: ModelGroupDefault
     analysis: ModelGroupDefault
+    safety: ModelGroupDefault
 
 
 def model_config_defaults() -> ModelConfigDefaults:
@@ -83,6 +87,7 @@ def model_config_defaults() -> ModelConfigDefaults:
     return ModelConfigDefaults(
         attack=ModelGroupDefault(model=ATTACK_DEFAULT_MODEL, base_url=ATTACK_DEFAULT_BASE_URL),
         analysis=ModelGroupDefault(model=ANALYSIS_DEFAULT_MODEL, base_url=ANALYSIS_DEFAULT_BASE_URL),
+        safety=ModelGroupDefault(model=SAFETY_DEFAULT_MODEL, base_url=SAFETY_DEFAULT_BASE_URL),
     )
 
 

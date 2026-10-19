@@ -18,7 +18,13 @@ from nemo_agent_hardener_plugin.cli.client import base_url, make_sdk
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
 from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
 from nemo_agent_hardener_plugin.jobs.manifest import DEFENDER_ENTRIES
-from nemo_agent_hardener_plugin.model_config import ANALYSIS_DEFAULT_BASE_URL, ATTACK_DEFAULT_BASE_URL
+from nemo_agent_hardener_plugin.model_config import (
+    ANALYSIS_DEFAULT_BASE_URL,
+    ATTACK_DEFAULT_BASE_URL,
+    SAFETY_DEFAULT_BASE_URL,
+    ModelChoice,
+    effective_safety,
+)
 from nemo_agent_hardener_plugin.sdk import AgentHardenerPluginResource
 from nemo_helix_plugin.agent_hardener.types import JsonMap, JsonValue
 from nemo_helix_plugin.client.adapter import SyncHelixClient
@@ -109,17 +115,18 @@ def models_from_flags(
     analysis_base_url: str | None = None,
     analysis_key_secret: str | None = None,
     safety_model: str | None = None,
+    safety_base_url: str | None = None,
+    safety_key_secret: str | None = None,
 ) -> dict[str, dict[str, str]] | None:
     """Collect the per-group model flags into a ``WarGameModels`` payload, or ``None`` if none were given.
 
     Only the fields the user actually set appear, so an omitted flag leaves that group's stored value (or
-    agent-hardener's built-in default) in force. ``safety`` takes a model only: agent-hardener pins the guardrail
-    LLM's endpoint and key when it writes the guardrail, so a base URL or secret there would never be read.
+    agent-hardener's built-in default) in force.
     """
     groups = {
         "attack": {"model": attack_model, "base_url": attack_base_url, "api_key_secret": attack_key_secret},
         "analysis": {"model": analysis_model, "base_url": analysis_base_url, "api_key_secret": analysis_key_secret},
-        "safety": {"model": safety_model},
+        "safety": {"model": safety_model, "base_url": safety_base_url, "api_key_secret": safety_key_secret},
     }
     chosen = {
         group: {field: value for field, value in fields.items() if value is not None}
@@ -129,7 +136,7 @@ def models_from_flags(
     return selected or None
 
 
-def preflight_models(ctx: CommandContext, chosen: dict[str, dict[str, str]]) -> None:
+def preflight_models(ctx: CommandContext, chosen: dict[str, dict[str, str]], stored: JsonMap | None = None) -> None:
     """Reject an unreachable model before it is stored, using the same probe Studio's "Test connection" runs.
 
     A stored default is only exercised when someone later launches a run — possibly days later, possibly
@@ -137,16 +144,22 @@ def preflight_models(ctx: CommandContext, chosen: dict[str, dict[str, str]]) -> 
     too (``jobs.run._preflight_models``); this is the earlier, cheaper failure.
 
     Delegates to ``POST /model-config/validate`` rather than probing locally, so the CLI, Studio's "Test
-    connection", and the run all share one probe and one credential-resolution rule. Each group is sent its
-    own default endpoint, matching what the run will actually use.
+    connection", and the run all share one probe and one credential-resolution rule. Each group is probed as
+    the run will use it: merged over the *stored* models, on its own default endpoint, with safety falling
+    back to the analysis endpoint and key.
     """
     endpoints = {
         "attack": ATTACK_DEFAULT_BASE_URL,
         "analysis": ANALYSIS_DEFAULT_BASE_URL,
-        # agent-hardener pins the guardrail LLM to the attack endpoint; see `_ensure_safety_llm`.
-        "safety": ATTACK_DEFAULT_BASE_URL,
+        "safety": SAFETY_DEFAULT_BASE_URL,
     }
-    for group, fields in chosen.items():
+    effective = merge_models(stored, chosen)
+    analysis = ModelChoice.model_validate(effective.get("analysis", {}))
+    for group in chosen:
+        fields = effective[group]
+        if group == "safety":
+            safety = effective_safety(ModelChoice.model_validate(fields), analysis)
+            fields = safety.model_dump(exclude_none=True) if safety else {}
         if not (fields.get("model") or fields.get("base_url")):
             continue
         base_url = fields.get("base_url") or endpoints[group]

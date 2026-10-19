@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Model selection for a war-game — the three groups (attack / analysis / agent), each pre-filled with
+ * Model selection for a war-game — the three groups (attack / analysis / safety), each pre-filled with
  * its built-in default. Controlled via `value`/`onChange` so it drops into both the react-hook-form
  * create wizards and the useState run-launch dialog. For a custom endpoint a user can set a base URL
  * and pick (or create) a Secret for the key, then "Test connection" to confirm reachability — which
@@ -35,8 +35,8 @@ import { useQuery } from '@tanstack/react-query';
 import { FC, PropsWithChildren, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-/** The two credentialed groups the user can point at a custom endpoint (the agent model routes via the IGW). */
-type CredentialedGroup = 'attack' | 'analysis';
+/** The groups the user can point at a custom endpoint (the agent model routes via the IGW). */
+type CredentialedGroup = keyof WarGameModels;
 
 const GROUP_LABEL: Record<keyof WarGameModels, string> = {
   attack: 'Attack model',
@@ -48,8 +48,8 @@ const GROUP_HELP: Record<keyof WarGameModels, string> = {
   analysis:
     'The defenders and the benign validator — both its suite generation (synth) and judging — one shared model.',
   safety:
-    "The LLM the generated guardrail uses to screen the agent's traffic. Leave blank to reuse the agent's " +
-    'own model, which makes guardrail quality depend on the model being attacked.',
+    "The LLM the generated guardrail uses to screen the agent's traffic. Blank fields fall back to the " +
+    'analysis model, endpoint and key.',
 };
 
 const NO_SECRET = '';
@@ -115,19 +115,16 @@ export const ModelGroupFields: FC<ModelGroupFieldsProps> = ({
       defaultBaseUrl={defaults?.analysis.base_url}
       divider
     />
-    {/* Safety (guardrail) model: name only — agent-hardener pins the endpoint + key when it writes the
-        guardrail into the victim's plugins.toml, so a base URL or secret here would never be read. */}
-    <GroupSection label={GROUP_LABEL.safety} help={GROUP_HELP.safety} divider>
-      <FormField name="safety-model" slotLabel="Model">
-        <TextInput
-          value={value.safety?.model ?? ''}
-          placeholder="Reuse the agent's own model"
-          onChange={(e) =>
-            onChange(withGroup(value, 'safety', { model: e.target.value || undefined }))
-          }
-        />
-      </FormField>
-    </GroupSection>
+    {/* The judge falls back to the analysis endpoint, so that is what a blank safety endpoint means. */}
+    <CredentialedGroupFields
+      group="safety"
+      value={value}
+      onChange={onChange}
+      workspace={workspace}
+      defaultModel={value.analysis?.model || defaults?.safety.model}
+      defaultBaseUrl={value.analysis?.base_url || defaults?.safety.base_url}
+      divider
+    />
   </Stack>
 );
 

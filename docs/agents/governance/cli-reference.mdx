@@ -92,7 +92,8 @@ Resolves a target once and saves it as a manifest. Pass either `--agent` or
 
 Model defaults can also be set here and are stored on the manifest:
 `--attack-model`, `--attack-base-url`, `--attack-key-secret`, `--analysis-model`,
-`--analysis-base-url`, `--analysis-key-secret` and `--safety-model`. They take the
+`--analysis-base-url`, `--analysis-key-secret`, `--safety-model`, `--safety-base-url`
+and `--safety-key-secret`. They take the
 same values as the matching options on [`run`](#run).
 
 `--binary` is derived for you and rarely needed: derivation proposes the image's
@@ -154,7 +155,9 @@ apply to one launch only.
 | `--analysis-model <name>` | Default model for the defenders and the benign validator |
 | `--analysis-base-url <url>` | Custom OpenAI-compatible endpoint for the analysis model |
 | `--analysis-key-secret <name>` | Secrets-store name holding the analysis endpoint's API key |
-| `--safety-model <name>` | Default model the generated guardrail uses to screen traffic |
+| `--safety-model <name>` | Default model the generated guardrail uses to screen traffic. Unset uses the analysis model |
+| `--safety-base-url <url>` | Custom OpenAI-compatible endpoint for the safety model. Unset uses the analysis endpoint |
+| `--safety-key-secret <name>` | Secrets-store name holding the safety endpoint's API key |
 
 ## Running
 
@@ -201,7 +204,9 @@ looked up by manifest id; with `--config` you must pass `--benign-suite` yoursel
 | `--analysis-model <name>` | Model for the defenders and benign validator |
 | `--analysis-base-url <url>` | Custom OpenAI-compatible endpoint for the analysis model |
 | `--analysis-key-secret <name>` | Secrets-store name holding the analysis endpoint's API key |
-| `--safety-model <name>` | Model the generated guardrail uses to screen traffic. Unset reuses the agent's own model |
+| `--safety-model <name>` | Model the generated guardrail uses to screen traffic. Unset uses the analysis model |
+| `--safety-base-url <url>` | Custom OpenAI-compatible endpoint for the safety model. Unset uses the analysis endpoint |
+| `--safety-key-secret <name>` | Secrets-store name holding the safety endpoint's API key |
 | `--env-file <path>` | Dotenv supplying the agent's secrets. Its values are merged into the agent's `.env` and win over the operator environment |
 | `--workspace <name>` | Workspace for the run |
 

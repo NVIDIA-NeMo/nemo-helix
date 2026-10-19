@@ -14,4 +14,5 @@ import type { ModelGroupDefault } from './ModelGroupDefault.ts';
 export interface ModelConfigDefaults {
   attack: ModelGroupDefault;
   analysis: ModelGroupDefault;
+  safety: ModelGroupDefault;
 }

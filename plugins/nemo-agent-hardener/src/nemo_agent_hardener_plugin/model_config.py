@@ -14,9 +14,9 @@ The victim's own LLM is deliberately *not* a group. In NAT it is declared in the
 overriding it would mean rewriting the target's own config — the war-game measures the agent rather
 than editing it. Change it in the project's workflow and re-upload.
 
-``attack`` and ``analysis`` reach agent-hardener as subprocess env vars; ``safety`` travels in the
-manifest instead (``overrides.defenders`` → the guardrails entry's ``config``), because it is consumed
-by a defender rather than by the agent-hardener process.
+``attack`` and ``analysis`` reach agent-hardener as subprocess env vars. ``safety``'s endpoint and key
+do too; its model name travels in the manifest instead (``overrides.defenders`` → the guardrails
+entry's ``config``), because it is consumed by a defender rather than by the agent-hardener process.
 
 Each group is a :class:`ModelChoice` (model name, optional custom ``base_url``, optional Secrets
 name for a custom provider key). ``None`` anywhere means "use the built-in default", so an unset
@@ -34,6 +34,8 @@ from nemo_helix_plugin.agent_hardener.types import (
     ANALYSIS_DEFAULT_MODEL,
     ATTACK_DEFAULT_BASE_URL,
     ATTACK_DEFAULT_MODEL,
+    SAFETY_DEFAULT_BASE_URL,
+    SAFETY_DEFAULT_MODEL,
     ModelChoice,
     ModelConfigDefaults,
     ModelGroupDefault,
@@ -46,9 +48,28 @@ __all__ = [
     "ANALYSIS_DEFAULT_MODEL",
     "ATTACK_DEFAULT_BASE_URL",
     "ATTACK_DEFAULT_MODEL",
+    "SAFETY_DEFAULT_BASE_URL",
+    "SAFETY_DEFAULT_MODEL",
     "ModelChoice",
     "ModelConfigDefaults",
     "ModelGroupDefault",
     "WarGameModels",
+    "effective_safety",
     "model_config_defaults",
 ]
+
+
+def effective_safety(safety: ModelChoice | None, analysis: ModelChoice | None) -> ModelChoice | None:
+    """The safety choice the guardrail judge will actually use.
+
+    agent-hardener falls back to the analysis endpoint and key for whichever of them safety leaves unset,
+    so a check of the safety model must probe that same combination.
+    """
+    if safety is None:
+        return None
+    analysis = analysis or ModelChoice()
+    return ModelChoice(
+        model=safety.model,
+        base_url=safety.base_url or analysis.base_url,
+        api_key_secret=safety.api_key_secret or analysis.api_key_secret,
+    )
