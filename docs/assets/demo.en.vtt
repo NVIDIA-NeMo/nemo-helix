@@ -1,0 +1,191 @@
+WEBVTT
+
+00:00:00.250 --> 00:00:04.720
+NeMo Helix is available on
+GitHub under Apache 2.0.
+
+00:00:04.840 --> 00:00:10.440
+You can install it with one command and
+then run nemo setup to start it up locally.
+
+00:00:14.600 --> 00:00:19.440
+From here on, I can work in a coding
+assistant, Claude Code in this case.
+
+00:00:19.740 --> 00:00:23.630
+I ask it to register our incident
+agent with Helix and deploy it.
+
+00:00:23.680 --> 00:00:26.940
+The agent is described as a YAML file.
+
+00:00:27.600 --> 00:00:30.080
+It's running in NeMo Studio.
+
+00:00:30.300 --> 00:00:33.220
+The included web UI shows it as healthy.
+
+00:00:34.080 --> 00:00:36.520
+Now, let's look at our example.
+
+00:00:36.640 --> 00:00:39.400
+We have a Slack message from an engineer.
+
+00:00:39.560 --> 00:00:44.720
+The scheduler on pod-c is lagging,
+but nothing is broken for users yet.
+
+00:00:44.820 --> 00:00:49.400
+The agent's triage step runs on
+Nemotron 3 Ultra with Meridian's notes
+
+00:00:49.450 --> 00:00:50.740
+in its prompt.
+
+00:00:50.880 --> 00:00:53.150
+It pages the on-call engineer.
+
+00:00:53.200 --> 00:00:57.320
+This issue isn't really urgent and
+could have waited until the morning.
+
+00:00:57.370 --> 00:01:01.440
+In Studio, you can see the
+three steps of that run.
+
+00:01:01.540 --> 00:01:04.300
+Only the first one needs
+Meridian's knowledge.
+
+00:01:04.920 --> 00:01:09.550
+Next, we send the same message to the
+same agent with that one step moved
+
+00:01:09.600 --> 00:01:13.180
+to a fine-tuned Qwen3.5-4B.
+
+00:01:13.400 --> 00:01:17.140
+It opens a ticket for the morning,
+which is the right decision.
+
+00:01:19.150 --> 00:01:22.110
+Let's see how we fine-tuned
+the fast decision model.
+
+00:01:22.160 --> 00:01:26.680
+We'll start with creating the
+training data using Data Designer.
+
+00:01:26.900 --> 00:01:28.900
+Here's the actual recipe file.
+
+00:01:29.040 --> 00:01:31.560
+At the top are the two models it uses.
+
+00:01:32.160 --> 00:01:34.530
+First, it picks the
+answer for each example,
+
+00:01:34.580 --> 00:01:38.500
+which team owns the incident
+and what to do about it.
+
+00:01:39.040 --> 00:01:42.060
+Then, a model writes a realistic
+incident report to match,
+
+00:01:42.110 --> 00:01:44.220
+without naming the answer.
+
+00:01:44.620 --> 00:01:47.100
+A second model checks every example.
+
+00:01:48.480 --> 00:01:51.640
+Now I ask Claude Code to run it in Helix.
+
+00:01:52.620 --> 00:01:55.260
+It starts generating incidents.
+
+00:01:59.780 --> 00:02:02.960
+Each example comes back
+with a quality score.
+
+00:02:04.020 --> 00:02:05.870
+Here's what the data looks like.
+
+00:02:05.920 --> 00:02:08.660
+The answer and the
+incident written for it.
+
+00:02:08.800 --> 00:02:11.880
+Slack messages, pager alerts, tickets.
+
+00:02:12.960 --> 00:02:16.690
+We throw out examples like this
+one that give the answer away,
+
+00:02:16.740 --> 00:02:20.280
+so the model is learning
+without being given the answers.
+
+00:02:20.920 --> 00:02:23.260
+This is the dataset we trained on.
+
+00:02:24.780 --> 00:02:28.780
+We turn the dataset into questions
+and answers for the model.
+
+00:02:35.660 --> 00:02:37.920
+And upload them to Helix.
+
+00:02:43.260 --> 00:02:49.040
+Then, Claude Code starts the fine-tuning
+job with the Helix post-training plugin.
+
+00:02:49.280 --> 00:02:54.420
+The plugin can train with NeMo
+Automodel, NeMo RL, or Unsloth.
+
+00:02:54.500 --> 00:02:59.000
+We used Unsloth because this is
+a small fine-tune on one GPU.
+
+00:02:59.660 --> 00:03:01.640
+Here's the finished training run.
+
+00:03:06.740 --> 00:03:11.560
+Helix serves the original model and
+the fine-tuned one side-by-side.
+
+00:03:12.960 --> 00:03:15.040
+We ask both the same question.
+
+00:03:15.180 --> 00:03:17.560
+The original model doesn't pick an action.
+
+00:03:17.660 --> 00:03:19.780
+The fine-tuned one picks the ticket.
+
+00:03:21.000 --> 00:03:25.740
+With the fine-tuned model in the
+agent, the same message gets a ticket.
+
+00:03:26.960 --> 00:03:32.920
+One message isn't proof, so we run an
+evaluation with the Helix Evals plugin.
+
+00:03:39.830 --> 00:03:44.080
+Every version of the agent is scored
+here on the same test incidents.
+
+00:03:45.440 --> 00:03:47.480
+You can open any one of them.
+
+00:03:49.600 --> 00:03:51.600
+Here's one side-by-side.
+
+00:03:51.680 --> 00:03:54.070
+The fine-tuned agent opens a ticket.
+
+00:03:54.120 --> 00:03:56.380
+The big model pages on-call.

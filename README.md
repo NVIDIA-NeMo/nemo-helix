@@ -37,7 +37,7 @@ Training took 22 minutes on one A100. We scored both models on 416 incidents hel
 
 <a href="https://nvidia-nemo.github.io/nemo-helix/gtc-berlin-2026-tutorial/#watch-h"><img src="docs/assets/readme/demo-thumbnail.jpg" alt="Watch the 4-minute demo" width="640"></a>
 
-Four minutes, narrated: the install, both agents on the same message, the training data, fine-tuning and the scores.
+Four minutes, narrated and captioned: the install, both agents on the same message, the training data, fine-tuning and the scores.
 
 ## What you'll do
 
