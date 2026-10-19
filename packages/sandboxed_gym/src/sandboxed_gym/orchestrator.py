@@ -53,7 +53,7 @@ LOGGER = logging.getLogger(__name__)
 TERMINATION_SIGNALS = (signal.SIGTERM, signal.SIGINT)
 
 # Registered shutdown hooks for this process.
-_TERMINATION_SHUTDOWNS: list[Callable[[], None]] = []
+_TERMINATION_SHUTDOWNS: list[Callable[[], object]] = []
 
 #: Job ids this process has already armed. A second call must not replace the
 #: signal handler the first one installed.
@@ -636,7 +636,7 @@ class EpisodeBroker(Protocol):
     def shutdown(self) -> None: ...
 
 
-def install_termination_cleanup(shutdown: Callable[[], None]) -> None:
+def install_termination_cleanup(shutdown: Callable[[], object]) -> None:
     """Run ``shutdown`` when this process exits without it having been called.
 
     A process that owns a sandbox is the only thing that can name it. Ray tears an actor's worker

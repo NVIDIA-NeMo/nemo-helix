@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from functools import partial
 
 import httpx
@@ -115,6 +116,19 @@ def test_async_client_from_sync_client_preserves_headers_timeout_and_request_eve
 
     assert seen_authorization == ["Bearer refreshed"]
     assert seen_timeouts == [timeout.as_dict()]
+
+
+def test_async_client_from_sync_client_adapts_a_sync_only_token_provider() -> None:
+    class SyncOnlyToken:
+        def get_access_token(self) -> str:
+            return "sync-token"
+
+    sync_client = NemoClient(base_url="http://platform.test", workspace="default", auth=SyncOnlyToken())
+
+    with async_client_from_sync_client(sync_client) as async_client:
+        auth = async_client._auth
+        assert auth is not None
+        assert asyncio.run(auth.get_access_token_async()) == "sync-token"
 
 
 def test_async_client_from_sync_client_ignores_missing_event_hook_mapping(mocker: MockerFixture) -> None:
