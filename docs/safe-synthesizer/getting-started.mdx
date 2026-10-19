@@ -51,6 +51,17 @@ nemo safe-synthesizer generate \
   --spec-file ./nss-job.json
 ```
 
+Note the job name in the command output, then use it to watch the job and download its results:
+
+```shell
+nemo jobs watch <job-name>
+nemo jobs results download synthetic-data --job <job-name> --output-file ./synthetic-data.csv
+nemo jobs results download evaluation-report --job <job-name> --output-file ./evaluation_report.html
+```
+
+To create the same job from Python, use `SafeSynthesizerJobBuilder`, which uploads local data for you; see [SDK Resources](/documentation/synthesize-safe-data/sdk-resources).
+To call the Jobs API directly, send the same spec as the request body; see the [Safe Synthesizer API Reference](/documentation/reference/api-reference).
+
 ---
 
 ## Next Steps

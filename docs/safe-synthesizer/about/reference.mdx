@@ -16,74 +16,59 @@ Top-level fields on the Safe Synthesizer job spec (alongside `config`):
 
 | Field | Description |
 |-------|-------------|
-| `data_source` | Input data as a platform fileset URL (`workspace/fileset#path`). |
+| `data_source` | Input data as a platform fileset URL (`workspace/fileset#path`). When you use the Python SDK, `SafeSynthesizerJobBuilder.with_data_source()` also accepts a pandas DataFrame or a local `.csv`, `.parquet`, `.json`, or `.jsonl` file; the builder uploads it to Files and sets `data_source` for you. |
 | `pretrained_model_job` | Prior completed job whose **`adapter`** result in Files is reused for **generation-only** synthesis. Format: `<job>` or `<workspace>/<job>`. Takes precedence over `config.training.pretrained_model`. |
 | `hf_token_secret` | Platform secret name for Hugging Face token during model initialization |
 
 ## Top-Level Configuration
 
-The `SafeSynthesizerParameters` schema defines the main configuration structure for Safe Synthesizer jobs.
+The `config` field holds `SafeSynthesizerParameters`, the configuration schema of the upstream
+NeMo Safe Synthesizer library. NeMo Helix passes it through unchanged, so the upstream
+[Configuration Reference](https://nvidia-nemo.github.io/Safe-Synthesizer/0.1.13/user-guide/configuration/) is the source of truth for field names, defaults, and tuning guidance.
+The plugin currently pins `nemo-safe-synthesizer` 0.1.13; the links below point to that version of the upstream docs.
 
-### SafeSynthesizerParameters
+All fields are optional at the top level.
 
-All fields are optional at the top level. For nested field constraints, see the
-[Safe Synthesizer API Reference](/documentation/reference/api-reference) and
-search for the schema name in the **Type** column.
+| Field | Type | SDK builder method | Upstream reference |
+|-------|------|--------------------|--------------------|
+| `data` | `DataParameters` | `with_data()` | [Data](https://nvidia-nemo.github.io/Safe-Synthesizer/0.1.13/user-guide/configuration/#data) |
+| `training` | `TrainingHyperparams` | `with_train()` | [Training](https://nvidia-nemo.github.io/Safe-Synthesizer/0.1.13/user-guide/configuration/#training) |
+| `generation` | `GenerateParameters` | `with_generate()` | [Generation](https://nvidia-nemo.github.io/Safe-Synthesizer/0.1.13/user-guide/configuration/#generation) |
+| `privacy` | `DifferentialPrivacyHyperparams` | `with_differential_privacy()` | [Differential Privacy](https://nvidia-nemo.github.io/Safe-Synthesizer/0.1.13/user-guide/configuration/#differential-privacy) |
+| `time_series` | `TimeSeriesParameters` | `with_time_series()` | [Time Series](https://nvidia-nemo.github.io/Safe-Synthesizer/0.1.13/user-guide/configuration/#time-series) |
+| `evaluation` | `EvaluationParameters` | `with_evaluate()` | [Evaluation](https://nvidia-nemo.github.io/Safe-Synthesizer/0.1.13/user-guide/configuration/#evaluation) |
+| `replace_pii` | `PiiReplacerConfig` | `with_replace_pii()` | [Replacing PII](https://nvidia-nemo.github.io/Safe-Synthesizer/0.1.13/user-guide/configuration/#replacing-pii) |
 
-| Field | Type | Constraints / description |
-|-------|------|---------------------------|
-| `data` | `DataParameters` | Controls grouping, ordering, and train/evaluation holdout behavior. |
-| `evaluation` | `EvaluationParameters` | Controls synthetic data quality and privacy evaluation settings. |
-| `training` | `TrainingHyperparams` | Controls fine-tuning behavior such as learning rate, batch size, LoRA settings, and optimization settings. |
-| `generation` | `GenerateParameters` | Controls synthetic data generation, including record count, sampling, structured generation, and validation. |
-| `privacy` | `DifferentialPrivacyHyperparams` | Configures DP-SGD. When omitted, differential privacy is disabled. |
-| `time_series` | `TimeSeriesParameters` | Configures experimental time-series mode, including timestamp and interval handling. |
-| `replace_pii` | `PiiReplacerConfig` | Configures PII detection and replacement. If provided directly, `steps` must contain 1 to 10 transformation steps. |
+The builder methods accept the same field names as keyword arguments, for example
+`.with_train(learning_rate=0.0005)` sets `config.training.learning_rate`.
 
----
+## NeMo Helix Differences
 
-<a id="data-parameters"></a>
-## Data Parameters
+The following behavior is specific to running Safe Synthesizer as a NeMo Helix job.
 
-Configuration for how to shape or use the input data, including grouping, ordering, and holdout settings.
+### PII Replacement
 
----
+PII replacement is on by default for jobs created through the CLI or REST API; set `config.enable_replace_pii` to `false` to disable it.
+The Python SDK builder runs PII replacement only when you call `.with_replace_pii()`.
 
-<a id="training-parameters"></a>
-## Training Parameters
+<a id="pii-replacement-configuration"></a>
+### Column Classification (`replace_pii.globals.classify`)
 
-Hyperparameters for model fine-tuning, including learning rate, batch size, and LoRA configuration.
-
----
-
-<a id="generation-parameters"></a>
-## Generation Parameters
-
-Configuration for synthetic data generation after training, including number of records, temperature, and structured generation options.
-
----
-
-## Differential Privacy Parameters
-
-Hyperparameters for differential privacy during training using DP-SGD. Enable these for formal privacy guarantees.
-
----
-
-## Evaluation Parameters
-
-Configuration for synthetic data quality and privacy assessment, including MIA, AIA, and PII replay detection.
-
----
-
-## PII Replacement Configuration
-
-Configuration for PII detection and replacement. See [pii-replacement](/documentation/synthesize-safe-data/about/pii-replacement) for conceptual documentation.
-
-### Column Classification Config (`replace_pii.globals.classify`)
-
-Column classification is configured via the SDK builder's `.with_classify_model_provider(provider_name)` method. The provider name can be unqualified (the builder prepends the current workspace) or fully-qualified as `workspace/provider_name`.
+Column classification uses an LLM served through the Inference Gateway, selected by
+`replace_pii.globals.classify.classify_model_provider` instead of the upstream `NSS_INFERENCE_KEY` and `NSS_INFERENCE_ENDPOINT` environment variables.
+Set it with the SDK builder's `.with_classify_model_provider(provider_name)` method. The provider name can be unqualified (the builder prepends the current workspace) or fully-qualified as `workspace/provider_name`.
 
 If omitted, column classification is skipped and PII detection falls back to heuristic defaults, which may reduce accuracy.
+
+### Pretrained Model
+
+`config.training.pretrained_model` is not an Inference Gateway model. It names the base model that the job fine-tunes inside its own container.
+The default, `HuggingFaceTB/SmolLM3-3B`, is loaded from the `default/smollm3-3b` fileset when your deployment has it staged in Files.
+Any other model ID is downloaded from Hugging Face Hub at job start, which requires outbound network access from the job;
+set `hf_token_secret` (or call `.with_hf_token_secret()`) for gated models or to avoid rate limits.
+For supported model families, refer to the upstream [Training](https://nvidia-nemo.github.io/Safe-Synthesizer/0.1.13/user-guide/configuration/#training) reference.
+
+To reuse a model trained by an earlier job, set `pretrained_model_job` instead.
 
 ---
 

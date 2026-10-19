@@ -95,17 +95,44 @@ For differential privacy configuration and privacy-utility tradeoffs, refer to [
 
 ## Evaluation Reports
 
-Every NeMo Safe Synthesizer job automatically generates an HTML evaluation report containing:
+Every NeMo Safe Synthesizer job automatically generates an HTML evaluation report and stores it as the job's `evaluation-report` result.
+A machine-readable `summary` result contains the same scores and timing data as structured JSON. The report contains:
 
 - Overall SQS and DPS scores
+- Statistics describing the training and synthetic data
 - Detailed subscores for each metric
 - Visualizations comparing training and synthetic data
-- Statistical test results
-- Recommendations for improvement
+
+Download the report with the CLI:
+
+```shell
+nemo jobs results download evaluation-report --job <job-name> --output-file ./evaluation_report.html
+```
+
+Or with the Python SDK, from the `SafeSynthesizerJob` returned by `SafeSynthesizerJobBuilder.create_job()`:
+
+{/* @nemo-docs: skip-python-type-check */}
+```python
+job.save_report("./evaluation_report.html")  # Write the HTML report to a local file
+summary = job.fetch_summary()  # Scores as a SafeSynthesizerSummary
+```
 
 ## Configuration
 
-We enable evaluation by default.
+Evaluation is enabled by default but can be customized in the `evaluation` section of the job config:
+
+```json
+{
+  "evaluation": {
+    "enabled": true,
+    "mia_enabled": true,
+    "aia_enabled": true
+  }
+}
+```
+
+With the Python SDK builder, pass the same fields to `.with_evaluate()`, for example `.with_evaluate(mia_enabled=False)`.
+For all evaluation fields, refer to [Configuration Reference -- Evaluation](https://nvidia-nemo.github.io/Safe-Synthesizer/0.1.13/user-guide/configuration/#evaluation) in the upstream Safe Synthesizer docs.
 
 ## Interpreting Scores
 
