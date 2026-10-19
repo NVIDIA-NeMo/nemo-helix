@@ -298,9 +298,35 @@ def test_agent_jobs_do_not_register_legacy_run_submit_verbs() -> None:
             assert f"No such command '{legacy_verb}'" in legacy_result.output
 
 
+def test_agents_cli_has_no_create_command() -> None:
+    result = CliRunner().invoke(AgentsCLI().get_cli(), ["create"])
+
+    assert result.exit_code == 2
+    assert "No such command 'create'" in result.output
+
+
+def test_register_name_only() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert req.method == "POST"
+        assert req.url.path == "/apis/agents/v2/workspaces/team-a/agents"
+        assert json.loads(req.content) == {"name": "calc"}
+        return httpx.Response(201, json={"name": "calc"})
+
+    with (
+        _install_mock_transport(handler),
+        patch("nemo_agents_plugin.cli._upload_ethos_fileset") as upload,
+        patch("nemo_agents_plugin.utils.inject_default_model") as resolve_model,
+    ):
+        result = CliRunner().invoke(AgentsCLI().get_cli(), ["register", "--name", "calc", "--workspace", "team-a"])
+
+    assert result.exit_code == 0, result.output
+    upload.assert_not_called()
+    resolve_model.assert_not_called()
+
+
 @pytest.mark.parametrize("placeholder", ["${NEMO_DEFAULT_MODEL}", "$NEMO_DEFAULT_MODEL"])
-def test_create_resolves_default_model_placeholder(tmp_path, placeholder: str) -> None:
-    """`nemo agents create` resolves NEMO_DEFAULT_MODEL before POST.
+def test_register_resolves_default_model_placeholder(tmp_path, placeholder: str) -> None:
+    """`nemo agents register` resolves NEMO_DEFAULT_MODEL before POST.
 
     Regression test: the agents service has no user context at
     deploy time, so an unresolved literal would be persisted on the Agent.
@@ -323,7 +349,7 @@ def test_create_resolves_default_model_placeholder(tmp_path, placeholder: str) -
         _install_mock_transport(handler),
         patch("nemo_agents_plugin.utils.get_default_model", return_value="nvidia-nemotron-3-super-v3"),
     ):
-        result = CliRunner().invoke(app, ["create", "--name", "calc", "--agent-config", str(config)])
+        result = CliRunner().invoke(app, ["register", "--name", "calc", "--agent-config", str(config)])
 
     assert result.exit_code == 0, result.stderr
     sent = _json.loads(captured["body"])
@@ -331,7 +357,7 @@ def test_create_resolves_default_model_placeholder(tmp_path, placeholder: str) -
     assert sent["config_format"] == "nat-workflow-v1"
 
 
-def test_create_reports_malformed_agent_config_yaml_without_traceback(tmp_path) -> None:
+def test_register_reports_malformed_agent_config_yaml_without_traceback(tmp_path) -> None:
     config = tmp_path / "agent.yaml"
     config.write_text("llms:\n  - [unterminated\n", encoding="utf-8")
 
@@ -340,7 +366,7 @@ def test_create_reports_malformed_agent_config_yaml_without_traceback(tmp_path) 
 
     app = AgentsCLI().get_cli()
     with _install_mock_transport(handler):
-        result = CliRunner().invoke(app, ["create", "--name", "calc", "--agent-config", str(config)])
+        result = CliRunner().invoke(app, ["register", "--name", "calc", "--agent-config", str(config)])
 
     assert result.exit_code == 1
     assert "invalid YAML in agent config" in result.stderr
@@ -349,7 +375,7 @@ def test_create_reports_malformed_agent_config_yaml_without_traceback(tmp_path) 
     assert ".venv" not in result.stderr
 
 
-def test_create_validates_platform_agent_config_before_post(tmp_path) -> None:
+def test_register_validates_platform_agent_config_before_post(tmp_path) -> None:
     import json as _json
 
     config = tmp_path / "agent.yaml"
@@ -398,7 +424,7 @@ def test_create_validates_platform_agent_config_before_post(tmp_path) -> None:
     ):
         result = CliRunner().invoke(
             app,
-            ["create", "--name", "fabric-agent", "--agent-config", str(config)],
+            ["register", "--name", "fabric-agent", "--agent-config", str(config)],
         )
 
     assert result.exit_code == 0, result.stderr
@@ -415,7 +441,7 @@ def test_create_validates_platform_agent_config_before_post(tmp_path) -> None:
     )
 
 
-def test_create_fabric_uploads_ethos_fileset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_register_fabric_uploads_ethos_fileset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     package = tmp_path / "agents" / "fabric-agent-spec"
     package.mkdir(parents=True)
     config = package / "agent.yaml"
@@ -469,7 +495,7 @@ def test_create_fabric_uploads_ethos_fileset(tmp_path: Path, monkeypatch: pytest
     ):
         result = CliRunner().invoke(
             app,
-            ["create", "--name", "fabric-agent", "--agent-config", str(config)],
+            ["register", "--name", "fabric-agent", "--agent-config", str(config)],
             obj=_CLIState(base_url="http://test"),
         )
 
@@ -624,7 +650,7 @@ def test_collect_text_agent_artifacts_rejects_directory_symlink(tmp_path: Path) 
         _collect_text_agent_artifacts(agent_root)
 
 
-def test_create_fabric_rolls_back_agent_when_fileset_upload_fails(tmp_path) -> None:
+def test_register_fabric_rolls_back_agent_when_fileset_upload_fails(tmp_path) -> None:
     config = tmp_path / "agent.yaml"
     config.write_text(
         "\n".join(
@@ -671,7 +697,7 @@ def test_create_fabric_rolls_back_agent_when_fileset_upload_fails(tmp_path) -> N
     ):
         result = CliRunner().invoke(
             app,
-            ["create", "--name", "fabric-agent", "--agent-config", str(config)],
+            ["register", "--name", "fabric-agent", "--agent-config", str(config)],
         )
 
     assert result.exit_code == 1
@@ -681,7 +707,7 @@ def test_create_fabric_rolls_back_agent_when_fileset_upload_fails(tmp_path) -> N
     assert methods == ["POST", "DELETE"]
 
 
-def test_create_fabric_reports_rollback_failure(tmp_path) -> None:
+def test_register_fabric_reports_rollback_failure(tmp_path) -> None:
     config = tmp_path / "agent.yaml"
     config.write_text(
         "\n".join(
@@ -724,7 +750,7 @@ def test_create_fabric_reports_rollback_failure(tmp_path) -> None:
     ):
         result = CliRunner().invoke(
             app,
-            ["create", "--name", "fabric-agent", "--agent-config", str(config)],
+            ["register", "--name", "fabric-agent", "--agent-config", str(config)],
         )
 
     assert result.exit_code == 1
@@ -732,7 +758,7 @@ def test_create_fabric_reports_rollback_failure(tmp_path) -> None:
     assert "nemo agents delete fabric-agent" in result.stderr
 
 
-def test_create_nat_does_not_upload_ethos_fileset(tmp_path) -> None:
+def test_register_nat_does_not_upload_ethos_fileset(tmp_path) -> None:
     config = tmp_path / "agent.yml"
     config.write_text("llms:\n  llm:\n    _type: openai\n    model_name: nvidia-nemotron-3-super-v3\n")
 
@@ -746,13 +772,13 @@ def test_create_nat_does_not_upload_ethos_fileset(tmp_path) -> None:
         patch("nemo_agents_plugin.cli._upload_ethos_fileset") as mock_upload,
         patch("nemo_agents_plugin.utils.get_default_model", return_value="nvidia-nemotron-3-super-v3"),
     ):
-        result = CliRunner().invoke(app, ["create", "--name", "calc", "--agent-config", str(config)])
+        result = CliRunner().invoke(app, ["register", "--name", "calc", "--agent-config", str(config)])
 
     assert result.exit_code == 0, result.stderr
     mock_upload.assert_not_called()
 
 
-def test_create_rejects_unsupported_config_format(tmp_path) -> None:
+def test_register_rejects_unsupported_config_format(tmp_path) -> None:
     config = tmp_path / "agent.yaml"
     config.write_text("config_format: custom-v2\nname: custom-agent\n")
 
@@ -763,7 +789,7 @@ def test_create_rejects_unsupported_config_format(tmp_path) -> None:
     with _install_mock_transport(handler):
         result = CliRunner().invoke(
             app,
-            ["create", "--name", "custom-agent", "--agent-config", str(config)],
+            ["register", "--name", "custom-agent", "--agent-config", str(config)],
         )
 
     assert result.exit_code == 1
@@ -771,7 +797,7 @@ def test_create_rejects_unsupported_config_format(tmp_path) -> None:
 
 
 @pytest.mark.parametrize("placeholder", ["${NEMO_DEFAULT_MODEL}", "$NEMO_DEFAULT_MODEL"])
-def test_create_aborts_when_default_model_missing(tmp_path, placeholder: str) -> None:
+def test_register_aborts_when_default_model_missing(tmp_path, placeholder: str) -> None:
     """If no default model is selected, refuse to POST a config with an unresolved
     NEMO_DEFAULT_MODEL placeholder (braced or bare). Regression test."""
     config = tmp_path / "agent.yml"
@@ -785,7 +811,7 @@ def test_create_aborts_when_default_model_missing(tmp_path, placeholder: str) ->
         _install_mock_transport(handler),
         patch("nemo_agents_plugin.utils.get_default_model", return_value=None),
     ):
-        result = CliRunner().invoke(app, ["create", "--name", "calc", "--agent-config", str(config)])
+        result = CliRunner().invoke(app, ["register", "--name", "calc", "--agent-config", str(config)])
 
     assert result.exit_code == 1
     assert "${NEMO_DEFAULT_MODEL}" in result.stderr

@@ -77,7 +77,7 @@ earlier:
 ```bash
 WORKSPACE="<confirmed-workspace>"
 
-nemo agents create \
+nemo agents register \
   --name "$AGENT_NAME" \
   --agent-config "agents/$AGENT_NAME/agent.yaml" \
   --workspace "$WORKSPACE"

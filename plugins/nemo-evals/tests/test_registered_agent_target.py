@@ -82,7 +82,7 @@ def _async_platform() -> AsyncNemoClient:
 
 
 def _calculator_config() -> dict[str, Any]:
-    """The shipped calculator example, as ``nemo agents create`` stores it."""
+    """The shipped calculator example, as ``nemo agents register`` stores it."""
     return {
         "config_format": "nemo-agents-spec-v1",
         "name": "calculator-agent",

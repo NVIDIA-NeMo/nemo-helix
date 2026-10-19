@@ -83,7 +83,7 @@ uv run nemo setup
 `workflow.yml` is a valid NAT config and is accepted by the platform as-is. The model name must be the platform-registered entity ID (lowercase, hyphenated) — list available IDs with `uv run nemo models list`.
 
 ```bash
-uv run nemo agents create --name research-agent \
+uv run nemo agents register --name research-agent \
   --agent-config workflow.yml \
   --description "Tavily-powered research agent"
 uv run nemo agents deploy --agent research-agent

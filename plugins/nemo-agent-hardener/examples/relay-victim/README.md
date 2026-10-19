@@ -25,7 +25,7 @@ export NHX_BASE_URL=http://localhost:8080
 
 nemo agents package --agent plugins/nemo-agent-hardener/examples/relay-victim/agent.yaml \
                     --dockerfile plugins/nemo-agent-hardener/examples/relay-victim/Dockerfile --tag ledger:v1
-nemo agents create  --name ledger --agent-config plugins/nemo-agent-hardener/examples/relay-victim/agent.yaml
+nemo agents register  --name ledger --agent-config plugins/nemo-agent-hardener/examples/relay-victim/agent.yaml
 nemo agents deploy  --agent ledger --image ledger:v1
 
 nemo agent-hardener init --agent ledger --name ledger

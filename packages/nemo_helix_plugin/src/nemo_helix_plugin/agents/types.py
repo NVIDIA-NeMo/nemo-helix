@@ -295,13 +295,20 @@ class AgentSession(EntityMetadata):
     expires_at: datetime | None = Field(default=None, description="UTC rolling idle deadline.")
 
 
-class CreateAgentRequest(BaseModel):
+class RegisterAgentRequest(BaseModel):
     """Request body for ``POST /v2/workspaces/{workspace}/agents``."""
 
     name: str = Field(description="Unique agent name within the workspace.")
     description: str = Field(default="", description="Human-readable description.")
-    config: JsonMap = Field(description="Agent config dict interpreted according to config_format.")
-    config_format: str = Field(default=NAT_WORKFLOW_CONFIG_FORMAT, description="Config format identifier.")
+    config: JsonMap = Field(
+        default_factory=dict, description="Agent config dict interpreted according to config_format."
+    )
+    config_format: str = Field(
+        default_factory=lambda data: (
+            NAT_WORKFLOW_CONFIG_FORMAT if data.get("config") else NEMO_AGENTS_SPEC_CONFIG_FORMAT
+        ),
+        description="Config format identifier. Defaults to nemo-agents-spec-v1 for an empty config, otherwise nat-workflow-v1.",
+    )
 
 
 class CreateSampleAgentRequest(BaseModel):

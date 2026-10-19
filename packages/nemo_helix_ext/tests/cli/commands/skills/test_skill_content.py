@@ -163,7 +163,7 @@ class TestLoadHelixSkills:
         content = load_skills()["nemo-build-agent"].content
         normalized = " ".join(content.split())
 
-        assert "do not run its `nemo agents create` registration step" in normalized
+        assert "do not run its `nemo agents register` registration step" in normalized
         assert "This build workflow owns registration after every pre-registration gate has passed" in normalized
         assert "do not run it earlier solely to validate the config" in normalized
         assert content.index("## Test before registration") < content.index("## Register and deploy")

@@ -198,7 +198,7 @@ def write_artifacts(
     """Write the optimized agent config and a run summary into a fresh *results_dir*.
 
     ``agent.yaml`` is a complete ``nemo-agents-spec-v1`` config, so it can be registered as-is
-    with ``nemo agents create --agent-config``.  The summary keeps both prompts and Prompt
+    with ``nemo agents register --agent-config``.  The summary keeps both prompts and Prompt
     Master's full reply side by side for review.
     """
     if results_dir.exists():

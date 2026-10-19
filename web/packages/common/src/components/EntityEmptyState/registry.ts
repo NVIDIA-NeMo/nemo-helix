@@ -242,7 +242,7 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
   agents: {
     heading: 'No agents yet',
     subheading: 'Build and deploy an agent to see it listed here.',
-    cliCommand: 'nemo agents create --name <agent-name> --agent-config <agent.yaml>',
+    cliCommand: 'nemo agents register --name <agent-name> --agent-config <agent.yaml>',
     skillPrompt: 'Help me create my first agent with the nemo-build-agent skill',
   },
 };

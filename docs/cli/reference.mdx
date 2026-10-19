@@ -6143,7 +6143,7 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 
 *Agent Resources:*
 
-* `create`: Register an agent on the platform.
+* `register`: Register an agent on the platform.
 * `list`: List agents on the platform.
 * `get`: Get an agent by name.
 * `delete`: Delete an agent from the platform.
@@ -6312,20 +6312,20 @@ nemo agents optimize run-strategy explain [OPTIONS]
 
 * `--help, -h`: Show this message and exit.
 
-#### nemo agents create
+#### nemo agents register
 
 Register an agent on the platform.
 
 **Usage:**
 
 ```shell
-nemo agents create [OPTIONS]
+nemo agents register [OPTIONS]
 ```
 
 **Options:**
 
 * `--name, -n`: Agent name.
-* `--agent-config, -c <FILE>`: Path to an agent YAML config file.
+* `--agent-config, -c <FILE>`: Optional path to an agent YAML config file.
 * `--description`: [default: ]
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
@@ -6455,7 +6455,7 @@ nemo agents deploy [OPTIONS]
 Redeploy an agent from a new config, in one command.
 
 Wraps the four steps you would otherwise run by hand to push a changed
-agent config to a running agent: ``undeploy`` → ``delete`` → ``create``
+agent config to a running agent: ``undeploy`` → ``delete`` → ``register``
 → ``deploy`` (the agent entity is immutable by name, so it must be torn
 down and rebuilt). The new config is validated before any teardown, so a
 bad config is a safe no-op; once teardown starts the operation is not
@@ -6473,7 +6473,7 @@ nemo agents redeploy [OPTIONS]
 
 * `--agent, -a`: Name of the deployed agent to rebuild.
 * `--agent-config, -c <FILE>`: Path to the new agent YAML config file to redeploy from.
-* `--description`: Agent description (as on create). [default: ]
+* `--description`: Agent description (as on register). [default: ]
 * `--name, -n`: Deployment name for the new deployment (auto-generated if omitted).
 * `--mode`: Runtime backend: subprocess, docker, k8s, or openshell. Auto-detected from the existing deployment when omitted.
 * `--image, -i`: Container image for docker/k8s/openshell modes. Auto-detected from the existing deployment when omitted.

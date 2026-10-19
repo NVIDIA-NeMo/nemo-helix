@@ -97,7 +97,7 @@ their defaults. Unset safety fields fall back to the analysis endpoint and key.
 **`Missing required secrets: <NAME>`.**
 The agent config references `${<NAME>}` and nothing supplies it. Required secrets
 are derived from the agent's stored config, so this means the variable was unset
-when the agent was registered. Export it and re-run `nemo agents create`, or
+when the agent was registered. Export it and re-run `nemo agents register`, or
 supply it with `--env-file` or `--secrets NAME=workspace/secret`.
 
 **A run fails with `could not read secret <workspace>/<name>`.**
@@ -123,7 +123,7 @@ The workflow's `model_name` is not a model entity the platform knows. Entity nam
 are lowercase letters, digits and hyphens, so a provider id containing a slash is
 rejected. Check `nemo models list`, then re-register the agent with that exact
 name. The value is resolved when the agent is registered, so it must be correct
-at `nemo agents create` time.
+at `nemo agents register` time.
 
 ## Studio
 

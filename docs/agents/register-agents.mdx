@@ -55,7 +55,7 @@ Register it:
 <Tab title="CLI">
 
 ```bash
-nemo agents create \
+nemo agents register \
   --name calculator-agent \
   --agent-config plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml
 ```
@@ -73,7 +73,7 @@ agents = AgentsResource(NemoClient.from_config())
 with open("plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml") as f:
     config = yaml.safe_load(f)
 
-agents.create(name="calculator-agent", config=config, config_format=config["config_format"])
+agents.register(name="calculator-agent", config=config, config_format=config["config_format"])
 ```
 
 </Tab>
@@ -117,8 +117,8 @@ See the [examples directory](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main
 for a config per harness.
 
 <Note>
-`nemo agents create` also accepts legacy NeMo Agent Toolkit (NAT) workflow configs
-(`config_format: nat-workflow-v1`, the default when `config_format` is omitted). Use
+`nemo agents register` also accepts legacy NeMo Agent Toolkit (NAT) workflow configs
+(`config_format: nat-workflow-v1`, the default for nonempty configs when `config_format` is omitted). Use
 `nemo-agents-spec-v1` for new agents; registered-agent evaluation targets and the optimization
 strategies require it.
 </Note>
@@ -224,7 +224,7 @@ harnesses:
 
 **5. Install the package everywhere the agent is validated or runs:**
 
-- The environment where you run `nemo agents create` and `nemo agents package`, which validate the
+- The environment where you run `nemo agents register` and `nemo agents package`, which validate the
   agent against its adapter.
 - The platform's Python environment, for subprocess deployments. If you installed NeMo Helix with
   `uv tool install`, add your package to that tool environment with `--with`.
@@ -329,7 +329,7 @@ configured on the remote agent; tag its traces with the agent's name so they mat
 
 ## Register from Traces
 
-To analyze an agent that already sends traces to Intake, register its name with an empty config.
+To analyze an agent that already sends traces to Intake, register it with only a name. The platform stores an empty Fabric config.
 The name must match the agent name on its traces (`agent.name` in ATIF, `gen_ai.agent.name` in
 OTLP); see [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces).
 
@@ -338,7 +338,7 @@ OTLP); see [Collect Agent Traces](/documentation/agents/traces-and-insights/coll
 <Tab title="CLI">
 
 ```bash
-nemo agents create --name support-agent --agent-config <(echo '{}')
+nemo agents register --name support-agent
 ```
 
 </Tab>
@@ -349,7 +349,7 @@ from nemo_agents_plugin.sdk import AgentsResource
 from nemo_helix_plugin.client.client import NemoClient
 
 agents = AgentsResource(NemoClient.from_config())
-agents.create(name="support-agent", config={})
+agents.register(name="support-agent")
 ```
 
 </Tab>

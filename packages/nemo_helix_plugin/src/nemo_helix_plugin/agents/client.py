@@ -18,7 +18,7 @@ class _AgentsMethods:
     create_sample_agent = method(endpoints.create_sample_agent)
     get_agent = method(endpoints.get_agent)
     list_agents = method(endpoints.list_agents)
-    create_agent = method(endpoints.create_agent)
+    register_agent = method(endpoints.register_agent)
     delete_agent = method(endpoints.delete_agent)
     get_deployment = method(endpoints.get_deployment)
     list_deployments = method(endpoints.list_deployments)

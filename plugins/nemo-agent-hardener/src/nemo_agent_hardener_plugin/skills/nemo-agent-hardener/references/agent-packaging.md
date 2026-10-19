@@ -10,7 +10,7 @@ already have. Agent Hardener hardens the image you ship — it never builds an a
 
 ## Route A: the `agent.yaml`
 
-`nemo agents create` accepts only `config_format: nemo-agents-spec-v1`. The parts that decide
+`nemo agents register` accepts only `config_format: nemo-agents-spec-v1`. The parts that decide
 whether a war-game can run:
 
 ```yaml

@@ -53,6 +53,15 @@ def test_unknown_config_format_is_rejected() -> None:
         validate_agent_config("custom-v2", {})
 
 
+def test_empty_fabric_config_can_register_but_not_deploy() -> None:
+    assert validate_agent_config(NEMO_AGENTS_SPEC_CONFIG_FORMAT, {}) == {}
+
+    with pytest.raises(InvalidAgentConfigError, match="Invalid agent config"):
+        resolve_agent_config_for_deployment(
+            NEMO_AGENTS_SPEC_CONFIG_FORMAT, {}, workspace="default", agent_name="test-agent"
+        )
+
+
 def test_nat_deployment_resolution_applies_legacy_injections(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, Any]] = []
 

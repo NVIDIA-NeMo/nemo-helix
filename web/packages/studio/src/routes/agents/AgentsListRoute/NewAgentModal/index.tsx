@@ -8,7 +8,7 @@ import { FormModal } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import {
   getAgentsListAgentsQueryKey,
-  useAgentsCreateAgent,
+  useAgentsRegisterAgent,
 } from '@nemo/sdk/generated/agents/agents';
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import {
@@ -154,7 +154,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     error: tracedCreateError,
     isPending: isCreatingTraced,
     reset: resetTracedMutation,
-  } = useAgentsCreateAgent({ mutation: { onSuccess: onAgentCreated } });
+  } = useAgentsRegisterAgent({ mutation: { onSuccess: onAgentCreated } });
 
   // useWatch re-renders this modal on every keystroke; the summary depends only on entries.
   const entriesSummary = useMemo(() => {
