@@ -9127,7 +9127,7 @@ nemo evals runs submit [OPTIONS]
 
 * `--harbor-dir <PATH>`: Local Harbor dataset directory.
 * `--harbor-hub`: Harbor Hub dataset, org/name@ref.
-* `--spec-file <PATH>`: TasksetRunInput JSON naming a taskset.
+* `--spec-file <PATH>`: TasksetRunInput JSON: its target and execution, and its taskset unless --harbor-dir or --harbor-hub supplies the tasks.
 * `--tasks`: Indexes or names, comma-separated; default all.
 * `--agent`: Harbor built-in agent (without --spec-file). [default: oracle]
 * `--sandbox-policy`: Operator sandbox profile. [default: harbor-standard]
@@ -9136,6 +9136,7 @@ nemo evals runs submit [OPTIONS]
 * `--list-tasks`: Print the selectable tasks and exit.
 * `--workspace`: Workspace for tasks, taskset and run; default: the configured workspace.
 * `--poll-seconds <FLOAT>`: Image-build polling interval. [default: 10.0]
+* `--experiment`: Intake Experiment (name) to publish the run to: one Evaluation per run, trials as each task ends.
 
 **Help:**
 
@@ -9161,7 +9162,7 @@ nemo evals agent-evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `--fail-fast`: Fail on the first metric error instead of recording an errored score. On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks budget can also fail the run and cancel remaining task Jobs.
 * `--publication.intake.evaluation-id`: Name of the existing Evaluation to publish under. Must already exist; the job does not create it.
 * `--publication.intake.agent-name`: Agent name recorded on each published trajectory. Derived from the target when it names one; required otherwise.
-* `--publication.intake.agent-version`: Agent version recorded on each published trajectory. Neither a Model nor an Agent carries a version, so this defaults to 'unknown' unless the submitter supplies one.
+* `--publication.intake.agent-version`: Agent version recorded on each published trajectory. Neither a Model nor an Agent carries a version, so this defaults to the version the agent's own trajectory records (a Harbor agent's, such as codex's), else 'unknown'.
 * `--publication.intake.required`: Fail the job when publication fails. Defaults to True so a run that asked to publish does not report success with nothing in Experiments. The result bundle is saved before publication runs, so a failed job still leaves the results intact to re-publish. Set False to keep the job successful and report the failure in its output instead.
 
 **Spec Source:**
@@ -9222,7 +9223,7 @@ nemo evals evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `--prompt-template`: Optional prompt template for online target generation. This flag accepts the string form only; use --spec or --spec-file for the other union form(s).
 * `--publication.intake.evaluation-id`: Name of the existing Evaluation to publish under. Must already exist; the job does not create it.
 * `--publication.intake.agent-name`: Agent name recorded on each published trajectory. Derived from the target when it names one; required otherwise.
-* `--publication.intake.agent-version`: Agent version recorded on each published trajectory. Neither a Model nor an Agent carries a version, so this defaults to 'unknown' unless the submitter supplies one.
+* `--publication.intake.agent-version`: Agent version recorded on each published trajectory. Neither a Model nor an Agent carries a version, so this defaults to the version the agent's own trajectory records (a Harbor agent's, such as codex's), else 'unknown'.
 * `--publication.intake.required`: Fail the job when publication fails. Defaults to True so a run that asked to publish does not report success with nothing in Experiments. The result bundle is saved before publication runs, so a failed job still leaves the results intact to re-publish. Set False to keep the job successful and report the failure in its output instead.
 * `--publication.intake.test-case-id-field`: Dataset column identifying each row, recorded as the published test case id. Defaults to a hash of the row's content, which keeps a row's id stable across dataset reorderings and revisions so the same test case can be compared run over run; editing a row makes it a new test case. Name a column here when the dataset has a real identifier — it reads better and survives content edits. Values must be unique per row; the run is rejected if they are not.
 

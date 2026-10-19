@@ -109,6 +109,46 @@ class HarborTaskJobsExecutionInput(BaseModel):
         return self.max_failed_tasks
 
 
+class TasksetRunIntakeInput(BaseModel):
+    """Publish the run's trials to an existing Intake Experiment, as one Evaluation named after the run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    experiment: str = Field(
+        min_length=1,
+        description="Name of an existing Intake Experiment. Submit creates one Evaluation in it per run, "
+        "named after the run; each task Job publishes its trials there when it finishes.",
+        examples=["swe-agent-tuning"],
+    )
+    agent_name: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Agent name recorded on each published trajectory. Defaults to the Harbor agent.",
+    )
+    dataset_name: str | None = Field(
+        default=None,
+        min_length=1,
+        description="The Evaluation's dataset, such as the Harbor Hub dataset the tasks came from. "
+        "Defaults to the taskset (workspace/name).",
+        examples=["datacurve/deep-swe"],
+    )
+    dataset_version: str | None = Field(
+        default=None,
+        min_length=1,
+        description="The dataset's version, such as a Harbor Hub dataset digest. "
+        "Defaults to the pinned taskset's content digest.",
+        examples=["sha256:aaa82ceb8404dccc17689c9383f93dbcbc8f029a7601d2e3856a416f2cb89269"],
+    )
+
+
+class TasksetRunPublicationInput(BaseModel):
+    """Where the run publishes its results, beyond its result bundle and record."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    intake: TasksetRunIntakeInput = Field(description="Publish trials and scores to an Intake Experiment.")
+
+
 class TasksetRunInput(BaseModel):
     """Validate a stored Harbor taskset request for independent Kubernetes task Jobs.
 
@@ -136,6 +176,10 @@ class TasksetRunInput(BaseModel):
         description="Optional caller-supplied key, scoped to workspace and caller, "
         "so retries of the same request return the accepted run. Omit for a new keyless run.",
     )
+    publication: TasksetRunPublicationInput | None = Field(
+        default=None,
+        description="Publish the run's trials to an Intake Experiment. Omit to publish nowhere.",
+    )
     timeout_seconds: int | None = Field(
         default=None,
         gt=0,
@@ -156,6 +200,23 @@ class TasksetRunInput(BaseModel):
         if not isinstance(self.spec.tasks, TasksetRef):
             raise ValueError(
                 "Kubernetes runs take a stored taskset reference in spec.tasks; publish the tasks as a taskset first"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _reject_spec_publication(self) -> Self:
+        """Refuse ``spec.publication``: every task Job would publish to it with the wrong settings.
+
+        It would publish under a random run id, fail the task Job (and drop its result) on any Intake
+        error, and race sibling Jobs on the Evaluation's metadata. ``publication.intake`` avoids all three.
+
+        Raises:
+            ValueError: The spec carries its own publication.
+        """
+        if self.spec.publication is not None:
+            raise ValueError(
+                "spec.publication isn't supported for Kubernetes runs; "
+                "set publication.intake.experiment to publish the run to an Intake Experiment"
             )
         return self
 
@@ -200,9 +261,11 @@ def request_digest(req: TasksetRunInput) -> str:
         req: Validated caller request, with model defaults filled.
 
     Returns:
-        SHA-256 of compact JSON with sorted keys and only idempotency_key excluded.
+        SHA-256 of compact JSON with sorted keys and only idempotency_key excluded. An omitted
+        ``publication`` is left out too, so requests from before the field existed keep their digest.
     """
-    body = req.model_dump(mode="json", exclude={"idempotency_key"})
+    exclude = {"idempotency_key"} if req.publication is not None else {"idempotency_key", "publication"}
+    body = req.model_dump(mode="json", exclude=exclude)
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 

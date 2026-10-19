@@ -154,7 +154,7 @@ def test_member_defaults_and_index() -> None:
 def test_frozen_plan_roundtrip(plan: TasksetRunPlan) -> None:
     """Verify the plan fixture round-trips while retaining its strict frozen schema.
 
-    Assertions pin the eleven stored fields and expect validation errors for
+    Assertions pin the twelve stored fields and expect validation errors for
     rebinding, extras, unresolved percentages, invalid caps, and missing nullable
     cap fields, protecting the resolved-input contract of stored plans.
     """
@@ -171,6 +171,7 @@ def test_frozen_plan_roundtrip(plan: TasksetRunPlan) -> None:
         "dispatcher_image",
         "dispatcher_profile",
         "task_environments",
+        "intake",
     }
     with pytest.raises(ValidationError, match="frozen"):
         plan.run_id = "changed"

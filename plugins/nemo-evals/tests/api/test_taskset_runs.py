@@ -268,6 +268,30 @@ async def test_taskset_run_missing_task_job_is_retryable_503(run_client, publish
     assert retry.status_code == 200 and len(fake_task_jobs.created) == 1
 
 
+@pytest.mark.parametrize("key", ["ci-run", None], ids=["keyed", "keyless"])
+async def test_intake_failing_before_acceptance_is_a_retryable_503(
+    run_client, published, request_body, fake_evaluations, entity_store, key
+):
+    body = request_body | {"idempotency_key": key, "publication": {"intake": {"experiment": "swe-agent-tuning"}}}
+    fake_evaluations.fail = {"experiment"}
+    response = await run_client.post(PATH, json=body)
+    assert response.status_code == 503, response.text
+    # Nothing was accepted yet, so even a keyless retry can't start a second run.
+    assert response.headers["x-should-retry"] == "true"
+    assert "nothing was accepted" in response.json()["detail"]
+    assert not (await entity_store.list(TasksetRunEntity, workspace="default")).data
+    fake_evaluations.fail = set()
+    assert (await run_client.post(PATH, json=body)).status_code == 201
+
+
+async def test_an_unreadable_experiment_is_403(run_client, published, request_body, fake_evaluations):
+    fake_evaluations.deny_experiments = True
+    body = request_body | {"publication": {"intake": {"experiment": "swe-agent-tuning"}}}
+    response = await run_client.post(PATH, json=body)
+    assert response.status_code == 403, response.text
+    assert "swe-agent-tuning" in response.json()["detail"]
+
+
 class _Everything(set):
     def __contains__(self, item: object) -> bool:
         return True

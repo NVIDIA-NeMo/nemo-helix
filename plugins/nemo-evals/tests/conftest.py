@@ -36,7 +36,7 @@ from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager, CloudpickleMetricPayload
 from nemo_evals.taskset_runs.entities import TasksetRunEntity
 from nemo_evals.taskset_runs.specs import MissingPrebuiltImagePolicy, TasksetRunPlan
-from nemo_helix_plugin.client.errors import ConflictError, InternalServerError, NemoHTTPError
+from nemo_helix_plugin.client.errors import ConflictError, InternalServerError, NemoHTTPError, PermissionDeniedError
 from nemo_helix_plugin.config import NemoHelixConfig, get_platform_config
 from nemo_helix_plugin.entities import (
     DEFAULT_WORKSPACE,
@@ -50,6 +50,7 @@ from nemo_helix_plugin.entities.types import DeleteResponse
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.in_memory_filter import InMemoryFilterRepository
+from nemo_helix_plugin.intake.types import EvaluationCreateRequest, EvaluationPatchRequest, EvaluationResponse
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, HelixJobResponse, HelixJobStatus
 from nhx.testing.files import InMemoryFilesService
 from nhx.testing.secrets import InMemorySecretsService
@@ -480,6 +481,58 @@ def _http_error[ErrorT: NemoHTTPError](cls: type[ErrorT], status: int) -> ErrorT
 @pytest.fixture
 def fake_task_jobs() -> FakeTaskJobs:
     return FakeTaskJobs()
+
+
+class FakeRunEvaluations:
+    """In-memory ``RunEvaluations``: Experiments by name, Evaluations by name, with scripted failures.
+
+    - ``fail``: operations ("experiment", "create", "get", "patch") that raise a 500, or
+      "create-denied" for a create that answers 403.
+    - ``deny_experiments``: the Experiment lookup answers 403.
+    """
+
+    def __init__(self) -> None:
+        self.experiments: dict[str, str] = {"swe-agent-tuning": "exp-1"}
+        self.evaluations: dict[str, EvaluationResponse] = {}
+        self.created: list[EvaluationCreateRequest] = []
+        self.patches: list[tuple[str, EvaluationPatchRequest]] = []
+        self.fail: set[str] = set()
+        self.deny_experiments = False
+
+    async def experiment_id(self, workspace: str, name: str) -> str | None:
+        if self.deny_experiments:
+            raise _http_error(PermissionDeniedError, 403)
+        if "experiment" in self.fail:
+            raise _http_error(InternalServerError, 500)
+        return self.experiments.get(name)
+
+    async def create(self, workspace: str, body: EvaluationCreateRequest) -> None:
+        if "create" in self.fail:
+            raise _http_error(InternalServerError, 500)
+        if "create-denied" in self.fail:
+            raise _http_error(PermissionDeniedError, 403)
+        if body.name in self.evaluations:
+            raise _http_error(ConflictError, 409)
+        self.created.append(body)
+        self.evaluations[body.name] = EvaluationResponse(
+            id=f"eval-{len(self.evaluations)}", workspace=workspace, **body.model_dump(exclude={"experiment_group_id"})
+        )
+
+    async def get(self, workspace: str, name: str) -> EvaluationResponse | None:
+        if "get" in self.fail:
+            raise _http_error(InternalServerError, 500)
+        return self.evaluations.get(name)
+
+    async def patch(self, workspace: str, name: str, body: EvaluationPatchRequest) -> None:
+        if "patch" in self.fail:
+            raise _http_error(InternalServerError, 500)
+        self.patches.append((name, body))
+        self.evaluations[name] = self.evaluations[name].model_copy(update=body.model_dump(exclude_none=True))
+
+
+@pytest.fixture
+def fake_evaluations() -> FakeRunEvaluations:
+    return FakeRunEvaluations()
 
 
 def harbor_resolved_task(name: str = "sum-three", *, config: dict | None = None) -> ResolvedTask:

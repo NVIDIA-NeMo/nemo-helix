@@ -57,6 +57,23 @@ def test_sandboxed_codex_disables_web_search_by_default(tmp_path):
     assert "-c web_search=disabled" in agent.build_cli_flags()
 
 
+def test_a_gateway_alias_has_no_price_unless_a_pricing_model_names_one(tmp_path):
+    tokens = {"prompt_tokens": 1_000_000, "completion_tokens": 1_000, "cached_tokens": 0, "cache_write_tokens": 0}
+    alias = "azure-openai-gpt-6-luna"  # what codex calls through the gateway; not in LiteLLM's table
+    assert SandboxedCodex(logs_dir=tmp_path, model_name=alias)._compute_cost_from_pricing(**tokens) is None
+    priced = SandboxedCodex(logs_dir=tmp_path, model_name=alias, pricing_model="azure/gpt-6-luna")
+    cost = priced._compute_cost_from_pricing(**tokens, model_name=alias)
+    assert cost is not None and cost > 0
+    assert "azure/gpt-6-luna" not in priced.build_cli_flags()  # codex still calls the gateway alias
+
+
+def test_harbor_accepts_pricing_model_before_queueing_trials():
+    # Job.create validates agent_kwargs against the agent's options model before any trial runs.
+    SandboxedCodex.preflight(kwargs={"pricing_model": "azure/gpt-6-luna"}, env={})
+    with pytest.raises(ValueError, match="Unknown option 'pricing'"):
+        SandboxedCodex.preflight(kwargs={"pricing": "x"}, env={})
+
+
 class _RecordingEnvironment:
     def __init__(self) -> None:
         self.uploads: list[tuple[Path, str]] = []

@@ -225,9 +225,9 @@ def test_shared_scoring_schema_has_correct_scope(spec_type):
     )
 
 
-def test_run_schema_has_only_the_four_request_fields():
+def test_run_schema_has_only_the_five_request_fields():
     schema = TasksetRunInput.model_json_schema()
-    assert set(schema["properties"]) == {"spec", "execution", "idempotency_key", "timeout_seconds"}
+    assert set(schema["properties"]) == {"spec", "execution", "publication", "idempotency_key", "timeout_seconds"}
     assert set(schema["required"]) == {"spec", "execution"}
     assert schema["additionalProperties"] is False
 
@@ -285,6 +285,24 @@ def test_digest_preserves_meaningful_request_differences(run_body, path, left, r
         node[path[-1]] = value
         requests.append(TasksetRunInput.model_validate(body))
     assert request_digest(requests[0]) != request_digest(requests[1])
+
+
+def test_spec_publication_is_rejected_with_guidance(run_body):
+    run_body["spec"]["publication"] = {"intake": {"evaluation_id": "e", "agent_name": "a"}}
+    with pytest.raises(ValidationError, match="set publication.intake.experiment"):
+        TasksetRunInput.model_validate(run_body)
+
+
+def test_publication_is_part_of_the_request_identity(run_body):
+    """The same idempotency_key with another Experiment is another request (409), not a replay."""
+    plain = request_digest(TasksetRunInput.model_validate(run_body))
+    digests = {
+        experiment: request_digest(
+            TasksetRunInput.model_validate(run_body | {"publication": {"intake": {"experiment": experiment}}})
+        )
+        for experiment in ("swe", "other")
+    }
+    assert len({plain, *digests.values()}) == 3
 
 
 def test_digest_hashes_the_exact_compact_json_projection(run_body):

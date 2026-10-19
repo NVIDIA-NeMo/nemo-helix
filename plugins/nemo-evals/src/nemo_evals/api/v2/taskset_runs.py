@@ -8,7 +8,12 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.exceptions import RequestValidationError
 from nemo_evals.api.dependencies import get_taskset_run_service
-from nemo_evals.api.service.taskset_run_service import TasksetRunResolutionError, TasksetRunService
+from nemo_evals.api.service.taskset_run_service import (
+    IntakeUnavailableError,
+    RunEvaluationError,
+    TasksetRunResolutionError,
+    TasksetRunService,
+)
 from nemo_evals.api.taskset_run_schemas import (
     TasksetRunInput,
     TasksetRunStatus,
@@ -53,7 +58,10 @@ router = APIRouter()
             "description": "Invalid request, excessive timeout, missing or incompatible source, "
             "unconfigured execution, or a task without images."
         },
-        503: {"description": "The run was accepted but some task Jobs weren't created; retry the same request."},
+        503: {
+            "description": "The run was accepted but some task Jobs, or its Intake Evaluation, weren't created; "
+            "retry the same request."
+        },
     },
 )
 @scope.write
@@ -114,7 +122,10 @@ async def submit_taskset_run(
         ) from exc
     except TasksetRunResolutionError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except TaskJobsIncompleteError as exc:
+    except IntakeUnavailableError as exc:
+        # Raised before acceptance: nothing exists yet, so a retry is safe with or without an idempotency_key.
+        raise HTTPException(status_code=503, detail=str(exc), headers={"x-should-retry": "true"}) from exc
+    except (TaskJobsIncompleteError, RunEvaluationError) as exc:
         # The run is already accepted here. Its ID is derived from (workspace, caller, req.idempotency_key),
         # so a retry with the same idempotency_key finds this run and creates only its missing Jobs. Without
         # an idempotency_key the run ID is random, so the SDK's automatic retry would create a new run and

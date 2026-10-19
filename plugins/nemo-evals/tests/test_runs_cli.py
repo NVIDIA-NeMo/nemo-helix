@@ -103,6 +103,77 @@ def test_spec_file_keeps_its_settings_and_takes_the_selected_taskset(tmp_path):
     assert request.idempotency_key
 
 
+def test_experiment_publishes_the_run_to_intake(tmp_path):
+    plain = run_request(
+        "default/t#" + "a" * 64, spec_file=None, agent="codex", sandbox_policy="p", dispatcher_profile=None
+    )
+    assert plain.publication is None
+    request = run_request(
+        "default/t#" + "a" * 64,
+        spec_file=None,
+        agent="codex",
+        sandbox_policy="p",
+        dispatcher_profile=None,
+        experiment="swe-agent-tuning",
+    )
+    assert request.publication is not None and request.publication.intake.experiment == "swe-agent-tuning"
+    spec = tmp_path / "run.json"
+    spec.write_text(
+        json.dumps({"spec": {"tasks": "default/t", "target": {"kind": "harbor"}}, "execution": {"sandbox_policy": "p"}})
+    )
+    # With --harbor-hub/--harbor-dir the dataset supplies the tasks, so the file may leave spec.tasks out.
+    no_tasks = tmp_path / "no-tasks.json"
+    no_tasks.write_text(json.dumps({"spec": {"target": {"kind": "harbor"}}, "execution": {"sandbox_policy": "p"}}))
+    selected = run_request(
+        "default/t#" + "a" * 64, spec_file=no_tasks, agent="", sandbox_policy="", dispatcher_profile=None
+    )
+    assert selected.spec.tasks.root == "default/t#" + "a" * 64
+    # --experiment replaces the file's publication before validation, so an invalid one doesn't block it.
+    no_tasks.write_text(
+        json.dumps(
+            {
+                "spec": {"target": {"kind": "harbor"}},
+                "execution": {"sandbox_policy": "p"},
+                "publication": {"intake": {"experiment": ""}},
+            }
+        )
+    )
+    overridden = run_request(
+        "default/t#" + "a" * 64,
+        spec_file=no_tasks,
+        agent="",
+        sandbox_policy="",
+        dispatcher_profile=None,
+        experiment="x",
+    )
+    assert overridden.publication is not None and overridden.publication.intake.experiment == "x"
+    for bad in ([], {"spec": ["not", "an", "object"]}):
+        no_tasks.write_text(json.dumps(bad))
+        with pytest.raises(ValueError, match="expected a TasksetRunInput JSON object"):
+            run_request(
+                "default/t#" + "a" * 64, spec_file=no_tasks, agent="", sandbox_policy="", dispatcher_profile=None
+            )
+    from_file = run_request(
+        "default/t#" + "a" * 64, spec_file=spec, agent="", sandbox_policy="", dispatcher_profile=None, experiment="x"
+    )
+    assert from_file.publication is not None and from_file.publication.intake.experiment == "x"
+    assert from_file.publication.intake.dataset_name is None  # no Hub dataset: the server uses the taskset
+    hub = run_request(
+        "default/t#" + "a" * 64,
+        spec_file=spec,
+        agent="",
+        sandbox_policy="",
+        dispatcher_profile=None,
+        experiment="x",
+        dataset=("datacurve/deep-swe", "sha256:" + "b" * 64),
+    )
+    assert hub.publication is not None
+    assert (hub.publication.intake.dataset_name, hub.publication.intake.dataset_version) == (
+        "datacurve/deep-swe",
+        "sha256:" + "b" * 64,
+    )
+
+
 def test_submit_retries_a_503_with_the_same_body():
     bodies = []
 

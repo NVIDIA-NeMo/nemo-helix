@@ -207,6 +207,9 @@ class _AgentEvalJobBase(NemoJob):
     #: Delete a registered agent's files snapshot after a successful run. A taskset run's task Jobs
     #: share one snapshot, so they keep it; the run controller deletes it (M4 story 8).
     discard_agent_files: ClassVar[bool] = True
+    #: Stamp the run's and the publish's durations onto the Evaluation after publishing. A taskset run's
+    #: task Jobs share one Evaluation, so they leave it to the run controller.
+    record_publication_durations: ClassVar[bool] = True
 
     @classmethod
     async def to_spec(
@@ -584,6 +587,7 @@ class _AgentEvalJobBase(NemoJob):
             labels=spec.labels,
             fail_fast=spec.fail_fast,
             work_dir=bundle_dir,
+            run_id=self._run_id(),
         )
         evaluator = self._build_evaluator(platform_client, spec.target)
         include_trial_measurements = not isinstance(spec.target, ModelTarget | AgentTarget)
@@ -639,6 +643,7 @@ class _AgentEvalJobBase(NemoJob):
                 target=spec.target,
                 workspace=ctx.workspace,
                 intake=intake,
+                record_durations=self.record_publication_durations,
             )
             output["publication"] = publication_outcome.model_dump(exclude_none=True)
 
@@ -653,6 +658,10 @@ class _AgentEvalJobBase(NemoJob):
             discard_registered_agent_files_sync(platform_client, snapshot)
 
         return output
+
+    def _run_id(self) -> str | None:
+        """Hook: the SDK run id, which keys published sessions (``run_id:trial_id``). None generates one."""
+        return None
 
     def _prepared_tasks(self, tasks: list[AgentEvalTask]) -> None:
         """Hook: inspect or adjust materialized tasks before they run. Does nothing by default."""
