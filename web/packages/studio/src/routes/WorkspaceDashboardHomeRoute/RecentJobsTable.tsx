@@ -7,7 +7,6 @@ import type { RowClickHandler } from '@nemo/common/src/components/DataView/useRo
 import { ElapsedTime } from '@nemo/common/src/components/ElapsedTime';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
-import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
@@ -66,12 +65,6 @@ const makeColumns: ComponentProps<typeof StudioDataView<HelixJobResponse>>['make
     cell: ({ row }) => <StatusBadge status={row.original.status} />,
   }),
   accessor((original) => original?.created_at || '', {
-    id: 'created_at',
-    header: 'Created',
-    enableSorting: true,
-    cell: ({ row }) => <RelativeTime datetime={row.original.created_at ?? ''} />,
-  }),
-  accessor((original) => original?.created_at || '', {
     id: 'elapsed',
     header: 'Elapsed time',
     meta: { title: false },
@@ -92,9 +85,7 @@ export const RecentJobsTable = () => {
   const openRow = useRowNavigation();
 
   const dataViewState = useStudioDataViewState({
-    defaultSort: [{ id: 'created_at', desc: true }],
     defaultPageSize: 10,
-    columnVisibility: { created_at: false },
   });
   const { pageRows, totalCount, isLoading, error } = useRecentJobs(workspace, dataViewState);
 

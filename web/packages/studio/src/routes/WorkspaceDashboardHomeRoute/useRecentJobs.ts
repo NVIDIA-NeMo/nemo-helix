@@ -3,9 +3,8 @@
 
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import type { StudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { getSortParam } from '@nemo/common/src/utils/query';
 import { useJobsListJobs } from '@nemo/sdk/generated/platform/jobs';
-import type { HelixJobListSortField } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobListSortField } from '@nemo/sdk/generated/platform/schema';
 import {
   buildFilter,
   isJobRunning,
@@ -37,7 +36,7 @@ export const useRecentJobs = (workspace: string, dataViewState: StudioDataViewSt
     {
       page: 1,
       page_size: JOBS_FETCH_SIZE,
-      sort: getSortParam(dataViewState.sorting.state) as HelixJobListSortField,
+      sort: HelixJobListSortField['-created_at'],
       filter: buildFilter(finishedSince),
     },
     {

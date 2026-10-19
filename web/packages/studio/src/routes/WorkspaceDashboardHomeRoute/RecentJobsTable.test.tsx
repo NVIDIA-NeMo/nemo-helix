@@ -196,6 +196,24 @@ describe('RecentJobsTable', () => {
     expect(cutoff).toBeGreaterThan(before - fortyEightHours - 60_000);
   });
 
+  it.each(['?sort=name', '?sort=created_at', '?sort=source'])(
+    'ignores %s in the URL and requests the newest jobs',
+    async (search) => {
+      let sortParam: string | null = null;
+      server.use(
+        http.get(JOBS_URL, ({ request }) => {
+          sortParam = new URL(request.url).searchParams.get('sort');
+          return HttpResponse.json(makeJobsPage([makeJob()]));
+        })
+      );
+
+      renderComponent(search);
+
+      expect(await screen.findByText('my-job')).toBeInTheDocument();
+      expect(sortParam).toBe('-created_at');
+    }
+  );
+
   it('fetches recent jobs in one large page and pages them in the table', async () => {
     const requests: URLSearchParams[] = [];
     const jobs = Array.from({ length: 12 }, (_, i) =>
