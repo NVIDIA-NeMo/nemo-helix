@@ -122,6 +122,12 @@ def newest_pod(pods: list[V1Pod]) -> V1Pod | None:
     return max(pods, key=creation_timestamp)
 
 
+def read_pod_log_text(core_v1: Any, **kwargs: Any) -> str:
+    # kubernetes>=36 returns str(bytes) ("b'...'") for preloaded pod logs; decode the raw body instead.
+    response = core_v1.read_namespaced_pod_log(_preload_content=False, **kwargs)
+    return response.data.decode("utf-8", errors="replace")
+
+
 def trim_log_text(text: str) -> tuple[list[str], bool]:
     truncated = len(text) > LOG_MAX_CHARS
     if truncated:
@@ -669,15 +675,14 @@ async def get_job_logs(
             pod = newest_pod(list(pods.items))
             if pod is None or pod.metadata is None:
                 return ""
-            pod_name = pod.metadata.name
-            raw = core_v1.read_namespaced_pod_log(
-                name=pod_name,
+            return read_pod_log_text(
+                core_v1,
+                name=pod.metadata.name,
                 namespace=namespace,
                 tail_lines=tail,
                 timestamps=True,
                 _request_timeout=timeout,
             )
-            return raw
 
         text = await asyncio.to_thread(_logs)
         lines, truncated = trim_log_text(text)
