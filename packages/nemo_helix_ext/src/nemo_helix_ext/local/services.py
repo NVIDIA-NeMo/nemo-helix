@@ -502,15 +502,18 @@ def _terminate_startup_process(proc: subprocess.Popen) -> None:
 
 def serve_embedded_app(app: Any, cfg: ServiceRunConfig, socket_path: Path | None) -> None:
     import uvicorn
+    from nhx.platform_runner.local_network import docker_listener_host
 
-    if socket_path is not None:
+    docker_host = docker_listener_host(cfg.host)
+    if socket_path is not None or docker_host:
         from nhx.platform_runner.server import _run_server_on_bound_sockets
 
         _run_server_on_bound_sockets(
             app,
             host=cfg.host,
             port=cfg.port,
-            socket_path=str(socket_path),
+            socket_path=str(socket_path) if socket_path is not None else None,
+            docker_host=docker_host,
             keep_alive_timeout_seconds=cfg.keep_alive_timeout_seconds,
         )
     else:
