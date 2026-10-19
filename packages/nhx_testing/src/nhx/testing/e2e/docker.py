@@ -253,7 +253,7 @@ class Docker(E2EBackend):
             logger.info(f"Container started, waiting for health check on port {self._host_port}")
 
             # Wait for container to be ready
-            self._wait_for_healthy()
+            self._wait_for_healthy(self.container)
 
             logger.info(f"NeMo Helix API container ready at http://localhost:{self._host_port}")
 
@@ -392,12 +392,10 @@ class Docker(E2EBackend):
             logger.warning(f"Failed to verify container status: {e}")
             # Continue anyway - the health check will catch issues
 
-    def _wait_for_healthy(self) -> None:
-        """Wait for the container to be healthy."""
-        if self.container is None:
-            raise RuntimeError("the container must be started before waiting for it to be healthy")
+    def _wait_for_healthy(self, container: DockerContainer) -> None:
+        """Wait for the started container to be healthy."""
         # Get the container host - this handles Docker Desktop on Mac/Windows correctly
-        container_host = self.container.get_container_host_ip()
+        container_host = container.get_container_host_ip()
         base_url = f"http://{container_host}:{self._host_port}"
         health_url = f"{base_url}{HEALTH_ENDPOINT}"
 

@@ -394,12 +394,6 @@ class _FakeFabric:
         return _FakePlan(capability_plan={"routes": routes}, harness=_harness_name(adapter_id))
 
 
-class _FabricModuleWithFakePlanner(types.ModuleType):
-    """A copy of ``nemo_fabric`` whose ``Fabric`` is replaced by the test's planner."""
-
-    Fabric: type
-
-
 def _install_fake_fabric(monkeypatch: pytest.MonkeyPatch) -> type[_FakeFabric]:
     """Inject a ``nemo_fabric`` module whose planner is fake, so skills routing is ours to decide."""
     _FakeFabric.planned = []
@@ -408,9 +402,8 @@ def _install_fake_fabric(monkeypatch: pytest.MonkeyPatch) -> type[_FakeFabric]:
     # Only the planner is faked; every other symbol stays the installed one. The runtime also builds
     # its config and telemetry out of this module, and a stand-in for those would happily accept a
     # config Fabric itself rejects — which is the drift these tests exist to notice.
-    module = _FabricModuleWithFakePlanner("nemo_fabric")
-    module.__dict__.update(nemo_fabric.__dict__)
-    module.Fabric = _FakeFabric
+    module = types.ModuleType("nemo_fabric")
+    module.__dict__.update(nemo_fabric.__dict__, Fabric=_FakeFabric)
     monkeypatch.setitem(sys.modules, "nemo_fabric", module)
     return _FakeFabric
 
