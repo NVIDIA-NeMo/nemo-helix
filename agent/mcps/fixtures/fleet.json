@@ -1,0 +1,716 @@
+{
+  "nodes": {
+    "dgx-a01": {
+      "pod": "pod-a",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 54,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-04T20:00Z"
+    },
+    "dgx-a02": {
+      "pod": "pod-a",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 79,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-01T11:00Z"
+    },
+    "dgx-a03": {
+      "pod": "pod-a",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 77,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-02T01:00Z"
+    },
+    "dgx-a04": {
+      "pod": "pod-a",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 71,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-01T07:00Z"
+    },
+    "dgx-a05": {
+      "pod": "pod-a",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 72,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-01T18:00Z"
+    },
+    "dgx-a06": {
+      "pod": "pod-a",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 59,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-06T20:00Z"
+    },
+    "dgx-a07": {
+      "pod": "pod-a",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 48,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-05T18:00Z"
+    },
+    "dgx-a08": {
+      "pod": "pod-a",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 59,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-01T17:00Z"
+    },
+    "dgx-a09": {
+      "pod": "pod-a",
+      "state": "degraded",
+      "gpus": 8,
+      "gpu_temp_c": 63,
+      "xid_errors_24h": 1,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-02T17:00Z"
+    },
+    "dgx-a10": {
+      "pod": "pod-a",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 64,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-05T21:00Z"
+    },
+    "dgx-a11": {
+      "pod": "pod-a",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 82,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-05T20:00Z"
+    },
+    "dgx-a12": {
+      "pod": "pod-a",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 51,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-05T22:00Z"
+    },
+    "dgx-a13": {
+      "pod": "pod-a",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 48,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-05T06:00Z"
+    },
+    "dgx-a14": {
+      "pod": "pod-a",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 79,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-04T10:00Z"
+    },
+    "dgx-a15": {
+      "pod": "pod-a",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 74,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-03T09:00Z"
+    },
+    "dgx-a16": {
+      "pod": "pod-a",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 56,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-06T07:00Z"
+    },
+    "dgx-a17": {
+      "pod": "pod-a",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 64,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-05T15:00Z"
+    },
+    "dgx-a18": {
+      "pod": "pod-a",
+      "state": "degraded",
+      "gpus": 8,
+      "gpu_temp_c": 73,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-05T02:00Z"
+    },
+    "dgx-a19": {
+      "pod": "pod-a",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 71,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-02T10:00Z"
+    },
+    "dgx-a20": {
+      "pod": "pod-a",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 76,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-04T01:00Z"
+    },
+    "dgx-a21": {
+      "pod": "pod-a",
+      "state": "drained",
+      "gpus": 8,
+      "gpu_temp_c": 49,
+      "xid_errors_24h": 3,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-05T10:00Z"
+    },
+    "dgx-a22": {
+      "pod": "pod-a",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 67,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-05T15:00Z"
+    },
+    "dgx-a23": {
+      "pod": "pod-a",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 74,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-01T02:00Z"
+    },
+    "dgx-a24": {
+      "pod": "pod-a",
+      "state": "degraded",
+      "gpus": 8,
+      "gpu_temp_c": 75,
+      "xid_errors_24h": 12,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-06T02:00Z"
+    },
+    "dgx-b01": {
+      "pod": "pod-b",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 64,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 40,
+      "last_reboot": "2026-10-03T22:00Z"
+    },
+    "dgx-b02": {
+      "pod": "pod-b",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 67,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-04T11:00Z"
+    },
+    "dgx-b03": {
+      "pod": "pod-b",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 52,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 40,
+      "last_reboot": "2026-10-01T06:00Z"
+    },
+    "dgx-b04": {
+      "pod": "pod-b",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 53,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-04T12:00Z"
+    },
+    "dgx-b05": {
+      "pod": "pod-b",
+      "state": "degraded",
+      "gpus": 8,
+      "gpu_temp_c": 76,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-04T12:00Z"
+    },
+    "dgx-b06": {
+      "pod": "pod-b",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 53,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 40,
+      "last_reboot": "2026-10-05T08:00Z"
+    },
+    "dgx-b07": {
+      "pod": "pod-b",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 67,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 40,
+      "last_reboot": "2026-10-02T04:00Z"
+    },
+    "dgx-b08": {
+      "pod": "pod-b",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 54,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-06T07:00Z"
+    },
+    "dgx-b09": {
+      "pod": "pod-b",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 82,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-03T09:00Z"
+    },
+    "dgx-b10": {
+      "pod": "pod-b",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 71,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 2,
+      "last_reboot": "2026-10-05T18:00Z"
+    },
+    "dgx-b11": {
+      "pod": "pod-b",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 53,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-04T21:00Z"
+    },
+    "dgx-b12": {
+      "pod": "pod-b",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 70,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 40,
+      "last_reboot": "2026-10-04T12:00Z"
+    },
+    "dgx-b13": {
+      "pod": "pod-b",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 70,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-02T02:00Z"
+    },
+    "dgx-b14": {
+      "pod": "pod-b",
+      "state": "drained",
+      "gpus": 8,
+      "gpu_temp_c": 73,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-03T19:00Z"
+    },
+    "dgx-b15": {
+      "pod": "pod-b",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 45,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-05T03:00Z"
+    },
+    "dgx-b16": {
+      "pod": "pod-b",
+      "state": "degraded",
+      "gpus": 8,
+      "gpu_temp_c": 46,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-05T12:00Z"
+    },
+    "dgx-b17": {
+      "pod": "pod-b",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 61,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 2,
+      "last_reboot": "2026-10-05T11:00Z"
+    },
+    "dgx-b18": {
+      "pod": "pod-b",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 52,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 40,
+      "last_reboot": "2026-10-04T15:00Z"
+    },
+    "dgx-b19": {
+      "pod": "pod-b",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 50,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-01T23:00Z"
+    },
+    "dgx-b20": {
+      "pod": "pod-b",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 61,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 40,
+      "last_reboot": "2026-10-06T05:00Z"
+    },
+    "dgx-b21": {
+      "pod": "pod-b",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 58,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 2,
+      "last_reboot": "2026-10-02T22:00Z"
+    },
+    "dgx-b22": {
+      "pod": "pod-b",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 46,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 2,
+      "last_reboot": "2026-10-06T02:00Z"
+    },
+    "dgx-b23": {
+      "pod": "pod-b",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 61,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 2,
+      "last_reboot": "2026-10-02T11:00Z"
+    },
+    "dgx-b24": {
+      "pod": "pod-b",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 79,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 2,
+      "last_reboot": "2026-10-06T07:00Z"
+    },
+    "dgx-c01": {
+      "pod": "pod-c",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 57,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-02T12:00Z"
+    },
+    "dgx-c02": {
+      "pod": "pod-c",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 59,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-02T16:00Z"
+    },
+    "dgx-c03": {
+      "pod": "pod-c",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 46,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-01T08:00Z"
+    },
+    "dgx-c04": {
+      "pod": "pod-c",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 57,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-06T19:00Z"
+    },
+    "dgx-c05": {
+      "pod": "pod-c",
+      "state": "drained",
+      "gpus": 8,
+      "gpu_temp_c": 73,
+      "xid_errors_24h": 12,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-03T11:00Z"
+    },
+    "dgx-c06": {
+      "pod": "pod-c",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 51,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-02T15:00Z"
+    },
+    "dgx-c07": {
+      "pod": "pod-c",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 58,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-04T19:00Z"
+    },
+    "dgx-c08": {
+      "pod": "pod-c",
+      "state": "drained",
+      "gpus": 8,
+      "gpu_temp_c": 45,
+      "xid_errors_24h": 1,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-06T11:00Z"
+    },
+    "dgx-c09": {
+      "pod": "pod-c",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 50,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-06T03:00Z"
+    },
+    "dgx-c10": {
+      "pod": "pod-c",
+      "state": "degraded",
+      "gpus": 8,
+      "gpu_temp_c": 57,
+      "xid_errors_24h": 1,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-02T13:00Z"
+    },
+    "dgx-c11": {
+      "pod": "pod-c",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 66,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-01T23:00Z"
+    },
+    "dgx-c12": {
+      "pod": "pod-c",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 70,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-06T02:00Z"
+    },
+    "dgx-c13": {
+      "pod": "pod-c",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 55,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-02T00:00Z"
+    },
+    "dgx-c14": {
+      "pod": "pod-c",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 74,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-06T04:00Z"
+    },
+    "dgx-c15": {
+      "pod": "pod-c",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 83,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-04T21:00Z"
+    },
+    "dgx-c16": {
+      "pod": "pod-c",
+      "state": "degraded",
+      "gpus": 8,
+      "gpu_temp_c": 54,
+      "xid_errors_24h": 3,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-05T04:00Z"
+    },
+    "dgx-c17": {
+      "pod": "pod-c",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 51,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-05T23:00Z"
+    },
+    "dgx-c18": {
+      "pod": "pod-c",
+      "state": "degraded",
+      "gpus": 8,
+      "gpu_temp_c": 72,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-02T00:00Z"
+    },
+    "dgx-c19": {
+      "pod": "pod-c",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 63,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-05T07:00Z"
+    },
+    "dgx-c20": {
+      "pod": "pod-c",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 65,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-03T17:00Z"
+    },
+    "dgx-c21": {
+      "pod": "pod-c",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 53,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-01T23:00Z"
+    },
+    "dgx-c22": {
+      "pod": "pod-c",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 74,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-06T18:00Z"
+    },
+    "dgx-c23": {
+      "pod": "pod-c",
+      "state": "degraded",
+      "gpus": 8,
+      "gpu_temp_c": 78,
+      "xid_errors_24h": 1,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-05T04:00Z"
+    },
+    "dgx-c24": {
+      "pod": "pod-c",
+      "state": "healthy",
+      "gpus": 8,
+      "gpu_temp_c": 78,
+      "xid_errors_24h": 0,
+      "nvlink_errors_24h": 0,
+      "last_reboot": "2026-10-05T00:00Z"
+    }
+  },
+  "services": {
+    "Loom": {
+      "state": "degraded",
+      "detail": "pod-b fabric: 3 links flapping on switch lm-b-04"
+    },
+    "Vault": {
+      "state": "healthy",
+      "detail": "mds p99 18ms, capacity 71%"
+    },
+    "Dispatch": {
+      "state": "healthy",
+      "detail": "queue depth 412, 0 stuck"
+    },
+    "Node Doctor": {
+      "state": "healthy",
+      "detail": "4 drains in last 24h"
+    },
+    "Backbone": {
+      "state": "healthy",
+      "detail": "all BGP sessions up"
+    },
+    "Gatekeeper": {
+      "state": "degraded",
+      "detail": "group sync lag 14 min"
+    },
+    "Kite": {
+      "state": "healthy",
+      "detail": "apiserver p99 220ms"
+    },
+    "Beacon": {
+      "state": "degraded",
+      "detail": "endpoint llm-chat-prod 5xx 2.1% since deploy 14:02Z"
+    },
+    "Conveyor": {
+      "state": "healthy",
+      "detail": "2 of 61 pipelines late"
+    },
+    "Lantern": {
+      "state": "healthy",
+      "detail": "ingest lag 4s"
+    },
+    "Ledger": {
+      "state": "healthy",
+      "detail": "team ml-research at 97% of quota"
+    },
+    "Sentinel": {
+      "state": "healthy",
+      "detail": "0 open findings"
+    }
+  },
+  "clusters": {
+    "pod-a": {
+      "nodes": 24,
+      "healthy": 20
+    },
+    "pod-b": {
+      "nodes": 24,
+      "healthy": 21
+    },
+    "pod-c": {
+      "nodes": 24,
+      "healthy": 18
+    }
+  }
+}

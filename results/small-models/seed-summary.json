@@ -1,0 +1,42 @@
+{
+  "qwen.runbook": {
+    "acc_by_seed": [
+      1.0,
+      0.9952,
+      1.0
+    ],
+    "mean": 0.9984,
+    "stdev": 0.0028,
+    "macro_f1_mean": 0.9986
+  },
+  "qwen.action": {
+    "acc_by_seed": [
+      0.8197,
+      0.8173,
+      0.8197
+    ],
+    "mean": 0.8189,
+    "stdev": 0.0014,
+    "macro_f1_mean": 0.7634
+  },
+  "nemotron.runbook": {
+    "acc_by_seed": [
+      0.9928,
+      0.9952,
+      0.9952
+    ],
+    "mean": 0.9944,
+    "stdev": 0.0014,
+    "macro_f1_mean": 0.9954
+  },
+  "nemotron.action": {
+    "acc_by_seed": [
+      0.8029,
+      0.8029,
+      0.7981
+    ],
+    "mean": 0.8013,
+    "stdev": 0.0028,
+    "macro_f1_mean": 0.7523
+  }
+}

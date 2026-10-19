@@ -1,0 +1,34 @@
+{
+  "A-frontier-no-context": {
+    "n": 50,
+    "errors": 0,
+    "p50_ms": 669,
+    "p95_ms": 2247,
+    "mean_prompt_tokens": 566,
+    "mean_completion_tokens": 2
+  },
+  "A-plus-frontier-with-context": {
+    "n": 41,
+    "errors": 9,
+    "p50_ms": 670,
+    "p95_ms": 2268,
+    "mean_prompt_tokens": 1436,
+    "mean_completion_tokens": 2
+  },
+  "C-qwen-finetuned": {
+    "n": 50,
+    "errors": 0,
+    "p50_ms": 301,
+    "p95_ms": 560,
+    "mean_prompt_tokens": 551,
+    "mean_completion_tokens": 1
+  },
+  "S-strands-decider-untuned": {
+    "n": 50,
+    "errors": 0,
+    "p50_ms": 793,
+    "p95_ms": 1005,
+    "mean_prompt_tokens": 572,
+    "mean_completion_tokens": 1
+  }
+}

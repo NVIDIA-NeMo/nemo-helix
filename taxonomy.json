@@ -1,0 +1,447 @@
+{
+  "company": {
+    "name": "Meridian Compute",
+    "description": "Operates three GPU clusters (pod-a, pod-b, pod-c) for internal ML teams. Internal platform services carry codenames that collide with public product names on purpose: a model without Meridian context will misroute them.",
+    "clusters": [
+      "pod-a",
+      "pod-b",
+      "pod-c"
+    ],
+    "node_prefixes": [
+      "dgx-",
+      "hgx-",
+      "cpu-"
+    ],
+    "zones": [
+      "us-west-2a",
+      "us-west-2b",
+      "eu-central-1a"
+    ]
+  },
+  "services": {
+    "Loom": "GPU interconnect fabric (NVLink, NVSwitch, InfiniBand). Public collision: Loom the video tool.",
+    "Vault": "Parallel filesystem for datasets and checkpoints. Public collision: HashiCorp Vault (secrets).",
+    "Dispatch": "Batch job scheduler built on Slurm.",
+    "Node Doctor": "Node health daemon: GPU Xid, ECC, thermal, drain and reboot.",
+    "Backbone": "Core network: DNS, BGP, zone-to-zone routing.",
+    "Gatekeeper": "SSO and identity broker. Public collision: OPA Gatekeeper (Kubernetes admission).",
+    "Kite": "Kubernetes control plane and image registry.",
+    "Beacon": "Model inference serving layer. Public collision: Bluetooth beacons.",
+    "Conveyor": "Data pipeline and ETL orchestration.",
+    "Lantern": "Metrics, logs and alerting.",
+    "Ledger": "Capacity, quota and reservation service. Public collision: accounting ledger.",
+    "Sentinel": "Security incident response tooling. Public collision: Microsoft Sentinel."
+  },
+  "runbooks": [
+    {
+      "id": "RB-01",
+      "team": "Interconnect",
+      "name": "Loom link fault",
+      "definition": "NVLink, NVSwitch or InfiniBand link errors, flaps or degraded all-reduce performance.",
+      "families": [
+        "nvlink-flap",
+        "ib-port-errors",
+        "slow-allreduce-training-job",
+        "nvswitch-reset-loop"
+      ],
+      "private_context": "Training jobs reported as 'slow' on pod-b were a Loom link fault 8 times out of 10 last quarter, not a Dispatch problem. Policy: single-link flaps auto-remediate by draining the link; multi-node flaps page the Interconnect on-call. Response policy: S1 escalate to the incident commander; S2 page the on-call; S3, S4 let automation remediate.",
+      "policy": {
+        "S1": "escalate-incident-commander",
+        "S2": "page-oncall",
+        "S3": "auto-remediate",
+        "S4": "auto-remediate"
+      },
+      "severity_weights": {
+        "S1": 5,
+        "S2": 25,
+        "S3": 45,
+        "S4": 25
+      }
+    },
+    {
+      "id": "RB-02",
+      "team": "Storage",
+      "name": "Vault filesystem",
+      "definition": "Vault read/write latency, metadata server pressure, mount failures, checkpoint write errors.",
+      "families": [
+        "vault-mds-latency",
+        "checkpoint-write-enospc",
+        "vault-mount-permission-denied",
+        "vault-scrub-degraded"
+      ],
+      "private_context": "Vault is the parallel filesystem, not the secrets manager. 'Permission denied' on a Vault path is almost always a stale mount or ACL sync lag, owned by Storage, never Identity or Security. Response policy: S1 escalate to the incident commander; S2, S3 page the on-call; S4 open a business-hours ticket.",
+      "policy": {
+        "S1": "escalate-incident-commander",
+        "S2": "page-oncall",
+        "S3": "page-oncall",
+        "S4": "ticket-business-hours"
+      },
+      "severity_weights": {
+        "S1": 10,
+        "S2": 35,
+        "S3": 35,
+        "S4": 20
+      }
+    },
+    {
+      "id": "RB-03",
+      "team": "Scheduler",
+      "name": "Dispatch queue",
+      "definition": "Jobs stuck pending, preemption loops, partition misconfiguration, scheduler daemon unresponsive.",
+      "families": [
+        "jobs-pending-no-reason",
+        "preemption-loop",
+        "partition-down",
+        "slurmctld-unresponsive"
+      ],
+      "private_context": "Dispatch owns scheduling only. A job that runs but runs slowly is not Dispatch. Jobs pending with 'Resources' reason on a cluster that looks idle usually means a Ledger reservation, so check RB-11 first. Response policy: S1 escalate to the incident commander; S2 page the on-call; S3, S4 open a business-hours ticket.",
+      "policy": {
+        "S1": "escalate-incident-commander",
+        "S2": "page-oncall",
+        "S3": "ticket-business-hours",
+        "S4": "ticket-business-hours"
+      },
+      "severity_weights": {
+        "S1": 5,
+        "S2": 30,
+        "S3": 40,
+        "S4": 25
+      }
+    },
+    {
+      "id": "RB-04",
+      "team": "Node Health",
+      "name": "Node Doctor GPU fault",
+      "definition": "GPU Xid errors, ECC errors, thermal throttling, node drained or rebooted by Node Doctor.",
+      "families": [
+        "xid-79-fallen-off-bus",
+        "ecc-uncorrectable",
+        "thermal-throttle",
+        "node-doctor-drain-storm"
+      ],
+      "private_context": "Node Doctor auto-drains on Xid 79 and uncorrectable ECC; those are routine. More than five drains in an hour on one pod is a Loom or power event, escalate to incident commander. Response policy: S1 escalate to the incident commander; S2 page the on-call; S3, S4 let automation remediate.",
+      "policy": {
+        "S1": "escalate-incident-commander",
+        "S2": "page-oncall",
+        "S3": "auto-remediate",
+        "S4": "auto-remediate"
+      },
+      "severity_weights": {
+        "S1": 10,
+        "S2": 15,
+        "S3": 45,
+        "S4": 30
+      }
+    },
+    {
+      "id": "RB-05",
+      "team": "Network Core",
+      "name": "Backbone connectivity",
+      "definition": "DNS resolution failures, BGP session drops, zone-to-zone packet loss, routing table changes.",
+      "families": [
+        "dns-resolution-failures",
+        "bgp-session-flap",
+        "zone-packet-loss",
+        "route-leak"
+      ],
+      "private_context": "Backbone is the core network. Anything inside a node (NVLink, IB) is Loom, not Backbone. Response policy: S1 escalate to the incident commander; S2, S3 page the on-call; S4 open a business-hours ticket.",
+      "policy": {
+        "S1": "escalate-incident-commander",
+        "S2": "page-oncall",
+        "S3": "page-oncall",
+        "S4": "ticket-business-hours"
+      },
+      "severity_weights": {
+        "S1": 20,
+        "S2": 40,
+        "S3": 25,
+        "S4": 15
+      }
+    },
+    {
+      "id": "RB-06",
+      "team": "Identity and Access",
+      "name": "Gatekeeper auth",
+      "definition": "SSO login failures, token expiry storms, group membership sync lag, service account lockouts.",
+      "families": [
+        "sso-login-loop",
+        "token-expiry-storm",
+        "group-sync-lag",
+        "service-account-lockout"
+      ],
+      "private_context": "Gatekeeper is the SSO broker, not the Kubernetes admission controller. Pods failing admission in Kite are RB-07. Unexpected login from a new country is RB-12, not RB-06. Response policy: S1, S2 page the on-call; S3, S4 open a business-hours ticket.",
+      "policy": {
+        "S1": "page-oncall",
+        "S2": "page-oncall",
+        "S3": "ticket-business-hours",
+        "S4": "ticket-business-hours"
+      },
+      "severity_weights": {
+        "S1": 5,
+        "S2": 25,
+        "S3": 40,
+        "S4": 30
+      }
+    },
+    {
+      "id": "RB-07",
+      "team": "Container Platform",
+      "name": "Kite control plane",
+      "definition": "Kubernetes API latency, image pull failures, registry outages, admission webhook errors, etcd pressure.",
+      "families": [
+        "image-pull-backoff-registry",
+        "apiserver-latency",
+        "admission-webhook-timeout",
+        "etcd-disk-pressure"
+      ],
+      "private_context": "Image pull failures against the Kite registry are RB-07 even when the error text mentions 'unauthorized'; registry token refresh is owned by Container Platform. Response policy: S1 escalate to the incident commander; S2, S3 page the on-call; S4 open a business-hours ticket.",
+      "policy": {
+        "S1": "escalate-incident-commander",
+        "S2": "page-oncall",
+        "S3": "page-oncall",
+        "S4": "ticket-business-hours"
+      },
+      "severity_weights": {
+        "S1": 10,
+        "S2": 35,
+        "S3": 35,
+        "S4": 20
+      }
+    },
+    {
+      "id": "RB-08",
+      "team": "Inference Serving",
+      "name": "Beacon serving",
+      "definition": "Model endpoint 5xx, p99 latency regression, model load failure after deploy, replica crash loops.",
+      "families": [
+        "endpoint-5xx-after-deploy",
+        "p99-latency-regression",
+        "model-load-oom",
+        "replica-crashloop"
+      ],
+      "private_context": "Beacon is the model serving layer. 'Beacon timeouts' are never a network problem; 9 of the last 10 were a bad deploy, so the action is rollback and page Inference Serving. Response policy: S1 escalate to the incident commander; S2, S3 page the on-call; S4 open a business-hours ticket.",
+      "policy": {
+        "S1": "escalate-incident-commander",
+        "S2": "page-oncall",
+        "S3": "page-oncall",
+        "S4": "ticket-business-hours"
+      },
+      "severity_weights": {
+        "S1": 15,
+        "S2": 45,
+        "S3": 25,
+        "S4": 15
+      }
+    },
+    {
+      "id": "RB-09",
+      "team": "Data Platform",
+      "name": "Conveyor pipeline",
+      "definition": "ETL job failures, schema drift, upstream data late, pipeline lag beyond SLA.",
+      "families": [
+        "schema-drift-upstream",
+        "pipeline-lag-sla",
+        "etl-task-oom",
+        "late-partition"
+      ],
+      "private_context": "Conveyor failures are business-hours tickets unless a training launch depends on the output today, in which case page. Response policy: S1, S2 page the on-call; S3, S4 open a business-hours ticket.",
+      "policy": {
+        "S1": "page-oncall",
+        "S2": "page-oncall",
+        "S3": "ticket-business-hours",
+        "S4": "ticket-business-hours"
+      },
+      "severity_weights": {
+        "S1": 5,
+        "S2": 20,
+        "S3": 40,
+        "S4": 35
+      }
+    },
+    {
+      "id": "RB-10",
+      "team": "Observability",
+      "name": "Lantern telemetry",
+      "definition": "Missing metrics, alert storms from a broken rule, dashboards blank, log ingestion lag.",
+      "families": [
+        "gpu-metrics-gap-exporter",
+        "alert-storm-bad-rule",
+        "dashboard-blank",
+        "log-ingestion-lag"
+      ],
+      "private_context": "'No GPU metrics for node X' is a Lantern exporter crash, not a node fault, unless Node Doctor also reports the node. Check Node Doctor before paging anyone. Response policy: S1 page the on-call; S2, S3, S4 open a business-hours ticket.",
+      "policy": {
+        "S1": "page-oncall",
+        "S2": "ticket-business-hours",
+        "S3": "ticket-business-hours",
+        "S4": "ticket-business-hours"
+      },
+      "severity_weights": {
+        "S1": 5,
+        "S2": 20,
+        "S3": 40,
+        "S4": 35
+      }
+    },
+    {
+      "id": "RB-11",
+      "team": "Capacity and Quota",
+      "name": "Ledger capacity",
+      "definition": "Quota exceeded, reservation conflicts, allocation denied, budget threshold alerts.",
+      "families": [
+        "quota-exceeded-team",
+        "reservation-conflict",
+        "allocation-denied",
+        "budget-threshold"
+      ],
+      "private_context": "Ledger is the capacity and quota service, nothing to do with finance or billing systems. Ledger issues never page; they are tickets. Response policy: S1, S2, S3, S4 open a business-hours ticket.",
+      "policy": {
+        "S1": "ticket-business-hours",
+        "S2": "ticket-business-hours",
+        "S3": "ticket-business-hours",
+        "S4": "ticket-business-hours"
+      },
+      "severity_weights": {
+        "S1": 0,
+        "S2": 10,
+        "S3": 45,
+        "S4": 45
+      }
+    },
+    {
+      "id": "RB-12",
+      "team": "Security Incident Response",
+      "name": "Sentinel security event",
+      "definition": "Suspicious logins, credential leaks, unexpected egress, privilege escalation attempts.",
+      "families": [
+        "impossible-travel-login",
+        "leaked-api-key",
+        "unexpected-egress",
+        "privilege-escalation"
+      ],
+      "private_context": "Any Sentinel finding escalates to the incident commander regardless of severity. A leaked key found in a repo is RB-12 even if the key belongs to Vault or Gatekeeper. Response policy: S1, S2, S3, S4 escalate to the incident commander.",
+      "policy": {
+        "S1": "escalate-incident-commander",
+        "S2": "escalate-incident-commander",
+        "S3": "escalate-incident-commander",
+        "S4": "escalate-incident-commander"
+      },
+      "severity_weights": {
+        "S1": 50,
+        "S2": 35,
+        "S3": 15,
+        "S4": 0
+      }
+    }
+  ],
+  "actions": [
+    {
+      "id": "auto-remediate",
+      "definition": "Run the runbook's automated fix and notify the team channel. No human paged."
+    },
+    {
+      "id": "page-oncall",
+      "definition": "Page the owning team's on-call engineer now."
+    },
+    {
+      "id": "ticket-business-hours",
+      "definition": "Open a ticket for the owning team; handled during business hours."
+    },
+    {
+      "id": "escalate-incident-commander",
+      "definition": "Declare an incident and page the incident commander."
+    }
+  ],
+  "severities": [
+    "S1",
+    "S2",
+    "S3",
+    "S4"
+  ],
+  "reporter_styles": [
+    {
+      "id": "pager-alert",
+      "description": "Terse automated alert text with metric names, thresholds and a node or service identifier. One to three lines."
+    },
+    {
+      "id": "slack-message",
+      "description": "Informal message from an engineer in the ops channel. Lowercase, abbreviations, missing details, maybe a guess at the cause."
+    },
+    {
+      "id": "formal-ticket",
+      "description": "Structured ticket with Summary, Impact, Steps taken and Request sections."
+    },
+    {
+      "id": "monitoring-json",
+      "description": "Machine-generated alert payload with fields like alertname, labels, annotations and firing time, rendered as compact JSON."
+    }
+  ],
+  "holdout_families": {
+    "note": "One family per runbook is held out of training entirely and appears only in the test set, so the test measures generalization across scenario types rather than memorization.",
+    "families": [
+      "nvswitch-reset-loop",
+      "vault-scrub-degraded",
+      "slurmctld-unresponsive",
+      "node-doctor-drain-storm",
+      "route-leak",
+      "service-account-lockout",
+      "etcd-disk-pressure",
+      "replica-crashloop",
+      "late-partition",
+      "log-ingestion-lag",
+      "budget-threshold",
+      "privilege-escalation"
+    ]
+  },
+  "family_descriptions": {
+    "nvlink-flap": "an NVLink link on one node keeps going down and coming back up; GPU-to-GPU bandwidth drops while it happens",
+    "ib-port-errors": "InfiniBand port counters on a node or switch show symbol errors and link downs climbing",
+    "slow-allreduce-training-job": "a multi-node training job is running but much slower than usual; collective operations take several times longer; nothing is queued or failing",
+    "nvswitch-reset-loop": "an NVSwitch keeps resetting itself every few minutes, taking a whole node's GPU fabric with it",
+    "vault-mds-latency": "metadata operations on the shared filesystem (ls, open, stat) are taking seconds instead of milliseconds",
+    "checkpoint-write-enospc": "training checkpoints fail to write with out-of-space errors on the shared filesystem even though quota looked fine",
+    "vault-mount-permission-denied": "nodes get permission denied on shared filesystem paths that worked yesterday; mounts look stale",
+    "vault-scrub-degraded": "the shared filesystem reports a degraded storage target and a background scrub is running; throughput is down",
+    "jobs-pending-no-reason": "jobs sit in pending with no useful reason while the cluster has idle nodes",
+    "preemption-loop": "a job keeps getting preempted and requeued over and over, never finishing",
+    "partition-down": "a scheduler partition shows down or drained and nothing is dispatching to it",
+    "slurmctld-unresponsive": "the scheduler controller daemon stops answering; job commands hang or time out",
+    "xid-79-fallen-off-bus": "a GPU reports Xid 79, has fallen off the bus, and the node was drained automatically",
+    "ecc-uncorrectable": "a GPU logs an uncorrectable ECC error; the running job died and the node was drained",
+    "thermal-throttle": "GPUs on a node are hitting thermal limits and clocking down; throughput drops",
+    "node-doctor-drain-storm": "many nodes in one pod get drained within a short window by the health daemon",
+    "dns-resolution-failures": "hostnames stop resolving intermittently inside a zone; connections fail by name but work by IP",
+    "bgp-session-flap": "a core router's BGP session keeps dropping and re-establishing; traffic between zones blips",
+    "zone-packet-loss": "steady packet loss between two availability zones; latency spikes on cross-zone traffic",
+    "route-leak": "routes that should stay internal show up where they do not belong; some traffic takes a wrong path",
+    "sso-login-loop": "users are bounced back to the login page repeatedly after signing in",
+    "token-expiry-storm": "a wave of access tokens expire at once; service calls fail with unauthorized until re-auth",
+    "group-sync-lag": "group membership changes take far longer than usual to show up; new team members cannot access what they should",
+    "service-account-lockout": "an automation's service account gets locked out after repeated failed auth attempts",
+    "image-pull-backoff-registry": "pods are stuck pulling images from the internal registry; pull backoff errors, sometimes unauthorized",
+    "apiserver-latency": "Kubernetes API calls are slow; kubectl and controllers time out",
+    "admission-webhook-timeout": "pods fail to be created because an admission webhook times out",
+    "etcd-disk-pressure": "the cluster's etcd reports disk pressure or high fsync latency; the control plane gets flaky",
+    "endpoint-5xx-after-deploy": "a model endpoint started returning 5xx errors right after a new version rolled out",
+    "p99-latency-regression": "a model endpoint's tail latency jumped several-fold with no error increase",
+    "model-load-oom": "new replicas of a model crash on startup running out of GPU memory while loading weights",
+    "replica-crashloop": "model serving replicas keep restarting; the endpoint is partially available",
+    "schema-drift-upstream": "an upstream data source changed its schema and the ingestion job now fails on parsing",
+    "pipeline-lag-sla": "a data pipeline is running but far behind schedule; downstream datasets are stale",
+    "etl-task-oom": "a transform task in a data pipeline is killed for using too much memory",
+    "late-partition": "an expected daily data partition has not arrived; downstream jobs are waiting on it",
+    "gpu-metrics-gap-exporter": "GPU metrics for a node or pod vanished from dashboards while the GPUs themselves run fine",
+    "alert-storm-bad-rule": "a newly changed alert rule is firing hundreds of times for a condition that is not real",
+    "dashboard-blank": "monitoring dashboards show no data though services are up",
+    "log-ingestion-lag": "logs arrive in the logging system many minutes late; searches miss recent events",
+    "quota-exceeded-team": "a team hit its GPU quota and new jobs are rejected",
+    "reservation-conflict": "two reservations overlap on the same nodes and one of them cannot start",
+    "allocation-denied": "a request for GPUs is denied for lack of available capacity in the reservation",
+    "budget-threshold": "a team crossed a spending or usage threshold and got a warning",
+    "impossible-travel-login": "a user account logged in from two distant countries within minutes",
+    "leaked-api-key": "a secret or API key was found committed to a repository",
+    "unexpected-egress": "a node is sending an unusual volume of data to an external address",
+    "privilege-escalation": "a process or user gained elevated privileges in a way policy does not allow"
+  },
+  "policy_note": "Actions are a deterministic function of runbook and severity (see runbooks[].policy). Severity S1 is a production outage, S2 serious and active, S3 real but contained, S4 a heads-up."
+}

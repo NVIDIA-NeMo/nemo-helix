@@ -1,0 +1,8 @@
+runs/
+.venv/
+__pycache__/
+*.pyc
+data/meridian-example/*.jsonl
+eval/specs/
+eval/specs-remote/
+docs/_site/

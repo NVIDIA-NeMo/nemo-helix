@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fast decision models with NeMo Helix</title>
+<meta name="description" content="Train a small open model to take over a decision that a large model makes inside your agent. Generate the training data, fine-tune on a single GPU and measure the result, all with open source tools in NeMo Helix.">
+<meta property="og:title" content="Fine-tune your own fast decision model on an open stack">
+<meta property="og:description" content="Train a small open model to take over a decision that a large model makes inside your agent. Generate the training data, fine-tune on a single GPU and measure the result, all with open source tools in NeMo Helix.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#7cbf2e">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,400;0,600;0,700;1,400&family=Zilla+Slab:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg: oklch(1 0 0);
+  --surface: oklch(0.972 0.008 131);
+  --line: oklch(0.87 0.015 131);
+  --ink: oklch(0.21 0.03 135);
+  --muted: oklch(0.45 0.025 135);
+  --green: oklch(0.72 0.19 131);
+  --green-ink: oklch(0.43 0.13 131);
+  --on-green: oklch(0.2 0.06 135);
+  --on-green-muted: oklch(0.3 0.08 135);
+  --term: oklch(0.2 0.01 131);
+  --term-ink: oklch(0.93 0.01 131);
+  --warn: oklch(0.5 0.15 45);
+  --slab: "Zilla Slab", Rockwell, Georgia, serif;
+  --sans: "Public Sans", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --z-sticky: 10;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}*,*::before,*::after{transition:none!important;animation:none!important}}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 1.05rem/1.65 var(--sans)}
+a{color:var(--green-ink);text-underline-offset:3px}
+a:hover{color:var(--ink)}
+:focus-visible{outline:3px solid var(--ink);outline-offset:2px;border-radius:3px}
+.skip{position:absolute;left:12px;top:-60px;z-index:20;background:var(--ink);color:white;padding:8px 14px;border-radius:6px;font-weight:600}
+.skip:focus{top:10px;color:white}
+h1,h2,h3{font-family:var(--slab);font-weight:700;margin:0;line-height:1.1;text-wrap:balance}
+p{text-wrap:pretty}
+code{font-family:var(--mono);font-size:.88em}
+.wrap{max-width:1160px;margin:0 auto;padding:0 28px}
+@media (max-width:640px){.wrap{padding:0 16px}}
+
+.top{background:var(--green);color:var(--on-green)}
+.top .nav{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;min-height:56px;font-size:.95rem;border-bottom:1px solid oklch(0.62 0.17 131)}
+.top .nav a{color:var(--on-green);text-decoration:none;font-weight:600}
+.top .nav a:hover{text-decoration:underline}
+.top .nav div{display:flex;gap:6px 18px;flex-wrap:wrap}
+@media (max-width:640px){.top .nav .opt{display:none}}
+
+.head{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:24px 56px;padding:44px 0 32px;align-items:end}
+@media (max-width:920px){.head{grid-template-columns:1fr;gap:4px;padding:28px 0 24px}}
+.from{font-size:.95rem;margin:0 0 14px;color:var(--on-green-muted);font-weight:600}
+.head h1{font-size:clamp(2.2rem,1.4rem + 3vw,4rem);letter-spacing:-0.015em;color:var(--on-green)}
+.head .sub{font-size:1.15rem;margin:16px 0 0;max-width:46ch;color:var(--on-green)}
+.yield{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin:28px 0 0;border-top:2px solid var(--on-green)}
+.yield div{padding:10px 14px 14px 0}
+.yield dt{font-size:.82rem;font-weight:700;color:var(--on-green-muted)}
+.yield dd{margin:2px 0 0;font-family:var(--slab);font-size:1.2rem;font-weight:500;line-height:1.25}
+.photo{margin:0 0 -72px;background:var(--bg);padding:10px;border-radius:6px;box-shadow:0 18px 40px -18px oklch(0.25 0.05 135 / .45)}
+@media (max-width:920px){.photo{margin-bottom:-40px;padding:6px}}
+.photo .zoom{display:block;cursor:zoom-in;border-radius:3px}
+.photo img{display:block;width:100%;height:auto;border-radius:3px}
+.photo figcaption{font-size:.88rem;color:var(--muted);padding:8px 4px 2px;font-style:italic}
+
+.dish{padding:112px 0 20px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:48px}
+@media (max-width:920px){.dish{grid-template-columns:1fr;gap:24px;padding-top:72px}}
+.dish h2{font-size:1.75rem;margin-bottom:10px}
+.dish p{margin:0 0 12px;max-width:62ch}
+.versus{width:100%;border-collapse:collapse;font-size:.98rem;margin-top:6px}
+.versus caption{text-align:left;font-size:.9rem;color:var(--muted);padding-bottom:8px;caption-side:top}
+.versus th,.versus td{text-align:left;padding:10px 12px 10px 0;border-bottom:1px solid var(--line);vertical-align:top}
+.versus thead th{font-size:.82rem;font-weight:700;color:var(--muted);border-bottom:2px solid var(--ink)}
+.versus td code{font-weight:600}
+.versus .bad code{color:var(--warn)}
+.versus .good code{color:var(--green-ink)}
+.msg{margin:0 0 14px;padding:14px 16px;background:var(--surface);border-radius:6px;font-size:.98rem}
+.msg span{display:block;font-size:.82rem;color:var(--muted);margin-bottom:4px;font-weight:600}
+.flow{margin:6px 0 0;padding-left:1.3em}
+.flow li{margin:4px 0}
+.flow li::marker{font-family:var(--slab);font-weight:700;color:var(--green-ink)}
+.flow mark{background:oklch(0.93 0.08 131);padding:0 4px;border-radius:3px;color:var(--ink)}
+
+.watch{padding:36px 0 12px}
+.watch-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2.2fr);gap:36px;align-items:start}
+@media (max-width:920px){.watch-grid{grid-template-columns:1fr;gap:14px}}
+.watch h2{font-size:1.75rem}
+.watch p{margin:10px 0 0;color:var(--muted)}
+.watch video{width:100%;height:auto;display:block;border-radius:6px;background:var(--term);aspect-ratio:16/9}
+
+/* the card */
+.card{margin:48px 0 0;border:2px solid var(--ink);border-radius:8px;display:grid;grid-template-columns:minmax(0,22rem) minmax(0,1fr)}
+@media (max-width:920px){.card{grid-template-columns:1fr}}
+.ingredients{padding:28px 28px 32px;background:var(--surface);border-right:2px solid var(--ink);border-radius:6px 0 0 6px}
+@media (max-width:920px){.ingredients{border-right:0;border-bottom:2px solid var(--ink);border-radius:6px 6px 0 0;padding:22px 18px}}
+.card h2{font-size:1.75rem}
+.card .hint{font-size:.9rem;color:var(--muted);margin:6px 0 14px}
+.ing{list-style:none;margin:0;padding:0}
+.ing li{border-bottom:1px dashed var(--line);padding:9px 0}
+.ing label{display:grid;grid-template-columns:auto 1fr;gap:10px;cursor:pointer;font-size:.97rem;line-height:1.45}
+.ing small{display:block;color:var(--muted);font-size:.85rem}
+.box{appearance:none;-webkit-appearance:none;width:22px;height:22px;margin:1px 0 0;border:2px solid var(--ink);border-radius:4px;background:var(--bg);cursor:pointer;display:grid;place-content:center;flex:none}
+.box::after{content:"";width:10px;height:6px;border-left:2.5px solid var(--on-green);border-bottom:2.5px solid var(--on-green);transform:rotate(-45deg) translate(1px,-1px) scale(0);transition:transform .18s cubic-bezier(.22,1,.36,1)}
+.box:checked{background:var(--green);border-color:var(--on-green)}
+.box:checked::after{transform:rotate(-45deg) translate(1px,-1px) scale(1)}
+.ing .sect{font-family:var(--slab);font-weight:700;font-size:1.05rem;padding-top:18px;border-bottom:0}
+
+.method{padding:28px 32px 32px}
+@media (max-width:920px){.method{padding:22px 18px}}
+.mhead{position:sticky;top:0;z-index:var(--z-sticky);background:var(--bg);padding:6px 0 12px;margin-bottom:6px;border-bottom:1px solid var(--line)}
+.mhead .row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.mhead .count{font-family:var(--slab);font-size:1.15rem;font-weight:500}
+.mhead .count b{color:var(--green-ink)}
+.mhead .meter{height:6px;background:var(--surface);border:1px solid var(--line);border-radius:99px;overflow:hidden;margin-top:8px}
+.mhead .meter i{display:block;height:100%;width:0;background:var(--green);transition:width .4s cubic-bezier(.22,1,.36,1)}
+.mhead .next{margin:8px 0 0;font-size:.95rem}
+.mhead .next a{font-weight:700}
+.steps{list-style:none;margin:0;padding:0}
+.step{display:grid;grid-template-columns:auto 2.4rem minmax(0,1fr);gap:0 12px;padding:18px 0;border-bottom:1px solid var(--line);scroll-margin-top:120px}
+.step .box{margin-top:6px}
+.step .num{font-family:var(--slab);font-weight:700;font-size:1.9rem;line-height:1;color:var(--green-ink);text-align:right}
+.step.done .num{color:oklch(0.7 0.03 131)}
+.step h3{font-family:var(--sans);font-size:1.08rem;font-weight:700;line-height:1.35}
+.step h3 label{cursor:pointer}
+.step.done h3{color:var(--muted)}
+.step .tags{font-size:.86rem;color:var(--muted);margin:3px 0 0}
+.step .tags .gpu{font-weight:700;color:var(--ink)}
+.step .tags .unv{color:var(--warn);font-weight:600}
+.step p{margin:6px 0 0;font-size:.98rem}
+.step pre{margin:8px 0 0;background:var(--term);color:var(--term-ink);font:.84rem/1.55 var(--mono);padding:10px 12px;border-radius:5px;overflow-x:auto;white-space:pre-wrap;word-break:break-all}
+.ni{display:none}
+@media (max-width:560px){.step{grid-template-columns:auto minmax(0,1fr)}.step .num{display:none}.ni{display:inline;font-family:var(--slab);color:var(--green-ink);margin-right:6px}}
+@media (max-width:520px){.versus thead{display:none}.versus tr{display:block;padding:10px 0;border-bottom:1px solid var(--line)}.versus td{display:block;border:0;padding:2px 0}.versus td:first-child{font-weight:600}}
+.step .go{font-size:.92rem;font-weight:600;display:inline-block;margin-top:6px}
+.oven{margin:20px 0 4px;font-family:var(--slab);font-size:1.25rem;font-weight:700}
+.oven + p{margin:0 0 6px;font-size:.95rem;color:var(--muted)}
+.reset{margin-top:14px;background:none;border:0;padding:0;font:inherit;font-size:.88rem;color:var(--muted);text-decoration:underline;cursor:pointer}
+.reset:hover{color:var(--ink)}
+.nojs{margin:14px 0 0;font-size:.95rem}
+
+.notes{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:48px;padding:56px 0 20px}
+@media (max-width:920px){.notes{grid-template-columns:1fr;gap:32px;padding-top:40px}}
+.notes h2{font-size:1.75rem;margin-bottom:12px}
+.cook{border:2px dashed var(--warn);border-radius:8px;padding:18px 20px;background:oklch(0.975 0.02 70)}
+.cook h2{font-size:1.4rem;color:var(--warn)}
+.cook ul{margin:10px 0 0;padding-left:1.1em}
+.cook li{margin:6px 0}
+.taste{width:100%;border-collapse:collapse;font-size:.97rem}
+.taste th,.taste td{text-align:left;padding:9px 10px 9px 0;border-bottom:1px solid var(--line)}
+.taste thead th{font-size:.82rem;color:var(--muted);border-bottom:2px solid var(--ink)}
+.taste thead th.n{text-align:right}
+.taste td.n{font-family:var(--slab);font-size:1.15rem;font-weight:500;text-align:right;white-space:nowrap}
+.taste tr.win td{font-weight:700}
+.taste tr.win td.n{color:var(--green-ink);font-weight:700}
+.after{font-size:.95rem;margin:12px 0 0}
+
+.ways{padding:48px 0 12px}
+.ways > h2{font-size:clamp(1.6rem,1.3rem + 1vw,2.2rem)}
+.ways-list{margin:20px 0 0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;border-top:2px solid var(--ink)}
+@media (max-width:920px){.ways-list{grid-template-columns:1fr}}
+.way{padding:20px 24px 20px 0}
+.way+.way{padding-left:24px;border-left:1px dashed var(--line)}
+@media (max-width:920px){.way,.way+.way{padding:18px 0;border-left:0;border-bottom:1px dashed var(--line)}}
+.way h3{font-size:1.35rem}
+.way p{margin:8px 0 0;font-size:.98rem}
+.way pre{margin:10px 0 0;background:var(--term);color:var(--term-ink);font:.84rem/1.55 var(--mono);padding:10px 12px;border-radius:5px;white-space:pre-wrap;word-break:break-word}
+
+.made{margin:52px 0 0;background:var(--green);color:var(--on-green);border-radius:10px;padding:32px 36px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:20px 40px;align-items:center}
+@media (max-width:760px){.made{grid-template-columns:1fr;padding:24px 20px}}
+.made h2{font-size:clamp(1.6rem,1.3rem + 1.2vw,2.4rem)}
+.made p{margin:8px 0 0;max-width:56ch}
+.made .links{display:flex;gap:18px;flex-wrap:wrap;margin-top:12px}
+.made .links a{color:var(--on-green);font-weight:600}
+.made .btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;background:var(--on-green);color:white;text-decoration:none;font-weight:700;padding:14px 20px;border-radius:8px}
+@media (min-width:761px){.made .btn{white-space:nowrap}}
+.made .btn:hover{background:oklch(0.3 0.07 135);color:white}
+.made .btn svg{width:18px;height:18px;fill:var(--green);flex:none}
+footer{padding:28px 0 44px;color:var(--muted);font-size:.9rem}
+footer p{margin:0 0 6px}
+
+@media print{
+  .top{background:none}.top .nav,.watch,.ways,.made,.reset,.photo,.skip{display:none}
+  .head h1,.from,.head .sub,.yield dt{color:black}
+  .card{break-inside:auto}.step{break-inside:avoid}
+  body{font-size:11pt}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to the recipe</a>
+<header class="top">
+  <div class="wrap">
+    <nav class="nav" aria-label="Site">
+      <a href="#top">NeMo Helix recipes</a>
+      <div>
+        <a class="opt" href="#card">The recipe</a>
+        <a href="tutorial.html">Full tutorial</a>
+        <a href="https://github.com/NVIDIA-NeMo/nemo-helix/tree/gtc-berlin-2026-tutorial">Repo</a>
+        <a class="opt" href="https://github.com/NVIDIA-NeMo/nemo-helix">NeMo Helix</a>
+      </div>
+    </nav>
+    <div class="head" id="top">
+      <div>
+        <p class="from">From the GTC Berlin session on post-training open models with synthetic data</p>
+        <h1>Fine-tune your own fast decision model on an open stack</h1>
+        <p class="sub">Train a small open model to take over a decision that a large model makes inside your agent. Generate the training data, fine-tune on a single GPU and measure the result, all with open source tools in NeMo Helix.</p>
+      </div>
+      <dl class="yield">
+        <div><dt>Makes</dt><dd>A 4B decision model</dd></div>
+        <div><dt>Laptop part</dt><dd>About 30 min</dd></div>
+        <div><dt>Training</dt><dd>22 min on one A100</dd></div>
+        <div><dt>Total</dt><dd>2 to 4 hours</dd></div>
+        <div><dt>Stack</dt><dd>Open source</dd></div>
+      </dl>
+    </div>
+    <figure class="photo">
+      <a class="zoom" href="assets/22-clip4-04-side-by-side-ticket-vs-page.jpg"><img src="assets/22-clip4-04-side-by-side-ticket-vs-page.jpg" width="1400" height="708" alt="NeMo Studio comparing one test incident across two runs. The fine-tuned agent answered ticket-business-hours and scored 100 percent on right action. The agent on Nemotron 3 Ultra with rules answered page-oncall and scored 0 percent. Opens the full-size screenshot."></a>
+      <figcaption>Served: one test incident in NeMo Studio, where the fine-tuned agent opens a ticket and Ultra pages on-call. Select the screenshot to open it full size.</figcaption>
+    </figure>
+  </div>
+</header>
+
+<main id="main">
+  <div class="wrap">
+    <section class="dish" aria-labelledby="dish-h">
+      <div>
+        <h2 id="dish-h">What you're making</h2>
+        <p>Meridian Compute is a made-up company that runs GPU clusters. Its incident agent runs on Nemotron 3 Super and works in steps:</p>
+        <ol class="flow">
+          <li>Read the alert, Slack message or ticket.</li>
+          <li><mark><code>route_incident</code></mark> picks which of 12 runbooks owns it and which of 4 actions Meridian's policy calls for. This is the step you fine-tune.</li>
+          <li>Check the node's status.</li>
+          <li>Page a team or open a ticket.</li>
+        </ol>
+        <p style="margin-top:12px">A general model doesn't know Meridian's policy. Even with the policy in its prompt, it picks the right action 70% of the time. The fine-tuned 4B model gets 82%.</p>
+      </div>
+      <div>
+        <div class="msg"><span>The incident, a Slack message from the test set</span>"dispatch queue on pod-c is lagging. jobs stuck pending, cli commands hanging or timing out after 30s. nothing is actually broken for users yet, but the scheduler controller seems to have stopped answering."</div>
+        <table class="versus">
+          <caption>What each version of the agent did</caption>
+          <thead><tr><th scope="col">Model in the triage step</th><th scope="col">Action</th><th scope="col">What happens</th></tr></thead>
+          <tbody>
+            <tr class="bad"><td>Nemotron 3 Ultra, policy in its prompt</td><td><code>page-oncall</code></td><td>The Scheduler team's on-call engineer gets paged.</td></tr>
+            <tr class="good"><td>Qwen3.5-4B, fine-tuned in NeMo Helix</td><td><code>ticket-business-hours</code></td><td>A ticket waits for the morning. Meridian's policy says so, since users aren't affected yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="watch" aria-labelledby="watch-h">
+      <div class="watch-grid">
+        <div>
+          <h2 id="watch-h">Watch it made first</h2>
+          <p>A 4-minute narrated run through the whole recipe. You'll see the install, both agents on this message, the data, training and scoring. Captions are on the way.</p>
+        </div>
+        <video controls preload="metadata" playsinline poster="assets/demo-poster.jpg" width="1280" height="720" aria-label="Narrated demo of the recipe, 4 minutes">
+          <source src="assets/demo.mp4" type="video/mp4">
+          <p>Your browser can't play this video. <a href="assets/demo.mp4">Download the demo (MP4)</a>.</p>
+        </video>
+      </div>
+    </section>
+
+    <section class="card" id="card" aria-label="The recipe">
+      <div class="ingredients">
+        <h2>What you need</h2>
+        <p class="hint">Tick what you have. It's saved in this browser.</p>
+        <ul class="ing" id="ing"></ul>
+      </div>
+      <div class="method">
+        <div class="mhead">
+          <div class="row"><h2>Method</h2><span class="count" aria-live="polite"><b id="count">0</b> of <span id="total">13</span> steps done</span></div>
+          <div class="meter" aria-hidden="true"><i id="bar"></i></div>
+          <p class="next">Next: <a id="next" href="#s-0">Step 0, Preflight</a></p>
+        </div>
+        <ol class="steps" id="steps"></ol>
+        <noscript><p class="nojs">The checklist needs JavaScript. Every step is in the <a href="tutorial.html">full tutorial</a>.</p></noscript>
+        <button class="reset" id="reset" type="button">Clear my ticks</button>
+      </div>
+    </section>
+
+    <section class="notes" aria-label="Notes and results">
+      <div class="cook" role="note">
+        <h2>Cook's notes</h2>
+        <ul>
+          <li><b>This is a draft.</b> Steps 7 to 9 haven't been run end to end on a single local GPU machine yet. Our training, serving and model evaluations ran on a Helix cluster.</li>
+          <li>Use the packaged data for your first run. Generating it takes 21 minutes on a fast provider and about 14 hours on a free tier.</li>
+          <li>A deployment holds its GPU until you delete it. Do the <a href="tutorial.html#clean-up">clean-up step</a> when you finish.</li>
+          <li>Every problem we hit is in <a href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md">KNOWN-ISSUES.md</a> with its fix.</li>
+        </ul>
+      </div>
+      <div>
+        <h2>How ours turned out</h2>
+        <table class="taste">
+          <thead><tr><th scope="col">Right action, on 416 test incidents none of the models trained on</th><th scope="col" class="n">Score</th></tr></thead>
+          <tbody>
+            <tr><td>Qwen3.5-4B, untuned</td><td class="n">37.7%</td></tr>
+            <tr><td>Nemotron 3 Ultra, no policy</td><td class="n">45.4%</td></tr>
+            <tr><td>Nemotron 3 Ultra, policy in its prompt</td><td class="n">70.0%</td></tr>
+            <tr class="win"><td>Qwen3.5-4B, fine-tuned in NeMo Helix</td><td class="n">82.0%</td></tr>
+          </tbody>
+        </table>
+        <p class="after">Inside the running agent the fine-tuned model got 81% on 200 incidents, against 74% for Ultra with the policy. Measured on its own it answers in 301 ms against 670 ms, though a whole agent run takes about the same time either way. The data is synthetic, so yours will differ. <a href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/RESULTS.md">Full results in RESULTS.md</a></p>
+      </div>
+    </section>
+
+    <section class="ways" aria-labelledby="ways-h">
+      <h2 id="ways-h">Three ways to make it</h2>
+      <div class="ways-list">
+        <div class="way">
+          <h3>On a GPU machine</h3>
+          <p>Linux x86_64 with an NVIDIA GPU of 40 GB or more, CUDA 13 and the NVIDIA Container Toolkit. We used one A100 80GB. Do steps 0 to 5 on a laptop if you like.</p>
+          <pre>git clone -b gtc-berlin-2026-tutorial --single-branch https://github.com/NVIDIA-NeMo/nemo-helix.git helix-specialized-agent-tutorial
+cd helix-specialized-agent-tutorial
+bash scripts/preflight.sh</pre>
+        </div>
+        <div class="way">
+          <h3>With a coding agent</h3>
+          <p>Open the repo in Claude Code, Codex, Cursor or Pi. Its agent instructions and skill know what each step should print and which fix goes with which error. The agent asks before anything that spends money or holds a GPU.</p>
+          <pre>Walk me through the Helix specialized-agent tutorial, one step at a time.</pre>
+        </div>
+        <div class="way">
+          <h3>With your own ingredients</h3>
+          <p>Pick a step in your agent that runs often and has a fixed list of answers, where past examples teach more than documents do. Swap in your options and policy in <code>taxonomy.json</code>, your data and your agent's tool. Then rerun from step 4.</p>
+          <p><a href="tutorial.html#step-11-adapt-it-to-your-own-agent">Step 11 covers each change</a></p>
+        </div>
+      </div>
+    </section>
+
+    <section class="made" aria-labelledby="made-h">
+      <div>
+        <h2 id="made-h">Made it, or plan to? Star NeMo Helix.</h2>
+        <p>Data Designer, the Helix post-training plugin, Deployments and the Helix Evals plugin are all in the NeMo Helix repo. A star saves it for later and tells the team you want more recipes like this one.</p>
+        <div class="links"><a href="tutorial.html">Full tutorial</a><a href="https://github.com/NVIDIA-NeMo/nemo-helix/tree/gtc-berlin-2026-tutorial">Tutorial repo</a></div>
+      </div>
+      <a class="btn" href="https://github.com/NVIDIA-NeMo/nemo-helix"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .67.42l1.88 3.8 4.2.61a.75.75 0 0 1 .41 1.28l-3.04 2.96.72 4.18a.75.75 0 0 1-1.09.79L8 12.31l-3.75 1.98a.75.75 0 0 1-1.09-.79l.72-4.18L.84 6.36a.75.75 0 0 1 .41-1.28l4.2-.61L7.33.67A.75.75 0 0 1 8 .25Z"/></svg>Star NeMo Helix on GitHub</a>
+    </section>
+  </div>
+</main>
+<footer>
+  <div class="wrap">
+    <p>Companion to the GTC Berlin session "Post Training Open Models with Synthetic Data for Specialized Agents" by Yamini Kagal and Stefan Gavrilovic, NVIDIA.</p>
+    <p>Meridian Compute is made up and its incident history is synthetic.</p>
+    <p>Code and data are licensed under <a href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/LICENSE">Apache 2.0</a>.</p>
+  </div>
+</footer>
+
+<script>
+(function(){
+"use strict";
+var TUT="tutorial.html#";
+var ING=[
+ {sect:"For every step"},
+ {id:"py",t:"Python 3.12 or 3.13 and uv"},
+ {id:"docker",t:"Docker",s:"for the local Helix services"},
+ {id:"prov",t:"An inference provider key",s:"anything nemo setup supports, or an OpenAI-compatible endpoint"},
+ {id:"data",t:"The packaged incident history",s:"already in the repo: 2,503 training and 416 test incidents"},
+ {sect:"For steps 6 to 10"},
+ {id:"gpu",t:"A Linux x86_64 machine with an NVIDIA GPU",s:"40 GB or more and CUDA 13; we used one A100 80GB"},
+ {id:"nct",t:"The NVIDIA Container Toolkit"},
+ {id:"disk",t:"About 21 GB of disk for the training images"},
+ {id:"time",t:"2 to 4 hours of GPU time",s:"the tutorial lists the GPU prices we saw"}
+];
+var STEPS=[
+ {id:"0",t:"Preflight",time:"1 min",d:"Check the machine before you spend time on it.",cmd:"bash scripts/preflight.sh --no-gpu",a:"step-0-preflight"},
+ {id:"1",t:"Install NeMo Helix and connect a provider",time:"10 to 15 min",d:"Start a local Helix with one inference provider.",cmd:"uv pip install -r requirements.txt && nemo setup",a:"step-1-install-nemo-helix-and-connect-a-provider"},
+ {id:"2",t:"Run the agent once on a general model",time:"5 min",d:"This is your baseline, and ours paged on-call.",cmd:"nemo agents invoke -d infra-ops-agent-with-context-deployment --no-progress --input-file incidents/slack-pod-c.json",a:"step-2-run-the-agent-once-on-a-general-model"},
+ {id:"3",t:"Get the incident history",time:"1 min, or 21 min to generate",d:"Use the packaged data, or generate your own with Data Designer.",cmd:"ls data/meridian-example/",a:"step-3-get-the-incident-history"},
+ {id:"4",t:"Check the data",time:"1 min",d:"Make sure no incident gives away its answer.",cmd:"python scripts/check_data.py",a:"step-4-check-the-data"},
+ {id:"5",t:"Upload the data as filesets",time:"1 min",d:"Put the files where the Helix post-training plugin and the Helix Evals plugin can read them.",cmd:"nemo files upload data/meridian-example/train.jsonl meridian-incidents-train --workspace default",a:"step-5-upload-the-data-as-filesets"},
+ {oven:true},
+ {id:"6",t:"Register the base model",time:"A few min",gpu:1,d:"Tell Helix which Hugging Face model to fine-tune.",cmd:"python training/register_base_model.py",a:"step-6-register-the-base-model"},
+ {id:"7",t:"Pull the training images and fine-tune",time:"21 GB download, then 30 min",gpu:1,unv:1,d:"Train a LoRA adapter on Meridian's history with the Helix post-training plugin.",cmd:"nemo customization unsloth submit training/job.json -w default",a:"step-7-pull-the-training-images-and-fine-tune"},
+ {id:"8",t:"Deploy the base model and the adapter",time:"20 to 30 min",gpu:1,unv:1,d:"Serve both models and ask them about the pod-c message.",cmd:"python training/deploy_model.py --model qwen3.5-4b-base --name meridian-qwen --lora-rank 16",a:"step-8-deploy-the-base-model-and-the-adapter"},
+ {id:"9",t:"Evaluate before and after",time:"5 to 15 min",gpu:1,unv:1,d:"Score both models on the 416 test incidents with the Helix Evals plugin.",cmd:"QUESTIONS=\"runbook action\" scripts/run-evals.sh \"default/meridian-incidents-test#eval.jsonl\" B-qwen-untuned C-qwen-finetuned",a:"step-9-evaluate-before-and-after"},
+ {id:"10",t:"Put the fine-tuned model behind the triage step",time:"30 min to 2 h",gpu:1,d:"Swap the model in the agent and score it against step 2.",cmd:"BATCHES=\"1 2 3 4\" scripts/run-agent-evals.sh agent-finetuned agent-frontier-with-context",a:"step-10-put-the-fine-tuned-model-behind-the-triage-step"},
+ {id:"11",t:"Adapt it to your own agent",time:"Your call",d:"Change the options and policy, the data and the agent's tool. Then rerun from step 4.",cmd:"$EDITOR taxonomy.json",a:"step-11-adapt-it-to-your-own-agent"},
+ {id:"cleanup",t:"Clean up",time:"Before you log off",gpu:1,d:"Delete the deployment so it stops holding the GPU.",cmd:"nemo inference deployments delete meridian-qwen --workspace default",a:"clean-up"}
+];
+var REAL=STEPS.filter(function(s){return !s.oven});
+var KEY="helix-specialized-agent-tutorial:v1";
+function load(){
+  try{
+    var v=JSON.parse(window.localStorage.getItem(KEY)||"{}");
+    return {s:new Set(Array.isArray(v.s)?v.s:[]),i:new Set(Array.isArray(v.i)?v.i:[])};
+  }catch(e){return {s:new Set(),i:new Set()}}
+}
+function save(){
+  try{window.localStorage.setItem(KEY,JSON.stringify({s:Array.from(st.s),i:Array.from(st.i)}))}catch(e){}
+}
+var st=load();
+function esc(t){return String(t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
+function nm(s){return s.id==="cleanup"?"Clean up":"Step "+s.id+", "+s.t}
+function ingHTML(x){
+  if(x.sect)return '<li class="sect">'+esc(x.sect)+'</li>';
+  return '<li><label><input class="box" type="checkbox" data-ing="'+x.id+'"><span>'+esc(x.t)+(x.s?'<small>'+esc(x.s)+'</small>':'')+'</span></label></li>';
+}
+function stepHTML(s){
+  if(s.oven)return '<li><p class="oven">Now move to the GPU machine</p><p>If you did steps 0 to 5 on a laptop, repeat 0, 1, 2 and 5 there first.</p></li>';
+  var c=s.id==="cleanup";
+  return '<li class="step" id="s-'+s.id+'">'+
+    '<input class="box" type="checkbox" id="c-'+s.id+'" data-step="'+s.id+'">'+
+    '<span class="num" aria-hidden="true">'+(c?"&middot;":s.id)+'</span>'+
+    '<div><h3><label for="c-'+s.id+'"><span class="ni">'+(c?"":s.id)+'</span>'+esc(s.t)+'</label></h3>'+
+    '<p class="tags">'+esc(s.time)+' &middot; '+(s.gpu?'<span class="gpu">GPU machine</span>':'laptop is fine')+
+    (s.unv?' &middot; <span class="unv">not yet run on a single local GPU machine</span>':'')+'</p>'+
+    '<p>'+esc(s.d)+'</p><pre>'+esc(s.cmd)+'</pre>'+
+    '<a class="go" href="'+TUT+s.a+'">Read '+(c?"the clean-up step":"step "+s.id)+' in full</a></div></li>';
+}
+function render(){
+  document.getElementById("ing").innerHTML=ING.map(ingHTML).join("");
+  document.getElementById("steps").innerHTML=STEPS.map(stepHTML).join("");
+  document.querySelectorAll("[data-step]").forEach(function(cb){
+    cb.checked=st.s.has(cb.dataset.step);
+    cb.addEventListener("change",function(){cb.checked?st.s.add(cb.dataset.step):st.s.delete(cb.dataset.step);save();update()});
+  });
+  document.querySelectorAll("[data-ing]").forEach(function(cb){
+    cb.checked=st.i.has(cb.dataset.ing);
+    cb.addEventListener("change",function(){cb.checked?st.i.add(cb.dataset.ing):st.i.delete(cb.dataset.ing);save()});
+  });
+  update();
+}
+function update(){
+  var n=REAL.filter(function(s){return st.s.has(s.id)}).length;
+  document.getElementById("count").textContent=n;
+  document.getElementById("total").textContent=REAL.length;
+  document.getElementById("bar").style.width=(n/REAL.length*100)+"%";
+  var nx=REAL.find(function(s){return !st.s.has(s.id)}),a=document.getElementById("next");
+  if(nx){a.textContent=nm(nx);a.href="#s-"+nx.id}
+  else{a.textContent="Every step is done, so star NeMo Helix if it worked for you.";a.href="#made-h"}
+  REAL.forEach(function(s){document.getElementById("s-"+s.id).classList.toggle("done",st.s.has(s.id))});
+}
+document.getElementById("reset").addEventListener("click",function(){st={s:new Set(),i:new Set()};save();render()});
+render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+[
+  {
+    "agent": "agent-frontier-with-context",
+    "incidents": 200,
+    "runbook_accuracy": 1.0,
+    "action_accuracy": 0.74
+  },
+  {
+    "agent": "agent-finetuned",
+    "incidents": 200,
+    "runbook_accuracy": 1.0,
+    "action_accuracy": 0.81
+  },
+  {
+    "agent": "agent-frontier",
+    "incidents": 50,
+    "runbook_accuracy": 1.0,
+    "action_accuracy": 0.6
+  }
+]

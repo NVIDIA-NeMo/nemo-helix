@@ -1,0 +1,970 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fine-tune your own fast decision model on an open stack | Fast decision models with NeMo Helix</title>
+<meta name="description" content="Every step of the tutorial in full: train a small open model to take over a decision inside your agent with NeMo Helix.">
+<meta name="theme-color" content="#7cbf2e">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,400;0,600;0,700;1,400&family=Zilla+Slab:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg: oklch(1 0 0);
+  --surface: oklch(0.972 0.008 131);
+  --line: oklch(0.87 0.015 131);
+  --ink: oklch(0.21 0.03 135);
+  --muted: oklch(0.45 0.025 135);
+  --green: oklch(0.72 0.19 131);
+  --green-ink: oklch(0.43 0.13 131);
+  --on-green: oklch(0.2 0.06 135);
+  --on-green-muted: oklch(0.3 0.08 135);
+  --term: oklch(0.2 0.01 131);
+  --term-ink: oklch(0.93 0.01 131);
+  --term-muted: oklch(0.74 0.02 131);
+  --warn: oklch(0.5 0.15 45);
+  --slab: "Zilla Slab", Rockwell, Georgia, serif;
+  --sans: "Public Sans", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}*,*::before,*::after{transition:none!important;animation:none!important}}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 1.05rem/1.65 var(--sans)}
+a{color:var(--green-ink);text-underline-offset:3px}
+a:hover{color:var(--ink)}
+:focus-visible{outline:3px solid var(--ink);outline-offset:2px;border-radius:3px}
+.skip{position:absolute;left:12px;top:-60px;z-index:20;background:var(--ink);color:white;padding:8px 14px;border-radius:6px;font-weight:600}
+.skip:focus{top:10px;color:white}
+.wrap{max-width:1160px;margin:0 auto;padding:0 28px}
+@media (max-width:640px){.wrap{padding:0 16px}}
+
+.top{background:var(--green);color:var(--on-green)}
+.top .nav{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;min-height:56px;font-size:.95rem;border-bottom:1px solid oklch(0.62 0.17 131)}
+.top .nav a{color:var(--on-green);text-decoration:none;font-weight:600}
+.top .nav a:hover{text-decoration:underline}
+.top .nav div{display:flex;gap:6px 18px;flex-wrap:wrap}
+@media (max-width:640px){.top .nav .opt{display:none}}
+.top .band{padding:22px 0 26px}
+.top .band p{margin:0;font-weight:600;color:var(--on-green-muted);font-size:.95rem}
+.top .band a{color:var(--on-green);font-weight:700}
+
+.doc{max-width:820px;padding:36px 0 24px}
+.doc h1,.doc h2,.doc h3{font-family:var(--slab);font-weight:700;line-height:1.15;text-wrap:balance;scroll-margin-top:16px}
+.doc h1{font-size:clamp(2rem,1.4rem + 2.4vw,3.2rem);letter-spacing:-0.015em;margin:0 0 20px}
+.doc h2{font-size:clamp(1.5rem,1.2rem + 1vw,2rem);margin:56px 0 12px;padding-top:20px;border-top:2px solid var(--ink)}
+.doc h3{font-size:1.3rem;margin:32px 0 8px}
+.doc p,.doc li{text-wrap:pretty}
+.doc p{margin:0 0 14px}
+.doc ul,.doc ol{padding-left:1.4em;margin:0 0 14px}
+.doc li{margin:6px 0}
+.doc li > p{margin:0 0 8px}
+.doc strong{font-weight:700}
+.doc .anchor{margin-left:.35em;font-family:var(--sans);font-weight:600;font-size:.7em;color:var(--muted);text-decoration:none;opacity:0}
+.doc h2:hover .anchor,.doc h3:hover .anchor,.doc .anchor:focus{opacity:1}
+@media (hover:none){.doc .anchor{opacity:1}}
+
+.doc blockquote{margin:0 0 20px;border:2px dashed var(--warn);border-radius:8px;padding:14px 18px;background:oklch(0.975 0.02 70)}
+.doc blockquote p:last-child{margin-bottom:0}
+.doc blockquote strong{color:var(--warn)}
+
+.doc code{font-family:var(--mono);font-size:.88em;background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:.05em .3em;overflow-wrap:anywhere}
+.doc pre{margin:0 0 16px;background:var(--term);color:var(--term-ink);font:.86rem/1.55 var(--mono);padding:12px 14px;border-radius:6px;overflow-x:auto;tab-size:4}
+.doc pre code{background:none;border:0;padding:0;font-size:inherit;color:inherit;overflow-wrap:normal}
+.doc .highlight .c,.doc .highlight .c1,.doc .highlight .cm{color:var(--term-muted)}
+.doc .highlight .s,.doc .highlight .s1,.doc .highlight .s2{color:oklch(0.86 0.12 131)}
+
+.doc table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse;font-size:.95rem;margin:0 0 18px}
+.doc th,.doc td{text-align:left;padding:8px 14px 8px 0;border-bottom:1px solid var(--line);vertical-align:top}
+.doc thead th{font-size:.82rem;font-weight:700;color:var(--muted);border-bottom:2px solid var(--ink)}
+
+.back{margin:40px 0 0;padding:20px 22px;background:var(--surface);border-radius:8px;display:flex;flex-wrap:wrap;gap:8px 24px;align-items:center;justify-content:space-between}
+.back p{margin:0}
+.back a{font-weight:700}
+footer{padding:28px 0 44px;color:var(--muted);font-size:.9rem}
+footer p{margin:0 0 6px}
+@media print{.top .nav,.skip,.back,.doc .anchor{display:none}.top{background:none}body{font-size:11pt}.doc pre{white-space:pre-wrap}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to the tutorial</a>
+<header class="top">
+  <div class="wrap">
+    <nav class="nav" aria-label="Site">
+      <a href="./">NeMo Helix recipes</a>
+      <div>
+        <a class="opt" href="./#card">The recipe card</a>
+        <a href="https://github.com/NVIDIA-NeMo/nemo-helix/tree/gtc-berlin-2026-tutorial">Repo</a>
+        <a class="opt" href="https://github.com/NVIDIA-NeMo/nemo-helix">NeMo Helix</a>
+      </div>
+    </nav>
+    <div class="band">
+      <p>Every step in full. The checklist, demo and results are on the <a href="./">recipe card</a>.</p>
+    </div>
+  </div>
+</header>
+<main id="main" class="wrap">
+  <article class="doc">
+<h1
+id="fine-tune-your-own-fast-decision-model-on-an-open-stack">Fine-tune
+your own fast decision model on an open stack</h1>
+<blockquote>
+<p><strong>Draft for review: not yet verified on a fresh
+machine.</strong> Commands marked <code>unverified</code> haven't been
+run in this exact form.</p>
+</blockquote>
+<p>This tutorial goes with the GTC Berlin session "Post Training Open
+Models with Synthetic Data for Specialized Agents" (Yamini Kagal and
+Stefan Gavrilovic, NVIDIA).</p>
+<p>Agents make the same decisions over and over, usually by calling a
+large general model. In this tutorial you train a small open model to
+take over one of those decisions: you generate the training data,
+fine-tune on a single GPU and measure the result. Everything runs on <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix">NeMo Helix</a> with
+open source tools.</p>
+<p>The example is an incident agent at Meridian Compute, a made-up
+company that runs GPU clusters. For each alert, Slack message or ticket,
+the agent's triage step picks which of 12 runbooks owns it and which of
+4 actions to take. The agent then checks status and acts. Meridian's
+internal service names and response policy aren't public, so a general
+model has to be told them, and it still gets the action right only 70%
+of the time. A 4B model fine-tuned on Meridian's history gets 82%. The
+full numbers are in <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/RESULTS.md">RESULTS.md</a>.</p>
+<h2 id="before-you-start">Before you start</h2>
+<p><strong>Hardware.</strong> Steps 0 to 5 and the agent baseline run on
+a laptop, macOS or Linux. Steps 6 to 10 train, serve and use a model and
+need a Linux x86_64 machine with an NVIDIA GPU and the NVIDIA Container
+Toolkit. Helix asks for at least 40 GB of GPU memory and CUDA 13; we
+used one A100 80GB per job.</p>
+<p><strong>Accounts.</strong> An inference provider for the agent's own
+model and, if you generate data, for the writer and judge models.
+<code>nemo setup</code> supports NVIDIA Build, OpenAI, Anthropic, Google
+Gemini, Ollama and any OpenAI-compatible endpoint. Base models come from
+Hugging Face; no token is needed for the two used here.</p>
+<p><strong>What we ran on.</strong> Our training, serving and model
+evaluations ran on a Helix cluster with one A100 80GB per job. The data
+generation and agent runs used a local Helix on a laptop. We haven't run
+steps 7 to 9 on a single local GPU machine end to end, which is why this
+is a draft.</p>
+<p><strong>Time and cost.</strong> Times below are what our runs took.
+Yours will differ with your data, model, hardware and provider. With the
+packaged data on one A100 80GB, plan on about 2 to 4 hours end to end
+plus the image download in step 7a: steps 0 to 6 about 30 minutes,
+training about 30 minutes, deploying 20 to 45 minutes, evaluations about
+15 minutes and the agent comparison 30 minutes for 50 incidents or about
+2 hours for all 200. Everything we ran cost about $13 to $40 at public
+prices, with an A100 80GB at $1.66 to $6.03 an hour (Brev listings,
+October 2026).</p>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>What you do</th>
+<th>Where it runs</th>
+<th>Our time</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#step-0-preflight">0</a></td>
+<td>Check the machine</td>
+<td>Any</td>
+<td>1 min</td>
+</tr>
+<tr>
+<td><a
+href="#step-1-install-nemo-helix-and-connect-a-provider">1</a></td>
+<td>Install NeMo Helix, connect a provider</td>
+<td>Any</td>
+<td>10 to 15 min (not timed)</td>
+</tr>
+<tr>
+<td><a href="#step-2-run-the-agent-once-on-a-general-model">2</a></td>
+<td>Register the agent, run it once</td>
+<td>Any</td>
+<td>5 min (not timed)</td>
+</tr>
+<tr>
+<td><a href="#step-3-get-the-incident-history">3</a></td>
+<td>Use the packaged data, or generate it</td>
+<td>Any</td>
+<td>1 min, or 21 min to generate (about 14 h on a free tier)</td>
+</tr>
+<tr>
+<td><a href="#step-4-check-the-data">4</a></td>
+<td>Check the data</td>
+<td>Any</td>
+<td>1 min</td>
+</tr>
+<tr>
+<td><a href="#step-5-upload-the-data-as-filesets">5</a></td>
+<td>Upload the data</td>
+<td>Any</td>
+<td>1 min</td>
+</tr>
+<tr>
+<td><a href="#step-6-register-the-base-model">6</a></td>
+<td>Register the base model</td>
+<td>GPU machine</td>
+<td>A few minutes</td>
+</tr>
+<tr>
+<td><a href="#step-7-pull-the-training-images-and-fine-tune">7</a></td>
+<td>Pull images, fine-tune</td>
+<td>GPU machine</td>
+<td>About 21 GB to download (not timed), 30 min to train Qwen</td>
+</tr>
+<tr>
+<td><a href="#step-8-deploy-the-base-model-and-the-adapter">8</a></td>
+<td>Deploy base plus adapter</td>
+<td>GPU machine</td>
+<td>21 min (Qwen), 30 min (Nemotron)</td>
+</tr>
+<tr>
+<td><a href="#step-9-evaluate-before-and-after">9</a></td>
+<td>Evaluate</td>
+<td>GPU machine</td>
+<td>5 to 15 min</td>
+</tr>
+<tr>
+<td><a
+href="#step-10-put-the-fine-tuned-model-behind-the-triage-step">10</a></td>
+<td>Swap the model in the agent, compare</td>
+<td>GPU machine</td>
+<td>30 min (50 incidents) to 2 h (200)</td>
+</tr>
+<tr>
+<td><a href="#step-11-adapt-it-to-your-own-agent">11</a></td>
+<td>Adapt it to your agent</td>
+<td>Any</td>
+<td>Your call</td>
+</tr>
+</tbody>
+</table>
+<p>Run every command from the repo root. The commands assume a local
+Helix at <code>http://localhost:8080</code> and the <code>default</code>
+workspace.</p>
+<h2 id="step-0-preflight">Step 0: Preflight</h2>
+<p><strong>Goal:</strong> find out what's missing before you spend time
+on it.</p>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">bash</span> scripts/preflight.sh            <span class="co"># on the GPU machine</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">bash</span> scripts/preflight.sh <span class="at">--no-gpu</span>   <span class="co"># on a laptop, for steps 0 to 5</span></span></code></pre></div>
+<p>Add <code>--model nemotron</code> to check for Nemotron Nano 9B v2
+instead of Qwen3.5-4B. The script only reads; it never prints keys or
+tokens.</p>
+<p><strong>You should see:</strong> one line per check, then a result.
+On a ready GPU machine every line says PASS and the last line is
+<code>Result: ready (0 warning(s)).</code> The script exits 0. On a Mac
+without a GPU, <code>--no-gpu</code> skips the GPU checks:</p>
+<pre><code>PASS  OS                        Darwin arm64 (fine without a GPU)
+PASS  Python                    3.13.13 (.venv/bin/python)
+PASS  nemo CLI                  version 0.6.0...
+PASS  Helix services            http://localhost:8080/health/ready says ready
+SKIP  GPU                       no NVIDIA GPU visible (...) (not needed with --no-gpu)</code></pre>
+<p><strong>If it fails:</strong> each FAIL line prints its fix. Run step
+1 first if the nemo CLI, Helix services or provider checks fail, then
+run the preflight again. An <code>NVIDIA container runtime</code> FAIL
+blocks steps 7 to 10; see <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#p6-preflight-fails-on-nvidia-container-runtime--not-listed-in-docker-info">P6</a>.</p>
+<h2 id="step-1-install-nemo-helix-and-connect-a-provider">Step 1:
+Install NeMo Helix and connect a provider</h2>
+<p><strong>Goal:</strong> a running local Helix with one inference
+provider, in a Python environment the repo scripts and the agent's tool
+server share.</p>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone <span class="at">-b</span> gtc-berlin-2026-tutorial <span class="at">--single-branch</span> https://github.com/NVIDIA-NeMo/nemo-helix.git meridian-tutorial <span class="kw">&amp;&amp;</span> <span class="bu">cd</span> meridian-tutorial</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> venv <span class="at">--python</span> 3.13</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="bu">source</span> .venv/bin/activate</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> pip install <span class="at">-r</span> requirements.txt   <span class="co"># NeMo Helix plus what the scripts import</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> pip install <span class="at">-e</span> agent              <span class="co"># the agent&#39;s tool server, meridian-ops-tools</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> setup</span></code></pre></div>
+<p><code>nemo setup</code> starts the local services, asks for a
+provider and key, and picks a default model for agents. Pick a model
+that can call tools for the default; we used Nemotron 3 Super. Run it
+from this activated shell so the agent you deploy later finds the same
+Python.</p>
+<p>To set up without prompts, with a build.nvidia.com key:</p>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">NVIDIA_API_KEY</span><span class="op">=</span>...   <span class="co"># your key; never commit it</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> setup <span class="at">--auto</span> <span class="at">--start-services</span> <span class="at">--no-install-skills</span> <span class="at">--ready-timeout</span> 360</span></code></pre></div>
+<p>To add OpenRouter as a second provider (flags confirmed from
+<code>--help</code>; <code>unverified</code> in this form):</p>
+<div class="sourceCode" id="cb5"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="bu">printf</span> <span class="st">&#39;%s&#39;</span> <span class="st">&quot;</span><span class="va">$OPENROUTER_API_KEY</span><span class="st">&quot;</span> <span class="kw">|</span> <span class="ex">nemo</span> secrets create openrouter-key <span class="at">--from-file</span> <span class="at">-</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> inference providers create openrouter <span class="at">--host-url</span> https://openrouter.ai/api/v1 <span class="at">--api-key-secret-name</span> openrouter-key</span></code></pre></div>
+<p>Check it:</p>
+<div class="sourceCode" id="cb6"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> http://localhost:8080/health/ready</span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> inference providers list <span class="at">-f</span> table</span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> models list <span class="at">-f</span> table</span></code></pre></div>
+<p><strong>You should see:</strong> <code>{"status":"ready"}</code>,
+your provider with status <code>READY</code>, and the models it serves.
+Write down the model names you'll use: the agent's default model, the
+baseline (for example <code>nvidia-nemotron-3-ultra-550b-a55b</code> on
+build.nvidia.com) and, for step 3, a writer and a judge.</p>
+<p><strong>If it fails:</strong> if an old <code>nemo</code> answers,
+see <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#p1-an-older-nemo-on-your-path-reads-a-different-config">P1</a>.
+If you have more than one CLI context, see <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#p2-nemo-setup-changed-the-wrong-context">P2</a>.
+Local services need Docker running.</p>
+<h2 id="step-2-run-the-agent-once-on-a-general-model">Step 2: Run the
+agent once on a general model</h2>
+<p><strong>Goal:</strong> see the agent work end to end with a general
+model in its triage step. This is the baseline you'll beat.</p>
+<p>The agent is defined in <code>agent/agent-with-context.yaml</code>.
+Nemotron 3 Super (your default model) runs its loop, and its
+<code>route_incident</code> tool asks a second model to triage, with
+Meridian's notes in the prompt. Set that model to your baseline's name
+from <code>nemo models list</code>:</p>
+<div class="sourceCode" id="cb7"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="co"># agent/agent-with-context.yaml, under mcp.servers.meridian-ops.env</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="fu">ROUTER_MODEL</span><span class="kw">:</span><span class="at"> nvidia-nemotron-3-ultra-550b-a55b</span></span></code></pre></div>
+<p>Then register, deploy and send it one incident:</p>
+<div class="sourceCode" id="cb8"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> agents create <span class="at">--name</span> infra-ops-agent-with-context <span class="at">--agent-config</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">/agent/agent-with-context.yaml&quot;</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> agents deploy <span class="at">--agent</span> infra-ops-agent-with-context <span class="at">--name</span> infra-ops-agent-with-context-deployment <span class="at">--mode</span> subprocess</span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> agents invoke <span class="at">-d</span> infra-ops-agent-with-context-deployment <span class="at">--no-progress</span> <span class="at">--input-file</span> incidents/slack-pod-c.json</span></code></pre></div>
+<p><code>incidents/slack-pod-c.json</code> is a Slack message from the
+test set: the dispatch queue on pod-c is lagging, but nothing is broken
+for users yet.</p>
+<p><strong>You should see:</strong> a runbook ID on the first line, an
+action on the second, then two to four sentences on what the agent
+checked and did. In our run, Nemotron 3 Ultra with the notes answered
+<code>RB-03</code> and <code>page-oncall</code>. Meridian's policy says
+<code>ticket-business-hours</code> for this one, because nothing is
+broken for users yet. The agent also shows up in NeMo Studio.</p>
+<p><strong>If it fails:</strong> <code>[Errno 17] File exists</code>
+means a relative path (<a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#a1-nemo-agents-create-fails-with-errno-17-file-exists">A1</a>).
+<code>No module named nemo_fabric_adapters</code> means the services
+started outside this <code>.venv</code> (<a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#a2-subprocess-agent-fails-with-no-module-named-nemo_fabric_adapters">A2</a>).
+A 409 on redeploy is <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#a4-nemo-agents-redeploy-fails-with-409-deployment-already-exists">A4</a>.
+A <code>host_timeout</code> is <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#a5-host_timeout-when-the-agent-starts">A5</a>.
+A blank or reasoning-only answer from the router is <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#p4-reasoning-models-return-only-their-reasoning">P4</a>.</p>
+<h2 id="step-3-get-the-incident-history">Step 3: Get the incident
+history</h2>
+<p><strong>Goal:</strong> labeled incidents to train and test on.
+Meridian has no real history, so it's generated with Data Designer.</p>
+<h3 id="recommended-for-a-first-run-use-the-packaged-data">Recommended
+for a first run: use the packaged data</h3>
+<p><code>data/meridian-example/</code> holds the exact dataset behind
+our results: 2,503 training incidents, 237 for validation, 240 for
+calibration and 416 for testing. Skip to <a
+href="#step-4-check-the-data">step 4</a>.</p>
+<h3 id="or-generate-your-own">Or generate your own</h3>
+<p><code>data/incidents.py</code> is the Data Designer recipe. It reads
+<code>taxonomy.json</code>, picks the right answer first (runbook,
+scenario, severity, how the incident is reported), then has a writer
+model write the incident without naming the answer, and a judge model
+score it. Point it at your provider and models (the defaults are
+OpenRouter names):</p>
+<div class="sourceCode" id="cb9"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">MERIDIAN_PROVIDER</span><span class="op">=</span>default/openrouter                  <span class="co"># default/&lt;your provider name&gt;</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">MERIDIAN_WRITER_MODEL</span><span class="op">=</span>nvidia/nemotron-3.5-lightning</span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">MERIDIAN_JUDGE_MODEL</span><span class="op">=</span>nvidia/nemotron-3-super-120b-a12b</span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> data-designer validate data/incidents.py</span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> data-designer check-models data/incidents.py</span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> data-designer create data/incidents.py <span class="at">-n</span> 10            <span class="co"># smoke test, runs as a job</span></span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a><span class="va">MERIDIAN_SPLIT</span><span class="op">=</span>test  <span class="ex">nemo</span> data-designer create data/incidents.py <span class="at">-n</span> 500</span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a><span class="va">MERIDIAN_SPLIT</span><span class="op">=</span>train <span class="ex">nemo</span> data-designer create data/incidents.py <span class="at">-n</span> 3600</span></code></pre></div>
+<p>Each <code>create</code> prints a job ID like
+<code>nemo-data-designer-p-xxxxxxxx</code>. Check on it with
+<code>nemo jobs get-status &lt;job&gt;</code>. Use different models for
+the writer and the judge, and neither should be the model you compare
+against later. <code>MERIDIAN_SPLIT=train</code> leaves out one scenario
+type per runbook, so the test measures how well the model handles
+incidents it never saw.</p>
+<p><strong>You should see:</strong> the validate and check-models
+commands pass, and each job ends <code>completed</code>. Our full run
+took 20 min 40 s with both jobs in parallel on a provider with high rate
+limits, and cost $1.29 at OpenRouter list prices. On the free
+build.nvidia.com tier we saw about 0.07 rows a second, so the 3,600
+training rows alone would take about 14 hours (<a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#d1-generation-is-slow-on-a-rate-limited-provider">D1</a>).</p>
+<p><strong>If it fails:</strong> slow or rate-limited, see <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#d1-generation-is-slow-on-a-rate-limited-provider">D1</a>.
+"Template is invalid" after you edit the recipe, see <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#d2-every-template-mistake-says-prompt-generation-template-is-invalid">D2</a>.
+<code>check-models</code> times out, see <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#d4-check-models-times-out-on-reasoning-models">D4</a>.
+Use <code>create -n 10</code> for smoke tests; <code>preview</code>
+times out on slow models (<a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#d3-preview-times-out-with-slow-models">D3</a>).</p>
+<h2 id="step-4-check-the-data">Step 4: Check the data</h2>
+<p><strong>Goal:</strong> make sure no incident gives away its answer,
+every runbook has examples and the test set holds scenario types the
+model never trained on.</p>
+<p>If you used the packaged data:</p>
+<div class="sourceCode" id="cb10"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> scripts/check_data.py</span></code></pre></div>
+<p>If you generated your own, apply the quality gates and split first,
+then check (<code>--no-upload</code> keeps the files local until step
+5):</p>
+<div class="sourceCode" id="cb11"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> scripts/split_dataset.py <span class="at">--job</span> <span class="op">&lt;</span>test-job<span class="op">&gt;</span> --split test <span class="at">--fileset</span> default/meridian-incidents-test <span class="at">--no-upload</span></span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> scripts/split_dataset.py <span class="at">--job</span> <span class="op">&lt;</span>train-job<span class="op">&gt;</span> --split train <span class="at">--fileset</span> default/meridian-incidents-train <span class="at">--no-upload</span></span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> scripts/check_data.py runs/datasets/train runs/datasets/test</span></code></pre></div>
+<p><code>split_dataset.py</code> drops rows the judge scored low on
+label support or on giving away the answer, rows the keyword check
+flagged and rows that match the pattern sweep. It splits the training
+run into train, validation and calibration, balanced by runbook.</p>
+<p><strong>You should see,</strong> for the packaged data:</p>
+<pre><code>Rows per file
+  train          5006 records (2503 incidents, two questions each)
+  validation      474 records (237 incidents)
+  calibration     240 incidents
+  test            416 incidents
+
+Training incidents per runbook
+  RB-01 214  RB-02 246  RB-03 272  RB-04 367  RB-05 171  RB-06 195  RB-07 150  RB-08 219  RB-09 213  RB-10 216  RB-11 172  RB-12 68
+...
+Test incidents from scenario types held out of training: 116 of 416
+Test incidents that also appear in training: 0
+
+Incidents whose text gives away the answer (runbook ID, team, action or scenario name):
+  train 0  calibration 0  test 0
+
+PASS: data looks ready to train on</code></pre>
+<p>For a generated run, <code>split_dataset.py</code> prints what each
+gate dropped. Ours kept 2,980 of 3,600 training rows and 416 of 500 test
+rows; 80% of the drops gave away the answer.</p>
+<p><strong>If it fails:</strong> incidents that give away the answer,
+see <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#d5-the-writer-gives-away-the-answer-and-the-judge-misses-it">D5</a>.
+Download trouble, see <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#d6-downloading-the-generated-dataset">D6</a>.</p>
+<h2 id="step-5-upload-the-data-as-filesets">Step 5: Upload the data as
+filesets</h2>
+<p><strong>Goal:</strong> put the training and test files where the
+Helix post-training plugin and the Helix Evals plugin can read them.
+Each training record is a prompt and a one-letter answer, so the model
+is trained on the answer only.</p>
+<p>Packaged data:</p>
+<div class="sourceCode" id="cb13"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="fu">gunzip</span> <span class="at">-k</span> data/meridian-example/<span class="pp">*</span>.gz</span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a><span class="fu">cp</span> data/meridian-example/test.jsonl data/meridian-example/eval.jsonl   <span class="co"># the eval specs read eval.jsonl</span></span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> files filesets create meridian-incidents-train <span class="at">--workspace</span> default <span class="at">--description</span> <span class="st">&quot;Meridian incident triage&quot;</span></span>
+<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> f <span class="kw">in</span> train validation calibration<span class="kw">;</span> <span class="cf">do</span></span>
+<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a>  <span class="ex">nemo</span> files upload data/meridian-example/<span class="va">$f</span>.jsonl meridian-incidents-train <span class="at">--workspace</span> default</span>
+<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a><span class="cf">done</span></span>
+<span id="cb13-7"><a href="#cb13-7" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> files filesets create meridian-incidents-test <span class="at">--workspace</span> default <span class="at">--description</span> <span class="st">&quot;Meridian incident triage&quot;</span></span>
+<span id="cb13-8"><a href="#cb13-8" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> files upload data/meridian-example/eval.jsonl meridian-incidents-test <span class="at">--workspace</span> default</span>
+<span id="cb13-9"><a href="#cb13-9" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> files list meridian-incidents-train <span class="at">--workspace</span> default</span></code></pre></div>
+<p>Generated data: rerun the two <code>split_dataset.py</code> commands
+from step 4 without <code>--no-upload</code>. They create both filesets
+and upload the same file names.</p>
+<p><strong>You should see:</strong> <code>nemo files list</code> shows
+<code>train.jsonl</code>, <code>validation.jsonl</code> and
+<code>calibration.jsonl</code>. Elsewhere you refer to them as
+<code>default/meridian-incidents-train</code>, and to the test file as
+<code>default/meridian-incidents-test#eval.jsonl</code>.</p>
+<p><strong>If it fails:</strong> a 404 on upload, see <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#f1-nemo-files-upload-returns-404">F1</a>.</p>
+<h2 id="step-6-register-the-base-model">Step 6: Register the base
+model</h2>
+<p><strong>Goal:</strong> tell Helix which Hugging Face model to
+fine-tune. The weights download when a job or deployment first needs
+them.</p>
+<p>On the GPU machine. If you did the earlier steps on a laptop, repeat
+steps 0, 1, 2 and 5 here first. Step 10 compares against the step 2
+agent deployment, so it has to run on the same Helix as the rest.</p>
+<div class="sourceCode" id="cb14"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> training/register_base_model.py    <span class="co"># Qwen/Qwen3.5-4B-Base -&gt; default/qwen3.5-4b-base</span></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a><span class="co"># or Nemotron Nano 9B v2, a small model from NVIDIA&#39;s open Nemotron family:</span></span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> training/register_base_model.py <span class="at">--repo</span> nvidia/NVIDIA-Nemotron-Nano-9B-v2 <span class="at">--name</span> nemotron-nano-9b-v2</span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> models get qwen3.5-4b-base <span class="at">--workspace</span> default</span></code></pre></div>
+<p><strong>You should see:</strong></p>
+<pre><code>created fileset qwen3.5-4b-base
+created model entity qwen3.5-4b-base
+model spec resolved: True
+use in training/job.json as model.name: default/qwen3.5-4b-base</code></pre>
+<p><strong>If it fails:</strong> HTTP 401 from a remote Helix, see <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#p5-python-scripts-get-http-401-from-a-helix-that-requires-sign-in">P5</a>.
+<code>model spec resolved: False</code> usually means Hugging Face isn't
+reachable from the machine running Helix; rerun
+<code>scripts/preflight.sh</code>.</p>
+<h2 id="step-7-pull-the-training-images-and-fine-tune">Step 7: Pull the
+training images and fine-tune</h2>
+<p><strong>Goal:</strong> a LoRA adapter that knows Meridian's runbooks
+and policy.</p>
+<h3 id="7a-pull-the-training-images">7a. Pull the training images</h3>
+<p>The Docker job backend runs training in two images,
+<code>nhx-customizer-tasks</code> and <code>nhx-unsloth-training</code>.
+NVIDIA publishes both on <code>nvcr.io/nvidia/nemo-helix/</code>, and
+they pull without an NGC key or <code>docker login</code> (checked
+2026-10-11 for tags <code>0.7.0</code> and <code>0.7.1</code>). Use the
+tag that matches the Helix version step 1 installed.</p>
+<p>A pip-installed Helix doesn't look on nvcr.io by itself. In
+<code>nemo-helix</code> 0.7.1 the platform's <code>image_registry</code>
+defaults to <code>my-registry</code> and <code>image_tag</code> to
+<code>local</code>, so a local Helix looks for
+<code>my-registry/nhx-unsloth-training:local</code>. Pull the published
+images and tag them with those local names. Step 8 uses the tasks image
+under its local name to download the adapter. A local Helix doesn't pull
+images for deployments, so pull the vLLM image here too:</p>
+<div class="sourceCode" id="cb16"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="va">HELIX_VERSION</span><span class="op">=</span><span class="va">$(</span><span class="ex">python</span> <span class="at">-c</span> <span class="st">&quot;import importlib.metadata as m; print(m.version(&#39;nemo-helix&#39;))&quot;</span><span class="va">)</span></span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;</span><span class="va">$HELIX_VERSION</span><span class="st">&quot;</span>   <span class="co"># 0.7.1 in October 2026; the image tag must be the same number</span></span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> img <span class="kw">in</span> nhx-customizer-tasks nhx-unsloth-training<span class="kw">;</span> <span class="cf">do</span></span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>  <span class="ex">docker</span> pull <span class="st">&quot;nvcr.io/nvidia/nemo-helix/</span><span class="va">$img</span><span class="st">:</span><span class="va">$HELIX_VERSION</span><span class="st">&quot;</span></span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>  <span class="ex">docker</span> tag <span class="st">&quot;nvcr.io/nvidia/nemo-helix/</span><span class="va">$img</span><span class="st">:</span><span class="va">$HELIX_VERSION</span><span class="st">&quot;</span> <span class="st">&quot;my-registry/</span><span class="va">$img</span><span class="st">:local&quot;</span></span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a><span class="cf">done</span></span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> pull docker.io/vllm/vllm-openai:v0.22.1   <span class="co"># the serving image step 8 uses</span></span>
+<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> images <span class="at">--format</span> <span class="st">&quot;{{.Repository}}:{{.Tag}}\t{{.Size}}&quot;</span> <span class="kw">|</span> <span class="fu">grep</span> <span class="at">-E</span> <span class="st">&quot;nhx-|vllm&quot;</span></span></code></pre></div>
+<p><strong>You should see:</strong> each pull ends
+<code>Status: Downloaded newer image</code>, and the last command lists
+each <code>nhx-</code> image twice (the <code>nvcr.io</code> name and
+the <code>my-registry/...:local</code> name share one image ID), plus
+the vLLM image. The two <code>nhx-</code> images are about 21 GB to
+download for x86_64. We pulled the tasks image anonymously on
+2026-10-11; we haven't run a training job against the pulled images on a
+local Helix yet (<code>unverified</code>).</p>
+<p><strong>If <code>docker pull</code> fails</strong> with
+<code>manifest unknown</code> or <code>not found</code>, there's no
+image for your Helix version. Run <code>echo $HELIX_VERSION</code> and
+install a Helix version that has images
+(<code>uv pip install "nemo-helix[all]==0.7.1"</code>), or build the
+images from source as below.</p>
+<p><strong>If the job in 7b still fails pulling
+<code>nhx-unsloth-training</code> or
+<code>nhx-customizer-tasks</code>,</strong> point the Helix
+post-training plugin at the published images by their full names and
+restart the services from this repo's activated shell. Delete any agent
+deployments first, or the restart can hang (<a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#p3-shutting-down-the-services-hangs">P3</a>).
+These settings come from the Helix source; this form is
+<code>unverified</code>:</p>
+<div class="sourceCode" id="cb17"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">NHX_UNSLOTH_TRAINING_IMAGE</span><span class="op">=</span>nvcr.io/nvidia/nemo-helix/nhx-unsloth-training:<span class="va">$HELIX_VERSION</span></span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">NHX_CUSTOMIZER_TASKS_IMAGE</span><span class="op">=</span>nvcr.io/nvidia/nemo-helix/nhx-customizer-tasks:<span class="va">$HELIX_VERSION</span></span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> services restart</span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> http://localhost:8080/health/ready</span></code></pre></div>
+<p>The services read these variables when they start, so set them again
+in any shell you later restart the services from. They cover training
+only; step 8 still looks for
+<code>my-registry/nhx-customizer-tasks:local</code>, so keep that
+tag.</p>
+<p><strong>Fallback: build the images from source.</strong> Use this
+only if you can't pull, for example on a Helix version with no published
+images or a machine that can't reach nvcr.io. The script builds
+<code>my-registry/nhx-customizer-tasks:local</code> and
+<code>my-registry/nhx-unsloth-training:local</code> with Helix's own
+bake file and pulls the vLLM image. The clone checks out the Helix
+release tag that matches your installed version. Expect 30 to 60 minutes
+the first time, because it compiles CUDA wheels for the hybrid Nemotron
+models (an estimate; <code>unverified</code> end to end):</p>
+<div class="sourceCode" id="cb18"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone <span class="at">--branch</span> <span class="st">&quot;</span><span class="va">$HELIX_VERSION</span><span class="st">&quot;</span> https://github.com/NVIDIA-NeMo/nemo-helix.git ~/nemo-helix</span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a><span class="va">HELIX_DIR</span><span class="op">=</span>~/nemo-helix <span class="fu">bash</span> scripts/gpu-build-images.sh</span></code></pre></div>
+<h3 id="7b-submit-the-training-job">7b. Submit the training job</h3>
+<div class="sourceCode" id="cb19"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> customization unsloth submit training/job.json <span class="at">-w</span> default</span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> jobs watch <span class="op">&lt;</span>job<span class="op">&gt;</span> --workspace default</span></code></pre></div>
+<p><code>training/job.json</code> trains Qwen3.5-4B: LoRA rank 16, two
+epochs, one GPU, loss on the answer only, seed 29. For Nemotron Nano use
+<code>training/job-nemotron-nano.json</code>. Keep the LoRA target lists
+in both files (<a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#t2-nemotron-nano-9b-v2-fails-late-with-module-out_proj-is-incompatible-with-mamba-based-models">T2</a>,
+<a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#t3-qwen35-trains-only-part-of-the-model-with-no-warning">T3</a>).</p>
+<p>Check the loss curve and the GPU it ran on:</p>
+<div class="sourceCode" id="cb20"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> jobs get-status <span class="op">&lt;</span>job<span class="op">&gt;</span> --workspace default <span class="at">-f</span> json <span class="kw">|</span> <span class="ex">jq</span> <span class="at">-r</span> <span class="st">&#39;&quot;status: \(.status)&quot;,</span></span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a><span class="st">  (.status_details.metrics.train_loss[] | select(.step == 10 or .step % 100 == 0 or .step == 310) | &quot;step \(.step)  loss \(.value*1000|round/1000)&quot;),</span></span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;validation loss: \(.status_details.metrics.val_loss[-1].value*1000|round/1000)&quot;&#39;</span></span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> jobs get-logs <span class="op">&lt;</span>job<span class="op">&gt;</span> --workspace default <span class="at">--all-pages</span> <span class="at">-f</span> raw <span class="dt">\</span></span>
+<span id="cb20-5"><a href="#cb20-5" aria-hidden="true" tabindex="-1"></a>  <span class="kw">|</span> <span class="fu">grep</span> <span class="at">-o</span> <span class="at">-E</span> <span class="st">&quot;NVIDIA [A-Z0-9-]+\. Num GPUs = [0-9]+|&#39;train_runtime&#39;: &#39;[0-9]+&#39;&quot;</span> <span class="kw">|</span> <span class="fu">sort</span> <span class="at">-u</span></span></code></pre></div>
+<p><strong>You should see:</strong> <code>submit</code> prints the job
+as JSON, and its <code>name</code> (like
+<code>unsloth-4bd924999dd1</code>) is the job ID. The job ends
+<code>completed</code>. In our Qwen run the loss fell from 0.474 at step
+10 to 0.103 at step 310, with a validation loss of 0.106.
+<code>train_runtime</code> was 1,303 seconds (22 minutes) on one A100
+80GB, and the whole job took 30 minutes. Nemotron Nano jobs took about
+41 minutes. At $1.66 to $6.03 an hour, the GPU time for one Qwen job
+costs about $0.75 to $2.70.</p>
+<p><strong>If it fails:</strong> an image pull error means the images
+from 7a aren't on this machine under the names Helix expects; use the
+override in 7a (<a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#t1-the-training-images-werent-public-resolved-2026-10-11">T1</a>
+has the history). <code>out_proj</code> is incompatible is <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#t2-nemotron-nano-9b-v2-fails-late-with-module-out_proj-is-incompatible-with-mamba-based-models">T2</a>.
+The <code>warmup_ratio</code> warning in the logs is expected (<a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#t4-warmup_ratio-is-accepted-and-then-ignored">T4</a>).
+If you run out of GPU memory, lower
+<code>batch.per_device_train_batch_size</code> and raise
+<code>gradient_accumulation_steps</code> to keep their product the
+same.</p>
+<h2 id="step-8-deploy-the-base-model-and-the-adapter">Step 8: Deploy the
+base model and the adapter</h2>
+<p><strong>Goal:</strong> serve the untuned base and your fine-tuned
+adapter from one vLLM deployment, so you can compare them.</p>
+<div class="sourceCode" id="cb21"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> training/deploy_model.py <span class="at">--model</span> qwen3.5-4b-base <span class="at">--name</span> meridian-qwen <span class="at">--lora-rank</span> 16 <span class="at">--timeout-minutes</span> 45</span>
+<span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> inference providers get meridian-qwen <span class="at">--workspace</span> default <span class="at">-f</span> json <span class="kw">|</span> <span class="ex">jq</span> <span class="at">-r</span> <span class="st">&#39;.status, (.served_models[].served_model_name)&#39;</span></span></code></pre></div>
+<p>Ask both models the triage question for the incident from step 2, and
+read the probability of each action (W fix it automatically, X page
+on-call now, Y ticket for business hours, Z escalate to the incident
+commander):</p>
+<div class="sourceCode" id="cb22"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> m <span class="kw">in</span> default/qwen3.5-4b-base default--meridian-router-qwen3.5-4b-seed29<span class="kw">;</span> <span class="cf">do</span></span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a>  <span class="bu">echo</span> <span class="st">&quot;== </span><span class="va">$m</span><span class="st">&quot;</span></span>
+<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a>  <span class="ex">nemo</span> inference gateway provider post v1/completions meridian-qwen <span class="at">--workspace</span> default <span class="dt">\</span></span>
+<span id="cb22-4"><a href="#cb22-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">--body</span> <span class="st">&quot;</span><span class="va">$(</span><span class="ex">jq</span> <span class="at">-nc</span> <span class="at">--arg</span> m <span class="st">&quot;</span><span class="va">$m</span><span class="st">&quot;</span> <span class="at">--rawfile</span> p incidents/slack-pod-c.decision-prompt.txt <span class="st">&#39;{model:$m,prompt:$p,max_tokens:1,temperature:0,logprobs:4}&#39;</span><span class="va">)</span><span class="st">&quot;</span> <span class="at">-f</span> json <span class="dt">\</span></span>
+<span id="cb22-5"><a href="#cb22-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">|</span> <span class="ex">jq</span> <span class="at">-r</span> <span class="st">&#39;.choices[0].logprobs.top_logprobs[0] | to_entries[] | &quot;\(.key|@json)  \((.value|exp)*100|round)%&quot;&#39;</span></span>
+<span id="cb22-6"><a href="#cb22-6" aria-hidden="true" tabindex="-1"></a><span class="cf">done</span></span></code></pre></div>
+<p><strong>You should see:</strong> <code>deploy_model.py</code> prints
+<code>status:</code> lines for 20 to 30 minutes, then
+<code>gateway ready: True</code>. Ours took 21 minutes for Qwen and 30
+for Nemotron. <code>providers get</code> prints <code>READY</code>,
+<code>default/qwen3.5-4b-base</code> and
+<code>default--meridian-router-qwen3.5-4b-seed29</code>. In our run the
+base model's top answer was a blank line (about 70%), so it didn't pick
+an action. The fine-tuned model put about 97% on <code>" Y"</code>, a
+ticket for business hours, which is Meridian's policy.</p>
+<p>A deployment holds its GPU until you delete it. When you're done with
+steps 9 and 10:</p>
+<div class="sourceCode" id="cb23"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> inference deployments delete meridian-qwen <span class="at">--workspace</span> default</span></code></pre></div>
+<p><strong>If it fails:</strong> stuck in PENDING with no logs is <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#s2-a-deployment-sits-in-pending-for-20-minutes-or-more-with-no-logs">S2</a>.
+A 422 or a missing adapter is <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#s3-the-adapter-returns-422-or-doesnt-appear-in-model-lists">S3</a>.
+<code>--input-file</code> errors are <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#s4---input-file-rejects-request-bodies">S4</a>.</p>
+<h2 id="step-9-evaluate-before-and-after">Step 9: Evaluate before and
+after</h2>
+<p><strong>Goal:</strong> score the untuned and fine-tuned models on the
+same 416 test incidents with the Helix Evals plugin, then compute
+accuracy, macro-F1 and calibration.</p>
+<div class="sourceCode" id="cb24"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="va">QUESTIONS</span><span class="op">=</span><span class="st">&quot;runbook action&quot;</span> <span class="ex">scripts/run-evals.sh</span> <span class="st">&quot;default/meridian-incidents-test#eval.jsonl&quot;</span> B-qwen-untuned C-qwen-finetuned</span></code></pre></div>
+<p>The script writes one spec per model and question, submits them,
+waits and downloads row scores to <code>runs/eval/</code>. The specs
+call the deployment's provider route (<code>unverified</code> from a
+local Helix; our runs called the vLLM service inside the cluster).</p>
+<p>Score the calibration split too, so you can fit the confidence:</p>
+<div class="sourceCode" id="cb25"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> eval/make_eval_specs.py <span class="at">--dataset</span> <span class="st">&quot;default/meridian-incidents-train#calibration.jsonl&quot;</span> <span class="dt">\</span></span>
+<span id="cb25-2"><a href="#cb25-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--out</span> runs/eval/specs-cal <span class="at">--arms</span> C-qwen-finetuned <span class="at">--question</span> action</span>
+<span id="cb25-3"><a href="#cb25-3" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> evaluator evaluate <span class="at">--spec-file</span> runs/eval/specs-cal/C-qwen-finetuned.action.json <span class="at">--workspace</span> default</span>
+<span id="cb25-4"><a href="#cb25-4" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> jobs watch <span class="op">&lt;</span>job<span class="op">&gt;</span> --workspace default</span>
+<span id="cb25-5"><a href="#cb25-5" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> jobs results download row-scores <span class="at">--job</span> <span class="op">&lt;</span>job<span class="op">&gt;</span> --workspace default <span class="dt">\</span></span>
+<span id="cb25-6"><a href="#cb25-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">--output-file</span> runs/eval/cal-C-qwen-finetuned.action.rows.jsonl</span></code></pre></div>
+<p>Then compare:</p>
+<div class="sourceCode" id="cb26"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> eval/analyze_results.py runs/eval/B-qwen-untuned.action.rows.jsonl</span>
+<span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> eval/analyze_results.py runs/eval/C-qwen-finetuned.action.rows.jsonl <span class="dt">\</span></span>
+<span id="cb26-3"><a href="#cb26-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--calibration</span> runs/eval/cal-C-qwen-finetuned.action.rows.jsonl</span></code></pre></div>
+<p>To add the frontier baseline, set <code>FRONTIER_MODEL</code> to its
+name on your gateway and add
+<code>A-frontier-no-context A-plus-frontier-with-context</code> to the
+<code>run-evals.sh</code> arms. Our scores for every model are in
+<code>results/</code>, so you can also compare against those without
+calling them.</p>
+<p><strong>You should see:</strong> <code>evaluator evaluate</code>
+prints a job ID like <code>nemo-evaluator-&lt;id&gt;</code>.
+<code>analyze_results.py</code> prints JSON per model. Ours for the
+fine-tuned Qwen action question: <code>"accuracy": 0.8197</code>,
+<code>"macro_f1": 0.7659</code>, <code>"ece": 0.0476</code>,
+<code>"accuracy_heldout_families": 0.8017</code>. The untuned base:
+37.7% accuracy. Each small-model job took under a minute; a 416-row job
+on Nemotron 3 Ultra took about 2.5 minutes. Yours will differ, but the
+fine-tuned model should beat the untuned one by a wide margin on the
+action.</p>
+<p>To see what a confidence threshold buys you, and why escalating
+uncertain cases to the big model didn't help in our run:</p>
+<div class="sourceCode" id="cb27"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> eval/cascade.py <span class="at">--small</span> runs/eval/C-qwen-finetuned.action.rows.jsonl <span class="dt">\</span></span>
+<span id="cb27-2"><a href="#cb27-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--cal</span> runs/eval/cal-C-qwen-finetuned.action.rows.jsonl <span class="dt">\</span></span>
+<span id="cb27-3"><a href="#cb27-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--large</span> results/frontier/A-plus-frontier-with-context.action.rows.jsonl.gz</span></code></pre></div>
+<p>To measure speed on the model alone:
+<code>FRONTIER_MODEL=&lt;name&gt; python eval/bench_latency.py --n 50 --arms A-plus-frontier-with-context C-qwen-finetuned</code>.
+Ours: 301 ms typical for the fine-tuned model, 670 ms for Ultra with the
+notes.</p>
+<p><strong>If it fails:</strong> a spec rejected over <code>name</code>
+is <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#e1-spec-rejected-mismatched-fields-name">E1</a>.
+<code>'item' is undefined</code> is <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#e2-item-is-undefined-in-a-generic-target-body">E2</a>.
+Many zeros with no answer are <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#e3-dropped-requests-count-as-wrong-answers">E3</a>.
+An untuned base scoring near zero is expected (<a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#s5-an-untuned-base-model-scores-near-zero-on-text-matching">S5</a>);
+<code>analyze_results.py</code> reads probabilities instead.</p>
+<h2 id="step-10-put-the-fine-tuned-model-behind-the-triage-step">Step
+10: Put the fine-tuned model behind the triage step</h2>
+<p><strong>Goal:</strong> the same agent, with only the triage step's
+model changed, scored against the baseline from step 2.</p>
+<p><code>agent/agent-decision-model.yaml</code> is the agent from step 2
+with <code>route_incident</code> pointed at your deployment. The
+settings are under <code>mcp.servers.meridian-ops.env</code>:</p>
+<div class="sourceCode" id="cb28"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ROUTER_URL</span><span class="kw">:</span><span class="at"> http://localhost:8080/apis/inference-gateway/v2/workspaces/default/provider/meridian-qwen/-/v1</span></span>
+<span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a><span class="fu">ROUTER_MODEL</span><span class="kw">:</span><span class="at"> default--meridian-router-qwen3.5-4b-seed29</span></span>
+<span id="cb28-3"><a href="#cb28-3" aria-hidden="true" tabindex="-1"></a><span class="fu">ROUTER_MODE</span><span class="kw">:</span><span class="at"> logits                  # read the probability of each option</span></span>
+<span id="cb28-4"><a href="#cb28-4" aria-hidden="true" tabindex="-1"></a><span class="fu">ROUTER_TEMPERATURE_RUNBOOK</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;1.40&quot;</span><span class="at">   </span><span class="co"># ours, fitted on the calibration split</span></span>
+<span id="cb28-5"><a href="#cb28-5" aria-hidden="true" tabindex="-1"></a><span class="fu">ROUTER_TEMPERATURE_ACTION</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;0.95&quot;</span><span class="at">    </span><span class="co"># ours, fitted on the calibration split</span></span></code></pre></div>
+<p>Replace our two temperatures with yours before you create the agent.
+Keep the quotes; the tool server reads them as strings.</p>
+<ul>
+<li><code>ROUTER_TEMPERATURE_ACTION</code>: the
+<code>temperature=</code> value on the <code>calibration:</code> line
+that <code>analyze_results.py</code> printed for
+<code>C-qwen-finetuned.action.rows.jsonl</code> in step 9. The same
+number is the <code>"temperature"</code> field in that model's
+JSON.</li>
+<li><code>ROUTER_TEMPERATURE_RUNBOOK</code>: step 9 only calibrates the
+action question. To fit this one, rerun step 9's calibration commands
+with <code>--question runbook</code> (the spec is then
+<code>runs/eval/specs-cal/C-qwen-finetuned.runbook.json</code>; name the
+download <code>cal-C-qwen-finetuned.runbook.rows.jsonl</code>), then run
+<code>python eval/analyze_results.py runs/eval/C-qwen-finetuned.runbook.rows.jsonl --calibration runs/eval/cal-C-qwen-finetuned.runbook.rows.jsonl</code>
+and use its <code>temperature=</code>. If you skip this, keep ours.</li>
+</ul>
+<p>If your deployment or adapter has a different name, change
+<code>ROUTER_URL</code> and <code>ROUTER_MODEL</code> too. Check the
+edit with <code>git diff agent/agent-decision-model.yaml</code>.</p>
+<div class="sourceCode" id="cb29"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> agents create <span class="at">--name</span> infra-ops-agent-decision-model <span class="at">--agent-config</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">/agent/agent-decision-model.yaml&quot;</span></span>
+<span id="cb29-2"><a href="#cb29-2" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> agents deploy <span class="at">--agent</span> infra-ops-agent-decision-model <span class="at">--name</span> infra-ops-agent-decision-model-deployment <span class="at">--mode</span> subprocess</span>
+<span id="cb29-3"><a href="#cb29-3" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> agents invoke <span class="at">-d</span> infra-ops-agent-decision-model-deployment <span class="at">--no-progress</span> <span class="at">--input-file</span> incidents/slack-pod-c.json</span></code></pre></div>
+<p>Score both agents on the same incidents, 50 per job:</p>
+<div class="sourceCode" id="cb30"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a><span class="va">BATCHES</span><span class="op">=</span><span class="st">&quot;1 2 3 4&quot;</span> <span class="ex">scripts/run-agent-evals.sh</span> agent-finetuned agent-frontier-with-context</span>
+<span id="cb30-2"><a href="#cb30-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> eval/analyze_agent.py runs/eval/agent/<span class="pp">*</span>.rows.jsonl</span></code></pre></div>
+<p><strong>You should see:</strong> the single incident comes back
+<code>RB-03</code> and <code>ticket-business-hours</code> in our run.
+<code>analyze_agent.py</code> prints one line per agent. Ours on 200
+incidents: fine-tuned <code>"action_accuracy": 0.81</code>, Nemotron 3
+Ultra with notes <code>0.74</code>, both 100% on the runbook. Each
+50-incident job took about 14 minutes. Our first 50 incidents tied at
+86%, so use all four batches if you want to see a difference.</p>
+<p>A whole agent run takes about the same time with either model (11 to
+12 seconds per incident for us). The agent's own loop on Nemotron 3
+Super takes most of it (<a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#a7-the-agent-adds-a-lot-of-tokens-to-every-call">A7</a>).
+The fine-tuned model answers faster measured on its own (step 9), and it
+costs less per answer when its GPU is busy.</p>
+<p><strong>If it fails:</strong> an evaluation that loses all its rows
+hit the 1-hour job limit (<a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#e6-an-agent-evaluation-hits-the-1-hour-job-limit-and-every-row-is-lost">E6</a>).
+Agent deployment errors are the same as step 2.</p>
+<p>When you finish, clean up (see <a href="#clean-up">Clean up</a>). The
+deployment from step 8 holds its GPU until you delete it.</p>
+<h2 id="step-11-adapt-it-to-your-own-agent">Step 11: Adapt it to your
+own agent</h2>
+<p><strong>Goal:</strong> the same method on a decision your own agent
+makes.</p>
+<p>First pick the step. Look for one that repeats at volume, where the
+right answer depends on knowledge that shows up in past examples more
+than in documents, and where a fixed list of options covers the
+answers.</p>
+<p>Then you change three things.</p>
+<ol type="1">
+<li><strong>The options and the policy, in <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/taxonomy.json"><code>taxonomy.json</code></a>.</strong>
+It holds everything Meridian-specific: the options
+(<code>runbooks</code> and <code>actions</code>), their definitions, the
+<code>policy</code> that maps each runbook and severity to an action,
+the internal service names, <code>private_context</code> (the notes only
+your team knows), the scenario types and which ones to hold out for
+testing. Data generation, training records, the agent prompt and
+evaluation all read from it. The prompts in <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/agent/mcps/prompting.py"><code>agent/mcps/prompting.py</code></a>
+say "Meridian Compute" and "incident", so change that wording too. As
+the code stands, the first question takes up to 12 options and the
+second up to 4 (<code>LETTERS</code> and <code>ACTION_LETTERS</code> in
+the same file). Extra options get dropped without a warning, so extend
+those strings if you have more.</li>
+<li><strong>The data: the recipe in <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/data/incidents.py"><code>data/incidents.py</code></a>,
+or your own labeled tickets.</strong> To generate, change the reporting
+styles, the weights per option, the writer's rules and the judge's
+questions. Either way, update <code>LEAK_PATTERNS</code> in that file to
+your own option names, because <code>scripts/check_data.py</code> uses
+them to catch text that gives away the answer. If you have real tickets,
+skip generation and follow <a
+href="#bring-your-own-labeled-tickets">Bring your own labeled
+tickets</a> below.</li>
+<li><strong>The agent's tool and names.</strong> Replace the
+instructions in <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/agent/agent-with-context.yaml"><code>agent/agent-with-context.yaml</code></a>
+and the tools in <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/agent/mcps/ops_tools.py"><code>agent/mcps/ops_tools.py</code></a>
+with your own. Keep the triage step as a tool driven by
+<code>ROUTER_MODEL</code> and <code>ROUTER_MODE</code>, so you can swap
+its model with a setting. The model, deployment and adapter names are
+written into <code>eval/make_eval_specs.py</code>,
+<code>agent/agent-decision-model.yaml</code>,
+<code>eval/specs-agent/</code> and
+<code>scripts/run-agent-evals.sh</code>; rename them to match
+yours.</li>
+</ol>
+<p>Then rerun steps 4 to 10. Compare against the general model with your
+notes in its prompt, since that's what it would get in production. Train
+more than once with different seeds before you trust a difference.</p>
+<p>The <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/skills/helix-specialized-agent-tutorial/reference/adapt.md">adapt
+guide</a> in the skill lists the questions to answer first and the other
+code limits to plan around, such as the top-20 limit on logprobs when
+you have many options.</p>
+<p>Our dataset had about 200 synthetic examples per runbook to keep the
+demo cheap. For production, plan for a few hundred real examples per
+option, including the rare ones, labels checked by people, a test set
+from a later period than the training data, and retraining when your
+teams or policy change.</p>
+<h3 id="bring-your-own-labeled-tickets">Bring your own labeled
+tickets</h3>
+<p>There's no script for real data yet.
+<code>scripts/split_dataset.py</code> reads a Data Designer job, so you
+build the four files yourself and then pick up at step 4. We tested the
+code below on rows from the packaged data, not on real tickets
+(<code>unverified</code> on real data).</p>
+<ol type="1">
+<li><p><strong>Check the labels.</strong> Each ticket needs its text as
+the step saw it at decision time, a first answer and a second answer.
+The answers must match the <code>id</code> values in
+<code>taxonomy.json</code> exactly; the lookup fails on anything else.
+Leave out anything added after the decision, such as resolution notes or
+the final queue, since it gives the answer away.</p></li>
+<li><p><strong>Split by date, by hand.</strong> Sort the tickets by
+date. Keep the latest period (for example the last two or three months)
+as your test set. Split the earlier tickets into train, validation and
+calibration; the tutorial uses 84%, 8% and 8%. Save each as a JSON Lines
+file with one ticket per line.</p></li>
+<li><p><strong>Format them as prompt and completion rows.</strong>
+Training and validation get two rows per ticket, one per question, the
+way <code>train_rows()</code> in <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/scripts/split_dataset.py"><code>scripts/split_dataset.py</code></a>
+builds them. That function renders the prompts with
+<code>render_runbook_question()</code> and
+<code>render_action_question()</code> and the answers with
+<code>letter_for_runbook()</code> and <code>letter_for_action()</code>,
+all from <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/agent/mcps/prompting.py"><code>agent/mcps/prompting.py</code></a>.
+Calibration and test get one row per ticket with the fields
+<code>eval_row()</code> writes, since the eval specs and
+<code>eval/analyze_results.py</code> read them. The simplest way is to
+call those two functions. From the repo root with <code>.venv</code>
+active, adjusting the field names in <code>load()</code> to your
+files:</p>
+<div class="sourceCode" id="cb31"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> json, sys</span>
+<span id="cb31-2"><a href="#cb31-2" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> pathlib <span class="im">import</span> Path</span>
+<span id="cb31-3"><a href="#cb31-3" aria-hidden="true" tabindex="-1"></a>sys.path.insert(<span class="dv">0</span>, <span class="st">&quot;scripts&quot;</span>)</span>
+<span id="cb31-4"><a href="#cb31-4" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> split_dataset <span class="im">import</span> train_rows, eval_row, write_jsonl</span>
+<span id="cb31-5"><a href="#cb31-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb31-6"><a href="#cb31-6" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> load(path):</span>
+<span id="cb31-7"><a href="#cb31-7" aria-hidden="true" tabindex="-1"></a>    rows <span class="op">=</span> [json.loads(line) <span class="cf">for</span> line <span class="kw">in</span> <span class="bu">open</span>(path)]</span>
+<span id="cb31-8"><a href="#cb31-8" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> [{<span class="st">&quot;incident_text&quot;</span>: r[<span class="st">&quot;text&quot;</span>], <span class="st">&quot;runbook_id&quot;</span>: r[<span class="st">&quot;runbook_id&quot;</span>], <span class="st">&quot;action_id&quot;</span>: r[<span class="st">&quot;action_id&quot;</span>],</span>
+<span id="cb31-9"><a href="#cb31-9" aria-hidden="true" tabindex="-1"></a>             <span class="st">&quot;scenario_family&quot;</span>: <span class="va">None</span>, <span class="st">&quot;reporter_style&quot;</span>: <span class="va">None</span>} <span class="cf">for</span> r <span class="kw">in</span> rows]</span>
+<span id="cb31-10"><a href="#cb31-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb31-11"><a href="#cb31-11" aria-hidden="true" tabindex="-1"></a>out <span class="op">=</span> Path(<span class="st">&quot;runs/my-data&quot;</span>)<span class="op">;</span> out.mkdir(parents<span class="op">=</span><span class="va">True</span>, exist_ok<span class="op">=</span><span class="va">True</span>)</span>
+<span id="cb31-12"><a href="#cb31-12" aria-hidden="true" tabindex="-1"></a>write_jsonl([row <span class="cf">for</span> r <span class="kw">in</span> load(<span class="st">&quot;my-train.jsonl&quot;</span>) <span class="cf">for</span> row <span class="kw">in</span> train_rows(r)], out <span class="op">/</span> <span class="st">&quot;train.jsonl&quot;</span>)</span>
+<span id="cb31-13"><a href="#cb31-13" aria-hidden="true" tabindex="-1"></a>write_jsonl([row <span class="cf">for</span> r <span class="kw">in</span> load(<span class="st">&quot;my-validation.jsonl&quot;</span>) <span class="cf">for</span> row <span class="kw">in</span> train_rows(r)], out <span class="op">/</span> <span class="st">&quot;validation.jsonl&quot;</span>)</span>
+<span id="cb31-14"><a href="#cb31-14" aria-hidden="true" tabindex="-1"></a>write_jsonl([eval_row(r) <span class="cf">for</span> r <span class="kw">in</span> load(<span class="st">&quot;my-calibration.jsonl&quot;</span>)], out <span class="op">/</span> <span class="st">&quot;calibration.jsonl&quot;</span>)</span>
+<span id="cb31-15"><a href="#cb31-15" aria-hidden="true" tabindex="-1"></a>write_jsonl([eval_row(r) <span class="cf">for</span> r <span class="kw">in</span> load(<span class="st">&quot;my-test.jsonl&quot;</span>)], out <span class="op">/</span> <span class="st">&quot;eval.jsonl&quot;</span>)</span></code></pre></div>
+<p>This keeps your labels as they are. <code>split_dataset.py</code>
+also runs <code>relabel_actions()</code>, which overwrites every action
+with Meridian's policy table; the code above doesn't call it.</p></li>
+<li><p><strong>Check the files:</strong>
+<code>python scripts/check_data.py runs/my-data</code>. Real tickets
+have no scenario types, so the held-out line says 0, which is fine. The
+other checks still apply: every option needs training examples, no test
+ticket can also be in training and no text should give away the
+answer.</p></li>
+<li><p><strong>Continue from step 5.</strong> Run its upload commands
+with <code>runs/my-data</code> in place of
+<code>data/meridian-example</code>, and skip the <code>gunzip</code> and
+<code>cp</code> lines. Then follow steps 6 to 10 as written.</p></li>
+</ol>
+<h2 id="clean-up">Clean up</h2>
+<p><strong>Goal:</strong> give back the GPU and the disk space. Every
+command here deletes something, so check each name before you run it.
+Skip anything you want to keep for another run.</p>
+<p>Delete the agent deployments first; stopping the services with an
+agent still deployed can hang (<a
+href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#p3-shutting-down-the-services-hangs">P3</a>).
+Then the agents, the model deployment and its config:</p>
+<div class="sourceCode" id="cb32"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb32-1"><a href="#cb32-1" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> agents deployments delete infra-ops-agent-decision-model-deployment <span class="at">-y</span>   <span class="co"># step 10</span></span>
+<span id="cb32-2"><a href="#cb32-2" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> agents deployments delete infra-ops-agent-with-context-deployment <span class="at">-y</span>     <span class="co"># step 2</span></span>
+<span id="cb32-3"><a href="#cb32-3" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> agents delete infra-ops-agent-decision-model <span class="at">-y</span></span>
+<span id="cb32-4"><a href="#cb32-4" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> agents delete infra-ops-agent-with-context <span class="at">-y</span></span>
+<span id="cb32-5"><a href="#cb32-5" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> inference deployments delete meridian-qwen <span class="at">--workspace</span> default           <span class="co"># step 8; frees the GPU</span></span>
+<span id="cb32-6"><a href="#cb32-6" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> inference deployments get meridian-qwen <span class="at">--workspace</span> default              <span class="co"># wait for DELETED</span></span>
+<span id="cb32-7"><a href="#cb32-7" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> inference deployment-configs delete meridian-qwen-cfg <span class="at">--workspace</span> default</span></code></pre></div>
+<p>The adapter, the base model entity and the filesets (steps 5 to 7). A
+fileset can't be deleted while a model entity points at it, so delete
+the model first. Read the adapter's name from
+<code>nemo models get</code> rather than assuming ours:</p>
+<div class="sourceCode" id="cb33"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> models get qwen3.5-4b-base <span class="at">--workspace</span> default</span>
+<span id="cb33-2"><a href="#cb33-2" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> models adapters delete meridian-router-qwen3.5-4b-seed29 <span class="at">--model-name</span> qwen3.5-4b-base <span class="at">--workspace</span> default</span>
+<span id="cb33-3"><a href="#cb33-3" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> models delete qwen3.5-4b-base <span class="at">--workspace</span> default</span>
+<span id="cb33-4"><a href="#cb33-4" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> files filesets list <span class="at">--workspace</span> default <span class="at">-f</span> table</span>
+<span id="cb33-5"><a href="#cb33-5" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> files filesets delete qwen3.5-4b-base <span class="at">--workspace</span> default</span>
+<span id="cb33-6"><a href="#cb33-6" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> files filesets delete meridian-incidents-train <span class="at">--workspace</span> default</span>
+<span id="cb33-7"><a href="#cb33-7" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> files filesets delete meridian-incidents-test <span class="at">--workspace</span> default</span></code></pre></div>
+<p>If you trained Nemotron Nano, use <code>meridian-nemotron</code>,
+<code>meridian-nemotron-cfg</code> and <code>nemotron-nano-9b-v2</code>
+in place of the Qwen names. We haven't run this cleanup sequence end to
+end (<code>unverified</code>); the commands and flags are from
+<code>--help</code>.</p>
+<p>Stop the local Helix services:</p>
+<div class="sourceCode" id="cb34"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb34-1"><a href="#cb34-1" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> services stop</span></code></pre></div>
+<p>Remove the images from step 7a. Check their sizes first:</p>
+<div class="sourceCode" id="cb35"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> images <span class="at">--format</span> <span class="st">&quot;{{.Repository}}:{{.Tag}}\t{{.Size}}&quot;</span> <span class="kw">|</span> <span class="fu">grep</span> <span class="at">-E</span> <span class="st">&quot;nhx-|vllm&quot;</span></span>
+<span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> rmi my-registry/nhx-unsloth-training:local my-registry/nhx-customizer-tasks:local docker.io/vllm/vllm-openai:v0.22.1</span>
+<span id="cb35-3"><a href="#cb35-3" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> rmi nvcr.io/nvidia/nemo-helix/nhx-unsloth-training:<span class="op">&lt;</span>helix version<span class="op">&gt;</span> nvcr.io/nvidia/nemo-helix/nhx-customizer-tasks:<span class="op">&lt;</span>helix version<span class="op">&gt;</span></span></code></pre></div>
+<p>Each image has two names after 7a, and Docker frees the space only
+once both are removed. Remove any other image the first command listed
+with <code>docker rmi &lt;image&gt;</code>.</p>
+<p>If you used the build fallback in 7a, also remove the Helix checkout
+(<code>du -sh ~/nemo-helix</code> shows its size,
+<code>rm -rf ~/nemo-helix</code> removes it). The build leaves a Docker
+build cache: <code>docker buildx du</code> shows its size, and
+<code>docker buildx prune</code> clears it for every project on the
+machine, not only this one.</p>
+<p>If you rented the GPU machine, stop or delete it with your provider
+when you're done; a running instance bills by the hour. On Brev that's
+<code>brev stop &lt;instance&gt;</code> (keeps the disk) or
+<code>brev delete &lt;instance&gt;</code> (removes it).</p>
+<p>If this helped, please star <a
+href="https://github.com/NVIDIA-NeMo/nemo-helix">NeMo Helix on
+GitHub</a>.</p>
+
+    <div class="back">
+      <p>Track your progress on the <a href="./#card">recipe card checklist</a>.</p>
+      <p><a href="https://github.com/NVIDIA-NeMo/nemo-helix">Star NeMo Helix on GitHub</a></p>
+    </div>
+  </article>
+</main>
+<footer>
+  <div class="wrap">
+    <p>Companion to the GTC Berlin session "Post Training Open Models with Synthetic Data for Specialized Agents" by Yamini Kagal and Stefan Gavrilovic, NVIDIA.</p>
+    <p>Meridian Compute is made up and its incident history is synthetic.</p>
+    <p>Code and data are licensed under <a href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/LICENSE">Apache 2.0</a>.</p>
+  </div>
+</footer>
+<script>
+document.querySelectorAll(".doc h2[id], .doc h3[id]").forEach(function(h){
+  var a=document.createElement("a");
+  a.className="anchor";a.href="#"+h.id;a.textContent="#";
+  a.setAttribute("aria-label","Link to this section");
+  h.appendChild(a);
+});
+</script>
+</body>
+</html>

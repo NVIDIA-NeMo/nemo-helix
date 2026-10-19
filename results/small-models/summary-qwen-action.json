@@ -1,0 +1,66 @@
+[
+  {
+    "arm": "B-qwen-untuned.action",
+    "rows": 416,
+    "unanswered": 0,
+    "accuracy": 0.3774,
+    "macro_f1": 0.203,
+    "accuracy_by_format": {
+      "formal-ticket": 0.327,
+      "monitoring-json": 0.359,
+      "pager-alert": 0.405,
+      "slack-message": 0.372
+    },
+    "accuracy_heldout_families": 0.4224,
+    "accuracy_collision_cases": 0.2667,
+    "top_confusions": [
+      "Y->X: 133",
+      "W->X: 64",
+      "Z->X: 42",
+      "Y->W: 18",
+      "X->W: 1"
+    ],
+    "temperature": 0.95,
+    "ece": 0.199,
+    "brier": 0.2614,
+    "gate": {
+      "threshold": 0.9,
+      "automated": 0,
+      "to_human": 416,
+      "coverage": 0.0,
+      "error_among_automated": 0.0
+    }
+  },
+  {
+    "arm": "C-qwen-finetuned.action",
+    "rows": 416,
+    "unanswered": 0,
+    "accuracy": 0.8197,
+    "macro_f1": 0.7659,
+    "accuracy_by_format": {
+      "formal-ticket": 0.923,
+      "monitoring-json": 0.821,
+      "pager-alert": 0.78,
+      "slack-message": 0.832
+    },
+    "accuracy_heldout_families": 0.8017,
+    "accuracy_collision_cases": 0.7917,
+    "top_confusions": [
+      "Z->X: 27",
+      "Y->X: 22",
+      "X->Y: 15",
+      "X->W: 5",
+      "Z->W: 3"
+    ],
+    "temperature": 0.95,
+    "ece": 0.0476,
+    "brier": 0.1279,
+    "gate": {
+      "threshold": 0.9,
+      "automated": 188,
+      "to_human": 228,
+      "coverage": 0.4519,
+      "error_among_automated": 0.0213
+    }
+  }
+]

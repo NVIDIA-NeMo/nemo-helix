@@ -1,0 +1,65 @@
+[
+  {
+    "arm": "B-nemotron-untuned.action",
+    "rows": 416,
+    "unanswered": 0,
+    "accuracy": 0.3582,
+    "macro_f1": 0.1603,
+    "accuracy_by_format": {
+      "formal-ticket": 0.327,
+      "monitoring-json": 0.372,
+      "pager-alert": 0.399,
+      "slack-message": 0.301
+    },
+    "accuracy_heldout_families": 0.4052,
+    "accuracy_collision_cases": 0.2667,
+    "top_confusions": [
+      "Y->X: 150",
+      "W->X: 73",
+      "Z->X: 43",
+      "Y->W: 1"
+    ],
+    "temperature": 0.95,
+    "ece": 0.4621,
+    "brier": 0.4379,
+    "gate": {
+      "threshold": 0.91,
+      "automated": 70,
+      "to_human": 346,
+      "coverage": 0.1683,
+      "error_among_automated": 0.5
+    }
+  },
+  {
+    "arm": "C-nemotron-finetuned.action",
+    "rows": 416,
+    "unanswered": 0,
+    "accuracy": 0.8029,
+    "macro_f1": 0.7599,
+    "accuracy_by_format": {
+      "formal-ticket": 0.904,
+      "monitoring-json": 0.821,
+      "pager-alert": 0.734,
+      "slack-message": 0.85
+    },
+    "accuracy_heldout_families": 0.7672,
+    "accuracy_collision_cases": 0.8167,
+    "top_confusions": [
+      "Z->X: 23",
+      "Y->X: 23",
+      "X->Y: 17",
+      "X->Z: 7",
+      "X->W: 6"
+    ],
+    "temperature": 0.95,
+    "ece": 0.0326,
+    "brier": 0.1302,
+    "gate": {
+      "threshold": 0.91,
+      "automated": 162,
+      "to_human": 254,
+      "coverage": 0.3894,
+      "error_among_automated": 0.0185
+    }
+  }
+]

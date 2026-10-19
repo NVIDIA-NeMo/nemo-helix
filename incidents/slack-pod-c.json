@@ -1,0 +1,1 @@
+["hey all, dispatch queue on pod-c is lagging. jobs stuck pending, cli commands hanging or timing out after 30s. nothing is actually broken for users yet, but the scheduler controller seems to have stopped answering. dgx-c14 is showing as unresponsive in the status page. anyone else seeing this or is it just me?"]

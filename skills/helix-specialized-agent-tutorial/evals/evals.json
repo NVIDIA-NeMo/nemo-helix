@@ -1,0 +1,201 @@
+{
+  "skill_name": "helix-specialized-agent-tutorial",
+  "notes": "Run each prompt in a fresh agent at the repo root, with and without the skill. Agents describe commands; they don't run state-changing ones. Record turns and wall time.",
+  "evals": [
+    {
+      "id": 1,
+      "type": "explicit",
+      "prompt": "Use the helix-specialized-agent-tutorial skill to get me started.",
+      "should_trigger": true,
+      "expectations": [
+        "Loads the skill",
+        "Says up front that steps 7 to 9 haven't been run end to end on a single local GPU machine",
+        "Gives the 2 to 4 hour estimate for one A100 80GB with packaged data plus the step 7a image download, as our times",
+        "Asks the setup questions in one batch (machine, Helix and context, provider and model names, data, budget), offering defaults: local Helix at http://localhost:8080 and the packaged data",
+        "Starts with bash scripts/preflight.sh"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "implicit",
+      "prompt": "I just cloned this on my Linux box with an A100 80GB. Walk me through running the whole tutorial end to end. I want to finish today.",
+      "should_trigger": true,
+      "expectations": [
+        "Says up front that steps 7 to 9 haven't been run end to end on a single local GPU machine and sets expectations",
+        "Gives the 2 to 4 hour total plus the step 7a image download (about 21 GB), with the per-step breakdown, says these are our times, and flags that finishing today is possible but not certain",
+        "Doesn't ask which machine again; asks only the unanswered questions in one batch, with defaults (local Helix at http://localhost:8080, packaged data)",
+        "Asks for provider and exact model names before step 2",
+        "Runs preflight first and says FAILs for nemo CLI, services, provider and packages are expected before step 1",
+        "Skips the git clone line in step 1 because the repo is already cloned",
+        "Recommends the packaged data for a first run",
+        "Checks each step's You should see before moving on and stops on a mismatch",
+        "Asks before step 2, the step 7a image pull, training, deployment, step 9 and the four-batch agent evals",
+        "Runs documented blocking commands such as nemo jobs watch or deploy_model.py's wait once, and doesn't write its own sleep-and-check loop",
+        "Flags the commands docs/tutorial.md marks unverified",
+        "Before step 10, writes the temperatures from analyze_results.py into ROUTER_TEMPERATURE_ACTION and ROUTER_TEMPERATURE_RUNBOOK in agent/agent-decision-model.yaml and shows the diff before deploying",
+        "In step 7a, pulls the nvcr.io images with the installed Helix version's tag and keeps the my-registry/...:local tags, rather than building from source; if 7b can't find the images, uses the step 7a override, says it's unverified and asks before restarting the services",
+        "At the end, walks through the Clean up section of docs/tutorial.md and asks before each delete",
+        "Never asks the user to paste an API key into chat",
+        "Doesn't rerun a failed step 2, 3, 7, 8, 9 or 10 without asking"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "application",
+      "prompt": "I'm on a MacBook Pro M3, no NVIDIA GPU. What can I actually do with this tutorial? I'd like to get as far as I can this afternoon without paying for anything.",
+      "should_trigger": true,
+      "expectations": [
+        "Says Docker Desktop has to be running for the local Helix services",
+        "Runs preflight with --no-gpu",
+        "Offers steps 1 to 5 with the packaged data and the results-only analysis commands",
+        "Says steps 6 to 10 need a Linux x86_64 NVIDIA GPU machine",
+        "Warns that generating data on the free tier runs at about 0.07 rows a second, so 3,600 rows take about 14 hours, citing step 3 and D1",
+        "Asks before step 2, since it spends provider credits",
+        "Makes no claims about code it didn't check"
+      ]
+    },
+    {
+      "id": 4,
+      "type": "application",
+      "prompt": "Preflight on my Ubuntu GPU box says:\nFAIL  NVIDIA container runtime  not listed in docker info\n      fix: install the NVIDIA Container Toolkit and restart Docker\nEverything else passed. Which KNOWN-ISSUES entry is this and can I just skip it and go to step 7?",
+      "should_trigger": true,
+      "expectations": [
+        "Maps the FAIL to KNOWN-ISSUES P6",
+        "Says not to skip it: training and serving run in GPU containers, so steps 7 to 10 are blocked",
+        "Points to NVIDIA's Container Toolkit install guide (the P6 link) rather than pasting install commands from memory",
+        "Reruns preflight after the fix and checks the Helix services are still ready"
+      ]
+    },
+    {
+      "id": 5,
+      "type": "application",
+      "prompt": "I have a customer support agent. Its routing step picks one of 20 queues and then one of 3 actions. I have about 4,000 real labeled tickets from last year. Adapt this repo's recipe to my agent. What do I change?",
+      "should_trigger": true,
+      "expectations": [
+        "In its first reply, asks about per-option counts, label quality, decision-time inputs, date range and personal data, and lists the code facts that already apply, without proposing file edits yet",
+        "Flags that LETTERS covers only 12 options and zip() drops the rest",
+        "Flags relabel_actions() overwriting real action labels",
+        "Says to update LEAK_PATTERNS and the prompt wording in prompting.py",
+        "Says split_dataset.py has no time-based split and describes splitting by date by hand before step 5, with prompt and completion rows rendered by render_runbook_question and render_action_question",
+        "Explains that with 20 options the logits mode's top-20 logprobs can't score every letter, and offers raising logprobs within the provider's cap or splitting the question",
+        "Keeps the decision step as a tool driven by ROUTER_MODEL"
+      ]
+    },
+    {
+      "id": 6,
+      "type": "application",
+      "prompt": "Step 8 has been sitting in PENDING for 25 minutes with no logs. Should I kill it and redeploy?",
+      "should_trigger": true,
+      "expectations": [
+        "Maps to KNOWN-ISSUES S2",
+        "Says to wait up to the 45-minute timeout",
+        "Reminds that the deployment holds its GPU until deleted",
+        "Doesn't delete or redeploy without the user's go-ahead"
+      ]
+    },
+    {
+      "id": 7,
+      "type": "contextual",
+      "prompt": "Walk me through this tutorial on my A100 box.",
+      "context": "Session also has a general LLM fine-tuning skill, a Docker skill and a GitHub MCP server loaded.",
+      "should_trigger": true,
+      "expectations": [
+        "Loads this skill rather than the general fine-tuning skill"
+      ]
+    },
+    {
+      "id": 8,
+      "type": "negative",
+      "prompt": "Summarize RESULTS.md in three bullets.",
+      "should_trigger": false,
+      "expectations": [
+        "Doesn't load the skill"
+      ]
+    },
+    {
+      "id": 9,
+      "type": "negative",
+      "prompt": "Fix the typo on line 3 of README.md.",
+      "should_trigger": false,
+      "expectations": [
+        "Doesn't load the skill"
+      ]
+    },
+    {
+      "id": 10,
+      "type": "negative",
+      "prompt": "What's the price of an A100 on Brev today?",
+      "should_trigger": false,
+      "expectations": [
+        "Doesn't load the skill"
+      ]
+    },
+    {
+      "id": 11,
+      "type": "application",
+      "prompt": "Step 2 failed: nemo agents create says [Errno 17] File exists. What now?",
+      "should_trigger": true,
+      "expectations": [
+        "Maps to KNOWN-ISSUES A1",
+        "Uses an absolute --agent-config path as A1 says",
+        "Reruns step 2 once and checks its You should see"
+      ]
+    },
+    {
+      "id": 12,
+      "type": "application",
+      "prompt": "I did steps 0 to 5 on my Mac. Tomorrow I get an A100 Linux box. What do I need to redo there?",
+      "should_trigger": true,
+      "expectations": [
+        "Says to repeat steps 0, 1, 2 and 5 on the GPU machine, as step 6 says",
+        "Explains that step 10's baseline eval calls the step 2 agent deployment on the same Helix"
+      ]
+    },
+    {
+      "id": 13,
+      "type": "application",
+      "prompt": "So swapping in the fine-tuned model made my agent faster, right? I want to tell my VP. Also which Helix product did the training and the scoring?",
+      "should_trigger": true,
+      "expectations": [
+        "Says the fine-tuned model is faster measured on its own, but a whole agent run takes about the same time (A7)",
+        "Names the Helix post-training plugin and the Helix Evals plugin, not Customizer or Evaluator"
+      ]
+    },
+    {
+      "id": 14,
+      "type": "application",
+      "prompt": "I've got a fresh A100 box and I already know Helix. Can I just jump to step 7 and train?",
+      "should_trigger": true,
+      "expectations": [
+        "Uses the step dependency list: step 7 needs 0, 1, 4, 5 and 6 on that machine first, and 7a's images",
+        "Says step 2 is also needed on the same Helix if they want step 10",
+        "Asks before the step 7a image pull and training"
+      ]
+    },
+    {
+      "id": 15,
+      "type": "application",
+      "prompt": "I pulled the images in step 7a but the training job still fails pulling nhx-unsloth-training. What now?",
+      "should_trigger": true,
+      "expectations": [
+        "Maps to T1 and the step 7a override",
+        "Checks first that the my-registry/nhx-unsloth-training:local and my-registry/nhx-customizer-tasks:local tags from 7a exist",
+        "Uses NHX_UNSLOTH_TRAINING_IMAGE and NHX_CUSTOMIZER_TASKS_IMAGE set to the nvcr.io names with the installed Helix version's tag, then nemo services restart, as written in step 7a, and says it's unverified",
+        "Asks before restarting the services and says to delete agent deployments first (P3)",
+        "Stops and asks if the override doesn't fix it, instead of trying other settings"
+      ]
+    },
+    {
+      "id": 16,
+      "type": "application",
+      "prompt": "Step 7a's docker pull says manifest unknown for nhx-unsloth-training. Should I just build the images?",
+      "should_trigger": true,
+      "expectations": [
+        "Maps to T1 and says there's no published image tag for the installed Helix version",
+        "Asks for or shows the installed version from the 7a command, without guessing a tag",
+        "Offers both options from 7a, installing a Helix version that has images or the source build fallback (scripts/gpu-build-images.sh, 30 to 60 minutes, unverified), and lets the user choose",
+        "Doesn't suggest docker login or an NGC key; the images pull anonymously"
+      ]
+    }
+  ]
+}

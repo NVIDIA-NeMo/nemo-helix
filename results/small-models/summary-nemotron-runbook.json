@@ -1,0 +1,64 @@
+[
+  {
+    "arm": "B-nemotron-untuned.runbook",
+    "rows": 416,
+    "unanswered": 0,
+    "accuracy": 0.9688,
+    "macro_f1": 0.9724,
+    "accuracy_by_format": {
+      "formal-ticket": 0.981,
+      "monitoring-json": 0.962,
+      "pager-alert": 0.948,
+      "slack-message": 1.0
+    },
+    "accuracy_heldout_families": 1.0,
+    "accuracy_collision_cases": 0.95,
+    "top_confusions": [
+      "J->D: 7",
+      "C->D: 2",
+      "A->C: 1",
+      "L->D: 1",
+      "G->C: 1"
+    ],
+    "temperature": 1.6,
+    "ece": 0.0887,
+    "brier": 0.0355,
+    "gate": {
+      "threshold": 0.5,
+      "automated": 404,
+      "to_human": 12,
+      "coverage": 0.9712,
+      "error_among_automated": 0.0198
+    }
+  },
+  {
+    "arm": "C-nemotron-finetuned.runbook",
+    "rows": 416,
+    "unanswered": 0,
+    "accuracy": 0.9928,
+    "macro_f1": 0.9935,
+    "accuracy_by_format": {
+      "formal-ticket": 1.0,
+      "monitoring-json": 1.0,
+      "pager-alert": 0.983,
+      "slack-message": 1.0
+    },
+    "accuracy_heldout_families": 0.9828,
+    "accuracy_collision_cases": 0.9833,
+    "top_confusions": [
+      "D->A: 1",
+      "I->J: 1",
+      "J->D: 1"
+    ],
+    "temperature": 1.6,
+    "ece": 0.0046,
+    "brier": 0.0059,
+    "gate": {
+      "threshold": 0.5,
+      "automated": 416,
+      "to_human": 0,
+      "coverage": 1.0,
+      "error_among_automated": 0.0072
+    }
+  }
+]

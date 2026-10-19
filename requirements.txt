@@ -1,0 +1,7 @@
+# Python environment for the scripts in this repo (the `nemo` CLI alone is not enough:
+# the training and deployment scripts import the Helix SDK).
+#   uv venv && source .venv/bin/activate && uv pip install -r requirements.txt
+nemo-helix[all]==0.7.1
+pandas>=2.2
+httpx>=0.27
+mcp>=1.28.1,<2

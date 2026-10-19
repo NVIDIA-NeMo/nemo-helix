@@ -1,0 +1,14 @@
+You route incidents for Meridian Compute's GPU platform operations.
+This incident is owned by RB-03 Dispatch queue (Scheduler). Pick the response action.
+
+Incident:
+hey all, dispatch queue on pod-c is lagging. jobs stuck pending, cli commands hanging or timing out after 30s. nothing is actually broken for users yet, but the scheduler controller seems to have stopped answering. dgx-c14 is showing as unresponsive in the status page. anyone else seeing this or is it just me?
+
+Actions:
+W. auto-remediate: Run the runbook's automated fix and notify the team channel. No human paged.
+X. page-oncall: Page the owning team's on-call engineer now.
+Y. ticket-business-hours: Open a ticket for the owning team; handled during business hours.
+Z. escalate-incident-commander: Declare an incident and page the incident commander.
+
+Answer with the letter only.
+Answer:

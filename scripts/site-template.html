@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__ | Fast decision models with NeMo Helix</title>
+<meta name="description" content="__DESCRIPTION__">
+<meta name="theme-color" content="#7cbf2e">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,400;0,600;0,700;1,400&family=Zilla+Slab:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg: oklch(1 0 0);
+  --surface: oklch(0.972 0.008 131);
+  --line: oklch(0.87 0.015 131);
+  --ink: oklch(0.21 0.03 135);
+  --muted: oklch(0.45 0.025 135);
+  --green: oklch(0.72 0.19 131);
+  --green-ink: oklch(0.43 0.13 131);
+  --on-green: oklch(0.2 0.06 135);
+  --on-green-muted: oklch(0.3 0.08 135);
+  --term: oklch(0.2 0.01 131);
+  --term-ink: oklch(0.93 0.01 131);
+  --term-muted: oklch(0.74 0.02 131);
+  --warn: oklch(0.5 0.15 45);
+  --slab: "Zilla Slab", Rockwell, Georgia, serif;
+  --sans: "Public Sans", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}*,*::before,*::after{transition:none!important;animation:none!important}}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 1.05rem/1.65 var(--sans)}
+a{color:var(--green-ink);text-underline-offset:3px}
+a:hover{color:var(--ink)}
+:focus-visible{outline:3px solid var(--ink);outline-offset:2px;border-radius:3px}
+.skip{position:absolute;left:12px;top:-60px;z-index:20;background:var(--ink);color:white;padding:8px 14px;border-radius:6px;font-weight:600}
+.skip:focus{top:10px;color:white}
+.wrap{max-width:1160px;margin:0 auto;padding:0 28px}
+@media (max-width:640px){.wrap{padding:0 16px}}
+
+.top{background:var(--green);color:var(--on-green)}
+.top .nav{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;min-height:56px;font-size:.95rem;border-bottom:1px solid oklch(0.62 0.17 131)}
+.top .nav a{color:var(--on-green);text-decoration:none;font-weight:600}
+.top .nav a:hover{text-decoration:underline}
+.top .nav div{display:flex;gap:6px 18px;flex-wrap:wrap}
+@media (max-width:640px){.top .nav .opt{display:none}}
+.top .band{padding:22px 0 26px}
+.top .band p{margin:0;font-weight:600;color:var(--on-green-muted);font-size:.95rem}
+.top .band a{color:var(--on-green);font-weight:700}
+
+.doc{max-width:820px;padding:36px 0 24px}
+.doc h1,.doc h2,.doc h3{font-family:var(--slab);font-weight:700;line-height:1.15;text-wrap:balance;scroll-margin-top:16px}
+.doc h1{font-size:clamp(2rem,1.4rem + 2.4vw,3.2rem);letter-spacing:-0.015em;margin:0 0 20px}
+.doc h2{font-size:clamp(1.5rem,1.2rem + 1vw,2rem);margin:56px 0 12px;padding-top:20px;border-top:2px solid var(--ink)}
+.doc h3{font-size:1.3rem;margin:32px 0 8px}
+.doc p,.doc li{text-wrap:pretty}
+.doc p{margin:0 0 14px}
+.doc ul,.doc ol{padding-left:1.4em;margin:0 0 14px}
+.doc li{margin:6px 0}
+.doc li > p{margin:0 0 8px}
+.doc strong{font-weight:700}
+.doc .anchor{margin-left:.35em;font-family:var(--sans);font-weight:600;font-size:.7em;color:var(--muted);text-decoration:none;opacity:0}
+.doc h2:hover .anchor,.doc h3:hover .anchor,.doc .anchor:focus{opacity:1}
+@media (hover:none){.doc .anchor{opacity:1}}
+
+.doc blockquote{margin:0 0 20px;border:2px dashed var(--warn);border-radius:8px;padding:14px 18px;background:oklch(0.975 0.02 70)}
+.doc blockquote p:last-child{margin-bottom:0}
+.doc blockquote strong{color:var(--warn)}
+
+.doc code{font-family:var(--mono);font-size:.88em;background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:.05em .3em;overflow-wrap:anywhere}
+.doc pre{margin:0 0 16px;background:var(--term);color:var(--term-ink);font:.86rem/1.55 var(--mono);padding:12px 14px;border-radius:6px;overflow-x:auto;tab-size:4}
+.doc pre code{background:none;border:0;padding:0;font-size:inherit;color:inherit;overflow-wrap:normal}
+.doc .highlight .c,.doc .highlight .c1,.doc .highlight .cm{color:var(--term-muted)}
+.doc .highlight .s,.doc .highlight .s1,.doc .highlight .s2{color:oklch(0.86 0.12 131)}
+
+.doc table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse;font-size:.95rem;margin:0 0 18px}
+.doc th,.doc td{text-align:left;padding:8px 14px 8px 0;border-bottom:1px solid var(--line);vertical-align:top}
+.doc thead th{font-size:.82rem;font-weight:700;color:var(--muted);border-bottom:2px solid var(--ink)}
+
+.back{margin:40px 0 0;padding:20px 22px;background:var(--surface);border-radius:8px;display:flex;flex-wrap:wrap;gap:8px 24px;align-items:center;justify-content:space-between}
+.back p{margin:0}
+.back a{font-weight:700}
+footer{padding:28px 0 44px;color:var(--muted);font-size:.9rem}
+footer p{margin:0 0 6px}
+@media print{.top .nav,.skip,.back,.doc .anchor{display:none}.top{background:none}body{font-size:11pt}.doc pre{white-space:pre-wrap}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to the tutorial</a>
+<header class="top">
+  <div class="wrap">
+    <nav class="nav" aria-label="Site">
+      <a href="./">NeMo Helix recipes</a>
+      <div>
+        <a class="opt" href="./#card">The recipe card</a>
+        <a href="https://github.com/NVIDIA-NeMo/nemo-helix/tree/gtc-berlin-2026-tutorial">Repo</a>
+        <a class="opt" href="https://github.com/NVIDIA-NeMo/nemo-helix">NeMo Helix</a>
+      </div>
+    </nav>
+    <div class="band">
+      <p>Every step in full. The checklist, demo and results are on the <a href="./">recipe card</a>.</p>
+    </div>
+  </div>
+</header>
+<main id="main" class="wrap">
+  <article class="doc">
+__CONTENT__
+    <div class="back">
+      <p>Track your progress on the <a href="./#card">recipe card checklist</a>.</p>
+      <p><a href="https://github.com/NVIDIA-NeMo/nemo-helix">Star NeMo Helix on GitHub</a></p>
+    </div>
+  </article>
+</main>
+<footer>
+  <div class="wrap">
+    <p>Companion to the GTC Berlin session "Post Training Open Models with Synthetic Data for Specialized Agents" by Yamini Kagal and Stefan Gavrilovic, NVIDIA.</p>
+    <p>Meridian Compute is made up and its incident history is synthetic.</p>
+    <p>Code and data are licensed under <a href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/LICENSE">Apache 2.0</a>.</p>
+  </div>
+</footer>
+<script>
+document.querySelectorAll(".doc h2[id], .doc h3[id]").forEach(function(h){
+  var a=document.createElement("a");
+  a.className="anchor";a.href="#"+h.id;a.textContent="#";
+  a.setAttribute("aria-label","Link to this section");
+  h.appendChild(a);
+});
+</script>
+</body>
+</html>

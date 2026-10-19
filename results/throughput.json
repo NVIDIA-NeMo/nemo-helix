@@ -1,0 +1,20 @@
+{
+  "qwen-finetuned": {
+    "requests": 400,
+    "ok": 400,
+    "seconds": 13.6,
+    "decisions_per_second": 29.5,
+    "concurrency": 16,
+    "gpus": 1,
+    "path": "Mac -> Helix gateway -> in-cluster vLLM (1 GPU)"
+  },
+  "nemotron-finetuned": {
+    "requests": 400,
+    "ok": 400,
+    "seconds": 19.6,
+    "decisions_per_second": 20.5,
+    "concurrency": 16,
+    "gpus": 1,
+    "path": "Mac -> Helix gateway -> in-cluster vLLM (1 GPU)"
+  }
+}

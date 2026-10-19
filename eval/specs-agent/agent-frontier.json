@@ -1,0 +1,62 @@
+{
+  "dataset": "default/meridian-incidents-test#eval.jsonl",
+  "prompt_template": "{{ item.incident_text }}",
+  "target": {
+    "format": "generic",
+    "name": "agent-frontier",
+    "url": "http://localhost:8080/apis/agents/v2/workspaces/default/deployments/infra-ops-agent-deployment/-/v1/chat/completions",
+    "body": {
+      "messages": [
+        {
+          "role": "user",
+          "content": "{{ prompt }}"
+        }
+      ]
+    },
+    "response_path": "$.choices[0].message.content"
+  },
+  "params": {
+    "parallelism": 2,
+    "limit_samples": 50,
+    "ignore_request_failure": true,
+    "request_timeout": 240,
+    "max_retries": 3
+  },
+  "metrics": [
+    {
+      "bundle_kind": "metric-bundle",
+      "bundle_format_version": "v1",
+      "metric_type": "exact-match",
+      "metadata": {
+        "description": "line one of the agent's answer equals the labeled runbook",
+        "labels": {}
+      },
+      "outputs": [
+        {
+          "name": "exact-match",
+          "description": null,
+          "value_json_schema": {
+            "description": "Continuous numeric metric value.",
+            "title": "ContinuousScore",
+            "type": "number"
+          }
+        }
+      ],
+      "secrets": {},
+      "payload": {
+        "kind": "inline",
+        "metric": {
+          "type": "exact-match",
+          "description": null,
+          "labels": {},
+          "supported_job_types": [
+            "online",
+            "offline"
+          ],
+          "reference": "{{ item.runbook_id }}",
+          "candidate": "{{ (sample.output_text | trim)[:5] }}"
+        }
+      }
+    }
+  ]
+}

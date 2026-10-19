@@ -1,0 +1,60 @@
+[
+  {
+    "arm": "B-qwen-untuned.runbook",
+    "rows": 416,
+    "unanswered": 0,
+    "accuracy": 0.9375,
+    "macro_f1": 0.9443,
+    "accuracy_by_format": {
+      "formal-ticket": 0.981,
+      "monitoring-json": 0.962,
+      "pager-alert": 0.884,
+      "slack-message": 0.982
+    },
+    "accuracy_heldout_families": 0.9397,
+    "accuracy_collision_cases": 0.9083,
+    "top_confusions": [
+      "J->D: 12",
+      "C->D: 4",
+      "L->D: 2",
+      "A->D: 2",
+      "G->D: 2"
+    ],
+    "temperature": 1.4,
+    "ece": 0.1346,
+    "brier": 0.0675,
+    "gate": {
+      "threshold": 0.5,
+      "automated": 381,
+      "to_human": 35,
+      "coverage": 0.9159,
+      "error_among_automated": 0.0315
+    }
+  },
+  {
+    "arm": "C-qwen-finetuned.runbook",
+    "rows": 416,
+    "unanswered": 0,
+    "accuracy": 1.0,
+    "macro_f1": 1.0,
+    "accuracy_by_format": {
+      "formal-ticket": 1.0,
+      "monitoring-json": 1.0,
+      "pager-alert": 1.0,
+      "slack-message": 1.0
+    },
+    "accuracy_heldout_families": 1.0,
+    "accuracy_collision_cases": 1.0,
+    "top_confusions": [],
+    "temperature": 1.4,
+    "ece": 0.0053,
+    "brier": 0.0006,
+    "gate": {
+      "threshold": 0.5,
+      "automated": 416,
+      "to_human": 0,
+      "coverage": 1.0,
+      "error_among_automated": 0.0
+    }
+  }
+]

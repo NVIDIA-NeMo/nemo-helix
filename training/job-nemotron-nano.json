@@ -1,0 +1,58 @@
+{
+  "name": "meridian-router-nemotron-nano-9b",
+  "model": {
+    "name": "default/nemotron-nano-9b-v2",
+    "max_seq_length": 2048,
+    "dtype": "bfloat16",
+    "trust_remote_code": false
+  },
+  "dataset": {
+    "path": "default/meridian-incidents-train",
+    "text_field": "text",
+    "apply_chat_template": false,
+    "validation_path": "default/meridian-incidents-train"
+  },
+  "training": {
+    "training_type": "sft",
+    "finetuning_type": "lora",
+    "lora": {
+      "rank": 16,
+      "alpha": 32,
+      "dropout": 0.05,
+      "target_modules": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "up_proj",
+        "down_proj",
+        "in_proj"
+      ]
+    },
+    "use_gradient_checkpointing": "unsloth"
+  },
+  "schedule": {
+    "epochs": 2,
+    "warmup_ratio": 0.05,
+    "lr_scheduler_type": "cosine",
+    "logging_steps": 10,
+    "seed": 29
+  },
+  "batch": {
+    "per_device_train_batch_size": 4,
+    "gradient_accumulation_steps": 8
+  },
+  "optimizer": {
+    "learning_rate": 0.0001,
+    "weight_decay": 0.01
+  },
+  "hardware": {
+    "gpus": "0",
+    "precision": "bf16"
+  },
+  "output": {
+    "name": "meridian-router-nemotron-nano-9b-seed29",
+    "description": "Nemotron Nano 9B v2 LoRA on Meridian routing and response policy; adapter served on the base with vLLM; loss on the answer letter only.",
+    "save_method": "lora"
+  }
+}
