@@ -2,13 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { FeedbackAnnotationInputValue } from '@nemo/sdk/generated/platform/schema';
-import { Flex, Text } from '@nvidia/foundations-react-core';
-import { SpanFeedbackControls } from '@studio/components/IntakeDetail/IntakeComponents/SpanFeedbackControls';
-import { SpanTriggerLabel } from '@studio/components/IntakeDetail/IntakeComponents/SpanTriggerLabel';
-import { SpanTriggerMeta } from '@studio/components/IntakeDetail/IntakeComponents/SpanTriggerMeta';
 import { TraceDetailLayout } from '@studio/components/IntakeDetail/TraceDetailLayout';
 import { TraceSpanTree } from '@studio/components/IntakeDetail/TraceDetailSpanTree';
-import { TraceSpanAccordionContent } from '@studio/components/IntakeDetail/TraceSpanAccordionContent';
+import { TraceSelectedSpanPanel } from '@studio/components/IntakeDetail/TraceSelectedSpanPanel';
 import type { SessionTrajectory, SpanTableRow } from '@studio/util/intakeTelemetry';
 import type { FC, ReactNode } from 'react';
 
@@ -70,50 +66,18 @@ export const SpanTreeView: FC<SpanTreeViewProps> = ({
       />
     }
   >
-    {banner}
-    <div className="min-w-0 overflow-hidden rounded-lg bg-surface-raised">
-      {selectedSpan ? (
-        <>
-          <Flex
-            align="center"
-            gap="density-lg"
-            className="border-b border-base px-density-lg py-density-md min-w-0"
-          >
-            <span className="flex min-w-0 flex-1 items-center gap-density-sm">
-              {/* No indentation: the selected span stands alone, not in a tree row. */}
-              <SpanTriggerLabel span={selectedSpan} showHierarchy={false} />
-            </span>
-            <span className="flex shrink-0 items-center gap-density-lg">
-              <SpanTriggerMeta span={selectedSpan} />
-              <SpanFeedbackControls
-                workspace={workspace}
-                spanId={selectedSpan.span_id}
-                sessionId={selectedSpan.session_id}
-                activeFeedback={activeFeedback}
-                hasNotes={hasNotes}
-                onAddNote={onAddNote}
-              />
-            </span>
-          </Flex>
-          <div className="p-density-lg">
-            <TraceSpanAccordionContent
-              workspace={workspace}
-              spanId={selectedSpan.span_id}
-              summarySpan={selectedSpan}
-              expandToken={expandToken}
-              collapseToken={collapseToken}
-              annotationCount={annotationCount}
-              focusNoteNonce={focusNoteNonce}
-            />
-          </div>
-        </>
-      ) : (
-        (emptyContent ?? (
-          <Text kind="body/regular/sm" className="text-secondary p-density-lg">
-            Select a span from the tree to view its details.
-          </Text>
-        ))
-      )}
-    </div>
+    <TraceSelectedSpanPanel
+      workspace={workspace}
+      selectedSpan={selectedSpan}
+      banner={banner}
+      expandToken={expandToken}
+      collapseToken={collapseToken}
+      activeFeedback={activeFeedback}
+      annotationCount={annotationCount}
+      hasNotes={hasNotes}
+      focusNoteNonce={focusNoteNonce}
+      onAddNote={onAddNote}
+      emptyContent={emptyContent}
+    />
   </TraceDetailLayout>
 );

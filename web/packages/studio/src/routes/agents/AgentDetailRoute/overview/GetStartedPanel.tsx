@@ -22,7 +22,7 @@ const TRACES_DESCRIPTION =
   'Import observability data to generate insights and power dataset generation from traces, without altering agent code.';
 const INTEGRATE_HEADING = 'Integrate your agent';
 const INTEGRATE_DESCRIPTION =
-  'Integrate your agent to NeMo Platform via Fabric to power evaluations, auto optimization, and manage agent deployments.';
+  'Integrate your agent to NeMo Helix via Fabric to power evaluations, auto optimization, and manage agent deployments.';
 
 /**
  * What the overview shows before an agent reports anything: the two ways to connect it.

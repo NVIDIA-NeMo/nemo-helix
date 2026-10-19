@@ -19,7 +19,7 @@ import {
 import {
   getSecretsListSecretsQueryKey,
   useSecretsCreateSecret,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/secrets';
 import { useQueryClient } from '@tanstack/react-query';
 import type { FC } from 'react';
 

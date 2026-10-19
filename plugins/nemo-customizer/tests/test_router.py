@@ -14,7 +14,7 @@ from nemo_customizer.router import (
     CustomizationRouterService,
     merge_router_dependencies,
 )
-from nemo_platform_plugin.service import RouterSpec
+from nemo_helix_plugin.service import RouterSpec
 
 
 class _FakeContributor:
@@ -103,6 +103,33 @@ def test_prefix_collision_raises(monkeypatch: pytest.MonkeyPatch) -> None:
         CustomizationRouterService()
 
 
+def test_template_route_collision_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _TemplateDup(_FakeContributor):
+        name = "template-dup"
+
+        def get_routers(self) -> list[RouterSpec]:
+            router = APIRouter()
+
+            @router.get("/job-templates")
+            async def list_templates() -> dict[str, str]:
+                return {"backend": "template-dup"}
+
+            return [
+                RouterSpec(
+                    router=router,
+                    prefix="/v2/workspaces/{workspace}",
+                    tag="Template Dup",
+                ),
+            ]
+
+    monkeypatch.setattr(
+        "nemo_customizer.router.discover_customization_contributors",
+        lambda: {"template-dup": _TemplateDup()},
+    )
+    with pytest.raises(CustomizationRouterError, match="collision"):
+        CustomizationRouterService()
+
+
 def test_shared_parent_prefix_with_disjoint_routes_is_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     """Two contributors mounting at the same parent prefix is fine as long as their
     actual routes underneath don't collide. This is the automodel + unsloth case:
@@ -151,8 +178,8 @@ def test_authz_derives_from_contributor_routes(monkeypatch: pytest.MonkeyPatch) 
     Doubles as the Phase-0 derivation gate: the customization hub plus backends
     must derive with no problems and no fail-closed DENY bindings.
     """
-    from nemo_platform_plugin.authz import CallerKind, Permission, path_rule
-    from nemo_platform_plugin.authz_discovery import _derive_service_contribution
+    from nemo_helix_plugin.authz import CallerKind, Permission, path_rule
+    from nemo_helix_plugin.authz_discovery import _derive_service_contribution
 
     def _make_contributor(backend: str) -> object:
         class _Contributor:

@@ -61,14 +61,14 @@ e2e/configs/.*.merged.yaml
 .files_storage/
 .data_designer_assets/
 # Auth policy WASM is built in CI/containers, not checked in
-services/core/auth/src/nmp/core/auth/assets/policy.wasm
+services/core/auth/src/nhx/core/auth/assets/policy.wasm
 logs/*
 *.log
 *.log.jsonl
 k8s/helm/Chart.lock
 k8s/helm/charts/
 chart-tmp
-nemo-platform-*.tgz
+nemo-helix-*.tgz
 # Visual Studio Code config
 .vscode/
 # PyCharm config
@@ -104,10 +104,6 @@ services/core/infrastructure/jobs/jobs.db
 *.pem
 *.enc
 *.csr
-
-# SDK artifacts
-sdk/openapi_schema_mapping_report.txt
-sdk/python/nemo-platform/uv.lock
 
 # Terraform
 **/.terraform
@@ -161,7 +157,10 @@ docs/helm/index.mdx
 .act-variables
 .act-secrets
 
-# iron-swarm CLI run artifacts (builds, policies, run-logs) written into the working dir
+# agent-hardener CLI run artifacts (builds, policies, run-logs) written into the working dir
+.agent-hardener/
+agent-hardener.yaml
+# Pre-rename run artifacts still on developer machines
 .iron-swarm/
 iron-swarm.yaml
 # Playwright MCP session output
@@ -171,8 +170,13 @@ iron-swarm.yaml
 docs/superpowers/
 # Per-worker fatal-signal tracebacks (PYTEST_CRASH_DUMP_DIR)
 crash-dumps/
+# Locally built nemo-helix wheels for Dockerfile.fabric-local builds
+agents/*/wheelhouse/
 
 # Names a specific cloud project (bucket, service accounts, registry paths), so
 # it stays local. plugins/_temporary-scaled-evals/deploy/k8s/local.env.example is the
 # committed template.
 plugins/_temporary-scaled-evals/deploy/k8s/local.env
+
+# Renames
+services/core/auth/src/nmp/

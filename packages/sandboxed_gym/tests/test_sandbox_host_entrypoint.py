@@ -15,10 +15,11 @@ from sandboxed_gym.host.entrypoint import (
     gym_host_script_path,
     packaged_gym_host_script,
 )
+from sandboxed_gym.host.models import GymHostSpec, GymHostVolumeMount
 from sandboxed_gym.runtime import gym_host_runtime as runtime
 
 #: These two tests instantiate the host provider, which drives the OpenSandbox SDK directly. The
-#: SDK is an optional extra (`sandboxed-gym[opensandbox]`) because only a deployment that
+#: SDK is an optional extra (`nemo-sandboxed-gym[opensandbox]`) because only a deployment that
 #: provisions real sandboxes needs it, so it is absent from a plain workspace checkout. Everything
 #: else in this package works without it -- the broker contract and the sandbox types are vendored
 #: (see `sandboxed_gym.wire`).
@@ -85,13 +86,59 @@ def test_opensandbox_host_provider_honors_explicit_skip_health_check():
     assert provider._create_options["skip_health_check"] is False
 
 
+@requires_opensandbox
+def test_opensandbox_host_provider_uses_configured_protocol_for_bare_endpoints():
+    from sandboxed_gym.host.opensandbox import OpenSandboxGymHostProvider
+
+    provider = OpenSandboxGymHostProvider(connection={"protocol": "http"})
+
+    assert provider._absolute_url("10.244.6.40:8080") == "http://10.244.6.40:8080"
+
+
+def _gym_host_spec(*, entrypoint: tuple[str, ...] | None = None) -> GymHostSpec:
+    return GymHostSpec(
+        job_id="job-1",
+        runtime_image="nhx-gym-host:dev",
+        environment_mount=GymHostVolumeMount(
+            pvc_claim="job-storage",
+            sub_path="environment",
+            mount_path="/job/environment",
+            read_only=True,
+        ),
+        workspace_mount=GymHostVolumeMount(
+            pvc_claim="job-storage",
+            sub_path="work",
+            mount_path="/job/work",
+        ),
+        entrypoint=entrypoint,
+    )
+
+
+@requires_opensandbox
+def test_opensandbox_host_provider_supplies_runtime_entrypoint_when_omitted():
+    from sandboxed_gym.host.opensandbox import OpenSandboxGymHostProvider
+
+    provider = OpenSandboxGymHostProvider(connection={"domain": "x", "api_key": "k"})
+    sandbox_spec = provider._to_sandbox_spec(_gym_host_spec())
+
+    assert sandbox_spec.entrypoint == ["python", "-m", "sandboxed_gym.runtime.gym_host_runtime"]
+
+
+@requires_opensandbox
+def test_opensandbox_host_provider_preserves_configured_entrypoint():
+    from sandboxed_gym.host.opensandbox import OpenSandboxGymHostProvider
+
+    provider = OpenSandboxGymHostProvider(connection={"domain": "x", "api_key": "k"})
+    sandbox_spec = provider._to_sandbox_spec(_gym_host_spec(entrypoint=("custom-runtime", "--serve")))
+
+    assert sandbox_spec.entrypoint == ["custom-runtime", "--serve"]
+
+
 # --------------------------------------------------------------------------------------------
 # gym_host.sh — the copy that stages Gym into a writable tree
 #
-# Only the OpenSandbox path runs this script: `build_gym_host_spec` falls back to
-# `default_gym_host_entrypoint()` when the sandbox config names no entrypoint, while the Docker
-# provider uses its image's own CMD. That is why a restart bug here survived — the path it is on
-# has never been executed.
+# A caller can configure this explicit bootstrap for a compatible runtime image. The standard
+# platform image instead starts the installed runtime module directly.
 # --------------------------------------------------------------------------------------------
 
 
@@ -127,6 +174,36 @@ def _run_gym_host(paths: dict[str, Path], gym_rw: Path) -> subprocess.CompletedP
         text=True,
         timeout=60,
     )
+
+
+def test_the_staged_path_is_published_for_search_root_discovery(tmp_path: Path) -> None:
+    paths = _fake_host(tmp_path)
+    recorded = tmp_path / "recorded-src"
+    python = paths["venv"] / "bin" / "python"
+    python.write_text(
+        '#!/bin/sh\nprintf \'%s\\n\' "$SANDBOXED_GYM_SRC_DIR" > "$RECORDED"\n',
+        encoding="utf-8",
+    )
+    python.chmod(0o755)
+    gym_rw = tmp_path / "custom-gym" / "Gym"
+
+    result = subprocess.run(
+        [
+            "/bin/sh",
+            str(gym_host_script_path(git_root=str(paths["root"]))),
+            str(paths["venv"]),
+            str(paths["root"]),
+            str(gym_rw),
+            str(paths["runtime"]),
+        ],
+        env={**os.environ, "SANDBOXED_GYM_TREE": str(paths["tree"]), "RECORDED": str(recorded)},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert recorded.read_text(encoding="utf-8") == f"{gym_rw}\n"
 
 
 def test_the_gym_tree_is_staged_where_pythonpath_expects_it(tmp_path: Path) -> None:

@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from nmp.common.entities import DEFAULT_WORKSPACE
-from nmp.guardrails.app.services.utils import normalize_config_ids
+from nhx.common.entities import DEFAULT_WORKSPACE
+from nhx.guardrails.app.services.utils import normalize_config_ids
 
 
 def test_normalize_config_ids():

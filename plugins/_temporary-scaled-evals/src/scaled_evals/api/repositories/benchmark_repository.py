@@ -25,7 +25,7 @@ from scaled_evals.api.repositories.base_repository import (
 )
 
 BENCHMARK_COLUMNS = (
-    "id, name, slug, description, visibility, qualification_status, "
+    "id, owner_id, name, slug, description, visibility, qualification_status, "
     "qualification_evidence, qualified_at, qualified_by, current_revision, created_at, updated_at"
 )
 _PATCHABLE_COLUMNS = frozenset({"name", "slug", "description", "visibility"})

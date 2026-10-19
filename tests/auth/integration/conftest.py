@@ -12,7 +12,7 @@ from e2e.services_pool_fixtures import (  # noqa: F401
     append_services_pool_report_sections,
     configure_services_pool,
     register_services_pool_items,
-    services_pool_sdk,
+    services_pool_client,
 )
 
 

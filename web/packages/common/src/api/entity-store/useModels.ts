@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { modelsListModels } from '@nemo/sdk/generated/platform/api';
+import { modelsListModels } from '@nemo/sdk/generated/platform/models';
 import { ModelsListModelsParams, ModelEntitysPage } from '@nemo/sdk/generated/platform/schema';
 import { useInfiniteQuery, UseQueryOptions } from '@tanstack/react-query';
 import { useEffect } from 'react';

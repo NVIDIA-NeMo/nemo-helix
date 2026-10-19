@@ -4,9 +4,10 @@
  */
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
-import { useGuardrailsGetGuardrailConfig } from '@nemo/sdk/generated/platform/api';
+import { useGuardrailsGetGuardrailConfig } from '@nemo/sdk/generated/platform/guardrails';
 import { Flex, PageHeader, Stack, Tabs, Text } from '@nvidia/foundations-react-core';
 import { Loading } from '@studio/components/Layouts/Loading';
+import { SuspenseOutlet } from '@studio/components/Layouts/SuspenseOutlet';
 import { ROUTE_PARAMS, ROUTES } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
@@ -20,8 +21,8 @@ import {
   getGuardrailVirtualModelsRoute,
 } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
-import { type FC, Suspense } from 'react';
-import { Link, Outlet, matchPath, useLocation } from 'react-router';
+import { type FC } from 'react';
+import { Link, matchPath, useLocation } from 'react-router';
 
 export const GuardrailDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
@@ -109,9 +110,7 @@ export const GuardrailDetailRoute: FC = () => {
             renderLink={(item) => <Link to={item.href!}>{item.children}</Link>}
           />
 
-          <Suspense fallback={<Loading description="Loading..." />}>
-            <Outlet />
-          </Suspense>
+          <SuspenseOutlet />
         </Stack>
       </GuardrailFormProvider>
     </AccessibleTitle>

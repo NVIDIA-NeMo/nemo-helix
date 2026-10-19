@@ -1,0 +1,320 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "email-security-triage"
+            }
+          }
+        ],
+        "droppedAttributesCount": 0
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "email-security-triage"
+          },
+          "spans": [
+            {
+              "traceId": "59dce43c08b51255ea6eecc7df276b44",
+              "spanId": "6cca327e801f7240",
+              "name": "email-security-triage.run",
+              "kind": 1,
+              "startTimeUnixNano": "1787091535000000000",
+              "endTimeUnixNano": "1787091547000000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "email-security-triage"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.version",
+                  "value": {
+                    "stringValue": "0.7.0"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "nvidia-nemotron-3-nano-30b-a3b"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": 3644
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": 71
+                  }
+                },
+                {
+                  "key": "openinference.span.kind",
+                  "value": {
+                    "stringValue": "AGENT"
+                  }
+                },
+                {
+                  "key": "input.value",
+                  "value": {
+                    "stringValue": "{\"user_message\": \"is this phishing?\", \"emails\": [{\"from\": \"alerts@github.com\", \"subject\": \"A new SSH key was added to your account\", \"body\": \"If you did not add this key, review your account security settings at https://github.com/settings/keys.\"}]}"
+                  }
+                },
+                {
+                  "key": "output.value",
+                  "value": {
+                    "stringValue": "benign\nThe notification comes from the genuine GitHub domain, links to that same domain's settings page, and asks for no credentials."
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "3f2a1c00-0017-4a00-8000-000000000017"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 1
+              },
+              "links": [],
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "59dce43c08b51255ea6eecc7df276b44",
+              "spanId": "a24b68770353d612",
+              "parentSpanId": "6cca327e801f7240",
+              "name": "chat.completions",
+              "kind": 1,
+              "startTimeUnixNano": "1787091541000000000",
+              "endTimeUnixNano": "1787091547000000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "email-security-triage"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "default/nvidia-nemotron-3-nano-30b-a3b"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": 3644
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": 71
+                  }
+                },
+                {
+                  "key": "llm.cost.total",
+                  "value": {
+                    "doubleValue": 0.0005892
+                  }
+                },
+                {
+                  "key": "openinference.span.kind",
+                  "value": {
+                    "stringValue": "LLM"
+                  }
+                },
+                {
+                  "key": "input.value",
+                  "value": {
+                    "stringValue": "{\"user_message\": \"is this phishing?\", \"emails\": [{\"from\": \"alerts@github.com\", \"subject\": \"A new SSH key was added to your account\", \"body\": \"If you did not add this key, review your account security settings at https://github.com/settings/keys.\"}]}"
+                  }
+                },
+                {
+                  "key": "output.value",
+                  "value": {
+                    "stringValue": "benign\nThe notification comes from the genuine GitHub domain, links to that same domain's settings page, and asks for no credentials."
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "3f2a1c00-0017-4a00-8000-000000000017"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 1
+              },
+              "links": [],
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "ddc649c0ea220c80d988c667e81c2d4a",
+              "spanId": "125816c7aad51701",
+              "name": "email-security-triage.run",
+              "kind": 1,
+              "startTimeUnixNano": "1787867423000000000",
+              "endTimeUnixNano": "1787867435000000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "email-security-triage"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.version",
+                  "value": {
+                    "stringValue": "0.7.0"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "nvidia-nemotron-3-nano-30b-a3b"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": 3610
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": 74
+                  }
+                },
+                {
+                  "key": "openinference.span.kind",
+                  "value": {
+                    "stringValue": "AGENT"
+                  }
+                },
+                {
+                  "key": "input.value",
+                  "value": {
+                    "stringValue": "{\"user_message\": \"is this legit?\", \"emails\": [{\"from\": \"billing@healthsoftsolutions.example.com\", \"subject\": \"Subscription Renewal Confirmation - Invoice #INV-2025-0874\", \"body\": \"Hello,\\n\\nYour subscription to PatientFlow Analytics has been renewed for the period 2025-09-01 through 2026-08-31. The charge of $12,450.00 was processed to the corporate card ending in 1234. Please find the official receipt attached for your records. No further action is required from you at this time.\\n\\nThank you,\\nHealthSoft Solutions Billing Department\"}]}"
+                  }
+                },
+                {
+                  "key": "output.value",
+                  "value": {
+                    "stringValue": "benign\nThe message confirms a transaction that already completed and asks for nothing: no link, no credential prompt, no payment redirect. The sender domain matches the vendor named in the body, and the contact details point back to that same domain."
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "3f2a1c00-0002-4a00-8000-000000000002"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 1
+              },
+              "links": [],
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "ddc649c0ea220c80d988c667e81c2d4a",
+              "spanId": "8e0233df6964074b",
+              "parentSpanId": "125816c7aad51701",
+              "name": "chat.completions",
+              "kind": 1,
+              "startTimeUnixNano": "1787867429000000000",
+              "endTimeUnixNano": "1787867435000000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "email-security-triage"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "default/nvidia-nemotron-3-nano-30b-a3b"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": 3610
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": 74
+                  }
+                },
+                {
+                  "key": "llm.cost.total",
+                  "value": {
+                    "doubleValue": 0.0005859
+                  }
+                },
+                {
+                  "key": "openinference.span.kind",
+                  "value": {
+                    "stringValue": "LLM"
+                  }
+                },
+                {
+                  "key": "input.value",
+                  "value": {
+                    "stringValue": "{\"user_message\": \"is this legit?\", \"emails\": [{\"from\": \"billing@healthsoftsolutions.example.com\", \"subject\": \"Subscription Renewal Confirmation - Invoice #INV-2025-0874\", \"body\": \"Hello,\\n\\nYour subscription to PatientFlow Analytics has been renewed for the period 2025-09-01 through 2026-08-31. The charge of $12,450.00 was processed to the corporate card ending in 1234. Please find the official receipt attached for your records. No further action is required from you at this time.\\n\\nThank you,\\nHealthSoft Solutions Billing Department\"}]}"
+                  }
+                },
+                {
+                  "key": "output.value",
+                  "value": {
+                    "stringValue": "benign\nThe message confirms a transaction that already completed and asks for nothing: no link, no credential prompt, no payment redirect. The sender domain matches the vendor named in the body, and the contact details point back to that same domain."
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "3f2a1c00-0002-4a00-8000-000000000002"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 1
+              },
+              "links": [],
+              "droppedLinksCount": 0,
+              "flags": 257
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

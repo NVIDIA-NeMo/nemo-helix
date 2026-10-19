@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI, HTTPException, Request
-from nmp.intake.readiness import CLICKHOUSE_UNAVAILABLE_MESSAGE
-from nmp.intake.spans.clickhouse_client import (
+from nhx.intake.readiness import CLICKHOUSE_UNAVAILABLE_MESSAGE
+from nhx.intake.spans.clickhouse_client import (
     ClickHouseSettings,
     ClickHouseSpanClient,
     get_clickhouse_client,

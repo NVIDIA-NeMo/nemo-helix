@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useModelsListModels as useListModels } from '@nemo/sdk/generated/platform/api';
+import { useModelsListModels as useListModels } from '@nemo/sdk/generated/platform/models';
 import { suppressConsoleError } from '@nemo/testing/utils/suppress-console';
 import { SearchBaseModels } from '@studio/components/FilterFields/SearchBaseModels';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -10,7 +10,7 @@ import userEvent from '@testing-library/user-event';
 import { useDebounce } from 'use-debounce';
 
 // Mock the SDK hook
-vi.mock('@nemo/sdk/generated/platform/api', () => ({
+vi.mock('@nemo/sdk/generated/platform/models', () => ({
   useModelsListModels: vi.fn(),
 }));
 

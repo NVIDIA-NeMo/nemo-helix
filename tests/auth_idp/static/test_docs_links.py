@@ -4,7 +4,7 @@
 from pathlib import Path
 
 import pytest
-from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 
 pytestmark = [pytest.mark.auth_idp]
 

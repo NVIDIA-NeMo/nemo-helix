@@ -8,9 +8,9 @@ from __future__ import annotations
 from typing import ClassVar
 
 from fastapi import Request
-from nemo_platform_plugin.authz import AuthzScope
-from nemo_platform_plugin.jobs.routes import add_job_routes
-from nemo_platform_plugin.service import ExceptionHandler, NemoService, RouterSpec
+from nemo_helix_plugin.authz import AuthzScope
+from nemo_helix_plugin.jobs.routes import add_job_routes
+from nemo_helix_plugin.service import ExceptionHandler, NemoService, RouterSpec
 from pydantic import ValidationError
 from starlette import status
 from starlette.responses import JSONResponse
@@ -20,7 +20,7 @@ _AUTHZ = AuthzScope(_SERVICE_NAME)
 
 
 class SafeSynthesizerService(NemoService):
-    """Safe Synthesizer service exposed as an NMP plugin."""
+    """Safe Synthesizer service exposed as an NHX plugin."""
 
     name: ClassVar[str] = _SERVICE_NAME
     dependencies: ClassVar[list[str]] = ["entities", "auth", "jobs", "secrets", "files"]

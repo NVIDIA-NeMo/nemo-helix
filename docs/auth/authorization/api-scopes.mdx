@@ -5,20 +5,50 @@
 title: "API Scopes"
 description: ""
 ---
-API scopes are token-level access restrictions that sit on top of role-based permissions. They control which parts of the API a token can access, independent of the user's role.
+API scopes are token-level access restrictions that sit on top of role-based
+permissions. When a token carries NeMo Helix API scopes, those scopes control
+which parts of the API the token can access, independent of the token
+principal's role.
 
 For role-based permissions, see [Roles & Permissions](/documentation/access-control/authorization/roles-and-permissions). For the RBAC model, see [Authorization Concepts](/documentation/access-control/concepts).
 
 ## How Scopes Work
 
-Scopes are included in OIDC tokens and follow the format `resource-group:access-type`. Each API endpoint is associated with one or more required scopes.
+NeMo Helix API scopes are values in a token's `scope` or `scp` claim and follow
+the format `resource-group:access-type`. They can come from the configured IdP
+during OIDC login, from Scoped Access Keys created with `--scope`, or from
+workload access tokens. Each API endpoint is associated with one or more
+required scopes.
 
-When a request arrives, the PDP checks:
+When a request arrives with platform API scopes, the PDP checks:
 
 1. Does the token have at least one of the endpoint's required scopes?
 2. Does the principal have the required role permissions in the workspace?
 
-Both must pass. This is the **two-layer authorization** model.
+Both must pass when platform API scopes are present. Tokens with no scope claim,
+or only standard OIDC scopes, skip the scope check for compatibility and rely on
+the role-permission check.
+
+## Scopes Are Not Groups
+
+OIDC tokens can carry both identity claims and OAuth scopes. NeMo Helix treats them differently:
+
+- **Identity claims** identify the caller. The configured `groups_claim` becomes NeMo Helix group principals that can receive workspace role bindings, for example `employee.profile.read`.
+- **OAuth scopes** come from a token's `scope` or `scp` claim. They are not group principals and never grant roles.
+- **NeMo API scopes** are OAuth scope values with NeMo Helix API-scope syntax, such as `platform:read` and `models:write`. NeMo Helix uses them to narrow which APIs the token can call.
+
+External IdP scopes such as `openid`, `profile`, `email`, `employee.profile.read`, and provider URL or URN scopes do not grant roles and do not need to be filtered out of the token. Dotted identity values are safe as group names when they arrive in the configured `groups_claim`; they are not groups when they arrive in `scope` or `scp`.
+
+## OIDC Login Scopes
+
+`nemo auth login` requests OAuth scopes from the configured IdP. Those requested scopes can include:
+
+- OIDC protocol scopes, such as `openid`, `profile`, `email`, and `offline_access`
+- NeMo Helix API scope names that the IdP application knows about, such as `platform:read` and `platform:write`
+
+Some IdPs require API scopes to be sent in a resource-qualified form. When auth discovery includes a scope prefix, the CLI output shows both the NeMo Helix scope name and the OAuth scope sent to the IdP, for example `platform:read (api://<app-client-id>/platform:read)`. Users should request the short NeMo Helix scope name; the CLI applies the discovered prefix automatically.
+
+OIDC login scopes are not group principals and do not create role bindings. If the IdP sends group or entitlement values that should grant workspace access, put those values in the configured identity claim, such as `groups_claim`, and bind roles to those principals.
 
 ## Available Scopes
 
@@ -28,13 +58,14 @@ Each API has a read and write scope. A token with an API-specific scope can only
 
 | API | Read Scope | Write Scope | Endpoints |
 |------|-----------|-------------|------|
-| Audit | `audit:read` | `audit:write` | `/apis/auditor/` |
+| Audit | `audit:read` | `audit:write` | `/apis/garak/` |
 | Auth | `auth:read` | `auth:write` | `/apis/auth/` |
 | Data Designer | `data-designer:read` | `data-designer:write` | `/apis/data-designer/` |
 | Entities | `entities:read` | `entities:write` | `/apis/entities/` (internal — see note) |
 | Files | `files:read` | `files:write` | `/apis/files/` |
 | Guardrails | `guardrails:read` | `guardrails:write` | `/apis/guardrails/` |
 | Inference | `inference:read` | `inference:write` | `/apis/inference-gateway/` |
+| Intake | `intake:read` | `intake:write` | `/apis/intake/` |
 | Jobs | `jobs:read` | `jobs:write` | `/apis/jobs/` |
 | Models | `models:read` | `models:write` | `/apis/models/` |
 | Safe Synthesizer | `safe-synthesizer:read` | `safe-synthesizer:write` | `/apis/safe-synthesizer/` |
@@ -42,9 +73,10 @@ Each API has a read and write scope. A token with an API-specific scope can only
 
 <Note>
 
-The `entities:read` and `entities:write` scopes are for internal service-to-service usage. The generic entities API is not accessible to regular users — only PlatformAdmin and service principals can access it. Users interact with entities through feature-specific APIs (Models, Evaluation, etc.) which use their own scopes.
+The `entities:read` and `entities:write` scopes are for internal service-to-service usage. The generic entities API is not accessible to regular users — only HelixAdmin and service principals can access it. Users interact with entities through feature-specific APIs (Models, Evaluation, etc.) which use their own scopes.
 
 </Note>
+
 ### Platform Scopes
 
 The `platform:*` scopes act as catch-alls that grant access to **all** APIs:
@@ -54,26 +86,39 @@ The `platform:*` scopes act as catch-alls that grant access to **all** APIs:
 | `platform:read` | Read access to all platform APIs |
 | `platform:write` | Write access to all platform APIs |
 
-Each endpoint in the authorization policy lists both its API-specific scope and the corresponding `platform:*` scope. A token needs at least one of the listed scopes to pass the scope check.
+Each endpoint in the authorization policy lists both its API-specific scope and
+the corresponding `platform:*` scope. When a token provides platform API scopes,
+it needs at least one of the listed scopes to pass the scope check.
 
 ### Requesting Scopes
 
-The CLI requests `platform:read platform:write` by default, granting full access. You can restrict a token to specific areas:
+For an interactive OIDC login, use `nemo auth login --scope` to request a narrower NeMo Helix API scope set from the configured IdP:
 
 ```bash
-# Full access (default)
+# Full access, using the deployment's configured default_scopes
 nemo auth login
 
-# Read-only access to everything
+# Read-only access to all APIs
 nemo auth login --scope "platform:read"
 
-# Only files and models access
+# Access only selected APIs
 nemo auth login --scope "files:read files:write models:read models:write"
+```
+
+The CLI keeps the deployment's non-API OIDC defaults, such as `openid`, `profile`, `email`, and `offline_access`, and applies the discovered `scope_prefix` when the IdP requires resource-qualified API scopes.
+
+For automation tokens, use Scoped Access Keys when the token should be narrower than the caller's normal OIDC session. Access-key `--scope` values are service areas; NeMo Helix expands each area into the corresponding read and write API scopes:
+
+```bash
+nemo auth access-keys create --name "intake-worker" \
+  --scope intake,entities \
+  --workspace ml-team:Editor
 ```
 
 ## Two-Layer Authorization
 
-For a request to succeed, it must satisfy **both** requirements:
+When a token provides platform API scopes, a request must satisfy **both**
+requirements:
 
 1. **Token scope check**: The API token must have at least one of the endpoint's required scopes
 2. **Permission check**: The principal must have the required permissions through role grants in the workspace
@@ -87,42 +132,65 @@ For a request to succeed, it must satisfy **both** requirements:
 | Viewer | `platform:read platform:write` | Create model | ✗ Denied by role check |
 | Viewer | `platform:read` | List models | ✓ Allowed |
 
-This enables least-privilege tokens: an Editor can create a read-only token (`platform:read`) for monitoring scripts that should never modify resources.
+A caller can hold a token whose API scope is narrower than their role. An Editor
+can sign in with `platform:read` for monitoring scripts that should not modify
+resources.
 
 ## IdP Configuration
 
-Scopes must be registered in your IdP as custom API scopes. The CLI requests them during the OAuth flow, and the IdP includes granted scopes in the access token.
+For OIDC tokens, scopes must be registered in your IdP as custom API scopes. The
+CLI requests them during the OAuth flow, and the IdP includes granted scopes in
+the access token. For NeMo service-account access keys, see
+[Scoped Intake Tokens](/documentation/access-control/deployment/scoped-intake-tokens).
 
-If your IdP prefixes scopes (e.g., Azure AD uses `api://client-id/platform:read`), configure `scope_prefix` in the NeMo Platform OIDC settings so the platform strips the prefix before authorization:
+Configure your IdP application with the OAuth scopes your login flow requests.
+At minimum this is usually `openid`, `profile`, `email`, and `offline_access`.
+If your deployment requests NeMo Helix API scope names during login, define
+those scopes on the same IdP application according to your provider's normal
+API-scope or consent model.
+
+Some IdPs, including Microsoft Entra ID, register scopes under short names such as `platform:read` and expect the OAuth request to use `api://<client-id>/platform:read`. Put the short names in `default_scopes` and pass them to `nemo auth login --scope`. Set `scope_prefix` on the interactive client, with a trailing slash:
 
 ```yaml
 auth:
- oidc:
- scope_prefix: "api://your-client-id/"
+  oidc:
+    public_client:
+      client_id: "your-client-id"
+      default_scopes: "platform:read platform:write openid profile email offline_access"
+      scope_prefix: "api://your-client-id/"
 ```
 
-If you use per-API scopes, each scope (e.g., `api://nmp/models:read`) must be exposed individually in the IdP app registration.
+The CLI and Studio add that prefix to any requested scope that contains `:` or ends with `.default`. `openid`, `profile`, `email`, and `offline_access` are requested unchanged. Discovery returns `scope_prefix` with the client, and `nemo auth login --scope platform:read` sends `api://your-client-id/platform:read`. A prefix with no trailing slash gets one added.
+
+Entra access tokens list the short name in `scp`, which is the value NeMo Helix checks. If `scope` or `scp` contains the prefix, NeMo Helix removes it before the check. When you configure a confidential client as well, set the same `scope_prefix` on both.
+
+Register each API scope by its short name, such as `models:read`. Clients then request `api://<client-id>/models:read`.
 
 ## Scope Checking Behavior
 
-The PDP distinguishes between OIDC standard scopes and platform scopes:
+The PDP distinguishes between external OAuth scopes and NeMo Helix API-scope syntax:
 
-- **No scopes in token**: Scope checking is skipped (backward compatible)
-- **Only OIDC scopes** (`openid`, `profile`, `email`): Treated as no platform scopes — checking skipped
-- **Platform scopes present** (contain `:`): At least one required scope must match
-- **PlatformAdmin**: Bypasses scope checking entirely
+- **No scopes in token**: scope checking is skipped (backward compatible)
+- **Only non-API OAuth scopes** (`openid`, `profile`, `email`, dotted scopes, provider URL scopes, or provider URNs): treated as no NeMo API scopes, so scope checking is skipped
+- **NeMo API scopes present** (`area:action`): at least one required scope for the endpoint must match
+- **HelixAdmin**: still obeys token scope restrictions when the token contains NeMo API scopes, so a scoped-down token stays scoped down
 
-## When to Restrict Scopes
+## When to Restrict Scoped Tokens
 
-- **CI/CD tokens** that should only read: `platform:read`
-- **Monitoring scripts** that should never modify resources: `platform:read`
-- **Data ingestion scripts**: `files:read files:write`
+- **OIDC CI/CD tokens** that should only read: `platform:read`
+- **OIDC monitoring tokens** that should never modify resources: `platform:read`
+- **OIDC data ingestion tokens**: `intake:write`
+- **Scoped Access Keys for CI/CD**: restrict to only the service areas the
+  pipeline needs with `--scope`
+- **Service-account Intake keys**: grant the `service-account:<id>` principal the
+  minimum workspace role, such as Viewer for readers or Editor for OTLP writers
 - **Model catalog readers**: `models:read`
-- **Shared service accounts**: limit blast radius by restricting to only the areas needed
+- **Shared IdP automation identities**: limit blast radius by requesting only the
+  scopes needed by that integration
 
 ## Related
 
 - [Roles & Permissions](/documentation/access-control/authorization/roles-and-permissions) — Role-based permission model.
-- [Using Authentication](/documentation/access-control/authentication/using-authentication) — Log in, requesting scopes, and token management.
-- [OIDC Setup](/documentation/access-control/authentication/oidc-setup) — Configuring scope prefix and default scopes.
+- [Using Authentication](/documentation/access-control/authentication/using-authentication) — Log in, create Scoped Access Keys, and manage tokens.
+- [OIDC Setup](/documentation/access-control/authentication/oidc-setup) — Configure OIDC login scopes and claim mapping.
 - [Security Model](/documentation/access-control/security-model) — Trust boundaries and two-layer authorization.

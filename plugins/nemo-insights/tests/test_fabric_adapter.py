@@ -5,8 +5,16 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+import json
+import os
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+from unittest import mock
 
+import pytest
 from nemo_fabric_adapter_contract import models as contract
 from nemo_insights_plugin import fabric_adapter
 from nemo_insights_plugin.analyst.result import AnalystResult
@@ -31,7 +39,7 @@ def _agent_config(settings: dict[str, Any]) -> contract.AgentConfig:
 
 
 class _StubClient:
-    """Stands in for the async SDK handle so a leak shows up as an unclosed client."""
+    """Stands in for the async client handle so a leak shows up as an unclosed client."""
 
     def __init__(self, service: str) -> None:
         self.service = service
@@ -44,7 +52,7 @@ class _StubClient:
         self.closed = True
 
 
-def _stub_sdk_factory(clients: list[_StubClient]) -> Any:
+def _stub_client_factory(clients: list[_StubClient]) -> Any:
     """Record every client handed out so a test can assert none were left open."""
 
     def factory(service: str) -> _StubClient:
@@ -55,8 +63,47 @@ def _stub_sdk_factory(clients: list[_StubClient]) -> Any:
     return factory
 
 
+def _runtime_context(telemetry: contract.RuntimeTelemetryContext | None = None) -> contract.RuntimeContext:
+    """The context Fabric hands every invocation; telemetry is the part we read."""
+    return contract.RuntimeContext(
+        runtime_id="runtime-1",
+        invocation_id="invocation-1",
+        request_id="request-1",
+        environment=contract.EnvironmentHandle(
+            environment_id="environment-1",
+            provider="local",
+            control_location="in_env_control",
+            ownership="caller_owned",
+        ),
+        artifacts=contract.ArtifactManifest(),
+        telemetry=telemetry,
+    )
+
+
 def _request(context: dict[str, Any] | None = None) -> contract.AgentRunRequest:
     return contract.AgentRunRequest(input="Analyze telemetry.", context=context or {})
+
+
+@pytest.fixture
+def isolated_relay_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    config_home = tmp_path / "xdg"
+    config_home.mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    monkeypatch.chdir(tmp_path)
+    return config_home
+
+
+def _clean_activation() -> SimpleNamespace:
+    return SimpleNamespace(report={"config": {"diagnostics": []}})
+
+
+def _minimal_relay_telemetry(tmp_path: Path) -> contract.RuntimeTelemetryContext:
+    config_path = tmp_path / "relay-minimal.json"
+    config_path.write_text(
+        json.dumps({"relay": {"config": {"version": 1, "components": [{"kind": "observability", "enabled": True}]}}}),
+        encoding="utf-8",
+    )
+    return contract.RuntimeTelemetryContext(relay_enabled=True, config_path=str(config_path), env={})
 
 
 async def test_fabric_adapter_returns_unpersisted_analyst_result(monkeypatch) -> None:
@@ -68,7 +115,7 @@ async def test_fabric_adapter_returns_unpersisted_analyst_result(monkeypatch) ->
         return AnalystResult(summary="No high-impact failures found."), object()
 
     monkeypatch.setattr(fabric_adapter, "run_analyst_change_set", fake_run_analyst_change_set)
-    monkeypatch.setattr(fabric_adapter, "get_async_task_sdk", _stub_sdk_factory(clients))
+    monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory(clients))
 
     runtime = fabric_adapter.InsightsAnalystRuntime()
     await runtime.start(
@@ -85,7 +132,7 @@ async def test_fabric_adapter_returns_unpersisted_analyst_result(monkeypatch) ->
         }
     )
 
-    result = await runtime.invoke(_request({"job_workspace": "workspace"}), cast(contract.RuntimeContext, None))
+    result = await runtime.invoke(_request({"job_workspace": "workspace"}), _runtime_context())
 
     assert result.status is contract.AgentRunStatus.SUCCEEDED
     assert result.output == {
@@ -94,6 +141,7 @@ async def test_fabric_adapter_returns_unpersisted_analyst_result(monkeypatch) ->
             "summary": "No high-impact failures found.",
             "new_insights": [],
             "updated_insights": [],
+            "notes": [],
         },
     }
     assert seen["agent"] == "research-agent"
@@ -117,13 +165,13 @@ async def test_fabric_adapter_does_not_leak_a_client_when_a_model_ref_is_invalid
     async def fail_if_called(**kwargs: Any) -> tuple[AnalystResult, object]:
         raise AssertionError("run_analyst_change_set should not be reached")
 
-    monkeypatch.setattr(fabric_adapter, "get_async_task_sdk", _stub_sdk_factory(clients))
+    monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory(clients))
     monkeypatch.setattr(fabric_adapter, "run_analyst_change_set", fail_if_called)
 
     runtime = fabric_adapter.InsightsAnalystRuntime()
     await runtime.start({"config": _agent_config({"agent": "research-agent", "default_model": "   "})})
 
-    result = await runtime.invoke(_request({"job_workspace": "workspace"}), cast(contract.RuntimeContext, None))
+    result = await runtime.invoke(_request({"job_workspace": "workspace"}), _runtime_context())
 
     assert result.status is contract.AgentRunStatus.FAILED
     assert result.error is not None
@@ -135,9 +183,233 @@ async def test_fabric_adapter_reports_configuration_failure() -> None:
     runtime = fabric_adapter.InsightsAnalystRuntime()
     await runtime.start({"config": _agent_config({})})
 
-    result = await runtime.invoke(_request({"job_workspace": "workspace"}), cast(contract.RuntimeContext, None))
+    result = await runtime.invoke(_request({"job_workspace": "workspace"}), _runtime_context())
 
     assert result.status is contract.AgentRunStatus.FAILED
     assert result.error is not None
     assert result.error.code == "insights_analyst_failed"
     assert "harness.settings.agent is required" in result.error.message
+
+
+async def test_fabric_adapter_logs_the_failure_with_its_traceback(monkeypatch, caplog) -> None:
+    """``str(error)`` alone loses the traceback, and the adapter's stderr is
+    captured to a run artifact the job dumps on failure - so logging here is
+    what puts the traceback somewhere anyone will actually read."""
+    clients: list[_StubClient] = []
+
+    async def fail(**kwargs: Any) -> tuple[AnalystResult, object]:
+        raise RuntimeError("gateway returned 502")
+
+    monkeypatch.setattr(fabric_adapter, "run_analyst_change_set", fail)
+    monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory(clients))
+
+    runtime = fabric_adapter.InsightsAnalystRuntime()
+    await runtime.start({"config": _agent_config({"agent": "research-agent"})})
+
+    with caplog.at_level("ERROR", logger="nemo_insights_plugin.fabric_adapter"):
+        result = await runtime.invoke(_request({"job_workspace": "workspace"}), _runtime_context())
+
+    assert result.status is contract.AgentRunStatus.FAILED
+    assert result.error is not None
+    assert result.error.code == "insights_analyst_failed"
+    assert "Insights analyst run failed." in caplog.text
+    assert "gateway returned 502" in caplog.text
+    assert "Traceback (most recent call last)" in caplog.text
+
+
+async def test_fabric_adapter_logs_the_whole_cause_chain(monkeypatch, caplog) -> None:
+    """The originating error is what distinguishes one failure from another:
+    an LLM error raised after retries reads identically whatever provoked it."""
+    clients: list[_StubClient] = []
+
+    originating = "Function 'abc-123': Not found for account"
+    raised = "LLM API error after 3 retries"
+
+    async def fail(**kwargs: Any) -> tuple[AnalystResult, object]:
+        try:
+            raise ValueError(originating)
+        except ValueError as cause:
+            raise RuntimeError(raised) from cause
+
+    monkeypatch.setattr(fabric_adapter, "run_analyst_change_set", fail)
+    monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory(clients))
+
+    runtime = fabric_adapter.InsightsAnalystRuntime()
+    await runtime.start({"config": _agent_config({"agent": "research-agent"})})
+
+    with caplog.at_level("ERROR", logger="nemo_insights_plugin.fabric_adapter"):
+        await runtime.invoke(_request({"job_workspace": "workspace"}), _runtime_context())
+
+    assert originating in caplog.text, "root cause was dropped"
+    assert raised in caplog.text
+
+
+async def test_relay_activates_fabrics_config_and_scopes_the_agent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_relay_config: Path
+) -> None:
+    """Fabric resolves the whole export; the adapter activates it and names the scope.
+
+    Nothing about the destination is decided here — the endpoint, credentials
+    and agent name all arrive in the config file Fabric wrote.
+    """
+    relay_config = tmp_path / "relay-config.json"
+    relay_config.write_text(
+        json.dumps(
+            {
+                "relay": {
+                    "config": {
+                        "version": 1,
+                        "components": [
+                            {
+                                "kind": "observability",
+                                "enabled": True,
+                                # The shape Fabric writes from the agents plugin's
+                                # auto-wiring: destination and credentials already
+                                # resolved, nothing for the adapter to decide.
+                                "config": {
+                                    "version": 4,
+                                    "atif": {
+                                        "enabled": True,
+                                        "agent_name": "insights-analyst",
+                                        "storage": [
+                                            {
+                                                "type": "http",
+                                                "endpoint": "http://platform/apis/intake/v2/workspaces/w/ingest/atif",
+                                                "header_env": {"X-NHX-Principal-Id": "NHX_HEADER"},
+                                            }
+                                        ],
+                                    },
+                                },
+                            }
+                        ],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    seen: dict[str, Any] = {}
+
+    async def fake_run_analyst_change_set(**kwargs: Any) -> tuple[AnalystResult, object]:
+        seen.update(kwargs)
+        return AnalystResult(summary="done"), object()
+
+    @asynccontextmanager
+    async def fake_activate(config: Any) -> AsyncGenerator[SimpleNamespace, None]:
+        seen["plugin_config"] = config
+        # Relay resolves header_env against the environment while exporting,
+        # so the variables have to be set for the duration of the run.
+        seen["env_during_run"] = os.environ.get("FABRIC_RELAY_CONFIG_PATH")
+        yield _clean_activation()
+
+    monkeypatch.setattr(fabric_adapter, "run_analyst_change_set", fake_run_analyst_change_set)
+    monkeypatch.setattr(fabric_adapter.relay_plugin, "activate", fake_activate)
+    monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory([]))
+
+    runtime = fabric_adapter.InsightsAnalystRuntime()
+    await runtime.start({"config": _agent_config({"agent": "research-agent"})})
+    telemetry = contract.RuntimeTelemetryContext(
+        relay_enabled=True,
+        config_path=str(relay_config),
+        env={"FABRIC_RELAY_CONFIG_PATH": str(relay_config)},
+    )
+
+    result = await runtime.invoke(_request({"job_workspace": "w"}), _runtime_context(telemetry))
+
+    assert result.status is contract.AgentRunStatus.SUCCEEDED
+    assert seen["relay_scope_name"] == fabric_adapter.ANALYST_RELAY_SCOPE
+    assert seen["plugin_config"]["components"][0]["kind"] == "observability"
+    assert seen["env_during_run"] == str(relay_config)
+    # The runtime serves many invocations; a leftover config path would make
+    # the next one export against a stale, possibly deleted, config.
+    assert "FABRIC_RELAY_CONFIG_PATH" not in os.environ
+
+
+async def test_relay_refuses_an_ambient_user_plugin_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_relay_config: Path
+) -> None:
+    (isolated_relay_config / "nemo-relay").mkdir()
+    (isolated_relay_config / "nemo-relay" / "plugins.toml").write_text("version = 1\n", encoding="utf-8")
+    activated: list[Any] = []
+
+    @asynccontextmanager
+    async def fake_activate(config: Any) -> AsyncGenerator[SimpleNamespace, None]:
+        activated.append(config)
+        yield _clean_activation()
+
+    async def fail_if_called(**kwargs: Any) -> tuple[AnalystResult, object]:
+        raise AssertionError("analyst ran")
+
+    monkeypatch.setattr(fabric_adapter, "run_analyst_change_set", fail_if_called)
+    monkeypatch.setattr(fabric_adapter.relay_plugin, "activate", fake_activate)
+    monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory([]))
+
+    runtime = fabric_adapter.InsightsAnalystRuntime()
+    await runtime.start({"config": _agent_config({"agent": "research-agent"})})
+
+    result = await runtime.invoke(
+        _request({"job_workspace": "w"}), _runtime_context(_minimal_relay_telemetry(tmp_path))
+    )
+
+    assert result.status is contract.AgentRunStatus.FAILED
+    assert "ambient user or project configuration" in result.output["response"]
+    assert activated == []
+
+
+async def test_relay_refuses_plugin_config_inherited_during_activation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_relay_config: Path
+) -> None:
+    inherited = SimpleNamespace(
+        report={
+            "config": {
+                "diagnostics": [
+                    {
+                        "code": "plugin.configuration_inherited",
+                        "level": "warning",
+                        "message": "inherited plugin configuration from discovered file: /home/user/plugins.toml",
+                    }
+                ]
+            }
+        }
+    )
+
+    @asynccontextmanager
+    async def fake_activate(config: Any) -> AsyncGenerator[SimpleNamespace, None]:
+        yield inherited
+
+    async def fail_if_called(**kwargs: Any) -> tuple[AnalystResult, object]:
+        raise AssertionError("analyst ran")
+
+    monkeypatch.setattr(fabric_adapter, "run_analyst_change_set", fail_if_called)
+    monkeypatch.setattr(fabric_adapter.relay_plugin, "activate", fake_activate)
+    monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory([]))
+
+    runtime = fabric_adapter.InsightsAnalystRuntime()
+    await runtime.start({"config": _agent_config({"agent": "research-agent"})})
+
+    result = await runtime.invoke(
+        _request({"job_workspace": "w"}), _runtime_context(_minimal_relay_telemetry(tmp_path))
+    )
+
+    assert result.status is contract.AgentRunStatus.FAILED
+    assert "/home/user/plugins.toml" in result.output["response"]
+
+
+async def test_without_relay_the_agent_runs_unscoped() -> None:
+    """Relay is opt-in per invocation; Fabric says when."""
+    seen: dict[str, Any] = {}
+
+    async def fake_run_analyst_change_set(**kwargs: Any) -> tuple[AnalystResult, object]:
+        seen.update(kwargs)
+        return AnalystResult(summary="done"), object()
+
+    runtime = fabric_adapter.InsightsAnalystRuntime()
+    await runtime.start({"config": _agent_config({"agent": "research-agent"})})
+
+    with (
+        mock.patch.object(fabric_adapter, "run_analyst_change_set", fake_run_analyst_change_set),
+        mock.patch.object(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory([])),
+    ):
+        await runtime.invoke(_request({"job_workspace": "w"}), _runtime_context(None))
+
+    assert seen["relay_scope_name"] is None

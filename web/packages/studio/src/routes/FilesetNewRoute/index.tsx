@@ -182,7 +182,7 @@ export const FilesetNewRoute: FC = () => {
   });
 
   const handleClose = useCallback(() => {
-    navigate(getWorkspaceFilesetsRoute(workspace));
+    navigate(getWorkspaceFilesetsRoute(workspace), { flushSync: true });
   }, [navigate, workspace]);
 
   const handleSecretCreated = useCallback(

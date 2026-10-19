@@ -99,10 +99,11 @@ the only other brake: `runtime.max_turns` is ignored by the deepagents adapter.
 
 **One knob that validates but does nothing.** `models.default.settings` is a
 free-form dict on `ModelConfig`, and it reaches the adapter — but `build_chat_model`
-forwards only `model`, `api_key`, `base_url` and `temperature`, so nothing in it is
-applied. Set `max_tokens` or `max_thinking_tokens` there and the model will happily
-exceed them. This is the one place the config lets you down quietly: every other
-unknown key is rejected outright, because `ModelConfig` is `extra="forbid"`.
+forwards only `model`, `api_key`, `base_url`, `temperature`, `top_p` and `max_tokens`,
+so nothing in `settings` is applied. Put `top_p` and `max_tokens` directly on the model
+block; set `max_thinking_tokens` under `settings` and the model will happily exceed it.
+This is the one place the config lets you down quietly: every other unknown key is
+rejected outright, because `ModelConfig` is `extra="forbid"`.
 
 Budget for the harness, too: deepagents prepends its own base prompt plus the
 filesystem and sub-agent tool documentation to `instructions.system.content`, and

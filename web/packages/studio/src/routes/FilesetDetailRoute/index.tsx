@@ -8,7 +8,7 @@ import { getEntityReference } from '@nemo/common/src/namedEntity';
 import {
   useFilesListFilesetFiles,
   useFilesRetrieveFileset,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/files';
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
 import {
   Flex,

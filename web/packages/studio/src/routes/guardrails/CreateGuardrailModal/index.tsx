@@ -8,7 +8,7 @@ import { useModelsFromWorkspace } from '@nemo/common/src/api/models/useModelsFro
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { ENTITY_NAME_HELP, entityNameSchema, toCopyName } from '@nemo/common/src/utils/entityName';
-import { useGuardrailsCreateConfig } from '@nemo/sdk/generated/platform/api';
+import { useGuardrailsCreateConfig } from '@nemo/sdk/generated/platform/guardrails';
 import type {
   GuardrailConfig,
   GuardrailConfigInput,

@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  UV_VERSION: "0.9.14"
+  UV_VERSION: "0.10.10"
 
 jobs:
   sync:
@@ -23,8 +23,8 @@ jobs:
       fail-fast: false
       matrix:
         team:
-          - nemo-platform
-          - nemo-platform-dev
+          - nemo-helix
+          - nemo-helix-dev
 
     steps:
       - name: Check out repository

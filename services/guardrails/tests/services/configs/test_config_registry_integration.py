@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import yaml
-from nmp.guardrails.app.services.configs.sources import _normalize
-from nmp.guardrails.entities import GuardrailConfig
-from nmp.guardrails.entities.values._private import (
+from nhx.guardrails.app.services.configs.sources import _normalize
+from nhx.guardrails.entities import GuardrailConfig
+from nhx.guardrails.entities.values._private import (
     PatronusEvaluationSuccessStrategy,
     Rails,
     RailsConfig,

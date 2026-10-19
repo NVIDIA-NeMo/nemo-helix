@@ -7,7 +7,10 @@ import { routes as appRoutes } from '@studio/routes';
 import { TestProviders, TestProvidersOptions } from '@studio/tests/util/TestProviders';
 import { queries, render, within } from '@testing-library/react';
 import { Suspense } from 'react';
-import { createMemoryRouter, MemoryRouter, RouterProvider, type RouteObject } from 'react-router';
+import { createMemoryRouter, MemoryRouter, type RouteObject } from 'react-router';
+// Only the `createMemoryRouter` branch below honors `flushSync`; the declarative
+// `MemoryRouter` fallback ignores it, so tests that depend on it need `routes`.
+import { RouterProvider } from 'react-router/dom';
 
 /**
  * Options for the renderRoute function

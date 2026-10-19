@@ -1,21 +1,21 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { PlatformJobTerminalStatuses } from '@nemo/common/src/constants/query';
-import { SegmentedControl, Stack, Text } from '@nvidia/foundations-react-core';
+import { SegmentedControl, Stack } from '@nvidia/foundations-react-core';
 import type { EvalJobRow } from '@studio/api/evaluation/utils';
 import { EvaluationsTable } from '@studio/routes/agents/AgentDetailRoute/evaluations/EvaluationsTable';
 import { ExperimentsTable } from '@studio/routes/agents/AgentDetailRoute/evaluations/ExperimentsTable';
 import { groupByExperiment } from '@studio/routes/agents/AgentDetailRoute/evaluations/groupByExperiment';
-import { JobsTable } from '@studio/routes/agents/AgentDetailRoute/evaluations/JobsTable';
+import { VIEW_SEARCH_PARAM } from '@studio/routes/agents/AgentDetailRoute/tabs';
 import type { AgentEvaluationRow } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
-import { type FC, useMemo, useState } from 'react';
+import { type FC, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'react-router';
 
 const VIEW_EVALUATIONS = 'evaluations';
 const VIEW_EXPERIMENTS = 'experiments';
 
 const VIEW_ITEMS = [
-  { value: VIEW_EVALUATIONS, children: 'Completed Evaluations' },
+  { value: VIEW_EVALUATIONS, children: 'Evaluations' },
   { value: VIEW_EXPERIMENTS, children: 'Experiments' },
 ];
 
@@ -27,27 +27,31 @@ interface EvaluationsTabProps {
   jobs: EvalJobRow[];
 }
 
-/** Two readings of the same published work — flat evaluations or rolled up by experiment — with
- *  the jobs still running pinned above them. Active jobs answer a different question ("what is
- *  running right now") that Intake cannot answer until a run publishes, so they get their own
- *  always-visible section instead of a segmented-control tab. */
+/** Two readings of the same work — flat evaluations or rolled up by experiment. The flat view takes
+ *  both datasets because a run in flight is only a job: it has no published evaluation to show
+ *  until it finishes, so `EvaluationsTable` merges the two rather than losing it. */
 export const EvaluationsTab: FC<EvaluationsTabProps> = ({ workspace, agentName, evals, jobs }) => {
-  const [view, setView] = useState<string>(VIEW_EVALUATIONS);
-  const experiments = useMemo(() => groupByExperiment(evals), [evals]);
-  const activeJobs = useMemo(
-    () =>
-      jobs.filter((job) => !PlatformJobTerminalStatuses.some((status) => status === job.status)),
-    [jobs]
+  const [searchParams, setSearchParams] = useSearchParams();
+  const view =
+    searchParams.get(VIEW_SEARCH_PARAM) === VIEW_EXPERIMENTS ? VIEW_EXPERIMENTS : VIEW_EVALUATIONS;
+  const setView = useCallback(
+    (next: string) => {
+      setSearchParams(
+        (previous) => {
+          const params = new URLSearchParams(previous);
+          if (next === VIEW_EXPERIMENTS) params.set(VIEW_SEARCH_PARAM, next);
+          else params.delete(VIEW_SEARCH_PARAM);
+          return params;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams]
   );
+  const experiments = useMemo(() => groupByExperiment(evals), [evals]);
 
   return (
     <Stack gap="density-lg" className="w-full">
-      {activeJobs.length > 0 && (
-        <Stack gap="density-sm">
-          <Text kind="title/sm">Active jobs</Text>
-          <JobsTable workspace={workspace} jobs={activeJobs} evaluations={evals} />
-        </Stack>
-      )}
       <SegmentedControl
         className="w-fit"
         aria-label="Evaluation view"

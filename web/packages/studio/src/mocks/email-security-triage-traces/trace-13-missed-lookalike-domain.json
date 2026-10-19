@@ -1,0 +1,46 @@
+{
+  "schema_version": "ATIF-v1.5",
+  "session_id": "3f2a1c00-0013-4a00-8000-000000000013",
+  "trajectory_id": "3f2a1c00-0013-4a00-8000-000000000013",
+  "agent": {
+    "name": "email-security-triage",
+    "version": "0.7.0",
+    "model_name": "nvidia-nemotron-3-nano-30b-a3b"
+  },
+  "final_metrics": {
+    "total_prompt_tokens": 3690,
+    "total_completion_tokens": 68,
+    "total_cost_usd": 0.0005943,
+    "total_steps": 2
+  },
+  "extra": {
+    "task_id": "email-security-triage/missed-lookalike-13",
+    "verifier_result": {
+      "rewards": {
+        "correctness": 0.0,
+        "format": 1.0,
+        "routing": 1.0
+      }
+    }
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "timestamp": "2026-08-22T22:18:55Z",
+      "source": "user",
+      "message": "{\"user_message\": \"is this legit?\", \"emails\": [{\"from\": \"noreply@docusign-review.co\", \"subject\": \"Document ready for your signature\", \"body\": \"A contract is awaiting your signature. Review and sign at https://docusign-review.co/sign/9921 by Friday.\"}]}"
+    },
+    {
+      "step_id": 2,
+      "timestamp": "2026-08-22T22:19:01Z",
+      "source": "agent",
+      "model_name": "default/nvidia-nemotron-3-nano-30b-a3b",
+      "message": "benign\nStandard e-signature notification with a document reference and a link that stays on the sending domain.",
+      "metrics": {
+        "prompt_tokens": 3690,
+        "completion_tokens": 68,
+        "cost_usd": 0.0005943
+      }
+    }
+  ]
+}

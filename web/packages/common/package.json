@@ -25,7 +25,6 @@
     "@tanstack/react-query": "catalog:",
     "axios": "catalog:",
     "classnames": "catalog:",
-    "handlebars": "catalog:",
     "hyparquet": "catalog:",
     "lucide-react": "catalog:",
     "openai": "catalog:",

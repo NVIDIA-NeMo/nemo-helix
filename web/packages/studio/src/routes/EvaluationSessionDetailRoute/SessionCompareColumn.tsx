@@ -4,7 +4,7 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { KVPair } from '@nemo/common/src/components/KVPair';
-import { useListAnnotations } from '@nemo/sdk/generated/platform/api';
+import { useListAnnotations } from '@nemo/sdk/generated/platform/annotations';
 import {
   AnnotationSortField,
   type EvaluationSessionResponse,
@@ -47,18 +47,25 @@ const fmtCost = (usd?: number | null) => {
 /** Evaluator means in the 0–1 range read as percentages; anything else is a raw scale. */
 const fmtScore = (v: number) => (v >= 0 && v <= 1 ? `${Math.round(v * 100)}%` : v.toFixed(2));
 
-/** The per-session metrics shown in the column card, in display order. */
-const sessionMetrics = (run: EvaluationSessionResponse | undefined) => [
-  { label: 'Cost', value: fmtCost(run?.cost_total_usd) },
-  { label: 'Latency', value: fmtMs(run?.latency_ms) },
-  { label: 'Tkns In', value: fmtNum(run?.input_tokens) },
-  { label: 'Tkns Out', value: fmtNum(run?.output_tokens) },
-  { label: 'Cached Tkns', value: fmtNum(run?.cached_tokens) },
-  ...Object.entries(run?.evaluator_scores ?? {}).map(([name, score]) => ({
-    label: name,
-    value: fmtScore(score),
-  })),
-];
+/** The per-session metrics shown in the column card, in display order. An evaluator appears once:
+ *  with its score when it has one, otherwise as `failed` when it recorded a FAILED result. */
+const sessionMetrics = (run: EvaluationSessionResponse | undefined) => {
+  const scored = Object.entries(run?.evaluator_scores ?? {}).filter(
+    (entry): entry is [string, number] => typeof entry[1] === 'number'
+  );
+  const scoredNames = new Set(scored.map(([name]) => name));
+  return [
+    { label: 'Cost', value: fmtCost(run?.cost_total_usd) },
+    { label: 'Latency', value: fmtMs(run?.latency_ms) },
+    { label: 'Tkns In', value: fmtNum(run?.input_tokens) },
+    { label: 'Tkns Out', value: fmtNum(run?.output_tokens) },
+    { label: 'Cached Tkns', value: fmtNum(run?.cached_tokens) },
+    ...scored.map(([name, score]) => ({ label: name, value: fmtScore(score) })),
+    ...(run?.failed_evaluators ?? [])
+      .filter((name) => !scoredNames.has(name))
+      .map((name) => ({ label: name, value: 'failed' })),
+  ];
+};
 
 // ── Column ────────────────────────────────────────────────────────────────────
 

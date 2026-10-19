@@ -7,7 +7,7 @@ import {
   useAnonymizerGetRunJob,
   useAnonymizerGetRunJobLogs,
   useAnonymizerListRunJobResults,
-} from '@nemo/sdk/generated/anonymizer/api';
+} from '@nemo/sdk/generated/anonymizer/anonymizer';
 import { Banner, Grid, PageHeader, Panel, Stack } from '@nvidia/foundations-react-core';
 import { AnonymizerJobActionsMenu } from '@studio/components/AnonymizerJobActionsMenu';
 import { ANONYMIZER_ENABLED } from '@studio/constants/environment';

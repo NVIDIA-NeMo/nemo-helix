@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEvaluatorListEvaluateJobResults } from '@nemo/sdk/generated/evaluator/api';
+import { useEvalsListEvaluateJobResults } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
+import { platformFetch } from '@nemo/sdk/src/utils/platformRequest';
 import { useQuery } from '@tanstack/react-query';
 
 export interface AggregateScores {
@@ -13,7 +14,7 @@ export const useEvaluationJobResultV2 = (workspace: string, jobName: string) => 
     data: resultsPage,
     isLoading: isLoadingMetadata,
     error: metadataError,
-  } = useEvaluatorListEvaluateJobResults(workspace, jobName, {
+  } = useEvalsListEvaluateJobResults(workspace, jobName, {
     query: {
       enabled: !!workspace && !!jobName,
     },
@@ -37,7 +38,7 @@ export const useEvaluationJobResultV2 = (workspace: string, jobName: string) => 
         throw new Error('No download URL available');
       }
 
-      const response = await fetch(aggregateScoresResult.download_url);
+      const response = await platformFetch(aggregateScoresResult.download_url);
       if (!response.ok) {
         throw new Error(`Failed to download results: ${response.statusText}`);
       }

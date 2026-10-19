@@ -35,6 +35,7 @@ export const ROUTE_PARAMS = {
   agentName: 'agentName',
   agentDeploymentName: 'agentDeploymentName',
   agentEvalJobName: 'agentEvalJobName',
+  optimizeJobName: 'optimizeJobName',
   jobName: 'jobName',
   /** Benchmark entity name segment under evaluation/benchmarks/:name */
   benchmarkName: 'benchmarkName',
@@ -60,12 +61,20 @@ export const ROUTES = {
     dashboard: `/workspaces/:${P.workspace}/dashboard`,
     jobs: `/workspaces/:${P.workspace}/jobs`,
     jobDetail: `/workspaces/:${P.workspace}/jobs/:${P.jobName}`,
-    promptTuningForm: `/workspaces/:${P.workspace}/customizations/prompt-tuned/new`,
-    newCustomizationJob: `/workspaces/:${P.workspace}/customizations/fine-tuned/new`,
+    newCustomizationJob: `/workspaces/:${P.workspace}/fine-tune/new`,
+    /**
+     * The full fine-tuning form. A sibling route rather than a step inside
+     * `newCustomizationJob`, so it survives a reload and answers to browser back.
+     * Named for the "build from scratch" tile that reaches it, but it also serves
+     * the template hand-off, `?model=` deep links, and Clone.
+     */
+    newCustomizationJobScratch: `/workspaces/:${P.workspace}/fine-tune/new/scratch`,
     baseModels: `/workspaces/:${P.workspace}/base-models`,
     /** Base models list with a specific model panel open (model name in path) */
     baseModelsModel: `/workspaces/:${P.workspace}/base-models/:${P.modelName}`,
     evaluation: `/workspaces/:${P.workspace}/evaluation`,
+    /** Dataset-driven model evaluation builder. */
+    evaluationNew: `/workspaces/:${P.workspace}/evaluation/new`,
     evaluationMetrics: `/workspaces/:${P.workspace}/evaluation/metrics`,
     evaluationMetricNew: `/workspaces/:${P.workspace}/evaluation/metrics/new`,
     /** Run panel without a pre-selected metric — user picks from within the panel */
@@ -81,8 +90,8 @@ export const ROUTES = {
     experimentDetail: `/workspaces/:${P.workspace}/experiment/:${P.experimentName}`,
     evaluationDetail: `/workspaces/:${P.workspace}/experiment/:${P.experimentName}/:${P.evaluationName}`,
     evaluationSessionDetail: `/workspaces/:${P.workspace}/experiment/:${P.experimentName}/:${P.evaluationName}/sessions/:${P.sessionId}`,
-    customizationJobList: `/workspaces/:${P.workspace}/customizations`,
-    customizationJobDetails: `/workspaces/:${P.workspace}/customizations/:${P.customizationJobName}`,
+    customizationJobList: `/workspaces/:${P.workspace}/fine-tune`,
+    customizationJobDetails: `/workspaces/:${P.workspace}/fine-tune/:${P.customizationJobName}`,
     filesets: `/workspaces/:${P.workspace}/filesets`,
     filesetNew: `/workspaces/:${P.workspace}/filesets/new`,
     filesetDetails: `/workspaces/:${P.workspace}/filesets/:${P.filesetId}`,
@@ -100,6 +109,14 @@ export const ROUTES = {
     virtualModelChat: `/workspaces/:${P.workspace}/virtual-models/:${P.virtualModelName}/chat`,
     deploymentConfigs: `/workspaces/:${P.workspace}/deployment-configs`,
     deployments: `/workspaces/:${P.workspace}/deployments`,
+    /**
+     * Dedicated Create Deployment wizard page.
+     *
+     * `~new`, not `new`: `~` is outside the entity-name charset (see
+     * `resourceRefRegExp`), so this segment can never collide with a deployment
+     * name — including if deployments ever get a single-segment detail route.
+     */
+    deploymentsNew: `/workspaces/:${P.workspace}/deployments/~new`,
     /** Deployments list with details side panel (deployment name + panel segment, e.g. `details`). */
     deploymentsDeployment: `/workspaces/:${P.workspace}/deployments/:${P.deploymentName}/:${P.deploymentPanelView}`,
     intake: `/workspaces/:${P.workspace}/intake`,
@@ -134,10 +151,12 @@ export const ROUTES = {
     agentsList: `/workspaces/:${P.workspace}/agents`,
     assistantChat: `/workspaces/:${P.workspace}/dashboard/assistant`,
     agentDetail: `/workspaces/:${P.workspace}/agents/:${P.agentName}`,
+    agentEvaluationNew: `/workspaces/:${P.workspace}/agents/:${P.agentName}/evaluations/new`,
     agentDeploymentsList: `/workspaces/:${P.workspace}/agent-deployments`,
     agentDeploymentDetail: `/workspaces/:${P.workspace}/agent-deployments/:${P.agentDeploymentName}`,
     /** Detail view for a single agent-evaluation job. */
     agentEvaluationDetail: `/workspaces/:${P.workspace}/agents/evaluations/:${P.agentEvalJobName}`,
+    agentOptimizationDetail: `/workspaces/:${P.workspace}/agents/optimizations/:${P.optimizeJobName}`,
     modelCompare: `/workspaces/:${P.workspace}/playground`,
     agentMonitor: `/workspaces/:${P.workspace}/agents/monitor`,
     /** Plugin-owned page; the plugin's internal router owns sub-paths via a `/*` suffix. */

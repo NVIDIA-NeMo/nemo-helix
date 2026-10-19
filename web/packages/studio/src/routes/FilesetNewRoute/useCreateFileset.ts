@@ -10,7 +10,7 @@ import {
   getFilesListFilesetsQueryKey,
   getFilesRetrieveFilesetQueryKey,
   useFilesCreateFileset,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/files';
 import {
   FilesetOutput,
   FilesetPurpose,

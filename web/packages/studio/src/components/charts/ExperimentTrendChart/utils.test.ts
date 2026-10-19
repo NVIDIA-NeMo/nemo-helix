@@ -59,6 +59,18 @@ describe('deriveTrendMetrics', () => {
     expect(getMetric(metrics, 'evaluators.answers_question').label).toBe('Answers Question');
   });
 
+  it('keeps the full evaluator key when short labels would collide', () => {
+    const metrics = deriveTrendMetrics([
+      row({
+        name: 'a',
+        evaluators: { 'correctness.score': 1, 'tool_use.score': 1, 'style.tone': 1 },
+      }),
+    ]);
+    expect(getMetric(metrics, 'evaluators.correctness.score').label).toBe('Correctness Score');
+    expect(getMetric(metrics, 'evaluators.tool_use.score').label).toBe('Tool Use Score');
+    expect(getMetric(metrics, 'evaluators.style.tone').label).toBe('Tone');
+  });
+
   it('offers the rollups even when no evaluation carries an evaluator score', () => {
     const metrics = deriveTrendMetrics([row({ name: 'a', cost: 1 })]);
     expect(metrics.map((m) => m.id)).toEqual(['duration_ms', 'cost_usd', 'latency_ms', 'tokens']);

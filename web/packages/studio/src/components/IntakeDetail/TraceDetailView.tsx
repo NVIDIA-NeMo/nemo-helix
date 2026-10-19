@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { IntakeAccordion } from '@nemo/common/src/components/IntakeAccordion';
-import { useGetTrace } from '@nemo/sdk/generated/platform/api';
 import type { Trace } from '@nemo/sdk/generated/platform/schema';
+import { useGetTrace } from '@nemo/sdk/generated/platform/traces';
 import { Banner, Stack, StatusMessage, Text } from '@nvidia/foundations-react-core';
 import { KeyValueRows } from '@studio/components/IntakeDetail/IntakeComponents/KeyValueRows';
 import { RawJsonDebug } from '@studio/components/IntakeDetail/IntakeComponents/RawJsonDebug';

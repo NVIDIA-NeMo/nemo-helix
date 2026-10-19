@@ -17,21 +17,24 @@ import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMe
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
 import {
-  getEvaluatorListAgentEvaluateJobsQueryKey,
-  useEvaluatorDeleteAgentEvaluateJob,
-  useEvaluatorListAgentEvaluateJobs,
-} from '@nemo/sdk/generated/evaluator/api';
+  getEvalsListAgentEvaluateJobsQueryKey,
+  useEvalsDeleteAgentEvaluateJob,
+  useEvalsListAgentEvaluateJobs,
+} from '@nemo/sdk/generated/evals/evals-plugin-agent-eval-jobs-routes';
 import {
   type AgentEvaluateJob,
   type AgentEvaluateJobsListFilter,
   AgentEvaluateJobsSortField,
-} from '@nemo/sdk/generated/evaluator/schema';
-import { Button } from '@nvidia/foundations-react-core';
+} from '@nemo/sdk/generated/evals/schema';
+import { Button, Flex } from '@nvidia/foundations-react-core';
 import { agentNameForJob, evalConfigName } from '@studio/api/evaluation/agent-evaluations';
+import { evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
+import { EvalRunOutcomeBadge } from '@studio/components/evaluation/EvalRunOutcomeBanner';
 import { STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getAgentEvaluationDetailRoute, getFilesetRoute } from '@studio/routes/utils';
@@ -39,7 +42,7 @@ import { getTextWithCount } from '@studio/util/strings';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
 import { Trash } from 'lucide-react';
 import { ComponentProps, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { Link } from 'react-router';
 
 type AgentEvalJobRow = AgentEvaluateJob & { id: string };
 
@@ -55,7 +58,7 @@ const DEFAULT_SORT = AgentEvaluateJobsSortField['-created_at'];
 
 export const AgentEvaluationsDataView = () => {
   const workspace = useWorkspaceFromPath();
-  const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const queryClient = useQueryClient();
 
   const [deleteJobs, setDeleteJobs] = useState<AgentEvalJobRow[]>([]);
@@ -64,11 +67,11 @@ export const AgentEvaluationsDataView = () => {
     defaultSort: [{ id: 'created_at', desc: true }],
   });
 
-  const deleteJobMutation = useEvaluatorDeleteAgentEvaluateJob({
+  const deleteJobMutation = useEvalsDeleteAgentEvaluateJob({
     mutation: {
       onSuccess: () =>
         queryClient.resetQueries({
-          queryKey: getEvaluatorListAgentEvaluateJobsQueryKey(workspace),
+          queryKey: getEvalsListAgentEvaluateJobsQueryKey(workspace),
         }),
     },
   });
@@ -95,7 +98,7 @@ export const AgentEvaluationsDataView = () => {
     data: jobsData,
     isLoading,
     error,
-  } = useEvaluatorListAgentEvaluateJobs(
+  } = useEvalsListAgentEvaluateJobs(
     workspace,
     {
       page: dataViewState.pagination.state.pageIndex + 1,
@@ -173,7 +176,12 @@ export const AgentEvaluationsDataView = () => {
           options: STATUS_OPTIONS_WITH_ALL,
         },
       },
-      cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      cell: ({ row }) => (
+        <Flex align="center" gap="density-xs" className="flex-wrap">
+          <StatusBadge status={row.original.status} />
+          <EvalRunOutcomeBadge outcome={evalRunOutcomeOf(row.original.status_details)} />
+        </Flex>
+      ),
     }),
     accessor((original) => original?.created_at || '', {
       id: 'created_at',
@@ -207,9 +215,9 @@ export const AgentEvaluationsDataView = () => {
         dataViewState={dataViewState}
         searchField="name"
         makeColumns={makeColumns}
-        onRowClick={(row) => {
+        onRowClick={(row, _index, event) => {
           if (!row.name) return;
-          navigate(getAgentEvaluationDetailRoute(workspace, row.name));
+          openRow(event, getAgentEvaluationDetailRoute(workspace, row.name));
         }}
         renderBulkActions={({ selectedRows }) => (
           <Button

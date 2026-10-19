@@ -4,7 +4,14 @@
 import type { LucideIcon } from 'lucide-react';
 
 /** Visual status of a node, used to tint the card's leading icon. */
-export type DagNodeStatus = 'idle' | 'running' | 'success' | 'error';
+export type DagNodeStatus =
+  | 'idle'
+  | 'running'
+  | 'success'
+  | 'warning'
+  | 'error'
+  | 'cancelled'
+  | 'unknown';
 
 /** Presentational content rendered inside a card node. */
 export interface DagNodeData {
@@ -22,10 +29,12 @@ export interface DagNodeData {
   status?: DagNodeStatus;
   /**
    * Accent classes applied to the icon (when idle) and subtitle, e.g.
-   * `text-[color:var(--text-color-accent-purple)]`. Non-idle statuses keep their
-   * semantic feedback color on the icon regardless of this prop.
+   * `text-[color:var(--text-color-accent-purple)]`. When set, it wins over the
+   * status color on the icon; otherwise the icon uses the status feedback color.
    */
   colorClassName?: string;
+  /** Draws attention to this node as part of a selected or computed path. */
+  highlighted?: boolean;
 }
 
 /** A single node in the DAG, identified by a unique `id`. */
@@ -42,6 +51,10 @@ export interface DagEdge {
   target: string;
   /** Optional label rendered on the arrow. */
   label?: string;
+  /** Draws attention to this edge as part of a selected or computed path. */
+  highlighted?: boolean;
+  /** De-emphasizes this edge while preserving its context. */
+  muted?: boolean;
 }
 
 /** Layout flow direction: top-to-bottom or left-to-right. */

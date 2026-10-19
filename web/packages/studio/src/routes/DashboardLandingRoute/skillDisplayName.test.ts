@@ -10,8 +10,8 @@ import {
 const skill = (overrides: Partial<AssistantSkill>): AssistantSkill => ({
   name: 'inference',
   claude_name: 'nemo-inference',
-  description: 'Use NeMo Platform inference.',
-  source: 'nemo-platform',
+  description: 'Use NeMo Helix inference.',
+  source: 'nemo-helix',
   install_path: '.claude/skills/nemo-inference/SKILL.md',
   installed: false,
   ...overrides,

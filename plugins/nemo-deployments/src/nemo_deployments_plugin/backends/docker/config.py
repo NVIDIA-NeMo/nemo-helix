@@ -15,7 +15,18 @@ DOCKER_ENDPOINT_MODE_ENV_VAR = "NEMO_DEPLOYMENTS_DOCKER_ENDPOINT_MODE"
 DOCKER_NETWORK_ENV_VAR = "NEMO_DEPLOYMENTS_DOCKER_NETWORK"
 LEGACY_MODELS_DOCKER_NETWORKING_MODE_ENV_VAR = "MODELS_DOCKER_NETWORKING_MODE"
 LEGACY_MODELS_DOCKER_NETWORK_ENV_VAR = "MODELS_DOCKER_NETWORK"
+DEFAULT_WORKLOAD_TOKEN_WRITER_IMAGE = (
+    "docker.io/library/busybox:1.37.0@sha256:9532d8c39891ca2ecde4d30d7710e01fb739c87a8b9299685c63704296b16028"
+)
 DockerEndpointMode = Literal["host", "network"]
+
+
+class DockerAdditionalVolumeMount(BaseModel):
+    """Executor-level Docker volume or bind mount applied to every deployment container."""
+
+    volume_name: str = Field(min_length=1, description="Docker volume name or host path to mount.")
+    mount_path: str = Field(min_length=1, description="Container path where the volume is mounted.")
+    read_only: bool = Field(default=False, description="Mount the source read-only when true.")
 
 
 def _default_network() -> str | None:
@@ -79,6 +90,18 @@ class DockerExecutorConfig(BaseModel):
             f"be set with {DOCKER_ENDPOINT_MODE_ENV_VAR}; "
             f"{LEGACY_MODELS_DOCKER_NETWORKING_MODE_ENV_VAR}=dond selects 'network' for compatibility."
         ),
+    )
+    additional_volume_mounts: list[DockerAdditionalVolumeMount] = Field(
+        default_factory=list,
+        description=(
+            "Executor-level Docker volume mounts applied to every deployment container. "
+            "Useful for shared platform assets such as gateway CA bundles."
+        ),
+    )
+    workload_token_writer_image: str = Field(
+        default=DEFAULT_WORKLOAD_TOKEN_WRITER_IMAGE,
+        min_length=1,
+        description="Image used for the workload identity token-writer container.",
     )
     resource_scope: str = Field(
         default=DEFAULT_RESOURCE_SCOPE,

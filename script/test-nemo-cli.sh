@@ -83,7 +83,7 @@ echo "----- boot platform and wait for default+system workspaces -----"
 # install knows about." For a wheel-test job that's exactly what we want —
 # any bundled service module that fails to import, run alembic, or answer
 # health probes is a real wheel-installability bug. The caller must have
-# installed `nemo-platform[services]` (the umbrella extra) for this to
+# installed `nemo-helix[services]` (the umbrella extra) for this to
 # resolve a meaningful set; with the base install you'd get just the SDK.
 nemo services run >"${LOG}" 2>&1 &
 SERVICES_PID=$!

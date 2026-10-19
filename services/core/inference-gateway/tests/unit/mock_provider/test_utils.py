@@ -7,10 +7,10 @@ from unittest.mock import Mock
 
 import pytest
 from fastapi import Request
-from nmp.common.config import Configuration
-from nmp.core.inference_gateway.api.mock_provider.responses import MOCK_RESPONSE_HEADER
-from nmp.core.inference_gateway.api.mock_provider.utils import is_mock_mode_enabled, is_mock_provider, is_mock_request
-from nmp.core.inference_gateway.config import InferenceGatewayConfig
+from nhx.common.config import Configuration
+from nhx.core.inference_gateway.api.mock_provider.responses import MOCK_RESPONSE_HEADER
+from nhx.core.inference_gateway.api.mock_provider.utils import is_mock_mode_enabled, is_mock_provider, is_mock_request
+from nhx.core.inference_gateway.config import InferenceGatewayConfig
 
 
 @pytest.fixture(autouse=True)

@@ -5,12 +5,15 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import ray
 
 from sandboxed_gym.broker import EpisodeBrokerServer
 from sandboxed_gym.config import BrokerEndpoint, EpisodeBrokerConfig
+
+LOGGER = logging.getLogger(__name__)
 
 BROKER_ACTOR_FQN = "sandboxed_gym.ray.broker_actor.SandboxEpisodeBrokerActor"
 
@@ -51,3 +54,44 @@ def start_episode_broker(
     actor = SandboxEpisodeBrokerActor.options(**options).remote(config)
     endpoint = ray.get(actor.start.remote())
     return actor, endpoint
+
+
+class RayEpisodeBroker:
+    """Runs the broker in its own Ray actor, for :meth:`SandboxedGymOrchestrator.start`.
+
+    Worth choosing when a job's environments open episodes often: the broker serves every episode
+    ``exec``, and hosting it here keeps that traffic off the calling process's GIL.
+
+    Ray supplies placement and lifecycle only. The HTTP server still runs on a background thread
+    inside the actor, so requests never serialize through Ray actor dispatch -- which is what
+    makes this a placement decision rather than a throughput one.
+    """
+
+    def __init__(
+        self,
+        config: EpisodeBrokerConfig | dict[str, Any],
+        *,
+        node_id: str | None = None,
+        extra_ray_options: dict[str, Any] | None = None,
+    ) -> None:
+        self._config = config
+        self._node_id = node_id
+        self._extra_ray_options = extra_ray_options
+        self._actor: Any | None = None
+
+    def start(self) -> BrokerEndpoint:
+        self._actor, endpoint = start_episode_broker(
+            self._config, node_id=self._node_id, extra_ray_options=self._extra_ray_options
+        )
+        return endpoint
+
+    def shutdown(self) -> None:
+        """Stop the actor. Logged rather than raised: a caller is already tearing down."""
+        if self._actor is None:
+            return
+        try:
+            ray.get(self._actor.shutdown.remote())
+        except Exception:
+            LOGGER.exception("Failed to shut down the episode broker actor")
+        finally:
+            self._actor = None

@@ -7,10 +7,10 @@ from typing import cast
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nmp.intake.repository.clickhouse.tables import ClickHouseTable, qualified_table
-from nmp.intake.service import IntakeService
-from nmp.intake.spans.clickhouse_client import ClickHouseSpanClient, bootstrap_schema
-from nmp.intake.spans.clickhouse_migrations import quote_clickhouse_identifier
+from nhx.intake.repository.clickhouse.tables import ClickHouseTable, qualified_table
+from nhx.intake.service import IntakeService
+from nhx.intake.spans.clickhouse_client import ClickHouseSpanClient, bootstrap_schema
+from nhx.intake.spans.clickhouse_migrations import quote_clickhouse_identifier
 
 
 def test_clickhouse_server_matches_supported_lts(
@@ -37,6 +37,7 @@ def test_clickhouse_bootstrap_is_idempotent(clickhouse_client: ClickHouseSpanCli
         ("ch_annotations_0001",),
         ("ch_evaluator_results_0001",),
         ("ch_evaluator_results_0002",),
+        ("ch_evaluator_results_0003_status",),
         ("ch_spans_0002",),
         ("ch_trace_index_0003",),
         ("ch_trace_index_0004_nemo_keys",),
@@ -56,12 +57,13 @@ def test_clickhouse_bootstrap_is_idempotent(clickhouse_client: ClickHouseSpanCli
         assert ttl in str(create.result_rows[0][0])
 
 
-def test_intake_service_readiness_bootstraps_and_probes_service_owned_clickhouse(client: TestClient, run_async):
+def test_intake_service_readiness_bootstraps_and_probes_service_owned_clickhouse(client: TestClient):
     app = cast(FastAPI, client.app)
     service = cast(IntakeService, app.state.intake_service)
 
     assert service.clickhouse_client is not None
-    assert run_async(service.is_ready()) is True
+    assert client.portal is not None
+    assert client.portal.call(service.is_ready) is True
     assert service.clickhouse_client._bootstrapped is True
 
     response = client.get("/apis/intake/v2/workspaces/default/spans")

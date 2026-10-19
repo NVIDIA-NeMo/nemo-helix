@@ -3,21 +3,25 @@
 
 import {
   LogFrameLevel,
+  ModelDownloadFrameStatus,
   type Done,
   type Error as ErrorFrame,
   type FailedRecordsFrame,
   type Heartbeat,
   type LogFrame,
+  type ModelDownloadFrame,
   type PreviewDatasetFrame,
   type PreviewRequest,
   type TraceDatasetFrame,
 } from '@nemo/sdk/generated/anonymizer/schema';
+import { platformFetch } from '@nemo/sdk/src/utils/platformRequest';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { asRecord } from '@studio/util/guards';
 import { readLineDelimitedStream } from '@studio/util/lineStream';
 
 export type PreviewFrame =
   | LogFrame
+  | ModelDownloadFrame
   | PreviewDatasetFrame
   | TraceDatasetFrame
   | FailedRecordsFrame
@@ -26,6 +30,7 @@ export type PreviewFrame =
   | ErrorFrame;
 
 const LOG_LEVELS: readonly string[] = Object.values(LogFrameLevel);
+const DOWNLOAD_STATUSES: readonly string[] = Object.values(ModelDownloadFrameStatus);
 
 const asRecordList = (value: unknown): Record<string, unknown>[] =>
   Array.isArray(value)
@@ -59,6 +64,15 @@ export const parsePreviewFrame = (line: string): PreviewFrame | undefined => {
         level: LOG_LEVELS.includes(String(level))
           ? (level as LogFrame['level'])
           : LogFrameLevel.info,
+        message: typeof message === 'string' ? message : '',
+      };
+    }
+    case 'model_download': {
+      const { status, message } = frame;
+      if (!DOWNLOAD_STATUSES.includes(String(status))) return undefined;
+      return {
+        kind,
+        status: status as ModelDownloadFrame['status'],
         message: typeof message === 'string' ? message : '',
       };
     }
@@ -114,12 +128,11 @@ export const streamAnonymizerPreview = async (
   signal: AbortSignal,
   onFrame: (frame: PreviewFrame) => void
 ): Promise<void> => {
-  const response = await fetch(`${PLATFORM_BASE_URL}${previewPath(workspace)}`, {
+  const response = await platformFetch(`${PLATFORM_BASE_URL}${previewPath(workspace)}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      'X-Source': 'NeMo Studio',
     },
     body: JSON.stringify(request),
     signal,

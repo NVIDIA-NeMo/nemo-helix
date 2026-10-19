@@ -11,6 +11,7 @@ export const NODE_HEIGHT = 116;
 
 /** Minimum empty gap to keep between a node and an edge that merely passes by it. */
 const EDGE_CLEARANCE = 24;
+const MAX_EDGE_CLEARANCE_NODES = 250;
 
 /** Rough on-screen size of an edge label, used to keep nodes clear of it. */
 const LABEL_CHAR_WIDTH = 7;
@@ -119,7 +120,9 @@ export const layoutGraph = <N extends Node>(
       return [node.id, { x, y }];
     })
   );
-  clearNodesOffEdges(centers, edges, isHorizontal);
+  if (nodes.length <= MAX_EDGE_CLEARANCE_NODES) {
+    clearNodesOffEdges(centers, edges, isHorizontal);
+  }
 
   return nodes.map((node) => {
     const { x, y } = centers.get(node.id) ?? { x: 0, y: 0 };

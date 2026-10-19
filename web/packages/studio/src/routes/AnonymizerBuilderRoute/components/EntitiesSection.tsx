@@ -4,7 +4,7 @@
 import { ControlledCheckbox } from '@nemo/common/src/components/form/ControlledCheckbox';
 import { ControlledCombobox } from '@nemo/common/src/components/form/ControlledCombobox';
 import { ControlledSegmentedControl } from '@nemo/common/src/components/form/ControlledSegmentedControl';
-import { useAnonymizerListEntityLabels } from '@nemo/sdk/generated/anonymizer/api';
+import { useAnonymizerListEntityLabels } from '@nemo/sdk/generated/anonymizer/anonymizer';
 import { Flex, Stack, Tag, Text } from '@nvidia/foundations-react-core';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import {

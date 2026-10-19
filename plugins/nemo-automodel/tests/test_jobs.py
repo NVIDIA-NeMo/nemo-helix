@@ -5,7 +5,7 @@
 
 ``validate_for_training`` rejects inconsistent parallelism/batch topologies.
 Those are user input errors, so they have to leave ``compile`` as
-``PlatformJobCompilationError`` — the api_factory only maps that type to a
+``HelixJobCompilationError`` — the api_factory only maps that type to a
 422, and anything else escapes as a 500.
 """
 
@@ -15,11 +15,12 @@ import asyncio
 from typing import Any
 from unittest.mock import patch
 
+import httpx
 import pytest
 from nemo_automodel_plugin.jobs.jobs import AutomodelJob
 from nemo_automodel_plugin.schema import AutomodelJobOutput
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 
 
 def _make_canonical(**parallelism: Any) -> AutomodelJobOutput:
@@ -38,15 +39,26 @@ def _make_canonical(**parallelism: Any) -> AutomodelJobOutput:
 
 
 def _compile(canonical: AutomodelJobOutput) -> Any:
-    return asyncio.run(
-        AutomodelJob.compile(
+    async def run_compile() -> Any:
+        async_sdk = AsyncNemoClient(
+            base_url="http://test",
             workspace="default",
-            spec=canonical,
-            entity_client=object(),
-            job_name=None,
-            async_sdk=object.__new__(AsyncNeMoPlatform),
-        ),
-    )
+            http_client=httpx.AsyncClient(
+                transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request))
+            ),
+        )
+        try:
+            return await AutomodelJob.compile(
+                workspace="default",
+                spec=canonical,
+                entity_client=object(),
+                job_name=None,
+                async_sdk=async_sdk,
+            )
+        finally:
+            await async_sdk.close()
+
+    return asyncio.run(run_compile())
 
 
 class TestCompileValidationErrors:
@@ -54,12 +66,12 @@ class TestCompileValidationErrors:
         # global_batch_size=4 with data_parallel_size=16 (2 nodes x 8 GPUs, TP=1).
         canonical = _make_canonical(tensor_parallel_size=1)
         with patch("nemo_automodel_plugin.jobs.jobs.require_container_runtime"):
-            with pytest.raises(PlatformJobCompilationError, match="global_batch_size"):
+            with pytest.raises(HelixJobCompilationError, match="global_batch_size"):
                 _compile(canonical)
 
     def test_indivisible_model_parallel_raises_compilation_error(self) -> None:
         # 16 total GPUs is not divisible by tensor_parallel_size=5.
         canonical = _make_canonical(tensor_parallel_size=5)
         with patch("nemo_automodel_plugin.jobs.jobs.require_container_runtime"):
-            with pytest.raises(PlatformJobCompilationError, match="Total GPUs"):
+            with pytest.raises(HelixJobCompilationError, match="Total GPUs"):
                 _compile(canonical)

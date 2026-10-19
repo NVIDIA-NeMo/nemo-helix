@@ -5,12 +5,46 @@
 
 {{ template "chart.typeBadge" . }}
 
-Documentation can be found at: https://docs.nvidia.com/nemo-platform.
-For deployment instructions, see https://docs.nvidia.com/nemo-platform/documentation/self-managed-deployment/setup.
+Documentation can be found at: https://docs.nvidia.com/nemo-helix.
+For deployment instructions, see https://docs.nvidia.com/nemo-helix/documentation/kubernetes-deployment/setup.
+
+## Ingress and Gateway API routing
+
+The default `ingress.hosts[0].paths` and `httpRoute.pathRules` route
+`/openapi.json` and `/health/ready` with exact matches. Custom route lists replace
+the defaults, so include these paths explicitly when overriding them.
+
+## Upgrading installations from before the rename
+
+Kubernetes Deployment selectors are immutable. If your existing component labels
+differ from the chart defaults, set `api.componentLabel` and
+`core.controller.componentLabel` to match the deployed selectors. For example,
+an installation using the legacy labels would use:
+
+```yaml
+api:
+  componentLabel: nmp-api
+core:
+  controller:
+    componentLabel: nmp-core-controller
+```
+
+Retain these overrides on subsequent upgrades for the lifetime of those
+Deployments. Also preserve your existing release name, resource names, storage
+configuration, and encryption key and its Secret reference. Fresh installations
+use the chart defaults.
+
+### Preserve existing PostgreSQL claim-template labels
+
+For older embedded PostgreSQL installations, copy the labels from the existing
+StatefulSet's `data` claim template into `postgresql.persistence.claimTemplateLabels`.
+Retain those exact values on future upgrades, including old version labels.
+The default `{}` preserves current behavior. This addresses claim labels only;
+the other migration requirements above still apply.
 
 ## Platform Secrets Encryption Key
 
-The platform secrets service reads `NMP_SECRETS_DEFAULT_ENCRYPTION_KEY` from the
+The platform secrets service reads `NHX_SECRETS_DEFAULT_ENCRYPTION_KEY` from the
 API env Secret. The value must be base64-encoded and decode to at least 32 bytes.
 
 Set `secrets.defaultEncryptionKey.value` to provide your own key. When that value
@@ -28,7 +62,7 @@ Set `envFromSecret` to use a fully user-managed API env Secret. In that mode the
 chart does not create or generate the API env Secret.
 
 On upgrade, the generated Secret must already exist and contain
-`NMP_SECRETS_DEFAULT_ENCRYPTION_KEY`. If it is missing, restore the original
+`NHX_SECRETS_DEFAULT_ENCRYPTION_KEY`. If it is missing, restore the original
 Secret instead of generating a replacement key; existing encrypted platform
 secrets will not decrypt with a new key.
 
@@ -124,7 +158,7 @@ and
 The chart does not install Kyverno. Multi-node NCCL device injection renders
 ClusterPolicies that Kyverno must apply. Enable exactly one cloud provider
 under `multinodeNetworking`.
-How-to: https://docs.nvidia.com/nemo-platform/latest/documentation/self-managed-deployment/setup/helm/multinode-networking
+How-to: https://docs.nvidia.com/nemo-helix/latest/documentation/kubernetes-deployment/setup/helm/multinode-networking
 
 ## Volcano
 
@@ -132,7 +166,7 @@ The chart does not install Volcano. Multi-node `volcano_job` workloads need it.
 `rbac.volcanoEnabled` defaults to true so the core controller can manage Volcano
 CRs. Skip Volcano and set `rbac.volcanoEnabled: false` if you are not running
 those jobs.
-How-to: https://docs.nvidia.com/nemo-platform/latest/documentation/self-managed-deployment/setup/helm/volcano
+How-to: https://docs.nvidia.com/nemo-helix/latest/documentation/kubernetes-deployment/setup/helm/volcano
 
 ## OpenSandbox
 
@@ -144,9 +178,16 @@ already installed server as an HTTP client (`OPEN_SANDBOX_DOMAIN`,
 namespace**. Control plane may stay in `opensandbox-system`. Copy the API-key
 Secret into the job namespace.
 
-Example overlays: [examples/opensandbox](examples/opensandbox).
-Shared-kernel (cluster default OCI runtime): https://docs.nvidia.com/nemo-platform/latest/documentation/self-managed-deployment/setup/helm/opensandbox
-Kata QEMU: https://docs.nvidia.com/nemo-platform/latest/documentation/self-managed-deployment/setup/helm/opensandbox-kata
+To run benchmark tasks that ship a Docker Compose file, set
+`opensandbox.composeServices.enabled`. The chart then renders the compose
+services extension into the OpenSandbox server's namespace (`opensandbox.namespace`),
+and the RBAC it needs into the sandbox namespace. The server loads the extension
+only at start, so restart it after the upgrade. See
+[Compose services](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/k8s/helm/examples/opensandbox#compose-services).
+
+Example overlays: [k8s/helm/examples/opensandbox](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/k8s/helm/examples/opensandbox).
+Shared-kernel (cluster default OCI runtime): https://docs.nvidia.com/nemo-helix/latest/documentation/kubernetes-deployment/setup/helm/open-sandbox
+Kata QEMU: https://docs.nvidia.com/nemo-helix/latest/documentation/kubernetes-deployment/setup/helm/opensandbox-kata
 
 ## NetworkPolicies
 

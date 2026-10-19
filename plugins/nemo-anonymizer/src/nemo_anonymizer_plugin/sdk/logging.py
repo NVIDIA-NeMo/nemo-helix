@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from functools import wraps
 from typing import Generator, TypeVar
 
-_LOGGER_NAME = "nemo_platform.anonymizer"
+_LOGGER_NAME = "nemo_helix.anonymizer"
 _HANDLER_MARKER = "_nemo_anonymizer_sdk_handler"
 _handler_lock = threading.RLock()
 _active_handler_users = 0

@@ -6,7 +6,7 @@ title: "List Active Jobs"
 description: ""
 ---
 <a id="ft-list-active-customization-jobs"></a>
-List active customization jobs and their high-level status. Customization jobs run on the platform's Jobs service, so you list them through that service and filter by `source` and `status`. The `source` scopes results to a backend (`automodel` or `unsloth`), while `status="active"` excludes completed, failed, and cancelled jobs. Each entry includes the job definition (model, dataset, training configuration) and overall status.
+List active customization jobs and their high-level status. Customization jobs run on the platform's Jobs service, so you list them through that service and filter by `source` and `status`. Platform job records use `source="customization"` for Automodel, Unsloth, and RL (the Jobs service does not store the training backend as `source`). `status="active"` excludes completed, failed, and cancelled jobs. Tell backends apart from the job name prefix (`automodel-…`, `unsloth-…`, `rl-…`) or from the backend you submitted to. Each entry includes the job definition (model, dataset, training configuration) and overall status.
 
 <Tip>
 
@@ -15,63 +15,59 @@ To get **detailed execution progress** (step-by-step status, training metrics li
 </Tip>
 ## Prerequisites
 
-Before you can list active customization jobs, make sure that you have:
-
-- Obtained the base URL of your NeMo Platform.
-- Set the `NMP_BASE_URL` environment variable to your NeMo Platform endpoint
-
-```bash
-export NMP_BASE_URL="https://your-nmp-base-url"
-```
+Before you can list active customization jobs, make sure that you have configured a CLI context that points at your NeMo Helix deployment. Refer to [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
 ---
 
 ## To List Active Customization Jobs
 
-Use the SDK to list jobs, filtering by `source` to scope the results to a customization backend and by `status` to return only active jobs:
+Use the SDK to list jobs, filtering by `source="customization"` and by `status` to return only active customization jobs:
 
 ```python
-import os
-from nemo_platform import NeMoPlatform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.jobs.types import ListJobsQueryParams
 
 # Initialize the client
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NemoClient.from_config()
+
+# List active customization jobs
+jobs = client.jobs.list_jobs(
     workspace="default",
+    query_params=ListJobsQueryParams(
+        filter={
+            "source": "customization",
+            "status": "active",
+        },
+        page=1,
+        page_size=10,
+        sort="created_at",
+    ),
 )
 
-# List active automodel customization jobs
-jobs = client.jobs.list(
-    workspace="default",
-    filter={
-        "source": "automodel",  # Use "unsloth" for the Unsloth backend
-        "status": "active",
-    },
-    page=1,
-    page_size=10,
-    sort="created_at",
-)
-
-print(f"Found {len(jobs.data)} jobs")
-for job in jobs.data:
+print(f"Found {len(jobs.items())} jobs")
+for job in jobs.items():
     print(f"Job {job.name}: {job.status}")
 
 # Add more filters (optional)
 # Valid filter fields: workspace, project, name, status, source, created_at, updated_at
-filtered_jobs = client.jobs.list(
+filtered_jobs = client.jobs.list_jobs(
     workspace="default",
-    filter={
-        "source": "automodel",
-        "status": "active",
-        "project": "my-finetuning-project",
-    },
-    sort="-created_at",  # Sort by created_at descending
+    query_params=ListJobsQueryParams(
+        filter={
+            "source": "customization",
+            "status": "active",
+            "project": "my-finetuning-project",
+        },
+        sort="-created_at",  # Sort by created_at descending
+    ),
 )
 
-print(f"Found {len(filtered_jobs.data)} jobs")
-for job in filtered_jobs.data:
+print(f"Found {len(filtered_jobs.items())} jobs")
+for job in filtered_jobs.items():
     print(f"Job {job.name}: {job.status}")
 ```
+
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
 
 <Accordion title="Example Response">
 
@@ -84,7 +80,7 @@ for job in filtered_jobs.data:
       "id": "platform-job-QtyhRY5ub4t4tTLPY4sTkz",
       "name": "automodel-99da3f7c1b2e",
       "workspace": "default",
-      "source": "automodel",
+      "source": "customization",
       "created_at": "2026-02-09T22:12:45",
       "updated_at": "2026-02-09T22:12:45",
       "status": "active",
@@ -92,7 +88,7 @@ for job in filtered_jobs.data:
         "message": "Job is running"
       },
       "spec": {
-        "model": "default/qwen3-1.7b",
+        "model": "default/qwen3-0.6b",
         "dataset": { "training": "default/sft-dataset" },
         "training": {
           "training_type": "sft",
@@ -126,7 +122,7 @@ for job in filtered_jobs.data:
   },
   "sort": "created_at",
   "filter": {
-    "source": "automodel",
+    "source": "customization",
     "status": "active"
   },
   "search": {}

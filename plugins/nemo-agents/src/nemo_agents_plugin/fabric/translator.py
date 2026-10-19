@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import copy
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +23,10 @@ HARNESS_ADAPTER_IDS = {
     "codex": "nvidia.fabric.codex",
     "deepagents": "nvidia.fabric.langchain.deepagents",
     "hermes": "nvidia.fabric.hermes",
+    "remote-agent": "nvidia.fabric.remote-agent",
+    "pi": "nvidia.fabric.pi",
+    "mini-swe-agent": "nvidia.fabric.mini-swe-agent",
+    "nooa-bench-agent": "nvidia.fabric.nooa.bench-agent",
 }
 
 # A harness kind carrying this prefix is already a fully-qualified Fabric
@@ -31,17 +37,60 @@ HARNESS_ADAPTER_IDS = {
 # than a translation error here.
 FABRIC_ADAPTER_ID_PREFIX = "nvidia.fabric."
 
-PLATFORM_RUNTIME_ENV_VARS = ("NEMO_BASE_URL", "NMP_BASE_URL", "NMP_WORKSPACE")
+PLATFORM_RUNTIME_ENV_VARS = ("NEMO_BASE_URL", "NHX_BASE_URL", "NHX_WORKSPACE")
+
+# In-image path where the Fabric Dockerfile stages the NeMo Relay Pi extension
+# (see container/template.py PI_RELAY_EXTENSION_PATH). The Pi adapter hard-requires
+# harness.settings["relay_extension_path"] when Relay telemetry is enabled, so a
+# Relay-enabled Pi agent defaults to the staged copy unless the config set a path.
+PI_RELAY_EXTENSION_PATH = "/opt/pi-relay-extension"
+
+RELAY_OBSERVABILITY_VERSION = 4
+# Fabric 0.4 stamped this same shape as version 3; a config persisted under it only needs the number raised.
+_SUPERSEDED_RELAY_OBSERVABILITY_VERSIONS = frozenset({3})
 
 
 class FabricTranslationError(ValueError):
     """Raised when Platform agent config cannot be translated to Fabric config."""
 
 
+def upgrade_relay_observability_version(config: dict[str, Any]) -> dict[str, Any]:
+    """A copy of a translated config with a superseded Relay observability version raised to the current one.
+
+    Returns ``config`` itself when there is nothing to raise.
+    """
+    relay = config.get("relay")
+    observability = relay.get("observability") if isinstance(relay, Mapping) else None
+    if not isinstance(observability, Mapping):
+        return config
+    if observability.get("version") not in _SUPERSEDED_RELAY_OBSERVABILITY_VERSIONS:
+        return config
+    upgraded = copy.deepcopy(config)
+    upgraded["relay"]["observability"]["version"] = RELAY_OBSERVABILITY_VERSION
+    return upgraded
+
+
 def translate_agent_config(config: AgentConfig, harness_name: str | None = None) -> fabric.FabricConfig:
     """Translate Platform-owned agent config into a typed in-memory FabricConfig."""
-    selected_harness_name, harness = _select_harness(config, harness_name)
-    model = _resolve_model(config, selected_harness_name, harness)
+    harness_config = None
+    workflow_config = None
+    runtime_payload = config.runtime.model_dump(exclude_none=True)
+    if config.workflow is not None:
+        if harness_name is not None:
+            raise FabricTranslationError("A harness override cannot be used with a workflow config.")
+        workflow_config = fabric.WorkflowConfig(**config.workflow.model_dump())
+        model = config.models.get("default")
+        if model is None:
+            raise FabricTranslationError("Workflow requires models.default to be configured.")
+    else:
+        selected_harness_name, harness = _select_harness(config, harness_name)
+        model = _resolve_model(config, selected_harness_name, harness)
+        _default_relay_runtime_artifacts(runtime_payload, config, harness)
+        harness_config = fabric.HarnessConfig(
+            adapter_id=_adapter_id_for_harness(harness),
+            resolution="preinstalled",
+            settings=harness.settings,
+        )
     model_payloads = _model_payloads(config, model)
     runtime_env = {
         **_platform_runtime_env(),
@@ -51,14 +100,11 @@ def translate_agent_config(config: AgentConfig, harness_name: str | None = None)
 
     fabric_config = fabric.FabricConfig(
         metadata=fabric.MetadataConfig(name=config.name, description=config.description or None),
-        harness=fabric.HarnessConfig(
-            adapter_id=_adapter_id_for_harness(harness),
-            resolution="preinstalled",
-            settings=harness.settings,
-        ),
+        harness=harness_config,
+        workflow=workflow_config,
         models={key: fabric.ModelConfig(**payload) for key, payload in model_payloads.items()},
         instructions=_instructions_config(config),
-        runtime=fabric.RuntimeConfig(**config.runtime.model_dump(exclude_none=True)),
+        runtime=fabric.RuntimeConfig(**runtime_payload),
         environment=_environment_config(config, runtime_env),
         skills=_skills_config(config),
         mcp=_mcp_config(config),
@@ -106,6 +152,8 @@ def _environment_config(config: AgentConfig, runtime_env: dict[str, str]) -> Any
 
 def _select_harness(config: AgentConfig, harness_name: str | None) -> tuple[str, HarnessConfig]:
     selected_harness_name = harness_name or config.default_harness
+    if selected_harness_name is None:
+        raise FabricTranslationError("No default_harness is configured.")
     harness = config.harnesses.get(selected_harness_name)
     if harness is None:
         available = ", ".join(sorted(config.harnesses))
@@ -177,7 +225,38 @@ def _model_payload(model: ModelConfig) -> dict[str, Any]:
     settings = payload.get("settings")
     if "base_url" not in payload and isinstance(settings, dict) and isinstance(settings.get("base_url"), str):
         payload["base_url"] = settings.pop("base_url")
+    _flatten_model_extensions(payload)
     return payload
+
+
+def _flatten_model_extensions(payload: dict[str, Any]) -> None:
+    """Spread author-supplied ``extensions`` metadata to top-level model keys.
+
+    The Fabric northbound ``ModelConfig`` collects unknown top-level keys into
+    its ``extensions`` map via ``#[serde(flatten)]``, so adapter-owned per-model
+    catalog metadata (``api``, ``context_window``, ...) must be emitted as
+    siblings of ``provider``/``model`` rather than nested under an
+    ``extensions`` object. A nested ``{"extensions": {...}}`` payload would be
+    captured as a single top-level key literally named ``extensions`` and arrive
+    double-nested at the adapter, leaving the metadata unreadable.
+    """
+    extensions = payload.pop("extensions", None)
+    if not extensions:
+        return
+    # Guard against shadowing a declared model field (which is authoritative),
+    # including one the author left unset -- an unset field is dropped from the
+    # dumped payload, so compare against the declared field names, not payload.
+    # ``extensions`` itself counts: a key literally named ``extensions`` would
+    # re-create the nested wrapper this flattening exists to remove.
+    declared_fields = set(ModelConfig.model_fields)
+    collisions = sorted(key for key in extensions if key in declared_fields)
+    if collisions:
+        raise FabricTranslationError(
+            "Model extensions may not override declared model fields: "
+            + ", ".join(collisions)
+            + ". Set these as top-level model fields instead of under extensions."
+        )
+    payload.update(extensions)
 
 
 def _validate_untranslated_shared_fields(config: AgentConfig) -> None:
@@ -229,11 +308,46 @@ def _apply_telemetry(fabric_config: Any, config: AgentConfig, model: ModelConfig
     if provider != "relay":
         raise FabricTranslationError(f"Unsupported telemetry provider {provider!r}. Only 'relay' is supported.")
 
+    _default_relay_extension_path(fabric_config)
+
     fabric_config.enable_relay(
         project=telemetry.project,
         output_dir=telemetry.output_dir,
         observability=_relay_observability_config(config, model),
     )
+
+
+def _default_relay_runtime_artifacts(
+    runtime_payload: dict[str, Any], config: AgentConfig, harness: HarnessConfig
+) -> None:
+    """Default ``runtime.artifacts`` for a Relay-enabled Pi harness when unset.
+
+    Fabric creates the runtime-owned Relay config under ``runtime.artifacts``, so a
+    Relay-enabled Pi agent needs it set or Pi startup fails. Default it to
+    ``./artifacts/pi`` while preserving an explicitly configured value; a no-op for
+    other harnesses and for telemetry-disabled Pi agents.
+    """
+    telemetry = config.telemetry
+    if not telemetry.enabled or (telemetry.provider or "relay") != "relay":
+        return
+    if _adapter_id_for_harness(harness) != HARNESS_ADAPTER_IDS["pi"]:
+        return
+    runtime_payload.setdefault("artifacts", "./artifacts/pi")
+
+
+def _default_relay_extension_path(fabric_config: Any) -> None:
+    """Point a Pi harness at the image-staged Relay extension when none is set.
+
+    The Pi adapter raises ``pi_relay_extension_not_found`` if Relay telemetry is
+    active without ``harness.settings["relay_extension_path"]``. The Fabric image
+    stages the extension at ``PI_RELAY_EXTENSION_PATH``, so default to it while
+    preserving an explicitly configured path. Only the Pi adapter consumes this
+    setting, so defaulting it is a no-op for the other harnesses.
+    """
+    harness = fabric_config.harness
+    if harness is None or harness.adapter_id != HARNESS_ADAPTER_IDS["pi"]:
+        return
+    harness.settings.setdefault("relay_extension_path", PI_RELAY_EXTENSION_PATH)
 
 
 def _telemetry_agent_name(config: AgentConfig) -> str:
@@ -244,7 +358,7 @@ def _telemetry_agent_name(config: AgentConfig) -> str:
 def _relay_observability_config(config: AgentConfig, model: ModelConfig) -> dict[str, Any]:
     telemetry = config.telemetry
     agent_name = _telemetry_agent_name(config)
-    observability: dict[str, Any] = {"version": 3}
+    observability: dict[str, Any] = {"version": RELAY_OBSERVABILITY_VERSION}
 
     if telemetry.atif is not None:
         atif = dict(telemetry.atif)

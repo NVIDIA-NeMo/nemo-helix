@@ -6,12 +6,48 @@
 
 version: 1
 metadata:
-  name: nemo-platform-oidc
+  name: nemo-helix-oidc
   labels:
     blueprints.goauthentik.io/instantiate: "true"
-    blueprints.goauthentik.io/description: "NeMo Platform OIDC provider + demo workload identity"
+    blueprints.goauthentik.io/description: "NeMo Helix OIDC provider + demo workload identity"
 
 entries:
+  # The flows and scope mappings found below come from authentik's default blueprints, which the
+  # worker applies in the background and in no fixed order. A !Find that runs first resolves to
+  # nothing: required fields then fail the apply, but an optional one like the brand's
+  # flow_device_code is silently left empty and /device answers 404. Applying those blueprints
+  # here makes them exist before anything references them; `required` fails this apply (so the
+  # caller retries) until the worker has discovered them.
+  - model: authentik_blueprints.metaapplyblueprint
+    attrs:
+      identifiers:
+        name: Default - Authentication flow
+      required: true
+  - model: authentik_blueprints.metaapplyblueprint
+    attrs:
+      identifiers:
+        name: Default - Provider authorization flow (implicit consent)
+      required: true
+  - model: authentik_blueprints.metaapplyblueprint
+    attrs:
+      identifiers:
+        name: Default - Provider invalidation flow
+      required: true
+  - model: authentik_blueprints.metaapplyblueprint
+    attrs:
+      identifiers:
+        name: System - OAuth2 Provider - Scopes
+      required: true
+  # The providers' signing key is not from a blueprint: the server creates it on startup, after it
+  # already reports healthy. If it is missing, the optional signing_key !Find leaves the providers
+  # signing HS256 tokens with no kid and an empty JWKS, which NeMo rejects. `created` leaves an
+  # existing keypair untouched, but creating one without certificate_data fails this apply (so the
+  # caller retries) until the server has created it.
+  - model: authentik_crypto.certificatekeypair
+    state: created
+    identifiers:
+      name: authentik Self-signed Certificate
+
   - model: authentik_providers_oauth2.scopemapping
     id: nemo-groups-scope
     identifiers:
@@ -26,12 +62,12 @@ entries:
   - model: authentik_providers_oauth2.oauth2provider
     id: nemo-provider
     identifiers:
-      name: nemo-platform
+      name: nemo-helix
     attrs:
-      name: nemo-platform
+      name: nemo-helix
       client_type: confidential
-      client_id: nemo-platform
-      client_secret: nemo-platform-secret-dev
+      client_id: nemo-helix
+      client_secret: !Env AUTHENTIK_SETUP_CLIENT_SECRET
       grant_types:
         - authorization_code
         - refresh_token
@@ -52,13 +88,42 @@ entries:
         - !KeyOf nemo-groups-scope
 
   - model: authentik_providers_oauth2.oauth2provider
+    id: nemo-user-provider
+    identifiers:
+      name: nemo-helix-user
+    attrs:
+      name: nemo-helix-user
+      client_type: confidential
+      client_id: nemo-helix-user
+      client_secret: !Env NHX_OIDC_CLIENT_SECRET
+      grant_types:
+        - authorization_code
+        - refresh_token
+      sub_mode: user_username
+      include_claims_in_id_token: true
+      redirect_uris:
+        - url: !Env NHX_OIDC_LOGIN_REDIRECT_URI
+          matching_mode: strict
+      authorization_flow:
+        !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      invalidation_flow:
+        !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      signing_key:
+        !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
+      property_mappings:
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, email]]
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, offline_access]]
+        - !KeyOf nemo-groups-scope
+
+  - model: authentik_providers_oauth2.oauth2provider
     id: nemo-cli-provider
     identifiers:
-      name: nemo-platform-cli
+      name: nemo-helix-cli
     attrs:
-      name: nemo-platform-cli
+      name: nemo-helix-cli
       client_type: public
-      client_id: nemo-platform-cli
+      client_id: nemo-helix-cli
       grant_types:
         - authorization_code
         - refresh_token
@@ -86,11 +151,11 @@ entries:
   - model: authentik_providers_oauth2.oauth2provider
     id: nemo-workload-provider
     identifiers:
-      name: nemo-platform-workload
+      name: nemo-helix-workload
     attrs:
-      name: nemo-platform-workload
+      name: nemo-helix-workload
       client_type: public
-      client_id: nemo-platform-workload
+      client_id: nemo-helix-workload
       grant_types:
         - password
       sub_mode: user_username
@@ -112,15 +177,23 @@ entries:
     identifiers:
       slug: nemo
     attrs:
-      name: NeMo Platform
+      name: NeMo Helix
       slug: nemo
       provider: !KeyOf nemo-provider
 
   - model: authentik_core.application
     identifiers:
+      slug: nemo-user
+    attrs:
+      name: NeMo Helix User
+      slug: nemo-user
+      provider: !KeyOf nemo-user-provider
+
+  - model: authentik_core.application
+    identifiers:
       slug: nemo-cli
     attrs:
-      name: NeMo Platform CLI
+      name: NeMo Helix CLI
       slug: nemo-cli
       provider: !KeyOf nemo-cli-provider
 
@@ -128,7 +201,7 @@ entries:
     identifiers:
       slug: nemo-workload
     attrs:
-      name: NeMo Platform Workload Identity
+      name: NeMo Helix Workload Identity
       slug: nemo-workload
       provider: !KeyOf nemo-workload-provider
 
@@ -161,7 +234,7 @@ entries:
       username: nemo-user
       email: nemo-user@example.com
       name: "NeMo CLI demo user"
-      password: nemo-user-password-dev
+      password: !Env AUTHENTIK_INTERACTIVE_USER_PASSWORD
       groups:
         - !KeyOf group-nemo-editors
 
@@ -203,7 +276,7 @@ entries:
       identifier: nemo-setup-token
       intent: app_password
       user: !KeyOf nemo-setup
-      key: nemo-setup-token-secret-dev
+      key: !Env AUTHENTIK_SETUP_PASSWORD
       expiring: false
 
   - model: authentik_core.token

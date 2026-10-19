@@ -4,7 +4,7 @@
 import {
   getListEvaluationSessionsQueryKey,
   listEvaluationSessions,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/experiments';
 import type { EvaluationSessionResponse } from '@nemo/sdk/generated/platform/schema';
 import { useQueries } from '@tanstack/react-query';
 

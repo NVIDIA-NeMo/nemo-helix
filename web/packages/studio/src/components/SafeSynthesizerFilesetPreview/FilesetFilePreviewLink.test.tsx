@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ToastProvider } from '@nemo/common/src/providers/toast/ToastProvider';
-import * as platformApi from '@nemo/sdk/generated/platform/api';
+import * as platformApi from '@nemo/sdk/generated/platform/files';
 import { ThemeProvider } from '@nvidia/foundations-react-core';
 import { FilesetFilePreviewLink } from '@studio/components/SafeSynthesizerFilesetPreview/FilesetFilePreviewLink';
 import * as utils from '@studio/components/SafeSynthesizerFilesetPreview/util';
@@ -11,8 +11,8 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 // Mock the SDK API hook
-vi.mock('@nemo/sdk/generated/platform/api', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@nemo/sdk/generated/platform/api')>();
+vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@nemo/sdk/generated/platform/files')>();
   return {
     ...original,
     useFilesDownloadFile: vi.fn(),

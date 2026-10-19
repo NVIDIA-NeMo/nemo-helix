@@ -6,7 +6,6 @@ import { datasetFileContentQueryOptions } from '@studio/api/datasets/useDatasetF
 import { CustomizationFileType } from '@studio/constants/customization';
 import { parseFilesetUri } from '@studio/hooks/useCustomizationFiles/utils';
 import { useDatasetFileDiscovery } from '@studio/hooks/useDatasetFileDiscovery';
-import { parseFileContent } from '@studio/util/files';
 import { useQueries } from '@tanstack/react-query';
 
 export { parseFilesetUri } from '@studio/hooks/useCustomizationFiles/utils';
@@ -98,8 +97,11 @@ export const useCustomizationFilesPreview = ({
 
 /**
  * This hook returns the rows of the customization training and validation files as an array of objects.
- * Each object contains the type of the file (training or validation), the path of the file, the number of records in the file, the size of the file, and the content of the file.
- * It also returns the total number of samples in the training and validation files, and the total number of samples in the fileset.
+ * Each object contains the type of the file (training or validation), the path of the file, the
+ * size of the file, and the content of the file.
+ *
+ * `content` is the size-capped preview from `datasetFileContentQueryOptions`, not the whole file,
+ * so it cannot be used to count the file's rows.
  * @param fileset - The fileset URI to fetch the customization files from (e.g. fileset://workspace/name).
  * @returns
  */
@@ -128,11 +130,9 @@ export const useCustomizationFilesAsRows = ({ fileset }: UseCustomizationFilesOp
     combine: (results) => ({
       rows: results.map((result, index) => {
         const { file, type } = taggedFiles[index];
-        const records = result.data ? parseFileContent({ content: result.data }).rows.length : 0;
         return {
           type,
           path: file.path,
-          records,
           size: file.size,
           content: result.data ?? '',
         };
@@ -140,23 +140,8 @@ export const useCustomizationFilesAsRows = ({ fileset }: UseCustomizationFilesOp
       isFetching: results.some((result) => result.isFetching),
     }),
   });
-  const [trainingRecords, validationRecords] = rows.reduce(
-    (acc, row) => {
-      if (row.type === CustomizationFileType.Training) {
-        acc[0] += row.records;
-      } else {
-        acc[1] += row.records;
-      }
-      return acc;
-    },
-    [0, 0]
-  );
-  const totalRecords = trainingRecords + validationRecords;
   return {
     rows,
-    trainingRecords,
-    validationRecords,
-    totalRecords,
     isFetchingRows,
     ...queryResults,
   };

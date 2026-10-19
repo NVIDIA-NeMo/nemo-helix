@@ -1,0 +1,31 @@
+{
+  "schema_version": "ATIF-v1.5",
+  "session_id": "3f2a1c00-0006-4a00-8000-000000000006",
+  "trajectory_id": "3f2a1c00-0006-4a00-8000-000000000006",
+  "agent": {
+    "name": "email-security-triage",
+    "version": "0.7.0",
+    "model_name": "nvidia-nemotron-3-nano-30b-a3b"
+  },
+  "final_metrics": {
+    "total_prompt_tokens": 3671,
+    "total_completion_tokens": 0,
+    "total_cost_usd": 0.00055065,
+    "total_steps": 1
+  },
+  "extra": {
+    "task_id": "email-security-triage/triage-timeout",
+    "error": {
+      "type": "AgentTimeoutError",
+      "message": "Agent execution timed out after 120.0 seconds"
+    }
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "timestamp": "2026-08-31T21:50:23Z",
+      "source": "user",
+      "message": "{\"user_message\": \"is this legit?\", \"emails\": [{\"from\": \"security-alerts@okta-verify.support\", \"subject\": \"Unusual sign-in blocked - confirm it was you\", \"body\": \"We blocked a sign-in from Lagos, Nigeria. Confirm it was you within 24 hours at https://okta-verify.support/confirm or your account will be locked.\"}]}"
+    }
+  ]
+}

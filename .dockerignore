@@ -16,13 +16,12 @@ Dockerfile.bake
 **/__pycache__
 **/node_modules
 web/packages/sdk/generated/
-sdk/python/nemo-platform/_dev/nmp
-# nemo-agents optimize-skills artifacts. These ephemeral run outputs can
-# contain root-owned files (the harbor agent runs as root inside the
-# container) that fail docker build context scanning with permission
-# denied; they're also pure noise in the build context regardless.
+# Local pi agent state (git-ignored); stale sandbox worktrees break context scanning.
+.pi
+# Local eval run outputs (for example Harbor's jobs/). These can contain
+# root-owned files (the harbor agent runs as root inside the container) that
+# fail docker build context scanning with permission denied; they're also pure
+# noise in the build context regardless.
 jobs/
 runs/
 baselines/
-loop_state*.json
-.agent-improver-state*.json

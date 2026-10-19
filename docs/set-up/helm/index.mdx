@@ -2,104 +2,104 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "Install NeMo Platform with Helm"
+title: "Install NeMo Helix with Helm"
 description: ""
 ---
-<a id="nemo-platform-setup"></a>
+<a id="nemo-helix-setup"></a>
 
-NeMo Platform is bundled in an all-in-one Helm chart for self-managed Kubernetes deployments. Use these guides to deploy the platform on local clusters such as minikube and kind, managed clusters such as EKS, AKS, GKE, and OKE, or on-prem Kubernetes.
+NeMo Helix is bundled in an all-in-one Helm chart for self-managed Kubernetes deployments. Use these guides to deploy the platform on local clusters such as minikube and kind, managed clusters such as EKS, AKS, GKE, and OKE, or on-prem Kubernetes.
 
-Start with [Prerequisites](/documentation/self-managed-deployment/setup/helm/prerequisites), then follow [Install](/documentation/self-managed-deployment/setup/helm/install). The install guide pins the chart with `NMP_HELM_CHART_VERSION` and uses the `nvidia/nemo-platform` NGC org for chart and image access.
+Start with [Prerequisites](/documentation/kubernetes-deployment/setup/helm/prerequisites), then follow [Install](/documentation/kubernetes-deployment/setup/helm/install). The install guide pins the chart with `NHX_HELM_CHART_VERSION` and uses the `nvidia/nemo-helix` NGC org for chart and image access.
 
 <Cards>
 
-<Card title="Prerequisites" href="/documentation/self-managed-deployment/setup/helm/prerequisites">
+<Card title="Prerequisites" href="/documentation/kubernetes-deployment/setup/helm/prerequisites">
 
-Review the prerequisites for installing the NeMo Platform Helm Chart.
+Review the prerequisites for installing NeMo Helix Helm Chart.
 
 <small><span class="md-tag">cluster-admin</span></small>
 
 </Card>
-<Card title="Install" href="/documentation/self-managed-deployment/setup/helm/install">
+<Card title="Install" href="/documentation/kubernetes-deployment/setup/helm/install">
 
-Install the NeMo Platform using the Helm chart.
+Install NeMo Helix using the Helm chart.
 
 <small><span class="md-tag">cluster-admin</span> <span class="md-tag">on-prem</span> <span class="md-tag">cloud</span></small>
 
 </Card>
-<Card title="NetworkPolicy Smoke Test" href="/documentation/self-managed-deployment/setup/helm/network-policy-smoke-test">
+<Card title="NetworkPolicy Smoke Test" href="/documentation/kubernetes-deployment/setup/helm/network-policy-smoke-test">
 
 Verify Helm NetworkPolicies on a local Kind cluster with Calico and Chainsaw.
 
 <small><span class="md-tag">cluster-admin</span> <span class="md-tag">kind</span> <span class="md-tag">networking</span></small>
 
 </Card>
-<Card title="Database Setup" href="/documentation/self-managed-deployment/setup/helm/database-setup">
+<Card title="Database Setup" href="/documentation/kubernetes-deployment/setup/helm/database-setup">
 
-Set up an external database for the NeMo Platform.
-
-<small><span class="md-tag">cluster-admin</span> <span class="md-tag">on-prem</span> <span class="md-tag">cloud</span></small>
-
-</Card>
-<Card title="Ingress" href="/documentation/self-managed-deployment/setup/helm/ingress">
-
-Set up Ingress for the NeMo Platform.
+Set up an external database for NeMo Helix.
 
 <small><span class="md-tag">cluster-admin</span> <span class="md-tag">on-prem</span> <span class="md-tag">cloud</span></small>
 
 </Card>
-<Card title="Persistent Volumes" href="/documentation/self-managed-deployment/setup/helm/persistent-volumes">
+<Card title="Ingress" href="/documentation/kubernetes-deployment/setup/helm/ingress">
 
-Set up persistent volumes for the NeMo Platform.
+Set up Ingress for NeMo Helix.
 
 <small><span class="md-tag">cluster-admin</span> <span class="md-tag">on-prem</span> <span class="md-tag">cloud</span></small>
 
 </Card>
-<Card title="File Storage" href="/documentation/self-managed-deployment/setup/helm/file-storage">
+<Card title="Persistent Volumes" href="/documentation/kubernetes-deployment/setup/helm/persistent-volumes">
+
+Set up persistent volumes for NeMo Helix.
+
+<small><span class="md-tag">cluster-admin</span> <span class="md-tag">on-prem</span> <span class="md-tag">cloud</span></small>
+
+</Card>
+<Card title="File Storage" href="/documentation/kubernetes-deployment/setup/helm/file-storage">
 
 Configure storage options for the Files service.
 
 <small><span class="md-tag">cluster-admin</span> <span class="md-tag">on-prem</span> <span class="md-tag">cloud</span></small>
 
 </Card>
-<Card title="Multinode Networking" href="/documentation/self-managed-deployment/setup/helm/multinode-networking">
+<Card title="Multinode Networking" href="/documentation/kubernetes-deployment/setup/helm/multinode-networking">
 
 Configure high-performance east-west networking (EFA, InfiniBand, TCP-XO, SR-IOV) for multi-node training.
 
 <small><span class="md-tag">cluster-admin</span> <span class="md-tag">cloud</span></small>
 
 </Card>
-<Card title="Volcano" href="/documentation/self-managed-deployment/setup/helm/volcano">
+<Card title="Volcano" href="/documentation/kubernetes-deployment/setup/helm/volcano">
 
 Install the Volcano scheduler for multi-node jobs. The chart does not install Volcano.
 
 <small><span class="md-tag">cluster-admin</span></small>
 
 </Card>
-<Card title="OpenSandbox" href="/documentation/self-managed-deployment/setup/helm/opensandbox">
+<Card title="OpenSandbox" href="/documentation/kubernetes-deployment/setup/helm/open-sandbox">
 
 Install OpenSandbox with the shared-kernel / default runtime path and point jobs at the in-cluster server.
 
 <small><span class="md-tag">cluster-admin</span></small>
 
 </Card>
-<Card title="OpenSandbox with Kata" href="/documentation/self-managed-deployment/setup/helm/opensandbox-kata">
+<Card title="OpenSandbox with Kata" href="/documentation/kubernetes-deployment/setup/helm/opensandbox-kata">
 
 Install Kata Containers and an OpenSandbox server that uses RuntimeClass kata-qemu.
 
 <small><span class="md-tag">cluster-admin</span></small>
 
 </Card>
-<Card title="OpenShift" href="/documentation/self-managed-deployment/setup/helm/openshift">
+<Card title="OpenShift" href="/documentation/kubernetes-deployment/setup/helm/openshift">
 
 Install with OpenShift-compatible configuration.
 
 <small><span class="md-tag">cluster-admin</span> <span class="md-tag">openshift</span></small>
 
 </Card>
-<Card title="Backup and Restore" href="/documentation/self-managed-deployment/setup/helm/backup-and-restore">
+<Card title="Backup and Restore" href="/documentation/kubernetes-deployment/setup/helm/backup-and-restore">
 
-Set up backup and restore configurations for the NeMo Platform.
+Set up backup and restore configurations for NeMo Helix.
 
 <small><span class="md-tag">cluster-admin</span> <span class="md-tag">on-prem</span> <span class="md-tag">cloud</span></small>
 

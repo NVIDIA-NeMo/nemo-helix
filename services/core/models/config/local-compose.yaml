@@ -3,7 +3,7 @@
 
 services:
   # immediately exit so we can use the local `uv run`
-  nmp-core:
+  nhx-core:
     entrypoint: ["python", "-c", "print('exiting for local dev')"]
 
   postgres:

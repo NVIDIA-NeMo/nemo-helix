@@ -4,7 +4,7 @@
 import {
   getAnonymizerListRunJobsQueryKey,
   useAnonymizerDeleteRunJob,
-} from '@nemo/sdk/generated/anonymizer/api';
+} from '@nemo/sdk/generated/anonymizer/anonymizer';
 import type { RunJob as AnonymizerJob } from '@nemo/sdk/generated/anonymizer/schema';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';

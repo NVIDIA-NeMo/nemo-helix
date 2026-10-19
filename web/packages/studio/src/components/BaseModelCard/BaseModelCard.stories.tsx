@@ -293,28 +293,7 @@ const fineTuneableOnlyModel = makeModel({
   fileset: 'meta/llama-checkpoint',
 });
 
-const promptTunableOnlyModel = makeModel({
-  name: 'prompt-tunable-only',
-  workspace: 'meta',
-  description: 'No fileset; chat-available + canPromptTune renders the Prompt-Tunable badge.',
-  spec: customizationSpec,
-  model_providers: ['default/nvidia-build'],
-});
-
-const fineAndPromptTunableModel = makeModel({
-  name: 'fine-and-prompt-tunable',
-  workspace: 'meta',
-  description: 'Has a fileset AND is prompt-tunable — both badges render.',
-  spec: customizationSpec,
-  model_providers: ['default/nvidia-build'],
-  fileset: 'meta/llama-checkpoint',
-});
-
-/**
- * The three customization-badge states side by side: fine-tunable, prompt-tunable,
- * and both. `isChatAvailable` is set explicitly so the Prompt-Tunable badge
- * (gated on `canPromptTune && isChatAvailable`) renders without backend mocks.
- */
+/** The fine-tunable customization badge, which renders when the model has a fileset. */
 export const CustomizationBadges: Story = {
   args: { model: fineTuneableOnlyModel },
   render: () => (
@@ -322,14 +301,6 @@ export const CustomizationBadges: Story = {
       <div>
         <p className="text-sm text-secondary mb-2">Fine-Tuneable only</p>
         <BaseModelCard model={fineTuneableOnlyModel} isChatAvailable />
-      </div>
-      <div>
-        <p className="text-sm text-secondary mb-2">Prompt-Tunable only</p>
-        <BaseModelCard model={promptTunableOnlyModel} isChatAvailable canPromptTune />
-      </div>
-      <div>
-        <p className="text-sm text-secondary mb-2">Fine-Tuneable + Prompt-Tunable</p>
-        <BaseModelCard model={fineAndPromptTunableModel} isChatAvailable canPromptTune />
       </div>
     </div>
   ),

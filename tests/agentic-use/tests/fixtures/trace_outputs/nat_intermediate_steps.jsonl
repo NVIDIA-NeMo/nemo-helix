@@ -1,2 +1,0 @@
-{"parent_id":"root","function_ancestry":{"function_id":"root","function_name":"root"},"payload":{"event_type":"WORKFLOW_START","event_timestamp":1.0,"data":{"input":"Run the command."}}}
-{"parent_id":"root","function_ancestry":{"function_id":"root","function_name":"root"},"payload":{"event_type":"WORKFLOW_END","event_timestamp":2.0,"data":{"output":"Done."}}}

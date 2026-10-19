@@ -20,7 +20,7 @@ def test_mcp_server():
     # Start the server process - run from repo root
     repo_root = Path(__file__).parent.parent.parent.parent.resolve()
     process = subprocess.Popen(
-        ["uv", "run", "tools/mcp-dev-tools/nmp_dev_mcp.py"],
+        ["uv", "run", "tools/mcp-dev-tools/nhx_dev_mcp.py"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

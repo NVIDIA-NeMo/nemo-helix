@@ -29,6 +29,7 @@ from scaled_evals.api.schemas.runnability import (
 )
 from scaled_evals.api.settings import settings
 from scaled_evals.api.tenancy import is_admin
+from scaled_evals.dispatch.harbor_dataset_images import effective_image_mode
 from scaled_evals.dispatch.registry import get_backend_capabilities
 
 ObjectExists = Callable[[str], bool]
@@ -126,11 +127,16 @@ def _reference_shape_error(body: CreateEvaluationRequest | CreateBenchmarkRunReq
     for field_name, value in (
         ("framework_profile_id", body.framework_profile_id),
         ("harbor_profile_id", body.harbor_profile_id),
-        ("switchyard_profile_id", body.switchyard_profile_id),
         ("intake_profile_id", body.intake_profile_id),
     ):
         if value is not None and not value.startswith("cfg_"):
             return f"{field_name} must be a cfg_ id"
+    if isinstance(body, CreateBenchmarkRunRequest):
+        for task_id, profile_id in body.member_framework_profile_ids.items():
+            if not task_id.startswith("task_"):
+                return f"member_framework_profile_ids key must be a task_ id: {task_id}"
+            if not profile_id.startswith("cfg_"):
+                return f"member_framework_profile_ids[{task_id}] must be a cfg_ id"
     for role, credential_id in body.credentials.items():
         if not credential_id.startswith("cred_"):
             return f"credentials[{role}] must be a cred_ id"
@@ -145,9 +151,13 @@ def _append_reference_checks(
 ) -> PreflightBlocker | None:
     profile_slots = [
         (body.framework_profile_id, _framework_profile_type(body.framework)),
-        (body.switchyard_profile_id, "switchyard"),
         (body.intake_profile_id, "intake"),
     ]
+    if isinstance(body, CreateBenchmarkRunRequest):
+        profile_slots.extend(
+            (profile_id, _framework_profile_type(body.framework))
+            for profile_id in body.member_framework_profile_ids.values()
+        )
     profile_slots = [(profile_id, kind) for profile_id, kind in profile_slots if profile_id]
     try:
         db.evaluations.validate_profile_references(profile_slots)
@@ -169,6 +179,51 @@ def _append_reference_checks(
             "referenced config profiles are accessible" if profile_slots else "no config profiles were requested",
         )
     )
+
+    framework_profile_ids = {body.framework_profile_id} if body.framework_profile_id else set()
+    if isinstance(body, CreateBenchmarkRunRequest):
+        framework_profile_ids.update(body.member_framework_profile_ids.values())
+    for framework_profile_id in sorted(framework_profile_ids) if body.framework == "harbor" else ():
+        profile_row = db.evaluations.load_framework_profile(framework_profile_id)
+        profile = profile_row.get("config") if profile_row else None
+        if isinstance(profile, dict) and profile.get("dataset_only") is True:
+            try:
+                effective_image_mode(profile)
+            except ValueError as exc:
+                message = str(exc)
+                checks.append(
+                    _check(
+                        "harbor_dataset_images",
+                        "incompatible",
+                        message,
+                        blocking=True,
+                        code="managed_dataset_images_required",
+                    )
+                )
+                return PreflightBlocker(422, "managed_dataset_images_required", message)
+            if (
+                not settings.image_builder_service_url
+                and not settings.cloud_build_enabled
+                and not settings.buildkit_enabled
+            ):
+                message = "managed Harbor dataset images require an enabled image builder"
+                checks.append(
+                    _check(
+                        "harbor_dataset_images",
+                        "unavailable",
+                        message,
+                        blocking=True,
+                        code="managed_dataset_builder_unavailable",
+                    )
+                )
+                return PreflightBlocker(503, "managed_dataset_builder_unavailable", message)
+            checks.append(
+                _check(
+                    "harbor_dataset_images",
+                    "ready",
+                    "dataset task images will be materialized through managed task revisions",
+                )
+            )
 
     credential_ids = sorted(set(body.credentials.values()))
     try:
@@ -585,6 +640,27 @@ def preflight_benchmark_run(
             )
         )
         summary = BenchmarkMemberSummary(total=0, ready=0, blocked=0)
+        return BlockedPreflight(
+            _report("benchmark_run", checks, summary),
+            PreflightBlocker(422, "invalid_reference", message),
+        )
+    unknown_profile_tasks = sorted(
+        set(body.member_framework_profile_ids) - {str(member["task_id"]) for member in members}
+    )
+    if unknown_profile_tasks:
+        message = "member framework profile override references task(s) outside the benchmark: " + ", ".join(
+            unknown_profile_tasks
+        )
+        checks.append(
+            _check(
+                "benchmark_members",
+                "incompatible",
+                message,
+                blocking=True,
+                code="invalid_reference",
+            )
+        )
+        summary = BenchmarkMemberSummary(total=len(members), ready=0, blocked=len(members))
         return BlockedPreflight(
             _report("benchmark_run", checks, summary),
             PreflightBlocker(422, "invalid_reference", message),

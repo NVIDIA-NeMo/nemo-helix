@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { customFetch } from '@nemo/sdk/generated/fetchers/platform';
-import { getFilesDownloadFileQueryKey } from '@nemo/sdk/generated/platform/api';
+import { getFilesDownloadFileQueryKey } from '@nemo/sdk/generated/platform/files';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 

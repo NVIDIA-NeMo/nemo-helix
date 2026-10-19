@@ -4,29 +4,39 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import json
+from collections.abc import Callable, Generator
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Iterator, cast
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 import yaml
-from nemo_optimization.jobs.optimize import OptimizeJob
-from nemo_optimization.schemas.optimize import OptimizeSpec
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.exceptions import (
-    PlatformJobCompilationError,
-    PlatformJobDependencyUnavailableError,
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.errors import LocalRunError
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.exceptions import (
+    HelixJobCompilationError,
+    HelixJobDependencyUnavailableError,
 )
-from nemo_platform_plugin.jobs.execution_profiles import (
+from nemo_helix_plugin.jobs.execution_profiles import (
     DockerJobExecutionProfile,
     DockerJobExecutionProfileConfig,
     SubprocessJobExecutionProfile,
 )
-from nemo_platform_plugin.refs import FilesetRef
-from nemo_platform_plugin.run_dependencies import LocalRunError
+from nemo_helix_plugin.refs import FilesetRef
+from nemo_optimization.backends.protocol import (
+    OptimizationBackendCapabilities,
+    OptimizationPhase,
+    OptimizationPhaseRequest,
+    OptimizationPhaseResult,
+    OptimizationPhaseStatus,
+)
+from nemo_optimization.jobs.optimize import OptimizeJob
+from nemo_optimization.schemas.optimize import FILESET_REQUIRED, OptimizeSpec, OptimizeSubmitSpec
 from pydantic import ValidationError
 
 FABRIC_AGENT = {
@@ -48,7 +58,7 @@ def write_config(directory: Path, config: dict[str, Any], name: str = "optimize.
 
 
 @contextlib.contextmanager
-def profiles(*execution_profiles: Any) -> Iterator[None]:
+def profiles(*execution_profiles: Any) -> Generator[None, None, None]:
     """Patch the Jobs client so ``compile`` sees exactly *execution_profiles*."""
 
     async def _get_execution_profiles() -> Any:
@@ -77,6 +87,12 @@ def staged_spec(**overrides: Any) -> OptimizeSpec:
     )
 
 
+def test_declares_the_config_tuning_strategy() -> None:
+    strategy = OptimizeJob.nemo_agent_optimization_strategy
+    assert (strategy.name, strategy.requires_config) == ("config-tuning", True)
+    assert strategy.title
+
+
 # ---------------------------------------------------------------------------
 # compile — fileset requirement
 # ---------------------------------------------------------------------------
@@ -97,7 +113,7 @@ async def test_compile_stamps_the_fileset_ref_into_the_step_config() -> None:
 @pytest.mark.asyncio
 async def test_compile_requires_a_staged_fileset() -> None:
     spec = OptimizeSpec(optimize_config="/abs/optimize.yml")
-    with pytest.raises(PlatformJobCompilationError, match="optimize_config_fileset is required"):
+    with pytest.raises(HelixJobCompilationError, match="prepare-fileset"):
         await compile_spec(spec)
 
 
@@ -106,7 +122,18 @@ def test_spec_rejects_absolute_config_alongside_a_fileset() -> None:
         OptimizeSpec(optimize_config="/abs/optimize.yml", optimize_config_fileset=FilesetRef("opt-bundle"))
 
 
-@pytest.mark.parametrize("config_path", ["../escape.yml", "~/optimize.yml", "C:\\bundle\\optimize.yml"])
+@pytest.mark.parametrize(
+    "config_path",
+    [
+        "/abs/optimize.yml",
+        "../escape.yml",
+        "configs/../escape.yml",
+        "~/optimize.yml",
+        "C:\\bundle\\optimize.yml",
+        "\\\\server\\share\\optimize.yml",
+        "\\optimize-chatonly.yaml",
+    ],
+)
 def test_spec_rejects_config_paths_that_escape_the_fileset(config_path: str) -> None:
     with pytest.raises(ValidationError, match="relative to the fileset root"):
         OptimizeSpec(optimize_config=config_path, optimize_config_fileset=FilesetRef("opt-bundle"))
@@ -120,6 +147,23 @@ def test_spec_rejects_a_malformed_fileset_ref() -> None:
 def test_spec_requires_a_config_location() -> None:
     with pytest.raises(ValidationError):
         OptimizeSpec.model_validate({})
+
+
+def test_submit_spec_requires_fileset_for_remote_requests() -> None:
+    with pytest.raises(ValidationError, match="prepare-fileset") as missing:
+        OptimizeSubmitSpec.model_validate({"optimize_config": "optimize.yml"})
+    assert FILESET_REQUIRED in str(missing.value)
+
+    with pytest.raises(ValidationError, match="prepare-fileset") as explicit_none:
+        OptimizeSubmitSpec.model_validate({"optimize_config": "optimize.yml", "optimize_config_fileset": None})
+    assert FILESET_REQUIRED in str(explicit_none.value)
+
+
+def test_submit_spec_allows_missing_fileset_for_local_scheduler() -> None:
+    spec = OptimizeSubmitSpec.model_validate({"optimize_config": "/abs/optimize.yml"}, context={"is_local": True})
+
+    assert spec.optimize_config == "/abs/optimize.yml"
+    assert spec.optimize_config_fileset is None
 
 
 # ---------------------------------------------------------------------------
@@ -142,14 +186,14 @@ async def test_compile_prefers_the_subprocess_profile() -> None:
 async def test_compile_falls_back_to_the_cpu_profile_with_a_task_image() -> None:
     with (
         profiles(CPU_PROFILE),
-        patch("nemo_optimization.jobs.optimize.get_qualified_image", return_value="reg.example/nmp-cpu-tasks:test"),
+        patch("nemo_optimization.jobs.optimize.get_qualified_image", return_value="reg.example/nhx-tasks:test"),
     ):
         platform_spec = await compile_spec(staged_spec())
 
     executor = next(iter(platform_spec["steps"]))["executor"]
     assert executor["provider"] == "cpu"
     assert executor["profile"] == "default"
-    assert executor["container"]["image"] == "reg.example/nmp-cpu-tasks:test"
+    assert executor["container"]["image"] == "reg.example/nhx-tasks:test"
     assert [*executor["container"]["entrypoint"], *executor["container"]["command"]] == [
         "python",
         "-m",
@@ -165,7 +209,7 @@ async def test_compile_matches_the_requested_profile_name() -> None:
             SUBPROCESS_PROFILE,
             DockerJobExecutionProfile(provider="cpu", profile="high-mem", config=DockerJobExecutionProfileConfig()),
         ),
-        patch("nemo_optimization.jobs.optimize.get_qualified_image", return_value="reg.example/nmp-cpu-tasks:test"),
+        patch("nemo_optimization.jobs.optimize.get_qualified_image", return_value="reg.example/nhx-tasks:test"),
     ):
         platform_spec = await compile_spec(staged_spec(), profile="high-mem")
 
@@ -177,14 +221,14 @@ async def test_compile_matches_the_requested_profile_name() -> None:
 @pytest.mark.asyncio
 async def test_compile_reports_available_profiles_when_none_match() -> None:
     with profiles(DockerJobExecutionProfile(provider="gpu", profile="a100", config=DockerJobExecutionProfileConfig())):
-        with pytest.raises(PlatformJobCompilationError, match=r"Available profiles: \['gpu/a100'\]"):
+        with pytest.raises(HelixJobCompilationError, match=r"Available profiles: \['gpu/a100'\]"):
             await compile_spec(staged_spec())
 
 
 @pytest.mark.asyncio
 async def test_compile_is_retryable_when_jobs_is_unreachable() -> None:
     import httpx
-    from nemo_platform_plugin.client.errors import NemoTransportError
+    from nemo_helix_plugin.client.errors import NemoTransportError
 
     async def _boom() -> Any:
         raise NemoTransportError(httpx.ConnectError("connection refused", request=httpx.Request("GET", "http://x")))
@@ -194,7 +238,7 @@ async def test_compile_is_retryable_when_jobs_is_unreachable() -> None:
     client.get_execution_profiles = _boom
     with (
         patch("nemo_optimization.jobs.optimize.client_from_platform", return_value=client),
-        pytest.raises(PlatformJobDependencyUnavailableError, match="temporarily unavailable"),
+        pytest.raises(HelixJobDependencyUnavailableError, match="temporarily unavailable"),
     ):
         await compile_spec(staged_spec())
 
@@ -216,6 +260,24 @@ def test_run_dispatches_a_local_fabric_config(tmp_path: Path, ctx: JobContext) -
     kwargs = dispatch.call_args.kwargs
     assert kwargs["agent_config"] is None
     assert kwargs["optimize_config"]["optimizer"]["numeric"]["enabled"] is True
+
+
+def test_run_uses_workspace_from_spec_for_absolute_config_without_fileset(tmp_path: Path, ctx: JobContext) -> None:
+    optimize_config = write_config(tmp_path, {**FABRIC_AGENT, **MINIMAL_CONFIG})
+    observed: dict[str, str] = {}
+
+    def _preflight(*args: Any, workspace: str, **kwargs: Any) -> None:
+        del args, kwargs
+        observed["workspace"] = workspace
+
+    with (
+        patch("nemo_optimization.jobs.optimize.preflight_validate_llm_models", side_effect=_preflight),
+        patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", return_value={"status": "completed"}),
+    ):
+        result = OptimizeJob().run({"optimize_config": optimize_config, "workspace": "research"}, ctx=ctx)
+
+    assert result["status"] == "completed"
+    assert observed["workspace"] == "research"
 
 
 def test_run_leaves_the_working_directory_alone_in_local_mode(tmp_path: Path, ctx: JobContext) -> None:
@@ -245,7 +307,9 @@ def test_run_expands_env_vars_in_the_config(tmp_path: Path, ctx: JobContext, mon
     assert dispatch.call_args.kwargs["optimize_config"]["models"]["default"]["model"] == "demo-model"
 
 
-def test_run_resolves_platform_agent_before_dispatch(tmp_path: Path, ctx: JobContext) -> None:
+def test_run_resolves_platform_agent_before_dispatch(
+    tmp_path: Path, ctx: JobContext, make_platform_client: Callable[..., NemoClient]
+) -> None:
     optimize_config = write_config(tmp_path, MINIMAL_CONFIG)
 
     platform_agent = {
@@ -276,14 +340,10 @@ def test_run_resolves_platform_agent_before_dispatch(tmp_path: Path, ctx: JobCon
         },
     }
 
-    class _StubAgents:
-        def get(self, *, name: str, workspace: str) -> dict[str, Any]:
-            assert name == "react-agent"
-            assert workspace == "default"
-            return {"config": platform_agent}
-
-    class _StubSDK:
-        agents = _StubAgents()
+    def _serve_agent(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/apis/agents/v2/workspaces/default/agents/react-agent"
+        return httpx.Response(200, json={"name": "react-agent", "workspace": "default", "config": platform_agent})
 
     with patch(
         "nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", return_value={"status": "completed"}
@@ -291,7 +351,7 @@ def test_run_resolves_platform_agent_before_dispatch(tmp_path: Path, ctx: JobCon
         OptimizeJob().run(
             {"optimize_config": optimize_config, "workspace": "default", "agent": "react-agent"},
             ctx=ctx,
-            sdk=cast(NeMoPlatform, _StubSDK()),
+            sdk=make_platform_client(_serve_agent),
         )
 
     agent_config = dispatch.call_args.kwargs["agent_config"]
@@ -316,31 +376,81 @@ def test_run_rejects_endpoint_agent(tmp_path: Path, ctx: JobContext) -> None:
 # ---------------------------------------------------------------------------
 
 
-def bundle_sdk(bundle: dict[str, str], *, downloaded: dict[str, Any] | None = None) -> NeMoPlatform:
-    """An SDK stub whose ``files.download`` materializes *bundle* (relative path → contents)."""
+@contextlib.contextmanager
+def bundle_sdk(
+    bundle: dict[str, str] | None = None,
+    *,
+    downloaded: dict[str, Any] | None = None,
+    uploaded: dict[str, Any] | None = None,
+) -> Generator[NemoClient, None, None]:
+    """Patch fileset staging helpers so typed-manager calls materialize *bundle*."""
 
-    class _StubFiles:
-        def download(self, *, local_path: str, fileset: str, workspace: str) -> None:
-            if downloaded is not None:
-                downloaded.update(fileset=fileset, workspace=workspace)
-            for relative, contents in bundle.items():
-                target = Path(local_path) / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(contents)
+    bundle = bundle or {}
+    sdk = MagicMock(spec=NemoClient)
+    files_client = MagicMock()
 
-    class _StubSDK:
-        files = _StubFiles()
+    def _manager(
+        _files_client: object,
+        *,
+        workspace: str,
+        fileset: str,
+        ensure_fileset_exists: bool,
+    ) -> object:
+        del _files_client
 
-    return cast(NeMoPlatform, _StubSDK())
+        class _StubManager:
+            def validate_storage(self) -> None:
+                pass
+
+            def download_from_url(self, _url: str, local_dir: str | Path | None = None) -> Any:
+                assert local_dir is not None
+                if downloaded is not None:
+                    downloaded.update(fileset=fileset, workspace=workspace)
+                root = Path(local_dir)
+                root.mkdir(parents=True, exist_ok=True)
+                for relative, contents in bundle.items():
+                    target = root / relative
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(contents)
+                return SimpleNamespace(path=root, tmp_dir=root)
+
+            def upload(
+                self,
+                *,
+                local_path: Path,
+                remote_path: str,
+                ignore_patterns: list[str] | str | None = None,
+            ) -> str:
+                del ignore_patterns
+                if uploaded is not None:
+                    uploaded.update(
+                        local_path=local_path,
+                        remote_path=remote_path,
+                        fileset=fileset,
+                        workspace=workspace,
+                        auto_create=ensure_fileset_exists,
+                        names=sorted(p.name for p in local_path.rglob("*") if p.is_file()),
+                    )
+                return f"{workspace}/{fileset}"
+
+        return _StubManager()
+
+    with (
+        patch("nemo_agents_plugin.jobs.fileset_io.FilesClient.from_client", return_value=files_client),
+        patch("nemo_agents_plugin.jobs.fileset_io._fileset_manager", side_effect=_manager),
+    ):
+        yield cast(NemoClient, sdk)
 
 
 def test_run_stages_the_config_from_the_fileset(ctx: JobContext) -> None:
     downloaded: dict[str, Any] = {}
-    sdk = bundle_sdk({"configs/optimize.yml": yaml.safe_dump(MINIMAL_CONFIG)}, downloaded=downloaded)
 
-    with patch(
-        "nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", return_value={"status": "completed"}
-    ) as dispatch:
+    with (
+        bundle_sdk({"configs/optimize.yml": yaml.safe_dump(MINIMAL_CONFIG)}, downloaded=downloaded) as sdk,
+        patch(
+            "nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", return_value={"status": "completed"}
+        ) as dispatch,
+    ):
         result = OptimizeJob().run(
             {
                 "optimize_config": "configs/optimize.yml",
@@ -365,12 +475,6 @@ def test_run_resolves_relative_assets_against_the_staged_bundle(ctx: JobContext)
             "fabric": {"base_dir": "."},
         },
     }
-    sdk = bundle_sdk(
-        {
-            "optimize.yml": yaml.safe_dump(config),
-            "data/rows.json": json.dumps([{"question": "q", "answer": "a"}]),
-        }
-    )
     observed: dict[str, Any] = {}
 
     def _dispatch(**kwargs: Any) -> dict[str, Any]:
@@ -380,7 +484,15 @@ def test_run_resolves_relative_assets_against_the_staged_bundle(ctx: JobContext)
         return {"status": "completed"}
 
     cwd = Path.cwd()
-    with patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch):
+    with (
+        bundle_sdk(
+            {
+                "optimize.yml": yaml.safe_dump(config),
+                "data/rows.json": json.dumps([{"question": "q", "answer": "a"}]),
+            }
+        ) as sdk,
+        patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch),
+    ):
         OptimizeJob().run(
             {
                 "optimize_config": "optimize.yml",
@@ -398,10 +510,10 @@ def test_run_resolves_relative_assets_against_the_staged_bundle(ctx: JobContext)
 
 
 def test_run_restores_the_working_directory_when_the_study_raises(ctx: JobContext) -> None:
-    sdk = bundle_sdk({"optimize.yml": yaml.safe_dump(MINIMAL_CONFIG)})
     cwd = Path.cwd()
 
     with (
+        bundle_sdk({"optimize.yml": yaml.safe_dump(MINIMAL_CONFIG)}) as sdk,
         patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=RuntimeError("study blew up")),
         pytest.raises(RuntimeError, match="study blew up"),
     ):
@@ -419,9 +531,10 @@ def test_run_restores_the_working_directory_when_the_study_raises(ctx: JobContex
 
 
 def test_run_rejects_a_staged_config_missing_from_the_fileset(ctx: JobContext) -> None:
-    sdk = bundle_sdk({"other.yml": yaml.safe_dump(MINIMAL_CONFIG)})
-
-    with pytest.raises(FileNotFoundError, match="was not found in fileset"):
+    with (
+        bundle_sdk({"other.yml": yaml.safe_dump(MINIMAL_CONFIG)}) as sdk,
+        pytest.raises(FileNotFoundError, match="was not found in fileset"),
+    ):
         OptimizeJob().run(
             {
                 "optimize_config": "optimize.yml",
@@ -434,7 +547,7 @@ def test_run_rejects_a_staged_config_missing_from_the_fileset(ctx: JobContext) -
 
 
 def test_run_rejects_a_staged_config_without_an_sdk(ctx: JobContext) -> None:
-    with pytest.raises(LocalRunError, match="requires a 'sdk: NeMoPlatform'"):
+    with pytest.raises(LocalRunError, match="requires a sync platform client"):
         OptimizeJob().run(
             {
                 "optimize_config": "optimize.yml",
@@ -459,24 +572,18 @@ def _config_with_dataset(dataset: Any) -> dict[str, Any]:
 
 def test_run_stages_dataset_from_fileset_ref(tmp_path: Path, ctx: JobContext) -> None:
     downloaded: dict[str, Any] = {}
-
-    class _StubFiles:
-        def download(self, *, local_path: str, fileset: str, workspace: str) -> None:
-            downloaded.update(fileset=fileset, workspace=workspace)
-            (Path(local_path) / "rows.json").write_text('[{"question": "q", "answer": "a"}]')
-
-    class _StubSDK:
-        files = _StubFiles()
-
     optimize_config = write_config(tmp_path, _config_with_dataset({"file_path": "default/evals#rows.json"}))
 
-    with patch(
-        "nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", return_value={"status": "completed"}
-    ) as dispatch:
+    with (
+        bundle_sdk({"rows.json": '[{"question": "q", "answer": "a"}]'}, downloaded=downloaded) as sdk,
+        patch(
+            "nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", return_value={"status": "completed"}
+        ) as dispatch,
+    ):
         OptimizeJob().run(
             {"optimize_config": optimize_config, "workspace": "default"},
             ctx=ctx,
-            sdk=cast(NeMoPlatform, _StubSDK()),
+            sdk=sdk,
         )
 
     assert downloaded == {"fileset": "evals", "workspace": "default"}
@@ -515,39 +622,27 @@ def _write_study_artifacts(ctx: JobContext) -> Path:
 
 def test_run_publishes_results_to_fileset(tmp_path: Path, ctx: JobContext) -> None:
     uploaded: dict[str, Any] = {}
-
-    class _StubFiles:
-        def upload(self, *, local_path: str, fileset: str, workspace: str, fileset_auto_create: bool) -> Any:
-            uploaded.update(
-                local_path=local_path,
-                fileset=fileset,
-                workspace=workspace,
-                auto_create=fileset_auto_create,
-                names=sorted(p.name for p in Path(local_path).rglob("*") if p.is_file()),
-            )
-            return SimpleNamespace(name=fileset)
-
-    class _StubSDK:
-        files = _StubFiles()
-
     optimize_config = write_config(tmp_path, MINIMAL_CONFIG)
 
     def _dispatch(**kwargs: Any) -> dict[str, Any]:
         _write_study_artifacts(ctx)
         return {"status": "completed", "best_trial": 3}
 
-    with patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch):
+    with (
+        bundle_sdk(uploaded=uploaded) as sdk,
+        patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch),
+    ):
         result = OptimizeJob().run(
             {"optimize_config": optimize_config, "workspace": "default", "output": "tuned-results"},
             ctx=ctx,
-            sdk=cast(NeMoPlatform, _StubSDK()),
+            sdk=sdk,
         )
 
     assert uploaded["fileset"] == "tuned-results"
     assert uploaded["workspace"] == "default"
     assert uploaded["auto_create"] is True
-    # Trailing slash uploads contents, not the dir itself.
-    assert uploaded["local_path"].endswith("/")
+    assert uploaded["local_path"] == ctx.storage.persistent / "results"
+    assert uploaded["remote_path"] == ""
     assert uploaded["names"] == ["optimized_config.yml", "study_summary.json"]
     # The study's own summary survives alongside the new pointer.
     assert result["best_trial"] == 3
@@ -574,14 +669,16 @@ def test_run_publishes_results_to_local_dir(tmp_path: Path, ctx: JobContext) -> 
 
 def test_run_publishes_staged_results_after_leaving_the_bundle(ctx: JobContext, tmp_path: Path) -> None:
     """Publishing happens outside the chdir, so a relative --output lands where the caller meant."""
-    sdk_bundle = bundle_sdk({"optimize.yml": yaml.safe_dump(MINIMAL_CONFIG)})
     dest = tmp_path / "published"
 
     def _dispatch(**kwargs: Any) -> dict[str, Any]:
         _write_study_artifacts(ctx)
         return {"status": "completed"}
 
-    with patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch):
+    with (
+        bundle_sdk({"optimize.yml": yaml.safe_dump(MINIMAL_CONFIG)}) as sdk,
+        patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch),
+    ):
         result = OptimizeJob().run(
             {
                 "optimize_config": "optimize.yml",
@@ -590,7 +687,7 @@ def test_run_publishes_staged_results_after_leaving_the_bundle(ctx: JobContext, 
                 "output": str(dest),
             },
             ctx=ctx,
-            sdk=sdk_bundle,
+            sdk=sdk,
         )
 
     assert (dest / "optimizer_results" / "study_summary.json").is_file()
@@ -612,25 +709,106 @@ def test_run_without_output_publishes_nothing(tmp_path: Path, ctx: JobContext) -
 
 def test_run_does_not_publish_when_study_fails(tmp_path: Path, ctx: JobContext) -> None:
     """A crashed study must not leave partial artifacts in the target fileset."""
-
-    class _StubFiles:
-        def upload(self, **kwargs: Any) -> Any:
-            raise AssertionError("upload must not run when the study raises")
-
-    class _StubSDK:
-        files = _StubFiles()
-
+    uploaded: dict[str, Any] = {}
     optimize_config = write_config(tmp_path, MINIMAL_CONFIG)
 
     with (
+        bundle_sdk(uploaded=uploaded) as sdk,
         patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=RuntimeError("study blew up")),
         pytest.raises(RuntimeError, match="study blew up"),
     ):
         OptimizeJob().run(
             {"optimize_config": optimize_config, "workspace": "default", "output": "tuned-results"},
             ctx=ctx,
-            sdk=cast(NeMoPlatform, _StubSDK()),
+            sdk=sdk,
         )
+    assert uploaded == {}
+
+
+def test_run_publishes_intermediate_artifacts_when_prompt_phase_fails(
+    tmp_path: Path,
+    ctx: JobContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    optimize_config = write_config(tmp_path, _multi_phase_config())
+    dest = tmp_path / "published"
+    calls: list[str] = []
+
+    def _backend(name: str, *, phase: OptimizationPhase):  # noqa: ANN001
+        return _JobFakeBackend(name=name, phase=phase, calls=calls, fail_prompt=True)
+
+    monkeypatch.setattr("nemo_optimization.router.require_optimization_backend", _backend)
+
+    result = OptimizeJob().run(
+        {"optimize_config": optimize_config, "workspace": "default", "output": str(dest)},
+        ctx=ctx,
+    )
+
+    assert result["status"] == "failed"
+    assert calls == ["numeric", "prompt"]
+    published = dest / "optimizer_results"
+    assert (published / "optimization_summary.json").is_file()
+    assert (published / "phase_results.json").is_file()
+    assert (published / "intermediate_numeric_config.yml").is_file()
+    assert (published / "intermediate_numeric_payload.json").is_file()
+    assert not (published / "final_optimized_config.yml").exists()
+
+
+@pytest.mark.integration
+def test_run_publishes_preflight_failure_when_real_prompt_config_raises(
+    tmp_path: Path,
+    ctx: JobContext,
+) -> None:
+    optimize_config = write_config(tmp_path, _multi_phase_config(prompt_overrides={"population_size": 0}))
+    dest = tmp_path / "published"
+
+    result = OptimizeJob().run(
+        {"optimize_config": optimize_config, "workspace": "default", "output": str(dest)},
+        ctx=ctx,
+    )
+
+    assert result["status"] == "failed"
+    assert [phase["status"] for phase in result["phases"]] == ["skipped", "failed"]
+    published = dest / "optimizer_results"
+    assert (published / "optimization_summary.json").is_file()
+    assert (published / "phase_results.json").is_file()
+    assert not (published / "intermediate_numeric_config.yml").exists()
+    assert not (published / "intermediate_numeric_payload.json").exists()
+    assert (published / "prompt_phase_failure.json").is_file()
+    assert not (published / "final_optimized_config.yml").exists()
+
+
+def test_run_publishes_final_artifacts_when_multi_phase_succeeds(
+    tmp_path: Path,
+    ctx: JobContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    optimize_config = write_config(tmp_path, _multi_phase_config())
+    dest = tmp_path / "published"
+    calls: list[str] = []
+
+    def _backend(name: str, *, phase: OptimizationPhase):  # noqa: ANN001
+        return _JobFakeBackend(name=name, phase=phase, calls=calls)
+
+    monkeypatch.setattr("nemo_optimization.router.require_optimization_backend", _backend)
+
+    result = OptimizeJob().run(
+        {"optimize_config": optimize_config, "workspace": "default", "output": str(dest)},
+        ctx=ctx,
+    )
+
+    assert result["status"] == "completed"
+    assert calls == ["numeric", "prompt"]
+    published = dest / "optimizer_results"
+    assert (published / "optimization_summary.json").is_file()
+    assert (published / "intermediate_numeric_config.yml").is_file()
+    assert (published / "final_optimized_config.yml").is_file()
+    assert (
+        yaml.safe_load((published / "final_optimized_config.yml").read_text(encoding="utf-8"))["instructions"][
+            "system"
+        ]["content"]
+        == "Tuned prompt."
+    )
 
 
 def test_run_rejects_fileset_output_without_sdk(tmp_path: Path, ctx: JobContext) -> None:
@@ -642,7 +820,7 @@ def test_run_rejects_fileset_output_without_sdk(tmp_path: Path, ctx: JobContext)
 
     with (
         patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch),
-        pytest.raises(LocalRunError, match="requires a 'sdk: NeMoPlatform'"),
+        pytest.raises(LocalRunError, match="requires a sync platform client"),
     ):
         OptimizeJob().run(
             {"optimize_config": optimize_config, "workspace": "default", "output": "tuned-results"},
@@ -675,3 +853,109 @@ def test_optimize_task_module_is_importable() -> None:
     from nemo_optimization.jobs.optimize import OPTIMIZE_TASK_MODULE
 
     assert importlib.import_module(OPTIMIZE_TASK_MODULE) is not None
+
+
+class _JobFakeBackend:
+    def __init__(
+        self,
+        *,
+        name: str,
+        phase: OptimizationPhase,
+        calls: list[str],
+        fail_prompt: bool = False,
+    ) -> None:
+        self.name = name
+        self.capabilities = OptimizationBackendCapabilities(phases=(phase,))
+        self._phase = phase
+        self._calls = calls
+        self._fail_prompt = fail_prompt
+
+    def run_phase(
+        self,
+        request: OptimizationPhaseRequest,
+        *,
+        ctx: JobContext,
+        sdk=None,  # noqa: ANN001
+    ) -> OptimizationPhaseResult:
+        del ctx, sdk
+        self._calls.append(request.phase.value)
+        payload = copy.deepcopy(request.payload)
+        if self._phase is OptimizationPhase.NUMERIC:
+            payload["models"]["default"]["temperature"] = 0.4
+            return OptimizationPhaseResult(
+                phase=OptimizationPhase.NUMERIC,
+                backend=self.name,
+                status=OptimizationPhaseStatus.COMPLETED,
+                optimized_payload=payload,
+                summary={"best_params": {"temperature": 0.4}},
+                trial_count=2,
+                trial_number_offset=request.trial_number_offset,
+            )
+
+        if self._fail_prompt:
+            return OptimizationPhaseResult(
+                phase=OptimizationPhase.PROMPT,
+                backend=self.name,
+                status=OptimizationPhaseStatus.FAILED,
+                optimized_payload=copy.deepcopy(request.payload),
+                summary={"error": "prompt failed"},
+                trial_count=1,
+                trial_number_offset=request.trial_number_offset,
+            )
+        payload["instructions"]["system"]["content"] = "Tuned prompt."
+        return OptimizationPhaseResult(
+            phase=OptimizationPhase.PROMPT,
+            backend=self.name,
+            status=OptimizationPhaseStatus.COMPLETED,
+            optimized_payload=payload,
+            summary={"best_prompts": {"system_prompt": "Tuned prompt."}},
+            trial_count=3,
+            trial_number_offset=request.trial_number_offset,
+        )
+
+    def validate_phase(
+        self,
+        request: OptimizationPhaseRequest,
+        *,
+        ctx: JobContext,
+        sdk=None,  # noqa: ANN001
+    ) -> None:
+        del request, ctx, sdk
+
+
+def _multi_phase_config(*, prompt_overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+    prompt = {"enabled": True, "backend": "ga", "model": "prompt_optimizer"}
+    if prompt_overrides:
+        prompt.update(prompt_overrides)
+    return {
+        **FABRIC_AGENT,
+        "models": {
+            "default": {"provider": "openai", "model": "agent-model", "temperature": 0.0},
+            "prompt_optimizer": {
+                "provider": "openai",
+                "model": "gpt-5-mini",
+                "base_url": "https://example.test/v1",
+                "api_key_env": "NVIDIA_API_KEY",
+            },
+        },
+        "instructions": {"system": {"content": "Base prompt."}},
+        "optimizer": {
+            "experiment_id": "exp-job",
+            "numeric": {"enabled": True, "backend": "optuna", "n_trials": 2},
+            "prompt": prompt,
+            "eval_metrics": {"average_score": {"direction": "maximize", "weight": 1.0}},
+            "search_space": {
+                "temperature": {
+                    "type": "fabric",
+                    "path": "models.default.temperature",
+                    "values": [0.0, 0.4],
+                },
+                "system_prompt": {
+                    "type": "fabric",
+                    "path": "instructions.system.content",
+                    "is_prompt": True,
+                    "purpose": "Answer accurately.",
+                },
+            },
+        },
+    }

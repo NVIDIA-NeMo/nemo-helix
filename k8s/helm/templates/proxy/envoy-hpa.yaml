@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES.
 SPDX-License-Identifier: Apache-2.0
 */}}
 
-{{- if and (include "nemo-platform.authEnabled" .) .Values.envoyProxy.enabled }}
+{{- if and (include "nemo-helix.authEnabled" .) .Values.envoyProxy.enabled }}
 {{- if .Values.envoyProxy.autoscaling.enabled }}
 {{- $requests := .Values.envoyProxy.resources.requests | default dict }}
 {{- if and .Values.envoyProxy.autoscaling.targetCPUUtilizationPercentage (not $requests.cpu) }}
@@ -15,9 +15,9 @@ SPDX-License-Identifier: Apache-2.0
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: {{ include "nmp-envoy.servicename" . }}
+  name: {{ include "nhx-envoy.servicename" . }}
   labels:
-    {{- include "nmp-envoy.labels" . | nindent 4 }}
+    {{- include "nhx-envoy.labels" . | nindent 4 }}
   {{- with .Values.envoyProxy.autoscaling.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -26,7 +26,7 @@ spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: {{ include "nmp-envoy.servicename" . }}
+    name: {{ include "nhx-envoy.servicename" . }}
   minReplicas: {{ .Values.envoyProxy.autoscaling.minReplicas }}
   maxReplicas: {{ .Values.envoyProxy.autoscaling.maxReplicas }}
   metrics:

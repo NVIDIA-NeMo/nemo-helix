@@ -1,23 +1,58 @@
 {
-  "model": "default/qwen3-0.6b",
-  "dataset": "default/ascii-tree-gym-data",
-  "environment": "default/ascii-tree-env",
+  "model": "default/qwen3-8b-base",
+  "dataset": "default/math-with-judge-gym-data",
+  "environment": "default/math-with-judge-env",
   "training": {
     "type": "grpo",
     "finetuning_type": "lora",
     "lora": {
-      "rank": 32,
-      "alpha": 32,
+      "rank": 128,
+      "alpha": 256,
       "dropout": 0.0,
       "use_triton": true
     },
-    "max_steps": 1,
-    "batch_size": 8,
+    "max_seq_length": 3072,
+    "max_new_tokens": 2048,
+    "temperature": 1.0,
+    "activation_checkpointing": true,
+    "learning_rate": 1e-05,
+    "min_learning_rate": 9e-06,
+    "adam_eps": 1e-08,
+    "warmup_steps": 10,
+    "weight_decay": 0.01,
+    "epochs": 1,
+    "max_steps": 200,
+    "batch_size": 512,
     "micro_batch_size": 1,
-    "learning_rate": 5e-6,
-    "max_seq_length": 1024,
-    "num_generations_per_prompt": 4,
-    "parallelism": { "num_nodes": 1, "num_gpus_per_node": 1 }
+    "num_prompts_per_step": 32,
+    "num_generations_per_prompt": 16,
+    "use_dynamic_sampling": true,
+    "batch_multiplier": 2.0,
+    "dynamic_sampling_max_gen_batches": 10,
+    "ref_policy_kl_penalty": 0.0,
+    "ratio_clip_min": 0.2,
+    "ratio_clip_max": 0.28,
+    "ratio_clip_c": 10.0,
+    "normalize_rewards": true,
+    "use_leave_one_out_baseline": true,
+    "max_rollout_turns": 1,
+    "truncated_importance_sampling_type": "tis",
+    "truncated_importance_sampling_ratio": 2.0,
+    "use_importance_sampling_correction": true,
+    "vllm_tensor_parallel_size": 8,
+    "vllm_gpu_memory_utilization": 0.6,
+    "val_at_start": true,
+    "val_at_end": true,
+    "val_check_interval": 25,
+    "keep_top_k": 1,
+    "seed": 42,
+    "parallelism": {
+      "num_nodes": 1,
+      "num_gpus_per_node": 8,
+      "tensor_parallel_size": 1
+    }
   },
-  "output": { "name": "qwen3-0.6b-grpo-lora" }
+  "output": {
+    "name": "qwen3-8b-base-grpo-lora"
+  }
 }

@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 {{- /*
 These Kyverno policies inject cloud-specific networking and NCCL configurations
-for multi-node GPU training jobs. They are triggered by the "nmp.nvidia.com/enable-multi-node-networking"
+for multi-node GPU training jobs. They are triggered by the "nhx.nvidia.com/enable-multi-node-networking"
 annotation set by the Volcano backend when num_nodes > 1.
 
 Requirements:
@@ -20,8 +20,8 @@ The policies watch for pods created by Volcano Jobs (batch.volcano.sh) and injec
 - OCI: RDMA devices, SR-IOV networks
 
 Annotations used:
-- nmp.nvidia.com/enable-multi-node-networking: "true" (triggers policy)
-- nmp.nvidia.com/num-nodes: "<count>" (used by OCI policy for network calculation)
+- nhx.nvidia.com/enable-multi-node-networking: "true" (triggers policy)
+- nhx.nvidia.com/num-nodes: "<count>" (used by OCI policy for network calculation)
 
 Note: Only enable ONE cloud policy per cluster deployment.
 */ -}}
@@ -38,10 +38,10 @@ Note: Only enable ONE cloud policy per cluster deployment.
 apiVersion: kyverno.io/v1
 kind: Policy
 metadata:
-  name: {{ include "nemo-platform.fullname" . }}-aws-efa-policy
+  name: {{ include "nemo-helix.fullname" . }}-aws-efa-policy
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
 spec:
   admission: true
   background: false
@@ -54,7 +54,7 @@ spec:
             operations:
               - CREATE
             annotations:
-              nmp.nvidia.com/enable-multi-node-networking: "true"
+              nhx.nvidia.com/enable-multi-node-networking: "true"
     mutate:
       foreach:
       - list: request.object.spec.containers
@@ -126,10 +126,10 @@ spec:
 apiVersion: kyverno.io/v1
 kind: Policy
 metadata:
-  name: {{ include "nemo-platform.fullname" . }}-azure-rdma-policy
+  name: {{ include "nemo-helix.fullname" . }}-azure-rdma-policy
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
 spec:
   admission: true
   background: false
@@ -142,7 +142,7 @@ spec:
           operations:
           - CREATE
           annotations:
-            nmp.nvidia.com/enable-multi-node-networking: "true"
+            nhx.nvidia.com/enable-multi-node-networking: "true"
     mutate:
       foreach:
       - list: request.object.spec.containers
@@ -166,7 +166,7 @@ spec:
               name: nv-shared-memory
             - configMap:
                 defaultMode: 420
-                name: {{ include "nemo-platform.fullname" . }}-nccl-topo
+                name: {{ include "nemo-helix.fullname" . }}-nccl-topo
               name: nccl-topo
             containers:
             - (name): '{{ `{{ element.name }}` }}'
@@ -239,10 +239,10 @@ spec:
 apiVersion: kyverno.io/v1
 kind: Policy
 metadata:
-  name: {{ include "nemo-platform.fullname" . }}-gcp-tcpxo-policy
+  name: {{ include "nemo-helix.fullname" . }}-gcp-tcpxo-policy
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
 spec:
   admission: true
   background: false
@@ -255,7 +255,7 @@ spec:
             operations:
               - CREATE
             annotations:
-              nmp.nvidia.com/enable-multi-node-networking: "true"
+              nhx.nvidia.com/enable-multi-node-networking: "true"
     mutate:
       foreach:
         - list: request.object.spec.containers
@@ -430,10 +430,10 @@ spec:
 apiVersion: kyverno.io/v1
 kind: Policy
 metadata:
-  name: {{ include "nemo-platform.fullname" . }}-oci-rdma-policy
+  name: {{ include "nemo-helix.fullname" . }}-oci-rdma-policy
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
 spec:
   admission: true
   background: false
@@ -446,11 +446,11 @@ spec:
           operations:
           - CREATE
           annotations:
-            nmp.nvidia.com/enable-multi-node-networking: "true"
+            nhx.nvidia.com/enable-multi-node-networking: "true"
     context:
       - name: numNodes
         variable:
-          jmesPath: "to_number(request.object.metadata.annotations.\"nmp.nvidia.com/num-nodes\" || '1')"
+          jmesPath: "to_number(request.object.metadata.annotations.\"nhx.nvidia.com/num-nodes\" || '1')"
       - name: baseNetworkListString
         variable:
           value: {{ repeat 128 "network-operator/sriov-net," | trimSuffix ","  }}

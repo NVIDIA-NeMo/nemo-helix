@@ -6,7 +6,7 @@ import { FilterPanel } from '@nemo/common/src/components/DataView/FilterPanel';
 import * as DataView from '@nemo/common/src/components/DataView/internal';
 import '@nemo/common/src/components/DataView/StudioDataView.css';
 import { StudioDataViewToolbar } from '@nemo/common/src/components/DataView/StudioDataViewToolbar';
-import { useRowClick } from '@nemo/common/src/components/DataView/useRowClick';
+import { RowClickHandler, useRowClick } from '@nemo/common/src/components/DataView/useRowClick';
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { DEFAULT_PAGE_SIZE_OPTIONS } from '@nemo/common/src/constants/pagination';
 import {
@@ -43,7 +43,7 @@ interface Props<DataType> {
    * Clicks on interactive child elements (buttons, links, inputs, etc.) are excluded automatically.
    * Add `data-no-row-click` to any element to opt it out of row-click delegation.
    */
-  onRowClick?: (row: DataType, index: number) => void;
+  onRowClick?: RowClickHandler<DataType>;
   /**
    * Maximum number of text lines to show in each data cell before truncating
    * with an ellipsis. Prebuilt columns (row-selection, row-actions) are not affected.
@@ -69,6 +69,8 @@ interface Props<DataType> {
    * When omitted, the default table with pagination is rendered.
    */
   children?: ReactNode;
+  /** Rendered at the leading end of the toolbar row, before the search bar. */
+  toolbarSlotStart?: ReactNode;
   /**
    * Rendered at the trailing end of the toolbar row (after the search bar and filter toggle).
    * Useful for controls like a sort dropdown that belong visually in the toolbar.
@@ -103,6 +105,7 @@ export const StudioDataView = <DataType,>({
   renderBulkActions,
   scrollContainerRef,
   searchField,
+  toolbarSlotStart,
   toolbarSlotEnd,
 }: Props<DataType>) => {
   const [showFilters, setShowFilters] = useState(false);
@@ -113,6 +116,7 @@ export const StudioDataView = <DataType,>({
   const {
     wrapColumns,
     onClick: rowClickHandler,
+    onAuxClick: rowAuxClickHandler,
     className: rowClickClassName,
   } = useRowClick(onRowClick, data);
 
@@ -165,6 +169,7 @@ export const StudioDataView = <DataType,>({
           onToggleFilters={toggleFilters}
           renderBulkActions={renderBulkActions}
           searchBarProps={attributes?.DataViewSearchBar}
+          slotStart={toolbarSlotStart}
           slotEnd={toolbarSlotEnd}
         />
         <Flex className="min-h-0 h-full">
@@ -177,6 +182,7 @@ export const StudioDataView = <DataType,>({
               <DataView.TableContent
                 stickyTableHeader={attributes?.DataViewTableContent?.stickyTableHeader ?? true}
                 onClick={rowClickHandler}
+                onAuxClick={rowAuxClickHandler}
                 renderEmptyState={() => (
                   <Block className="h-full">
                     <TableEmptyState

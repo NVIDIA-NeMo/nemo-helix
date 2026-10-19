@@ -18,16 +18,27 @@ const DeploymentsListRoute =
     }))
   );
 
+const NewDeploymentRoute =
+  DEPLOYMENTS_ENABLED &&
+  lazy(() =>
+    import('@studio/routes/NewDeploymentRoute').then((module) => ({
+      default: module.NewDeploymentRoute,
+    }))
+  );
+
 export const deploymentRoutes: RouteObject[] = gateDeploymentsRoutes([
   {
-    path: ROUTES.workspace.deployments,
     element: DeploymentsListRoute ? <DeploymentsListRoute /> : null,
     errorElement: <RouteErrorPanel title="Deployments" />,
+    children: [
+      { path: ROUTES.workspace.deployments, element: null },
+      { path: ROUTES.workspace.deploymentsDeployment, element: null },
+    ],
   },
   {
-    path: ROUTES.workspace.deploymentsDeployment,
-    element: DeploymentsListRoute ? <DeploymentsListRoute /> : null,
-    errorElement: <RouteErrorPanel title="Deployments" />,
+    path: ROUTES.workspace.deploymentsNew,
+    element: NewDeploymentRoute ? <NewDeploymentRoute /> : null,
+    errorElement: <RouteErrorPanel title="Create Deployment" />,
   },
 ]);
 

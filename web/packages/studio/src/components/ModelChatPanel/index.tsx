@@ -1,23 +1,25 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { useModelEntity } from '@nemo/common/src/api/models/useModelEntity';
 import {
   WorkspaceModelSelect,
   type ModelSelection,
 } from '@nemo/common/src/components/ModelSelectV2';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
-import { hasModelProvider } from '@nemo/common/src/utils/models';
+import { hasModelProvider, toInferenceModelName } from '@nemo/common/src/utils/models';
 import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { DEFAULT_INFERENCE_PARAMS, type InferenceParams } from '@studio/components/chat/params';
 import { ParamsPopover } from '@studio/components/chat/ParamsPopover';
 import { ModelChat } from '@studio/components/ModelChat';
+import { useModelChatAvailability } from '@studio/hooks/useModelChatAvailability';
 import {
   PANEL_ROLE_DOT_CLASS,
   type PanelChatControls,
   type PanelState,
 } from '@studio/routes/ModelCompareRoute/types';
 import { Minimize2, Trash2 } from 'lucide-react';
-import { useCallback, useState, type FC } from 'react';
+import { useCallback, useMemo, useState, type FC } from 'react';
 
 interface ModelChatPanelProps extends PanelChatControls {
   panel: PanelState;
@@ -26,7 +28,7 @@ interface ModelChatPanelProps extends PanelChatControls {
   onToggle: (id: number) => void;
   onRemove: (id: number) => void;
   /** Receives the full URN ("workspace/name"), or null when cleared. */
-  onModelChange: (id: number, modelURN: string | null) => void;
+  onModelChange: (id: number, modelURN: string | null, adapter?: string | null) => void;
   /** Hide the trash button (locked baseline in agent overlay, or only one panel). */
   hideRemove?: boolean;
 }
@@ -47,12 +49,14 @@ export const ModelChatPanel: FC<ModelChatPanelProps> = ({
   composerSeed,
   seedQuestions,
 }) => {
-  const selectedModel: ModelSelection | null = panel.modelURN ? { model: panel.modelURN } : null;
+  const selectedModel: ModelSelection | null = panel.modelURN
+    ? { model: panel.modelURN, adapter: panel.adapter ?? undefined }
+    : null;
   const [inferenceParams, setInferenceParams] = useState<InferenceParams>(DEFAULT_INFERENCE_PARAMS);
 
   const handleModelChange = useCallback(
     (selection: ModelSelection) => {
-      onModelChange(panel.id, selection.model);
+      onModelChange(panel.id, selection.model, selection.adapter ?? null);
     },
     [panel.id, onModelChange]
   );
@@ -62,6 +66,35 @@ export const ModelChatPanel: FC<ModelChatPanelProps> = ({
   const parts = panel.modelURN ? getPartsFromReference(panel.modelURN) : null;
   const modelName = parts?.name ?? null;
   const modelWorkspace = parts?.workspace || fallbackWorkspace;
+
+  const modelEntity = useModelEntity(panel.modelURN);
+  const adapter = useMemo(
+    () =>
+      panel.adapter ? modelEntity?.adapters?.find((a) => a.name === panel.adapter) : undefined,
+    [modelEntity, panel.adapter]
+  );
+
+  const {
+    modelChatStatus,
+    isLoading: isChatStatusLoading,
+    isAdapterUnserved,
+  } = useModelChatAvailability(modelEntity, { adapter });
+
+  // The panel knows its adapter by name from URL state; the Adapter itself only
+  // arrives with the model entity, and may never (a stale name from a link, an
+  // adapter since deleted).
+  const isAdapterEntityPending = Boolean(panel.adapter) && !modelEntity;
+  const isLoadingChat = isChatStatusLoading || isAdapterEntityPending;
+
+  // An adapter goes on the wire as `base&adapters/{ws}/{name}`, which the gateway
+  // resolves through the base model's VirtualModel — so it needs no special base URL
+  // and inherits that VM's middleware. Without a resolved Adapter there is no
+  // composite to build, and falling back to the base name would quietly chat with
+  // the wrong weights under an adapter's label.
+  const adapterModelName =
+    adapter && modelEntity ? toInferenceModelName(modelEntity, adapter) : undefined;
+  const chatModelName = panel.adapter ? adapterModelName : modelName;
+  const adapterUnresolved = Boolean(panel.adapter) && (!adapterModelName || isAdapterUnserved);
 
   if (panel.collapsed) {
     return (
@@ -114,7 +147,6 @@ export const ModelChatPanel: FC<ModelChatPanelProps> = ({
             include={hasModelProvider}
             value={selectedModel}
             onValueChange={handleModelChange}
-            hideAdapters
             fullWidth
             disabled={panel.locked}
           />
@@ -126,11 +158,22 @@ export const ModelChatPanel: FC<ModelChatPanelProps> = ({
       <Stack className="min-h-0 flex-1 px-3 pb-1">
         <ModelChat
           // Remount (clears messages + metrics) when the selected model changes.
-          key={panel.modelURN ?? 'none'}
-          model={modelName ?? ''}
+          key={`${panel.modelURN ?? 'none'}:${panel.adapter ?? ''}`}
+          model={chatModelName ?? ''}
           workspace={modelWorkspace}
-          disabled={!modelName}
-          emptyState={!modelName ? { slotHeading: 'Select a model to start chatting' } : undefined}
+          disabled={!modelName || isLoadingChat || adapterUnresolved}
+          modelChatStatus={modelChatStatus}
+          emptyState={
+            !modelName
+              ? { slotHeading: 'Select a model to start chatting' }
+              : adapterUnresolved && !isLoadingChat
+                ? {
+                    slotHeading: 'Adapter is not currently served',
+                    slotSubheading:
+                      'No provider lists this adapter among its served models, so it cannot be chatted with yet. It becomes available once the deployment serving its base model has loaded the adapter.',
+                  }
+                : undefined
+          }
           promptData={{ inference_params: inferenceParams }}
           composerMode={composerMode}
           slotComposerEnd={slotComposerEnd}

@@ -26,6 +26,7 @@ flowchart TB
     TDV[TraceDetailView]
     TSA[TraceSpanAccordions]
     STV[SpanTreeView]
+    SGV[TraceSpanGraphView]
     SLV[SpanListView]
     TST[TraceDetailSpanTree]
     TAC[TraceSpanAccordionContent]
@@ -45,9 +46,11 @@ flowchart TB
   SDV --> TDV
   TDV --> TSA
   TSA -->|tree| STV
+  TSA -->|graph| SGV
   TSA -->|list| SLV
   STV --> TST
   STV --> TAC
+  SGV --> TAC
   SLV --> TAC
   TAC --> SMA
   SMA --> REG
@@ -58,32 +61,32 @@ flowchart TB
   TDV --> RJD
 ```
 
-| Layer                           | Role                                                                                                                     |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| **Routes**                      | Intake and Evaluation routes supply context to the same session detail view.                                             |
-| **SessionDetailView**           | Owns session queries, the persistent header/sidebar, URL selection, and the session trajectory model.                    |
-| **TraceDetailView**             | Hydrates the selected trace and renders its Attributes / Evaluation Context accordions and raw JSON debug.               |
-| **TraceSpanAccordions**         | Uses session span summaries and fetches trace annotations; Tree/List toggle; toolbar; row headers + feedback.            |
-| **SpanTreeView / SpanListView** | Layout shells for tree vs list modes; shared row chrome (`SpanTriggerLabel`, `SpanTriggerMeta`, `SpanFeedbackControls`). |
-| **TraceSpanAccordionContent**   | Lazy `useGetSpan` when a span body is shown; merges list summary with full detail via `mergeSpanDetails`.                |
-| **SpanMetadataAccordions**      | Single source of truth for span body inside the trace explorer.                                                          |
-| **SpanTemplates/**              | Per-`SpanKind` descriptors + content components; registered in `registry.ts`.                                            |
-| **traceSpanShared.ts**          | Note-focus nonces and accordion DOM ids shared by the explorer views.                                                    |
-| **IntakeComponents/**           | Shared UI: key/value grids, payloads, status badges, feedback controls, `spanKeyValues` / `traceKeyValues`.              |
+| Layer                         | Role                                                                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **Routes**                    | Intake and Evaluation routes supply context to the same session detail view.                                        |
+| **SessionDetailView**         | Owns session queries, the persistent header/sidebar, URL selection, and the session trajectory model.               |
+| **TraceDetailView**           | Hydrates the selected trace and renders its Attributes / Evaluation Context accordions and raw JSON debug.          |
+| **TraceSpanAccordions**       | Uses session span summaries and fetches trace annotations; Tree/Graph/List toggle; toolbar; row headers + feedback. |
+| **Tree / Graph / List views** | Three trace layouts that share span selection, detail content, annotations, and URL state.                          |
+| **TraceSpanAccordionContent** | Lazy `useGetSpan` when a span body is shown; merges list summary with full detail via `mergeSpanDetails`.           |
+| **SpanMetadataAccordions**    | Single source of truth for span body inside the trace explorer.                                                     |
+| **SpanTemplates/**            | Per-`SpanKind` descriptors + content components; registered in `registry.ts`.                                       |
+| **traceSpanShared.ts**        | Note-focus nonces and accordion DOM ids shared by the explorer views.                                               |
+| **IntakeComponents/**         | Shared UI: key/value grids, payloads, status badges, feedback controls, `spanKeyValues` / `traceKeyValues`.         |
 
-## Tree vs list layout
+## Trace layouts
 
-`TraceViewToolbar` keeps the **Tree | List** control in the same slot for session and trace-selected bodies. Session selection intentionally has no detail body; Tree retains the trajectory sidebar. In a trace-selected body, both views share row headers (`SpanTriggerLabel`, `SpanTriggerMeta`, `SpanFeedbackControls`) and the same body via `TraceSpanAccordionContent` → `SpanMetadataAccordions`.
+`TraceViewToolbar` keeps the view control in the same slot for session and trace-selected bodies. Graph is available after selecting a trace. All three views share URL selection and span details.
 
-|                  | **Tree** (`SpanTreeView`)                                      | **List** (`SpanListView`)                |
-| ---------------- | -------------------------------------------------------------- | ---------------------------------------- |
-| **Layout**       | `TraceDetailSpanTree` (left, `lg+` only) + selected span panel | Flat `IntakeAccordion` of every span     |
-| **Selection**    | Click tree node → show that span's body in the right panel     | Expand accordion row inline              |
-| **Row chrome**   | Fixed header bar above the body (not an accordion trigger)     | Accordion trigger + `slotEnd` feedback   |
-| **Expand all**   | Opens every _section_ of the selected span                     | Opens every _span row_                   |
-| **Collapse all** | Closes every section of the selected span                      | Closes every span row                    |
-| **Data**         | First summary page rendered as an always-open hierarchy        | First summary page, hierarchy in trigger |
-| **Lazy load**    | `useGetSpan` when a span is selected                           | `useGetSpan` only when a row is open     |
+|               | **Tree** (`SpanTreeView`)                               | **Graph** (`TraceSpanGraphView`)                                                                                       | **List** (`SpanListView`)                |
+| ------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| **Layout**    | Trajectory tree + selected span panel                   | Interactive DAG + selected span panel                                                                                  | Flat `IntakeAccordion` of every span     |
+| **Selection** | Click tree node to show its span                        | Click graph node to show its span or choose a call from a grouped node                                                 | Expand accordion row inline              |
+| **Modes**     | Session and trace hierarchy                             | Grouped combines repeated operations; All spans shows every parent link and can highlight the path with the most spans | Trace spans in start order               |
+| **Data**      | First summary page rendered as an always-open hierarchy | Intake span summaries from the selected trace                                                                          | First summary page, hierarchy in trigger |
+| **Lazy load** | `useGetSpan` when a span is selected                    | `useGetSpan` when a graph node or grouped call is selected                                                             | `useGetSpan` only when a row is open     |
+
+The graph and span details use a draggable divider. The divider is keyboard accessible with Left, Right, Home and End keys.
 
 The Intake detail route is `/intake/sessions/:sessionId`; the Evaluation detail route is `/experiment/:experimentName/:evaluationName/sessions/:sessionId`. Both accept `traceId` and `spanId` query parameters for progressively deeper links and feed the same `SessionDetailView`. The sidebar loads the session's first summary-only page of up to 1,000 spans, combines each trace with its spans and tree in a `SessionTrajectory`, and renders every available hierarchy open and non-collapsible. Selecting a span fetches its full payload for the detail body. Clicking **Session** clears trace/span selection. Direct trace/span links remain available when the span lies outside the summary page.
 

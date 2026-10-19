@@ -17,7 +17,7 @@ import {
 import {
   getSecretsListSecretsQueryKey,
   secretsListSecrets,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/secrets';
 import { MenuItem } from '@nvidia/foundations-react-core';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { type ReactNode, useCallback, useMemo } from 'react';

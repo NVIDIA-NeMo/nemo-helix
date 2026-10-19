@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from typing import ClassVar, Self
 
-from nemo_platform_plugin.config import NemoConfig
+from nemo_helix_plugin.config import NemoConfig
 from pydantic import BaseModel, Field, model_validator
 
 # Reuse a bundled tiktoken cache if present (Anonymizer relies on Data Designer

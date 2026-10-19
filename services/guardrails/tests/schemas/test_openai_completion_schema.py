@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import pytest
-from nmp.guardrails.api.schemas import (
+from nhx.guardrails.api.schemas import (
     CompletionRequest,
     CompletionResponse,
     CompletionResponseChoice,
@@ -89,7 +89,7 @@ class TestCompletionRequestMovedFields:
         assert request.suffix == " world"
 
     def test_not_on_base_request(self):
-        from nmp.guardrails.api.schemas import BaseRequest
+        from nhx.guardrails.api.schemas import BaseRequest
 
         base = BaseRequest(model="m")
         assert not hasattr(base, "best_of")

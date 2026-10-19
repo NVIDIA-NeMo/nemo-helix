@@ -5,16 +5,19 @@
 
 from __future__ import annotations
 
+import os
+import stat
 from pathlib import Path
 
 import pytest
-from nmp.rl.tasks.training.backends.nemo_rl.sandbox_config import (
+from nhx.rl.tasks.training.backends.nemo_rl.sandbox_config import (
     GymHostEgressRule,
     SandboxConfig,
     SandboxNetworkPolicy,
     apply_master_egress_to_sandbox_config,
     assemble_master_egress_allow,
     build_sandbox_mounts,
+    prepare_sandbox_workspace,
 )
 from pydantic import ValidationError
 
@@ -28,10 +31,10 @@ def test_assemble_master_egress_allow_defaults() -> None:
 
 
 def test_assemble_master_egress_allow_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NMP_VLLM_SERVICE_HOST", "vllm.svc")
-    monkeypatch.setenv("NMP_VLLM_SERVICE_PORT", "9000")
-    monkeypatch.setenv("NMP_BROKER_SERVICE_HOST", "broker.svc")
-    monkeypatch.setenv("NMP_BROKER_SERVICE_PORT", "51235")
+    monkeypatch.setenv("NHX_VLLM_SERVICE_HOST", "vllm.svc")
+    monkeypatch.setenv("NHX_VLLM_SERVICE_PORT", "9000")
+    monkeypatch.setenv("NHX_BROKER_SERVICE_HOST", "broker.svc")
+    monkeypatch.setenv("NHX_BROKER_SERVICE_PORT", "51235")
     rules = assemble_master_egress_allow()
     assert [(r.host, r.port) for r in rules] == [
         ("vllm.svc", 9000),
@@ -40,7 +43,7 @@ def test_assemble_master_egress_allow_from_env(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_assemble_master_egress_allow_explicit_overrides_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NMP_VLLM_SERVICE_HOST", "env-host")
+    monkeypatch.setenv("NHX_VLLM_SERVICE_HOST", "env-host")
     rules = assemble_master_egress_allow(vllm_host="explicit", vllm_port=1, broker_host="b", broker_port=2)
     assert [(r.host, r.port) for r in rules] == [("explicit", 1), ("b", 2)]
 
@@ -49,8 +52,8 @@ def _sandbox_config() -> SandboxConfig:
     return SandboxConfig(
         image="nvcr.io/example/rl:latest",
         network_policy=SandboxNetworkPolicy(egress_allow=[GymHostEgressRule(host="placeholder", port=1)]),
-        environment_pvc_claim="nmp-job-storage",
-        workspace_pvc_claim="nmp-job-storage",
+        environment_pvc_claim="nhx-job-storage",
+        workspace_pvc_claim="nhx-job-storage",
     )
 
 
@@ -65,7 +68,7 @@ def test_sandbox_config_requires_pvc_claims() -> None:
 
 def test_build_sandbox_mounts_maps_paths_to_pvc_subpaths() -> None:
     mounts = build_sandbox_mounts(
-        pvc_claim="nmp-job-storage",
+        pvc_claim="nhx-job-storage",
         workspace="default",
         job_id="job-9",
         storage_root=Path("/var/run/scratch/job"),
@@ -75,7 +78,7 @@ def test_build_sandbox_mounts_maps_paths_to_pvc_subpaths() -> None:
     assert mounts.environment_sub_path == "jobs/default/job-9/environment"
     assert mounts.dataset_sub_path == "jobs/default/job-9/dataset"
     assert mounts.workspace_sub_path == "jobs/default/job-9/gym-work"
-    assert mounts.environment_pvc_claim == "nmp-job-storage"
+    assert mounts.environment_pvc_claim == "nhx-job-storage"
 
 
 def test_apply_master_egress_to_sandbox_config() -> None:
@@ -86,6 +89,35 @@ def test_apply_master_egress_to_sandbox_config() -> None:
     assert sandbox.network_policy.egress_allow[0].host == "placeholder"
 
 
+def test_workspace_permissions_survive_restrictive_umask(tmp_path: Path) -> None:
+    previous_umask = os.umask(0o077)
+    try:
+        workspace = prepare_sandbox_workspace(tmp_path)
+    finally:
+        os.umask(previous_umask)
+    assert workspace == tmp_path / "gym-work"
+    assert stat.S_IMODE(workspace.stat().st_mode) == 0o777
+
+
+def test_workspace_preparation_preserves_existing_contents(tmp_path: Path) -> None:
+    workspace = prepare_sandbox_workspace(tmp_path)
+    sentinel = workspace / "existing-result"
+    sentinel.write_text("keep", encoding="utf-8")
+    assert prepare_sandbox_workspace(tmp_path) == workspace
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+
+
+@pytest.mark.parametrize("symlink", [False, True], ids=["file", "symlink"])
+def test_workspace_preparation_rejects_non_directory_paths(tmp_path: Path, symlink: bool) -> None:
+    workspace = tmp_path / "gym-work"
+    if symlink:
+        workspace.symlink_to(tmp_path, target_is_directory=True)
+    else:
+        workspace.write_text("file", encoding="utf-8")
+    with pytest.raises(NotADirectoryError, match="Gym workspace must be a directory"):
+        prepare_sandbox_workspace(tmp_path)
+
+
 def test_egress_is_operator_scoped_not_per_job() -> None:
     """The job schema must have no path to widen sandbox egress.
 
@@ -93,7 +125,7 @@ def test_egress_is_operator_scoped_not_per_job() -> None:
     RlConfig, so they are per-deployment. Asserting on the submission schema is what actually
     pins the invariant: the compiler-side models legitimately carry both fields.
     """
-    from nmp.rl.schemas.job import GRPOTraining
+    from nhx.rl.schemas.job import GRPOTraining
 
     for field in ("allow_internet", "public_dns_allow", "egress_allow", "network_policy"):
         assert field not in GRPOTraining.model_fields
@@ -107,14 +139,16 @@ def test_egress_is_operator_scoped_not_per_job() -> None:
 
 
 def test_sandbox_config_carries_both_operator_egress_levers() -> None:
-    from nmp.rl.tasks.training.backends.nemo_rl.sandbox_config import (
+    from nhx.rl.tasks.training.backends.nemo_rl.sandbox_config import (
         SandboxConfig,
         SandboxNetworkPolicy,
     )
 
-    common = {"environment_pvc_claim": "c", "workspace_pvc_claim": "c"}
-    assert SandboxConfig(image="i", **common).allow_internet is False
-    assert SandboxConfig(image="i", allow_internet=True, **common).allow_internet is True
+    assert SandboxConfig(image="i", environment_pvc_claim="c", workspace_pvc_claim="c").allow_internet is False
+    assert (
+        SandboxConfig(image="i", allow_internet=True, environment_pvc_claim="c", workspace_pvc_claim="c").allow_internet
+        is True
+    )
 
     assert SandboxNetworkPolicy().public_dns_allow == ()
     policy = SandboxNetworkPolicy(public_dns_allow=("hub.primeintellect.ai",))
@@ -123,7 +157,7 @@ def test_sandbox_config_carries_both_operator_egress_levers() -> None:
 
 def test_master_egress_refresh_preserves_public_dns_allow() -> None:
     """Refreshing vLLM/broker endpoints must not drop operator DNS configuration."""
-    from nmp.rl.tasks.training.backends.nemo_rl.sandbox_config import (
+    from nhx.rl.tasks.training.backends.nemo_rl.sandbox_config import (
         SandboxConfig,
         SandboxNetworkPolicy,
         apply_master_egress_to_sandbox_config,

@@ -6,14 +6,10 @@
 from __future__ import annotations
 
 from fastapi.routing import APIRoute
-from nemo_agents_plugin.jobs.analyze_batch import AnalyzeBatchJob
 from nemo_agents_plugin.jobs.evaluate_agent import EvaluateAgentJob
-from nemo_agents_plugin.jobs.evaluate_suite import EvaluateSuiteJob
 from nemo_agents_plugin.jobs.execute import ExecuteAgentJob
-from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
 from nemo_agents_plugin.service import AgentsService
-from nemo_optimization.jobs.optimize import OptimizeJob
-from nemo_platform_plugin.scheduler import submit_path_for
+from nemo_helix_plugin.scheduler import submit_path_for
 
 
 def _mounted_routes() -> dict[str, set[str]]:
@@ -42,24 +38,8 @@ def test_evaluate_job_route_matches_generated_submit_path() -> None:
     assert submit_path_for(EvaluateAgentJob, workspace="{workspace}") in _mounted_post_paths()
 
 
-def test_evaluate_suite_job_route_matches_generated_submit_path() -> None:
-    assert submit_path_for(EvaluateSuiteJob, workspace="{workspace}") in _mounted_post_paths()
-
-
 def test_execute_job_route_matches_generated_submit_path() -> None:
     assert submit_path_for(ExecuteAgentJob, workspace="{workspace}") in _mounted_post_paths()
-
-
-def test_optimize_skills_job_route_matches_generated_submit_path() -> None:
-    assert submit_path_for(OptimizeSkillsJob, workspace="{workspace}") in _mounted_post_paths()
-
-
-def test_optimize_job_route_matches_generated_submit_path() -> None:
-    assert submit_path_for(OptimizeJob, workspace="{workspace}") in _mounted_post_paths()
-
-
-def test_analyze_job_route_matches_generated_submit_path() -> None:
-    assert submit_path_for(AnalyzeBatchJob, workspace="{workspace}") in _mounted_post_paths()
 
 
 def test_session_routes_are_mounted() -> None:

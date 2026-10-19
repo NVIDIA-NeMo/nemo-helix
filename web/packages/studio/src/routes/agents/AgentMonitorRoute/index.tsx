@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
-import { agentsListAgents } from '@nemo/sdk/generated/agents/api';
-import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/api';
+import { agentsListAgents } from '@nemo/sdk/generated/agents/agents';
+import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import { Combobox, PageHeader, Stack } from '@nvidia/foundations-react-core';
 import { FeatureFlagBadge } from '@studio/components/FeatureFlagBadge';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';

@@ -15,12 +15,12 @@ then the SQL builder.
 from typing import Any
 
 import pytest
-from nmp.common.api.filter import parse_json_filter
-from nmp.common.api.parsed_filter import ParsedFilter
-from nmp.intake.repository.clickhouse.span import _span_where
-from nmp.intake.spans.api.spans import ATTRIBUTE_EQ_FILTER_FIELD_MAP, ATTRIBUTE_EQ_FILTER_FIELDS, _span_filter
-from nmp.intake.spans.api.spans_schemas import SpanFilter
-from nmp.intake.spans.span_attribute_catalog import spec_for_field
+from nhx.common.api.filter import parse_json_filter
+from nhx.common.api.parsed_filter import ParsedFilter
+from nhx.intake.repository.clickhouse.span import _span_where
+from nhx.intake.spans.api.spans import ATTRIBUTE_EQ_FILTER_FIELD_MAP, ATTRIBUTE_EQ_FILTER_FIELDS, _span_filter
+from nhx.intake.spans.api.spans_schemas import SpanFilter
+from nhx.intake.spans.span_attribute_catalog import spec_for_field
 
 # A value each field accepts, so a failure means the field and never the value.
 FILTER_VALUES: dict[str, Any] = {

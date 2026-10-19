@@ -6,6 +6,8 @@ import { CustomizeModelButton } from '@studio/components/dataViews/CustomModelsD
 import { ROUTES } from '@studio/constants/routes';
 import { useModelCustomizationEligibility } from '@studio/hooks/useModelCustomizationEligibility';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
+import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
+import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -19,17 +21,11 @@ const mockedUseEligibility = vi.mocked(useModelCustomizationEligibility);
 
 const testModel = { id: 'model-1', name: 'my-model', workspace: 'ws' } as ModelEntity;
 
-const setEligibility = (overrides: {
-  canFineTune?: boolean;
-  canPromptTune?: boolean;
-  isLoading?: boolean;
-}) => {
+const setEligibility = (overrides: { canFineTune?: boolean; isLoading?: boolean } = {}) => {
   const canFineTune = overrides.canFineTune ?? false;
-  const canPromptTune = overrides.canPromptTune ?? false;
   mockedUseEligibility.mockReturnValue({
     canFineTune,
-    canPromptTune,
-    canCustomize: canFineTune || canPromptTune,
+    canCustomize: canFineTune,
     isLoading: overrides.isLoading ?? false,
   });
 };
@@ -39,12 +35,17 @@ const renderRoute = (props: { model?: ModelEntity } = {}) => {
     [
       {
         path: ROUTES.workspace.customizationJobList,
-        element: <CustomizeModelButton workspace={workspace1.workspace} model={props.model} />,
+        element: (
+          <>
+            <CustomizeModelButton workspace={workspace1.workspace} model={props.model} />
+            <LocationDisplay />
+          </>
+        ),
       },
+      { path: ROUTES.workspace.newCustomizationJob, element: <LocationDisplay /> },
+      { path: ROUTES.workspace.newCustomizationJobScratch, element: <LocationDisplay /> },
     ],
-    {
-      initialEntries: [ROUTES.workspace.customizationJobList],
-    }
+    { initialEntries: [ROUTES.workspace.customizationJobList] }
   );
   return render(
     <TestProviders>
@@ -56,7 +57,7 @@ const renderRoute = (props: { model?: ModelEntity } = {}) => {
 describe('CustomizeModelButton', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    setEligibility({ canFineTune: true, canPromptTune: true });
+    setEligibility({ canFineTune: true });
   });
 
   describe('workspace-level (no model)', () => {
@@ -65,27 +66,21 @@ describe('CustomizeModelButton', () => {
       expect(screen.getByRole('button', { name: 'Customize a Model' })).toBeInTheDocument();
     });
 
-    it('opens the customize model modal on click', async () => {
+    it('navigates to the start picker on click', async () => {
       const user = userEvent.setup();
       renderRoute();
       await user.click(screen.getByRole('button', { name: 'Customize a Model' }));
-      expect(
-        await screen.findByText(
-          'Select a method to use for customizing your model for your specific use case.'
-        )
-      ).toBeInTheDocument();
+      // Exact, not `toHaveTextContent`: that is a substring match, so the scratch route
+      // would satisfy it too — and telling the two apart is the point of this assertion.
+      expect((await screen.findByTestId(LOCATION_DISPLAY_TEST_ID)).textContent).toBe(
+        `/workspaces/${workspace1.workspace}/fine-tune/new`
+      );
     });
 
-    it('stays enabled regardless of eligibility and does not gate modal options', async () => {
-      setEligibility({ canFineTune: false, canPromptTune: false });
-      const user = userEvent.setup();
+    it('stays enabled regardless of eligibility', () => {
+      setEligibility({ canFineTune: false });
       renderRoute();
-      const button = screen.getByRole('button', { name: 'Customize a Model' });
-      expect(button).not.toBeDisabled();
-      await user.click(button);
-      expect(await screen.findByRole('radio', { name: /Prompt Tuned/ })).not.toHaveAttribute(
-        'data-disabled'
-      );
+      expect(screen.getByRole('button', { name: 'Customize a Model' })).not.toBeDisabled();
     });
   });
 
@@ -107,25 +102,19 @@ describe('CustomizeModelButton', () => {
       expect(screen.getByRole('status')).toBeInTheDocument();
     });
 
-    it('disables the button when neither method is eligible', () => {
-      setEligibility({ canFineTune: false, canPromptTune: false });
+    it('disables the button when the model cannot be fine-tuned', () => {
+      setEligibility({ canFineTune: false });
       renderRoute({ model: testModel });
       expect(screen.getByRole('button', { name: /Customize this Model/ })).toBeDisabled();
     });
 
-    it('enables the button when at least one method is eligible', () => {
-      setEligibility({ canFineTune: true, canPromptTune: false });
-      renderRoute({ model: testModel });
-      expect(screen.getByRole('button', { name: /Customize this Model/ })).not.toBeDisabled();
-    });
-
-    it('forwards eligibility into the modal so ineligible options are disabled', async () => {
-      setEligibility({ canFineTune: false, canPromptTune: true });
+    it('navigates to the fine-tuning form with the model preselected', async () => {
       const user = userEvent.setup();
       renderRoute({ model: testModel });
       await user.click(screen.getByRole('button', { name: /Customize this Model/ }));
-      expect(await screen.findByRole('radio', { name: /Fine-Tuned/ })).toBeDisabled();
-      expect(screen.getByRole('radio', { name: /Prompt Tuned/ })).not.toBeDisabled();
+      expect((await screen.findByTestId(LOCATION_DISPLAY_TEST_ID)).textContent).toBe(
+        `/workspaces/${workspace1.workspace}/fine-tune/new/scratch?model=ws%2Fmy-model`
+      );
     });
   });
 });

@@ -8,15 +8,15 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from nmp.common.config import PlatformConfig
-from nmp.common.jobs.schemas import PlatformJobStatus
-from nmp.core.jobs.app.providers import SubprocessExecutionProvider
-from nmp.core.jobs.controllers.backends.base import (
-    NMP_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR,
-    NMP_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR,
-    NMP_JOB_LAUNCHER_OTLP_LOGS_TRANSPORT_ENVVAR,
+from nhx.common.config import HelixConfig
+from nhx.common.jobs.schemas import HelixJobStatus
+from nhx.core.jobs.app.providers import SubprocessExecutionProvider
+from nhx.core.jobs.controllers.backends.base import (
+    NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR,
+    NHX_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR,
+    NHX_JOB_LAUNCHER_OTLP_LOGS_TRANSPORT_ENVVAR,
 )
-from nmp.core.jobs.controllers.backends.subprocess import (
+from nhx.core.jobs.controllers.backends.subprocess import (
     SubprocessJobBackend,
     SubprocessJobExecutionProfileConfig,
     SubprocessProcessKey,
@@ -25,10 +25,10 @@ from nmp.core.jobs.controllers.backends.subprocess import (
 from services.core.jobs.tests.controllers.client_mocks import data_response
 
 
-def _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config) -> SubprocessJobBackend:
-    with patch("nmp.core.jobs.controllers.backends.subprocess.get_platform_config", return_value=mock_platform_config):
+def _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config) -> SubprocessJobBackend:
+    with patch("nhx.core.jobs.controllers.backends.subprocess.get_platform_config", return_value=mock_platform_config):
         return SubprocessJobBackend(
-            mock_nmp_client,
+            mock_nemo_client,
             SubprocessJobExecutionProfileConfig(working_directory=str(tmp_path)),
             profile_name="subprocess",
         )
@@ -65,19 +65,19 @@ def _step_named(step, name: str):
 
 
 def _schedule_without_otel_export(backend: SubprocessJobBackend, step):
-    with patch("nmp.core.jobs.controllers.backends.subprocess.create_otel_logger", return_value=None):
+    with patch("nhx.core.jobs.controllers.backends.subprocess.create_otel_logger", return_value=None):
         return backend.schedule(step.step_spec.executor, step)
 
 
 def test_schedule_starts_process_and_stages_environment(
-    mock_nmp_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_pending
+    mock_nemo_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_pending
 ):
-    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "printf 'hello local\\n'"])
 
     update = _schedule_without_otel_export(backend, step)
 
-    assert update.status == PlatformJobStatus.PENDING
+    assert update.status == HelixJobStatus.PENDING
     key = SubprocessProcessKey(step.workspace, step.job, str(step.attempt_id), step.name)
     metadata = backend._process_registry.get(key)
     assert metadata is not None
@@ -88,19 +88,19 @@ def test_schedule_starts_process_and_stages_environment(
 
 
 def test_created_step_does_not_ttl_before_backend_acceptance(
-    mock_nmp_client, tmp_path, mock_platform_config, test_step_pending
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending
 ):
-    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "true"])
     ttl_seconds = backend._execution_profile_config.ttl_seconds_before_active
     old_timestamp = datetime.now(timezone.utc) - timedelta(seconds=ttl_seconds + 300)
     step.created_at = old_timestamp
     step.updated_at = old_timestamp
-    step.status = PlatformJobStatus.CREATED
+    step.status = HelixJobStatus.CREATED
 
     update = _schedule_without_otel_export(backend, step)
 
-    assert update.status == PlatformJobStatus.PENDING
+    assert update.status == HelixJobStatus.PENDING
     key = SubprocessProcessKey(step.workspace, step.job, str(step.attempt_id), step.name)
     metadata = backend._process_registry.get(key)
     assert metadata is not None
@@ -108,9 +108,9 @@ def test_created_step_does_not_ttl_before_backend_acceptance(
 
 
 def test_subprocess_persistent_storage_is_shared_across_job_attempt(
-    mock_nmp_client, tmp_path, mock_platform_config, test_step_pending
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending
 ):
-    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     first_step = _step_with_command(_step_named(test_step_pending, "first-step"), ["/bin/sh", "-c", "true"])
     second_step = _step_with_command(_step_named(test_step_pending, "second-step"), ["/bin/sh", "-c", "true"])
 
@@ -135,8 +135,10 @@ def test_subprocess_persistent_storage_is_shared_across_job_attempt(
     )
 
 
-def test_schedule_uses_allowlisted_host_environment(mock_nmp_client, tmp_path, mock_platform_config, test_step_pending):
-    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+def test_schedule_uses_allowlisted_host_environment(
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending
+):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     step = _step_with_command(
         test_step_pending,
         [
@@ -157,11 +159,11 @@ def test_schedule_uses_allowlisted_host_environment(mock_nmp_client, tmp_path, m
             {"HOME": "/home/test", "PATH": "/bin", "VIRTUAL_ENV": "/venv", "SECRET_TOKEN": "do-not-leak"},
             clear=True,
         ),
-        patch("nmp.core.jobs.controllers.backends.subprocess.create_otel_logger", return_value=None),
+        patch("nhx.core.jobs.controllers.backends.subprocess.create_otel_logger", return_value=None),
     ):
         update = backend.schedule(step.step_spec.executor, step)
 
-    assert update.status == PlatformJobStatus.PENDING
+    assert update.status == HelixJobStatus.PENDING
     metadata = backend._process_registry.get(
         SubprocessProcessKey(step.workspace, step.job, str(step.attempt_id), step.name)
     )
@@ -169,28 +171,28 @@ def test_schedule_uses_allowlisted_host_environment(mock_nmp_client, tmp_path, m
     assert metadata.process.wait(timeout=5) == 0
 
 
-def test_schedule_passes_the_agent_wheel_through(mock_nmp_client, tmp_path, mock_platform_config, test_step_pending):
-    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+def test_schedule_passes_the_agent_wheel_through(mock_nemo_client, tmp_path, mock_platform_config, test_step_pending):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     step = _step_with_command(
         test_step_pending,
         [
             "/bin/sh",
             "-c",
-            'test "$NEMO_AGENTS_WHEEL" = "/dist/nemo_platform.whl" && test -z "${SECRET_TOKEN+x}"',
+            'test "$NEMO_AGENTS_WHEEL" = "/dist/nemo_helix.whl" && test -z "${SECRET_TOKEN+x}"',
         ],
     )
 
     with (
         patch.dict(
             os.environ,
-            {"PATH": "/bin", "NEMO_AGENTS_WHEEL": "/dist/nemo_platform.whl", "SECRET_TOKEN": "do-not-leak"},
+            {"PATH": "/bin", "NEMO_AGENTS_WHEEL": "/dist/nemo_helix.whl", "SECRET_TOKEN": "do-not-leak"},
             clear=True,
         ),
-        patch("nmp.core.jobs.controllers.backends.subprocess.create_otel_logger", return_value=None),
+        patch("nhx.core.jobs.controllers.backends.subprocess.create_otel_logger", return_value=None),
     ):
         update = backend.schedule(step.step_spec.executor, step)
 
-    assert update.status == PlatformJobStatus.PENDING
+    assert update.status == HelixJobStatus.PENDING
     metadata = backend._process_registry.get(
         SubprocessProcessKey(step.workspace, step.job, str(step.attempt_id), step.name)
     )
@@ -198,12 +200,12 @@ def test_schedule_passes_the_agent_wheel_through(mock_nmp_client, tmp_path, mock
     assert metadata.process.wait(timeout=5) == 0
 
 
-def test_schedule_preserves_uds_otlp_metadata_in_runtime_env(mock_nmp_client, tmp_path, test_step_pending):
-    platform_config = PlatformConfig(  # type: ignore[abstract]
-        service_discovery={"files": "unix:///tmp/nemo-platform.sock"},
+def test_schedule_preserves_uds_otlp_metadata_in_runtime_env(mock_nemo_client, tmp_path, test_step_pending):
+    platform_config = HelixConfig(  # type: ignore[abstract]
+        service_discovery={"files": "unix:///tmp/nemo-helix.sock"},
         loopback_address=None,
     )
-    backend = _subprocess_backend(mock_nmp_client, tmp_path, platform_config)
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, platform_config)
     step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "true"])
     captured_env = {}
 
@@ -212,39 +214,39 @@ def test_schedule_preserves_uds_otlp_metadata_in_runtime_env(mock_nmp_client, tm
         return None
 
     with (
-        patch("nmp.core.jobs.controllers.backends.subprocess.get_platform_config", return_value=platform_config),
-        patch("nmp.core.jobs.controllers.backends.subprocess.create_otel_logger", side_effect=fake_create_otel_logger),
+        patch("nhx.core.jobs.controllers.backends.subprocess.get_platform_config", return_value=platform_config),
+        patch("nhx.core.jobs.controllers.backends.subprocess.create_otel_logger", side_effect=fake_create_otel_logger),
     ):
         update = backend.schedule(step.step_spec.executor, step)
 
-    assert update.status == PlatformJobStatus.PENDING
+    assert update.status == HelixJobStatus.PENDING
     metadata = backend._process_registry.get(
         SubprocessProcessKey(step.workspace, step.job, str(step.attempt_id), step.name)
     )
     assert metadata is not None
     assert metadata.process.wait(timeout=5) == 0
-    assert captured_env[NMP_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR] == (
-        "http://nemo-platform.local/apis/files/v2/workspaces/default/filesets/test-logs-fileset/otlp/v1/logs"
+    assert captured_env[NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR] == (
+        "http://nemo-helix.local/apis/files/v2/workspaces/default/filesets/test-logs-fileset/otlp/v1/logs"
     )
-    assert captured_env[NMP_JOB_LAUNCHER_OTLP_LOGS_TRANSPORT_ENVVAR] == "uds"
-    assert captured_env[NMP_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR] == "/tmp/nemo-platform.sock"
+    assert captured_env[NHX_JOB_LAUNCHER_OTLP_LOGS_TRANSPORT_ENVVAR] == "uds"
+    assert captured_env[NHX_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR] == "/tmp/nemo-helix.sock"
 
 
 def test_schedule_terminates_process_when_post_popen_setup_fails(
-    mock_nmp_client, tmp_path, mock_platform_config, test_step_pending
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending
 ):
-    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "sleep 30"])
 
     with (
         patch(
-            "nmp.core.jobs.controllers.backends.subprocess.create_otel_logger", side_effect=RuntimeError("otel boom")
+            "nhx.core.jobs.controllers.backends.subprocess.create_otel_logger", side_effect=RuntimeError("otel boom")
         ),
         patch.object(backend, "_terminate_process_group", wraps=backend._terminate_process_group) as mock_terminate,
     ):
         update = backend.schedule(step.step_spec.executor, step)
 
-    assert update.status == PlatformJobStatus.ERROR
+    assert update.status == HelixJobStatus.ERROR
     assert "initialize subprocess runtime" in update.error_details["message"]
     mock_terminate.assert_called_once()
     assert backend._process_registry.is_empty()
@@ -252,13 +254,13 @@ def test_schedule_terminates_process_when_post_popen_setup_fails(
 
 
 def test_sync_completed_closes_logs(
-    mock_nmp_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_pending
+    mock_nemo_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_pending
 ):
-    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "printf 'hello logs\\n'"])
 
     update = _schedule_without_otel_export(backend, step)
-    assert update.status == PlatformJobStatus.PENDING
+    assert update.status == HelixJobStatus.PENDING
     key = SubprocessProcessKey(step.workspace, step.job, str(step.attempt_id), step.name)
     metadata = backend._process_registry.get(key)
     assert metadata is not None
@@ -266,15 +268,15 @@ def test_sync_completed_closes_logs(
 
     update = backend.sync(step)
 
-    assert update.status == PlatformJobStatus.COMPLETED
+    assert update.status == HelixJobStatus.COMPLETED
     assert metadata.closed_logs is True
     assert "hello logs" in metadata.log_path.read_text(encoding="utf-8")
     last_call = mock_jobs_client.update_job_step_task.call_args
-    assert last_call.kwargs["body"].status == PlatformJobStatus.COMPLETED
+    assert last_call.kwargs["body"].status == HelixJobStatus.COMPLETED
 
 
-def test_shutdown_finishes_logs(mock_nmp_client, tmp_path, mock_platform_config, test_step_pending):
-    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+def test_shutdown_finishes_logs(mock_nemo_client, tmp_path, mock_platform_config, test_step_pending):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "sleep 30"])
     _schedule_without_otel_export(backend, step)
     metadata = backend._process_registry.get(
@@ -288,8 +290,8 @@ def test_shutdown_finishes_logs(mock_nmp_client, tmp_path, mock_platform_config,
     assert metadata.closed_logs is True
 
 
-def test_sync_nonzero_exit_sets_error(mock_nmp_client, tmp_path, mock_platform_config, test_step_pending):
-    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+def test_sync_nonzero_exit_sets_error(mock_nemo_client, tmp_path, mock_platform_config, test_step_pending):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "printf 'bad\\n' >&2; exit 7"])
 
     _schedule_without_otel_export(backend, step)
@@ -300,17 +302,17 @@ def test_sync_nonzero_exit_sets_error(mock_nmp_client, tmp_path, mock_platform_c
 
     update = backend.sync(step)
 
-    assert update.status == PlatformJobStatus.ERROR
+    assert update.status == HelixJobStatus.ERROR
     assert update.error_details == {"message": "Job exited with code 7"}
 
 
-def test_missing_command_fails_without_process(mock_nmp_client, tmp_path, mock_platform_config, test_step_pending):
-    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+def test_missing_command_fails_without_process(mock_nemo_client, tmp_path, mock_platform_config, test_step_pending):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     step = _step_with_unvalidated_command(test_step_pending, [])
 
     update = backend.schedule(step.step_spec.executor, step)
 
-    assert update.status == PlatformJobStatus.ERROR
+    assert update.status == HelixJobStatus.ERROR
     assert update.error_details is not None
     assert "subprocess requires" in update.error_details["message"]
     assert backend._process_registry.is_empty()
@@ -320,13 +322,13 @@ def test_build_command_uses_current_interpreter_for_python_module_commands() -> 
     executor = SubprocessExecutionProvider(
         provider="subprocess",
         profile="default",
-        command=["python", "-m", "nemo_evaluator.tasks.evaluate"],
+        command=["python", "-m", "nemo_evals.tasks.evaluate"],
     )
 
     assert SubprocessJobBackend._build_command(executor, None) == [
         sys.executable,
         "-m",
-        "nemo_evaluator.tasks.evaluate",
+        "nemo_evals.tasks.evaluate",
     ]
 
 
@@ -334,13 +336,13 @@ def test_build_command_uses_current_interpreter_for_python3_commands() -> None:
     executor = SubprocessExecutionProvider(
         provider="subprocess",
         profile="default",
-        command=["python3", "-m", "nemo_evaluator.tasks.evaluate"],
+        command=["python3", "-m", "nemo_evals.tasks.evaluate"],
     )
 
     assert SubprocessJobBackend._build_command(executor, None) == [
         sys.executable,
         "-m",
-        "nemo_evaluator.tasks.evaluate",
+        "nemo_evals.tasks.evaluate",
     ]
 
 
@@ -352,20 +354,130 @@ def test_build_command_prefers_virtual_env_python(tmp_path) -> None:
     executor = SubprocessExecutionProvider(
         provider="subprocess",
         profile="default",
-        command=["python", "-m", "nemo_evaluator.tasks.evaluate"],
+        command=["python", "-m", "nemo_evals.tasks.evaluate"],
     )
 
     assert SubprocessJobBackend._build_command(executor, str(tmp_path / "venv")) == [
         str(venv_python),
         "-m",
-        "nemo_evaluator.tasks.evaluate",
+        "nemo_evals.tasks.evaluate",
+    ]
+
+
+def test_build_command_resolves_console_script_against_virtual_env_bin(tmp_path) -> None:
+    venv_script = tmp_path / "venv" / "bin" / "nemo-helix"
+    venv_script.parent.mkdir(parents=True)
+    venv_script.write_text("#!/bin/sh\n", encoding="utf-8")
+    venv_script.chmod(0o755)
+    executor = SubprocessExecutionProvider(
+        provider="subprocess",
+        profile="default",
+        command=["nemo-helix", "run", "task", "--task", "nhx.hello_world.tasks.hello_world"],
+    )
+
+    assert SubprocessJobBackend._build_command(executor, str(tmp_path / "venv")) == [
+        str(venv_script),
+        "run",
+        "task",
+        "--task",
+        "nhx.hello_world.tasks.hello_world",
+    ]
+
+
+def test_build_command_leaves_console_script_unchanged_when_absent_from_virtual_env_bin(tmp_path) -> None:
+    (tmp_path / "venv" / "bin").mkdir(parents=True)
+    executor = SubprocessExecutionProvider(
+        provider="subprocess",
+        profile="default",
+        command=["nemo-helix", "run", "task", "--task", "nhx.hello_world.tasks.hello_world"],
+    )
+
+    assert SubprocessJobBackend._build_command(executor, str(tmp_path / "venv")) == [
+        "nemo-helix",
+        "run",
+        "task",
+        "--task",
+        "nhx.hello_world.tasks.hello_world",
+    ]
+
+
+def test_build_command_resolves_console_script_via_sys_executable_when_virtual_env_unset(tmp_path) -> None:
+    # Direct-binary launch (e.g. `.venv/bin/nemo-helix` under Jenkins/systemd) leaves
+    # VIRTUAL_ENV unset, but the controller still runs from the venv -- sys.executable
+    # points at its bin. Resolve the console script against that dir so the fix holds
+    # whether or not the environment was activated.
+    bin_dir = tmp_path / "venv" / "bin"
+    bin_dir.mkdir(parents=True)
+    venv_script = bin_dir / "nemo-helix"
+    venv_script.write_text("#!/bin/sh\n", encoding="utf-8")
+    venv_script.chmod(0o755)
+    executor = SubprocessExecutionProvider(
+        provider="subprocess",
+        profile="default",
+        command=["nemo-helix", "run", "task", "--task", "nhx.hello_world.tasks.hello_world"],
+    )
+
+    with patch.object(sys, "executable", str(bin_dir / "python")):
+        result = SubprocessJobBackend._build_command(executor, None)
+
+    assert result == [
+        str(venv_script),
+        "run",
+        "task",
+        "--task",
+        "nhx.hello_world.tasks.hello_world",
+    ]
+
+
+def test_build_command_leaves_console_script_unchanged_when_absent_from_sys_executable_bin(tmp_path) -> None:
+    # No VIRTUAL_ENV and the script is not in the interpreter's bin dir -> fall through
+    # to the normal PATH lookup unchanged.
+    bin_dir = tmp_path / "venv" / "bin"
+    bin_dir.mkdir(parents=True)
+    executor = SubprocessExecutionProvider(
+        provider="subprocess",
+        profile="default",
+        command=["nemo-helix", "run", "task", "--task", "nhx.hello_world.tasks.hello_world"],
+    )
+
+    with patch.object(sys, "executable", str(bin_dir / "python")):
+        result = SubprocessJobBackend._build_command(executor, None)
+
+    assert result == [
+        "nemo-helix",
+        "run",
+        "task",
+        "--task",
+        "nhx.hello_world.tasks.hello_world",
+    ]
+
+
+def test_build_command_does_not_resolve_a_path_bearing_command_against_virtual_env_bin(tmp_path) -> None:
+    # Only a bare script name is resolved against venv/bin; a command carrying a path
+    # separator is left to the normal lookup rather than joined under bin/. The bin/
+    # entry below is executable, so without the separator guard the relative command
+    # would be rewritten to it — this asserts it is not.
+    venv_script = tmp_path / "venv" / "bin" / "nemo-helix"
+    venv_script.parent.mkdir(parents=True)
+    venv_script.write_text("#!/bin/sh\n", encoding="utf-8")
+    venv_script.chmod(0o755)
+    executor = SubprocessExecutionProvider(
+        provider="subprocess",
+        profile="default",
+        command=["./nemo-helix", "run", "task"],
+    )
+
+    assert SubprocessJobBackend._build_command(executor, str(tmp_path / "venv")) == [
+        "./nemo-helix",
+        "run",
+        "task",
     ]
 
 
 def test_schedule_python_command_does_not_depend_on_runtime_path(
-    mock_nmp_client, tmp_path, mock_platform_config, test_step_pending
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending
 ):
-    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     empty_path = tmp_path / "empty-path"
     empty_path.mkdir()
     step = _step_with_command(
@@ -375,11 +487,11 @@ def test_schedule_python_command_does_not_depend_on_runtime_path(
 
     with (
         patch.dict(os.environ, {"PATH": str(empty_path)}, clear=True),
-        patch("nmp.core.jobs.controllers.backends.subprocess.create_otel_logger", return_value=None),
+        patch("nhx.core.jobs.controllers.backends.subprocess.create_otel_logger", return_value=None),
     ):
         update = backend.schedule(step.step_spec.executor, step)
 
-    assert update.status == PlatformJobStatus.PENDING
+    assert update.status == HelixJobStatus.PENDING
     metadata = backend._process_registry.get(
         SubprocessProcessKey(step.workspace, step.job, str(step.attempt_id), step.name)
     )
@@ -388,8 +500,8 @@ def test_schedule_python_command_does_not_depend_on_runtime_path(
     assert metadata.process.wait(timeout=5) == 0
 
 
-def test_cancelling_terminates_running_process(mock_nmp_client, tmp_path, mock_platform_config, test_step_cancelling):
-    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+def test_cancelling_terminates_running_process(mock_nemo_client, tmp_path, mock_platform_config, test_step_cancelling):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     step = _step_with_command(test_step_cancelling, ["/bin/sh", "-c", "sleep 10"])
 
     _schedule_without_otel_export(backend, step)
@@ -400,7 +512,7 @@ def test_cancelling_terminates_running_process(mock_nmp_client, tmp_path, mock_p
 
     update = backend.sync(step)
 
-    assert update.status in {PlatformJobStatus.CANCELLING, PlatformJobStatus.CANCELLED}
+    assert update.status in {HelixJobStatus.CANCELLING, HelixJobStatus.CANCELLED}
     for _ in range(20):
         if metadata.process.poll() is not None:
             break
@@ -409,9 +521,9 @@ def test_cancelling_terminates_running_process(mock_nmp_client, tmp_path, mock_p
 
 
 def test_sync_uses_persisted_task_when_local_metadata_is_missing(
-    mock_nmp_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_active
+    mock_nemo_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_active
 ):
-    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     step = _step_with_command(test_step_active, ["/bin/sh", "-c", "sleep 10"])
 
     _schedule_without_otel_export(backend, step)
@@ -425,7 +537,7 @@ def test_sync_uses_persisted_task_when_local_metadata_is_missing(
         SimpleNamespace(
             data=[
                 SimpleNamespace(
-                    status=PlatformJobStatus.ACTIVE.value,
+                    status=HelixJobStatus.ACTIVE.value,
                     status_details={"message": "Job is running"},
                     error_details={},
                     created_at=step.created_at,
@@ -437,28 +549,28 @@ def test_sync_uses_persisted_task_when_local_metadata_is_missing(
 
     update = backend.sync(step)
 
-    assert update.status == PlatformJobStatus.ACTIVE
+    assert update.status == HelixJobStatus.ACTIVE
     assert update.status_details == {"message": "Job is running"}
     assert update.error_details == {}
 
 
 def test_get_task_fallback_update_handles_missing_task_timestamps(
-    mock_nmp_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_active
+    mock_nemo_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_active
 ):
-    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     step = _step_with_command(test_step_active, ["/bin/sh", "-c", "true"])
     mock_jobs_client.list_job_step_tasks.return_value = data_response(
         SimpleNamespace(
             data=[
                 SimpleNamespace(
-                    status=PlatformJobStatus.PENDING.value,
+                    status=HelixJobStatus.PENDING.value,
                     status_details={"message": "missing timestamps"},
                     error_details={},
                     created_at=None,
                     updated_at=None,
                 ),
                 SimpleNamespace(
-                    status=PlatformJobStatus.ACTIVE.value,
+                    status=HelixJobStatus.ACTIVE.value,
                     status_details={"message": "latest"},
                     error_details={},
                     created_at=step.created_at,
@@ -471,21 +583,21 @@ def test_get_task_fallback_update_handles_missing_task_timestamps(
     update = backend._get_task_fallback_update(step)
 
     assert update is not None
-    assert update.status == PlatformJobStatus.ACTIVE
+    assert update.status == HelixJobStatus.ACTIVE
     assert update.status_details == {"message": "latest"}
     assert update.error_details == {}
 
 
 def test_sync_keeps_recent_pending_step_pending_when_local_metadata_is_missing(
-    mock_nmp_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_pending
+    mock_nemo_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_pending
 ):
-    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "true"])
     mock_jobs_client.list_job_step_tasks.return_value = data_response(SimpleNamespace(data=[]))
 
     update = backend.sync(step)
 
-    assert update.status == PlatformJobStatus.PENDING
+    assert update.status == HelixJobStatus.PENDING
     assert update.error_details == {}
 
 

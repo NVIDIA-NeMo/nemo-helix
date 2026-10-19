@@ -5,7 +5,7 @@
 
 Returns the path to the ``skills/`` directory inside this package so the
 platform can discover and load skill markdown files shipped with the plugin
-(currently: ``nemo-agent-skills-optimization``).
+(currently: ``agents-optimize`` and ``agents-secure``).
 """
 
 from __future__ import annotations

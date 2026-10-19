@@ -14,7 +14,6 @@ import {
   getNewDataDesignerJobRoute,
   getNewFilesetRoute,
   getNewSafeSynthesizerRoute,
-  getPromptTuningFormRoute,
   getSecretsRoute,
   getWorkspaceBaseModelsRoute,
   getWorkspaceDeploymentsRoute,
@@ -140,14 +139,6 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
     ],
   },
   {
-    id: 'prompt-tuning',
-    title: 'Open Prompt Tuning',
-    description: 'Studio has a UI for creating prompt-tuned models.',
-    getHref: getPromptTuningFormRoute,
-    requiredFeatureFlags: ['customizerEnabled'],
-    patterns: [/\bprompt[-\s]?tun(e|ing)\b/i],
-  },
-  {
     id: 'model-playground',
     title: 'Open Playground',
     description: 'Studio has a playground UI for chatting with and comparing models.',
@@ -208,7 +199,7 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
     title: 'Open Evaluations',
     description: 'Studio has a UI for reviewing model evaluation results.',
     getHref: getEvaluationResultsRoute,
-    requiredFeatureFlags: ['evaluatorEnabled'],
+    requiredFeatureFlags: ['evalsEnabled'],
     patterns: [
       /\bevaluat(e|ing|ion)s? (a )?model\b/i,
       /\bmodel (eval|evaluation|evaluations)\b/i,
@@ -216,7 +207,7 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
       /\b(eval|evaluation) history\b/i,
       /\bnemo[-\s]?evaluator\b/i,
       /\bevaluator (jobs?|sdk specs?)\b/i,
-      /\buse (the )?evaluator plugin\b/i,
+      /\buse (the )?evals plugin\b/i,
     ],
   },
   {

@@ -1,17 +1,17 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Releasing NeMo Platform
+# Releasing NeMo Helix
 
 [`release.yaml`](.github/workflows/release.yaml) is the single release workflow
-for NeMo Platform. It handles scheduled nightlies and manually dispatched
+for NeMo Helix. It handles scheduled nightlies and manually dispatched
 nightly or stable releases. The release catalog is deliberately defined in that
 workflow so contributors can see and validate every releasable artifact in one
 place.
 
 Anyone with permission to run repository workflows can start a release. A
-stable release requires a specific source commit and version; a nightly can use
-the default branch head.
+stable release requires a specific source commit and version; a nightly uses
+the latest `release/X.Y` branch unless pinned to a commit in that branch's history.
 
 ## Before starting a stable release
 
@@ -27,6 +27,17 @@ This regenerates the OpenAPI specifications and synchronizes the SDKs. The
 specifications intentionally retain `info.version: 0.0.0`; do not copy the
 release version into them.
 
+When containers are selected, their images must already be staged at
+`nvcr.io/0921617854601259/nemo-helix-dev/<id>:<source-sha>` by the existing
+build workflow. Stable releases reuse these images and publish them under the
+requested release version without rebuilding or changing their contents.
+Missing images use the downstream registration workflow's existing wait and
+timeout; there is no fallback build.
+
+Existing nSpect container registrations are reused only when the nSpect program,
+release version, and full image URL (including team and SHA tag) all match.
+Missing registrations still go through the existing registration process.
+
 ## Release catalog
 
 The catalog in [`release.yaml`](.github/workflows/release.yaml) is the source
@@ -34,11 +45,19 @@ of truth for selection. Do not add a separate release manifest or configuration
 file. When changing the catalog, also update the matching `workflow_dispatch`
 input description in that workflow.
 
+Planning reads the wheel and container catalogs from `release.yaml` at the
+selected source SHA, for both nightly and stable releases. New artifacts on
+`main` do not enter nightlies until the release branch ships them. Custom IDs
+must also exist in the selected source's catalog; the workflow form may list
+newer IDs that are unavailable on that source. Keep these catalogs as JSON in
+folded (`>-`) environment blocks so the planner can read them without executing
+the selected workflow.
+
 | Type | IDs |
 | --- | --- |
-| Wheels | `nemo-platform`, `nemo-platform-plugin` |
-| Containers | `nmp-api`, `nmp-cpu-tasks`, `nmp-gym-tasks`, `nmp-customizer-tasks`, `nmp-automodel-training`, `nmp-unsloth-training`, `nmp-rl-training`, `auditor-tasks`, `safe-synthesizer-tasks` |
-| Helm chart | `nemo-platform` |
+| Wheels | `nemo-helix`, `nemo-helix-plugin` |
+| Containers | `nhx-api`, `nhx-tasks`, `nhx-tasks-openshell`, `nhx-gym-tasks`, `nhx-gym-host`, `nhx-customizer-tasks`, `nhx-automodel-training`, `nhx-unsloth-training`, `nhx-rl-training`, `nhx-garak-tasks`, `nhx-safe-synthesizer-tasks`, `nhx-builder-tasks`, `nhx-kaniko` |
+| Helm chart | `nemo-helix` |
 
 For every selected wheel, the workflow checks that its package configuration
 declares the expected project name. For every selected container, it checks the
@@ -48,19 +67,19 @@ before any external release work is dispatched.
 
 ## Starting a release
 
-Open the [Release workflow](https://github.com/NVIDIA-NeMo/nemo-platform/actions/workflows/release.yaml)
+Open the [Release workflow](https://github.com/NVIDIA-NeMo/nemo-helix/actions/workflows/release.yaml)
 and select **Run workflow**. The form shows the allowed custom artifact IDs.
 
 | Input | Use |
 | --- | --- |
 | `release-type` | `nightly` by default. Select `stable` for a versioned release. Every successful non-dry-run stable release creates or confirms its Git tag and GitHub Release. |
-| `source-sha` | Required for stable releases. Optional for nightlies; a normal nightly with no SHA uses the current default-branch head. A dry-run nightly with no SHA uses the workflow commit so a branch can be validated. |
+| `source-sha` | Required for stable releases. Optional for nightlies, including dry runs; without a SHA, the highest `release/X.Y` branch is selected. A pinned nightly SHA must belong to that branch's history. |
 | `version` | Required for stable releases. Enter the `MAJOR.MINOR.PATCH` release version. |
 | `release-scope` | `all` by default. Select `wheels`, `containers`, `helm`, or `custom` for a subset. Scope selects artifacts only; it does not control the stable tag or GitHub Release. |
 | `wheel-ids`, `container-ids` | Comma-separated IDs used only with `release-scope: custom`. Each ID must be in the catalog above; duplicates and empty entries fail validation. |
 | `include-helm` | Includes the Helm chart in a custom release. |
 | `helm-version` | Optional exact SemVer Helm chart version for stable Helm-only releases. The stable release label still comes from `version`. |
-| `update-ngc-metadata` | Also runs the reusable NGC metadata workflow for `nemo-platform` and `nemo-platform-dev`. It checks out the workflow ref, normally `main`. |
+| `update-ngc-metadata` | Also runs the reusable NGC metadata workflow for `nemo-helix` and `nemo-helix-dev`. It checks out the workflow ref, normally `main`. |
 | `send-notifications` | Sends Slack start and final-status notifications. Defaults to `true`. |
 | `dry-run` | Validates the selected source and packages the selected Helm chart, but does not publish, dispatch external work, poll, create a GitHub release, or signal deployment. The start notification intentionally still runs when notifications are enabled. |
 
@@ -70,8 +89,8 @@ Examples:
 | --- | --- |
 | Scheduled-style nightly | Leave `release-type` as `nightly` and use the default `all` scope. |
 | Stable full release | `release-type: stable`, `source-sha: <40-character SHA>`, `version: <MAJOR.MINOR.PATCH>`, `release-scope: all`. |
-| One container | `release-scope: custom`, `container-ids: nmp-customizer-tasks`. |
-| Stable one-container release or retry | `release-type: stable`, `source-sha: <40-character SHA>`, `version: <MAJOR.MINOR.PATCH>`, `release-scope: custom`, `container-ids: nmp-customizer-tasks`. |
+| One container | `release-scope: custom`, `container-ids: nhx-customizer-tasks`. |
+| Stable one-container release or retry | `release-type: stable`, `source-sha: <40-character SHA>`, `version: <MAJOR.MINOR.PATCH>`, `release-scope: custom`, `container-ids: nhx-customizer-tasks`. |
 | Helm-only validation | `release-scope: helm`, `dry-run: true`. |
 | Stable Helm-only chart override | `release-type: stable`, `source-sha: <40-character SHA>`, `version: 0.1.0`, `release-scope: helm`, `helm-version: 0.1.0+helmfix1`. |
 
@@ -87,9 +106,11 @@ America/Los_Angeles.
 2. Checks out the selected source and validates the selected wheel paths,
    Docker Bake targets, and NGC overview files.
 3. Optionally synchronizes NGC metadata, when requested on a non-dry-run.
-4. Dispatches wheel, container, and stable-release registration work to the
-   configured internal release repository. The selected source SHA, release
-   type, version, and selected IDs are passed with the dispatch.
+4. Dispatches wheel builds, nightly container builds, and stable-release
+   registration work to the configured internal release repository. Stable
+   registration includes `source_team: nemo-helix-dev` and
+   `container_version: <source-sha>` so containers are copied from the selected
+   SHA tag to the requested public release version.
 5. Packages the Helm chart with the planned chart version. A nightly chart uses
    the latest release or RC Git tag core reachable from the selected source with
    `-nightly-<UTC timestamp>` appended, falling back to the `Chart.yaml`
@@ -116,12 +137,14 @@ America/Los_Angeles.
 | Artifact | Nightly | Stable |
 | --- | --- | --- |
 | Wheels | [pypi.nvidia.com](https://pypi.nvidia.com) | [PyPI](https://pypi.org) |
-| Containers | `ghcr.io/nvidia-nemo/nemo-platform/<id>:nightly-...` | `nvcr.io/nvidia/nemo-platform/<id>:<version>` and the public NGC catalog |
-| Helm chart | OCI chart at `oci://ghcr.io/nvidia-nemo/nemo-platform` | Initially staged at `0921617854601259/nemo-platform`, then promoted to the public [NGC Helm repository](https://helm.ngc.nvidia.com/nvidia/nemo-platform) |
+| Containers | `ghcr.io/nvidia-nemo/nemo-helix/<id>:nightly-...` | `nvcr.io/nvidia/nemo-helix/<id>:<version>` and the public NGC catalog |
+| Helm chart | OCI chart at `oci://ghcr.io/nvidia-nemo/nemo-helix` | Initially staged at `0921617854601259/nemo-helix-dev`, then promoted to the public [NGC Helm repository](https://helm.ngc.nvidia.com/nvidia/nemo-helix) |
 
 The stable Helm promotion is external to this workflow. The workflow polls the
 public NGC Helm repository, not the internal staging endpoint, before it marks
-the release complete.
+the release complete. Stable charts continue to reference public
+`nvcr.io/nvidia/nemo-helix` images tagged with the requested release version;
+the staging location does not change the images deployed by the chart.
 
 ## Notifications
 
@@ -159,6 +182,6 @@ release point to the requested source SHA.
 For a stable wheel release, a quick client check is:
 
 ```bash
-uv tool upgrade nemo-platform
+uv tool upgrade nemo-helix
 nemo --version
 ```

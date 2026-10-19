@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useRehydrateListFromDetailQuery } from '@nemo/common/src/hooks/useRehydrateListFromDetailQuery';
-import { getModelsListDeploymentsQueryKey } from '@nemo/sdk/generated/platform/api';
+import { getModelsListDeploymentsQueryKey } from '@nemo/sdk/generated/platform/model-deployments';
 import type { ModelDeployment } from '@nemo/sdk/generated/platform/schema';
 import { useMemo } from 'react';
 

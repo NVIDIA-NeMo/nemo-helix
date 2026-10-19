@@ -7,10 +7,11 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from backends.k8s.k8s_helpers import sample_always_config, sample_config
+from backends.k8s.k8s_helpers import sample_always_config, sample_config, with_workload_identity
 from kubernetes.client import ApiClient
 from nemo_deployments_plugin.backends.k8s.compiler import (
     DeploymentConfigError,
+    ExecutorK8sDefaults,
     _build_probe,
     build_configmap_body,
     build_env_vars,
@@ -34,8 +35,16 @@ from nemo_deployments_plugin.entities import (
     K8sDeploymentConfig,
     Probe,
     SecretRef,
+    VolumeMount,
+    WorkloadIdentitySpec,
 )
-from nemo_platform_plugin.config import ImagePullSecret
+from nemo_helix_plugin.auth.workload_identity import (
+    WORKLOAD_IDENTITY_TOKEN_FILE_PATH,
+    WORKLOAD_IDENTITY_VOLUME_NAME,
+    WORKLOAD_IDENTITY_VOLUME_PATH,
+)
+from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nemo_helix_plugin.config import ImagePullSecret
 
 
 def _serialized(obj: object) -> dict:
@@ -175,6 +184,248 @@ def test_compile_applies_k8s_deployment_config() -> None:
     assert affinity.node_affinity is not None
     security_context = compiled.pod_spec_kwargs["security_context"]
     assert security_context.run_as_user == 1000
+
+
+def test_compile_workload_identity_prefers_workload_service_account() -> None:
+    config = with_workload_identity(sample_always_config(), service_account_name="workload-sa")
+    k8s_config = K8sDeploymentConfig.model_validate({"serviceAccount": "pod-sa"})
+    compiled = compile_workload(
+        config=config,
+        workspace="default",
+        deployment_name="task",
+        labels={"managed-by": "nemo-deployments"},
+        k8s_config=k8s_config,
+        pod_restart_policy="Always",
+    )
+
+    pod_spec = _serialized(compiled.pod_spec_kwargs)
+    assert pod_spec["service_account_name"] == "workload-sa"
+    assert any(volume["name"] == WORKLOAD_IDENTITY_VOLUME_NAME for volume in pod_spec["volumes"])
+
+
+def test_compile_applies_node_selector() -> None:
+    config = sample_always_config()
+    k8s_config = K8sDeploymentConfig.model_validate({"nodeSelector": {"gpu": "a100", "zone": "us-west1-a"}})
+    compiled = compile_workload(
+        config=config,
+        workspace="default",
+        deployment_name="task",
+        labels={"managed-by": "nemo-deployments"},
+        k8s_config=k8s_config,
+        pod_restart_policy="Always",
+    )
+    pod_spec = _serialized(compiled.pod_spec_kwargs)
+    assert pod_spec["node_selector"] == {"gpu": "a100", "zone": "us-west1-a"}
+
+
+def test_compile_applies_topology_spread_constraints() -> None:
+    config = sample_always_config()
+    k8s_config = K8sDeploymentConfig.model_validate(
+        {
+            "topologySpreadConstraints": [
+                {
+                    "maxSkew": 1,
+                    "topologyKey": "kubernetes.io/hostname",
+                    "whenUnsatisfiable": "DoNotSchedule",
+                    "labelSelector": {"matchLabels": {"app": "x"}},
+                }
+            ]
+        }
+    )
+    compiled = compile_workload(
+        config=config,
+        workspace="default",
+        deployment_name="task",
+        labels={"managed-by": "nemo-deployments"},
+        k8s_config=k8s_config,
+        pod_restart_policy="Always",
+    )
+    pod_spec = _serialized(compiled.pod_spec_kwargs)
+    tsc = pod_spec["topology_spread_constraints"]
+    assert len(tsc) == 1
+    assert tsc[0]["maxSkew"] == 1
+    assert tsc[0]["topologyKey"] == "kubernetes.io/hostname"
+    assert tsc[0]["whenUnsatisfiable"] == "DoNotSchedule"
+
+
+def test_compile_carries_pod_annotations() -> None:
+    config = sample_config(restart_policy="Never")
+    k8s_config = K8sDeploymentConfig.model_validate({"podAnnotations": {"sidecar.istio.io/nativeSidecar": "true"}})
+    compiled = compile_workload(
+        config=config,
+        workspace="default",
+        deployment_name="task",
+        labels={"managed-by": "nemo-deployments"},
+        k8s_config=k8s_config,
+        pod_restart_policy="Never",
+    )
+    assert compiled.pod_annotations == {"sidecar.istio.io/nativeSidecar": "true"}
+    # Annotations live on the pod-template metadata, not the pod spec.
+    assert "annotations" not in compiled.pod_spec_kwargs
+
+
+def test_compile_applies_executor_defaults() -> None:
+    # Executor-level defaults (shared by every consumer: models, agents, ...) land
+    # on a workload with no per-entity k8s config.
+    config = sample_always_config()
+    executor_defaults = ExecutorK8sDefaults(
+        pod_annotations={"sidecar.istio.io/nativeSidecar": "true"},
+        node_selector={"gpu": "a100"},
+        tolerations=[{"key": "gpu", "operator": "Equal", "value": "true", "effect": "NoSchedule"}],
+        affinity={
+            "nodeAffinity": {
+                "requiredDuringSchedulingIgnoredDuringExecution": {
+                    "nodeSelectorTerms": [{"matchExpressions": [{"key": "gpu", "operator": "In", "values": ["a100"]}]}]
+                }
+            }
+        },
+        topology_spread_constraints=[
+            {"maxSkew": 1, "topologyKey": "kubernetes.io/hostname", "whenUnsatisfiable": "DoNotSchedule"}
+        ],
+    )
+    compiled = compile_workload(
+        config=config,
+        workspace="default",
+        deployment_name="task",
+        labels={"managed-by": "nemo-deployments"},
+        k8s_config=None,
+        pod_restart_policy="Always",
+        executor_defaults=executor_defaults,
+    )
+    pod_spec = _serialized(compiled.pod_spec_kwargs)
+    assert compiled.pod_annotations == {"sidecar.istio.io/nativeSidecar": "true"}
+    assert pod_spec["node_selector"] == {"gpu": "a100"}
+    assert pod_spec["tolerations"][0]["key"] == "gpu"
+    assert compiled.pod_spec_kwargs["affinity"].node_affinity is not None
+    assert pod_spec["topology_spread_constraints"][0]["topologyKey"] == "kubernetes.io/hostname"
+
+
+def test_compile_per_entity_wins_over_executor_defaults() -> None:
+    # A per-entity K8sDeploymentConfig overrides the executor default: annotations
+    # merge key-wise (entity key wins), and node_selector / tolerations are applied
+    # from the entity wholesale (executor default not additionally applied).
+    config = sample_always_config()
+    k8s_config = K8sDeploymentConfig.model_validate(
+        {
+            "podAnnotations": {"sidecar.istio.io/nativeSidecar": "false", "team": "a"},
+            "nodeSelector": {"zone": "us-west1-a"},
+            "tolerations": [{"key": "entity", "operator": "Exists"}],
+        }
+    )
+    executor_defaults = ExecutorK8sDefaults(
+        pod_annotations={"sidecar.istio.io/nativeSidecar": "true", "platform": "nhx"},
+        node_selector={"gpu": "a100"},
+        tolerations=[{"key": "platform", "operator": "Exists"}],
+    )
+    compiled = compile_workload(
+        config=config,
+        workspace="default",
+        deployment_name="task",
+        labels={"managed-by": "nemo-deployments"},
+        k8s_config=k8s_config,
+        pod_restart_policy="Always",
+        executor_defaults=executor_defaults,
+    )
+    pod_spec = _serialized(compiled.pod_spec_kwargs)
+    # Annotations: entity value wins for the shared key; non-conflicting keys from
+    # both sides are retained.
+    assert compiled.pod_annotations == {
+        "sidecar.istio.io/nativeSidecar": "false",
+        "team": "a",
+        "platform": "nhx",
+    }
+    # node_selector / tolerations: entity wins wholesale.
+    assert pod_spec["node_selector"] == {"zone": "us-west1-a"}
+    assert [t["key"] for t in pod_spec["tolerations"]] == ["entity"]
+
+
+def test_compile_empty_executor_defaults_are_noop() -> None:
+    config = sample_config(restart_policy="Never")
+    compiled = compile_workload(
+        config=config,
+        workspace="default",
+        deployment_name="task",
+        labels={"managed-by": "nemo-deployments"},
+        k8s_config=None,
+        pod_restart_policy="Never",
+        executor_defaults=ExecutorK8sDefaults(),
+    )
+    assert compiled.pod_annotations == {}
+    assert "node_selector" not in compiled.pod_spec_kwargs
+    assert "tolerations" not in compiled.pod_spec_kwargs
+    assert "affinity" not in compiled.pod_spec_kwargs
+    assert "topology_spread_constraints" not in compiled.pod_spec_kwargs
+
+
+def test_compile_pod_annotations_default_empty_without_k8s_config() -> None:
+    config = sample_config(restart_policy="Never")
+    compiled = compile_workload(
+        config=config,
+        workspace="default",
+        deployment_name="task",
+        labels={"managed-by": "nemo-deployments"},
+        k8s_config=None,
+        pod_restart_policy="Never",
+    )
+    assert compiled.pod_annotations == {}
+
+
+def test_build_job_body_stamps_pod_annotations_on_template() -> None:
+    config = sample_config(restart_policy="Never")
+    k8s_config = K8sDeploymentConfig.model_validate({"podAnnotations": {"sidecar.istio.io/nativeSidecar": "true"}})
+    built = build_job_body(
+        job_name="default-task",
+        labels={"managed-by": "nemo-deployments"},
+        config=config,
+        workspace="default",
+        deployment_name="task",
+        k8s_config=k8s_config,
+    )
+    template_meta = _serialized(built.job)["spec"]["template"]["metadata"]
+    assert template_meta["annotations"] == {"sidecar.istio.io/nativeSidecar": "true"}
+
+
+def test_build_job_body_omits_annotations_when_none() -> None:
+    config = sample_config(restart_policy="Never")
+    built = build_job_body(
+        job_name="default-task",
+        labels={"managed-by": "nemo-deployments"},
+        config=config,
+        workspace="default",
+        deployment_name="task",
+        k8s_config=None,
+    )
+    template_meta = _serialized(built.job)["spec"]["template"]["metadata"]
+    assert "annotations" not in template_meta
+
+
+def test_build_deployment_body_stamps_pod_annotations_on_template() -> None:
+    config = sample_always_config()
+    k8s_config = K8sDeploymentConfig.model_validate({"podAnnotations": {"sidecar.istio.io/nativeSidecar": "true"}})
+    built = build_deployment_body(
+        resource_name="default-task",
+        labels={"managed-by": "nemo-deployments"},
+        config=config,
+        workspace="default",
+        deployment_name="task",
+        k8s_config=k8s_config,
+    )
+    template_meta = _serialized(built.deployment)["spec"]["template"]["metadata"]
+    assert template_meta["annotations"] == {"sidecar.istio.io/nativeSidecar": "true"}
+
+
+def test_build_deployment_body_omits_annotations_when_none() -> None:
+    config = sample_always_config()
+    built = build_deployment_body(
+        resource_name="default-task",
+        labels={"managed-by": "nemo-deployments"},
+        config=config,
+        workspace="default",
+        deployment_name="task",
+        k8s_config=None,
+    )
+    template_meta = _serialized(built.deployment)["spec"]["template"]["metadata"]
+    assert "annotations" not in template_meta
 
 
 def test_compile_workload_emits_image_pull_secrets() -> None:
@@ -399,3 +650,148 @@ def test_compile_workload_no_secret_when_secret_env_empty() -> None:
     assert compiled.secret_name is None
     pod_spec = _serialized(compiled.pod_spec_kwargs)
     assert "envFrom" not in pod_spec["containers"][0]
+
+
+def test_compile_workload_projects_workload_identity_token() -> None:
+    config = sample_always_config().model_copy(
+        update={
+            "workload_identity": WorkloadIdentitySpec(
+                enabled=True,
+                workloadKind="agent_deployment",
+                workloadId="task",
+                tokenAudience="nemo-helix",
+                tokenExpirationSeconds=900,
+            )
+        }
+    )
+    compiled = compile_workload(
+        config=config,
+        workspace="default",
+        deployment_name="task",
+        labels={"managed-by": "nemo-deployments"},
+        k8s_config=None,
+        pod_restart_policy="Always",
+    )
+
+    pod_spec = _serialized(compiled.pod_spec_kwargs)
+    volume = next(item for item in pod_spec["volumes"] if item["name"] == WORKLOAD_IDENTITY_VOLUME_NAME)
+    projection = volume["projected"]["sources"][0]["serviceAccountToken"]
+    assert projection["path"] == "token"
+    assert projection["audience"] == "nemo-helix"
+    assert projection["expirationSeconds"] == 900
+
+    main = pod_spec["containers"][0]
+    env = {item["name"]: item["value"] for item in main["env"]}
+    assert env[WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR] == WORKLOAD_IDENTITY_TOKEN_FILE_PATH
+    mount = next(item for item in main["volumeMounts"] if item["name"] == WORKLOAD_IDENTITY_VOLUME_NAME)
+    assert mount["mountPath"] == WORKLOAD_IDENTITY_VOLUME_PATH
+    assert mount["readOnly"] is True
+
+
+def test_compile_workload_rejects_user_workload_identity_volume_mount_name() -> None:
+    config = with_workload_identity(
+        sample_always_config().model_copy(
+            update={
+                "volume_mounts": [
+                    VolumeMount(
+                        name=WORKLOAD_IDENTITY_VOLUME_NAME,
+                        mountPath="/data",
+                    )
+                ]
+            }
+        )
+    )
+
+    with pytest.raises(DeploymentConfigError, match=WORKLOAD_IDENTITY_VOLUME_NAME):
+        validate_config_for_deployment(config)
+
+
+def test_compile_workload_rejects_user_workload_identity_volume_mount_path() -> None:
+    config = with_workload_identity(
+        sample_always_config().model_copy(
+            update={
+                "volume_mounts": [
+                    VolumeMount(
+                        name="data",
+                        mountPath=WORKLOAD_IDENTITY_VOLUME_PATH,
+                    )
+                ]
+            }
+        )
+    )
+
+    with pytest.raises(DeploymentConfigError, match=WORKLOAD_IDENTITY_VOLUME_PATH):
+        validate_config_for_deployment(config)
+
+
+def test_compile_workload_allows_user_workload_identity_volume_mount_name_when_disabled() -> None:
+    config = sample_always_config().model_copy(
+        update={
+            "volume_mounts": [
+                VolumeMount(
+                    name=WORKLOAD_IDENTITY_VOLUME_NAME,
+                    mountPath="/data",
+                )
+            ]
+        }
+    )
+
+    validate_config_for_deployment(config)
+
+
+def test_compile_workload_rejects_mismatched_workload_identity_token_audience() -> None:
+    config = sample_always_config().model_copy(
+        update={
+            "workload_identity": WorkloadIdentitySpec(
+                enabled=True,
+                tokenAudience="other-audience",
+            )
+        }
+    )
+
+    with (
+        patch(
+            "nemo_deployments_plugin.backends.k8s.compiler.get_workload_identity_token_audience",
+            return_value="platform-audience",
+        ),
+        pytest.raises(DeploymentConfigError, match="tokenAudience"),
+    ):
+        compile_workload(
+            config=config,
+            workspace="default",
+            deployment_name="task",
+            labels={"managed-by": "nemo-deployments"},
+            k8s_config=None,
+            pod_restart_policy="Always",
+        )
+
+
+def test_compile_workload_mounts_workload_identity_on_auth_proxy() -> None:
+    config = sample_always_config().model_copy(
+        update={
+            "auth_proxy_sidecar": True,
+            "auth_proxy_sidecar_identity": "agents",
+            "auth_proxy_sidecar_on_behalf_of": "user:alice",
+            "workload_identity": WorkloadIdentitySpec(enabled=True, workloadKind="agent_deployment", workloadId="task"),
+        }
+    )
+    with patch("nemo_deployments_plugin.auth_proxy.platform_auth_enabled", return_value=True):
+        compiled = compile_workload(
+            config=config,
+            workspace="default",
+            deployment_name="task",
+            labels={"managed-by": "nemo-deployments"},
+            k8s_config=None,
+            pod_restart_policy="Always",
+        )
+
+    pod_spec = _serialized(compiled.pod_spec_kwargs)
+    auth_proxy = next(item for item in pod_spec["init_containers"] if item["name"] == "auth-proxy")
+    auth_proxy_env = {item["name"]: item["value"] for item in auth_proxy.get("env", [])}
+    assert auth_proxy_env["XDG_STATE_HOME"] == "/tmp"
+    assert auth_proxy_env[WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR] == WORKLOAD_IDENTITY_TOKEN_FILE_PATH
+    workload_identity_mount = next(
+        mount for mount in auth_proxy.get("volumeMounts", []) if mount["name"] == WORKLOAD_IDENTITY_VOLUME_NAME
+    )
+    assert workload_identity_mount["mountPath"] == WORKLOAD_IDENTITY_VOLUME_PATH
+    assert workload_identity_mount["readOnly"] is True

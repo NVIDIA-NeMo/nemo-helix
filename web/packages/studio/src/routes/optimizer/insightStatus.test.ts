@@ -10,10 +10,10 @@ describe('insightStatus', () => {
       { label: 'Resolve', target: 'resolved', kind: 'primary' },
     ]);
     expect(insightActions('resolved')).toEqual([
-      { label: 'Run experiment', target: 'open', kind: 'primary', color: 'brand' },
+      { label: 'Reopen', target: 'open', kind: 'primary', color: 'brand' },
     ]);
     expect(insightActions('deleted')).toEqual([
-      { label: 'Run experiment', target: 'open', kind: 'primary', color: 'brand' },
+      { label: 'Reopen', target: 'open', kind: 'primary', color: 'brand' },
     ]);
   });
 });

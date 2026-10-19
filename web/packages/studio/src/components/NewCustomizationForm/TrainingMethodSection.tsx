@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
+import { ControlledSliderWithTextInput } from '@nemo/common/src/components/form/ControlledSliderWithTextInput';
+import { ControlledSwitch } from '@nemo/common/src/components/form/ControlledSwitch';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { RadioCard } from '@nemo/common/src/components/RadioCard';
 import {
@@ -9,24 +12,27 @@ import {
   UnslothTrainingSpecFinetuningType,
 } from '@nemo/sdk/generated/customizer/schema';
 import { RadioGroupRoot, Stack, Text } from '@nvidia/foundations-react-core';
+import { TEACHER_PRECISION_ITEMS } from '@studio/components/NewCustomizationForm/constants';
 import { FormSection } from '@studio/components/NewCustomizationForm/FormSection';
 import {
   RL_DPO_TRAINING_DEFAULTS,
   RL_GRPO_TRAINING_DEFAULTS,
   type CustomizationFormFields,
 } from '@studio/util/forms/customization';
+import { AUTOMODEL_SPEC_DEFAULTS, specSliderProps } from '@studio/util/forms/specDefaults';
 import { useFormContext } from 'react-hook-form';
 
 const AUTOMODEL_FINETUNING_TYPES = [
   {
     value: AutomodelTrainingSpecFinetuningType.lora,
     title: 'LoRA',
-    description: 'Low-rank adapter — fewer parameters, less VRAM.',
+    description: 'Low-rank adapter — fewer parameters, less VRAM. Ships as an adapter.',
   },
   {
     value: AutomodelTrainingSpecFinetuningType.lora_merged,
     title: 'LoRA (Merged)',
-    description: 'LoRA weights merged into base at the end.',
+    description:
+      'Trains the same adapter, then folds it into the base weights. Ships as a full model.',
   },
   {
     value: AutomodelTrainingSpecFinetuningType.all_weights,
@@ -95,20 +101,18 @@ export const TrainingMethodSection = () => {
           onValueChange={(v) => {
             const next = v as 'dpo' | 'grpo';
             setValue('grpo.trainingType', next, { shouldValidate: true });
-            // rl.training is shared by both methods, and the two default sets differ
-            // only in max_steps, val_at_end and ref_policy_kl_penalty. Reset to the
-            // incoming method's defaults so DPO cannot inherit GRPO's step budget and
-            // skipped end validation, but carry over the fields that mean the same
-            // thing under either method so a switch does not discard the user's work.
+            // rl.training is shared, so reset to the incoming method's defaults, then
+            // carry over the fields that mean the same thing under either method.
             const current = getValues('rl.training');
             setValue(
               'rl.training',
               {
                 ...(next === 'grpo' ? RL_GRPO_TRAINING_DEFAULTS : RL_DPO_TRAINING_DEFAULTS),
                 parallelism: current.parallelism,
-                learning_rate: current.learning_rate,
                 batch_size: current.batch_size,
                 max_seq_length: current.max_seq_length,
+                // learning_rate is NOT carried over: the two methods now default two
+                // orders of magnitude apart, so each switch takes its own default.
               },
               { shouldValidate: true }
             );
@@ -123,7 +127,7 @@ export const TrainingMethodSection = () => {
                 value={opt.value}
                 label={<Text kind="body/bold/md">{opt.title}</Text>}
                 description={
-                  <Text kind="body/regular/md" color="secondary">
+                  <Text className="text-secondary" kind="body/regular/md">
                     {opt.description}
                   </Text>
                 }
@@ -179,7 +183,7 @@ export const TrainingMethodSection = () => {
                   value={opt.value}
                   label={<Text kind="body/bold/md">{opt.title}</Text>}
                   description={
-                    <Text kind="body/regular/md" color="secondary">
+                    <Text className="text-secondary" kind="body/regular/md">
                       {opt.description}
                     </Text>
                   }
@@ -215,7 +219,7 @@ export const TrainingMethodSection = () => {
                     value={opt.value}
                     label={<Text kind="body/bold/md">{opt.title}</Text>}
                     description={
-                      <Text kind="body/regular/md" color="secondary">
+                      <Text className="text-secondary" kind="body/regular/md">
                         {opt.description}
                       </Text>
                     }
@@ -225,13 +229,63 @@ export const TrainingMethodSection = () => {
               </div>
             </RadioGroupRoot>
             {trainingType === 'distillation' && (
-              <ControlledTextInput
-                useControllerProps={{ name: 'automodel.training.teacher_model', control }}
-                label="Teacher Model"
-                placeholder="workspace/model-name"
-                required
-                disabled={disabled}
-              />
+              <Stack gap="density-lg">
+                <ControlledTextInput
+                  useControllerProps={{ name: 'automodel.training.teacher_model', control }}
+                  label="Teacher Model"
+                  placeholder="workspace/model-name"
+                  required
+                  disabled={disabled}
+                />
+                <ControlledSliderWithTextInput
+                  useControllerProps={{ name: 'automodel.training.distillation_ratio', control }}
+                  formFieldProps={{
+                    slotLabel: 'Distillation Ratio',
+                    slotInfo:
+                      'How much of the loss comes from matching the teacher rather than the training labels. 0 is pure supervised training, 1 is pure distillation.',
+                  }}
+                  {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'training_distillation_ratio')}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  disabled={disabled}
+                />
+                <ControlledSliderWithTextInput
+                  useControllerProps={{
+                    name: 'automodel.training.distillation_temperature',
+                    control,
+                  }}
+                  formFieldProps={{
+                    slotLabel: 'Distill Temperature',
+                    slotInfo:
+                      'Softens the teacher’s output distribution. Higher values spread probability mass onto lower-ranked tokens, so the student learns more than just the teacher’s top choice.',
+                  }}
+                  {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'training_distillation_temperature')}
+                  min={0.1}
+                  max={10}
+                  step={0.1}
+                  disabled={disabled}
+                />
+                <ControlledSelect
+                  useControllerProps={{ name: 'automodel.training.teacher_precision', control }}
+                  formFieldProps={{
+                    slotLabel: 'Teacher Precision',
+                    slotInfo: 'Precision the teacher runs at. Lower precision frees VRAM.',
+                  }}
+                  items={TEACHER_PRECISION_ITEMS}
+                  disabled={disabled}
+                />
+                <ControlledSwitch
+                  useControllerProps={{ name: 'automodel.training.offload_teacher', control }}
+                  formFieldProps={{
+                    slotLabel: 'Offload Teacher',
+                    labelPosition: 'left',
+                    slotInfo:
+                      'Keep the teacher on CPU between forward passes. Frees VRAM for the student at the cost of transfer time.',
+                  }}
+                  disabled={disabled}
+                />
+              </Stack>
             )}
           </Stack>
         )}

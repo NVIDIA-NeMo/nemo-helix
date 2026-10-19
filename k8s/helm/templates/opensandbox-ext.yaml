@@ -1,0 +1,70 @@
+{{/*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/}}
+
+{{- /*
+The OpenSandbox compose services extension. The chart doesn't install OpenSandbox, so this only ships what the stock
+server needs to load the extension: its ConfigMap, in the server's namespace, and the Role that lets it exec into a
+sandbox's service containers, in the namespace sandboxes run in. The server reads the ConfigMap at start, and the chart
+can't restart it. files/opensandbox-ext/configmap.yaml is generated: see script/generate_opensandbox_ext_configmap.py.
+*/}}
+{{- $compose := .Values.opensandbox.composeServices }}
+{{- if $compose.enabled }}
+{{- if not (or .Values.sandboxClusterCapable (dig "platform" "sandbox_cluster_capable" false .Values.platformConfig)) }}
+{{- fail "opensandbox.composeServices.enabled needs sandboxClusterCapable: the extension only runs on an OpenSandbox server" }}
+{{- end }}
+{{- if not .Values.opensandbox.namespace }}
+{{- fail "opensandbox.namespace is required when opensandbox.composeServices.enabled: it is where the extension ConfigMap goes" }}
+{{- end }}
+{{- if not $compose.serverServiceAccount }}
+{{- fail "opensandbox.composeServices.serverServiceAccount is required when opensandbox.composeServices.enabled" }}
+{{- end }}
+{{- $sandboxNamespace := $compose.sandboxNamespace | default .Release.Namespace }}
+{{- $configMap := .Files.Get "files/opensandbox-ext/configmap.yaml" | fromYaml }}
+{{- $_ := set $configMap.metadata "namespace" .Values.opensandbox.namespace }}
+{{- $_ = set $configMap.metadata "labels" (include "nemo-helix.labels" . | fromYaml) }}
+{{- toYaml $configMap }}
+---
+# The extension's exec route runs commands in a sandbox's service containers, and its services route reads a failed
+# service's last log lines. The upstream server ClusterRole grants neither, so this adds them in the sandbox namespace only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nemo-opensandbox-ext
+  namespace: {{ $sandboxNamespace }}
+  labels:
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  # Kubernetes checks "create" for exec over WebSocket on current versions and "get" on older ones.
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nemo-opensandbox-ext
+  namespace: {{ $sandboxNamespace }}
+  labels:
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nemo-opensandbox-ext
+subjects:
+  - kind: ServiceAccount
+    name: {{ $compose.serverServiceAccount }}
+    namespace: {{ .Values.opensandbox.namespace }}
+  {{- with $compose.kataServerServiceAccount }}
+  - kind: ServiceAccount
+    name: {{ . }}
+    namespace: {{ $.Values.opensandbox.namespace }}
+  {{- end }}
+{{- end }}

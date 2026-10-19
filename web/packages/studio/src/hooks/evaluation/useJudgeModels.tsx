@@ -8,7 +8,7 @@ import {
   getBaseModelURN,
   getModelEntityChatStatus,
 } from '@nemo/common/src/utils/models';
-import { modelsListModels } from '@nemo/sdk/generated/platform/api';
+import { modelsListModels } from '@nemo/sdk/generated/platform/models';
 import type {
   ModelEntitysPage,
   ModelEntity,

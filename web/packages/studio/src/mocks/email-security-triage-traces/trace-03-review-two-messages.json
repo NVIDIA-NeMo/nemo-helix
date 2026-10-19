@@ -1,0 +1,46 @@
+{
+  "schema_version": "ATIF-v1.5",
+  "session_id": "3f2a1c00-0003-4a00-8000-000000000003",
+  "trajectory_id": "3f2a1c00-0003-4a00-8000-000000000003",
+  "agent": {
+    "name": "email-security-triage",
+    "version": "0.7.0",
+    "model_name": "nvidia-nemotron-3-nano-30b-a3b"
+  },
+  "final_metrics": {
+    "total_prompt_tokens": 3944,
+    "total_completion_tokens": 187,
+    "total_cost_usd": 0.0007038,
+    "total_steps": 2
+  },
+  "extra": {
+    "task_id": "email-security-triage/review-two-messages",
+    "verifier_result": {
+      "rewards": {
+        "correctness": 1.0,
+        "format": 1.0,
+        "routing": 1.0
+      }
+    }
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "timestamp": "2026-08-28T21:50:23Z",
+      "source": "user",
+      "message": "{\"user_message\": \"\", \"emails\": [{\"from\": \"ceo@nvidia-corp.co\", \"subject\": \"Quick favour - are you at your desk?\", \"body\": \"I'm in back-to-back meetings and need you to move $48,000 to a new supplier account today. Don't loop in finance yet, I'll explain after. Reply here and I'll send the wire details.\"}, {\"from\": \"no-reply@calendar.google.com\", \"subject\": \"Invitation: Q4 planning sync\", \"body\": \"You have been invited to Q4 planning sync on Thursday at 10:00. https://calendar.google.com/event?eid=abc123\"}]}"
+    },
+    {
+      "step_id": 2,
+      "timestamp": "2026-08-28T21:50:29Z",
+      "source": "agent",
+      "model_name": "default/nvidia-nemotron-3-nano-30b-a3b",
+      "message": "ANALYSIS\n\n[1]\nVERDICT: phishing\nATTACK_TYPE: bec\nIOCS: nvidia-corp.co\nACTION: quarantine\nREASONING: Lookalike executive domain nvidia-corp.co paired with an urgent out-of-band wire request and an explicit instruction to bypass finance.\n\n[2]\nVERDICT: benign\nATTACK_TYPE: benign\nIOCS: calendar.google.com\nACTION: deliver\nREASONING: Standard calendar notification from the genuine provider domain, with no credential or payment request.",
+      "metrics": {
+        "prompt_tokens": 3944,
+        "completion_tokens": 187,
+        "cost_usd": 0.0007038
+      }
+    }
+  ]
+}

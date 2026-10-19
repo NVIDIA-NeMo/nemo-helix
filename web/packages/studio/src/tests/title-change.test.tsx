@@ -33,6 +33,7 @@ const pathParams = {
   [RP.agentName]: '',
   [RP.agentDeploymentName]: '',
   [RP.agentEvalJobName]: 'test-agent-eval-job',
+  [RP.optimizeJobName]: 'test-optimize-job',
   [RP.jobName]: 'test-job',
   [RP.benchmarkName]: 'test-benchmark',
   [RP.experimentName]: 'test-experiment-group',

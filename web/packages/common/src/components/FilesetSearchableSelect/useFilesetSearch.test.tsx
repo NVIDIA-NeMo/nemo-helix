@@ -3,12 +3,12 @@
 
 import { withOperators } from '@nemo/common/src/api/filterOperators';
 import { useFilesetSearch } from '@nemo/common/src/components/FilesetSearchableSelect/useFilesetSearch';
-import { filesListFilesets } from '@nemo/sdk/generated/platform/api';
+import { filesListFilesets } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 
-vi.mock('@nemo/sdk/generated/platform/api', () => ({
+vi.mock('@nemo/sdk/generated/platform/files', () => ({
   filesListFilesets: vi.fn(),
   getFilesListFilesetsQueryKey: vi.fn((workspace: string) => ['filesets', workspace]),
 }));

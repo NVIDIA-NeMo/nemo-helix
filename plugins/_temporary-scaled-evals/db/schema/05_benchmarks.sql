@@ -33,9 +33,6 @@ CREATE TABLE benchmarks (
     --      tasks TBDs (01_tasks.sql).
 );
 
-ALTER TABLE benchmarks ADD CONSTRAINT benchmarks_public_requires_qualification_ck
-    CHECK (visibility <> 'public' OR qualification_status = 'qualified');
-
 -- Per-owner slug uniqueness on live rows (owner column lands with auth; global
 -- for now, same as tasks). Benchmarks and tasks have separate slug namespaces.
 CREATE UNIQUE INDEX benchmarks_slug_live_uq

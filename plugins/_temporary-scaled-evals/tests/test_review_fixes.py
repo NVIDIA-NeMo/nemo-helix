@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
+import os
 import subprocess
 import tarfile
 from contextlib import nullcontext
@@ -22,17 +24,17 @@ try:
     from nemo_scaled_evals_plugin import migrations
     from scaled_evals.api.build import buildkit
     from scaled_evals.api.build.errors import BuildError
-    from scaled_evals.api.repositories.runtime_resource_repository import (
-        RuntimeResourceRepository,
-    )
-    from scaled_evals.api.repositories.switchyard_campaign_repository import (
-        SwitchyardCampaignRepository,
-    )
+    from scaled_evals.api.build.image_builder_service import _post_resolve
+    from scaled_evals.api.repositories.build_repository import TaskBuildRepository
+    from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
+    from scaled_evals.api.repositories.task_repository import TaskRepository
     from scaled_evals.api.routers import evaluations as evaluations_router
-    from scaled_evals.cli.client import make_client, request
-    from scaled_evals.dispatch import worker as worker_module
+    from scaled_evals.cli.client import download_artifact, make_client, request, upload_file
+    from scaled_evals.dispatch import detached_runner
+    from scaled_evals.dispatch.credentials import write_env_file
+    from scaled_evals.dispatch.gym.docker import make_gym_docker_submitter
     from scaled_evals.dispatch.kubectl import execute_kubectl
-    from scaled_evals.dispatch.worker import Dispatcher
+    from scaled_evals.dispatch.runtime_backend import LaunchSpec
 except ImportError as exc:
     pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
 
@@ -56,6 +58,22 @@ class _MigrationConnection:
 
     def rollback(self) -> None:
         self.rollbacks += 1
+
+
+def test_build_success_only_advances_a_transitioned_revision() -> None:
+    connection = MagicMock()
+    connection.transaction.return_value = nullcontext()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    repository = TaskBuildRepository(connection)
+
+    cursor.rowcount = 0
+    repository.record_success("task", 2, image_ref="image:2", image_digest="sha256:" + "a" * 64)
+    assert cursor.execute.call_count == 1
+
+    cursor.reset_mock()
+    cursor.rowcount = 1
+    repository.record_success("task", 2, image_ref="image:2", image_digest="sha256:" + "a" * 64)
+    assert cursor.execute.call_count == 2
 
 
 def test_fresh_schema_is_atomic(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -123,60 +141,9 @@ def test_external_commands_and_http_redirects_fail_bounded() -> None:
             request(client, "GET", "/tasks")
 
 
-def test_p1_cleanup_recovery_and_cancellation_are_bounded(
+def test_p1_cancellation_commits_before_teardown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cursor = MagicMock()
-    connection = MagicMock()
-    connection.transaction.return_value = nullcontext()
-    connection.cursor.return_value.__enter__.return_value = cursor
-
-    RuntimeResourceRepository(connection).claim_due_switchyard_teardown(
-        claim_timeout=30,
-        worker_id="worker-a",
-    )
-    claim_sql = cursor.execute.call_args.args[0]
-    assert "r.status IN ('draining', 'deleting', 'delete_failed')" in claim_sql
-
-    cursor.reset_mock()
-    SwitchyardCampaignRepository(connection).mark_delete_unavailable(
-        "bmr-missing",
-        worker_id="worker-a",
-        detail="lease missing after 5 attempts",
-    )
-    terminal_sql, terminal_params = cursor.execute.call_args.args
-    assert "SET status = 'deleted'" in terminal_sql
-    assert "resource_name IS NOT NULL" not in terminal_sql
-    assert terminal_params == ("lease missing after 5 attempts", "bmr-missing", "worker-a")
-
-    campaign_events: list[str] = []
-
-    class _CampaignRepository:
-        def __init__(self, _connection: Any) -> None:
-            pass
-
-        def mark_delete_failed(self, *_args: Any, **_kwargs: Any) -> None:
-            campaign_events.append("retry")
-
-        def mark_delete_unavailable(self, *_args: Any, **_kwargs: Any) -> None:
-            campaign_events.append("terminal")
-
-    monkeypatch.setattr(worker_module, "SwitchyardCampaignRepository", _CampaignRepository)
-    dispatcher = Dispatcher(
-        connect=cast(Any, lambda: nullcontext(connection)),
-        switchyard=MagicMock(),
-        worker_id="worker-a",
-    )
-    campaign = {
-        "benchmark_run_id": "bmr-missing",
-        "status": "deleting",
-        "resource_name": None,
-        "metadata": {},
-    }
-    dispatcher.delete_switchyard_campaign({**campaign, "claim_attempt": 4})
-    dispatcher.delete_switchyard_campaign({**campaign, "claim_attempt": 5})
-    assert campaign_events == ["retry", "terminal"]
-
     request_events: list[str] = []
     row = {"id": "ev-cancel"}
 
@@ -267,3 +234,141 @@ async def test_buildkit_timeout_terminates_and_reaps_process(tmp_path: Path, mon
         )
     assert process.terminated is True
     assert process.communicate_calls == 2
+
+
+def test_repair_and_cleanup_sql_preserve_recoverability() -> None:
+    connection = MagicMock()
+    connection.transaction.return_value = nullcontext()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    cursor.rowcount = 1
+
+    assert TaskRepository(connection).mark_task_pack_missing(
+        owner_id="owner",
+        task_id="task",
+        revision=3,
+        object_key="tasks/task/rev/3.tar.gz",
+        previous_status="ready",
+    )
+    repair_sql = cursor.execute.call_args_list[1].args[0]
+    assert "latest.revision IS NOT NULL" in repair_sql
+
+    cursor.reset_mock()
+    cursor.fetchone.side_effect = [
+        {
+            "id": "ev",
+            "status": "running",
+            "runtime": "sandbox_k8s",
+            "backend_handle": {"external_id": "old"},
+            "benchmark_run_id": None,
+            "infrastructure_retries": 0,
+            "max_infrastructure_retries": 1,
+        },
+        {"benchmark_available": True},
+        {"id": 7},
+    ]
+    result = EvaluationRepository(connection).record_dispatch_job_infrastructure_failure(
+        "ev",
+        execution_number=2,
+        dispatch_job_name="job",
+        reconcile_worker_id="worker",
+        failure_code="JobFailed",
+        detail="failed",
+        retry_delay_seconds=1,
+    )
+    insert_sql = next(
+        call.args[0]
+        for call in cursor.execute.call_args_list
+        if "INSERT INTO evaluation_execution_cleanups" in call.args[0]
+    )
+    assert result == {"action": "cleanup", "retry": True}
+    assert "WHERE evaluation_execution_cleanups.status = 'deleted'" in insert_sql
+    assert "status = 'pending'" in insert_sql
+
+
+def test_detached_spawn_failure_is_terminal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pid_path = tmp_path / "runner.pid"
+    exit_path = tmp_path / "runner.exit.json"
+    token = "token"
+    pid_path.write_text(json.dumps({"pid": os.getpid(), "token": token}))
+
+    def fail_spawn(*_args: Any, **_kwargs: Any) -> None:
+        raise FileNotFoundError("runner missing")
+
+    monkeypatch.setattr(detached_runner.subprocess, "run", fail_spawn)
+
+    assert detached_runner.run(pid_path, exit_path, token, ["missing"]) == 127
+    assert not pid_path.exists()
+    terminal = json.loads(exit_path.read_text())
+    assert terminal["exit_code"] == 127
+    assert "runner missing" in terminal["error"]
+
+
+def test_cleartext_and_external_targets_are_rejected(tmp_path: Path) -> None:
+    with pytest.raises(BuildError, match="must use HTTPS"):
+        _post_resolve(
+            data={},
+            files={"context": ("context.tar.gz", b"x", "application/gzip")},
+            oc_token="secret",
+            service_url="http://builder.example.test",
+        )
+    with pytest.raises(click.ClickException, match="must use HTTPS"):
+        make_client("http://localhost:8080", "secret")
+    with make_client("http://localhost:8080", None) as client:
+        assert client.base_url == httpx.URL("http://localhost:8080/v1/")
+
+    def redirect(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            307,
+            headers={"location": "http://storage.example.test/archive"},
+        )
+
+    source = tmp_path / "archive.tar.gz"
+    source.write_bytes(b"archive")
+    with make_client(
+        "https://api.example.test",
+        "secret",
+        transport=httpx.MockTransport(redirect),
+    ) as client:
+        # The broker upload target is derived from the (HTTPS-validated) client base_url
+        # rather than a client-supplied URL, so the cleartext guard now lives in make_client
+        # (asserted above). upload_file instead rejects a malformed/empty upload block.
+        with pytest.raises(click.ClickException, match="missing workspace/fileset/path"):
+            upload_file(client, {"url": "http://storage.example.test/archive"}, source)
+        with pytest.raises(click.ClickException, match="must use HTTPS"):
+            download_artifact(client, "/artifacts/archive", tmp_path / "download")
+
+
+def test_gym_paths_are_created_exclusively(tmp_path: Path) -> None:
+    target = tmp_path / "target.env"
+    target.write_text("attacker-controlled")
+    with pytest.raises(FileExistsError):
+        write_env_file(target, {"TOKEN": "secret"})
+    target.unlink()
+    target.symlink_to(tmp_path / "captured")
+    with pytest.raises(FileExistsError):
+        write_env_file(target, {"TOKEN": "secret"})
+    assert not (tmp_path / "captured").exists()
+
+    env_file = tmp_path / "daytona.env"
+    env_file.write_text("GYM_AGENT_NAME=test\n")
+    work = tmp_path / "work"
+    (work / "ev-x2").mkdir(parents=True)
+    submit = make_gym_docker_submitter(
+        backend_name="gym_sandbox_daytona",
+        image=None,
+        env_file=str(env_file),
+        work_dir=str(work),
+        work_volume="gym-work",
+        runner=lambda *_args: None,
+    )
+    with pytest.raises(FileExistsError):
+        submit(
+            LaunchSpec(
+                evaluation_id="ev-x2",
+                name="test",
+                framework="nemo_gym",
+                runner_image_ref="registry.example/gym:frozen",
+                image_ref="task:tag",
+                parallelism=1,
+            )
+        )

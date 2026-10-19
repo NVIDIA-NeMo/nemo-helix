@@ -36,10 +36,15 @@ from nemo_agents_plugin.schema import (
     AgentStatus,
     CreateAgentRequest,
 )
-from nemo_platform_plugin.api.filters import make_filter_obj_dep
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
-from nemo_platform_plugin.schema import PaginationData
+from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.entity_client import (
+    NemoEntitiesClient,
+    NemoEntityConflictError,
+    NemoEntityNotFoundError,
+    NemoEntityValidationError,
+)
+from nemo_helix_plugin.schema import PaginationData
 
 # Deployment statuses that block agent deletion.
 # "failed" and "deleting" are excluded — they are terminal/in-cleanup and
@@ -83,6 +88,8 @@ async def create_agent(
             status_code=409,
             detail=f"Agent '{body.name}' already exists in workspace '{workspace}'.",
         ) from exc
+    except NemoEntityValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Failed to create agent '%s'", body.name)
         raise HTTPException(status_code=500, detail="Failed to create agent.") from exc
@@ -92,7 +99,7 @@ async def create_agent(
 @router.get("/agents", response_model=AgentPage, tags=["Agents"])
 @scope.read
 @path_rule(
-    callers=[CallerKind.PRINCIPAL],
+    callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL],
     permissions=[AgentPerms.LIST],
 )
 async def list_agents(
@@ -130,7 +137,7 @@ async def list_agents(
 @router.get("/agents/{name}", response_model=Agent, tags=["Agents"])
 @scope.read
 @path_rule(
-    callers=[CallerKind.PRINCIPAL],
+    callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL],
     permissions=[AgentPerms.READ],
 )
 async def get_agent(

@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock
 import pytest
 from nemo_deployments_plugin.entities import Deployment
 from nemo_deployments_plugin.reconciler.entity_client import list_all_pages
-from nemo_platform_plugin.entity_client import NemoPaginationInfo
-from nemo_platform_plugin.filter_ops import ComparisonOperation, FilterOperator
+from nemo_helix_plugin.entity_client import NemoPaginationInfo
+from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperator
 
 
 def _page(items: list[Deployment], *, page: int, total_pages: int) -> AsyncMock:

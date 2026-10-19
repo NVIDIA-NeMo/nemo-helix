@@ -10,13 +10,13 @@ from unittest.mock import MagicMock
 
 import pytest
 from fastapi import Request
-from nmp.common.api.filter import (
+from nhx.common.api.filter import (
     ComparisonOperation,
     FilterOperator,
     FilterRepository,
     LogicalOperation,
 )
-from nmp.core.entities.utils.filter import (
+from nhx.core.entities.utils.filter import (
     RelationshipFilterOperation,
     _parse_bracket_params,
     _parse_json_filter,
@@ -110,6 +110,12 @@ class TestParseJsonSearch:
         assert isinstance(result, ComparisonOperation)
         assert result.operator == FilterOperator.NIN
         assert result.value == ["val1", "val2"]
+
+    def test_elem_match_keeps_its_criteria_object(self):
+        result = _parse_json_filter('{"data.meta":{"$elemMatch":{"key":"owner","value":"alice"}}}')
+        assert isinstance(result, ComparisonOperation)
+        assert result.operator == FilterOperator.ELEM_MATCH
+        assert result.value == {"key": "owner", "value": "alice"}
 
     def test_invalid_json(self):
         """Test invalid JSON raises ValueError."""
@@ -281,7 +287,7 @@ class TestRepositoryApply:
 
     def test_relationship_operation_calls_repository(self):
         """Test RelationshipFilterOperation delegates to repository.relationship_exists."""
-        from nmp.core.entities.utils.relationships import Relationship
+        from nhx.core.entities.utils.relationships import Relationship
 
         class MockRepository(FilterRepository):
             def eq(self, field, value):
@@ -478,7 +484,7 @@ class TestRelationshipJsonParsing:
         assert result.value is True
 
     def test_to_dict_exists(self):
-        from nmp.core.entities.utils.relationships import Relationship
+        from nhx.core.entities.utils.relationships import Relationship
 
         op = RelationshipFilterOperation(
             relationship_name="adapters",
@@ -488,7 +494,7 @@ class TestRelationshipJsonParsing:
         assert op.to_dict() == {"adapters": {"$exists": False}}
 
     def test_to_dict_condition(self):
-        from nmp.core.entities.utils.relationships import Relationship
+        from nhx.core.entities.utils.relationships import Relationship
 
         op = RelationshipFilterOperation(
             relationship_name="adapters",

@@ -1,28 +1,28 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { agentsCreateAgent, agentsGetAgent } from '@nemo/sdk/generated/agents/api';
+import { agentsCreateAgent, agentsGetAgent } from '@nemo/sdk/generated/agents/agents';
 import {
   filesCreateFileset,
   filesDeleteFileset,
   filesRetrieveFileset,
   filesUploadFile,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/files';
 import {
   AgentSpecFilesetConflictError,
   AgentSpecFilesetOrphanError,
-  createAgentFromUpload,
-} from '@studio/api/agents/useCreateAgentFromUpload';
+} from '@studio/api/agents/agentSpecFileset';
+import { createAgentFromUpload } from '@studio/api/agents/useCreateAgentFromUpload';
 import type { UploadAgentEntry } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/type';
 
-vi.mock('@nemo/sdk/generated/agents/api', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@nemo/sdk/generated/agents/api')>()),
+vi.mock('@nemo/sdk/generated/agents/agents', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@nemo/sdk/generated/agents/agents')>()),
   agentsCreateAgent: vi.fn(),
   agentsGetAgent: vi.fn(),
 }));
 
-vi.mock('@nemo/sdk/generated/platform/api', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@nemo/sdk/generated/platform/api')>()),
+vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@nemo/sdk/generated/platform/files')>()),
   filesRetrieveFileset: vi.fn(),
   filesCreateFileset: vi.fn(),
   filesUploadFile: vi.fn(),
@@ -48,14 +48,14 @@ const httpError = (status: number): Error =>
 
 const filesetMissing = () => vi.mocked(filesRetrieveFileset).mockRejectedValue(httpError(404));
 const filesetExists = () =>
-  vi.mocked(filesRetrieveFileset).mockResolvedValue({ name: 'calc-spec' } as never);
+  vi.mocked(filesRetrieveFileset).mockResolvedValue({ name: 'calc-ethos' } as never);
 const agentMissing = () => vi.mocked(agentsGetAgent).mockRejectedValue(httpError(404));
 const agentExists = () => vi.mocked(agentsGetAgent).mockResolvedValue({ name: 'calc' } as never);
 
 beforeEach(() => {
   filesetMissing();
   agentMissing();
-  vi.mocked(filesCreateFileset).mockResolvedValue({ name: 'calc-spec' } as never);
+  vi.mocked(filesCreateFileset).mockResolvedValue({ name: 'calc-ethos' } as never);
   vi.mocked(filesUploadFile).mockResolvedValue({ path: 'agent.yaml' } as never);
   vi.mocked(filesDeleteFileset).mockResolvedValue(undefined as never);
   vi.mocked(agentsCreateAgent).mockResolvedValue({ name: 'calc' } as never);
@@ -112,10 +112,10 @@ describe('createAgentFromUpload', () => {
 
     await createAgentFromUpload({ ...params(), replaceOrphanedFileset: true });
 
-    expect(filesDeleteFileset).toHaveBeenCalledWith('ws', 'calc-spec');
+    expect(filesDeleteFileset).toHaveBeenCalledWith('ws', 'calc-ethos');
     expect(filesCreateFileset).toHaveBeenCalledWith(
       'ws',
-      expect.objectContaining({ name: 'calc-spec' })
+      expect.objectContaining({ name: 'calc-ethos' })
     );
     expect(agentsCreateAgent).toHaveBeenCalled();
   });
@@ -136,14 +136,14 @@ describe('createAgentFromUpload', () => {
       .mockRejectedValueOnce(new Error('network down'));
 
     await expect(createAgentFromUpload(params())).rejects.toThrow('network down');
-    expect(filesDeleteFileset).toHaveBeenCalledWith('ws', 'calc-spec');
+    expect(filesDeleteFileset).toHaveBeenCalledWith('ws', 'calc-ethos');
   });
 
   it('deletes the fileset when creating the agent fails', async () => {
     vi.mocked(agentsCreateAgent).mockRejectedValue(new Error('409 conflict'));
 
     await expect(createAgentFromUpload(params())).rejects.toThrow('409 conflict');
-    expect(filesDeleteFileset).toHaveBeenCalledWith('ws', 'calc-spec');
+    expect(filesDeleteFileset).toHaveBeenCalledWith('ws', 'calc-ethos');
   });
 
   it('does not delete a fileset it failed to create', async () => {

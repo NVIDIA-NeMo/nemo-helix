@@ -39,21 +39,29 @@ def run(pid_path: Path, exit_path: Path, token: str, argv: list[str]) -> int:
     else:
         return 125
 
-    completed = subprocess.run(argv, check=False)
-    _atomic_json(
-        exit_path,
-        {
-            "token": token,
-            "exit_code": completed.returncode,
-            "finished_at": datetime.now(UTC).isoformat(),
-        },
-    )
     try:
-        if json.loads(pid_path.read_text()).get("token") == token:
-            pid_path.unlink()
-    except (OSError, ValueError):
-        pass
-    return completed.returncode
+        try:
+            completed = subprocess.run(argv, check=False)
+            exit_code = completed.returncode
+            error = None
+        except OSError as exc:
+            exit_code = 127
+            error = str(exc)
+        payload: dict[str, object] = {
+            "token": token,
+            "exit_code": exit_code,
+            "finished_at": datetime.now(UTC).isoformat(),
+        }
+        if error is not None:
+            payload["error"] = error
+        _atomic_json(exit_path, payload)
+        return exit_code
+    finally:
+        try:
+            if json.loads(pid_path.read_text()).get("token") == token:
+                pid_path.unlink()
+        except (OSError, ValueError):
+            pass
 
 
 def main() -> int:

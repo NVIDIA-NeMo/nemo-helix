@@ -11,7 +11,7 @@ canonical-shape contract that ``train_sft`` and ``compile`` consume.
 from __future__ import annotations
 
 import pytest
-from nmp.unsloth.schemas import (
+from nhx.unsloth.schemas import (
     DatasetSpec,
     LoRAParams,
     ModelLoadSpec,

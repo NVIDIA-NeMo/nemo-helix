@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-nmp-e2e}"
+KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-nhx-e2e}"
 
 if [ "$#" -eq 0 ]; then
     echo "usage: $0 IMAGE [IMAGE...]" >&2

@@ -14,7 +14,10 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
-import { getListExperimentsQueryKey, useCreateExperiment } from '@nemo/sdk/generated/platform/api';
+import {
+  getListExperimentsQueryKey,
+  useCreateExperiment,
+} from '@nemo/sdk/generated/platform/experiments';
 import { FormField, Stack, TextInput } from '@nvidia/foundations-react-core';
 import { queryClient } from '@studio/api/queryClient';
 import {

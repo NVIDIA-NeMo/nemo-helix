@@ -8,10 +8,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
+import stat
+import time
+from contextlib import nullcontext
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar, NamedTuple, cast
 
 from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.agent_config_formats import resolve_agent_config_for_deployment
@@ -40,27 +44,42 @@ from nemo_agents_plugin.jobs.execute_extensions import (
     run_execute_agent_after_invoke_extension,
     validate_execute_agent_extension_config,
 )
+from nemo_agents_plugin.jobs.gateway_proxy import (
+    exports_otlp_to_intake,
+    optional_platform_auth_proxy,
+    platform_auth_proxy,
+    rewrite_gateway_models,
+    rewrite_intake_otlp_endpoints,
+    routes_inference_through_gateway,
+)
+from nemo_agents_plugin.jobs.job_usage import fabric_output_token_usage
 from nemo_agents_plugin.tasks.execute.workdir import (
     AgentWorkdir,
     materialize_agent_workdir,
     validate_agent_workdir,
 )
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.job_results import ResultRef
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_agents_plugin.telemetry.intake_export import (
+    configure_intake_atif_export,
+    supports_intake_atif_export,
+    wants_intake_atif_export,
+)
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.job_results import ResultRef
+from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
     EnvironmentVariable,
     EnvironmentVariableFromSecret,
-    PlatformJobSpec,
-    PlatformJobStep,
+    HelixJobSpec,
+    HelixJobStep,
     ResourcesLimitsSpec,
     ResourcesSpec,
 )
-from nemo_platform_plugin.jobs.constants import (
+from nemo_helix_plugin.jobs.constants import (
     CONFIG_TASK_STORAGE_PATH_ENVVAR,
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
@@ -74,9 +93,8 @@ from nemo_platform_plugin.jobs.constants import (
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
     TASK_CONFIG_ENVVAR,
 )
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
-from nemo_platform_plugin.jobs.image import get_qualified_image
-from nemo_platform_plugin.refs import ENTITY_REF_PATTERN, parse_entity_ref
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, parse_entity_ref
 from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
@@ -86,13 +104,27 @@ FABRIC_BASE_DIR_NAME = "fabric"
 INPUT_WORKDIR_RESULT_NAME = "input_workdir"
 OUTPUT_WORKDIR_RESULT_NAME = "output_workdir"
 OUTPUT_ARTIFACTS_RESULT_NAME = "output_artifacts"
+NHX_BASE_URL_ENVVAR = "NHX_BASE_URL"
 FABRIC_RUN_RESULT_NAME = "fabric_run_result"
 FABRIC_ERROR_RESULT_NAME = "fabric_error"
 FABRIC_RUN_RESULT_FILENAME = "fabric_run_result.json"
 FABRIC_ERROR_FILENAME = "fabric_error.json"
 SUCCESSFUL_FABRIC_STATUSES = {"succeeded"}
 DEFAULT_AGENT_EXECUTION_TIMEOUT_SECONDS = 60 * 60
-DEFAULT_AGENT_EXECUTION_IMAGE_NAME = "nmp-api"
+
+# Name Fabric gives the agent process's captured stderr. It lives under a
+# runtime/invocation directory Fabric names itself, so it is found by search
+# rather than opened by path.
+_AGENT_STDERR_FILENAME = "stderr.txt"
+# Bounds on what a failing agent can make this task read into memory. The
+# artifacts directory is agent-writable, so neither the size nor the number of
+# these files is ours to trust, and a runaway agent could otherwise exhaust the
+# task's memory while it reports the failure - destroying the diagnostics this
+# exists to produce. Sized never to fire on real output (a genuine failed run's
+# stderr measured ~2 KiB), so it bounds the pathological case without
+# truncating the ordinary one.
+_MAX_LOGGED_STDERR_BYTES = 4 * 1024 * 1024
+_MAX_LOGGED_STDERR_FILES = 5
 
 # k8s resource key carrying the GPU count. The agents ``ComputeResources`` maps
 # express GPUs the Kubernetes way (a ``nvidia.com/gpu`` entry in ``limits``);
@@ -106,13 +138,13 @@ _SUPPORTED_RESOURCE_KEYS = frozenset({"cpu", "memory", _GPU_RESOURCE_KEY})
 
 # Env var names a secret-backed env var must never shadow. Splitting a secret's
 # resolved value over one of these would clobber platform-injected job state (the
-# jobs substrate sets the ``NEMO_JOB_*``/``NMP_TASK_CONFIG`` family on every
+# jobs substrate sets the ``NEMO_JOB_*``/``NHX_TASK_CONFIG`` family on every
 # step) or the agent-container env the execute task relies on to reach the
 # platform SDK (mirrors the deployment container's reserved set). Reject the
 # collision at compile time so it can never reach the running step.
 _RESERVED_ENV_VAR_NAMES = frozenset(
     {
-        # Jobs substrate (nemo_platform_plugin.jobs.constants).
+        # Jobs substrate (nemo_helix_plugin.jobs.constants).
         EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
         PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
         CONFIG_TASK_STORAGE_PATH_ENVVAR,
@@ -126,9 +158,9 @@ _RESERVED_ENV_VAR_NAMES = frozenset(
         NEMO_JOB_FILESET_ENVVAR,
         NEMO_JOB_SECRETS_ENVVAR,
         # Agent execution env (mirrors the deployment container's reserved set).
-        "NMP_WORKSPACE",
-        "NMP_AGENT_NAME",
-        "NMP_BASE_URL",
+        "NHX_WORKSPACE",
+        "NHX_AGENT_NAME",
+        "NHX_BASE_URL",
         "PYTHONPATH",
         "AGENT_CONFIG_PATH",
         "NAT_CONFIG_PATH",
@@ -173,6 +205,27 @@ class ExecuteAgentJobConfig(BaseModel):
         gt=0,
         description="Maximum time to wait for Fabric to return an execution result.",
     )
+    auto_telemetry: bool = Field(
+        default=True,
+        description=(
+            "Let the server fill in the agent's telemetry export -- an Intake destination for a "
+            "config that asks for one and does not say where. False submits the agent config as "
+            "written, which still exports if the config says to; an agent config is the place to "
+            "say a run should not be traced."
+        ),
+    )
+    image: str = Field(
+        default="",
+        description=(
+            "Container image to execute the agent in. Mirrors "
+            "CreateDeploymentRequest.image. Typically the output of "
+            "`nemo agents package`, which contains both the agent's Fabric "
+            "adapter and the execute task module. Empty falls back to "
+            "agents.jobs.default_image, then to the jobs substrate's chain "
+            "(the execution profile's default_task_image, then the platform "
+            "CPU tasks image)."
+        ),
+    )
     extension: ExecuteAgentExtensionConfig | None = Field(
         default=None,
         description="Optional trusted plugin extension to run during the execute-agent lifecycle.",
@@ -198,6 +251,18 @@ class ExecuteAgentJobConfig(BaseModel):
         _validate_agent_config_format(value.config_format)
         if not value.config:
             raise ValueError("Inline agent definitions require a non-empty config.")
+        return value
+
+    @field_validator("image")
+    @classmethod
+    def _validate_image(cls, value: str) -> str:
+        """Reject a blank-but-present image.
+
+        Empty means "omitted" and is the documented way to inherit the fallback chain;
+        whitespace is a caller mistake that would otherwise resolve as if the field had been omitted.
+        """
+        if value and not value.strip():
+            raise ValueError("Image must not be blank; omit the field to inherit the configured default.")
         return value
 
 
@@ -231,11 +296,17 @@ class ExecuteAgentJob(NemoJob):
     spec_schema: ClassVar[type[BaseModel]] = ExecuteAgentStepConfig
 
     @staticmethod
-    def _execution_image() -> str:
-        return AgentsConfig.get().deployments.default_image or get_qualified_image(DEFAULT_AGENT_EXECUTION_IMAGE_NAME)
+    def _execution_image(request_image: str) -> str | None:
+        """Resolve the task image, or ``None`` to inherit the jobs substrate chain.
+
+        The third tier is deliberately not spelled here: ``ContainerSpec.image``
+        is optional precisely so a job can defer to the execution profile's
+        ``default_task_image`` and then the platform CPU tasks image.
+        """
+        return request_image.strip() or AgentsConfig.get().jobs.default_image.strip() or None
 
     @classmethod
-    async def to_spec(  # type: ignore[override]
+    async def to_spec(
         cls,
         input_spec: BaseModel,
         *,
@@ -289,8 +360,8 @@ class ExecuteAgentJob(NemoJob):
 
         workdir = None
         if request.workdir is not None:
-            sdk = cast(AsyncNeMoPlatform, async_sdk)
-            workdir = await validate_agent_workdir(request.workdir, sdk.files, default_workspace=workspace)
+            files_client = AsyncFilesClient.from_client(cast(AsyncNemoClient, async_sdk))
+            workdir = await validate_agent_workdir(request.workdir, files_client, default_workspace=workspace)
 
         extension = request.extension or _make_noop_extension_config()
         validate_execute_agent_extension_config(extension.kind, extension.config)
@@ -310,7 +381,7 @@ class ExecuteAgentJob(NemoJob):
         )
 
     @classmethod
-    async def compile(  # type: ignore[override]
+    async def compile(
         cls,
         *,
         workspace: str,
@@ -320,7 +391,7 @@ class ExecuteAgentJob(NemoJob):
         async_sdk: object,
         profile: str | None = None,
         options: dict | None = None,
-    ) -> PlatformJobSpec:
+    ) -> HelixJobSpec:
         del workspace, entity_client, job_name, async_sdk, options
         step_config = ExecuteAgentStepConfig.model_validate(spec)
 
@@ -328,7 +399,7 @@ class ExecuteAgentJob(NemoJob):
             profile=profile or "default",
             provider="cpu",
             container=ContainerSpec(
-                image=cls._execution_image(),
+                image=cls._execution_image(step_config.request.image),
                 entrypoint=["python", "-m"],
                 command=["nemo_agents_plugin.tasks.execute"],
             ),
@@ -337,9 +408,9 @@ class ExecuteAgentJob(NemoJob):
         # secret-backed step env vars. Both validate the snapshot and raise
         # ``ValueError`` on a bad shape (an unsupported resource key, or a secret
         # env name colliding with a reserved job env var). Surface those as a
-        # ``PlatformJobCompilationError`` so the jobs create route maps them to a
+        # ``HelixJobCompilationError`` so the jobs create route maps them to a
         # descriptive 422 rather than an opaque 500 (the route's compile wrapper
-        # only translates ``PlatformJobCompilationError``, not bare ``ValueError``).
+        # only translates ``HelixJobCompilationError``, not bare ``ValueError``).
         try:
             # Snapshotted compute -> executor resources. Injected only when the
             # environment supplied a compute spec, so the default CPU sizing is
@@ -351,14 +422,14 @@ class ExecuteAgentJob(NemoJob):
             # indirection - see environment_resolution).
             environment = _secret_environment(step_config.secrets)
         except ValueError as exc:
-            raise PlatformJobCompilationError(str(exc)) from exc
+            raise HelixJobCompilationError(str(exc)) from exc
 
         if resources is not None:
             executor["resources"] = resources
 
-        return PlatformJobSpec(
+        return HelixJobSpec(
             steps=[
-                PlatformJobStep(
+                HelixJobStep(
                     name="execute-agent",
                     executor=executor,
                     config=step_config.model_dump(mode="json"),
@@ -367,80 +438,154 @@ class ExecuteAgentJob(NemoJob):
             ],
         )
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: NeMoPlatform | None = None) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: NemoClient | None = None) -> dict:
         step_config = ExecuteAgentStepConfig.model_validate(config)
+        agent_ref = f"{step_config.agent.workspace}/{step_config.agent.name}"
+        # Logged before validation so a config that fails to parse still names the agent it belonged to.
+        logger.info("Executing agent %s (timeout %gs).", agent_ref, step_config.request.timeout_seconds)
+
         _validate_agent_config_format(step_config.agent.config_format)
         agent_config = _validate_agent_config(step_config.agent.config)
 
         fabric_dirs = FabricDirectories.create(agent_config, ctx.storage.ephemeral)
 
-        if step_config.workdir is not None and _has_workdir_inputs(step_config.workdir):
-            if sdk is None:
-                raise RuntimeError("sdk is required to stage workdir inputs.")
-            materialize_agent_workdir(step_config.workdir, sdk.files, fabric_dirs.workspace)
+        # One loopback proxy serves every way the *agent process* reaches the
+        # platform: its inference calls, Relay's trajectory export and its
+        # OpenTelemetry exports. This task's own calls -- staging a workdir, saving
+        # results -- need none of it; they go through an SDK that authenticates
+        # them. The proxy stays open through result saving, so an export posted
+        # as the agent exits still lands.
+        # A job that opted out of ATIF, or already named its own destination, should
+        # not pay for the Fabric plan probe, nor for the proxy that probe would justify.
+        exports_telemetry = (
+            step_config.request.auto_telemetry
+            and wants_intake_atif_export(step_config.agent.config)
+            and supports_intake_atif_export(step_config.agent.config, base_dir=fabric_dirs.base)
+        )
+        # Starting a proxy nothing would use is not free: it resolves the job's
+        # credentials up front, failing a run that never needed them. And a job
+        # that wants one only for telemetry would rather run untraced than not
+        # at all, which inference cannot say.
+        if routes_inference_through_gateway(agent_config):
+            proxy = platform_auth_proxy()
+        elif exports_telemetry or exports_otlp_to_intake(agent_config):
+            proxy = optional_platform_auth_proxy()
+        else:
+            proxy = nullcontext(None)
 
-        input_workdir_ref = ctx.results.save(INPUT_WORKDIR_RESULT_NAME, fabric_dirs.workspace)
+        with proxy as proxy_origin:
+            if exports_telemetry:
+                _configure_intake_telemetry(
+                    step_config.agent.config, workspace=ctx.workspace, proxy_origin=proxy_origin
+                )
+                # Wiring mutates the config mapping, not the model validated above,
+                # so re-validate to carry it into what Fabric is handed.
+                agent_config = _validate_agent_config(step_config.agent.config)
 
-        try:
-            result = asyncio.run(
-                invoke_agent_config_request_once(
-                    AgentConfigInvocationRequest(
-                        agent_config=agent_config,
-                        input=step_config.request.input,
-                        base_dir=fabric_dirs.base,
-                        request_id=ctx.job_id,
-                        caller_context={
-                            "job_id": ctx.job_id,
-                            "job_workspace": ctx.workspace,
-                            "agent": f"{step_config.agent.workspace}/{step_config.agent.name}",
-                        },
-                        timeout_seconds=step_config.request.timeout_seconds,
+            if step_config.workdir is not None and _has_workdir_inputs(step_config.workdir):
+                if sdk is None:
+                    raise RuntimeError("sdk is required to stage workdir inputs.")
+                logger.info("Staging workdir inputs for agent %s.", agent_ref)
+                files_client = FilesClient.from_client(sdk)
+                materialize_agent_workdir(step_config.workdir, files_client, fabric_dirs.workspace)
+
+            input_workdir_ref = ctx.results.save(INPUT_WORKDIR_RESULT_NAME, fabric_dirs.workspace)
+
+            logger.info("Invoking agent %s.", agent_ref)
+            started_at = time.monotonic()
+            try:
+                result = asyncio.run(
+                    invoke_agent_config_request_once(
+                        AgentConfigInvocationRequest(
+                            agent_config=rewrite_intake_otlp_endpoints(
+                                rewrite_gateway_models(agent_config, proxy_origin), proxy_origin
+                            ),
+                            input=step_config.request.input,
+                            base_dir=fabric_dirs.base,
+                            request_id=ctx.job_id,
+                            caller_context={
+                                "job_id": ctx.job_id,
+                                "job_workspace": ctx.workspace,
+                                "agent": agent_ref,
+                            },
+                            timeout_seconds=step_config.request.timeout_seconds,
+                        )
                     )
                 )
-            )
-        except Exception as error:
-            self._save_fabric_error_results(
-                ctx, workspace_dir=fabric_dirs.workspace, artifacts_dir=fabric_dirs.artifacts, error=error
-            )
-            raise
-
-        fabric_run_result_ref = _save_json_result(
-            ctx,
-            FABRIC_RUN_RESULT_NAME,
-            ctx.storage.ephemeral / FABRIC_RUN_RESULT_FILENAME,
-            asdict(result),
-        )
-        output_workdir_ref = ctx.results.save(OUTPUT_WORKDIR_RESULT_NAME, fabric_dirs.workspace)
-        output_artifacts_ref = ctx.results.save(OUTPUT_ARTIFACTS_RESULT_NAME, fabric_dirs.artifacts)
-        status = "completed" if result.status in SUCCESSFUL_FABRIC_STATUSES else "failed"
-        if status == "completed":
-            try:
-                run_execute_agent_after_invoke_extension(
-                    step_config.extension.kind,
-                    ExecuteAgentAfterInvokeContext(
-                        ctx=ctx,
-                        config=step_config.extension.config,
-                        agent_name=step_config.agent.name,
-                        fabric_result=result,
-                    ),
+            except Exception as error:
+                # Fabric never produced a result, so the agent's own stderr is the
+                # only account of how far it got, if anywhere.
+                logger.exception(
+                    "Fabric invocation failed for agent %s after %.1fs.", agent_ref, time.monotonic() - started_at
                 )
-            except Exception:
-                logger.exception("Execute-agent extension failed.")
+                _log_agent_stderr(fabric_dirs.artifacts)
+                self._save_fabric_error_results(
+                    ctx, workspace_dir=fabric_dirs.workspace, artifacts_dir=fabric_dirs.artifacts, error=error
+                )
                 raise
 
-        output = {
-            "status": status,
-            "agent": f"{step_config.agent.workspace}/{step_config.agent.name}",
-            "fabric_status": result.status,
-            "runtime_id": result.runtime_id,
-            "invocation_id": result.invocation_id,
-            "request_id": result.request_id,
-            "input_workdir": input_workdir_ref.model_dump(),
-            "output_workdir": output_workdir_ref.model_dump(),
-            "output_artifacts": output_artifacts_ref.model_dump(),
-            "fabric_run_result": fabric_run_result_ref.model_dump(),
-        }
-        return output
+            logger.info(
+                "Agent %s returned status=%s after %.1fs.", agent_ref, result.status, time.monotonic() - started_at
+            )
+
+            usage = fabric_output_token_usage(result.output)
+            if usage is not None:
+                ctx.usage.report_totals(input_tokens=usage.input_tokens, output_tokens=usage.output_tokens)
+
+            fabric_run_result_ref = _save_json_result(
+                ctx,
+                FABRIC_RUN_RESULT_NAME,
+                ctx.storage.ephemeral / FABRIC_RUN_RESULT_FILENAME,
+                asdict(result),
+            )
+            output_workdir_ref = ctx.results.save(OUTPUT_WORKDIR_RESULT_NAME, fabric_dirs.workspace)
+            output_artifacts_ref = ctx.results.save(OUTPUT_ARTIFACTS_RESULT_NAME, fabric_dirs.artifacts)
+            status = "completed" if result.status in SUCCESSFUL_FABRIC_STATUSES else "failed"
+            if status == "completed":
+                try:
+                    run_execute_agent_after_invoke_extension(
+                        step_config.extension.kind,
+                        ExecuteAgentAfterInvokeContext(
+                            ctx=ctx,
+                            config=step_config.extension.config,
+                            agent_name=step_config.agent.name,
+                            fabric_result=result,
+                        ),
+                    )
+                except Exception:
+                    logger.exception("Execute-agent extension failed.")
+                    raise
+            else:
+                # A Fabric result that *reports* failure is not an exception here,
+                # so this is the only place the reason is stated. Without it the
+                # step exits non-zero having logged nothing at all, and the cause
+                # is only reachable by downloading the saved artifacts.
+                logger.error(
+                    "Agent %s failed: fabric_status=%s error=%s (runtime_id=%s invocation_id=%s). "
+                    "Fabric run result: %s. Agent stdout/stderr: %s",
+                    agent_ref,
+                    result.status,
+                    result.error,
+                    result.runtime_id,
+                    result.invocation_id,
+                    fabric_run_result_ref.artifact_url,
+                    output_artifacts_ref.artifact_url,
+                )
+                _log_agent_stderr(fabric_dirs.artifacts)
+
+            output = {
+                "status": status,
+                "agent": agent_ref,
+                "fabric_status": result.status,
+                "runtime_id": result.runtime_id,
+                "invocation_id": result.invocation_id,
+                "request_id": result.request_id,
+                "input_workdir": input_workdir_ref.model_dump(),
+                "output_workdir": output_workdir_ref.model_dump(),
+                "output_artifacts": output_artifacts_ref.model_dump(),
+                "fabric_run_result": fabric_run_result_ref.model_dump(),
+            }
+            return output
 
     def _save_fabric_error_results(
         self,
@@ -471,6 +616,104 @@ class ExecuteAgentJob(NemoJob):
             _save_json_result(ctx, FABRIC_ERROR_RESULT_NAME, ctx.storage.ephemeral / FABRIC_ERROR_FILENAME, payload)
         except Exception:
             logger.warning("Failed to save Fabric error result.", exc_info=True)
+
+
+def _log_agent_stderr(artifacts_dir: Path) -> None:
+    """Log the agent process's captured stderr after a run that failed.
+
+    Fabric runs the agent as its own process and redirects its streams to files
+    under the artifacts directory, so nothing it logs reaches the task
+    container's stdout. Only stderr is worth reading: the stdout file is the
+    adapter's protocol channel - a single JSON response, already saved as
+    ``fabric_run_result`` - and the lifecycle harness redirects the agent's own
+    stdout into stderr anyway, so nothing is lost by ignoring it.
+
+    Read on failure only. A healthy run's execution record belongs in telemetry,
+    which carries it live and structured; this exists for what telemetry cannot
+    see - a failure before the agent started and produced any spans, an export
+    that never landed, a process that died.
+
+    Best-effort: it runs on an already-failing path and must never replace the
+    error that got us here.
+    """
+    try:
+        # Safe to run over an agent-writable tree: pathlib's ``**`` does not
+        # follow symlinks, so a symlink loop cannot make this hang.
+        paths = sorted(artifacts_dir.rglob(_AGENT_STDERR_FILENAME))
+    except OSError as error:
+        logger.warning("Could not search %s for agent stderr: %s", artifacts_dir, error)
+        return
+    if len(paths) > _MAX_LOGGED_STDERR_FILES:
+        logger.warning(
+            "Found %d agent stderr files under %s; logging the first %d.",
+            len(paths),
+            artifacts_dir,
+            _MAX_LOGGED_STDERR_FILES,
+        )
+        paths = paths[:_MAX_LOGGED_STDERR_FILES]
+    for path in paths:
+        try:
+            tail = _read_stderr_tail(path)
+        except OSError as error:
+            logger.warning("Could not read agent stderr at %s: %s", path, error)
+            continue
+        if not tail.text.strip():
+            logger.warning("Agent stderr at %s was empty.", path)
+            continue
+        if tail.omitted_bytes:
+            logger.error(
+                "Agent stderr (%s, last %d bytes; %d earlier bytes omitted - the saved artifact has "
+                "the whole stream):\n%s",
+                path,
+                tail.read_bytes,
+                tail.omitted_bytes,
+                tail.text,
+            )
+        else:
+            logger.error("Agent stderr (%s):\n%s", path, tail.text)
+
+
+class _StderrTail(NamedTuple):
+    """What was read from an agent stderr file, in bytes rather than characters."""
+
+    text: str
+    read_bytes: int
+    omitted_bytes: int
+
+
+def _read_stderr_tail(path: Path) -> _StderrTail:
+    """Return *path*'s contents and how many leading bytes were dropped.
+
+    Takes the tail rather than the head when a stream exceeds the cap: a file
+    that large means the agent ran a long while before failing, so the failure
+    is at the end. A run that fails early writes little and is never truncated,
+    which is where the beginning would have mattered.
+
+    The file type is not taken on trust, because the artifacts directory is
+    agent-writable and a size check alone is not a bound: a ``stderr.txt``
+    symlinked to ``/dev/zero`` reports ``st_size`` 0, passes any cap, and then
+    reads forever, and a FIFO of that name would block this task indefinitely
+    while it is trying to report a failure. ``O_NOFOLLOW`` refuses a symlinked
+    final component, ``O_NONBLOCK`` keeps a FIFO from blocking the open, and
+    the ``fstat`` below rejects anything that is not a regular file - checked
+    on the open descriptor so the answer cannot change underneath us.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    with os.fdopen(os.open(path, flags), "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise OSError(f"{path} is not a regular file")
+        size = info.st_size
+        if size > _MAX_LOGGED_STDERR_BYTES:
+            handle.seek(size - _MAX_LOGGED_STDERR_BYTES)
+        # Bounded by the cap regardless of what ``st_size`` claimed, so a file
+        # that lied about its size or grew mid-read still cannot run away.
+        chunk = handle.read(_MAX_LOGGED_STDERR_BYTES)
+    return _StderrTail(
+        text=chunk.decode("utf-8", errors="replace"),
+        read_bytes=len(chunk),
+        omitted_bytes=max(0, size - len(chunk)),
+    )
 
 
 class _AgentSource(BaseModel):
@@ -633,6 +876,31 @@ def _validate_agent_config_format(config_format: str) -> None:
             f"Config format {config_format!r} is not supported; "
             f"agents.execute jobs only support {FABRIC_AGENT_CONFIG_FORMAT!r}."
         )
+
+
+def _configure_intake_telemetry(
+    agent_config: dict[str, Any],
+    *,
+    workspace: str,
+    proxy_origin: str | None,
+) -> None:
+    """Wire the agent's trajectory export to Intake for this job.
+
+    Runs here rather than at create time because only the task knows where the
+    export can reach: the loopback proxy it is running for this invocation, or
+    -- on a platform with auth disabled, where there is no proxy -- the
+    ``NHX_BASE_URL`` the Jobs service rewrote for this pod.
+
+    No credential travels with the config. The proxy authenticates each export
+    as it forwards it, which both keeps the bearer out of artifacts Fabric
+    uploads as a job result and lets a job outlive any single access token.
+    """
+    base_url = proxy_origin or os.environ.get(NHX_BASE_URL_ENVVAR)
+    if not base_url:
+        logger.warning("%s is not set; the agent will run untraced.", NHX_BASE_URL_ENVVAR)
+        return
+
+    configure_intake_atif_export(agent_config, workspace=workspace, base_url=base_url)
 
 
 def _validate_agent_config(config: dict) -> AgentConfig:

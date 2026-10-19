@@ -3,11 +3,7 @@
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
-import {
-  type ListSpansQueryError,
-  useGetSpan,
-  useListAnnotations,
-} from '@nemo/sdk/generated/platform/api';
+import { useListAnnotations } from '@nemo/sdk/generated/platform/annotations';
 import {
   AnnotationSortField,
   type FeedbackAnnotationInputValue,
@@ -15,8 +11,14 @@ import {
   SpanStatus,
   type Trace,
 } from '@nemo/sdk/generated/platform/schema';
+import {
+  type ListSpansQueryError,
+  useGetSpan,
+  useListSpans,
+} from '@nemo/sdk/generated/platform/spans';
 import { Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
 import { IntakeErrorBanner } from '@studio/components/IntakeDetail/IntakeComponents/IntakeErrorBanner';
+import { TraceSpanGraphView } from '@studio/components/IntakeDetail/TraceSpanGraphView';
 import { SpanListView } from '@studio/components/IntakeDetail/TraceSpanListView';
 import {
   type NoteRequest,
@@ -28,9 +30,11 @@ import {
   type TraceViewMode,
   TraceViewToolbar,
 } from '@studio/components/IntakeDetail/TraceViewToolbar';
+import { featureFlags } from '@studio/constants/featureFlags';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import {
   buildSpanHierarchyRows,
+  buildSpanTree,
   getSpansDurationMs,
   type SessionTrajectory,
 } from '@studio/util/intakeTelemetry';
@@ -40,7 +44,7 @@ import { useSearchParams } from 'react-router';
 const TRACE_SPANS_PAGE_SIZE = 1000;
 const EMPTY_SPANS: Span[] = [];
 
-// ── Explorer: toolbar (Tree/List + expand/collapse) over the chosen view ─────
+// ── Explorer: toolbar and the chosen trace view ──────────────────────────────
 
 interface TraceSpanAccordionsProps {
   workspace: string;
@@ -59,8 +63,6 @@ export interface SessionExplorerData {
   readonly spansLoaded: boolean;
   readonly spansError: ListSpansQueryError | null;
   readonly isSpansFetching: boolean;
-  readonly spanPageSize: number;
-  readonly spanTotal: number;
 }
 
 export const TraceSpanAccordions: FC<TraceSpanAccordionsProps> = ({
@@ -75,6 +77,8 @@ export const TraceSpanAccordions: FC<TraceSpanAccordionsProps> = ({
   onViewModeChange,
 }) => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const activeViewMode =
+    viewMode === 'graph' && !featureFlags.traceGraphEnabled ? 'tree' : viewMode;
   const linkedSpanId = searchParams.get(QUERY_PARAMETERS.spanId) || null;
   const [openSpanIds, setOpenSpanIds] = useState<string[]>([]);
   // Bumped to broadcast expand/collapse-all to the selected span's sections in
@@ -88,13 +92,36 @@ export const TraceSpanAccordions: FC<TraceSpanAccordionsProps> = ({
   // manually toggling an accordion doesn't yank the viewport around.
   const scrollToActiveRef = useRef(false);
 
-  const { trajectories, spansLoaded, spansError, isSpansFetching, spanPageSize, spanTotal } =
-    explorer;
-  const spans =
+  const { trajectories } = explorer;
+  const sessionSpans =
     trajectories.find(({ trace: sessionTrace }) => sessionTrace.id === trace.id)?.spans ??
     EMPTY_SPANS;
+  const {
+    data: traceSpansResponse,
+    error: traceSpansError,
+    isFetching: isTraceSpansFetching,
+  } = useListSpans(workspace, {
+    filter: { session_id: trace.session_id, trace_id: trace.id },
+    mode: 'summary',
+    page: 1,
+    page_size: TRACE_SPANS_PAGE_SIZE,
+    sort: 'started_at',
+  });
+  const spans = traceSpansResponse?.data ?? sessionSpans;
+  const spansLoaded = traceSpansResponse !== undefined || traceSpansError !== null;
+  const spansError = spans.length === 0 ? traceSpansError : null;
+  const isShowingFallbackSpans = traceSpansError !== null && spans.length > 0;
+  const isSpansFetching = isTraceSpansFetching;
 
   const spanRows = useMemo(() => buildSpanHierarchyRows(spans), [spans]);
+  const treeTrajectories = useMemo(() => {
+    const selectedTrajectory = { trace, spans, spanTree: buildSpanTree(spans) };
+    const traceIndex = trajectories.findIndex(({ trace: item }) => item.id === trace.id);
+    if (traceIndex === -1) return [...trajectories, selectedTrajectory];
+    return trajectories.map((trajectory, index) =>
+      index === traceIndex ? selectedTrajectory : trajectory
+    );
+  }, [spans, trace, trajectories]);
   const resolvedSessionDurationMs = useMemo(
     () => sessionDurationMs ?? trace.duration_ms ?? getSpansDurationMs(spans),
     [sessionDurationMs, trace.duration_ms, spans]
@@ -121,14 +148,14 @@ export const TraceSpanAccordions: FC<TraceSpanAccordionsProps> = ({
       linkedSpanDetail.session_id === trace.session_id);
   const linkedSpanFromDetail = useMemo(
     () =>
-      linkedSpanDetail && linkedSpanMatchesTrace
+      shouldFetchLinkedSpan && linkedSpanDetail && linkedSpanMatchesTrace
         ? ({
             ...linkedSpanDetail,
             hierarchyDepth: 0,
             hierarchyStatus: 'parent_outside_page',
           } as const)
         : undefined,
-    [linkedSpanDetail, linkedSpanMatchesTrace]
+    [linkedSpanDetail, linkedSpanMatchesTrace, shouldFetchLinkedSpan]
   );
   const selectedSpan = selectedSpanFromPage ?? linkedSpanFromDetail;
   const selectedSpanId = selectedSpan?.span_id ?? null;
@@ -136,13 +163,6 @@ export const TraceSpanAccordions: FC<TraceSpanAccordionsProps> = ({
     () => (linkedSpanFromDetail ? [linkedSpanFromDetail, ...spanRows] : spanRows),
     [linkedSpanFromDetail, spanRows]
   );
-  // The trace's own error lives on its root span (the trace status derives from
-  // it); used to decide whether to surface a trace-level error banner.
-  const rootSpan = useMemo(
-    () => spanRows.find((span) => span.span_id === trace.root_span_id),
-    [spanRows, trace.root_span_id]
-  );
-
   // One query for the whole trace's annotations (rather than per row) so each
   // header can show its feedback sentiment and annotation count. Sorted
   // newest-first; keep the latest feedback per span.
@@ -217,13 +237,13 @@ export const TraceSpanAccordions: FC<TraceSpanAccordionsProps> = ({
   // In list view, expand/collapse opens every span row; in tree view it opens
   // every section of the one selected span.
   const expandAll = useCallback(() => {
-    if (viewMode === 'list') setOpenSpanIds(listSpanRows.map((span) => span.span_id));
+    if (activeViewMode === 'list') setOpenSpanIds(listSpanRows.map((span) => span.span_id));
     else setSectionExpandToken((token) => token + 1);
-  }, [viewMode, listSpanRows]);
+  }, [activeViewMode, listSpanRows]);
   const collapseAll = useCallback(() => {
-    if (viewMode === 'list') setOpenSpanIds([]);
+    if (activeViewMode === 'list') setOpenSpanIds([]);
     else setSectionCollapseToken((token) => token + 1);
-  }, [viewMode]);
+  }, [activeViewMode]);
 
   // "Add note" reveals the span (selecting it in tree view, expanding its row in
   // list view) and bumps the nonce so its annotations panel opens and focuses
@@ -246,15 +266,18 @@ export const TraceSpanAccordions: FC<TraceSpanAccordionsProps> = ({
     }
   }, [selectedSpanId]);
 
-  const showSpanLimitMessage = spanTotal > spanPageSize;
+  const traceSpanTotal =
+    trace.span_count ?? traceSpansResponse?.pagination?.total_results ?? spans.length;
+  const showSpanLimitMessage =
+    spansLoaded && !isShowingFallbackSpans && spans.length < traceSpanTotal;
 
-  // Only surface a trace-level error banner when the trace itself has an error
-  // message (carried on its root span). A child-span error alone no longer
-  // raises a banner here — it shows on that span's own detail instead.
-  const banner = rootSpan?.error_message?.trim() ? (
+  const rootSpan = spanRows.find(({ span_id }) => span_id === trace.root_span_id);
+  const showRootError =
+    rootSpan?.status === SpanStatus.error && selectedSpan?.span_id !== rootSpan.span_id;
+  const banner = showRootError ? (
     <IntakeErrorBanner
-      heading={rootSpan.error_type?.trim() || 'Error'}
-      message={rootSpan.error_message}
+      heading="Trace failed"
+      message={rootSpan.error_message?.trim() || 'No error message was captured for the root span.'}
     />
   ) : null;
 
@@ -289,22 +312,28 @@ export const TraceSpanAccordions: FC<TraceSpanAccordionsProps> = ({
   return (
     <Stack gap="density-lg" className="min-w-0">
       <TraceViewToolbar
-        viewMode={viewMode}
+        viewMode={activeViewMode}
         onViewModeChange={handleViewModeChange}
-        onCollapseAll={spanRows.length > 0 ? collapseAll : undefined}
-        onExpandAll={spanRows.length > 0 ? expandAll : undefined}
+        showGraph={featureFlags.traceGraphEnabled}
+        onCollapseAll={activeViewMode !== 'graph' && spanRows.length > 0 ? collapseAll : undefined}
+        onExpandAll={activeViewMode !== 'graph' && spanRows.length > 0 ? expandAll : undefined}
       />
+
+      {isShowingFallbackSpans ? (
+        <ErrorMessage message="Could not load all spans for this trace. Showing the spans already loaded for the session." />
+      ) : null}
 
       {showSpanLimitMessage && (
         <Text kind="body/regular/sm" className="text-secondary">
-          Showing first {spanPageSize.toLocaleString()} of {spanTotal.toLocaleString()} spans in
-          this session. Parent spans outside this page are marked in the hierarchy.
+          {activeViewMode === 'graph'
+            ? `Showing ${spans.length.toLocaleString()} of ${traceSpanTotal.toLocaleString()} spans for this trace. This graph is incomplete.`
+            : `Showing ${spans.length.toLocaleString()} of ${traceSpanTotal.toLocaleString()} spans for this trace. Parent spans outside this page are marked in the hierarchy.`}
         </Text>
       )}
 
-      {viewMode === 'tree' ? (
+      {activeViewMode === 'tree' ? (
         <SpanTreeView
-          trajectories={trajectories}
+          trajectories={treeTrajectories}
           activeTraceId={trace.id}
           selectedSpan={selectedSpan}
           workspace={workspace}
@@ -314,6 +343,28 @@ export const TraceSpanAccordions: FC<TraceSpanAccordionsProps> = ({
           onSelectSpan={handleSelectSpan}
           onSelectTrace={onSelectTrace}
           onSelectSession={onSelectSession}
+          banner={banner}
+          expandToken={sectionExpandToken}
+          collapseToken={sectionCollapseToken}
+          activeFeedback={selectedSpan ? feedbackBySpan.get(selectedSpan.span_id) : undefined}
+          annotationCount={
+            selectedSpan ? annotationCountBySpan.get(selectedSpan.span_id) : undefined
+          }
+          hasNotes={selectedSpan ? notesBySpan.has(selectedSpan.span_id) : false}
+          focusNoteNonce={
+            selectedSpan ? noteFocusNonce(noteRequest, selectedSpan.span_id) : undefined
+          }
+          onAddNote={() => selectedSpan && handleAddNote(selectedSpan.span_id)}
+          emptyContent={spansStatusContent ?? linkedSpanStatusContent}
+        />
+      ) : activeViewMode === 'graph' ? (
+        <TraceSpanGraphView
+          key={trace.id}
+          spanRows={listSpanRows}
+          selectedSpan={selectedSpan}
+          traceId={trace.id}
+          workspace={workspace}
+          onSelectSpan={handleSelectSpan}
           banner={banner}
           expandToken={sectionExpandToken}
           collapseToken={sectionCollapseToken}

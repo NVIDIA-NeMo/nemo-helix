@@ -8,7 +8,7 @@ import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import {
   useSafeSynthesizerDownloadJobResultSyntheticData as useDownloadJobResultSyntheticDataV1beta1GenerateJobsJobIdResultsSyntheticDataDownloadGet,
   useSafeSynthesizerListJobResults as useListJobResultsV1beta1GenerateJobsJobIdResultsGet,
-} from '@nemo/sdk/generated/safe-synthesizer/api';
+} from '@nemo/sdk/generated/safe-synthesizer/safe-synthesizer';
 import type { GenerateJob } from '@nemo/sdk/generated/safe-synthesizer/schema';
 import {
   Anchor,

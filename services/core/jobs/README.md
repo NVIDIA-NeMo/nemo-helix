@@ -3,7 +3,37 @@
 
 # Jobs Infrastructure Microservice
 
-A microservice for providing a generic job runner for NeMo Platform.
+A microservice for providing a generic job runner for NeMo Helix.
+
+## Cancellation lifecycle
+
+Execution controllers report a step as `cancelled` only after execution teardown
+finishes. The Jobs service finalizes every nonterminal public child task,
+across all task-list pages, both before and after persisting the terminal step.
+Cancelled steps cancel their children; errored steps error their children.
+The post-save sweep and task writers' parent-state recheck cover reports handled
+by other API replicas, whose process-local mutation locks are independent.
+Completed, errored, and already-cancelled tasks retain their terminal state.
+Pre-save cleanup failures leave the step nonterminal. Terminal steps persist a
+`task_cleanup_pending` status-detail marker until cleanup and attempt updates
+succeed, so crashes or post-save failures remain retryable by the reconciler.
+The step-list `filter[task_cleanup_pending]` query selects outstanding cleanup
+without continuously scanning every terminal step.
+This applies to Kubernetes, Volcano, Docker, and subprocess execution alike.
+
+Task writes use the stored parent step rather than the caller's cached step.
+Late reports cannot create or reactivate a nonterminal task under a cancelled
+or errored step. Genuine terminal reports, including errors received during
+cancellation, retain their status and diagnostics.
+Pause/resume behavior is unchanged.
+
+Repeating the existing cancel request on an already-cancelled or errored job repairs
+nonterminal child tasks in its current attempt. This repair is idempotent and
+does not modify earlier attempts or unrelated workspaces. Reruns complete any
+pending cleanup before archiving the current attempt. It does not scan or
+mutate existing jobs automatically.
+Controller status writes include `expected_step_id` so a delayed request for an
+old attempt cannot finalize a rerun's same-named step.
 
 - [Integrating a functional microservice with Jobs](#integrating-a-functional-microservice-with-jobs)
 - [Local Development](#local-development)
@@ -20,7 +50,7 @@ After this is done, you should be able to schedule jobs against the Jobs microse
 
 ### Create a Jobs configuration compiler
 
-Each functional microservice will be responsible for translating their specific job's request object into a `PlatformJobSpec` that can be submitted to the Jobs API. As defined in the [Jobs RFC API Interfaces](https://docs.google.com/document/d/1KhF0ED9OGhFIHu8-wittuhMHWOBvNvBQuqz3ahk63vY/edit?tab=t.0#heading=h.ccl0b5irew8u), every request into a functional microservice will satisfy a base JobRequest schema that includes a `spec` field that is customizable. This field is then used to compile a platform Job specification. The compiler is provided by the functional microservice, leveraging SDK-provided objects to build a platform job.
+Each functional microservice will be responsible for translating their specific job's request object into a `HelixJobSpec` that can be submitted to the Jobs API. As defined in the [Jobs RFC API Interfaces](https://docs.google.com/document/d/1KhF0ED9OGhFIHu8-wittuhMHWOBvNvBQuqz3ahk63vY/edit?tab=t.0#heading=h.ccl0b5irew8u), every request into a functional microservice will satisfy a base JobRequest schema that includes a `spec` field that is customizable. This field is then used to compile a platform Job specification. The compiler is provided by the functional microservice, leveraging the job types from `nemo_helix_plugin.jobs` to build a platform job.
 
 Suppose you have your functional microservice's job specification as below:
 
@@ -44,9 +74,9 @@ You can create a platform job configuration compiler like the following:
 
 ```python
 ## Import the necessary building blocks from the factory
-from nemo_platform_plugin.jobs.api_factory import (
-    PlatformJobSpec,
-    PlatformJobStep,
+from nemo_helix_plugin.jobs.api_factory import (
+    HelixJobSpec,
+    HelixJobStep,
     CPUExecutionProviderSpec,
     ContainerSpec,
     ResourcesSpec,
@@ -59,7 +89,7 @@ from nemo_platform_plugin.jobs.api_factory import (
 from pydantic_settings import BaseSettings
 
 class MyFunctionalMicroserviceSettings(BaseSettings):
-    job_image: str = Field(default="nvcr.io/nvidia/nemo-platform/my-functional-microservice:v0.0.1")
+    job_image: str = Field(default="nvcr.io/nvidia/nemo-helix/my-functional-microservice:v0.0.1")
     job_command: list[str] = Field(default=[])
     job_args: list[str] = Field(default=["--target", "default"])
     default_job_resource_cpu_request: str = Field(default="1")
@@ -70,7 +100,7 @@ class MyFunctionalMicroserviceSettings(BaseSettings):
 settings = MyFunctionalMicroserviceSettings()
 
 ## Create the config compiler
-def my_functional_job_compiler(model: MyFunctionalJobConfig) -> PlatformJobSpec:
+def my_functional_job_compiler(model: MyFunctionalJobConfig) -> HelixJobSpec:
 
     # Create the job step's resources from settings
     resources = ResourcesSpec(
@@ -86,9 +116,9 @@ def my_functional_job_compiler(model: MyFunctionalJobConfig) -> PlatformJobSpec:
     )
 
     # Create the job steps based on settings and the job request's spec
-    return PlatformJobSpec(
+    return HelixJobSpec(
         steps=[
-            PlatformJobStep(
+            HelixJobStep(
                 name="my-job-step-1",
                 executor=CPUExecutionProviderSpec(
                     profile=model.execution_profile,
@@ -103,7 +133,7 @@ def my_functional_job_compiler(model: MyFunctionalJobConfig) -> PlatformJobSpec:
                 environment={"ENV_VAR": "test_value"},
             ),
             # Multiple steps can be configured
-            PlatformJobStep(
+            HelixJobStep(
                 name="my-job-step-2",
                 executor=CPUExecutionProviderSpec(
                     profile=model.execution_profile,
@@ -122,7 +152,7 @@ def my_functional_job_compiler(model: MyFunctionalJobConfig) -> PlatformJobSpec:
 Now that you have a platform job configuration compiler, you can implement the Jobs api factory as follows:
 
 ```python
-from nemo_platform_plugin.jobs.api_factory import job_route_factory
+from nemo_helix_plugin.jobs.api_factory import job_route_factory
 
 service_name = "my-functional-microservice"
 jobs_router = job_route_factory(
@@ -228,7 +258,7 @@ curl http://localhost:8080/v1/jobs/job-some-random-id
           "provider": "cpu",
           "profile": "default",
           "container": {
-            "image": "nvcr.io/nvidia/nemo-platform/my-functional-microservice:v0.0.1",
+            "image": "nvcr.io/nvidia/nemo-helix/my-functional-microservice:v0.0.1",
             "command": [],
             "args": ["--target", "default"]
           },
@@ -254,7 +284,7 @@ curl http://localhost:8080/v1/jobs/job-some-random-id
           "provider": "cpu",
           "profile": "default",
           "container": {
-            "image": "nvcr.io/nvidia/nemo-platform/my-functional-microservice:v0.0.1"
+            "image": "nvcr.io/nvidia/nemo-helix/my-functional-microservice:v0.0.1"
           },
           "resources": {
             "requests": {
@@ -295,13 +325,13 @@ cd services/core/infrastructure/jobs
 ### Start the API server
 
 ```
-DATABASE_HOST=localhost NMP_CONFIG_FILE_PATH=config/local.yaml DEBUG=True uv run python -m jobs.api.server
+DATABASE_HOST=localhost NHX_CONFIG_FILE_PATH=config/local.yaml DEBUG=True uv run python -m jobs.api.server
 ```
 
 ### Start the controller
 
 ```
-DATABASE_HOST=localhost NMP_CONFIG_FILE_PATH=config/local.yaml DEBUG=True uv run python -m jobs.controller.main
+DATABASE_HOST=localhost NHX_CONFIG_FILE_PATH=config/local.yaml DEBUG=True uv run python -m jobs.controller.main
 ```
 
 ### Start both API server and controller

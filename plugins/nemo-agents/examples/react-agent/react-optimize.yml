@@ -11,17 +11,16 @@
 #
 # Usage:
 #
-#   nemo agents optimize run \
-#       --optimize-config examples/react-agent/react-optimize.yml \
+#   nemo agents optimize prepare-fileset \
+#       --source plugins/nemo-agents/examples/react-agent \
+#       --optimize-config react-optimize.yml \
+#       --fileset react-optimize
+#
+#   nemo agents optimize run-strategy \
+#       --strategy config-tuning \
+#       --optimize-config-fileset default/react-optimize \
+#       --optimize-config react-optimize.yml \
 #       --agent react-agent
-#
-# A literal HTTP URL is still accepted for non-platform agent servers, but
-# the parameter sweep is local-only in that mode and won't reach the remote
-# agent — prefer the named-agent form whenever the agent is platform-managed:
-#
-#   nemo agents optimize run \
-#       --optimize-config examples/react-agent/react-optimize.yml \
-#       --agent http://localhost:8080
 #
 # See the NAT Optimizer Guide for full documentation on search spaces,
 # prompt GA, and multi-objective tuning:
@@ -31,10 +30,10 @@ llms:
   # LLM used by the agent workflow — its hyperparameters are optimised.
   # base_url and api_key are injected automatically by the platform
   # (routes through the Inference Gateway).  For local runs without the
-  # platform, override via --base-url or NEMO_BASE_URL.
+  # platform, override via `nemo --base-url` or NHX_BASE_URL.
   llm:
     _type: openai
-    model_name: nvidia-nemotron-3-nano-30b-a3b
+    model_name: nvidia-nemotron-3-5-lightning-30b-a3b
     temperature: 0.0
     optimizable_params:
       - temperature

@@ -3,29 +3,35 @@
 
 import importlib
 import os
-import time
 import uuid
 from collections.abc import Iterator
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlparse
 
-import httpx
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_ext.client.tls import NMP_CLIENT_SSL_CERT_FILE_ENVVAR, client_verify_from_env
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceQueryParams, CreateWorkspaceRequest
+from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceQueryParams, CreateWorkspaceRequest
 
 from e2e.services_pool import E2EHarnessConfig, E2EServicesPool, RunningServices
 from tests.auth_idp.authentik_live import authentik_gateway_tls_ca_bundle, prepare_authentik_compose_inputs
-from tests.auth_idp.providers import ProviderConfig
+from tests.auth_idp.deployment_context import load_credential_environment, load_deployment_context
+from tests.auth_idp.providers import ProviderConfig, load_provider_config
 from tests.auth_idp.runtime import get_authentik_docker_test_runtime
-from tests.auth_idp.runtime_contract import AuthIdpCase
+from tests.auth_idp.runtime_contract import AuthIdpCase, AuthIdpRuntime
 from tests.auth_idp.runtime_factory import iter_auth_idp_cases, parametrize_cases, runtime_class_for_case
+from tests.auth_idp.runtime_host import HostAuthIdpRuntime
+from tests.auth_idp.token_acquisition import exchange_token_with_retries, token_request_auth, token_request_body
 
-pytest_plugins = ("e2e.conftest",)
+PYTEST_TIMEOUT_SECONDS = 2400
+pytest_plugins = ("e2e.conftest", "tests.auth_idp.browser_fixtures")
+
+_exchange_token_with_retries = exchange_token_with_retries
+_token_request_auth = token_request_auth
+_token_request_body = token_request_body
 
 
 def _auth_idp_case_for_item(item: pytest.Item) -> AuthIdpCase | None:
@@ -40,6 +46,12 @@ def _auth_idp_case_for_item(item: pytest.Item) -> AuthIdpCase | None:
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     group = parser.getgroup("auth-idp")
+    group.addoption(
+        "--auth-idp-context",
+        action="store",
+        default=None,
+        help="Run contracts on the host against an immutable provider deployment context.",
+    )
     group.addoption(
         "--auth-idp-provider",
         action="store",
@@ -64,6 +76,19 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     if "auth_idp_case" not in metafunc.fixturenames:
         return
+    context_path = metafunc.config.getoption("--auth-idp-context")
+    if context_path:
+        context = load_deployment_context(Path(context_path))
+        load_credential_environment(context.credential_env_files)
+        provider = load_provider_config(context.provider_manifest)
+        case = AuthIdpCase(
+            id=context.runtime_id,
+            provider=provider,
+            backend=context.backend,
+            capabilities=frozenset(context.capabilities),
+        )
+        metafunc.parametrize("auth_idp_case", [pytest.param(case, id=case.id)], scope="session")
+        return
     backend = metafunc.config.getoption("--auth-idp-backend")
     if backend is None and metafunc.definition.get_closest_marker("auth_idp_k8s") is not None:
         backend = "kubernetes"
@@ -87,8 +112,6 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.add_marker(pytest.mark.xdist_group("idp-live"))
         case = _auth_idp_case_for_item(item)
         if case is not None and case.backend == "kubernetes" and item.get_closest_marker("timeout") is None:
-            from tests.auth_idp.runtime_kubernetes import PYTEST_TIMEOUT_SECONDS
-
             item.add_marker(pytest.mark.timeout(PYTEST_TIMEOUT_SECONDS))
         if not runtime_markers:
             selected.append(item)
@@ -107,27 +130,6 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         items[:] = selected
 
 
-def _token_request_body(grant: dict[str, str]) -> dict[str, str]:
-    grant_type = grant["grant_type"]
-    body = {
-        "grant_type": grant_type,
-        "client_id": grant["client_id"],
-    }
-    if "client_secret" in grant:
-        body["client_secret"] = grant["client_secret"]
-    if grant_type == "password":
-        body["username"] = grant["username"]
-        body["password"] = grant["password"]
-        if "scope" in grant:
-            body["scope"] = grant["scope"]
-        return body
-    if grant_type == "client_credentials":
-        if "scope" in grant:
-            body["scope"] = grant["scope"]
-        return body
-    raise ValueError(f"unsupported grant_type for auth_idp token exchange: {grant_type}")
-
-
 def _compose_e2e_config_for_case(
     auth_idp_case: AuthIdpCase,
 ) -> tuple[tuple[str | dict[str, Any], ...], E2EHarnessConfig]:
@@ -143,13 +145,17 @@ def _compose_e2e_config_for_case(
     marker = marker_decorator.mark
     config_layers = cast(tuple[str | dict[str, Any], ...], marker.args)
     harness_config = cast(E2EHarnessConfig, dict(marker.kwargs.get("harness") or {}))
-    lifecycle = os.environ.get("NMP_E2E_COMPOSE_LIFECYCLE")
-    if lifecycle:
-        harness_config["lifecycle"] = cast(Any, lifecycle)
-    compose_project_name = os.environ.get("NMP_AUTHENTIK_COMPOSE_PROJECT_NAME")
+    lifecycle = os.environ.get("NHX_E2E_COMPOSE_LIFECYCLE")
+    if lifecycle == "fresh":
+        harness_config["lifecycle"] = "fresh"
+    elif lifecycle == "reuse":
+        harness_config["lifecycle"] = "reuse"
+    elif lifecycle:
+        raise ValueError("NHX_E2E_COMPOSE_LIFECYCLE must be 'fresh' or 'reuse'")
+    compose_project_name = os.environ.get("NHX_AUTHENTIK_COMPOSE_PROJECT_NAME")
     if compose_project_name:
         harness_config["compose_project_name"] = compose_project_name
-    gateway_port = os.environ.get("NMP_AUTHENTIK_COMPOSE_GATEWAY_PORT")
+    gateway_port = os.environ.get("NHX_AUTHENTIK_COMPOSE_GATEWAY_PORT")
     if gateway_port:
         dynamic_ports = dict(harness_config.get("dynamic_ports") or {})
         gateway_config = dict(dynamic_ports.get("gateway") or {})
@@ -157,48 +163,6 @@ def _compose_e2e_config_for_case(
         dynamic_ports["gateway"] = gateway_config
         harness_config["dynamic_ports"] = dynamic_ports
     return config_layers, harness_config
-
-
-def _exchange_token_with_retries(
-    token_endpoint: str,
-    grant: dict[str, str],
-    timeout: float = 60.0,
-    verify: str | bool | None = None,
-) -> str:
-    deadline = time.monotonic() + timeout
-    last_error: Exception | None = None
-    request_verify = client_verify_from_env() if verify is None else verify
-    while time.monotonic() < deadline:
-        try:
-            response = httpx.post(
-                token_endpoint,
-                data=_token_request_body(grant),
-                timeout=30.0,
-                verify=request_verify,
-            )
-            if response.status_code >= 500:
-                last_error = httpx.HTTPStatusError(
-                    f"token endpoint not ready: {response.status_code}",
-                    request=response.request,
-                    response=response,
-                )
-                time.sleep(2)
-                continue
-            try:
-                response.raise_for_status()
-            except httpx.HTTPStatusError as exc:
-                raise httpx.HTTPStatusError(
-                    f"{exc}; response body: {response.text}",
-                    request=response.request,
-                    response=response,
-                ) from exc
-            return response.json()["access_token"]
-        except httpx.RequestError as exc:
-            last_error = exc
-            time.sleep(2)
-    if last_error is not None:
-        raise last_error
-    raise TimeoutError(f"token endpoint did not become ready: {token_endpoint}")
 
 
 def _url_port(url: str) -> str:
@@ -260,7 +224,11 @@ def _write_terminal_line(request: pytest.FixtureRequest, message: str) -> None:
 
 @pytest.fixture(scope="session")
 def idp_e2e_enabled(pytestconfig: pytest.Config) -> bool:
-    return bool(pytestconfig.getoption("--run-e2e") or pytestconfig.getoption("--auth-idp-runtime"))
+    return bool(
+        pytestconfig.getoption("--run-e2e")
+        or pytestconfig.getoption("--auth-idp-runtime")
+        or pytestconfig.getoption("--auth-idp-context")
+    )
 
 
 @pytest.fixture(scope="session")
@@ -271,11 +239,11 @@ def require_idp_e2e(idp_e2e_enabled: bool) -> Iterator[None]:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _prepare_authentik_compose_inputs_for_e2e(idp_e2e_enabled: bool) -> None:
-    if idp_e2e_enabled:
+def _prepare_authentik_compose_inputs_for_e2e(idp_e2e_enabled: bool, pytestconfig: pytest.Config) -> None:
+    if idp_e2e_enabled and not pytestconfig.getoption("--auth-idp-context"):
         prepare_authentik_compose_inputs()
         os.environ.setdefault(
-            NMP_CLIENT_SSL_CERT_FILE_ENVVAR,
+            NHX_CLIENT_SSL_CERT_FILE_ENVVAR,
             str(authentik_gateway_tls_ca_bundle()),
         )
 
@@ -286,10 +254,17 @@ def auth_idp_runtime(
     require_idp_e2e: None,
     request: pytest.FixtureRequest,
     _services_pool_manager: E2EServicesPool,
-):
+) -> Iterator[AuthIdpRuntime]:
+    context_path = request.config.getoption("--auth-idp-context")
+    if context_path:
+        runtime = HostAuthIdpRuntime(load_deployment_context(Path(context_path)))
+        runtime.assert_available()
+        yield runtime
+        runtime.assert_available()
+        return
     services: RunningServices | None = None
     owner_id: str | None = None
-    runtime: Any | None = None
+    runtime: AuthIdpRuntime | None = None
     failures_before = request.session.testsfailed
     _write_terminal_line(request, _auth_idp_runtime_event_line("starting", auth_idp_case))
     try:
@@ -314,8 +289,10 @@ def auth_idp_runtime(
                 cleanup=lambda: _services_pool_manager.release_for_config(owner_id),
             )
         elif auth_idp_case.backend == "kubernetes":
+            runtime_class = runtime_class_for_case(auth_idp_case)
             runtime = runtime_class(auth_idp_case)
         else:
+            runtime_class = runtime_class_for_case(auth_idp_case)
             runtime = runtime_class(auth_idp_case)
     except Exception:
         if owner_id is not None and runtime is None:
@@ -345,11 +322,22 @@ def auth_idp_runtime(
         )
 
 
+@pytest.fixture(autouse=True)
+def _assert_host_runtime_available(request: pytest.FixtureRequest) -> Iterator[None]:
+    if not request.config.getoption("--auth-idp-context"):
+        yield
+        return
+    runtime = request.getfixturevalue("auth_idp_runtime")
+    assert isinstance(runtime, HostAuthIdpRuntime)
+    runtime.assert_available()
+    yield
+    runtime.assert_available()
+
+
 @pytest.fixture
-def auth_idp_workspace(auth_idp_runtime) -> Iterator[str]:
+def auth_idp_workspace(auth_idp_runtime: AuthIdpRuntime) -> Iterator[str]:
     workspace_name = f"auth-idp-ws-{uuid.uuid4().hex[:8]}"
-    sdk = auth_idp_runtime.e2e_setup_sdk()
-    workspaces = client_from_platform(sdk, WorkspacesClient)
+    workspaces = WorkspacesClient.from_client(auth_idp_runtime.e2e_setup_client())
     workspaces.create_workspace(
         query_params=CreateWorkspaceQueryParams(wait_role_propagation=True),
         body=CreateWorkspaceRequest(name=workspace_name, description="Workspace for auth-idp provider contract tests"),
@@ -417,35 +405,23 @@ def interactive_user_token(authentik_stack: ProviderConfig) -> str:
 
 
 @pytest.fixture(scope="module")
-def authentik_e2e_setup_sdk(authentik_stack: ProviderConfig, e2e_setup_token: str) -> NeMoPlatform:
-    return NeMoPlatform(
-        base_url=authentik_stack.gateway_base_url,
-        default_headers={"Authorization": f"Bearer {e2e_setup_token}"},
-        max_retries=0,
-    )
+def authentik_e2e_setup_client(authentik_stack: ProviderConfig, e2e_setup_token: str) -> NemoClient:
+    return NemoClient(base_url=authentik_stack.gateway_base_url, auth=e2e_setup_token)
 
 
 @pytest.fixture(scope="module")
-def authentik_interactive_user_sdk(authentik_stack: ProviderConfig, interactive_user_token: str) -> NeMoPlatform:
-    return NeMoPlatform(
-        base_url=authentik_stack.gateway_base_url,
-        default_headers={"Authorization": f"Bearer {interactive_user_token}"},
-        max_retries=0,
-    )
+def authentik_interactive_user_client(authentik_stack: ProviderConfig, interactive_user_token: str) -> NemoClient:
+    return NemoClient(base_url=authentik_stack.gateway_base_url, auth=interactive_user_token)
 
 
 @pytest.fixture(scope="module")
-def workload_provider_sdk(authentik_stack: ProviderConfig, workload_provider_token: str) -> NeMoPlatform:
-    return NeMoPlatform(
-        base_url=authentik_stack.gateway_base_url,
-        default_headers={"Authorization": f"Bearer {workload_provider_token}"},
-        max_retries=0,
-    )
+def workload_provider_client(authentik_stack: ProviderConfig, workload_provider_token: str) -> NemoClient:
+    return NemoClient(base_url=authentik_stack.gateway_base_url, auth=workload_provider_token)
 
 
 @pytest.fixture
-def authentik_workspace(authentik_e2e_setup_sdk: NeMoPlatform) -> Iterator[str]:
-    workspaces = client_from_platform(authentik_e2e_setup_sdk, WorkspacesClient)
+def authentik_workspace(authentik_e2e_setup_client: NemoClient) -> Iterator[str]:
+    workspaces = WorkspacesClient.from_client(authentik_e2e_setup_client)
     workspace_name = f"authentik-ws-{uuid.uuid4().hex[:8]}"
     workspaces.create_workspace(
         query_params=CreateWorkspaceQueryParams(wait_role_propagation=True),

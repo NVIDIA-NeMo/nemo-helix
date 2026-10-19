@@ -11,8 +11,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from nemo_deployments_plugin.types import DeploymentStatus, Endpoint, VolumeStatus
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.capabilities import CapabilityUnavailableError
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.capabilities import CapabilityUnavailableError
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from pydantic import BaseModel, Field
 
 
@@ -23,7 +24,7 @@ class MissingBackendDependencyError(CapabilityUnavailableError):
     a runtime substrate is unreachable (e.g. Docker daemon/socket). The executor
     registry catches this, skips that executor with a warning, and continues
     starting the deployments service. Subclasses
-    :class:`~nemo_platform_plugin.capabilities.CapabilityUnavailableError` (and
+    :class:`~nemo_helix_plugin.capabilities.CapabilityUnavailableError` (and
     therefore ``RuntimeError``) so existing ``except RuntimeError`` paths keep
     working and jobs/deployments share one unavailable-capability type.
     """
@@ -54,8 +55,8 @@ class LogResult:
 class DeploymentBackend(abc.ABC):
     """Abstract substrate backend for deployment and volume lifecycle."""
 
-    def __init__(self, sdk: AsyncNeMoPlatform, config: dict[str, Any]) -> None:
-        self._sdk = sdk
+    def __init__(self, client: AsyncNemoClient, config: dict[str, Any]) -> None:
+        self._nemo_client = client
         self._config = config
         self.init()
 
@@ -76,6 +77,7 @@ class DeploymentBackend(abc.ABC):
         config_name: str,
         labels: dict[str, str],
         backend_config: dict[str, Any],
+        auth_context: AuthContext | None = None,
     ) -> BackendStatusUpdate:
         raise NotImplementedError
 

@@ -19,10 +19,15 @@ from nemo_deployments_plugin.schema import (
     DeploymentConfigPage,
     RequestContainer,
 )
-from nemo_platform_plugin.api.filters import make_filter_obj_dep
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
-from nemo_platform_plugin.schema import PaginationData
+from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.entity_client import (
+    NemoEntitiesClient,
+    NemoEntityConflictError,
+    NemoEntityNotFoundError,
+    NemoEntityValidationError,
+)
+from nemo_helix_plugin.schema import PaginationData
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +44,7 @@ def _container_from_request(container: RequestContainer) -> Container:
 
 @router.post("/deployment-configs", response_model=DeploymentConfig, status_code=201, tags=["Deployment Configs"])
 @scope.write
-@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[DeploymentConfigPerms.CREATE])
+@path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[DeploymentConfigPerms.CREATE])
 async def create_deployment_config(
     workspace: str,
     body: CreateDeploymentConfigRequest,
@@ -60,11 +65,13 @@ async def create_deployment_config(
             status_code=409,
             detail=f"DeploymentConfig '{body.name}' already exists in workspace '{workspace}'.",
         ) from exc
+    except NemoEntityValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/deployment-configs", response_model=DeploymentConfigPage, tags=["Deployment Configs"])
 @scope.read
-@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[DeploymentConfigPerms.LIST])
+@path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[DeploymentConfigPerms.LIST])
 async def list_deployment_configs(
     workspace: str,
     page: int = Query(default=1, ge=1),
@@ -88,7 +95,7 @@ async def list_deployment_configs(
 
 @router.get("/deployment-configs/{name}", response_model=DeploymentConfig, tags=["Deployment Configs"])
 @scope.read
-@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[DeploymentConfigPerms.READ])
+@path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[DeploymentConfigPerms.READ])
 async def get_deployment_config(
     workspace: str,
     name: str,
@@ -105,7 +112,7 @@ async def get_deployment_config(
 
 @router.delete("/deployment-configs/{name}", status_code=204, tags=["Deployment Configs"])
 @scope.write
-@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[DeploymentConfigPerms.DELETE])
+@path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[DeploymentConfigPerms.DELETE])
 async def delete_deployment_config(
     workspace: str,
     name: str,

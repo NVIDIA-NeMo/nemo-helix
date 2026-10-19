@@ -20,7 +20,7 @@ import {
   getModelsListProvidersQueryKey,
   useModelsCreateProvider,
   useModelsListProviders,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/model-providers';
 import { Button, Flex, FormField, SidePanel, Stack, Text } from '@nvidia/foundations-react-core';
 import { InferenceModelProviderSelect } from '@studio/routes/InferenceProvidersListRoute/CreateInferenceProviderSidePanel/InferenceModelProviderSelect';
 import {

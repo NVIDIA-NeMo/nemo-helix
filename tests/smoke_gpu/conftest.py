@@ -3,11 +3,11 @@
 
 
 def pytest_configure(config):
-    config.addinivalue_line("markers", "smoke_gpu_tasks: Import smoke tests for the nmp-gpu-tasks image")
+    config.addinivalue_line("markers", "smoke_gpu_tasks: Import smoke tests for the nhx-gpu-tasks image")
     config.addinivalue_line(
-        "markers", "smoke_nmp_customizer_tasks: Import smoke tests for the nmp-customizer-tasks image"
+        "markers", "smoke_nhx_customizer_tasks: Import smoke tests for the nhx-customizer-tasks image"
     )
     config.addinivalue_line(
-        "markers", "smoke_nmp_automodel_training: Import smoke tests for the nmp/automodel-training image"
+        "markers", "smoke_nhx_automodel_training: Import smoke tests for the nhx/automodel-training image"
     )
-    config.addinivalue_line("markers", "smoke_nmp_rl_training: Import smoke tests for the nmp-rl-training image")
+    config.addinivalue_line("markers", "smoke_nhx_rl_training: Import smoke tests for the nhx-rl-training image")

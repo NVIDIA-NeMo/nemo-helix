@@ -64,6 +64,7 @@ export const TRACE_HIGHLIGHT_METRIC_KEYS = new Set<keyof Trace | string>([
   'status',
   'started_at',
   'ended_at',
+  'agent_name',
   'span_count',
   'error_count',
   'duration_ms',
@@ -189,57 +190,76 @@ export const buildTraceSummaryEntries = (
  * their totals; the per-direction breakdown rides along as `details`, surfaced
  * in a hover popover.
  */
-export const buildSessionHighlightMetrics = (session: Session): TraceHighlightMetric[] => [
+type HighlightTelemetry = Pick<
+  Trace,
+  | 'span_count'
+  | 'duration_ms'
+  | 'input_tokens'
+  | 'output_tokens'
+  | 'cached_tokens'
+  | 'total_tokens'
+  | 'cost_usd'
+  | 'cost_input_usd'
+  | 'cost_output_usd'
+>;
+
+const buildHighlightMetrics = (telemetry: HighlightTelemetry): TraceHighlightMetric[] => [
   {
     id: 'span_count',
     label: 'Spans',
-    value: session.span_count != null ? formatInteger(session.span_count) : EMPTY_VALUE,
+    value: telemetry.span_count != null ? formatInteger(telemetry.span_count) : EMPTY_VALUE,
   },
   {
     id: 'duration_ms',
     label: 'Duration',
-    value: session.duration_ms != null ? formatDurationMs(session.duration_ms) : EMPTY_VALUE,
+    value: telemetry.duration_ms != null ? formatDurationMs(telemetry.duration_ms) : EMPTY_VALUE,
   },
   {
     id: 'total_tokens',
     label: 'Total Tokens',
-    value: formatTokens(session.total_tokens),
+    value: formatTokens(telemetry.total_tokens),
     details: [
       {
         id: 'input_tokens',
         label: 'Input Tokens',
-        value: formatTokens(session.input_tokens),
+        value: formatTokens(telemetry.input_tokens),
       },
       {
         id: 'output_tokens',
         label: 'Output Tokens',
-        value: formatTokens(session.output_tokens),
+        value: formatTokens(telemetry.output_tokens),
       },
       {
         id: 'cached_tokens',
         label: 'Cached Tokens',
-        value: formatTokens(session.cached_tokens),
+        value: formatTokens(telemetry.cached_tokens),
       },
     ],
   },
   {
     id: 'cost_usd',
     label: 'Total Cost',
-    value: formatCostValue(session.cost_usd),
+    value: formatCostValue(telemetry.cost_usd),
     details: [
       {
         id: 'cost_input_usd',
         label: 'Input Cost',
-        value: formatCostValue(session.cost_input_usd),
+        value: formatCostValue(telemetry.cost_input_usd),
       },
       {
         id: 'cost_output_usd',
         label: 'Output Cost',
-        value: formatCostValue(session.cost_output_usd),
+        value: formatCostValue(telemetry.cost_output_usd),
       },
     ],
   },
 ];
+
+export const buildSessionHighlightMetrics = (session: Session): TraceHighlightMetric[] =>
+  buildHighlightMetrics(session);
+
+export const buildTraceHighlightMetrics = (trace: Trace): TraceHighlightMetric[] =>
+  buildHighlightMetrics(trace);
 
 export const buildEvaluationContextEntries = (
   evaluationContext: EvaluationContext | null | undefined

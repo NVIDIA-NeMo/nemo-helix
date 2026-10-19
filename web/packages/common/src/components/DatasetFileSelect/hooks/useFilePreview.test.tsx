@@ -8,8 +8,8 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 
 const downloadFileMock = vi.hoisted(() => vi.fn());
 
-vi.mock('@nemo/sdk/generated/platform/api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@nemo/sdk/generated/platform/api')>();
+vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@nemo/sdk/generated/platform/files')>();
   return { ...actual, filesDownloadFile: downloadFileMock };
 });
 

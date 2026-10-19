@@ -168,7 +168,7 @@ describe('RecentExperimentsPanel', () => {
     );
 
     expect(screen.getByText('Measure agent performance')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Run evaluation' }));
+    await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 
     expect(onRunEvaluation).toHaveBeenCalled();
   });

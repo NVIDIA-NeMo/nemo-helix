@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    // Matches web/packages/{studio,sdk,storybook}: this config also typechecks the @nemo/common
+    // sources it maps to, and those use ES2023 APIs (e.g. Array.prototype.findLastIndex).
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "paths": {
+      "@nemo/common": ["../../../web/packages/common/src/plugin.ts"],
+      "@nemo/common/*": ["../../../web/packages/common/*"],
+      "@nemo/sdk/*": ["../../../web/packages/sdk/*"],
+      // Common's ControlledTextInput/Select/TextArea take a react-hook-form
+      // `control`, so the type must have ONE identity. Two copies (this pnpm
+      // root's and Studio's) make tsc compare Control's recursive private
+      // internals structurally and fail, even at the same version.
+      "react-hook-form": ["../../../web/packages/common/node_modules/react-hook-form"],
+      "@agent-hardener/*": ["./src/*"]
+    }
+  },
+  "include": ["src"]
+}

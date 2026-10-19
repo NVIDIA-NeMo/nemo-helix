@@ -3,12 +3,12 @@
 
 import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { useListEvaluations } from '@nemo/sdk/generated/platform/evaluations';
 import {
   getGetExperimentQueryKey,
   getListExperimentsQueryKey,
-  useListEvaluations,
   useUpdateExperiment,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/experiments';
 import type { ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { FormField, Stack, TextInput } from '@nvidia/foundations-react-core';
 import { queryClient } from '@studio/api/queryClient';

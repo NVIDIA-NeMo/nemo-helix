@@ -4,13 +4,25 @@
 import base64
 import json
 import os
+import shlex
+from typing import Protocol, runtime_checkable
 
+import httpx
 import pytest
+from nemo_helix_ext.auth.helpers import NHXOIDCConfig, discover_nhx_config
+from nemo_helix_ext.client.tls import HttpxTLSConfig, httpx_tls_config_from_env
 
-from tests.auth_idp.runtime_contract import AuthIdpCase
+from tests.auth_idp.runtime_contract import AuthIdpCase, AuthIdpRuntime, JsonObject
 
 
-def jwt_claims(token: str) -> dict[str, object]:
+@runtime_checkable
+class RuntimeTLSConfigProvider(Protocol):
+    @property
+    def verify(self) -> str:
+        raise NotImplementedError
+
+
+def jwt_claims(token: str) -> JsonObject:
     parts = token.split(".")
     if len(parts) != 3:
         return {}
@@ -26,7 +38,48 @@ def require_capability(case: AuthIdpCase, capability: str) -> None:
         pytest.skip(f"{case.id} does not declare auth-idp capability: {capability}")
 
 
-def nmp_api_image() -> str:
+def nhx_api_image() -> str:
     registry = os.environ.get("IMAGE_REGISTRY", "my-registry")
     tag = os.environ.get("BAKE_TAG", "local")
-    return f"{registry}/nmp-api:{tag}"
+    return f"{registry}/nhx-api:{tag}"
+
+
+def managed_workload_workspace_get_command(*, task_config: JsonObject | None = None) -> str:
+    command = (
+        'if [ -n "${NHX_PRINCIPAL:-}" ]; then '
+        "echo 'Unexpected NHX_PRINCIPAL in managed workload'; exit 42; "
+        "fi; "
+        'if [ -z "${NHX_WORKLOAD_IDENTITY_TOKEN_FILE:-}" ]; then '
+        "echo 'Missing NHX_WORKLOAD_IDENTITY_TOKEN_FILE in managed workload'; exit 43; "
+        "fi; "
+        'if [ ! -f "${NHX_WORKLOAD_IDENTITY_TOKEN_FILE}" ]; then '
+        "echo 'Workload identity token file is missing'; exit 44; "
+        "fi; "
+        "echo 'Workload auth env: NHX_PRINCIPAL=absent NHX_WORKLOAD_IDENTITY_TOKEN_FILE=present'; "
+        "exec nemo-helix run task --task nhx.hello_world.tasks.workload_workspace_get"
+    )
+    if task_config is None:
+        return command
+    config_json = json.dumps(task_config, separators=(",", ":"))
+    return f"{command} --config {shlex.quote(config_json)}"
+
+
+def runtime_tls_config(auth_idp_runtime: AuthIdpRuntime) -> HttpxTLSConfig:
+    if isinstance(auth_idp_runtime, RuntimeTLSConfigProvider):
+        ca_bundle = auth_idp_runtime.verify.strip()
+        if not ca_bundle:
+            raise AssertionError("Auth IDP runtime verify must be a non-empty CA bundle path")
+        return {"verify": ca_bundle}
+    return httpx_tls_config_from_env()
+
+
+def discover_nhx_config_with_tls(base_url: str, tls_config: HttpxTLSConfig) -> NHXOIDCConfig:
+    with httpx.Client(timeout=10.0, follow_redirects=True, **tls_config) as http_client:
+        return discover_nhx_config(base_url, http_client=http_client)
+
+
+def discover_runtime_nhx_config(auth_idp_runtime: AuthIdpRuntime) -> NHXOIDCConfig:
+    return discover_nhx_config_with_tls(
+        auth_idp_runtime.gateway_base_url,
+        runtime_tls_config(auth_idp_runtime),
+    )

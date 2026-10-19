@@ -50,18 +50,12 @@ describe('AnonymizerRecordView', () => {
     expect(screen.getByText('Rewritten')).toBeInTheDocument();
   });
 
-  it('still shows the map when the shared page param outruns a short record', () => {
+  it('ignores the page search param and leaves it untouched for other tables on the route', async () => {
     renderRecord(traceRow, 'Replaced', '/?page=3');
 
     expect(screen.getAllByText('Teddy').length).toBeGreaterThan(0);
     expect(screen.queryByText('No Entries Found')).not.toBeInTheDocument();
-  });
-
-  it('rewinds the shared page param instead of leaving it out of range', async () => {
-    renderRecord(traceRow, 'Replaced', '/?page=3');
-
-    await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent(''));
-    expect(screen.getByTestId('search').textContent).toBe('');
+    await waitFor(() => expect(screen.getByTestId('search').textContent).toBe('?page=3'));
   });
 
   it('explains when nothing was replaced', () => {

@@ -3,6 +3,38 @@ info:
   title: agents (plugin)
   version: 0.0.0
 paths:
+  /apis/agents/v2/sample-agent:
+    post:
+      tags:
+      - Sample Agent
+      summary: Create Sample Agent
+      description: Stream provisioning progress; deployment readiness is checked separately.
+      operationId: create_sample_agent_apis_agents_v2_sample_agent_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSampleAgentRequest'
+        required: true
+      responses:
+        '201':
+          description: New sample agent provisioning stream.
+          content:
+            application/x-ndjson:
+              schema:
+                $ref: '#/components/schemas/SampleAgentStreamEvent'
+        '200':
+          description: Existing sample agent resumed or already provisioned.
+          content:
+            application/x-ndjson:
+              schema:
+                $ref: '#/components/schemas/SampleAgentStreamEvent'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/agents/v2/workspaces/{workspace}/agents:
     post:
       tags:
@@ -342,6 +374,33 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/deployment-modes:
+    get:
+      tags:
+      - Agent Deployments
+      summary: List Deployment Modes
+      description: List every deployment mode and whether this platform can run it.
+      operationId: list_deployment_modes_apis_agents_v2_workspaces__workspace__deployment_modes_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentModeList'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/agents/v2/workspaces/{workspace}/deployments:
     post:
       tags:
@@ -502,7 +561,7 @@ paths:
       tags:
       - Agent Deployments
       summary: Get Deployment Logs
-      description: Return the most recent *tail* lines from the deployment's log file.
+      description: Return the most recent *tail* lines from the deployment's logs.
       operationId: get_deployment_logs_apis_agents_v2_workspaces__workspace__deployments__name__logs_get
       parameters:
       - name: workspace
@@ -544,7 +603,7 @@ paths:
       tags:
       - Agent Deployments
       summary: Stream Deployment Logs
-      description: SSE tail-follow of the deployment's log file; resumes via ``Last-Event-ID``.
+      description: SSE tail-follow of deployment logs; resumes via ``Last-Event-ID``.
       operationId: stream_deployment_logs_apis_agents_v2_workspaces__workspace__deployments__name__logs_stream_get
       parameters:
       - name: workspace
@@ -859,380 +918,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/analyze:
-    post:
-      tags:
-      - Agents
-      summary: Create Job
-      operationId: create_job_apis_agents_v2_workspaces__workspace__jobs_analyze_post
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AnalyzeJobRequest'
-      responses:
-        '201':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AnalyzeJob'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-    get:
-      tags:
-      - Agents
-      summary: List Jobs
-      operationId: list_jobs_apis_agents_v2_workspaces__workspace__jobs_analyze_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page size.
-          default: 10
-          title: Page Size
-        description: Page size.
-      - name: sort
-        in: query
-        required: false
-        schema:
-          allOf:
-          - $ref: '#/components/schemas/AnalyzeJobsSortField'
-          description: The field to sort by. To sort in decreasing order, use `-`
-            in front of the field name.
-          default: -created_at
-        description: The field to sort by. To sort in decreasing order, use `-` in
-          front of the field name.
-      - in: query
-        name: filter
-        style: deepObject
-        required: false
-        explode: true
-        schema:
-          $ref: '#/components/schemas/AnalyzeJobsListFilter'
-        description: Filter jobs on various criteria.
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AnalyzeJobsPage'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/analyze/{job}/results/{name}:
-    get:
-      tags:
-      - Agents
-      summary: Get Job Result
-      operationId: get_job_result_apis_agents_v2_workspaces__workspace__jobs_analyze__job__results__name__get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: job
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Job
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/analyze/{job}/results/{name}/download:
-    get:
-      tags:
-      - Agents
-      summary: Download Job Result
-      operationId: download_job_result_apis_agents_v2_workspaces__workspace__jobs_analyze__job__results__name__download_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: job
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Job
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/octet-stream:
-              schema:
-                type: string
-                format: binary
-        '404':
-          description: Not Found
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/analyze/{name}:
-    get:
-      tags:
-      - Agents
-      summary: Get Job
-      operationId: get_job_apis_agents_v2_workspaces__workspace__jobs_analyze__name__get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AnalyzeJob'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-    delete:
-      tags:
-      - Agents
-      summary: Delete Job
-      operationId: delete_job_apis_agents_v2_workspaces__workspace__jobs_analyze__name__delete
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '204':
-          description: Successful Response
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/analyze/{name}/cancel:
-    post:
-      tags:
-      - Agents
-      summary: Cancel Job
-      operationId: cancel_job_apis_agents_v2_workspaces__workspace__jobs_analyze__name__cancel_post
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AnalyzeJob'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/analyze/{name}/logs:
-    get:
-      tags:
-      - Agents
-      summary: Get Job Logs
-      operationId: get_job_logs_apis_agents_v2_workspaces__workspace__jobs_analyze__name__logs_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      - name: limit
-        in: query
-        required: false
-        schema:
-          title: Limit
-          type: integer
-      - name: page_cursor
-        in: query
-        required: false
-        schema:
-          title: Page Cursor
-          type: string
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/analyze/{name}/results:
-    get:
-      tags:
-      - Agents
-      summary: List Job Results
-      operationId: list_job_results_apis_agents_v2_workspaces__workspace__jobs_analyze__name__results_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/analyze/{name}/status:
-    get:
-      tags:
-      - Agents
-      summary: Get Job Status
-      operationId: get_job_status_apis_agents_v2_workspaces__workspace__jobs_analyze__name__status_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
   /apis/agents/v2/workspaces/{workspace}/jobs/evaluate:
     post:
       tags:
@@ -1329,380 +1014,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/evaluate-suite:
-    post:
-      tags:
-      - Agents
-      summary: Create Job
-      operationId: create_job_apis_agents_v2_workspaces__workspace__jobs_evaluate_suite_post
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/EvaluateSuiteJobRequest'
-      responses:
-        '201':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EvaluateSuiteJob'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-    get:
-      tags:
-      - Agents
-      summary: List Jobs
-      operationId: list_jobs_apis_agents_v2_workspaces__workspace__jobs_evaluate_suite_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page size.
-          default: 10
-          title: Page Size
-        description: Page size.
-      - name: sort
-        in: query
-        required: false
-        schema:
-          allOf:
-          - $ref: '#/components/schemas/EvaluateSuiteJobsSortField'
-          description: The field to sort by. To sort in decreasing order, use `-`
-            in front of the field name.
-          default: -created_at
-        description: The field to sort by. To sort in decreasing order, use `-` in
-          front of the field name.
-      - in: query
-        name: filter
-        style: deepObject
-        required: false
-        explode: true
-        schema:
-          $ref: '#/components/schemas/EvaluateSuiteJobsListFilter'
-        description: Filter jobs on various criteria.
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EvaluateSuiteJobsPage'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/evaluate-suite/{job}/results/{name}:
-    get:
-      tags:
-      - Agents
-      summary: Get Job Result
-      operationId: get_job_result_apis_agents_v2_workspaces__workspace__jobs_evaluate_suite__job__results__name__get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: job
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Job
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/evaluate-suite/{job}/results/{name}/download:
-    get:
-      tags:
-      - Agents
-      summary: Download Job Result
-      operationId: download_job_result_apis_agents_v2_workspaces__workspace__jobs_evaluate_suite__job__results__name__download_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: job
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Job
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/octet-stream:
-              schema:
-                type: string
-                format: binary
-        '404':
-          description: Not Found
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/evaluate-suite/{name}:
-    get:
-      tags:
-      - Agents
-      summary: Get Job
-      operationId: get_job_apis_agents_v2_workspaces__workspace__jobs_evaluate_suite__name__get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EvaluateSuiteJob'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-    delete:
-      tags:
-      - Agents
-      summary: Delete Job
-      operationId: delete_job_apis_agents_v2_workspaces__workspace__jobs_evaluate_suite__name__delete
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '204':
-          description: Successful Response
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/evaluate-suite/{name}/cancel:
-    post:
-      tags:
-      - Agents
-      summary: Cancel Job
-      operationId: cancel_job_apis_agents_v2_workspaces__workspace__jobs_evaluate_suite__name__cancel_post
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EvaluateSuiteJob'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/evaluate-suite/{name}/logs:
-    get:
-      tags:
-      - Agents
-      summary: Get Job Logs
-      operationId: get_job_logs_apis_agents_v2_workspaces__workspace__jobs_evaluate_suite__name__logs_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      - name: limit
-        in: query
-        required: false
-        schema:
-          title: Limit
-          type: integer
-      - name: page_cursor
-        in: query
-        required: false
-        schema:
-          title: Page Cursor
-          type: string
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/evaluate-suite/{name}/results:
-    get:
-      tags:
-      - Agents
-      summary: List Job Results
-      operationId: list_job_results_apis_agents_v2_workspaces__workspace__jobs_evaluate_suite__name__results_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/evaluate-suite/{name}/status:
-    get:
-      tags:
-      - Agents
-      summary: Get Job Status
-      operationId: get_job_status_apis_agents_v2_workspaces__workspace__jobs_evaluate_suite__name__status_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
   /apis/agents/v2/workspaces/{workspace}/jobs/evaluate/{job}/results/{name}:
     get:
       tags:
@@ -1734,7 +1045,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -1835,6 +1146,10 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '404':
+          description: Job not Found
+        '409':
+          description: Job is not in a terminal state
         '422':
           description: Validation Error
           content:
@@ -1904,13 +1219,21 @@ paths:
         schema:
           title: Page Cursor
           type: string
+      - name: tail
+        in: query
+        required: false
+        schema:
+          title: Tail
+          type: integer
+          maximum: 10000
+          exclusiveMinimum: 0
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -1942,7 +1265,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -1974,7 +1297,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -2108,7 +1431,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -2209,6 +1532,10 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '404':
+          description: Job not Found
+        '409':
+          description: Job is not in a terminal state
         '422':
           description: Validation Error
           content:
@@ -2278,13 +1605,21 @@ paths:
         schema:
           title: Page Cursor
           type: string
+      - name: tail
+        in: query
+        required: false
+        schema:
+          title: Tail
+          type: integer
+          maximum: 10000
+          exclusiveMinimum: 0
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -2316,7 +1651,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -2348,755 +1683,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize:
-    post:
-      tags:
-      - Agents
-      summary: Create Job
-      operationId: create_job_apis_agents_v2_workspaces__workspace__jobs_optimize_post
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/OptimizeJobRequest'
-      responses:
-        '201':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OptimizeJob'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-    get:
-      tags:
-      - Agents
-      summary: List Jobs
-      operationId: list_jobs_apis_agents_v2_workspaces__workspace__jobs_optimize_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page size.
-          default: 10
-          title: Page Size
-        description: Page size.
-      - name: sort
-        in: query
-        required: false
-        schema:
-          allOf:
-          - $ref: '#/components/schemas/OptimizeJobsSortField'
-          description: The field to sort by. To sort in decreasing order, use `-`
-            in front of the field name.
-          default: -created_at
-        description: The field to sort by. To sort in decreasing order, use `-` in
-          front of the field name.
-      - in: query
-        name: filter
-        style: deepObject
-        required: false
-        explode: true
-        schema:
-          $ref: '#/components/schemas/OptimizeJobsListFilter'
-        description: Filter jobs on various criteria.
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OptimizeJobsPage'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize-skills:
-    post:
-      tags:
-      - Agents
-      summary: Create Job
-      operationId: create_job_apis_agents_v2_workspaces__workspace__jobs_optimize_skills_post
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/OptimizeSkillsJobRequest'
-      responses:
-        '201':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OptimizeSkillsJob'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-    get:
-      tags:
-      - Agents
-      summary: List Jobs
-      operationId: list_jobs_apis_agents_v2_workspaces__workspace__jobs_optimize_skills_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page size.
-          default: 10
-          title: Page Size
-        description: Page size.
-      - name: sort
-        in: query
-        required: false
-        schema:
-          allOf:
-          - $ref: '#/components/schemas/OptimizeSkillsJobsSortField'
-          description: The field to sort by. To sort in decreasing order, use `-`
-            in front of the field name.
-          default: -created_at
-        description: The field to sort by. To sort in decreasing order, use `-` in
-          front of the field name.
-      - in: query
-        name: filter
-        style: deepObject
-        required: false
-        explode: true
-        schema:
-          $ref: '#/components/schemas/OptimizeSkillsJobsListFilter'
-        description: Filter jobs on various criteria.
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OptimizeSkillsJobsPage'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize-skills/{job}/results/{name}:
-    get:
-      tags:
-      - Agents
-      summary: Get Job Result
-      operationId: get_job_result_apis_agents_v2_workspaces__workspace__jobs_optimize_skills__job__results__name__get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: job
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Job
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize-skills/{job}/results/{name}/download:
-    get:
-      tags:
-      - Agents
-      summary: Download Job Result
-      operationId: download_job_result_apis_agents_v2_workspaces__workspace__jobs_optimize_skills__job__results__name__download_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: job
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Job
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/octet-stream:
-              schema:
-                type: string
-                format: binary
-        '404':
-          description: Not Found
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize-skills/{name}:
-    get:
-      tags:
-      - Agents
-      summary: Get Job
-      operationId: get_job_apis_agents_v2_workspaces__workspace__jobs_optimize_skills__name__get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OptimizeSkillsJob'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-    delete:
-      tags:
-      - Agents
-      summary: Delete Job
-      operationId: delete_job_apis_agents_v2_workspaces__workspace__jobs_optimize_skills__name__delete
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '204':
-          description: Successful Response
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize-skills/{name}/cancel:
-    post:
-      tags:
-      - Agents
-      summary: Cancel Job
-      operationId: cancel_job_apis_agents_v2_workspaces__workspace__jobs_optimize_skills__name__cancel_post
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OptimizeSkillsJob'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize-skills/{name}/logs:
-    get:
-      tags:
-      - Agents
-      summary: Get Job Logs
-      operationId: get_job_logs_apis_agents_v2_workspaces__workspace__jobs_optimize_skills__name__logs_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      - name: limit
-        in: query
-        required: false
-        schema:
-          title: Limit
-          type: integer
-      - name: page_cursor
-        in: query
-        required: false
-        schema:
-          title: Page Cursor
-          type: string
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize-skills/{name}/results:
-    get:
-      tags:
-      - Agents
-      summary: List Job Results
-      operationId: list_job_results_apis_agents_v2_workspaces__workspace__jobs_optimize_skills__name__results_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize-skills/{name}/status:
-    get:
-      tags:
-      - Agents
-      summary: Get Job Status
-      operationId: get_job_status_apis_agents_v2_workspaces__workspace__jobs_optimize_skills__name__status_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize/{job}/results/{name}:
-    get:
-      tags:
-      - Agents
-      summary: Get Job Result
-      operationId: get_job_result_apis_agents_v2_workspaces__workspace__jobs_optimize__job__results__name__get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: job
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Job
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize/{job}/results/{name}/download:
-    get:
-      tags:
-      - Agents
-      summary: Download Job Result
-      operationId: download_job_result_apis_agents_v2_workspaces__workspace__jobs_optimize__job__results__name__download_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: job
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Job
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/octet-stream:
-              schema:
-                type: string
-                format: binary
-        '404':
-          description: Not Found
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize/{name}:
-    get:
-      tags:
-      - Agents
-      summary: Get Job
-      operationId: get_job_apis_agents_v2_workspaces__workspace__jobs_optimize__name__get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OptimizeJob'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-    delete:
-      tags:
-      - Agents
-      summary: Delete Job
-      operationId: delete_job_apis_agents_v2_workspaces__workspace__jobs_optimize__name__delete
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '204':
-          description: Successful Response
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize/{name}/cancel:
-    post:
-      tags:
-      - Agents
-      summary: Cancel Job
-      operationId: cancel_job_apis_agents_v2_workspaces__workspace__jobs_optimize__name__cancel_post
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OptimizeJob'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize/{name}/logs:
-    get:
-      tags:
-      - Agents
-      summary: Get Job Logs
-      operationId: get_job_logs_apis_agents_v2_workspaces__workspace__jobs_optimize__name__logs_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      - name: limit
-        in: query
-        required: false
-        schema:
-          title: Limit
-          type: integer
-      - name: page_cursor
-        in: query
-        required: false
-        schema:
-          title: Page Cursor
-          type: string
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize/{name}/results:
-    get:
-      tags:
-      - Agents
-      summary: List Job Results
-      operationId: list_job_results_apis_agents_v2_workspaces__workspace__jobs_optimize__name__results_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize/{name}/status:
-    get:
-      tags:
-      - Agents
-      summary: Get Job Status
-      operationId: get_job_status_apis_agents_v2_workspaces__workspace__jobs_optimize__name__status_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -3230,7 +1817,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -3331,6 +1918,10 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '404':
+          description: Job not Found
+        '409':
+          description: Job is not in a terminal state
         '422':
           description: Validation Error
           content:
@@ -3400,13 +1991,21 @@ paths:
         schema:
           title: Page Cursor
           type: string
+      - name: tail
+        in: query
+        required: false
+        schema:
+          title: Tail
+          type: integer
+          maximum: 10000
+          exclusiveMinimum: 0
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -3438,7 +2037,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -3470,7 +2069,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -3892,6 +2491,20 @@ components:
             as ENV_VAR_NAME -> 'workspace/secret-name'. Compiled into secret-backed
             container env vars (never plaintext) for docker/k8s modes; ignored for
             subprocess.
+        spec_revision:
+          type: string
+          title: Spec Revision
+          description: Revision of the agent spec fileset this deployment last staged,
+            for source-backed filesets (e.g. a GitHub commit SHA). Empty when the
+            fileset has no revision.
+          default: ''
+        spec_tracked_revision:
+          type: string
+          title: Spec Tracked Revision
+          description: Mutable ref the spec fileset tracked when this deployment last
+            staged it (e.g. 'main'). Empty when the fileset was pinned to an immutable
+            id.
+          default: ''
         status:
           type: string
           enum:
@@ -3910,9 +2523,11 @@ components:
           - subprocess
           - docker
           - k8s
+          - openshell
           title: Deployment Mode
           description: Runtime backend for this deployment. 'subprocess' (default)
-            reads the loopback 'endpoint'; 'docker'/'k8s' read the projected 'endpoints'.
+            reads the loopback 'endpoint'; 'docker'/'k8s'/'openshell' read the projected
+            'endpoints'.
           default: subprocess
         endpoint:
           type: string
@@ -3929,7 +2544,7 @@ components:
         image:
           type: string
           title: Image
-          description: Container image for docker/k8s modes. Empty for subprocess;
+          description: Container image for container modes. Empty for subprocess;
             falls back to AgentsConfig.deployments.default_image.
           default: ''
         use_image_entrypoint:
@@ -3998,6 +2613,11 @@ components:
           title: Db Version
           description: Database version of the entity for optimistic locking.
           readOnly: true
+        auth_context:
+          allOf:
+          - $ref: '#/components/schemas/AuthContext'
+          readOnly: true
+          nullable: true
       type: object
       required:
       - workspace
@@ -4009,6 +2629,7 @@ components:
       - entity_id
       - parent
       - db_version
+      - auth_context
       title: AgentDeployment
       description: "A running (or pending) deployment of an Agent.\n\nEntity type:\
         \ ``agent_deployment``\nLifecycle: pending \u2192 starting \u2192 running\
@@ -4545,185 +3166,61 @@ components:
       - ref
       - mount_path
       title: AgentWorkdirArtifactMount
-    AnalyzeBatchConfig:
+    AuthContext:
       properties:
-        batch:
+        principal_id:
           type: string
-          title: Batch
-          description: Path to a batch directory produced by evaluate-suite.
-        format:
+          title: Principal Id
+          description: The principal's unique identifier
+        principal_account_id:
+          title: Principal Account Id
+          description: Stable NeMo account identifier for the principal
           type: string
-          enum:
-          - md
-          - json
-          title: Format
-          description: 'Output format: md or json.'
-          default: md
-        mechanical_only:
-          type: boolean
-          title: Mechanical Only
-          description: Skip the LLM analysis pass.
-          default: false
-        anthropic_api_key_secret:
-          title: Anthropic Api Key Secret
-          description: Name of a platform Secret holding the Anthropic API key.  When
-            set on a submit, the value is injected as ``ANTHROPIC_API_KEY`` into the
-            dispatched subprocess so the LLM gap-analysis pass can call Anthropic.  Ignored
-            when ``mechanical_only=True``.  Local (in-process) runs read ``ANTHROPIC_API_KEY``
-            from the calling shell as before.
+        principal_email:
+          title: Principal Email
+          description: The principal's email address
           type: string
-      type: object
-      required:
-      - batch
-      title: AnalyzeBatchConfig
-    AnalyzeJob:
-      properties:
-        id:
-          title: Id
-          type: string
-        name:
-          type: string
-          title: Name
-        description:
-          title: Description
-          type: string
-        project:
-          title: Project
-          type: string
-        workspace:
-          title: Workspace
-          type: string
-        created_at:
-          title: Created At
-          type: string
-          format: date-time
-        updated_at:
-          title: Updated At
-          type: string
-          format: date-time
-        spec:
-          $ref: '#/components/schemas/AnalyzeBatchConfig'
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          title: Status Details
-          additionalProperties: true
-          type: object
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        ownership:
-          title: Ownership
-          additionalProperties: true
-          type: object
-        custom_fields:
-          title: Custom Fields
-          additionalProperties: true
-          type: object
-      type: object
-      required:
-      - name
-      - spec
-      title: AnalyzeJob
-    AnalyzeJobRequest:
-      properties:
-        name:
-          title: Name
-          type: string
-        description:
-          title: Description
-          type: string
-        project:
-          title: Project
-          type: string
-        spec:
-          $ref: '#/components/schemas/AnalyzeBatchConfig'
-        profile:
-          title: Profile
-          type: string
-        options:
-          title: Options
-          additionalProperties: true
-          type: object
-        ownership:
-          title: Ownership
-          additionalProperties: true
-          type: object
-        custom_fields:
-          title: Custom Fields
-          additionalProperties: true
-          type: object
-        output_location:
-          title: Output Location
-          type: string
-      type: object
-      required:
-      - spec
-      title: AnalyzeJobRequest
-    AnalyzeJobsListFilter:
-      additionalProperties: false
-      properties:
-        created_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs created at 'gte' datetime or 'lte' datetime.
-        name:
-          anyOf:
-          - $ref: '#/components/schemas/StringFilter'
-          - type: string
-          description: Name of the job.
-          title: Name
-        workspace:
-          description: Workspace of the job.
-          title: Workspace
-          type: string
-        project:
-          description: Project containing the job.
-          title: Project
-          type: string
-        status:
-          allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
-          description: The current status.
-        updated_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs updated at 'gte' datetime or 'lte' datetime.
-      title: AnalyzeJobsListFilter
-      type: object
-    AnalyzeJobsPage:
-      properties:
-        data:
+        principal_groups:
           items:
-            $ref: '#/components/schemas/AnalyzeJob'
+            type: string
           type: array
-          title: Data
-        pagination:
-          allOf:
-          - $ref: '#/components/schemas/PaginationData'
-          description: Pagination information.
-        sort:
-          title: Sort
-          description: The field on which the results are sorted.
+          title: Principal Groups
+          description: Groups the principal belongs to
+        principal_authz_aliases:
+          items:
+            type: string
+          type: array
+          title: Principal Authz Aliases
+          description: Alternate trusted identifiers for the principal
+        principal_on_behalf_of:
+          title: Principal On Behalf Of
+          description: If acting on behalf of another principal, their principal ID
           type: string
-        filter:
-          title: Filter
-          description: Filtering information.
-          additionalProperties: true
-          type: object
+        principal_on_behalf_of_groups:
+          title: Principal On Behalf Of Groups
+          description: Groups the on-behalf-of principal belongs to
+          items:
+            type: string
+          type: array
+        principal_on_behalf_of_email:
+          title: Principal On Behalf Of Email
+          description: The on-behalf-of principal's email address
+          type: string
+        principal_on_behalf_of_account_id:
+          title: Principal On Behalf Of Account Id
+          description: Stable NeMo account identifier for the on-behalf-of principal
+          type: string
+        principal_on_behalf_of_authz_aliases:
+          items:
+            type: string
+          type: array
+          title: Principal On Behalf Of Authz Aliases
+          description: Alternate trusted identifiers for the on-behalf-of principal
       type: object
       required:
-      - data
-      title: AnalyzeJobsPage
-    AnalyzeJobsSortField:
-      type: string
-      enum:
-      - created_at
-      - -created_at
-      - updated_at
-      - -updated_at
-      title: AnalyzeJobsSortField
+      - principal_id
+      title: AuthContext
+      description: Auth context captured at resource creation for delegated access.
     ComputeResources:
       properties:
         limits:
@@ -4826,13 +3323,15 @@ components:
           - subprocess
           - docker
           - k8s
+          - openshell
           title: Deployment Mode
-          description: 'Runtime backend: subprocess (default), docker, or k8s.'
+          description: 'Runtime backend: subprocess (default), docker, k8s, or openshell.'
           default: subprocess
         image:
           type: string
           title: Image
-          description: Container image for docker/k8s modes. Ignored for subprocess.
+          description: Container image for docker/k8s/openshell modes. Ignored for
+            subprocess.
           default: ''
         use_image_entrypoint:
           type: boolean
@@ -4964,6 +3463,17 @@ components:
       - name
       title: CreateEnvironmentSpecRequest
       description: Request body for ``POST /v2/workspaces/{workspace}/environment-specs``.
+    CreateSampleAgentRequest:
+      properties:
+        model:
+          type: string
+          title: Model
+          description: Workspace-qualified model entity, for example default/my-model.
+      type: object
+      required:
+      - model
+      title: CreateSampleAgentRequest
+      description: Model to use when provisioning the packaged email security sample.
     CreateSessionRequest:
       properties:
         deployment_id:
@@ -5008,10 +3518,12 @@ components:
           title: Total Lines
           description: Number of lines actually returned.
         next_offset:
-          type: integer
+          anyOf:
+          - type: integer
+          - type: string
           title: Next Offset
-          description: Byte offset just past the returned tail; pass as Last-Event-ID
-            to resume the stream without gaps.
+          description: Resume cursor; pass as Last-Event-ID to continue the stream
+            without gaps.
       type: object
       required:
       - data
@@ -5019,6 +3531,46 @@ components:
       - next_offset
       title: DeploymentLogsResponse
       description: Response body for ``GET /deployments/{name}/logs``.
+    DeploymentModeAvailability:
+      properties:
+        mode:
+          type: string
+          enum:
+          - subprocess
+          - docker
+          - k8s
+          - openshell
+          title: Mode
+          description: The deployment mode.
+        enabled:
+          type: boolean
+          title: Enabled
+          description: True when a deployment in this mode would run on a matching
+            executor backend.
+        requires_image:
+          type: boolean
+          title: Requires Image
+          description: True when a deployment in this mode must set 'image' because
+            no default image is configured.
+      type: object
+      required:
+      - mode
+      - enabled
+      - requires_image
+      title: DeploymentModeAvailability
+      description: Whether this platform can run deployments in one ``deployment_mode``.
+    DeploymentModeList:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/DeploymentModeAvailability'
+          type: array
+          title: Data
+      type: object
+      required:
+      - data
+      title: DeploymentModeList
+      description: Response for ``GET /v2/workspaces/{workspace}/deployment-modes``.
     Endpoint:
       properties:
         name:
@@ -5154,10 +3706,10 @@ components:
         output:
           title: Output
           description: "Where to write eval outputs \u2014 either a local directory\
-            \ (path-shaped: starts with '/', './', '../', '~/') or a NeMo Platform\
-            \ fileset reference ('name' or 'workspace/name').  Filesets are created\
-            \ on demand if missing.  Defaults to <ctx.storage.persistent>/results\
-            \ (the platform-injected persistent volume) when not provided."
+            \ (path-shaped: starts with '/', './', '../', '~/') or a NeMo Helix fileset\
+            \ reference ('name' or 'workspace/name').  Filesets are created on demand\
+            \ if missing.  Defaults to <ctx.storage.persistent>/results (the platform-injected\
+            \ persistent volume) when not provided."
           type: string
         workspace:
           type: string
@@ -5191,15 +3743,15 @@ components:
         \        this ``None`` and let ``eval_config`` be a real local path.\n   \
         \ output: Where to put the eval outputs.  Accepts either a local\n       \
         \ directory path (``./out``, ``/abs/out``, ``~/out``) or an\n        NeMo\
-        \ Platform fileset reference (``\"name\"`` or ``\"workspace/name\"``).\n \
-        \       Path-shaped values write directly to disk; bare names upload\n   \
-        \     results to the named fileset, creating it on demand.  When\n       \
-        \ ``None`` the job writes to ``ctx.storage.persistent /\n        \"results\"\
-        `` \u2014 the platform-injected persistent volume in\n        container runs,\
-        \ a tempdir under ``$TMPDIR`` for local CLI\n        runs.\n    workspace:\
-        \ NeMo Platform workspace used to scope gateway URL injection,\n        ``--agent``\
-        \ resolution, and ``--output`` fileset creation\n        when those values\
-        \ are given as bare names."
+        \ Helix fileset reference (``\"name\"`` or ``\"workspace/name\"``).\n    \
+        \    Path-shaped values write directly to disk; bare names upload\n      \
+        \  results to the named fileset, creating it on demand.  When\n        ``None``\
+        \ the job writes to ``ctx.storage.persistent /\n        \"results\"`` \u2014\
+        \ the platform-injected persistent volume in\n        container runs, a tempdir\
+        \ under ``$TMPDIR`` for local CLI\n        runs.\n    workspace: NeMo Helix\
+        \ workspace used to scope gateway URL injection,\n        ``--agent`` resolution,\
+        \ and ``--output`` fileset creation\n        when those values are given as\
+        \ bare names."
     EvaluateJob:
       properties:
         id:
@@ -5228,7 +3780,7 @@ components:
         spec:
           $ref: '#/components/schemas/EvaluateAgentSpec'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -5255,6 +3807,12 @@ components:
         name:
           title: Name
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -5308,8 +3866,13 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
         updated_at:
           allOf:
           - $ref: '#/components/schemas/DatetimeFilter'
@@ -5348,313 +3911,6 @@ components:
       - updated_at
       - -updated_at
       title: EvaluateJobsSortField
-    EvaluateSuiteConfig:
-      properties:
-        evals:
-          type: string
-          title: Evals
-          description: Path to the directory of eval tasks.
-        agent:
-          title: Agent
-          description: Agent root (defaults to repo root in local run).
-          type: string
-        runner:
-          type: string
-          enum:
-          - auto
-          - harbor
-          - nat
-          title: Runner
-          description: Eval runner.
-          default: auto
-        prefer:
-          type: string
-          enum:
-          - harbor
-          - nat
-          title: Prefer
-          description: Tiebreaker when both markers present.
-          default: nat
-        concurrency:
-          type: integer
-          minimum: 1.0
-          title: Concurrency
-          description: Parallel eval concurrency.
-          default: 4
-        skip_build:
-          type: boolean
-          title: Skip Build
-          description: Skip docker build (Harbor only).
-          default: false
-        output:
-          title: Output
-          description: Output dir for batch artifacts (defaults to cwd/runs in local
-            run).
-          type: string
-        filter_glob:
-          title: Filter Glob
-          description: Glob filter on eval names.
-          type: string
-        repeats:
-          type: integer
-          minimum: 1.0
-          title: Repeats
-          description: Trials per eval (median aggregation when >1).
-          default: 1
-        anthropic_api_key_secret:
-          title: Anthropic Api Key Secret
-          description: Name of a platform Secret holding the Anthropic API key.  When
-            set on a submit, the value is injected as ``ANTHROPIC_API_KEY`` into the
-            dispatched subprocess so the Harbor eval tasks' LLM-judge calls reach
-            Anthropic.  Local (in-process) runs read ``ANTHROPIC_API_KEY`` from the
-            calling shell as before.
-          type: string
-      type: object
-      required:
-      - evals
-      title: EvaluateSuiteConfig
-      description: 'Canonical config consumed by ``EvaluateSuiteJob.run``.
-
-
-        ``agent`` and ``output`` are optional here so the local run path can
-
-        fall back to ``Path.cwd()`` / ``Path.cwd()/runs/batch-<ts>``.  The
-
-        submit path uses :class:`EvaluateSuiteSubmitConfig` (where both are
-
-        required) as its wire schema, and ``compile()`` re-validates that
-
-        both ended up non-``None`` before dispatch.'
-    EvaluateSuiteJob:
-      properties:
-        id:
-          title: Id
-          type: string
-        name:
-          type: string
-          title: Name
-        description:
-          title: Description
-          type: string
-        project:
-          title: Project
-          type: string
-        workspace:
-          title: Workspace
-          type: string
-        created_at:
-          title: Created At
-          type: string
-          format: date-time
-        updated_at:
-          title: Updated At
-          type: string
-          format: date-time
-        spec:
-          $ref: '#/components/schemas/EvaluateSuiteConfig'
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          title: Status Details
-          additionalProperties: true
-          type: object
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        ownership:
-          title: Ownership
-          additionalProperties: true
-          type: object
-        custom_fields:
-          title: Custom Fields
-          additionalProperties: true
-          type: object
-      type: object
-      required:
-      - name
-      - spec
-      title: EvaluateSuiteJob
-    EvaluateSuiteJobRequest:
-      properties:
-        name:
-          title: Name
-          type: string
-        description:
-          title: Description
-          type: string
-        project:
-          title: Project
-          type: string
-        spec:
-          $ref: '#/components/schemas/EvaluateSuiteSubmitConfig'
-        profile:
-          title: Profile
-          type: string
-        options:
-          title: Options
-          additionalProperties: true
-          type: object
-        ownership:
-          title: Ownership
-          additionalProperties: true
-          type: object
-        custom_fields:
-          title: Custom Fields
-          additionalProperties: true
-          type: object
-        output_location:
-          title: Output Location
-          type: string
-      type: object
-      required:
-      - spec
-      title: EvaluateSuiteJobRequest
-    EvaluateSuiteJobsListFilter:
-      additionalProperties: false
-      properties:
-        created_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs created at 'gte' datetime or 'lte' datetime.
-        name:
-          anyOf:
-          - $ref: '#/components/schemas/StringFilter'
-          - type: string
-          description: Name of the job.
-          title: Name
-        workspace:
-          description: Workspace of the job.
-          title: Workspace
-          type: string
-        project:
-          description: Project containing the job.
-          title: Project
-          type: string
-        status:
-          allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
-          description: The current status.
-        updated_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs updated at 'gte' datetime or 'lte' datetime.
-      title: EvaluateSuiteJobsListFilter
-      type: object
-    EvaluateSuiteJobsPage:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/EvaluateSuiteJob'
-          type: array
-          title: Data
-        pagination:
-          allOf:
-          - $ref: '#/components/schemas/PaginationData'
-          description: Pagination information.
-        sort:
-          title: Sort
-          description: The field on which the results are sorted.
-          type: string
-        filter:
-          title: Filter
-          description: Filtering information.
-          additionalProperties: true
-          type: object
-      type: object
-      required:
-      - data
-      title: EvaluateSuiteJobsPage
-    EvaluateSuiteJobsSortField:
-      type: string
-      enum:
-      - created_at
-      - -created_at
-      - updated_at
-      - -updated_at
-      title: EvaluateSuiteJobsSortField
-    EvaluateSuiteSubmitConfig:
-      properties:
-        evals:
-          type: string
-          title: Evals
-          description: Path to the directory of eval tasks.
-        agent:
-          type: string
-          title: Agent
-          description: Agent root.
-        runner:
-          type: string
-          enum:
-          - auto
-          - harbor
-          - nat
-          title: Runner
-          description: Eval runner.
-          default: auto
-        prefer:
-          type: string
-          enum:
-          - harbor
-          - nat
-          title: Prefer
-          description: Tiebreaker when both markers present.
-          default: nat
-        concurrency:
-          type: integer
-          minimum: 1.0
-          title: Concurrency
-          description: Parallel eval concurrency.
-          default: 4
-        skip_build:
-          type: boolean
-          title: Skip Build
-          description: Skip docker build (Harbor only).
-          default: false
-        output:
-          type: string
-          title: Output
-          description: Output dir for batch artifacts.
-        filter_glob:
-          title: Filter Glob
-          description: Glob filter on eval names.
-          type: string
-        repeats:
-          type: integer
-          minimum: 1.0
-          title: Repeats
-          description: Trials per eval (median aggregation when >1).
-          default: 1
-        anthropic_api_key_secret:
-          title: Anthropic Api Key Secret
-          description: Name of a platform Secret holding the Anthropic API key.  When
-            set on a submit, the value is injected as ``ANTHROPIC_API_KEY`` into the
-            dispatched subprocess so the Harbor eval tasks' LLM-judge calls reach
-            Anthropic.  Local (in-process) runs read ``ANTHROPIC_API_KEY`` from the
-            calling shell as before.
-          type: string
-      type: object
-      required:
-      - evals
-      - agent
-      - output
-      title: EvaluateSuiteSubmitConfig
-      description: 'Submit-side wire schema for ``EvaluateSuiteJob``.
-
-
-        Narrows ``agent`` and ``output`` from ``str | None`` to ``str`` (no
-
-        default) so the OpenAPI contract matches the runtime behaviour: the
-
-        subprocess executor''s work dir is not the caller''s cwd, so the
-
-        canonical ``EvaluateSuiteConfig`` fallback to ``Path.cwd()`` would
-
-        silently land in ``/tmp/nmp-subprocess-jobs/.../task-*/``.  Making
-
-        them required at the schema layer surfaces the requirement as a
-
-        422 at submit time instead of a confusing dispatched-job failure.'
     ExecuteAgentExtensionConfig:
       properties:
         kind:
@@ -5706,6 +3962,23 @@ components:
           title: Timeout Seconds
           description: Maximum time to wait for Fabric to return an execution result.
           default: 3600
+        auto_telemetry:
+          type: boolean
+          title: Auto Telemetry
+          description: Let the server fill in the agent's telemetry export -- an Intake
+            destination for a config that asks for one and does not say where. False
+            submits the agent config as written, which still exports if the config
+            says to; an agent config is the place to say a run should not be traced.
+          default: true
+        image:
+          type: string
+          title: Image
+          description: Container image to execute the agent in. Mirrors CreateDeploymentRequest.image.
+            Typically the output of `nemo agents package`, which contains both the
+            agent's Fabric adapter and the execute task module. Empty falls back to
+            agents.jobs.default_image, then to the jobs substrate's chain (the execution
+            profile's default_task_image, then the platform CPU tasks image).
+          default: ''
         extension:
           allOf:
           - $ref: '#/components/schemas/ExecuteAgentExtensionConfig'
@@ -5766,7 +4039,7 @@ components:
         spec:
           $ref: '#/components/schemas/ExecuteAgentStepConfig'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -5793,6 +4066,12 @@ components:
         name:
           title: Name
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -5846,8 +4125,13 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
         updated_at:
           allOf:
           - $ref: '#/components/schemas/DatetimeFilter'
@@ -5900,6 +4184,248 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    HelixJobListResultResponse:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobResultResponse'
+          type: array
+          title: Data
+      type: object
+      required:
+      - data
+      title: HelixJobListResultResponse
+    HelixJobLog:
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          title: Timestamp
+        job:
+          type: string
+          title: Job
+        job_step:
+          type: string
+          title: Job Step
+        job_task:
+          type: string
+          title: Job Task
+        message:
+          type: string
+          title: Message
+      type: object
+      required:
+      - timestamp
+      - job
+      - job_step
+      - job_task
+      - message
+      title: HelixJobLog
+    HelixJobLogPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobLog'
+          type: array
+          title: Data
+        total:
+          type: integer
+          title: Total
+        next_page:
+          title: Next Page
+          type: string
+        prev_page:
+          title: Prev Page
+          type: string
+      type: object
+      required:
+      - data
+      - total
+      - next_page
+      - prev_page
+      title: HelixJobLogPage
+    HelixJobResultResponse:
+      properties:
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        project:
+          title: Project
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        artifact_url:
+          type: string
+          title: Artifact Url
+        artifact_storage_type:
+          $ref: '#/components/schemas/FileStorageType'
+        download_url:
+          title: Download Url
+          type: string
+      type: object
+      required:
+      - name
+      - job
+      - workspace
+      - artifact_url
+      - artifact_storage_type
+      title: HelixJobResultResponse
+    HelixJobStatus:
+      type: string
+      enum:
+      - created
+      - pending
+      - active
+      - cancelled
+      - cancelling
+      - error
+      - completed
+      - paused
+      - pausing
+      - resuming
+      title: HelixJobStatus
+      description: 'Enumeration of possible job statuses.
+
+
+        This enum represents the various states a job can be in during its lifecycle,
+
+        from creation to a terminal state.'
+    HelixJobStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        steps:
+          items:
+            $ref: '#/components/schemas/HelixJobStepStatusResponse'
+          type: array
+          title: Steps
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - steps
+      - created_at
+      - updated_at
+      title: HelixJobStatusResponse
+    HelixJobStepStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        tasks:
+          items:
+            $ref: '#/components/schemas/HelixJobTaskStatusResponse'
+          type: array
+          title: Tasks
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - tasks
+      - created_at
+      - updated_at
+      title: HelixJobStepStatusResponse
+    HelixJobTaskStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        error_stack:
+          title: Error Stack
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - error_stack
+      - created_at
+      - updated_at
+      title: HelixJobTaskStatusResponse
     LogLine:
       properties:
         timestamp:
@@ -5930,7 +4456,7 @@ components:
       - timestamp
       - message
       title: LogLine
-      description: One line shaped to match ``PlatformJobLog`` so Studio's LogViewer
+      description: One line shaped to match ``HelixJobLog`` so Studio's LogViewer
         renders it as-is.
     McpFulfillment:
       properties:
@@ -6202,426 +4728,6 @@ components:
       required:
       - data
       title: NemoListResponse_Agent_
-    OptimizeJob:
-      properties:
-        id:
-          title: Id
-          type: string
-        name:
-          type: string
-          title: Name
-        description:
-          title: Description
-          type: string
-        project:
-          title: Project
-          type: string
-        workspace:
-          title: Workspace
-          type: string
-        created_at:
-          title: Created At
-          type: string
-          format: date-time
-        updated_at:
-          title: Updated At
-          type: string
-          format: date-time
-        spec:
-          $ref: '#/components/schemas/OptimizeSpec'
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          title: Status Details
-          additionalProperties: true
-          type: object
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        ownership:
-          title: Ownership
-          additionalProperties: true
-          type: object
-        custom_fields:
-          title: Custom Fields
-          additionalProperties: true
-          type: object
-      type: object
-      required:
-      - name
-      - spec
-      title: OptimizeJob
-    OptimizeJobRequest:
-      properties:
-        name:
-          title: Name
-          type: string
-        description:
-          title: Description
-          type: string
-        project:
-          title: Project
-          type: string
-        spec:
-          $ref: '#/components/schemas/OptimizeSpec'
-        profile:
-          title: Profile
-          type: string
-        options:
-          title: Options
-          additionalProperties: true
-          type: object
-        ownership:
-          title: Ownership
-          additionalProperties: true
-          type: object
-        custom_fields:
-          title: Custom Fields
-          additionalProperties: true
-          type: object
-        output_location:
-          title: Output Location
-          type: string
-      type: object
-      required:
-      - spec
-      title: OptimizeJobRequest
-    OptimizeJobsListFilter:
-      additionalProperties: false
-      properties:
-        created_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs created at 'gte' datetime or 'lte' datetime.
-        name:
-          anyOf:
-          - $ref: '#/components/schemas/StringFilter'
-          - type: string
-          description: Name of the job.
-          title: Name
-        workspace:
-          description: Workspace of the job.
-          title: Workspace
-          type: string
-        project:
-          description: Project containing the job.
-          title: Project
-          type: string
-        status:
-          allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
-          description: The current status.
-        updated_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs updated at 'gte' datetime or 'lte' datetime.
-      title: OptimizeJobsListFilter
-      type: object
-    OptimizeJobsPage:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/OptimizeJob'
-          type: array
-          title: Data
-        pagination:
-          allOf:
-          - $ref: '#/components/schemas/PaginationData'
-          description: Pagination information.
-        sort:
-          title: Sort
-          description: The field on which the results are sorted.
-          type: string
-        filter:
-          title: Filter
-          description: Filtering information.
-          additionalProperties: true
-          type: object
-      type: object
-      required:
-      - data
-      title: OptimizeJobsPage
-    OptimizeJobsSortField:
-      type: string
-      enum:
-      - created_at
-      - -created_at
-      - updated_at
-      - -updated_at
-      title: OptimizeJobsSortField
-    OptimizeSkillsConfig:
-      properties:
-        evals:
-          type: string
-          title: Evals
-          description: Path to the directory of eval tasks.
-        agent:
-          type: string
-          title: Agent
-          description: Agent root (where the loop runs from; skills live under it).
-        skills_path:
-          type: string
-          title: Skills Path
-          description: Relative path inside agent where skills live.
-          default: .agents/skills
-        filter_glob:
-          title: Filter Glob
-          description: Glob filter on eval names (e.g. 'files-*').
-          type: string
-        iterations:
-          type: integer
-          minimum: 1.0
-          title: Iterations
-          default: 3
-        concurrency:
-          type: integer
-          minimum: 1.0
-          title: Concurrency
-          default: 2
-        state:
-          title: State
-          description: 'Path to loop_state.json; default: <agent>/loop_state.json.'
-          type: string
-        initial_batch:
-          title: Initial Batch
-          description: Existing batch dir to seed from.
-          type: string
-        full_verification:
-          type: boolean
-          title: Full Verification
-          default: false
-        open_pr:
-          type: boolean
-          title: Open Pr
-          default: false
-        repeats:
-          type: integer
-          minimum: 1.0
-          title: Repeats
-          default: 1
-        analyze_only:
-          type: boolean
-          title: Analyze Only
-          description: 'Analyze-only mode: consume an existing --initial-batch, generate
-            suggestions, exit. Skips worktree, apply, verify, MR. Works with any AUT
-            (Harbor or NAT).'
-          default: false
-        trace_parser:
-          type: string
-          const: claude-code
-          title: Trace Parser
-          description: "Trace parser for the agent's traces. Today only 'claude-code'\
-            \ is registered (parses Claude Code session.jsonl). Future parsers \u2014\
-            \ e.g. for NAT IntermediateStep records \u2014 extend this Literal."
-          default: claude-code
-        anthropic_api_key_secret:
-          title: Anthropic Api Key Secret
-          description: Name of a platform Secret holding the Anthropic API key.  When
-            set on a submit, the value is injected as ``ANTHROPIC_API_KEY`` into the
-            dispatched subprocess so the loop's ``check_anthropic_api`` / Claude analyzer
-            preflights pass.  Local (in-process) runs read ``ANTHROPIC_API_KEY`` from
-            the calling shell as before.
-          type: string
-      type: object
-      required:
-      - evals
-      - agent
-      title: OptimizeSkillsConfig
-    OptimizeSkillsJob:
-      properties:
-        id:
-          title: Id
-          type: string
-        name:
-          type: string
-          title: Name
-        description:
-          title: Description
-          type: string
-        project:
-          title: Project
-          type: string
-        workspace:
-          title: Workspace
-          type: string
-        created_at:
-          title: Created At
-          type: string
-          format: date-time
-        updated_at:
-          title: Updated At
-          type: string
-          format: date-time
-        spec:
-          $ref: '#/components/schemas/OptimizeSkillsConfig'
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          title: Status Details
-          additionalProperties: true
-          type: object
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        ownership:
-          title: Ownership
-          additionalProperties: true
-          type: object
-        custom_fields:
-          title: Custom Fields
-          additionalProperties: true
-          type: object
-      type: object
-      required:
-      - name
-      - spec
-      title: OptimizeSkillsJob
-    OptimizeSkillsJobRequest:
-      properties:
-        name:
-          title: Name
-          type: string
-        description:
-          title: Description
-          type: string
-        project:
-          title: Project
-          type: string
-        spec:
-          $ref: '#/components/schemas/OptimizeSkillsConfig'
-        profile:
-          title: Profile
-          type: string
-        options:
-          title: Options
-          additionalProperties: true
-          type: object
-        ownership:
-          title: Ownership
-          additionalProperties: true
-          type: object
-        custom_fields:
-          title: Custom Fields
-          additionalProperties: true
-          type: object
-        output_location:
-          title: Output Location
-          type: string
-      type: object
-      required:
-      - spec
-      title: OptimizeSkillsJobRequest
-    OptimizeSkillsJobsListFilter:
-      additionalProperties: false
-      properties:
-        created_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs created at 'gte' datetime or 'lte' datetime.
-        name:
-          anyOf:
-          - $ref: '#/components/schemas/StringFilter'
-          - type: string
-          description: Name of the job.
-          title: Name
-        workspace:
-          description: Workspace of the job.
-          title: Workspace
-          type: string
-        project:
-          description: Project containing the job.
-          title: Project
-          type: string
-        status:
-          allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
-          description: The current status.
-        updated_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs updated at 'gte' datetime or 'lte' datetime.
-      title: OptimizeSkillsJobsListFilter
-      type: object
-    OptimizeSkillsJobsPage:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/OptimizeSkillsJob'
-          type: array
-          title: Data
-        pagination:
-          allOf:
-          - $ref: '#/components/schemas/PaginationData'
-          description: Pagination information.
-        sort:
-          title: Sort
-          description: The field on which the results are sorted.
-          type: string
-        filter:
-          title: Filter
-          description: Filtering information.
-          additionalProperties: true
-          type: object
-      type: object
-      required:
-      - data
-      title: OptimizeSkillsJobsPage
-    OptimizeSkillsJobsSortField:
-      type: string
-      enum:
-      - created_at
-      - -created_at
-      - updated_at
-      - -updated_at
-      title: OptimizeSkillsJobsSortField
-    OptimizeSpec:
-      properties:
-        optimize_config:
-          type: string
-          minLength: 1
-          title: Optimize Config
-          description: "Location of the Fabric-native optimization YAML.  With optimize_config_fileset\
-            \ set \u2014 required for `submit` \u2014 this is a path relative to the\
-            \ fileset root.  Without it (local `nemo agents optimize run` only) it\
-            \ is an absolute path on the host running the CLI."
-        optimize_config_fileset:
-          title: Optimize Config Fileset
-          description: 'Fileset holding the optimization bundle: the config named
-            by optimize_config plus every asset it references (Agent under Test package,
-            dataset, eval.fabric.base_dir tree, hooks and MCP configs).  Stage one
-            with `nemo agents optimize prepare-fileset`.  Required for `submit`, where
-            the job has no access to the client''s filesystem.'
-          type: string
-        workspace:
-          type: string
-          title: Workspace
-          description: Workspace used to fetch a platform agent and for VirtualModel
-            preflight.
-          default: default
-        agent:
-          title: Agent
-          description: Optional platform agent reference ('name' or 'workspace/name').
-            When omitted, the optimization config must include an inline Fabric agent
-            package.
-          type: string
-          minLength: 1
-        output:
-          title: Output
-          description: "Where to publish the study artifacts (optimized config, trials\
-            \ dataframe, pareto plots, ATIF evidence) once the study succeeds \u2014\
-            \ either a local directory (path-shaped: starts with '/', './', '../',\
-            \ '~/') or a NeMo Platform fileset reference ('name' or 'workspace/name').\
-            \  Filesets are created on demand if missing.  This is in addition to\
-            \ the per-job artifacts that ``ctx.results.save`` always registers; it\
-            \ gives remote clients a stable, addressable location to read from."
-          type: string
-      type: object
-      required:
-      - optimize_config
-      title: OptimizeSpec
-      description: Spec for an Agents optimize study (``nemo agents optimize``).
     PackageAgentInput:
       properties:
         agent:
@@ -6678,10 +4784,11 @@ components:
           default: false
         registry:
           title: Registry
-          description: "Push the built image to this registry (e.g. 'nvcr.io/my-org').\
-            \ The host executing the push must already be authenticated to it \u2014\
-            \ the local machine for `run`, the platform's job-execution host for `submit`/the\
-            \ REST API. Credentials are never accepted over this API."
+          description: 'Push the built image to this registry (e.g. ''nvcr.io/my-org'').
+            The host executing the push must already be authenticated to it: the local
+            machine for direct CLI invocation, or the platform''s job-execution host
+            for remote execution or the REST API. Credentials are never accepted over
+            this API.'
           type: string
           pattern: ^[a-zA-Z0-9][a-zA-Z0-9._-]*(:[0-9]+)?(/[a-zA-Z0-9][a-zA-Z0-9._-]*)*$
         push_tag:
@@ -6729,7 +4836,7 @@ components:
         spec:
           $ref: '#/components/schemas/PackageAgentSpec'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -6756,6 +4863,12 @@ components:
         name:
           title: Name
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -6809,8 +4922,13 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
         updated_at:
           allOf:
           - $ref: '#/components/schemas/DatetimeFilter'
@@ -6905,10 +5023,11 @@ components:
           default: false
         registry:
           title: Registry
-          description: "Push the built image to this registry (e.g. 'nvcr.io/my-org').\
-            \ The host executing the push must already be authenticated to it \u2014\
-            \ the local machine for `run`, the platform's job-execution host for `submit`/the\
-            \ REST API. Credentials are never accepted over this API."
+          description: 'Push the built image to this registry (e.g. ''nvcr.io/my-org'').
+            The host executing the push must already be authenticated to it: the local
+            machine for direct CLI invocation, or the platform''s job-execution host
+            for remote execution or the REST API. Credentials are never accepted over
+            this API.'
           type: string
           pattern: ^[a-zA-Z0-9][a-zA-Z0-9._-]*(:[0-9]+)?(/[a-zA-Z0-9][a-zA-Z0-9._-]*)*$
         push_tag:
@@ -6968,248 +5087,6 @@ components:
       - total_pages
       - total_results
       title: PaginationData
-    PlatformJobListResultResponse:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/PlatformJobResultResponse'
-          type: array
-          title: Data
-      type: object
-      required:
-      - data
-      title: PlatformJobListResultResponse
-    PlatformJobLog:
-      properties:
-        timestamp:
-          type: string
-          format: date-time
-          title: Timestamp
-        job:
-          type: string
-          title: Job
-        job_step:
-          type: string
-          title: Job Step
-        job_task:
-          type: string
-          title: Job Task
-        message:
-          type: string
-          title: Message
-      type: object
-      required:
-      - timestamp
-      - job
-      - job_step
-      - job_task
-      - message
-      title: PlatformJobLog
-    PlatformJobLogPage:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/PlatformJobLog'
-          type: array
-          title: Data
-        total:
-          type: integer
-          title: Total
-        next_page:
-          title: Next Page
-          type: string
-        prev_page:
-          title: Prev Page
-          type: string
-      type: object
-      required:
-      - data
-      - total
-      - next_page
-      - prev_page
-      title: PlatformJobLogPage
-    PlatformJobResultResponse:
-      properties:
-        name:
-          type: string
-          title: Name
-        job:
-          type: string
-          title: Job
-        workspace:
-          type: string
-          title: Workspace
-        project:
-          title: Project
-          type: string
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-        artifact_url:
-          type: string
-          title: Artifact Url
-        artifact_storage_type:
-          $ref: '#/components/schemas/FileStorageType'
-        download_url:
-          title: Download Url
-          type: string
-      type: object
-      required:
-      - name
-      - job
-      - workspace
-      - artifact_url
-      - artifact_storage_type
-      title: PlatformJobResultResponse
-    PlatformJobStatus:
-      type: string
-      enum:
-      - created
-      - pending
-      - active
-      - cancelled
-      - cancelling
-      - error
-      - completed
-      - paused
-      - pausing
-      - resuming
-      title: PlatformJobStatus
-      description: 'Enumeration of possible job statuses.
-
-
-        This enum represents the various states a job can be in during its lifecycle,
-
-        from creation to a terminal state.'
-    PlatformJobStatusResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        name:
-          type: string
-          title: Name
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        steps:
-          items:
-            $ref: '#/components/schemas/PlatformJobStepStatusResponse'
-          type: array
-          title: Steps
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - name
-      - status
-      - status_details
-      - error_details
-      - steps
-      - created_at
-      - updated_at
-      title: PlatformJobStatusResponse
-    PlatformJobStepStatusResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        name:
-          type: string
-          title: Name
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        tasks:
-          items:
-            $ref: '#/components/schemas/PlatformJobTaskStatusResponse'
-          type: array
-          title: Tasks
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - name
-      - status
-      - status_details
-      - error_details
-      - tasks
-      - created_at
-      - updated_at
-      title: PlatformJobStepStatusResponse
-    PlatformJobTaskStatusResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        name:
-          type: string
-          title: Name
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        error_stack:
-          title: Error Stack
-          type: string
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - name
-      - status
-      - status_details
-      - error_details
-      - error_stack
-      - created_at
-      - updated_at
-      title: PlatformJobTaskStatusResponse
     ResolvedAgentConfig:
       properties:
         name:
@@ -7232,6 +5109,96 @@ components:
       - config
       - config_format
       title: ResolvedAgentConfig
+    SampleAgentResponse:
+      properties:
+        status:
+          type: string
+          enum:
+          - created
+          - resumed
+          - already_exists
+          title: Status
+        workspace:
+          type: string
+          title: Workspace
+        studio_url:
+          type: string
+          title: Studio Url
+          description: Studio path relative to the platform origin.
+        agent:
+          type: string
+          title: Agent
+        deployment:
+          type: string
+          title: Deployment
+        deployment_status:
+          type: string
+          enum:
+          - pending
+          - starting
+          - running
+          - failed
+          - deleting
+          title: Deployment Status
+      type: object
+      required:
+      - status
+      - workspace
+      - studio_url
+      - agent
+      - deployment
+      - deployment_status
+      title: SampleAgentResponse
+      description: Provisioned sample agent and its workspace and deployment state.
+    SampleAgentStreamEvent:
+      properties:
+        kind:
+          type: string
+          enum:
+          - progress
+          - done
+          - error
+          title: Kind
+        component:
+          title: Component
+          type: string
+          enum:
+          - workspace
+          - agent
+          - deployment
+          - dataset
+          - evaluation_config
+        status:
+          title: Status
+          type: string
+          enum:
+          - created
+          - existing
+          - submitted
+          - uploaded
+          - updated
+        workspace:
+          title: Workspace
+          type: string
+        result:
+          $ref: '#/components/schemas/SampleAgentResponse'
+        message:
+          title: Message
+          type: string
+        status_code:
+          title: Status Code
+          type: integer
+        failed_step:
+          title: Failed Step
+          type: string
+        retryable:
+          title: Retryable
+          type: boolean
+      type: object
+      required:
+      - kind
+      title: SampleAgentStreamEvent
+      description: One NDJSON frame from sample-agent provisioning.
     SessionFilter:
       additionalProperties: false
       description: Query filter for ``GET /v2/workspaces/{workspace}/sessions``.

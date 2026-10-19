@@ -6,7 +6,7 @@ import { Page, expect } from '@playwright/test';
 import { TOUR_SEEN_KEY } from '@studio/util/localStorage';
 
 export const disableAuthForTest = async (page: Page) => {
-  await page.goto('/');
+  await page.goto('./');
   await page.evaluate((tourSeenKey) => {
     localStorage.setItem('e2e_test', 'true');
     // Prevent the welcome tour from auto-starting and blocking clicks

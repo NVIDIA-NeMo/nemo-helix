@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { filesCreateFileset, filesUploadFile } from '@nemo/sdk/generated/platform/api';
+import { filesCreateFileset, filesUploadFile } from '@nemo/sdk/generated/platform/files';
 import type { CreateFilesetRequest, FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { resetDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
 import { useMutation, UseMutationOptions } from '@tanstack/react-query';

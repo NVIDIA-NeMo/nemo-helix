@@ -7,15 +7,15 @@ import json
 from decimal import Decimal
 
 import pytest
-from nmp.intake.spans.span_attribute_bags import SpanAttributeBags
-from nmp.intake.spans.span_attribute_catalog import (
+from nhx.intake.spans.span_attribute_bags import SpanAttributeBags
+from nhx.intake.spans.span_attribute_catalog import (
     ATTRIBUTE_SPECS,
     SPECS_BY_FIELD_VALUE,
     from_bag,
     to_bag,
     where_clause,
 )
-from nmp.intake.spans.span_semantic_attributes import SpanSemanticAttributes
+from nhx.intake.spans.span_semantic_attributes import SpanSemanticAttributes
 
 
 @pytest.mark.parametrize("spec", ATTRIBUTE_SPECS)

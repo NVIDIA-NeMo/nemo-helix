@@ -8,6 +8,7 @@ Defines the create/spec and config shapes used by ``SandboxedGymHostProvider`` a
 :mod:`sandboxed_gym.egress`.
 """
 
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Generic, Mapping, TypeVar
@@ -24,8 +25,18 @@ DEFAULT_MAX_ROLLOUT_BYTES = 268_435_456  # 256 MiB
 DEFAULT_HOST_TTL_S = 14_400  # 4 hours
 DEFAULT_HOST_READY_TIMEOUT_S = 15 * 60
 DEFAULT_ROLLOUT_TIMEOUT_S = 30 * 60
+# A batch is split into bounded POSTs so request duration and response size track the chunk rather
+# than the batch. Tune the two together: concurrency offsets the split.
+#: A request that failed faster than this cannot have been cut for staying open too long.
+MIN_PROXY_CUTOFF_S = 30.0
+DEFAULT_ROLLOUT_CHUNK_SIZE = 8
+DEFAULT_ROLLOUT_MAX_IN_FLIGHT = 8
+# Applied to transport failures only. An error the host itself reported is deterministic, so
+# retrying it just spends generation time to fail the same way.
+DEFAULT_ROLLOUT_MAX_ATTEMPTS = 3
+DEFAULT_ROLLOUT_RETRY_BACKOFF_S = 5.0
 
-FORBIDDEN_BOOTSTRAP_ENV_PREFIXES = ("OPENSANDBOX_",)
+FORBIDDEN_BOOTSTRAP_ENV_PREFIXES = ("OPENSANDBOX_", "OPEN_SANDBOX_")
 FORBIDDEN_BOOTSTRAP_ENV_KEYS = frozenset(
     {
         "OPENSANDBOX_API_KEY",
@@ -196,7 +207,13 @@ class SandboxConfig(BaseModel):
     workspace_sub_path: str = ""
     runtime_http_port: int = Field(default=DEFAULT_RUNTIME_HTTP_PORT, ge=1, le=65535)
     ready_timeout_s: float = Field(default=float(DEFAULT_HOST_READY_TIMEOUT_S), gt=0)
+    # Gym's /health wait once the sandbox runs; unset reuses ready_timeout_s, which also covers the pull.
+    bootstrap_timeout_s: float | None = Field(default=None, gt=0)
     rollout_timeout_s: float = Field(default=float(DEFAULT_ROLLOUT_TIMEOUT_S), gt=0)
+    rollout_chunk_size: int = Field(default=DEFAULT_ROLLOUT_CHUNK_SIZE, gt=0)
+    rollout_max_in_flight: int = Field(default=DEFAULT_ROLLOUT_MAX_IN_FLIGHT, gt=0)
+    rollout_max_attempts: int = Field(default=DEFAULT_ROLLOUT_MAX_ATTEMPTS, ge=1)
+    rollout_retry_backoff_s: float = Field(default=DEFAULT_ROLLOUT_RETRY_BACKOFF_S, ge=0)
     host_provider_options: dict[str, Any] = Field(default_factory=dict)
     entrypoint: list[str] | None = None
 
@@ -209,6 +226,8 @@ class NemoGymSandboxedConfig(BaseModel):
     sandboxed: bool = False
     host_provider: str = "opensandbox"
     environment_path: str | None = None
+    environment_offline: bool = False
+    reuse_image_gym_install: bool = False
     sandbox: SandboxConfig | None = None
     job_id: str = DEFAULT_JOB_ID
     episode_broker: dict[str, Any] = Field(default_factory=dict)
@@ -263,29 +282,34 @@ def build_bootstrap_env(
     max_request_bytes: int,
     max_response_bytes: int,
     dataset_path: str | None = None,
+    rollout_deadline_s: float | None = None,
     extra: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     """Build the bootstrap environment injected into the job sandbox.
 
-    Publishes the broker under both ``NMP_BROKER_*`` and Gym's ``BROKER_*_ENV`` names so the
+    Publishes the broker under both ``NHX_BROKER_*`` and Gym's ``BROKER_*_ENV`` names so the
     runtime and ``Sandbox`` agree on the endpoint.
     """
     env: dict[str, str] = {
-        "NMP_JOB_ID": job_id,
-        "NMP_ENVIRONMENT_PATH": environment_path,
-        "NMP_WORK_PATH": work_path,
-        "NMP_BROKER_URL": broker_url,
-        "NMP_BROKER_TOKEN": broker_token,
+        "NHX_JOB_ID": job_id,
+        "NHX_ENVIRONMENT_PATH": environment_path,
+        "NHX_WORK_PATH": work_path,
+        "NHX_BROKER_URL": broker_url,
+        "NHX_BROKER_TOKEN": broker_token,
         BROKER_URL_ENV: broker_url,
         BROKER_TOKEN_ENV: broker_token,
-        "NMP_MAX_REQUEST_BYTES": str(max_request_bytes),
-        "NMP_MAX_RESPONSE_BYTES": str(max_response_bytes),
+        "NHX_MAX_REQUEST_BYTES": str(max_request_bytes),
+        "NHX_MAX_RESPONSE_BYTES": str(max_response_bytes),
     }
+    if rollout_deadline_s is not None:
+        # The host gives up just before the client would, so a stuck batch comes back as a
+        # readable error instead of the client's own socket timeout.
+        env["NHX_ROLLOUT_DEADLINE_S"] = str(rollout_deadline_s)
     if dataset_path is not None:
-        env["NMP_DATASET_PATH"] = dataset_path
+        env["NHX_DATASET_PATH"] = dataset_path
     if extra:
         # `extra` carries caller-supplied variables, and a caller does not get to move the broker
-        # endpoint or the mount paths: pointing NMP_BROKER_URL at its own listener would take the
+        # endpoint or the mount paths: pointing NHX_BROKER_URL at its own listener would take the
         # host's rollouts outside the sandbox's mediation entirely.
         reserved = sorted(set(extra) & set(env))
         if reserved:
@@ -296,3 +320,23 @@ def build_bootstrap_env(
         env.update(dict(extra))
     validate_bootstrap_env(env)
     return env
+
+
+class GymHostBootstrapFailed(RuntimeError):
+    """The host started its HTTP server but never finished bootstrapping."""
+
+
+def render_host_error(error: object) -> str:
+    """Render a host error envelope, ending with the host's own output when it sent any."""
+    if not isinstance(error, Mapping):
+        return str(error) if error is not None else "no detail reported"
+
+    tail = error.get("host_output_tail")
+    summary = {key: value for key, value in error.items() if key != "host_output_tail"}
+    rendered = json.dumps(summary)[:2000]
+    if isinstance(tail, list) and tail:
+        # Every line the host sent. It already bounded the tail against its own response budget, and
+        # re-bounding here would drop diagnostics that survived the wire.
+        lines = "\n".join(str(line) for line in tail)
+        rendered = f"{rendered}\n--- gym host output ({len(tail)} lines) ---\n{lines}"
+    return rendered

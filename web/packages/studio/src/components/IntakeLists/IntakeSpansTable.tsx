@@ -7,15 +7,17 @@ import * as DataView from '@nemo/common/src/components/DataView/internal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
+import { JOB_POLLING_INTERVAL_LONG } from '@nemo/common/src/constants';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
-import { useListSpans } from '@nemo/sdk/generated/platform/api';
 import {
   SpanKind,
   type ListSpansMode,
   type SpanFilter,
   type SpanSortField,
 } from '@nemo/sdk/generated/platform/schema';
+import { useListSpans } from '@nemo/sdk/generated/platform/spans';
 import { Anchor, Text } from '@nvidia/foundations-react-core';
 import { IntakeTelemetryStatusBadge } from '@studio/components/IntakeDetail/IntakeComponents/IntakeTelemetryStatusBadge';
 import {
@@ -40,10 +42,10 @@ import {
 } from '@studio/util/intakeTelemetry';
 import { keepPreviousData } from '@tanstack/react-query';
 import { type ComponentProps, type FC, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { Link } from 'react-router';
 
 const SPAN_STATUS_FILTER_OPTIONS = [
-  { value: 'success', label: 'Success' },
+  { value: 'success', label: 'Completed' },
   { value: 'error', label: 'Error' },
   { value: 'cancelled', label: 'Cancelled' },
   { value: 'unknown', label: 'Unknown' },
@@ -144,7 +146,7 @@ const SeededIntakeSpansTable: FC<
   onRowClick,
   defaultStartedAtFilter,
 }) => {
-  const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const routeWorkspace = useWorkspaceFromPathIfExists();
   const workspace = workspaceProp ?? routeWorkspace;
   const hasWorkspace = Boolean(workspace);
@@ -153,9 +155,10 @@ const SeededIntakeSpansTable: FC<
     onRowClick === null
       ? undefined
       : (onRowClick ??
-        ((span: SpanTableRow) => {
+        ((span: SpanTableRow, _index: number, event: React.MouseEvent) => {
           if (span.trace_id) {
-            navigate(
+            openRow(
+              event,
               getIntakeSessionTraceRoute(requestWorkspace, span.session_id, span.trace_id, {
                 spanId: span.span_id,
               })
@@ -177,7 +180,8 @@ const SeededIntakeSpansTable: FC<
 
   const {
     data: spansResponse,
-    isFetching,
+    isLoading,
+    isPlaceholderData,
     error,
   } = useListSpans(
     requestWorkspace,
@@ -201,6 +205,7 @@ const SeededIntakeSpansTable: FC<
       query: {
         enabled: hasWorkspace,
         placeholderData: keepPreviousData,
+        refetchInterval: JOB_POLLING_INTERVAL_LONG,
       },
     }
   );
@@ -351,7 +356,7 @@ const SeededIntakeSpansTable: FC<
       }),
     ].filter(Boolean) as DataView.TanstackTable.ColumnDef<SpanTableRow>[];
 
-  if (error) {
+  if (error && !spansResponse) {
     return <ErrorMessage message={getErrorMessage(error)} />;
   }
 
@@ -369,7 +374,7 @@ const SeededIntakeSpansTable: FC<
         DataViewRoot: {
           data: tableData,
           totalCount: spansResponse?.pagination?.total_results,
-          requestStatus: isFetching ? 'loading' : undefined,
+          requestStatus: isLoading || isPlaceholderData ? 'loading' : undefined,
         },
         DataViewTableContent: {
           renderEmptyState: () =>

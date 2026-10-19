@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Framework-agnostic capability model for the NeMo Platform API.
+ * Framework-agnostic capability model for the NeMo Helix API.
  *
  * A "capability" is a single API operation (one path + method) described in a
  * way an LLM agent can discover and invoke through tool use. The metadata in
@@ -26,7 +26,7 @@ export type JsonSchema = Record<string, unknown>;
 export interface CapabilityMeta {
   /** Stable, unique identifier used as the tool/operation name. */
   readonly name: string;
-  /** Owning service spec, e.g. `platform`, `agents`, `evaluator`. */
+  /** Owning service spec, e.g. `platform`, `agents`, `evals`. */
   readonly service: string;
   readonly method: HttpMethod;
   /** Path template, e.g. `/apis/models/v2/workspaces/{workspace}/models`. */

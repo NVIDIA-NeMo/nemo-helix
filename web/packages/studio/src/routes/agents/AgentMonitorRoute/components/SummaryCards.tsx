@@ -53,12 +53,12 @@ export const SummaryCards: FC<Props> = ({ summary }) => {
       {tiles.map((tile) => (
         <Card key={tile.label}>
           <Stack gap="density-sm" padding="density-xl">
-            <Text kind="body/regular/sm" color="secondary">
+            <Text className="text-secondary" kind="body/regular/sm">
               {tile.label}
             </Text>
             <Text kind="body/bold/2xl">{tile.value}</Text>
             {tile.hint ? (
-              <Text kind="body/regular/sm" color="secondary" className="truncate" title={tile.hint}>
+              <Text kind="body/regular/sm" className="truncate text-secondary" title={tile.hint}>
                 {tile.hint}
               </Text>
             ) : null}

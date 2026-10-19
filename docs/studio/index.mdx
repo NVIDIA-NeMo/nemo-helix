@@ -14,60 +14,69 @@ Studio is still in early development. Many features are missing or should be exp
 
 </Note>
 
-NeMo Studio is the web app for AI development with NVIDIA NeMo Platform. It provides a workspace-oriented UI for managing local platform resources, reviewing agents, running agent optimization workflows, monitoring agent telemetry, and working with filesets, jobs, and secrets.
+NeMo Studio is the web app for AI development with NVIDIA NeMo Helix. It provides a workspace-oriented UI for managing local platform resources, reviewing agents, running agent optimization workflows, monitoring agent telemetry, and working with filesets, jobs, and secrets.
 
-The pages visible in your workspace depend on the installed plugins, enabled services, feature flags, and NeMo Platform version. A page documented here might be hidden in your deployment. Preview pages identify the feature flag that enables them.
+The pages visible in your workspace depend on the installed plugins, enabled services, feature flags, and NeMo Helix version. A page documented here might be hidden in your deployment. Preview pages identify the feature flag that enables them.
 
 ---
 
 ## Getting Started
 
-NeMo Studio is included with the platform. Follow the [Setup guide](/documentation/get-started) to start NeMo Platform, then access Studio at `/studio` on your running server.
+NeMo Studio is included with the platform. Follow the [Setup guide](/documentation/get-started) to start NeMo Helix, then access Studio at `/studio` on your running server.
 
 ## Features
 
 ### Current Workspace Navigation
 
-The current sidebar groups related pages under expandable parents. Selecting a parent that has its own landing page opens that page; use its chevron to expand the child entries.
+The current sidebar groups related pages under expandable parents. Selecting a parent that has its own landing page, such as **Agents**, opens that page; when it has child entries, use its chevron to expand them. A parent without a landing page, such as **Models**, only expands its child entries.
 
 | Sidebar group | Current entry point | Purpose and availability |
 | --- | --- | --- |
-| **Observability** | **Insights** | Review recurring agent failure patterns and optimization insights. Shown when optimization is enabled. |
-| **Observability** | **Traces** | Inspect ingested traces, spans, and session details. |
-| **Components** | **Agents** | Opens the agent list. Select an agent to access Deployments, Logs, Chat, Evaluations, and Details. |
-| **Components** | **Models** | Opens the base-model list directly. Expand **Models** for **Fine-tune**, **Model Evaluations**, **Playground**, and **Virtual Models**, when those capabilities are enabled. |
-| **Evaluations** | **Experiments** | Run evaluations against an agent, and review experiments, evaluations, sessions, and published results across the workspace. See [NeMo Studio Experiments](/documentation/studio/experiments). |
+| **Observability** | **Insights** | Review optimization insights generated from observed agent sessions. Shown when optimization is enabled; see [NeMo Studio Insights](/documentation/studio/insights). |
+| **Observability** | **Traces** | Inspect ingested traces, spans, and session details; see [NeMo Studio Traces](/documentation/studio/traces). |
+| **Components** | **Agents** | Opens the agent list. Select an agent to access the Overview, Deployments, Logs, Chat, Evaluations, Optimizations, Insights, and Details tabs. Optimizations and Insights are enabled by default and can be hidden by their feature flags. |
+| **Components** | **Models** | Expands to **Model Catalog**, **Evaluations**, **Fine-tuning**, **Playground**, **Deployments**, and **Virtual Models**, when those capabilities are enabled. **Model Catalog** opens the base-model list. **Evaluations** opens the Model Evaluations page; see [NeMo Studio Model Evaluations](/documentation/studio/model-evaluations). **Fine-tuning** opens the fine-tuned models list; see [NeMo Studio Fine-tuning](/documentation/studio/customization). **Playground** is disabled by default. **Virtual Models** appears only when the Guardrails preview feature is enabled. |
+| **Evaluations** | **Experiments** | Group evaluations for comparison, drill into results, and compare runs side by side; see [NeMo Studio Experiments](/documentation/studio/experiments). |
+| **Data** | **Datasets > Anonymizer** | Detect and protect PII in a dataset. Enabled by default; see [NeMo Studio Anonymizer](/documentation/studio/anonymizer). |
 | **Data** | **Datasets > Data Designer** | Build and monitor synthetic-data jobs. Other installed data plugins can appear below **Datasets**. |
+| **Data** | **Datasets > Safe Synthesizer** | Create and monitor privacy-preserving synthetic tabular data jobs. Enabled by default. |
 | **Governance** | **Guardrails** | Manage guardrail configurations. Disabled by default; see [Studio Guardrail Configs](/documentation/studio/guardrail-configs). |
-| **Governance** | **Iron Swarm** | Plugin-provided agent hardening UI. Appears only when the Iron Swarm plugin is installed; see [Studio Plugin UIs](/documentation/studio/plugins). |
+| **Governance** | **Agent Hardening** | Plugin-provided agent hardening UI. Appears only when the Agent Hardener plugin is installed; see [Studio Plugin UIs](/documentation/studio/plugins). |
 | **System** | **Filesets** | Organize and manage files used by agents and jobs. |
 | **System** | **Jobs** | Monitor jobs across enabled platform capabilities. |
+| **System** | **Settings** | View workspace settings and open **Secrets** and inference provider management. Enabled by default. |
 
-Additional entries, including Dashboard, Safe Synthesizer, Anonymizer, deployments, and workspace settings, appear when their corresponding capability or feature flag is enabled. Because plugins contribute navigation at runtime, an installed plugin can also add pages to an existing group or add a new group.
+**Dashboard** appears above the sidebar groups and is shown by default. **Playground** and **Virtual Models** are disabled by default and appear only when an administrator enables their feature flags. Because plugins contribute navigation at runtime, an installed plugin can also add pages to an existing group or add a new group.
 
 ### Agents
 
-Use the Studio Agents area to review Platform-managed agents, including the current Fabric-first `nemo-agents-spec-v1` experience, inspect agent details, deploy agents, open a chat session against a running deployment, and clean up deployments that are no longer needed.
+Use the Studio Agents area to review NeMo Helix-managed agents, including the current Fabric-first `nemo-agents-spec-v1` experience, inspect agent details, deploy agents, open a chat session against a running deployment, and clean up deployments that are no longer needed.
 
 For the full workflow, see [Studio Agents](/documentation/studio/agents).
 
-### Monitor
+### Insights
 
-Use **Agents \> Monitor** to inspect agent telemetry stored by the platform, including recent inference logs and token usage summaries.
+Use **Observability > Insights** to review optimization insights the analyst agent generates from observed agent sessions and traces, and drill into an insight's linked experiments and observed sessions. Use **Resolve** or **Delete** to close an open insight, and **Reopen** to restore a resolved or deleted one.
 
-For the full workflow, see [Studio Monitor](/documentation/studio/monitor).
+For the full workflow, see [Studio Insights](/documentation/studio/insights).
+
+### Traces
+
+Use **Observability > Traces** to inspect ingested telemetry in the Traces and Spans tables, and drill into a session's trace and span detail, with specialized views for LLM, tool, agent, chain, embedding, reranker, retriever, guardrail, and evaluator spans.
+
+For the full workflow, see [Studio Traces](/documentation/studio/traces).
 
 ### Guardrails
 
-When the preview feature is enabled, use **Governance > Guardrails** to view NeMo Guardrails configurations for the current workspace. The list shows each config's name, attached task model count, and rail count. Select a row to open the detail page, which displays the full configuration payload as formatted JSON.
+When the preview feature is enabled, use **Governance > Guardrails** to create and manage NeMo Guardrails configurations for the current workspace. Select **Create Guardrail** to add a configuration. The list shows each config's **Name**, **Main Model**, **Flows**, and **Updated** columns, with an optional **Created** column; use the row actions to **Duplicate** or **Delete** a config, or select several rows to delete them together.
 
-Guardrail configurations are created through the `nemo guardrail` CLI or Guardrails API.
+Select a row to open the detail page, which has **Configuration**, **Test and Validate**, and **Virtual Models** tabs. The **Configuration** tab lets you edit the main model and rails, and shows the full payload as read-only **Configuration JSON**. Select **Save Guardrail** to apply your changes or **Reset** to discard them. The detail page also offers **Duplicate** and **Delete** actions.
 
 For the full workflow, see [Studio Guardrail Configs](/documentation/studio/guardrail-configs).
 
 ### Virtual Models
 
-When the Guardrails preview feature is enabled, use **Models > Virtual Models** to inspect inference routes managed by the Inference Gateway. The list shows all user-created virtual models in the workspace — auto-provisioned passthrough routes are hidden. Select a row to open the details panel, which shows the default backend model when configured, and the ordered request, response, and post-response middleware pipelines attached to the route.
+When the Guardrails preview feature is enabled, use **Models > Virtual Models** to inspect inference routes managed by the Inference Gateway. The list shows all user-created virtual models in the workspace — auto-provisioned passthrough routes are hidden. Select a row, or choose **View** from its row actions, to open the virtual model's detail page. The **Details** tab shows the default backend model when configured, and the ordered request, response, and post-response middleware pipelines attached to the route. The **Chat** tab sends test prompts through the virtual model. Row actions also include **Chat** and **Delete**.
 
 Virtual models are created through the `nemo inference virtual-models` CLI or the Inference Gateway API.
 
@@ -75,11 +84,15 @@ For the full workflow, see [Studio Virtual Models](/documentation/studio/virtual
 
 ### Models
 
-Select **Models** to browse base-model entities available in the current workspace. There is no separate **Base Models** child entry in the sidebar: **Models** is both the expandable parent and the link to the base-model list. Base models include models registered in the workspace and default platform models.
+Select **Models > Model Catalog** to browse base-model entities available in the current workspace. **Models** is an expandable parent without its own landing page; **Model Catalog** is the base-model list. Base models include models registered in the workspace and default platform models.
 
-The Base Models page supports searching by model name, filtering by creation or update date, sorting alphabetically or by creation time, and showing only customizable models. Select a model card to open the model details side panel.
+The Model Catalog page supports searching by model name, filtering by creation or update date, sorting alphabetically or by creation time, and showing only customizable models. Select a model card to open the model details side panel.
 
-The model details side panel shows model metadata, parameters, and available actions. From the side panel you can open the chat playground for chat-capable models or navigate to model evaluation results.
+The model details side panel has **Model Details** and **Chat Playground** tabs. **Model Details** shows model metadata, parameters, and available actions, such as **Customize this Model** when fine-tuning is enabled. **Chat Playground** lets you chat with chat-capable models.
+
+### Fine-tuning
+
+Select **Models > Fine-tuning** to open the fine-tuned models list, start a fine-tuning job against an eligible base model, and track job progress. Enabled by default; see [NeMo Studio Fine-tuning](/documentation/studio/customization).
 
 ### Workspaces
 
@@ -91,9 +104,10 @@ Use **Filesets** to organize files by **purpose**, which determines which metada
 
 | Purpose | Use for |
 | ------- | ------- |
-| Generic | Default. Files that don't fit the Dataset or Model categories. Doesn't add purpose-specific metadata fields. |
-| Dataset | Training and evaluation data. Enables dataset-specific metadata, including schema information. Use built-in tools to transform data schemas with LLM assistance or create train/test splits. |
+| Generic | Files that don't fit the Dataset, Model, or Environment categories. Doesn't add purpose-specific metadata fields. |
+| Dataset | Default for new filesets. Training and evaluation data. Enables dataset-specific metadata, including schema information. Use built-in tools to transform data schemas with LLM assistance or create train/test splits. |
 | Model | Model weights and checkpoints. Enables model-specific metadata, including tool-calling and model configuration fields. |
+| Environment | Executable environment packages consumed by sandboxed workloads. |
 
 **Supported file formats:** JSON (`.json`), JSONL (`.jsonl`), CSV (`.csv`), and Parquet (`.parquet`). PDF, image, and other binary formats are not currently supported.
 
@@ -103,9 +117,15 @@ You can upload any file type into a fileset. However, each service supports spec
 | --------------------------------------------------- | ------------------------------------- |
 | [Data Designer](/documentation/design-synthetic-data) | `.json`, `.jsonl`, `.csv`, `.parquet` |
 
+### Anonymizer
+
+Use **Datasets > Anonymizer** to detect and protect PII in a dataset, choosing a substitute, redact, annotate, hash, or rewrite strategy, previewing the result on a few records, and running a full job. Enabled by default.
+
+For the full workflow, see [NeMo Studio Anonymizer](/documentation/studio/anonymizer).
+
 ### Safe Synthesizer
 
-Use **Data > Safe Synthesizer** to create and monitor privacy-preserving synthetic tabular data jobs from NeMo Studio. The Studio page provides access to job creation, job status, details, reports, and result downloads for Safe Synthesizer workflows.
+Use **Datasets > Safe Synthesizer** to create and monitor privacy-preserving synthetic tabular data jobs from NeMo Studio. The Studio page provides access to job creation, job status, details, reports, and result downloads for Safe Synthesizer workflows.
 
 For the full workflow, see [Synthesize Safe Data](/documentation/synthesize-safe-data).
 
@@ -115,9 +135,9 @@ Studio provides separate agent, model, and workspace evaluation views:
 
 | Location | What it shows |
 | -------- | ------------- |
-| **Agents > select an agent > Evaluations** | Active evaluation jobs, completed evaluations, and experiments scoped to the selected agent. |
-| **Models > Model Evaluations** | Model evaluation results. |
-| **Evaluations > Experiments** | Experiments and their evaluations across the workspace. See [NeMo Studio Experiments](/documentation/studio/experiments). |
+| **Agents > select an agent > Evaluations** | In-progress and completed evaluations in one table, and experiments scoped to the selected agent. Start a new run with **Run Evaluation**. |
+| **Models > Evaluations** | The Model Evaluations page: start a model evaluation with **Run Evaluation**, and review job results and per-row scores. See [Studio Model Evaluations](/documentation/studio/model-evaluations). |
+| **Evaluations > Experiments** | Experiments and their evaluations across the workspace, evaluation drill-down, and side-by-side run comparison. See [Studio Experiments](/documentation/studio/experiments). |
 
 Use the agent's **Evaluations** tab when reviewing how a specific agent performed. Use **Experiments** for the broader workspace history.
 
@@ -156,4 +176,4 @@ Navigate to **Jobs** in the workspace sidebar to see all jobs in the current wor
 
 ### Secrets
 
-Store API keys and credentials to securely connect with external providers. See [manage-secrets](/documentation/get-started/core-concepts/manage-secrets) for details.
+Store API keys and credentials to securely connect with external providers. Open **Settings** in the **System** group and select **Manage Secrets**. See [manage-secrets](/documentation/get-started/core-concepts/manage-secrets) for details.

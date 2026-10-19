@@ -9,7 +9,7 @@ import { CJobCancellableStatuses } from '@nemo/common/src/constants/query';
 import {
   getAnonymizerListRunJobsQueryKey,
   useAnonymizerCancelRunJob,
-} from '@nemo/sdk/generated/anonymizer/api';
+} from '@nemo/sdk/generated/anonymizer/anonymizer';
 import type { RunJob as AnonymizerJob } from '@nemo/sdk/generated/anonymizer/schema';
 import { DeleteJobModal } from '@studio/components/dataViews/AnonymizerJobsDataView/DeleteJobModal';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';

@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import anyio
 import pytest
 from fastapi import Request
-from nmp.core.files.app.backends.base import ByteRange
-from nmp.core.files.app.streaming import (
+from nhx.core.files.app.backends.base import ByteRange
+from nhx.core.files.app.streaming import (
     OctetStreamChunkProcessor,
     download_url,
     download_url_streaming,
@@ -17,7 +17,7 @@ from nmp.core.files.app.streaming import (
     streaming_file_upload,
     tee_stream,
 )
-from nmp.core.files.exceptions import InactivityTimeoutError
+from nhx.core.files.exceptions import InactivityTimeoutError
 from starlette.requests import ClientDisconnect
 
 
@@ -384,7 +384,7 @@ async def test_download_url_success():
 
     mock_session = create_mock_aiohttp_session(mock_response)
 
-    with patch("nmp.core.files.app.streaming.aiohttp.ClientSession", return_value=mock_session):
+    with patch("nhx.core.files.app.streaming.aiohttp.ClientSession", return_value=mock_session):
         result = await download_url("https://example.com/api/data")
 
         assert result == {"status": "ok", "data": "test"}
@@ -399,7 +399,7 @@ async def test_download_url_with_headers():
 
     mock_session = create_mock_aiohttp_session(mock_response)
 
-    with patch("nmp.core.files.app.streaming.aiohttp.ClientSession", return_value=mock_session):
+    with patch("nhx.core.files.app.streaming.aiohttp.ClientSession", return_value=mock_session):
         result = await download_url("https://example.com/api/data", headers={"Authorization": "Bearer token"})
 
         assert result == {"authenticated": True}
@@ -544,7 +544,7 @@ async def test_download_url_preserves_encoded_url():
         "https://api.ngc.nvidia.com/v2/models/org/nvidia/team/nemo/test/1.0/files?path=model.yaml&key=a%2Bb%3Dc"
     )
 
-    with patch("nmp.core.files.app.streaming.aiohttp.ClientSession", return_value=mock_session):
+    with patch("nhx.core.files.app.streaming.aiohttp.ClientSession", return_value=mock_session):
         await download_url(encoded_url, headers={"Authorization": "Bearer token"})
 
     # Verify the URL was passed with encoded=True (yarl URL object)

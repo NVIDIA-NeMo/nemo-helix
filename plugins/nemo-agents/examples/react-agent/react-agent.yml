@@ -4,7 +4,7 @@
 # nemotron-agent.yml
 #
 # A ReAct agent with Wikipedia search and datetime tools, backed by
-# nvidia/nemotron-3-nano-30b-a3b — a compact reasoning model from NVIDIA.
+# nvidia/nemotron-3.5-lightning-30b-a3b — a compact reasoning model from NVIDIA.
 #
 # Quick local test (no platform, requires NVIDIA API key):
 #   export NVIDIA_API_KEY=nvapi-...
@@ -20,7 +20,7 @@
 #       --input "Who invented the telephone? Also what time is it?"
 #
 # Model entity name (auto-created by models controller from nvidia-build discovery):
-#   nvidia/nemotron-3-nano-30b-a3b  →  nvidia-nemotron-3-nano-30b-a3b
+#   nvidia/nemotron-3.5-lightning-30b-a3b  →  nvidia-nemotron-3-5-lightning-30b-a3b
 
 functions:
   wiki:

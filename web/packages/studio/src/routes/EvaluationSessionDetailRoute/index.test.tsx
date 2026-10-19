@@ -1,10 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getListTracesQueryKey } from '@nemo/sdk/generated/platform/traces';
 import { mockTracesPage } from '@studio/mocks/intake/telemetry';
+import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { EvaluationSessionDetailRoute } from '@studio/routes/EvaluationSessionDetailRoute';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
+import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
 const renderSessionDetail = (search = '') =>
@@ -22,7 +25,7 @@ describe('EvaluationSessionDetailRoute', () => {
   it('renders an evaluation session summary', async () => {
     const traceModes: Array<string | null> = [];
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/traces', ({ request }) => {
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), ({ request }) => {
         const url = new URL(request.url);
         traceModes.push(url.searchParams.get('mode'));
         const sessionId = url.searchParams.get('filter[session_id]');
@@ -49,10 +52,12 @@ describe('EvaluationSessionDetailRoute', () => {
   });
 
   it('retains evaluation context while rendering a selected trace', async () => {
+    const user = userEvent.setup();
     renderSessionDetail('?traceId=trace-agent-run-001');
 
     expect(await screen.findByText('Test case: case-0042')).toBeInTheDocument();
-    expect(screen.getByText('Evaluation Context')).toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: 'Trace' }));
+    expect(await screen.findByText('Evaluation Context')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Intake' })).not.toBeInTheDocument();
   });
 

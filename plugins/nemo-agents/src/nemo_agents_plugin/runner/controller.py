@@ -7,7 +7,7 @@ Registered under the ``nemo.controllers`` entry-point group so the platform
 runner manages its lifecycle (startup, reconcile loop, graceful shutdown)
 without any wiring in :class:`~nemo_agents_plugin.service.AgentsService`.
 
-Every ``interval_seconds`` (driven by :class:`~nemo_platform_plugin.controller.NemoController`)
+Every ``interval_seconds`` (driven by :class:`~nemo_helix_plugin.controller.NemoController`)
 it queries the Entities Service for ``agent_deployment`` entities and drives
 state transitions:
 
@@ -27,8 +27,9 @@ import asyncio
 import logging
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import ClassVar, cast
 
+import httpx
 from nemo_agents_plugin.config import ControllerConfig
 from nemo_agents_plugin.entities import (
     NEMO_AGENTS_SPEC_CONFIG_FORMAT,
@@ -39,15 +40,13 @@ from nemo_agents_plugin.entities import (
 )
 from nemo_agents_plugin.runner.backend import RunnerBackend
 from nemo_agents_plugin.runner.registry import RunnerBackendRegistry
-from nemo_platform_plugin.controller import NemoController
-from nemo_platform_plugin.entity_client import (
+from nemo_deployments_plugin.endpoint_transport import EndpointTransport
+from nemo_helix_plugin.controller import NemoController
+from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
     NemoEntityNotFoundError,
 )
-
-if TYPE_CHECKING:
-    import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +61,7 @@ def _is_fabric_deployment(dep: AgentDeployment) -> bool:
 class AgentDeploymentController(NemoController):
     """Reconciles ``agent_deployment`` entities against a :class:`RunnerBackend`.
 
-    Extends :class:`~nemo_platform_plugin.controller.NemoController` so the platform
+    Extends :class:`~nemo_helix_plugin.controller.NemoController` so the platform
     runner manages its loop, startup, and graceful shutdown automatically.
     Register this class under ``nemo.controllers`` in ``pyproject.toml``; the
     platform will instantiate it and wire it into the thread-based
@@ -80,10 +79,16 @@ class AgentDeploymentController(NemoController):
         self._entities: NemoEntitiesClient | None = None
         self._controller_config: ControllerConfig | None = None
         self._starting_since: dict[tuple[str, str], float] = {}
+        # Container deployments that were running and went back to starting because the
+        # deployments plugin is recovering them. The plugin owns their recovery deadline
+        # (drift recovery, then its starting timeout, both ending in FAILED), so the
+        # first-start health timeout here must not delete them. In-memory: after a
+        # controller restart a recovering deployment is timed like a first start.
+        self._recovering: set[tuple[str, str]] = set()
         self._runtime_instance_ids: dict[tuple[str, str], str] = {}
         self._pending_restart_reconciliations: dict[str, datetime] = {}
         self._runtime_cleanup_tasks: set[asyncio.Task[None]] = set()
-        self._runtime_health_client: httpx.AsyncClient | None = None
+        self._runtime_health_clients: dict[EndpointTransport, httpx.AsyncClient] = {}
         self._startup_sessions_reconciled = False
         self._startup_session_reconciliation_at: datetime | None = None
         self._interval_seconds: float = 5.0  # default; overwritten in on_startup
@@ -135,10 +140,9 @@ class AgentDeploymentController(NemoController):
         # even when the agents controller is never started.  Do not hoist.
         from nemo_agents_plugin.config import AgentsConfig
         from nemo_agents_plugin.runner.registry import set_runner_registry
-        from nemo_platform_plugin.client.adapter import client_from_platform
-        from nemo_platform_plugin.entities import EntityClient as _EntityClient
-        from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-        from nemo_platform_plugin.sdk_provider import get_async_platform_sdk
+        from nemo_helix_plugin.client_provider import get_async_nemo_client
+        from nemo_helix_plugin.entities import EntityClient as _EntityClient
+        from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 
         config = AgentsConfig.get()
         self._interval_seconds = float(config.controller.interval_seconds)
@@ -146,14 +150,14 @@ class AgentDeploymentController(NemoController):
 
         # Build a service-principal entity client for the controller background task.
         #
-        # We use get_async_platform_sdk() directly (not entity_client.as_service()) because
+        # We use get_async_nemo_client() directly (not entity_client.as_service()) because
         # on_startup() runs outside request scope — there is no existing EntityClient to elevate.
-        # get_async_platform_sdk(as_service=..., internal=True) applies the same headers that
-        # as_service(internal=True) would: X-NMP-Principal-Id: service:agents plus
+        # get_async_nemo_client(as_service=..., internal=True) applies the same headers that
+        # as_service(internal=True) would: X-NHX-Principal-Id: service:agents plus
         # MARK_INTERNAL_REQUEST_HEADERS.  It also wires the shared HTTP client and URL router,
         # which as_service() would inherit from an existing client but we must set up from scratch.
-        sdk = get_async_platform_sdk(as_service="agents", internal=True)
-        entities_api = client_from_platform(sdk, AsyncEntitiesClient)
+        client = get_async_nemo_client(as_service="agents", internal=True)
+        entities_api = AsyncEntitiesClient.from_client(client)
         self._entities = _EntityClient(entities_api)
 
         registry = RunnerBackendRegistry(config)
@@ -170,9 +174,9 @@ class AgentDeploymentController(NemoController):
             task.cancel()
         if cleanup_tasks:
             await asyncio.gather(*cleanup_tasks, return_exceptions=True)
-        if self._runtime_health_client is not None:
-            await self._runtime_health_client.aclose()
-            self._runtime_health_client = None
+        for client in self._runtime_health_clients.values():
+            await client.aclose()
+        self._runtime_health_clients.clear()
         if self._registry is not None:
             await self._registry.shutdown()
         logger.info("AgentDeploymentController shut down.")
@@ -211,7 +215,7 @@ class AgentDeploymentController(NemoController):
     async def reconcile_one(self, obj: object) -> None:
         """Drive the state machine for a single deployment entity.
 
-        :class:`~nmp.common.entities.client.EntityConflictError` is caught and
+        :class:`~nhx.common.entities.client.EntityConflictError` is caught and
         logged as a debug message (optimistic lock; retry next cycle) so it does
         not propagate to the base class's generic error handler.
         """
@@ -453,20 +457,15 @@ class AgentDeploymentController(NemoController):
 
     async def _read_runtime_instance(self, dep: AgentDeployment) -> tuple[str, datetime] | None:
         """Read the current Fabric server process identity without persisting it."""
-        from nemo_agents_plugin.deployment_routing import get_deployment_endpoint
+        from nemo_agents_plugin.deployment_routing import get_deployment_endpoint, get_deployment_transport
 
         endpoint = get_deployment_endpoint(dep)
         if endpoint is None:
             return None
-        if self._runtime_health_client is None:
-            import httpx
-
-            self._runtime_health_client = httpx.AsyncClient(
-                timeout=_RUNTIME_HEALTH_TIMEOUT_SECONDS,
-                follow_redirects=False,
-            )
         try:
-            response = await self._runtime_health_client.get(f"{endpoint.rstrip('/')}/health")
+            transport = get_deployment_transport(dep)
+            health_url, routing_headers = transport.target(f"{endpoint.rstrip('/')}/health")
+            response = await self._runtime_health_client(transport).get(health_url, headers=routing_headers)
             response.raise_for_status()
             health = response.json()
             runtime_instance_id = health.get("runtime_instance_id")
@@ -484,6 +483,17 @@ class AgentDeploymentController(NemoController):
         if runtime_started_at.tzinfo is None or runtime_started_at.utcoffset() is None:
             return None
         return runtime_instance_id, runtime_started_at.astimezone(UTC)
+
+    def _runtime_health_client(self, transport: EndpointTransport) -> httpx.AsyncClient:
+        client = self._runtime_health_clients.get(transport)
+        if client is None:
+            client = httpx.AsyncClient(
+                timeout=_RUNTIME_HEALTH_TIMEOUT_SECONDS,
+                follow_redirects=False,
+                **transport.client_kwargs(),
+            )
+            self._runtime_health_clients[transport] = client
+        return client
 
     async def _expire_session_if_due(
         self,
@@ -538,21 +548,21 @@ class AgentDeploymentController(NemoController):
         task.add_done_callback(self._runtime_cleanup_tasks.discard)
 
     async def _start_deployment(self, dep: AgentDeployment) -> None:
-        """pending -> starting: allocate port (subprocess) and spawn via the mode backend."""
+        """pending -> starting: spawn via the mode backend."""
         await self._reconcile_deployment_sessions_after_restart(dep)
         t0 = time.perf_counter()
         backend = self._backend_for(dep)
-        port = backend.allocate_port()
         try:
             info = await backend.create_deployment(
                 workspace=dep.workspace,
                 name=dep.name,
                 config=dep.config,
-                port=port,
+                port=0,
                 agent=dep.agent,
                 image=dep.image or None,
                 deployment_mode=dep.deployment_mode,
                 created_by=dep.created_by,
+                auth_context=dep.auth_context,
                 resources=dep.compute.resources if dep.compute is not None else None,
                 secrets=dep.secrets or None,
                 use_image_entrypoint=dep.use_image_entrypoint,
@@ -571,6 +581,9 @@ class AgentDeploymentController(NemoController):
             return
 
         spawn_ms = (time.perf_counter() - t0) * 1000
+        if info.staged_spec is not None:
+            dep.spec_revision = info.staged_spec.revision
+            dep.spec_tracked_revision = info.staged_spec.tracked_revision
         dep.status = info.status
         dep.port = info.port
         dep.pid = info.pid
@@ -604,12 +617,13 @@ class AgentDeploymentController(NemoController):
         no agents-side loopback health check.
         """
         # setdefault — without it, missing key returns now() forever, never times out.
-        since = self._starting_since.setdefault((dep.workspace, dep.name), time.monotonic())
+        key = (dep.workspace, dep.name)
+        since = self._starting_since.setdefault(key, time.monotonic())
         timeout = self.controller_config.health_check_timeout_seconds
         elapsed = time.monotonic() - since
         remaining = timeout - elapsed
 
-        if remaining <= 0:
+        if remaining <= 0 and key not in self._recovering:
             dep.status = "failed"
             dep.error = f"Health check timed out after {timeout}s."
             self._starting_since.pop((dep.workspace, dep.name), None)
@@ -628,6 +642,7 @@ class AgentDeploymentController(NemoController):
             dep.status = "failed"
             dep.error = info.error or "Process exited unexpectedly during startup."
             self._starting_since.pop((dep.workspace, dep.name), None)
+            self._recovering.discard(key)
             try:
                 if is_container_deployment_mode(dep.deployment_mode):
                     await backend.delete_deployment(dep.workspace, dep.name)
@@ -652,6 +667,8 @@ class AgentDeploymentController(NemoController):
             if info.status == "running":
                 dep.status = "running"
                 dep.endpoint = ""
+                dep.error = ""
+                self._recovering.discard(key)
                 self._starting_since.pop((dep.workspace, dep.name), None)
                 await self._observe_runtime_instance(dep)
                 await self._save(dep)
@@ -712,6 +729,18 @@ class AgentDeploymentController(NemoController):
             dep.error = info.error or "Process exited unexpectedly."
             await self._save(dep)
             logger.warning("Deployment '%s' failed: %s", dep.name, dep.error)
+        elif info.status == "starting" and is_container_deployment_mode(dep.deployment_mode):
+            # The workload went offline (e.g. its sandbox was stopped) and the deployments
+            # plugin is recovering it; report that instead of claiming it still serves.
+            await self._reconcile_deployment_sessions_after_restart(dep)
+            key = (dep.workspace, dep.name)
+            dep.status = "starting"
+            dep.error = "Runtime went offline; the deployments plugin is recovering it."
+            dep.endpoints = list(info.endpoints)
+            self._recovering.add(key)
+            self._starting_since[key] = time.monotonic()
+            await self._save(dep)
+            logger.warning("Deployment '%s' is being recovered by the deployments plugin.", dep.name)
         else:
             if info.status == "starting":
                 await self._reconcile_deployment_sessions_after_restart(dep)
@@ -744,6 +773,7 @@ class AgentDeploymentController(NemoController):
             return
 
         self._starting_since.pop((dep.workspace, dep.name), None)
+        self._recovering.discard((dep.workspace, dep.name))
         self._runtime_instance_ids.pop((dep.workspace, dep.name), None)
         if dep.id is not None:
             self._pending_restart_reconciliations.pop(dep.id, None)

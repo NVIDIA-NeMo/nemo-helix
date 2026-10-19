@@ -4,20 +4,15 @@
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { GradientBackground } from '@nemo/common/src/components/GradientBackground';
 import ModelEvaluationIcon from '@nemo/common/src/svgs/model_evaluation.svg?react';
-import ModelPromptTuningIcon from '@nemo/common/src/svgs/model_prompt_tuning.svg?react';
 import SafeSynthesizerLogo from '@nemo/common/src/svgs/safe_synthesizer_logo.svg?react';
 import { Grid, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
 import {
   CUSTOMIZER_ENABLED,
-  EVALUATOR_ENABLED,
+  EVALS_ENABLED,
   MODEL_COMPARE_ENABLED,
   SAFE_SYNTHESIZER_ENABLED,
 } from '@studio/constants/environment';
-import {
-  LINK_DOCS_MODELS,
-  LINK_DOCS_SAFE_SYNTHESIZER,
-  LINK_DOCS_STUDIO_EVALUATION,
-} from '@studio/constants/links';
+import { LINK_DOCS_SAFE_SYNTHESIZER, LINK_DOCS_STUDIO_EVALUATION } from '@studio/constants/links';
 import { ROUTES } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
@@ -43,15 +38,15 @@ export const WorkspaceDashboardRoute: FC = () => {
             slotHeading="Welcome to NeMo Studio"
             slotDescription={
               CUSTOMIZER_ENABLED
-                ? 'Fine-tune and evaluate models, generate synthetic data, and monitor NeMo Platform jobs.'
-                : 'Evaluate models, generate synthetic data, and monitor NeMo Platform jobs.'
+                ? 'Fine-tune and evaluate models, generate synthetic data, and monitor NeMo Helix jobs.'
+                : 'Evaluate models, generate synthetic data, and monitor NeMo Helix jobs.'
             }
           />
 
           <Stack gap="density-lg" data-tour="dashboard-get-started">
             <Stack gap="density-sm">
               <Text kind="title/md">Get Started</Text>
-              <Text kind="body/regular/sm" color="secondary">
+              <Text className="text-secondary" kind="body/regular/sm">
                 Kick off a new job that matches your use case.
               </Text>
             </Stack>
@@ -65,20 +60,8 @@ export const WorkspaceDashboardRoute: FC = () => {
                   actionHref={getModelCompareRoute(workspace)}
                 />
               )}
-              {/* Prompt Tune a Model */}
-              {CUSTOMIZER_ENABLED && (
-                <DashboardCard
-                  icon={<ModelPromptTuningIcon className="w-8 h-8" />}
-                  title="Prompt Tune a Model"
-                  description="Optimize model responses using prompt-based techniques without fine-tuning."
-                  docsUrl={LINK_DOCS_MODELS}
-                  actionLabel="Prompt Tune"
-                  actionHref={generatePath(ROUTES.workspace.promptTuningForm, { workspace })}
-                />
-              )}
-
               {/* Evaluate a Model or Dataset */}
-              {EVALUATOR_ENABLED && (
+              {EVALS_ENABLED && (
                 <DashboardCard
                   icon={<ModelEvaluationIcon className="w-8 h-8" />}
                   title="Evaluate a Model or Dataset"

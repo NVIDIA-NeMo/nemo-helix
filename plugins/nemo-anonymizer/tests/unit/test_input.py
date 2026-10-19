@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from unittest.mock import AsyncMock
 
 import pytest
 from nemo_anonymizer_plugin.app import input as input_module
@@ -17,7 +16,39 @@ from nemo_anonymizer_plugin.app.input import (
     prepare_anonymizer_input_async,
     validate_anonymizer_input_source,
 )
-from nemo_platform_plugin.jobs.file_manager import TmpDirPath
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
+from nemo_helix_plugin.jobs.file_manager import TmpDirPath
+
+FilesetClient = FilesClient | AsyncFilesClient
+
+
+class FakeFilesetFileSystem:
+    def __init__(self, *, client: FilesetClient) -> None:
+        self.client = client
+
+
+def _async_platform() -> AsyncNemoClient:
+    return AsyncNemoClient(base_url="http://platform.test", workspace="team-a")
+
+
+def _platform() -> NemoClient:
+    return NemoClient(base_url="http://platform.test", workspace="team-a")
+
+
+def _patch_files_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    def client_from_platform(
+        sdk: NemoClient | AsyncNemoClient,
+        client_cls: type[FilesClient] | type[AsyncFilesClient],
+    ) -> FilesetClient:
+        base_url = str(sdk.base_url).rstrip("/")
+        if client_cls is FilesClient:
+            return FilesClient(base_url=base_url, workspace=sdk.workspace)
+        return AsyncFilesClient(base_url=base_url, workspace=sdk.workspace)
+
+    monkeypatch.setattr(input_module, "FilesetFileSystem", FakeFilesetFileSystem)
+    monkeypatch.setattr(input_module, "AsyncFilesetFileSystem", FakeFilesetFileSystem)
+    monkeypatch.setattr(input_module, "client_from_platform", client_from_platform)
 
 
 def test_classifies_supported_sources() -> None:
@@ -74,12 +105,12 @@ async def test_prepare_fileset_materializes_before_building_upstream_input(
             *,
             workspace: str,
             fileset_name: str,
-            sdk: object,
+            filesystem: FakeFilesetFileSystem,
             ensure_fileset_exists: bool,
         ) -> None:
             captured["workspace"] = workspace
             captured["fileset_name"] = fileset_name
-            captured["sdk"] = sdk
+            captured["filesystem"] = filesystem
             captured["ensure_fileset_exists"] = ensure_fileset_exists
 
         async def download_from_url(self, url: str) -> TmpDirPath:
@@ -87,10 +118,11 @@ async def test_prepare_fileset_materializes_before_building_upstream_input(
             return tmp_dir_path
 
     monkeypatch.setattr(input_module, "AsyncFilesetFileManager", FakeAsyncFilesetFileManager)
+    _patch_files_client(monkeypatch)
 
     prepared = await prepare_anonymizer_input_async(
         AnonymizerInputSpec(source="fs#data/input.csv", text_column="body"),
-        sdk=AsyncMock(),
+        sdk=_async_platform(),
         workspace="team-a",
         allow_local_paths=False,
     )
@@ -113,18 +145,26 @@ async def test_prepare_fileset_rejects_downloaded_directory(
     tmp_dir_path = TmpDirPath(path=download_dir, tmp_dir=download_dir)
 
     class FakeAsyncFilesetFileManager:
-        def __init__(self, **kwargs: object) -> None:
-            pass
+        def __init__(
+            self,
+            *,
+            workspace: str,
+            fileset_name: str,
+            filesystem: FakeFilesetFileSystem,
+            ensure_fileset_exists: bool,
+        ) -> None:
+            del workspace, fileset_name, filesystem, ensure_fileset_exists
 
         async def download_from_url(self, url: str) -> TmpDirPath:
             return tmp_dir_path
 
     monkeypatch.setattr(input_module, "AsyncFilesetFileManager", FakeAsyncFilesetFileManager)
+    _patch_files_client(monkeypatch)
 
     with pytest.raises(AnonymizerInvalidConfigError, match="directory"):
         await prepare_anonymizer_input_async(
             AnonymizerInputSpec(source="fs#data"),
-            sdk=AsyncMock(),
+            sdk=_async_platform(),
             workspace="team-a",
             allow_local_paths=False,
         )
@@ -143,15 +183,24 @@ async def test_prepare_fileset_cleans_download_when_upstream_input_rejects_data(
     tmp_dir_path = TmpDirPath(path=downloaded, tmp_dir=download_dir)
 
     class FakeAsyncFilesetFileManager:
-        def __init__(self, **kwargs: object) -> None:
-            pass
+        def __init__(
+            self,
+            *,
+            workspace: str,
+            fileset_name: str,
+            filesystem: FakeFilesetFileSystem,
+            ensure_fileset_exists: bool,
+        ) -> None:
+            del workspace, fileset_name, filesystem, ensure_fileset_exists
 
         async def download_from_url(self, url: str) -> TmpDirPath:
             return tmp_dir_path
 
     monkeypatch.setattr(input_module, "AsyncFilesetFileManager", FakeAsyncFilesetFileManager)
+    _patch_files_client(monkeypatch)
 
-    def raise_bad_input(*args: object, **kwargs: object) -> object:
+    def raise_bad_input(data: AnonymizerInputSpec, *, source: str) -> input_module.AnonymizerInput:
+        del data, source
         raise AnonymizerInvalidConfigError("bad input")
 
     monkeypatch.setattr(input_module, "_make_upstream_input", raise_bad_input)
@@ -159,7 +208,7 @@ async def test_prepare_fileset_cleans_download_when_upstream_input_rejects_data(
     with pytest.raises(AnonymizerInvalidConfigError, match="bad input"):
         await prepare_anonymizer_input_async(
             AnonymizerInputSpec(source="fs#input.csv"),
-            sdk=AsyncMock(),
+            sdk=_async_platform(),
             workspace="team-a",
             allow_local_paths=False,
         )
@@ -177,15 +226,24 @@ def test_prepare_fileset_sync_cleans_download_when_upstream_input_rejects_data(
     tmp_dir_path = TmpDirPath(path=downloaded, tmp_dir=download_dir)
 
     class FakeFilesetFileManager:
-        def __init__(self, **kwargs: object) -> None:
-            pass
+        def __init__(
+            self,
+            *,
+            workspace: str,
+            fileset_name: str,
+            filesystem: FakeFilesetFileSystem,
+            ensure_fileset_exists: bool,
+        ) -> None:
+            del workspace, fileset_name, filesystem, ensure_fileset_exists
 
         def download_from_url(self, url: str) -> TmpDirPath:
             return tmp_dir_path
 
     monkeypatch.setattr(input_module, "FilesetFileManager", FakeFilesetFileManager)
+    _patch_files_client(monkeypatch)
 
-    def raise_bad_input(*args: object, **kwargs: object) -> object:
+    def raise_bad_input(data: AnonymizerInputSpec, *, source: str) -> input_module.AnonymizerInput:
+        del data, source
         raise AnonymizerInvalidConfigError("bad input")
 
     monkeypatch.setattr(input_module, "_make_upstream_input", raise_bad_input)
@@ -193,7 +251,7 @@ def test_prepare_fileset_sync_cleans_download_when_upstream_input_rejects_data(
     with pytest.raises(AnonymizerInvalidConfigError, match="bad input"):
         prepare_anonymizer_input(
             AnonymizerInputSpec(source="fs#input.csv"),
-            sdk=object(),  # type: ignore[arg-type]
+            sdk=_platform(),
             workspace="team-a",
             allow_local_paths=False,
         )
@@ -202,18 +260,19 @@ def test_prepare_fileset_sync_cleans_download_when_upstream_input_rejects_data(
 
 @pytest.mark.asyncio
 async def test_prepare_fileset_with_sync_sdk_runs_in_worker_thread(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     event_loop_thread = threading.get_ident()
-    sentinel = object()
+    sentinel_path = tmp_path / "input.csv"
+    sentinel_path.write_text("text\nhello\n")
+    sentinel = input_module.AnonymizerInput(source=str(sentinel_path))
     captured: dict[str, object] = {}
-
-    class FakeSyncPlatform: ...
 
     def fake_prepare_anonymizer_input(
         data: AnonymizerInputSpec,
         *,
-        sdk: object,
+        sdk: NemoClient,
         workspace: str,
         allow_local_paths: bool,
     ) -> input_module.PreparedAnonymizerInput:
@@ -222,15 +281,14 @@ async def test_prepare_fileset_with_sync_sdk_runs_in_worker_thread(
         captured["sdk"] = sdk
         captured["workspace"] = workspace
         captured["allow_local_paths"] = allow_local_paths
-        return input_module.PreparedAnonymizerInput(input=sentinel)  # type: ignore[arg-type]
+        return input_module.PreparedAnonymizerInput(input=sentinel)
 
-    sdk = FakeSyncPlatform()
-    monkeypatch.setattr(input_module, "NeMoPlatform", FakeSyncPlatform)
+    sdk = _platform()
     monkeypatch.setattr(input_module, "prepare_anonymizer_input", fake_prepare_anonymizer_input)
 
     prepared = await prepare_anonymizer_input_async(
         AnonymizerInputSpec(source="fs#input.csv"),
-        sdk=sdk,  # type: ignore[arg-type]
+        sdk=sdk,
         workspace="team-a",
         allow_local_paths=False,
     )

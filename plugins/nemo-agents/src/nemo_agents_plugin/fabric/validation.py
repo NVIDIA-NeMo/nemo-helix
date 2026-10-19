@@ -15,7 +15,7 @@ from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.fabric.translator import FabricTranslationError, translate_agent_config
 
 # CI type-checks this plugin via ty extra-paths without installing nemo-agents deps.
-from nemo_fabric import Fabric, FabricConfig, FabricConfigError  # ty: ignore[unresolved-import]
+from nemo_fabric import Fabric, FabricConfig, FabricConfigError
 from pydantic import ValidationError
 
 FABRIC_VALIDATION_TIMEOUT_SECONDS = 60.0
@@ -30,7 +30,7 @@ class FabricValidationResult:
 
 
 @dataclass(frozen=True, slots=True)
-class PlatformFabricValidationResult:
+class HelixFabricValidationResult:
     """Result of Platform config translation and Fabric validation."""
 
     agent_config: AgentConfig
@@ -58,7 +58,7 @@ async def validate_platform_agent_config(
     base_dir: Path | str,
     harness_name: str | None = None,
     fabric: Any | None = None,
-) -> PlatformFabricValidationResult:
+) -> HelixFabricValidationResult:
     """Translate and validate a Platform-owned agent config with Fabric."""
 
     agent_config = _coerce_agent_config(config)
@@ -68,7 +68,7 @@ async def validate_platform_agent_config(
         raise FabricValidationError(f"Fabric config translation failed: {error}") from error
 
     validation_result = await validate_fabric_config(fabric_config, base_dir=base_dir, fabric=fabric)
-    return PlatformFabricValidationResult(
+    return HelixFabricValidationResult(
         agent_config=agent_config,
         fabric_config=fabric_config,
         fabric_validation_result=validation_result,

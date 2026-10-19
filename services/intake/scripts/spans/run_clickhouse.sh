@@ -11,10 +11,10 @@ clickhouse_version="$(tr -d '[:space:]' < "${script_dir}/../../.clickhouse-versi
 # Preserve the script's historical credential overrides while delegating all
 # lifecycle, identity, port allocation, and readiness logic to Intake's Python
 # provisioner.
-export NMP_INTAKE_CLICKHOUSE_USER="${NMP_INTAKE_CLICKHOUSE_USER:-${CLICKHOUSE_USER:-default}}"
-export NMP_INTAKE_CLICKHOUSE_PASSWORD="${NMP_INTAKE_CLICKHOUSE_PASSWORD:-${CLICKHOUSE_PASSWORD:-}}"
-export NMP_INTAKE_CLICKHOUSE_IMAGE="${NMP_INTAKE_CLICKHOUSE_IMAGE:-${CLICKHOUSE_IMAGE:-clickhouse/clickhouse-server:${clickhouse_version}}}"
-export NMP_INTAKE_CLICKHOUSE_DATA_DIR="${NMP_INTAKE_CLICKHOUSE_DATA_DIR:-${CLICKHOUSE_DATA_DIR:-${repo_root}/tmp/intake-clickhouse}}"
+export NHX_INTAKE_CLICKHOUSE_USER="${NHX_INTAKE_CLICKHOUSE_USER:-${CLICKHOUSE_USER:-default}}"
+export NHX_INTAKE_CLICKHOUSE_PASSWORD="${NHX_INTAKE_CLICKHOUSE_PASSWORD:-${CLICKHOUSE_PASSWORD:-}}"
+export NHX_INTAKE_CLICKHOUSE_IMAGE="${NHX_INTAKE_CLICKHOUSE_IMAGE:-${CLICKHOUSE_IMAGE:-clickhouse/clickhouse-server:${clickhouse_version}}}"
+export NHX_INTAKE_CLICKHOUSE_DATA_DIR="${NHX_INTAKE_CLICKHOUSE_DATA_DIR:-${CLICKHOUSE_DATA_DIR:-${repo_root}/tmp/intake-clickhouse}}"
 
 cd "${repo_root}"
-exec uv run python -m nmp.intake.local_clickhouse --legacy-script-mode "$@"
+exec uv run python -m nhx.intake.local_clickhouse --legacy-script-mode "$@"

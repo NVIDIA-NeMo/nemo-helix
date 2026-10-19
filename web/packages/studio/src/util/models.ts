@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ResourceRef } from '@nemo/common/src/types';
-import { getGatewayProxyGetQueryKey } from '@nemo/sdk/generated/platform/api';
+import { getGatewayProxyGetQueryKey } from '@nemo/sdk/generated/platform/inference-gateway';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ChatCompletionTool } from 'openai/resources/index.mjs';

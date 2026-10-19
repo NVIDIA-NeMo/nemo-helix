@@ -39,6 +39,19 @@ _SIMS = [
 ]
 
 
+class _FakeClient:
+    """Stand-in for the typed client that records whether it was closed."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def __aenter__(self) -> "_FakeClient":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        self.closed = True
+
+
 def _intake_subject(**overrides) -> Subject:
     config = {"agent": "a", "workspace": "w", "base_url": "u", **overrides}
     return Subject(name="nvq", type="intake", config=config)
@@ -88,7 +101,7 @@ def test_intake_check_basic_auth_reports_missing_password_env_name(monkeypatch: 
 async def test_intake_analyze_basic_auth_injects_built_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("GLAMR_INTAKE_USER", "intake")
     monkeypatch.setenv("GLAMR_INTAKE_PASSWORD", "secret")
-    sentinel = object()
+    sentinel = _FakeClient()
     built: dict[str, object] = {}
     calls: dict[str, object] = {}
 
@@ -112,6 +125,7 @@ async def test_intake_analyze_basic_auth_injects_built_client(monkeypatch: pytes
 
     assert report == "REPORT"
     assert calls["client"] is sentinel
+    assert sentinel.closed
     assert calls["enable_observability"] is False
     assert built == {
         "base_url": "https://agenthub.aire.nvidia.com",
@@ -132,7 +146,7 @@ def test_build_adapter_unknown_type_exits():
 
 async def test_intake_analyze_calls_run_analyst(monkeypatch, tmp_path: Path):
     calls: dict[str, object] = {}
-    built_client = object()
+    built_client = _FakeClient()
 
     async def fake_run_analyst(**kwargs):
         calls.update(kwargs)
@@ -148,7 +162,23 @@ async def test_intake_analyze_calls_run_analyst(monkeypatch, tmp_path: Path):
     assert calls["base_url"] == "u"
     assert calls["ethos"] is None
     assert calls["client"] is built_client
+    assert built_client.closed
     assert calls["enable_observability"] is True
+
+
+async def test_intake_analyze_closes_client_when_analyst_fails(monkeypatch, tmp_path: Path):
+    built_client = _FakeClient()
+
+    async def failing_run_analyst(**kwargs):
+        raise RuntimeError("analyst failed")
+
+    monkeypatch.setattr("evaluation.adapters.run_analyst", failing_run_analyst)
+    monkeypatch.setattr("evaluation.adapters.make_client", lambda base_url: built_client)
+    with pytest.raises(RuntimeError, match="analyst failed"):
+        await build_adapter(_intake_subject()).analyze(
+            record=None, since=None, verbose=False, out_path=tmp_path / "insights.json"
+        )
+    assert built_client.closed
 
 
 async def test_intake_analyze_missing_keys_exits(tmp_path: Path):
@@ -333,7 +363,10 @@ async def test_benchmark_produce_records_run_without_analyzing(monkeypatch, tmp_
     assert record["dataset_name"] == "tau2:airline"
     assert created == ["tau2-airline", "tau2-airline-oracle"]  # both stable workspaces ensured
     # Experiment entity created on the ORACLE workspace only.
-    assert experiments == [("tau2-airline-oracle", record["experiment_id"], "tau2:airline", record["dataset_version"])]
+    assert experiments == [
+        ("tau2-airline", record["experiment_id"], "tau2:airline", record["dataset_version"]),
+        ("tau2-airline-oracle", record["experiment_id"], "tau2:airline", record["dataset_version"]),
+    ]
     assert len(exported) == 4  # 2 sims x 2 workspaces
     # Every exported span is tagged with the run id.
     for _ws, _sid, spans in exported:
@@ -382,7 +415,8 @@ async def test_benchmark_analyze_uses_record(monkeypatch, tmp_path):
         return "REPORT-OK"
 
     monkeypatch.setattr("evaluation.adapters.run_analyst", fake_run_analyst)
-    monkeypatch.setattr("evaluation.adapters.make_client", lambda base_url: object())
+    built_client = _FakeClient()
+    monkeypatch.setattr("evaluation.adapters.make_client", lambda base_url: built_client)
 
     cfg = {**_CFG, "tau2_data_dir": str(tmp_path), "tau2_bin": "tau2"}
     record: dict[str, object] = {
@@ -416,6 +450,7 @@ async def test_benchmark_analyze_uses_record(monkeypatch, tmp_path):
     assert seen["base_url"] == "http://localhost:8080"
     assert seen["local_only"] is True  # benchmark runs capture to file and never write to the platform
     assert seen["analyst_evaluation"] == analyst_evaluation
+    assert built_client.closed
 
 
 async def test_benchmark_analyze_without_record_raises(tmp_path):
@@ -513,4 +548,4 @@ async def test_benchmark_produce_realistic_only_when_rewards_disabled(monkeypatc
     assert len(exported) == 2  # 2 sims x 1 workspace
     assert all(ws == record["realistic_workspace"] for ws, _, _ in exported)
     assert evals == []  # no oracle → no reward rows
-    assert experiments == []  # no oracle workspace → no Experiment entity
+    assert experiments == [("tau2-airline", record["experiment_id"], "tau2:airline", record["dataset_version"])]

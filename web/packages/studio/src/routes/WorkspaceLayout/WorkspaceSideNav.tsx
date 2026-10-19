@@ -9,9 +9,7 @@ import type {
   NavItem as NavItemData,
 } from '@studio/components/Layouts/NavigationDrawer/types';
 import { isGroup } from '@studio/components/Layouts/NavigationDrawer/utils';
-import { BASE_MODELS_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { getPluginIcon } from '@studio/plugins/iconMap';
 import {
   usePluginInstalled,
   usePlugins,
@@ -22,6 +20,7 @@ import { iconColorClass } from '@studio/routes/constants';
 import {
   getAgentSideNavItems,
   getAnonymizerSideNavItems,
+  getBaseModelsSideNavItems,
   getCustomizationSideNavItems,
   getDashboardSideNavItems,
   getDataDesignerSideNavItems,
@@ -38,9 +37,20 @@ import {
   getSettingsSideNavItems,
   getVirtualModelsSideNavItems,
 } from '@studio/routes/groups';
-import { getAgentsListRoute, getWorkspaceBaseModelsRoute } from '@studio/routes/utils';
-import { useMemo } from 'react';
-import { useLocation } from 'react-router';
+import { getAgentsListRoute } from '@studio/routes/utils';
+import { lazy, Suspense, useMemo } from 'react';
+
+const NoPluginNavIcon = () => null;
+
+// Without the catch, a failed chunk (e.g. after a redeploy) reaches the root errorElement.
+const PluginNavIcon = lazy(() =>
+  import('@studio/plugins/PluginNavIcon')
+    .then((m) => ({ default: m.PluginNavIcon }))
+    .catch((err: unknown) => {
+      logger.warn('[plugins] Failed to load plugin nav icons:', err);
+      return { default: NoPluginNavIcon };
+    })
+);
 
 // The parent rows stand for the entity their landing page lists, so they take
 // that entity's canonical glyph. `Datasets` only groups the data jobs today,
@@ -49,46 +59,8 @@ const AgentsIcon = ENTITY_ICONS.agents;
 const ModelsIcon = ENTITY_ICONS.baseModels;
 const DatasetsIcon = ENTITY_ICONS.datasets;
 
-/** Whether the path is on, or nested under, one of these items. */
-const isUnder = (pathname: string, items: { href?: string }[]) =>
-  items.some(
-    (item) =>
-      item.href !== undefined && (pathname === item.href || pathname.startsWith(`${item.href}/`))
-  );
-
-const eachItem = (entries: NavInputItem[]): NavItemData[] =>
-  entries.flatMap((entry) => (isGroup(entry) ? entry.items : [entry]));
-
-/** A parent starts expanded when the current page is its own landing page or one of its children. */
-const ownsCurrentPage = (item: NavItemData, pathname: string) =>
-  isUnder(pathname, [{ href: item.href }, ...(item.subItems ?? [])]);
-
-/**
- * The ids of every expanded parent, joined into one string. Navigating deeper inside a section
- * leaves this untouched, which is what lets `withDefaultOpen` hand back the identical tree.
- */
-const openParentKey = (entries: NavInputItem[], pathname: string): string =>
-  eachItem(entries)
-    .filter((item) => item.subItems !== undefined && ownsCurrentPage(item, pathname))
-    .map((item) => item.id)
-    .join('|');
-
-/**
- * Stamp `defaultOpen` onto the parents named by `openIds`. Kept apart from building the tree so a
- * navigation rewrites a few parent objects instead of rebuilding every leaf and icon.
- */
-const withDefaultOpen = (entries: NavInputItem[], openIds: string): NavInputItem[] => {
-  const open = new Set(openIds.split('|'));
-  const stamp = (item: NavItemData): NavItemData =>
-    item.subItems === undefined ? item : { ...item, defaultOpen: open.has(item.id) };
-  return entries.map((entry) =>
-    isGroup(entry) ? { ...entry, items: entry.items.map(stamp) } : stamp(entry)
-  );
-};
-
 export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
   const workspace = useWorkspaceFromPath();
-  const { pathname } = useLocation();
   const plugins = usePlugins();
   const agentsInstalled = usePluginInstalled('agents');
   const pluginsLoaded = usePluginsLoaded();
@@ -96,7 +68,7 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
   const manifestResolved = pluginsLoaded && !pluginsError;
   const showAgents = agentsInstalled || !manifestResolved;
 
-  const baseItems = useMemo<NavInputItem[]>(() => {
+  const items = useMemo<NavInputItem[]>(() => {
     const dashboardNav = getDashboardSideNavItems(workspace);
     const customizerNav = getCustomizationSideNavItems(workspace);
     const evalNav = getEvaluationSideNavItems(workspace);
@@ -113,18 +85,21 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
 
     const observabilityItems = [...optimizerNav, ...tracesNav];
 
+    // Ordered as the funnel a user walks: pick a model, measure it, improve it, try it, ship it.
+    // Virtual Models trails the funnel because it composes models rather than producing one.
     const modelSubItems = [
-      ...deploymentsNav,
-      ...customizerNav,
+      ...getBaseModelsSideNavItems(workspace),
       ...evalNav,
+      ...customizerNav,
       ...modelCompareNav,
+      ...deploymentsNav,
       ...virtualModelsNav,
     ];
     const datasetSubItems = [...anonymizerNav, ...dataDesignerNav, ...safeSynthesizerNav];
 
-    // Agents and Models link to their own entity list page; the chevron expands any sub-items.
+    // Agents links to its own entity list page; Models is a disclosure whose 'Model Catalog'
+    // child is the list page. The chevron expands any sub-items.
     const agentsHref = showAgents ? getAgentsListRoute(workspace) : undefined;
-    const modelsHref = BASE_MODELS_ENABLED ? getWorkspaceBaseModelsRoute(workspace) : undefined;
 
     const componentItems = [
       ...(agentsHref !== undefined
@@ -138,13 +113,12 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
             },
           ]
         : []),
-      ...(modelsHref !== undefined || modelSubItems.length > 0
+      ...(modelSubItems.length > 0
         ? [
             {
               id: 'models-group',
               slotIcon: <ModelsIcon className={iconColorClass} />,
               slotLabel: 'Models',
-              href: modelsHref,
               subItems: modelSubItems,
             },
           ]
@@ -177,9 +151,6 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
     ];
   }, [workspace, showAgents]);
 
-  const openIds = useMemo(() => openParentKey(baseItems, pathname), [baseItems, pathname]);
-  const items = useMemo(() => withDefaultOpen(baseItems, openIds), [baseItems, openIds]);
-
   const systemNavGroup = useMemo(() => {
     const systemItems = [
       ...getFilesetSideNavItems(workspace),
@@ -195,17 +166,18 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
         try {
           return plugin.navItems(workspace).map((group) => ({
             group: group.group,
-            items: group.items.map((item) => {
-              const Icon = getPluginIcon(item.iconName);
-              return {
-                // Namespaced: ids are React keys and accordion-state keys, and
-                // merging puts plugin items in the same array as core ones.
-                id: `${plugin.name}:${item.id}`,
-                slotIcon: Icon ? <Icon className={iconColorClass} /> : undefined,
-                slotLabel: item.label,
-                href: item.href,
-              };
-            }),
+            items: group.items.map((item) => ({
+              // Namespaced: ids are React keys and accordion-state keys, and
+              // merging puts plugin items in the same array as core ones.
+              id: `${plugin.name}:${item.id}`,
+              slotIcon: (
+                <Suspense>
+                  <PluginNavIcon iconName={item.iconName} className={iconColorClass} />
+                </Suspense>
+              ),
+              slotLabel: item.label,
+              href: item.href,
+            })),
           }));
         } catch (err) {
           logger.warn(`[plugins] navItems() threw for plugin "${plugin.name}":`, err);

@@ -1,0 +1,197 @@
+{/* SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */}
+{/* SPDX-License-Identifier: Apache-2.0 */}
+
+## Usage
+
+This section describes how to use the NeMo Helix Python SDK. The SDK is built on the typed `NemoClient`, which exposes per-service resource clients (for example `client.files`, `client.workspaces`, `client.secrets`, `client.jobs`) that you call directly.
+
+### Import the Main Client Class
+
+Import the main client class from the `nemo_helix_plugin.client` package and create a client instance as follows:
+
+```python
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient(
+    base_url="http://nemo.test",
+    workspace="default",
+)
+
+# Sample API call
+for workspace in client.workspaces.list_workspaces().items():
+    print(workspace.name)
+```
+
+After creating the client instance, you can use the client to interact with NeMo Helix APIs. Each call returns a `NemoResponse`; use `.data()` for a single entity or `.items()` for a paginated list.
+
+## Async Usage
+
+If you want to use the asynchronous client, import `AsyncNemoClient` instead of `NemoClient` and use `await` with each API call:
+
+```python
+import asyncio
+
+from nemo_helix_plugin.client.client import AsyncNemoClient
+
+client = AsyncNemoClient(
+    base_url="http://nemo.test",
+    workspace="default",
+)
+
+# Sample API call
+async def main() -> None:
+    async for workspace in client.workspaces.list_workspaces().items():
+        print(workspace.name)
+
+asyncio.run(main())
+```
+
+Functionality between the synchronous and asynchronous clients is otherwise identical.
+
+## Using Types
+
+Request bodies are Pydantic models that you pass to the `body=` argument of each method, and responses are Pydantic models too:
+
+```python
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
+
+workspace = client.workspaces.create_workspace(
+    body=CreateWorkspaceRequest(name="ml-team", description="ML team workspace"),
+).data()
+print(workspace.model_dump_json(indent=2))
+```
+
+Typed requests and responses provide autocomplete and documentation within your editor. If you would like to see type errors in VS Code to help catch bugs, set `python.analysis.typeCheckingMode` to `basic`.
+
+## Pagination
+
+List methods in the NeMo Helix API are paginated. Each list call returns a `NemoPaginatedResponse`, which you can iterate with `.items()` (all items across pages) or `.pages()` (page by page):
+
+```python
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient(
+    base_url="http://nemo.test",
+    workspace="default",
+)
+
+all_workspaces = []
+# Automatically fetches more pages as needed.
+for workspace in client.workspaces.list_workspaces().items():
+    # Do something with workspace here
+    all_workspaces.append(workspace)
+print(all_workspaces)
+```
+
+Or, asynchronously:
+
+```python
+import asyncio
+
+from nemo_helix_plugin.client.client import AsyncNemoClient
+
+client = AsyncNemoClient(
+    base_url="http://nemo.test",
+    workspace="default",
+)
+
+async def main() -> None:
+    all_workspaces = []
+    # Iterate through items across all pages, issuing requests as needed.
+    async for workspace in client.workspaces.list_workspaces().items():
+        all_workspaces.append(workspace)
+    print(all_workspaces)
+
+asyncio.run(main())
+```
+
+To work page by page, use `.pages()` (or `await .pages()` for the async client) and iterate the `.items` on each page result:
+
+```python
+for page in client.workspaces.list_workspaces().pages():
+    for workspace in page.items:
+        print(workspace.name)
+```
+
+## Handling Errors
+
+The library raises errors when it cannot connect to the API or when the API returns a non-success status code.
+
+When the library cannot connect to the API (for example, due to network connection problems or a timeout), it raises `NemoTransportError`.
+
+When the API returns a non-success status code (that is, 4xx or 5xx response), it raises a subclass of `NemoHTTPError` containing `status_code` and `detail` properties. All errors inherit from `NemoClientError`.
+
+```python
+from nemo_helix_plugin.client import errors
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient(
+    base_url="http://nemo.test",
+    workspace="default",
+)
+
+try:
+    client.workspaces.get_workspace(name="ml-team").data()
+except errors.NemoTransportError as e:
+    print("The server could not be reached")
+    print(e.__cause__)  # an underlying Exception, likely raised within httpx.
+except errors.RateLimitError as e:
+    print("A 429 status code was received; we should back off a bit.")
+except errors.NotFoundError as e:
+    print("A 404 status code was received")
+    print(e.status_code)
+    print(e.detail)
+```
+
+Error codes are as follows:
+
+| Status Code | Error Type                 |
+| ----------- | -------------------------- |
+| 400         | `BadRequestError`          |
+| 401         | `AuthenticationError`      |
+| 403         | `PermissionDeniedError`    |
+| 404         | `NotFoundError`            |
+| 409         | `ConflictError`            |
+| 422         | `UnprocessableEntityError` |
+| 429         | `RateLimitError`           |
+| >=500       | `InternalServerError`      |
+
+## Retries and Timeouts
+
+By default, requests time out after 60 seconds. You can configure this with the `timeout` option, which accepts a float or an [`httpx.Timeout`](https://www.python-httpx.org/advanced/timeouts/#fine-tuning-the-configuration) object:
+
+```python
+from nemo_helix_plugin.client.client import NemoClient
+
+# Configure the default for all requests:
+client = NemoClient(
+    base_url="http://nemo.test",
+    workspace="default",
+    # 20 seconds (default is 60)
+    timeout=20.0,
+)
+
+# More granular control:
+import httpx
+
+client = NemoClient(
+    base_url="http://nemo.test",
+    workspace="default",
+    timeout=httpx.Timeout(60.0, read=5.0, write=10.0, connect=2.0),
+)
+```
+
+You can configure automatic retries with a `RetryPolicy` through the `retry` option, and override either per client with `with_options`:
+
+```python
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.types import RetryPolicy
+
+client = NemoClient(
+    base_url="http://nemo.test",
+    workspace="default",
+    retry=RetryPolicy(max_retries=2),
+)
+
+client.with_options(timeout=5.0).workspaces.list_workspaces().items()
+```

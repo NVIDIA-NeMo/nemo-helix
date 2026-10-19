@@ -6,7 +6,7 @@
 
 def test_auth_config_defaults():
     """Test default auth config."""
-    from nmp.core.auth.config import AuthServiceConfig
+    from nhx.core.auth.config import AuthServiceConfig
 
     cfg = AuthServiceConfig()
 
@@ -25,7 +25,7 @@ def test_auth_config_defaults():
 
 def test_default_workspace_custom():
     """Test custom default workspace."""
-    from nmp.core.auth.config import AuthServiceConfig
+    from nhx.core.auth.config import AuthServiceConfig
 
     cfg = AuthServiceConfig(default_workspace="my-workspace")
 

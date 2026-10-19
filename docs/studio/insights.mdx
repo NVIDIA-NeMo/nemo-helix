@@ -1,0 +1,43 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "NeMo Studio Insights"
+description: "Review optimization insights generated from observed agent sessions."
+---
+
+Use **Observability > Insights** in the NeMo Studio workspace sidebar to review insights the analyst agent generates from observed agent sessions and traces. To generate insights, run an analysis on demand or on a schedule; see [Analyze Agent Telemetry with Insights](/documentation/agents/optimize-agents/insights-analysis).
+
+<Note>
+
+Insights is enabled by default. An administrator can disable it by setting `studio.feature_flags.optimizer_enabled: false` in the platform configuration and restarting Studio.
+
+</Note>
+
+## Insight List
+
+The Insights table shows each insight's status, title, source agent, number of observed traces, number of linked experiments, and creation and last-seen times. Select a row to open the insight's detail page.
+
+## Insight Detail
+
+The detail page shows the insight's status, source agent, description, and:
+
+| Section | Shows |
+| ------- | ----- |
+| Experiments | Experiments linked to this insight, with evaluation counts and last-updated times. Select a row to open that experiment. |
+| Observed Sessions | The observed sessions and traces that produced this insight, with the count in the heading. |
+
+Available actions depend on the insight's status:
+
+| Status | Available actions |
+| ------ | ------------------ |
+| Open | **Delete**, or **Resolve**. |
+| Resolved or Deleted | **Reopen** — changes the insight status back to Open. |
+
+If the insight originated an experiment, that experiment's detail page links back here. See [NeMo Studio Experiments](/documentation/studio/experiments).
+
+## Related Topics
+
+- [Analyze Agent Telemetry with Insights](/documentation/agents/optimize-agents/insights-analysis)
+- [NeMo Studio Experiments](/documentation/studio/experiments)
+- [Optimize Agents](/documentation/agents/optimize-agents)

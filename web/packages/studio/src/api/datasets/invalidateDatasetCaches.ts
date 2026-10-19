@@ -5,7 +5,7 @@ import {
   getFilesListFilesetFilesQueryKey,
   getFilesListFilesetsQueryKey,
   getFilesRetrieveFilesetQueryKey,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/files';
 import { queryClient } from '@studio/api/queryClient';
 
 type Scope = 'list' | 'detail' | 'files' | 'content';

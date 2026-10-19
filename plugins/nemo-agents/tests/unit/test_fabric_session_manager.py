@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, cast
 
@@ -28,6 +29,7 @@ class _FakeRuntime:
 
 class _FakeFabricConfig:
     def __init__(self, *, copied: bool = False) -> None:
+        self.harness = None
         self.copied = copied
         self.relay_enabled = False
 
@@ -150,14 +152,21 @@ async def test_open_session_stops_runtime_when_registration_fails(
 
 
 @pytest.mark.asyncio
-async def test_resolve_session_opens_session_when_id_is_absent(
+async def test_invoke_once_uses_unregistered_runtime(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(session_manager, "translate_agent_config", lambda config: _FakeFabricConfig())
-    runtime = _FakeRuntime()
-    fabric = _FakeFabric(runtime)
+    fabric_config = _FakeFabricConfig()
+    monkeypatch.setattr(session_manager, "translate_agent_config", lambda config: fabric_config)
+    captured: list[tuple[Any, Any]] = []
+
+    async def run_fabric_agent_once(request: Any, *, fabric: Any) -> FabricRuntimeResult:
+        captured.append((request, fabric))
+        return FabricRuntimeResult(status="succeeded", response=request.input)
+
+    monkeypatch.setattr(session_manager, "run_fabric_agent_once", run_fabric_agent_once)
     registry = FabricSessionRegistry()
+    fabric = object()
     manager = FabricSessionManager(
         _agent_config(),
         base_dir=tmp_path,
@@ -165,10 +174,52 @@ async def test_resolve_session_opens_session_when_id_is_absent(
         fabric=cast(Any, fabric),
     )
 
-    session = await manager.resolve_session(None)
+    result = await manager.invoke_once(FabricInvocationRequest(input="hello"))
 
-    assert session.runtime is runtime
-    assert len(fabric.start_calls) == 1
+    assert result.response == "hello"
+    request, captured_fabric = captured[0]
+    assert request.fabric_config is fabric_config
+    assert request.input == "hello"
+    assert request.caller_context == {}
+    assert captured_fabric is fabric
+    assert await registry.count() == 0
+
+
+@pytest.mark.asyncio
+async def test_stream_once_uses_relay_enabled_unregistered_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fabric_config = _FakeFabricConfig()
+    monkeypatch.setattr(session_manager, "translate_agent_config", lambda config: fabric_config)
+    captured: list[tuple[Any, Any]] = []
+    expected_stream = object()
+
+    @asynccontextmanager
+    async def stream_fabric_agent_once(request: Any, *, fabric: Any) -> Any:
+        captured.append((request, fabric))
+        yield expected_stream
+
+    monkeypatch.setattr(session_manager, "stream_fabric_agent_once", stream_fabric_agent_once)
+    registry = FabricSessionRegistry()
+    fabric = object()
+    manager = FabricSessionManager(
+        _agent_config(),
+        base_dir=tmp_path,
+        session_registry=registry,
+        fabric=cast(Any, fabric),
+    )
+
+    async with manager.stream_once(FabricInvocationRequest(input="hello")) as stream:
+        assert stream is expected_stream
+
+    request, captured_fabric = captured[0]
+    assert request.fabric_config is not fabric_config
+    assert request.fabric_config.copied is True
+    assert request.fabric_config.relay_enabled is True
+    assert request.input == "hello"
+    assert captured_fabric is fabric
+    assert await registry.count() == 0
 
 
 @pytest.mark.asyncio
@@ -823,6 +874,138 @@ async def test_cancelled_capacity_waiter_does_not_leak_capacity(
 
     assert invocation_order == ["first", "next"]
     assert result.response == "next"
+
+
+@pytest.mark.asyncio
+async def test_invoke_once_limits_runtime_construction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(session_manager, "translate_agent_config", lambda config: _FakeFabricConfig())
+    manager = FabricSessionManager(
+        _agent_config(),
+        base_dir=tmp_path,
+        session_registry=FabricSessionRegistry(),
+        max_concurrent_invocations=1,
+    )
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    invocation_order: list[str] = []
+
+    async def run_fabric_agent_once(request: Any, *, fabric: Any) -> FabricRuntimeResult:
+        invocation_order.append(request.input)
+        if request.input == "first":
+            first_started.set()
+            await release_first.wait()
+        return FabricRuntimeResult(status="succeeded", response=request.input)
+
+    monkeypatch.setattr(session_manager, "run_fabric_agent_once", run_fabric_agent_once)
+    first = asyncio.create_task(manager.invoke_once(FabricInvocationRequest(input="first")))
+    await first_started.wait()
+    second = asyncio.create_task(manager.invoke_once(FabricInvocationRequest(input="second")))
+    await asyncio.sleep(0)
+
+    assert invocation_order == ["first"]
+
+    release_first.set()
+    results = await asyncio.gather(first, second)
+
+    assert invocation_order == ["first", "second"]
+    assert [result.response for result in results] == ["first", "second"]
+
+
+@pytest.mark.asyncio
+async def test_one_shot_and_session_invocations_share_concurrency_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(session_manager, "translate_agent_config", lambda config: _FakeFabricConfig())
+    registry = FabricSessionRegistry()
+    session = await registry.register(cast(Any, _FakeRuntime()), session_id="session-1")
+    manager = FabricSessionManager(
+        _agent_config(),
+        base_dir=tmp_path,
+        session_registry=registry,
+        max_concurrent_invocations=1,
+    )
+    session_started = asyncio.Event()
+    release_session = asyncio.Event()
+    invocation_order: list[str] = []
+
+    async def invoke_fabric_runtime(runtime: Any, request: FabricInvocationRequest) -> FabricRuntimeResult:
+        invocation_order.append(request.input)
+        session_started.set()
+        await release_session.wait()
+        return FabricRuntimeResult(status="succeeded", response=request.input)
+
+    async def run_fabric_agent_once(request: Any, *, fabric: Any) -> FabricRuntimeResult:
+        invocation_order.append(request.input)
+        return FabricRuntimeResult(status="succeeded", response=request.input)
+
+    monkeypatch.setattr(session_manager, "invoke_fabric_runtime", invoke_fabric_runtime)
+    monkeypatch.setattr(session_manager, "run_fabric_agent_once", run_fabric_agent_once)
+    stateful = asyncio.create_task(manager.invoke_session(session, FabricInvocationRequest(input="stateful")))
+    await session_started.wait()
+    one_shot = asyncio.create_task(manager.invoke_once(FabricInvocationRequest(input="one-shot")))
+    await asyncio.sleep(0)
+
+    assert invocation_order == ["stateful"]
+
+    release_session.set()
+    await asyncio.gather(stateful, one_shot)
+
+    assert invocation_order == ["stateful", "one-shot"]
+
+
+@pytest.mark.asyncio
+async def test_stream_once_holds_concurrency_limit_until_runtime_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(session_manager, "translate_agent_config", lambda config: _FakeFabricConfig())
+    manager = FabricSessionManager(
+        _agent_config(),
+        base_dir=tmp_path,
+        session_registry=FabricSessionRegistry(),
+        max_concurrent_invocations=1,
+    )
+    stream_started = asyncio.Event()
+    release_stream = asyncio.Event()
+    stream_cleaned_up = asyncio.Event()
+    invocation_order: list[str] = []
+
+    @asynccontextmanager
+    async def stream_fabric_agent_once(request: Any, *, fabric: Any) -> Any:
+        invocation_order.append(request.input)
+        try:
+            yield object()
+        finally:
+            stream_cleaned_up.set()
+
+    async def run_fabric_agent_once(request: Any, *, fabric: Any) -> FabricRuntimeResult:
+        assert stream_cleaned_up.is_set()
+        invocation_order.append(request.input)
+        return FabricRuntimeResult(status="succeeded", response=request.input)
+
+    monkeypatch.setattr(session_manager, "stream_fabric_agent_once", stream_fabric_agent_once)
+    monkeypatch.setattr(session_manager, "run_fabric_agent_once", run_fabric_agent_once)
+
+    async def consume_stream() -> None:
+        async with manager.stream_once(FabricInvocationRequest(input="stream")):
+            stream_started.set()
+            await release_stream.wait()
+
+    streaming = asyncio.create_task(consume_stream())
+    await stream_started.wait()
+    one_shot = asyncio.create_task(manager.invoke_once(FabricInvocationRequest(input="one-shot")))
+    await asyncio.sleep(0)
+
+    assert invocation_order == ["stream"]
+
+    release_stream.set()
+    await asyncio.gather(streaming, one_shot)
+
+    assert invocation_order == ["stream", "one-shot"]
 
 
 @pytest.mark.asyncio

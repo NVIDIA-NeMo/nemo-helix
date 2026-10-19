@@ -104,7 +104,7 @@ def _schema_version(front: dict[str, Any]) -> tuple[int, list[str]]:
     if raw > ETHOS_SCHEMA_VERSION:
         raise EthosParseError(
             f"ETHOS.md declares schema version {raw}, but this tooling supports "
-            f"up to {ETHOS_SCHEMA_VERSION}. Upgrade nemo-platform to read it."
+            f"up to {ETHOS_SCHEMA_VERSION}. Upgrade nemo-helix to read it."
         )
     return raw, []
 

@@ -1,11 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Data-access backend for the analyst's tools and final change-set.
+"""Platform data access and persistence for analysis runs.
 
-Every tool talks to the platform through one :class:`AnalystBackend`, built
-once per run by the CLI and shared via ``AnalystDeps`` instead of threading a
-raw SDK client around. The backend owns the SDK client and exposes:
+The caller supplies an authenticated typed client. The backend exposes:
 
 - read-only Intake queries (spans, span groups, feedback annotations, and a
   span-rollup session count),
@@ -38,24 +36,30 @@ caller (the CLI), so the backend never closes it.
 
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
 
 import httpx
 import yaml
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import SpanMode
+from nemo_helix_plugin.schema import PaginationData
 from nemo_insights_plugin.analyst.result import AnalystResult
 from nemo_insights_plugin.entities import Insight, InsightStatus
 from nemo_insights_plugin.schema import InsightListItem, InsightPage
-from nemo_platform import AsyncNeMoPlatform, omit
-from nemo_platform_plugin.schema import PaginationData
+from pydantic import BaseModel, JsonValue
+
+FilterParam = dict[str, JsonValue]
 
 
 class InsightNotFoundError(Exception):
     """No insight with the given id exists in the workspace."""
 
 
-def _dump(item) -> dict:
+def _dump(item: BaseModel) -> dict[str, object]:
     """Serialize one SDK model to a plain JSON-able dict (drop null fields)."""
     return item.model_dump(mode="json", exclude_none=True)
 
@@ -71,14 +75,14 @@ def _union_refs(existing: list[str] | None, new: list[str] | None) -> list[str]:
     return merged
 
 
-async def _drain(paginator, *, limit: int) -> tuple[list, bool]:
+async def _drain(paginator: AsyncIterable[BaseModel], *, limit: int) -> tuple[list[BaseModel], bool]:
     """Pull up to *limit* items across pages; return ``(items, truncated)``.
 
     ``truncated`` is True when the stream still had more items than *limit*,
     so the model knows it is looking at a capped view and can narrow its
     filter or raise the limit.
     """
-    items: list = []
+    items: list[BaseModel] = []
     truncated = False
     async for item in paginator:
         if len(items) >= limit:
@@ -93,33 +97,35 @@ def _page_size_for(limit: int) -> int:
     return max(1, min(limit, 100))
 
 
-def _merge_since_filter(filter_obj: dict | None, *, since: datetime | None) -> dict | None:
+def _merge_since_filter(filter_obj: FilterParam | None, *, since: datetime | None) -> FilterParam | None:
     """Return *filter_obj* with an enforced ``started_at >= since`` lower bound."""
     return _merge_datetime_lower_bound(filter_obj, key="started_at", since=since)
 
 
-def _merge_created_since_filter(filter_obj: dict | None, *, since: datetime | None) -> dict | None:
+def _merge_created_since_filter(filter_obj: FilterParam | None, *, since: datetime | None) -> FilterParam | None:
     """Return *filter_obj* with an enforced ``created_at >= since`` lower bound."""
     return _merge_datetime_lower_bound(filter_obj, key="created_at", since=since)
 
 
-def _merge_datetime_lower_bound(filter_obj: dict | None, *, key: str, since: datetime | None) -> dict | None:
+def _merge_datetime_lower_bound(
+    filter_obj: FilterParam | None, *, key: str, since: datetime | None
+) -> FilterParam | None:
     if since is None:
         return filter_obj
 
-    merged: dict = dict(filter_obj or {})
+    merged: FilterParam = dict(filter_obj or {})
     existing = merged.get(key)
     lower_bound = since.isoformat()
     if isinstance(existing, dict):
         existing = dict(existing)
-        current = existing.get("gte")
+        current = existing.get("$gte")
         current_datetime = _parse_datetime(current)
         since_datetime = _parse_datetime(since)
         if current_datetime is None or since_datetime is None or current_datetime < since_datetime:
-            existing["gte"] = lower_bound
+            existing["$gte"] = lower_bound
         merged[key] = existing
     else:
-        merged[key] = {"gte": lower_bound}
+        merged[key] = {"$gte": lower_bound}
     return merged
 
 
@@ -139,7 +145,7 @@ def _parse_datetime(value: object) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def _merge_eval_filter(filter_obj: dict | None, *, evaluation_id: str | None) -> dict | None:
+def _merge_eval_filter(filter_obj: FilterParam | None, *, evaluation_id: str | None) -> FilterParam | None:
     """AND-pin the run scope onto a span filter.
 
     Mirrors ``_merge_since_filter``: a set ``evaluation_id`` is forced onto every
@@ -148,7 +154,7 @@ def _merge_eval_filter(filter_obj: dict | None, *, evaluation_id: str | None) ->
     """
     if evaluation_id is None:
         return filter_obj
-    merged: dict = dict(filter_obj or {})
+    merged: FilterParam = dict(filter_obj or {})
     merged["evaluation_id"] = evaluation_id
     return merged
 
@@ -159,13 +165,12 @@ class AnalystBackend(ABC):
     The read surface is a thin, uniform pass-through over the Intake SDK: every
     list method takes the raw Intake ``filter`` dict and ``sort`` field and
     drains pages up to ``limit``, and there are get-by-id and evaluator-score
-    primitives. The analyst composes these in Nooa CodeAct rather than relying
-    on a wide catalog of narrow tools. Reads always hit the live platform, even
-    in local insights mode.
+    primitives. Reads always hit the live platform, even in local insights mode.
     """
 
-    def __init__(self, client: AsyncNeMoPlatform) -> None:
+    def __init__(self, client: AsyncNemoClient) -> None:
         self.client = client
+        self.intake = AsyncIntakeClient.from_client(client)
 
     # -- reads: always against the live platform -------------------------- #
 
@@ -198,22 +203,22 @@ class AnalystBackend(ABC):
         self,
         *,
         workspace: str,
-        filter: dict | None,
+        filter: FilterParam | None,
         sort: str,
-        mode: str,
+        mode: SpanMode,
         limit: int,
         since: datetime | None = None,
         evaluation_id: str | None = None,
     ) -> dict:
         effective_filter = _merge_eval_filter(_merge_since_filter(filter, since=since), evaluation_id=evaluation_id)
-        paginator = self.client.intake.spans.list(
+        paginator = await self.intake.spans.list(
             workspace=workspace,
             page_size=_page_size_for(limit),
-            sort=cast(Any, sort),
-            filter=cast(Any, effective_filter) or omit,
-            mode=cast(Any, mode),
+            sort=sort,
+            filter=effective_filter,
+            mode=mode,
         )
-        items, truncated = await _drain(paginator, limit=limit)
+        items, truncated = await _drain(paginator.items(), limit=limit)
         return {
             "spans": [_dump(s) for s in items],
             "count": len(items),
@@ -224,7 +229,7 @@ class AnalystBackend(ABC):
         self,
         *,
         workspace: str,
-        filter: dict | None,
+        filter: FilterParam | None,
         group_by: str = "session_id",
         sort: str = "-span_count",
         limit: int,
@@ -242,13 +247,13 @@ class AnalystBackend(ABC):
         """
         effective_filter = _merge_eval_filter(_merge_since_filter(filter, since=since), evaluation_id=evaluation_id)
         page_size = max(1, min(limit, 1000))
-        page = await self.client.intake.spans.groups.list(
+        page = await self.intake.spans.groups.list(
             workspace=workspace,
             by=group_by,
             page=1,
             page_size=page_size,
-            filter=cast(Any, effective_filter or omit),
-            sort=cast(Any, sort),
+            filter=effective_filter,
+            sort=sort,
         )
         groups = [_dump(g) for g in page.data]
         total = page.pagination.total_results if page.pagination is not None else len(groups)
@@ -264,19 +269,19 @@ class AnalystBackend(ABC):
         self,
         *,
         workspace: str,
-        filter: dict | None,
+        filter: FilterParam | None,
         sort: str,
         limit: int,
         since: datetime | None = None,
     ) -> dict:
         effective_filter = _merge_created_since_filter(filter, since=since)
-        paginator = self.client.intake.annotations.list(
+        paginator = await self.intake.annotations.list(
             workspace=workspace,
             page_size=_page_size_for(limit),
-            sort=cast(Any, sort),
-            filter=cast(Any, effective_filter) or omit,
+            sort=sort,
+            filter=effective_filter,
         )
-        items, truncated = await _drain(paginator, limit=limit)
+        items, truncated = await _drain(paginator.items(), limit=limit)
         return {
             "annotations": [_dump(a) for a in items],
             "count": len(items),
@@ -284,15 +289,15 @@ class AnalystBackend(ABC):
         }
 
     async def get_span(self, *, workspace: str, span_id: str) -> dict:
-        span = await self.client.intake.spans.retrieve(span_id, workspace=workspace)
+        span = await self.intake.spans.retrieve(span_id, workspace=workspace)
         return _dump(span)
 
     async def get_annotation(self, *, workspace: str, annotation_id: str) -> dict:
-        annotation = await self.client.intake.annotations.retrieve(annotation_id, workspace=workspace)
+        annotation = await self.intake.annotations.retrieve(annotation_id, workspace=workspace)
         return _dump(annotation)
 
     async def list_scores(self, *, workspace: str, span_id: str) -> dict:
-        results = await self.client.intake.spans.evaluator_results.list(span_id, workspace=workspace)
+        results = await self.intake.spans.evaluator_results.list(span_id, workspace=workspace)
         return {
             "evaluator_results": [_dump(r) for r in results],
             "count": len(results),
@@ -430,7 +435,7 @@ class RemoteAnalystBackend(AnalystBackend):
     semantics.
     """
 
-    def __init__(self, client: AsyncNeMoPlatform, mirror: InsightsFileStore | None = None) -> None:
+    def __init__(self, client: AsyncNemoClient, mirror: InsightsFileStore | None = None) -> None:
         super().__init__(client)
         self.mirror = mirror
 
@@ -483,6 +488,7 @@ class RemoteAnalystBackend(AnalystBackend):
                 if upd.trace_refs:
                     updated = await self._add_trace_refs(
                         workspace=workspace,
+                        agent=agent,
                         insight_id=upd.id,
                         trace_refs=upd.trace_refs,
                     )
@@ -496,6 +502,7 @@ class RemoteAnalystBackend(AnalystBackend):
 
         if not lines:
             lines.append("- no insights created or updated")
+        lines.extend(result.notes)
 
         lines.extend(self._mirror(workspace=workspace, stored=stored))
         return f"{result.summary}\n\n" + "\n".join(lines)
@@ -536,26 +543,34 @@ class RemoteAnalystBackend(AnalystBackend):
             trace_refs=_union_refs(None, trace_refs),
         )
 
-    async def _add_trace_refs(self, *, workspace: str, insight_id: str, trace_refs: list[str]) -> Insight:
+    async def _add_trace_refs(self, *, workspace: str, agent: str, insight_id: str, trace_refs: list[str]) -> Insight:
         current = await self._get(workspace=workspace, insight_id=insight_id)
+        if current.workspace != workspace or current.agent != agent:
+            raise ValueError(f"Insight {insight_id!r} no longer belongs to this workspace and agent")
         try:
             return await self._insights.update(
                 workspace=workspace,
                 insight_id=insight_id,
                 trace_refs=_union_refs(current.trace_refs, trace_refs),
             )
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 404:
+        except (httpx.HTTPStatusError, NotFoundError) as exc:
+            if _is_not_found(exc):
                 raise InsightNotFoundError(insight_id) from exc
             raise
 
     async def _get(self, *, workspace: str, insight_id: str) -> Insight:
         try:
             return await self._insights.get(workspace=workspace, insight_id=insight_id)
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 404:
+        except (httpx.HTTPStatusError, NotFoundError) as exc:
+            if _is_not_found(exc):
                 raise InsightNotFoundError(insight_id) from exc
             raise
+
+
+def _is_not_found(error: httpx.HTTPStatusError | NotFoundError) -> bool:
+    if isinstance(error, NotFoundError):
+        return True
+    return error.response.status_code == 404
 
 
 class LocalAnalystBackend(AnalystBackend):
@@ -581,7 +596,7 @@ class LocalAnalystBackend(AnalystBackend):
     stored entity.
     """
 
-    def __init__(self, *, client: AsyncNeMoPlatform, path: Path) -> None:
+    def __init__(self, *, client: AsyncNemoClient, path: Path) -> None:
         super().__init__(client)
         self.store = InsightsFileStore(path)
 
@@ -617,12 +632,15 @@ class LocalAnalystBackend(AnalystBackend):
             if existing is None:
                 lines.append(f"- skipped (insight not found): {upd.id}")
                 continue
+            if existing.get("agent") != agent:
+                raise ValueError(f"Insight {upd.id!r} no longer belongs to this agent")
             existing["trace_refs"] = _union_refs(existing.get("trace_refs"), upd.trace_refs)
             existing["updated_at"] = now
             lines.append(f"- updated: {upd.id} ({len(upd.trace_refs)} trace refs)")
 
         if not lines:
             lines.append("- no insights created or updated")
+        lines.extend(result.notes)
 
         self.store.write_records(records)
         return f"{result.summary}\n\nWrote analyst result to {self.path}\n" + "\n".join(lines)
@@ -661,7 +679,7 @@ class LocalAnalystBackend(AnalystBackend):
 
 def make_analyst_backend(
     *,
-    client: AsyncNeMoPlatform,
+    client: AsyncNemoClient,
     insights_output: str | None,
     local_only: bool = False,
 ) -> AnalystBackend:

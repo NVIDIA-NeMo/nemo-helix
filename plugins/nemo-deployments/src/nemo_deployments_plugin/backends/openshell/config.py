@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Literal
 from urllib.parse import urlparse
 
+from nemo_deployments_plugin.endpoint_transport import EndpointTransport
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -25,8 +26,8 @@ class OpenShellTLSConfig(BaseModel):
     client_key_path: str | None = Field(default=None, description="Path to the client private key (mTLS).")
 
 
-class PlatformEgressConfig(BaseModel):
-    """The NeMo platform endpoint a sandbox must always be able to reach.
+class HelixEgressConfig(BaseModel):
+    """The NeMo Helix endpoint a sandbox must always be able to reach.
 
     Environment-specific: on the docker driver a sandbox reaches the platform at
     host.docker.internal:8080; an in-cluster (k8s) driver uses the platform Service
@@ -39,16 +40,16 @@ class PlatformEgressConfig(BaseModel):
 
     host: str = Field(default="host.docker.internal", description="Platform host reachable from inside a sandbox.")
     port: int = Field(default=8080, ge=1, description="Platform port (the inference gateway / API listener).")
-    # Value sets track openshell/proto/sandbox.proto (NetworkAccessRule), which is broader than
-    # the summaries above imply: protocol also allows "graphql" and "" (L4-only), tls allows
-    # "passthrough".
+    # Value sets track OpenShell's authored policy schema: protocol also allows "graphql" and
+    # "" (L4-only). OpenShell 0.1 removed tls "terminate"/"passthrough": omitted TLS is
+    # inspected automatically, and "skip" turns inspection off.
     protocol: Literal["rest", "websocket", "graphql", "sql", ""] = Field(
         default="rest",
         description='OpenShell L7 protocol: "rest", "websocket", "graphql", "sql", or "" for L4-only.',
     )
-    tls: Literal["terminate", "passthrough", ""] = Field(
+    tls: Literal["", "skip"] = Field(
         default="",
-        description='TLS handling: "terminate" for HTTPS L7 intercept, "passthrough" (or "") for no L7 interception.',
+        description='TLS handling: "" (default) for automatic inspection, "skip" to disable inspection.',
     )
     access: Literal["read-only", "read-write", "full"] = Field(
         default="full",
@@ -72,8 +73,24 @@ class OpenShellExecutorConfig(BaseModel):
         default="http://127.0.0.1:17670",
         description=(
             "OpenShell gateway endpoint as a URL (http://host:port or https://host:port). "
-            "The gRPC target is the same host:port; http implies plaintext, https implies TLS."
+            "The gRPC target is the same host:port; http implies plaintext, https implies TLS. "
+            "The serving URL a deployment advertises is minted by the gateway under its own "
+            "service-routing domain, not derived from this value."
         ),
+    )
+    service_router_endpoint: str | None = Field(
+        default=None,
+        description=(
+            "URL the platform dials to reach exposed sandbox services (scheme://host:port). The "
+            "gateway routes those requests by Host header on the same listener it serves gRPC on, "
+            "so this defaults to gateway_endpoint and the sandbox service domain never has to "
+            "resolve from the platform. Set it only when the gateway's HTTP listener is reached "
+            "at a different address."
+        ),
+    )
+    workspace: str = Field(
+        default="default",
+        description="OpenShell gateway workspace that every sandbox RPC is scoped to. The gateway creates 'default'.",
     )
     insecure: bool | None = Field(
         default=None,
@@ -94,8 +111,8 @@ class OpenShellExecutorConfig(BaseModel):
             "disable it entirely (e.g. gateway-managed inference via inference.local)."
         ),
     )
-    platform_egress: PlatformEgressConfig | None = Field(
-        default_factory=PlatformEgressConfig,
+    platform_egress: HelixEgressConfig | None = Field(
+        default_factory=HelixEgressConfig,
         description=(
             "Platform endpoint a sandbox reaches directly. Drives the generated default policy "
             "(when default_policy_path is unset) and is injected into every policy as a mandatory "
@@ -105,11 +122,13 @@ class OpenShellExecutorConfig(BaseModel):
         ),
     )
     serve_workdir: str = Field(
-        default="/home/sandbox",
+        default="~",
         description=(
             "Working directory for the detached serve command. Must be writable by the sandbox "
-            "user: a packaged agent image chowns /workspace to its own 'agent' user, so NAT's "
-            "per-run temp dir is written here instead. Empty string disables the chdir."
+            "identity: a packaged agent image's /workspace contents are owned by its 'agent' user. "
+            "'~' (default) is that identity's home, which differs by compute driver (the docker "
+            "driver runs as the policy's 'sandbox' user, the kubernetes driver as its own uid with "
+            "HOME=/sandbox). Empty string disables the chdir."
         ),
     )
     serve_path: str = Field(
@@ -143,9 +162,13 @@ class OpenShellExecutorConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_endpoint(self) -> OpenShellExecutorConfig:
-        parsed = urlparse(self.gateway_endpoint)
-        if parsed.scheme not in ("http", "https") or not parsed.hostname:
-            raise ValueError("gateway_endpoint must be a URL like http://host:port or https://host:port")
+        for name in ("gateway_endpoint", "service_router_endpoint"):
+            value = getattr(self, name)
+            if value is None:
+                continue
+            parsed = urlparse(value)
+            if parsed.scheme not in ("http", "https") or not parsed.hostname:
+                raise ValueError(f"{name} must be a URL like http://host:port or https://host:port")
         return self
 
     def grpc_target(self) -> str:
@@ -160,3 +183,16 @@ class OpenShellExecutorConfig(BaseModel):
         if self.insecure is not None:
             return self.insecure
         return urlparse(self.gateway_endpoint).scheme == "http"
+
+    def service_transport(self) -> EndpointTransport:
+        """How the platform dials this executor's exposed sandbox services."""
+        parsed = urlparse(self.service_router_endpoint or self.gateway_endpoint)
+        ca_cert: str | None = None
+        client_cert: tuple[str, str] | None = None
+        if parsed.scheme == "https" and self.insecure is not True and self.tls is not None:
+            ca_cert = self.tls.ca_cert_path or None
+            if self.tls.client_cert_path and self.tls.client_key_path:
+                client_cert = (self.tls.client_cert_path, self.tls.client_key_path)
+        return EndpointTransport(
+            connect_base=f"{parsed.scheme}://{parsed.netloc}", ca_cert=ca_cert, client_cert=client_cert
+        )

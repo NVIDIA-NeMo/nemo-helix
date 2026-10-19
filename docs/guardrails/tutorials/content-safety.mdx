@@ -8,23 +8,23 @@ description: ""
 
 <a id="guardrails-content-safety"></a>
 
-Learn how to use NeMo Platform to apply content safety checks to user inputs and LLM outputs with the NVIDIA Nemotron Content Safety NIM. Content safety checks detect and block harmful, abusive, or policy-violating content before it reaches users.
+Learn how to use NeMo Helix to apply content safety checks to user inputs and LLM outputs with the NVIDIA Nemotron Content Safety NIM. Content safety checks detect and block harmful, abusive, or policy-violating content before it reaches users.
 
 For the content safety checks, this tutorial uses the [Llama-3.1-Nemotron-Safety-Guard-8B-v3](https://build.nvidia.com/nvidia/llama-3_1-nemotron-safety-guard-8b-v3) NIM, which is trained to classify input or output content as safe or unsafe.
 
-For the main model, this tutorial uses the [Nemotron 3 Nano 30B-A3B](https://build.nvidia.com/nvidia/nemotron-3-nano-30b-a3b) NIM.
+For the main model, this tutorial uses the [Nemotron 3.5 Lightning 30B-A3B](https://build.nvidia.com/nvidia/nemotron-3.5-lightning-30b-a3b) NIM.
 
 ## Prerequisites
 
 Before you begin:
 
-- You have access to a running NeMo Platform.
-- `NMP_BASE_URL` is set to the NeMo Platform base URL.
+- You have access to a running NeMo Helix deployment.
+- Your current CLI context points at your NeMo Helix deployment. For details, refer to [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 - A `ModelProvider` is configured with an LLM provider. Follow [Setup](/documentation/get-started) if you haven't done this yet.
 
 This tutorial uses the following NIMs, available on `build.nvidia.com`:
 
-- `main` model: `nvidia/nemotron-3-nano-30b-a3b`
+- `main` model: `nvidia/nemotron-3.5-lightning-30b-a3b`
 - `content_safety` model: `nvidia/llama-3.1-nemotron-safety-guard-8b-v3`
 
 ---
@@ -44,14 +44,16 @@ You will:
 Instantiate the platform client.
 
 ```python
-import os
-from nemo_platform import NeMoPlatform, ConflictError
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
+from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest, MiddlewareCall
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 ```
+
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
 
 ---
 
@@ -100,11 +102,13 @@ guardrails_config = {
 }
 
 try:
-    config = client.guardrail.configs.create(
-        name="content-safety-config",
-        description="Content safety guardrails with NemoGuard NIM",
-        data=guardrails_config,
-    )
+    config = client.guardrail.create_guardrail_config(
+        body=CreateGuardrailConfigRequest(
+            name="content-safety-config",
+            description="Content safety guardrails with NemoGuard NIM",
+            data=guardrails_config,
+        ),
+    ).data()
 except ConflictError:
     print("Config content-safety-config already exists, continuing...")
 
@@ -117,23 +121,25 @@ except ConflictError:
 The plugin runs only when a VirtualModel references it in its middleware list. Wire the config on both `request_middleware` (input rails) and `response_middleware` (output rails).
 
 ```python
-client.inference.virtual_models.create(
-    name="guarded-content-safety",
-    default_model_entity="default/nvidia-nemotron-3-nano-30b-a3b",
-    request_middleware=[
-        {
-            "name": "nemo-guardrails",
-            "config_type": "guardrail_config",
-            "config_id": "default/content-safety-config",
-        }
-    ],
-    response_middleware=[
-        {
-            "name": "nemo-guardrails",
-            "config_type": "guardrail_config",
-            "config_id": "default/content-safety-config",
-        }
-    ],
+VirtualModelsClient.from_client(client).create_virtual_model(
+    body=CreateVirtualModelRequest(
+        name="guarded-content-safety",
+        default_model_entity="default/nvidia-nemotron-3.5-lightning-30b-a3b",
+        request_middleware=[
+            MiddlewareCall(
+                name="nemo-guardrails",
+                config_type="guardrail_config",
+                config_id="default/content-safety-config",
+            )
+        ],
+        response_middleware=[
+            MiddlewareCall(
+                name="nemo-guardrails",
+                config_type="guardrail_config",
+                config_id="default/content-safety-config",
+            )
+        ],
+    ),
     exist_ok=True,
 )
 ```
@@ -181,7 +187,7 @@ print(response.model_dump_json(indent=2))
 {
   "id": "chatcmpl-6e6ee35f-87be-4372-8f3d-f4f0c61f51db",
   "object": "chat.completion",
-  "model": "nvidia/nemotron-3-nano-30b-a3b",
+  "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
   "choices": [
     {
       "index": 0,
@@ -196,10 +202,10 @@ print(response.model_dump_json(indent=2))
 ```
 
 </Accordion>
-The `Nemotron-Safety-Guard-8B-v3` and `Nemotron 3 Nano 30B-A3B` NIMs both support multiple languages. For the full list, refer to the model cards:
+The `Nemotron-Safety-Guard-8B-v3` and `Nemotron 3.5 Lightning 30B-A3B` NIMs both support multiple languages. For the full list, refer to the model cards:
 
 - [Nemotron-Safety-Guard-8B-v3](https://build.nvidia.com/nvidia/llama-3_1-nemotron-safety-guard-8b-v3/modelcard)
-- [Nemotron 3 Nano 30B-A3B](https://build.nvidia.com/nvidia/nemotron-3-nano-30b-a3b)
+- [Nemotron 3.5 Lightning 30B-A3B](https://build.nvidia.com/nvidia/nemotron-3.5-lightning-30b-a3b)
 
 Send an unsafe request in French that the content safety input rail blocks.
 
@@ -224,7 +230,7 @@ print(response.model_dump_json(indent=2))
 {
   "id": "chatcmpl-3f3f3d2e-2caa-4f89-9a46-8c2b2d0b1f8c",
   "object": "chat.completion",
-  "model": "nvidia/nemotron-3-nano-30b-a3b",
+  "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
   "choices": [
     {
       "index": 0,
@@ -261,7 +267,7 @@ print(response.model_dump_json(indent=2))
 {
   "id": "chatcmpl-3f3f3d2e-2caa-4f89-9a46-8c2b2d0b1f8c",
   "object": "chat.completion",
-  "model": "nvidia/nemotron-3-nano-30b-a3b",
+  "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
   "choices": [
     {
       "index": 0,
@@ -294,7 +300,7 @@ print(response.model_dump_json(indent=2))
 {
   "id": "chatcmpl-6e6ee35f-87be-4372-8f3d-f4f0c61f51db",
   "object": "chat.completion",
-  "model": "nvidia/nemotron-3-nano-30b-a3b",
+  "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
   "choices": [
     {
       "index": 0,
@@ -314,8 +320,8 @@ print(response.model_dump_json(indent=2))
 ## Cleanup
 
 ```python
-client.inference.virtual_models.delete(name="guarded-content-safety")
-client.guardrail.configs.delete(name="content-safety-config")
+VirtualModelsClient.from_client(client).delete_virtual_model(name="guarded-content-safety")
+client.guardrail.delete_guardrail_config(name="content-safety-config")
 print("Cleanup complete")
 ```
 

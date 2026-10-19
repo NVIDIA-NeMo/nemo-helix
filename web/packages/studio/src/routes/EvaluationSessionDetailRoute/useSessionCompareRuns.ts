@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useGetExperiment, useListEvaluations } from '@nemo/sdk/generated/platform/api';
+import { useListEvaluations } from '@nemo/sdk/generated/platform/evaluations';
+import { useGetExperiment } from '@nemo/sdk/generated/platform/experiments';
 import { useSessionTrajectories } from '@studio/components/IntakeDetail/useSessionTrajectories';
 import { useTestCaseRuns } from '@studio/routes/EvaluationSessionDetailRoute/useTestCaseRuns';
 import { useMemo } from 'react';

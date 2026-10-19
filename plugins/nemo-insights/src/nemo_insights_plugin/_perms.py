@@ -3,7 +3,7 @@
 
 """Typed permissions for Insights HTTP resources."""
 
-from nemo_platform_plugin.authz import PermissionSet, perm
+from nemo_helix_plugin.authz import PermissionSet, perm
 
 
 class InsightPerms(PermissionSet, namespace="insights.insights"):
@@ -24,6 +24,8 @@ class AnalysisConfigPerms(PermissionSet, namespace="insights.analysis-configs"):
 
 class AnalysisRunPerms(PermissionSet, namespace="insights.analysis-runs"):
     CREATE = perm("Submit an insights analysis run")
+    LIST = perm("List insights analysis runs")
+    READ = perm("Read an insights analysis run")
 
 
 class AnalysisRunStatusPerms(PermissionSet, namespace="insights.analysis-run-statuses"):

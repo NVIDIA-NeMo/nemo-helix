@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEntitiesGetWorkspace } from '@nemo/sdk/generated/platform/api';
+import { useEntitiesGetWorkspace } from '@nemo/sdk/generated/platform/entity-store';
 import { useAuthProfile } from '@studio/providers/auth/useAuthProfile';
 import { useAuthTokenStatus } from '@studio/providers/auth/useAuthTokenStatus';
 import { WorkspaceContext } from '@studio/providers/workspace/WorkspaceContext';

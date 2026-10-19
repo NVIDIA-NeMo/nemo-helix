@@ -5,14 +5,15 @@ import {
   checkDatasetQuality,
   type DatasetQualityReport,
 } from '@nemo/common/src/utils/datasetQuality';
-import { ROUTE_PARAMS } from '@studio/constants/routes';
+import { ROUTE_PARAMS, ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { FilesetNewRoute } from '@studio/routes/FilesetNewRoute';
 import { mockUseNavigate, mockUseParams } from '@studio/tests/util/mockUseParams';
-import { render, screen } from '@studio/tests/util/render';
+import { render, renderRoute as renderRouteWithRouter, screen } from '@studio/tests/util/render';
 import { TestProviders } from '@studio/tests/util/TestProviders';
-import { within } from '@testing-library/react';
+import { act, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import * as reactRouter from 'react-router';
 
 vi.mock('@nemo/common/src/utils/datasetQuality', () => ({
   checkDatasetQuality: vi.fn(),
@@ -360,5 +361,51 @@ describe('FilesetNewRoute', () => {
 
       expect(await screen.findByText(/Scanned first 1,000 of 5,000 lines/i)).toBeInTheDocument();
     });
+  });
+});
+
+describe('FilesetNewRoute close behavior', () => {
+  // This block needs the real router hooks, not the module-level mocks the suite
+  // above installs — the bug only appears when a genuine navigation runs.
+  beforeEach(async () => {
+    const actual = await vi.importActual<typeof import('react-router')>('react-router');
+    vi.mocked(reactRouter.useParams).mockImplementation(actual.useParams);
+    vi.mocked(reactRouter.useNavigate).mockImplementation(actual.useNavigate);
+  });
+
+  it('closes exactly once without flashing back open', async () => {
+    const user = userEvent.setup();
+
+    // The `routes` option builds a data router, which is the only path that honors
+    // `flushSync`; the declarative MemoryRouter fallback drops the option.
+    renderRouteWithRouter(undefined, {
+      history: `/workspaces/${workspace1.workspace}/filesets/new`,
+      routes: [
+        { path: ROUTES.workspace.filesetNew, element: <FilesetNewRoute /> },
+        { path: ROUTES.workspace.filesets, element: <div>Filesets list</div> },
+      ],
+    });
+
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() => expect(dialog).toHaveAttribute('data-state', 'open'));
+
+    // Count re-shows rather than watching `data-state`: the shared test setup stubs
+    // `MutationObserver` to a no-op. `showModal` is the direct signal — `useDialog`
+    // calls it when it sees a stale `open === true` against a closed <dialog>, which
+    // is the flash.
+    const showModalSpy = vi.spyOn(HTMLDialogElement.prototype, 'showModal');
+
+    await user.click(screen.getByRole('button', { name: /close side panel/i }));
+
+    // KUI's animate-out is a real 200ms timeout, so the resulting updates land outside
+    // React's event loop. Advance real time inside `act` to flush them.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    });
+
+    expect(showModalSpy).not.toHaveBeenCalled();
+    await screen.findByText('Filesets list');
+
+    showModalSpy.mockRestore();
   });
 });

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from nmp.unsloth.schemas import (
+from nhx.unsloth.schemas import (
     DatasetSpec,
     LoRAParams,
     ModelLoadSpec,
@@ -19,7 +19,7 @@ from nmp.unsloth.schemas import (
     TrainingSpec,
     UnslothJobOutput,
 )
-from nmp.unsloth.tasks.training.backends.unsloth_sft import build_model_load_kwargs, build_peft_kwargs
+from nhx.unsloth.tasks.training.backends.unsloth_sft import build_model_load_kwargs, build_peft_kwargs
 
 
 def _spec(

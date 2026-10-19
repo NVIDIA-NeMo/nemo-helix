@@ -6,12 +6,13 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from nmp.common.files.storage_config import LocalStorageConfig, S3StorageConfig
-from nmp.common.jobs.schemas import PaginationDirection
-from nmp.core.files.app.backends.local import LocalStorageImpl
-from nmp.core.files.app.backends.s3 import S3StorageImpl
-from nmp.core.files.app.log_storage import LogEntry, LogStorage
-from nmp.core.files.exceptions import InvalidFilterError, InvalidPathError
+from nhx.common.files.storage_config import LocalStorageConfig, S3StorageConfig
+from nhx.common.jobs.schemas import InvalidPageCursorError, LogPageCursorV1, PaginationDirection, decode_log_page_cursor
+from nhx.core.files.app.backends.local import LocalStorageImpl
+from nhx.core.files.app.backends.s3 import S3StorageImpl
+from nhx.core.files.app.log_db import DuckDBLogRepository
+from nhx.core.files.app.log_storage import LogEntry, LogStorage
+from nhx.core.files.exceptions import InvalidFilterError, InvalidPathError
 
 
 @pytest.fixture
@@ -250,6 +251,184 @@ async def test_query_logs_pagination(log_storage, local_storage, sample_log_entr
     assert page3.next_page is None
 
 
+async def test_query_logs_tail_returns_latest_rows_oldest_to_newest(log_storage, local_storage, sample_log_entries):
+    """Tail returns the latest window in normal oldest-to-newest display order."""
+    await log_storage.insert_logs(local_storage, sample_log_entries)
+
+    result = await log_storage.query_logs(
+        local_storage,
+        filters={"job": "job-123", "job_attempt": "attempt-1"},
+        page_size=3,
+        tail=3,
+    )
+
+    assert [log.message for log in result.data] == ["Log message 22", "Log message 23", "Log message 24"]
+    assert result.total == 25
+    assert result.next_page is None
+    assert result.prev_page is not None
+
+
+async def test_query_logs_tail_larger_than_log_returns_everything(log_storage, local_storage, sample_log_entries):
+    """Tail larger than the available rows returns the complete log without a previous cursor."""
+    await log_storage.insert_logs(local_storage, sample_log_entries)
+
+    result = await log_storage.query_logs(
+        local_storage,
+        filters={"job": "job-123", "job_attempt": "attempt-1"},
+        page_size=100,
+        tail=100,
+    )
+
+    assert len(result.data) == 25
+    assert result.total == 25
+    assert result.next_page is None
+    assert result.prev_page is None
+
+
+async def test_query_logs_prev_page_deduplicates_tail_boundary(log_storage, local_storage):
+    """The previous-page cursor avoids re-serving a non-unique timestamp boundary row."""
+    timestamp = datetime(2026, 9, 2, 12, 0, 0)
+    entries = [
+        LogEntry(
+            workspace="default",
+            job="j",
+            job_attempt="1",
+            job_step="s",
+            job_task="t",
+            log_message=message,
+            timestamp=timestamp,
+        )
+        for message in ["a", "b", "c", "d"]
+    ]
+    await log_storage.insert_logs(local_storage, entries)
+
+    tail_page = await log_storage.query_logs(
+        local_storage,
+        filters={"job": "j", "job_attempt": "1"},
+        page_size=2,
+        tail=2,
+    )
+    previous_page = await log_storage.query_logs(
+        local_storage,
+        filters={"job": "j", "job_attempt": "1"},
+        page_size=2,
+        page_cursor=tail_page.prev_page,
+    )
+
+    combined_messages = [log.message for log in previous_page.data + tail_page.data]
+    assert sorted(combined_messages) == ["a", "b", "c", "d"]
+    assert len(combined_messages) == len(set(combined_messages))
+
+
+async def test_query_logs_prev_page_preserves_identical_boundary_row_count(log_storage, local_storage):
+    """The emitted-boundary count preserves identical rows without returning the same count twice."""
+    timestamp = datetime(2026, 9, 2, 12, 0, 0)
+    entries = [
+        LogEntry(
+            workspace="default",
+            job="j",
+            job_attempt="1",
+            job_step="s",
+            job_task="t",
+            log_message="same",
+            timestamp=timestamp,
+        )
+        for _ in range(3)
+    ]
+    await log_storage.insert_logs(local_storage, entries)
+
+    tail_page = await log_storage.query_logs(
+        local_storage,
+        filters={"job": "j", "job_attempt": "1"},
+        page_size=1,
+        tail=1,
+    )
+    previous_page = await log_storage.query_logs(
+        local_storage,
+        filters={"job": "j", "job_attempt": "1"},
+        page_size=2,
+        page_cursor=tail_page.prev_page,
+    )
+
+    assert [log.message for log in previous_page.data + tail_page.data] == ["same", "same", "same"]
+    assert previous_page.prev_page is None
+
+
+async def test_query_logs_prev_page_rejects_different_filters(log_storage, local_storage):
+    """A cursor is only valid for the effective query scope that produced it."""
+    base_time = datetime(2026, 9, 2, 12, 0, 0)
+    entries = [
+        LogEntry(
+            workspace="default",
+            job="j",
+            job_attempt="1",
+            job_step="s",
+            job_task="t",
+            log_message=f"message {i}",
+            timestamp=base_time + timedelta(seconds=i),
+        )
+        for i in range(3)
+    ]
+    await log_storage.insert_logs(local_storage, entries)
+
+    tail_page = await log_storage.query_logs(
+        local_storage,
+        filters={"job": "j", "job_attempt": "1"},
+        page_size=1,
+        tail=1,
+    )
+
+    with pytest.raises(InvalidPageCursorError, match="page_cursor does not match the current log filters"):
+        await log_storage.query_logs(
+            local_storage,
+            filters={"job": "j"},
+            page_size=1,
+            page_cursor=tail_page.prev_page,
+        )
+
+
+def test_tail_sql_does_not_use_offset():
+    """Tail queries avoid the current page-number OFFSET path."""
+    query = DuckDBLogRepository._build_tail_query("read_parquet('/tmp/logs/**/*.parquet')", "job = ?")
+
+    assert "OFFSET" not in query.upper()
+    assert "SHA256" in query.upper()
+
+
+def test_cursor_v1_sql_does_not_use_offset():
+    """V1 cursor queries avoid the current page-number OFFSET path."""
+    query = DuckDBLogRepository._build_cursor_v1_query("read_parquet('/tmp/logs/**/*.parquet')", "job = ?")
+
+    assert "OFFSET" not in query.upper()
+    assert "SHA256" in query.upper()
+
+
+async def test_tail_prev_page_cursor_uses_compact_anchor_payload(log_storage, local_storage, sample_log_entries):
+    """Tail previous-page cursors carry compact typed anchor fields."""
+    await log_storage.insert_logs(local_storage, sample_log_entries)
+
+    page = await log_storage.query_logs(
+        local_storage,
+        filters={"job": "job-123"},
+        page_size=1,
+        tail=1,
+    )
+
+    assert page.prev_page is not None
+    cursor = decode_log_page_cursor(page.prev_page)
+    assert isinstance(cursor, LogPageCursorV1)
+    assert cursor.version == 1
+    assert len(cursor.boundary_row_hash) == 32
+    assert len(cursor.query_scope_hash) == 32
+    assert cursor.emitted_boundary_rows == 1
+
+
+async def test_query_logs_rejects_malformed_page_cursor(log_storage, local_storage):
+    """Malformed cursor values are reported as client cursor errors."""
+    with pytest.raises(InvalidPageCursorError, match="Invalid page cursor"):
+        await log_storage.query_logs(local_storage, page_cursor="garbage")
+
+
 async def test_query_logs_no_files(log_storage, local_storage):
     """Test querying when no log files exist."""
     result = await log_storage.query_logs(local_storage)
@@ -363,16 +542,16 @@ async def test_query_logs_allows_apostrophe_in_log_message_filter(log_storage, l
     assert result.data[0].message == "I'm testing apostrophes"
 
 
-def test_query_logs_sync_rejects_multi_statement_query(local_storage, monkeypatch):
+def test_log_repository_rejects_multi_statement_query(local_storage, monkeypatch):
     """Test that query SQL containing injected multi-statements is rejected."""
 
     def _injected_path(cls, base_path, filters):  # noqa: ARG001
         return "logs'; SELECT 1; --"
 
-    monkeypatch.setattr(LogStorage, "_build_query_path", classmethod(_injected_path))
+    monkeypatch.setattr(DuckDBLogRepository, "_build_query_path", classmethod(_injected_path))
 
     with pytest.raises(ValueError, match="Multiple SQL statements detected in query"):
-        LogStorage._query_logs_sync(
+        DuckDBLogRepository._query_offset_page(
             base_path=local_storage.get_duckdb_path("logs"),
             filters={},
             page_size=10,
@@ -382,19 +561,21 @@ def test_query_logs_sync_rejects_multi_statement_query(local_storage, monkeypatc
         )
 
 
-def test_query_logs_sync_uses_hardened_duckdb_config(local_storage, monkeypatch):
+def test_log_repository_uses_hardened_duckdb_config(local_storage, monkeypatch):
     """Test that query connection is created with hardened DuckDB settings."""
-    captured: dict[str, object] = {}
+    captured_database: str | None = None
+    captured_config: dict[str, str] | None = None
 
-    def _fake_connect(*args, **kwargs):
-        captured["database"] = args[0] if args else kwargs.get("database")
-        captured["config"] = kwargs.get("config")
+    def _fake_connect(database: str, *, config: dict[str, str]):
+        nonlocal captured_database, captured_config
+        captured_database = database
+        captured_config = config
         raise RuntimeError("connect intercepted")
 
-    monkeypatch.setattr("nmp.core.files.app.log_storage.duckdb.connect", _fake_connect)
+    monkeypatch.setattr("nhx.core.files.app.log_db.duckdb.connect", _fake_connect)
 
     with pytest.raises(RuntimeError, match="connect intercepted"):
-        LogStorage._query_logs_sync(
+        DuckDBLogRepository._query_offset_page(
             base_path=local_storage.get_duckdb_path("logs"),
             filters={},
             page_size=10,
@@ -403,8 +584,8 @@ def test_query_logs_sync_uses_hardened_duckdb_config(local_storage, monkeypatch)
             storage=local_storage,
         )
 
-    assert captured["database"] == ":memory:"
-    assert captured["config"] == {
+    assert captured_database == ":memory:"
+    assert captured_config == {
         "autoload_known_extensions": "false",
         "autoinstall_known_extensions": "false",
     }
@@ -459,7 +640,7 @@ class TestS3LogStorage:
         )
 
         mock_conn = MagicMock()
-        LogStorage._configure_s3_secret(mock_conn, config)
+        DuckDBLogRepository._configure_s3_secret(mock_conn, config)
 
         call_args = mock_conn.execute.call_args[0][0]
         assert "TYPE s3" in call_args

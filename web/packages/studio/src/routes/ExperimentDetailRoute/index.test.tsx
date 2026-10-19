@@ -1,12 +1,17 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getInsightsGetInsightQueryKey } from '@nemo/sdk/generated/insights/insights-insights';
+import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
+import { getGetExperimentQueryKey } from '@nemo/sdk/generated/platform/experiments';
 import type { ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { ROUTES } from '@studio/constants/routes';
+import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { ExperimentDetailRoute } from '@studio/routes/ExperimentDetailRoute';
 import { renderRoute, screen } from '@studio/tests/util/render';
-import { waitFor } from '@testing-library/react';
+import { waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
 vi.hoisted(() => {
@@ -27,25 +32,25 @@ const group = {
   evaluation_count: 0,
 } satisfies Partial<ExperimentResponse>;
 
-const mockGroup = (overrides?: Partial<ExperimentResponse>) => {
+const mockGroup = (overrides?: Partial<ExperimentResponse>, evaluations: object[] = []) => {
   const insightRequest = vi.fn();
   server.use(
-    http.get('*/apis/intake/v2/workspaces/:workspace/experiments/:name', () =>
+    http.get(mockApiUrl(getGetExperimentQueryKey, ':workspace', ':name'), () =>
       HttpResponse.json({ ...group, ...overrides })
     ),
-    http.get('*/apis/intake/v2/workspaces/:workspace/evaluations', () =>
+    http.get(mockApiUrl(getListEvaluationsQueryKey, ':workspace'), () =>
       HttpResponse.json({
-        data: [],
+        data: evaluations,
         pagination: {
           page: 1,
           page_size: 25,
-          current_page_size: 0,
-          total_pages: 0,
-          total_results: 0,
+          current_page_size: evaluations.length,
+          total_pages: evaluations.length ? 1 : 0,
+          total_results: evaluations.length,
         },
       })
     ),
-    http.get('*/apis/insights/v2/workspaces/:workspace/insights/:insightId', () => {
+    http.get(mockApiUrl(getInsightsGetInsightQueryKey, ':workspace', ':insightId'), () => {
       insightRequest();
       return HttpResponse.json({});
     })
@@ -79,6 +84,20 @@ describe('ExperimentDetailRoute', () => {
 
     expect(await screen.findByText('Editable group description')).toBeInTheDocument();
     expect(screen.queryByText('Summary')).not.toBeInTheDocument();
+  });
+
+  it('toggles the scorecard', async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    mockGroup();
+
+    await user.click(await screen.findByRole('button', { name: 'Scorecard' }));
+
+    expect(await screen.findByText('Scorecard')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Hide scorecard' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
   });
 
   describe('over-time chart visibility', () => {
@@ -146,5 +165,28 @@ describe('ExperimentDetailRoute', () => {
       expect(await screen.findByText('Editable group description')).toBeInTheDocument();
       expect(trendToggle()).toHaveAttribute('aria-pressed', 'true');
     });
+  });
+
+  it('opens the comparison charts in a modal when evaluations are compared', async () => {
+    const evaluation = (name: string) => ({
+      id: name,
+      name,
+      workspace: WORKSPACE,
+      experiment_ids: [group.id],
+      dataset_name: 'dataset',
+      created_at: '2026-10-11T02:00:00Z',
+      aggregate_scores: { judge: { mean: 1 } },
+    });
+    mockGroup({ evaluation_count: 2 }, [evaluation('first'), evaluation('second')]);
+    const user = userEvent.setup();
+
+    const firstRow = await screen.findByRole('row', { name: /first/ }, { timeout: 10_000 });
+    await user.click(within(firstRow).getByRole('checkbox'));
+    await user.click(within(screen.getByRole('row', { name: /second/ })).getByRole('checkbox'));
+    await user.click(screen.getByRole('button', { name: 'Compare selected' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Comparing 2 evaluations')).toBeInTheDocument();
+    expect(within(dialog).getByRole('combobox', { name: 'Baseline' })).toBeInTheDocument();
   });
 });

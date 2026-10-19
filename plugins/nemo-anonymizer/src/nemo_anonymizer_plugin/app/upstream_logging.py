@@ -7,18 +7,18 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 _ROOT_LOGGING_LOCK = threading.RLock()
 
 
 @contextmanager
-def preserve_root_logging() -> Iterator[None]:
+def preserve_root_logging() -> Generator[None, None, None]:
     """Restore the platform root logger after upstream library initialization.
 
     Data Designer's interface runtime configures logging by clearing root
-    handlers. Inside the platform API process that removes NeMo Platform's structured
+    handlers. Inside the platform API process that removes NeMo Helix's structured
     logging handler and its internal-request filter, so background controller
     traffic starts printing as ordinary request logs and we start seeing flood of
     logs like "Request Completed", which are the requests that jobs and Models

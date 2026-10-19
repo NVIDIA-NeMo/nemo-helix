@@ -5,7 +5,11 @@
 #
 # Collects the docs/fern/ sources and PR metadata from the (possibly untrusted)
 # PR branch and uploads them as an artifact. No secrets are used here, so this
-# is safe to run on fork PRs via the regular pull_request trigger.
+# is safe to run on fork PRs via the regular pull_request trigger. This also
+# materializes release versions (npm run materialize:versions), including any
+# selected docs/fern/release-branches.json pre-release entries, so the preview's
+# version selector matches what a real publish would produce; the branch fetch it
+# does is an anonymous `git fetch` against this public repo, so it needs no token.
 #
 # The companion workflow (fern-docs-preview-comment.yaml) picks up the artifact,
 # builds the preview with DOCS_FERN_TOKEN, and posts the PR comment.
@@ -42,6 +46,19 @@ jobs:
           echo "$PR_NUMBER" > preview-metadata/pr_number
           echo "$HEAD_REF" > preview-metadata/head_ref
           git diff --name-only "origin/${BASE_REF}...HEAD" -- '*.mdx' > preview-metadata/changed_mdx_files 2>/dev/null || true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install Fern dependencies
+        working-directory: ./docs/fern
+        run: npm ci
+
+      - name: Materialize release versions
+        working-directory: ./docs/fern
+        run: npm run materialize:versions
 
       - name: Prepare preview
         env:

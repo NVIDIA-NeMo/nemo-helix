@@ -1,0 +1,31 @@
+{
+  "schema_version": "ATIF-v1.5",
+  "session_id": "3f2a1c00-0015-4a00-8000-000000000015",
+  "trajectory_id": "3f2a1c00-0015-4a00-8000-000000000015",
+  "agent": {
+    "name": "email-security-triage",
+    "version": "0.7.0",
+    "model_name": "nvidia-nemotron-3-nano-30b-a3b"
+  },
+  "final_metrics": {
+    "total_prompt_tokens": 4890,
+    "total_completion_tokens": 0,
+    "total_cost_usd": 0.0007335,
+    "total_steps": 1
+  },
+  "extra": {
+    "task_id": "email-security-triage/timeout-long-input-15",
+    "error": {
+      "type": "AgentTimeoutError",
+      "message": "Agent execution timed out after 120.0 seconds"
+    }
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "timestamp": "2026-08-20T22:18:55Z",
+      "source": "user",
+      "message": "{\"user_message\": \"is this legit?\", \"emails\": [{\"from\": \"notices@account-review-center.net\", \"subject\": \"Important changes to your account\", \"body\": \"Dear valued customer,\\n\\nWe are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. We are writing to inform you about important changes to your account and the steps required to keep it in good standing. Please read the following carefully. \\n\\nConfirm at https://account-review-center.net/verify within 24 hours.\"}]}"
+    }
+  ]
+}

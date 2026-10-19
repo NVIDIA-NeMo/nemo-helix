@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useAgentsGetAgent } from '@nemo/sdk/generated/agents/api';
+import { useAgentsGetAgent } from '@nemo/sdk/generated/agents/agents';
 import type { AgentConfig as StudioAgentConfig } from '@studio/components/dataViews/AgentsDataView';
 import { useMemo } from 'react';
 

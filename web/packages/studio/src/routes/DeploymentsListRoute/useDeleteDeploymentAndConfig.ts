@@ -16,17 +16,23 @@ import { logger } from '@nemo/common/src/utils/logger';
 import {
   filesDeleteFileset,
   getFilesListFilesetsQueryKey,
-  getModelsGetLatestDeploymentQueryKey,
+} from '@nemo/sdk/generated/platform/files';
+import {
   getModelsListDeploymentConfigsQueryKey,
-  getModelsListDeploymentsQueryKey,
-  getModelsListModelsQueryKey,
   modelsDeleteAllDeploymentConfigVersions,
+  modelsGetLatestDeploymentConfig,
+} from '@nemo/sdk/generated/platform/model-deployment-configs';
+import {
+  getModelsGetLatestDeploymentQueryKey,
+  getModelsListDeploymentsQueryKey,
   modelsDeleteAllDeploymentVersions,
+  modelsGetLatestDeployment,
+} from '@nemo/sdk/generated/platform/model-deployments';
+import {
+  getModelsListModelsQueryKey,
   modelsDeleteModel,
   modelsGetModel,
-  modelsGetLatestDeployment,
-  modelsGetLatestDeploymentConfig,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/models';
 import {
   type ModelDeployment,
   type ModelDeploymentConfig,

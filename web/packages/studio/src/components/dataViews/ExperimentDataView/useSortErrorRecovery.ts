@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { TanstackTable } from '@nemo/common/src/components/DataView/internal';
-import type { ListEvaluationsQueryError } from '@nemo/sdk/generated/platform/api';
+import type { ListEvaluationsQueryError } from '@nemo/sdk/generated/platform/evaluations';
 import { useEffect, useRef } from 'react';
 
 /** The table's sorting state — at most one active column for this single-sort table. */

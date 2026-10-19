@@ -56,6 +56,12 @@ const test = baseTest.extend<TestFixtures>({
 });
 
 test.describe('Model Deployments', () => {
+  test.beforeEach(() => {
+    test.skip(
+      !process.env.RECORD,
+      'Deployments feature-flagged off + needs NGC infra; run via pnpm test:e2e:record'
+    );
+  });
   test.beforeEach(async ({ page }) => disableAuthForTest(page));
 
   test('Creates an NGC deployment, views its details, and deletes it @record', async ({
@@ -63,10 +69,6 @@ test.describe('Model Deployments', () => {
     deploymentsPage,
     trackedDeployments,
   }) => {
-    test.skip(
-      !process.env.RECORD,
-      'Deployments feature-flagged off + needs NGC infra; run via pnpm test:e2e:record'
-    );
     test.slow();
 
     // Base name is what the user types in the wizard. The API resources become:
@@ -88,11 +90,15 @@ test.describe('Model Deployments', () => {
     await test.step('Open Create Deployment side panel', async () => {
       await page.getByRole('button', { name: 'Create Deployment' }).first().click();
 
-      // NGC is the default source. The Deploy submit button only renders inside the open panel.
+      // The Deploy submit button only renders inside the open panel.
       await expect(page.getByRole('button', { name: 'Deploy', exact: true })).toBeVisible();
     });
 
     await test.step('Fill the NGC NIM Container form', async () => {
+      // Select the source explicitly rather than relying on which one the wizard
+      // preselects — this test covers the NGC path, not the default.
+      await page.getByRole('radio', { name: 'NGC NIM Container' }).click();
+
       const nameField = page.getByRole('textbox', { name: 'Name', exact: true });
       // The wizard pre-fills a generated name; clear it before typing.
       await nameField.fill(baseName);

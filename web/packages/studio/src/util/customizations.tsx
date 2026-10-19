@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { StatTileProps, StatTileStatus } from '@nemo/common/src/components/StatTile';
+import type { StatTileDiagnosticProps, StatTileStatus } from '@nemo/common/src/components/StatTile';
 import { formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
 import { formatFinetuningType } from '@nemo/common/src/utils/formatters';
 import type { RlGRPOTraining, RlJobOutput } from '@nemo/sdk/generated/customizer/schema';
-import type { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Badge } from '@nvidia/foundations-react-core';
 import type {
   CustomizationMetricValue,
@@ -23,7 +23,7 @@ import { formatElapsedTime } from '@studio/util/date';
 import { formatStepDuration, GRPO_METRIC, medianValue, readSeries } from '@studio/util/grpoMetrics';
 import { getTextWithCount } from '@studio/util/strings';
 import { Circle /* TODO: replace with a proper icon (was Circle) */, Gpu } from 'lucide-react';
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 export { formatFinetuningType };
 
@@ -50,6 +50,12 @@ export const getFormattedTrainingType = (type?: string) => {
     case 'distillation': {
       return 'Distillation';
     }
+    case 'dpo': {
+      return 'DPO';
+    }
+    case 'grpo': {
+      return 'GRPO';
+    }
     default: {
       return type;
     }
@@ -61,7 +67,7 @@ export const getFormattedTrainingType = (type?: string) => {
  * 'Deployment In Progress', optionally with the progress percentage.
  */
 export const getFormattedCustomizationStatus = (
-  status?: PlatformJobStatus | string,
+  status?: HelixJobStatus | string,
   progressPercent?: number
 ) => {
   let statusText = '';
@@ -280,7 +286,7 @@ const metricTile = (
   label: string,
   summary: MetricSummary | undefined,
   { betterWhen, formatValue = formatMetricValue, hint }: MetricTileOptions
-): StatTileProps => {
+): StatTileDiagnosticProps => {
   if (!summary) {
     return { label, value: NOT_AVAILABLE, hint };
   }
@@ -307,7 +313,7 @@ const metricTile = (
 
 export const getTrainingProgressTiles = (
   telemetry: CustomizationTrainingTelemetry
-): StatTileProps[] => [
+): StatTileDiagnosticProps[] => [
   {
     label: 'Steps Completed',
     value:
@@ -331,7 +337,7 @@ export const getTrainingProgressTiles = (
 export const getLossTiles = (
   statusDetails: CustomizationStatusDetailsWithMetrics | undefined,
   isTerminal = false
-): StatTileProps[] => [
+): StatTileDiagnosticProps[] => [
   metricTile(
     `${isTerminal ? 'Final' : 'Latest'} Training Loss`,
     summarizeMetric(statusDetails?.metrics?.train_loss),
@@ -402,7 +408,7 @@ interface TrainingDiagnosticsContext {
 const getRunStateTile = (
   telemetry: CustomizationTrainingTelemetry,
   { isTerminal, duration, failedAtStepLabel }: TrainingDiagnosticsContext
-): StatTileProps => {
+): StatTileDiagnosticProps => {
   if (failedAtStepLabel) {
     return {
       label: 'Run State',
@@ -429,7 +435,7 @@ export const getTrainingDiagnosticsTiles = (
   telemetry: CustomizationTrainingTelemetry,
   statusDetails: CustomizationStatusDetailsWithMetrics | undefined,
   context: TrainingDiagnosticsContext
-): StatTileProps[] => {
+): StatTileDiagnosticProps[] => {
   const trainLoss = summarizeMetric(statusDetails?.metrics?.train_loss);
   const valLoss = summarizeMetric(statusDetails?.metrics?.val_loss);
 
@@ -464,7 +470,7 @@ const formatPercent = (value: number): string => `${(value * 100).toFixed(1)}%`;
 export const getGrpoSummaryTiles = (
   statusDetails: CustomizationStatusDetailsWithMetrics | undefined,
   isTerminal = false
-): StatTileProps[] => {
+): StatTileDiagnosticProps[] => {
   const validation = readSeries(statusDetails, GRPO_METRIC.validationReward);
   const lastEvalStep = validation?.[validation.length - 1]?.step;
   const truncation = summarizeMetric(readSeries(statusDetails, GRPO_METRIC.truncationRate));
@@ -542,7 +548,7 @@ export const getGrpoRunProgressSummary = (
 export const getGrpoProgressTiles = (
   telemetry: CustomizationTrainingTelemetry,
   context: TrainingDiagnosticsContext
-): StatTileProps[] => [
+): StatTileDiagnosticProps[] => [
   {
     label: 'Epochs Completed',
     value:
@@ -653,32 +659,4 @@ export const getTrainingOptionBadges = (job: CustomizationJob | null | undefined
   }
 
   return [];
-};
-
-/**
- * The number of steps completed during training.
- * Used for showing a max x-axis value in the loss line chart.
- */
-interface GetCustomizationTrainingStepsParams {
-  epochs: number;
-  trainingRecords: number;
-  batchSize: number;
-  hasValidationDataset?: boolean;
-}
-export const getCustomizationTrainingSteps = ({
-  epochs,
-  trainingRecords,
-  batchSize,
-  hasValidationDataset,
-}: GetCustomizationTrainingStepsParams): number => {
-  if (epochs === 0 || batchSize === 0 || trainingRecords === 0) {
-    return 0;
-  }
-  if (hasValidationDataset) {
-    // When both training and validation datasets are used
-    return epochs * Math.ceil(trainingRecords / batchSize);
-  } else {
-    // When only training dataset is used (90% split for training)
-    return epochs * Math.ceil(Math.ceil(trainingRecords * 0.9) / batchSize);
-  }
 };

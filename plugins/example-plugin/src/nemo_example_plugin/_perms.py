@@ -10,7 +10,7 @@ factory routes (see ``get_routers``), so they are not declared here.
 
 from __future__ import annotations
 
-from nemo_platform_plugin.authz import PermissionSet, perm
+from nemo_helix_plugin.authz import PermissionSet, perm
 
 
 class ExampleHelloPerms(PermissionSet, namespace="example.hello"):

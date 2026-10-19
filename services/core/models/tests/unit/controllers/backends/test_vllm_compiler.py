@@ -5,17 +5,28 @@
 
 from types import SimpleNamespace
 
-from nmp.core.models.controllers.backends import vllm_compiler
-from nmp.core.models.controllers.backends.common import DeploymentConfigView
+from nhx.core.models.controllers.backends import vllm_compiler
+from nhx.core.models.controllers.backends.common import DeploymentConfigView
 
 
 def _view(**kwargs) -> DeploymentConfigView:
     return DeploymentConfigView(**kwargs)
 
 
-def _model_entity(*, spec=None, trust_remote_code=False) -> SimpleNamespace:
+def _model_entity(
+    *,
+    spec=None,
+    trust_remote_code=False,
+    base_model=None,
+    finetuning_type=None,
+) -> SimpleNamespace:
     """A lightweight stand-in for a ModelEntity (avoids MagicMock(spec=) collision)."""
-    return SimpleNamespace(spec=spec, trust_remote_code=trust_remote_code)
+    return SimpleNamespace(
+        spec=spec,
+        trust_remote_code=trust_remote_code,
+        base_model=base_model,
+        finetuning_type=finetuning_type,
+    )
 
 
 def _spec(**kwargs) -> SimpleNamespace:
@@ -56,6 +67,42 @@ def test_compile_vllm_args_basic():
     assert args[0] == "/model-store"
     assert "--served-model-name" in args
     assert args[args.index("--served-model-name") + 1] == "default/qwen"
+
+
+def test_compile_vllm_args_uses_hf_alternate_for_customized_embedding():
+    model_entity = _model_entity(
+        spec=_spec(head_type="embedding"),
+        base_model="default/base-embed",
+        finetuning_type="all_weights",
+    )
+    args = vllm_compiler.compile_vllm_args(_view(gpu=1, model_name="embed"), model_entity)
+    assert args[0] == vllm_compiler.VLLM_HF_ALTERNATE_PATH
+
+
+def test_compile_vllm_args_uses_hf_alternate_for_legacy_embedding_alias():
+    model_entity = _model_entity(
+        spec=_spec(head_type="unknown", is_embedding_model=True),
+        base_model="default/base-embed",
+        finetuning_type="all_weights",
+    )
+    args = vllm_compiler.compile_vllm_args(_view(gpu=1, model_name="embed"), model_entity)
+    assert args[0] == vllm_compiler.VLLM_HF_ALTERNATE_PATH
+
+
+def test_compile_vllm_args_cross_encoder_does_not_use_hf_alternate():
+    model_entity = _model_entity(
+        spec=_spec(head_type="cross_encoder", is_embedding_model=True),
+        base_model="default/base-rerank",
+        finetuning_type="all_weights",
+    )
+    args = vllm_compiler.compile_vllm_args(_view(gpu=1, model_name="rerank"), model_entity)
+    assert args[0] == vllm_compiler.MODEL_STORE_PATH
+
+
+def test_compile_vllm_args_uses_root_for_base_embedding():
+    model_entity = _model_entity(spec=_spec(head_type="embedding", is_embedding_model=True))
+    args = vllm_compiler.compile_vllm_args(_view(gpu=1, model_name="embed"), model_entity)
+    assert args[0] == vllm_compiler.MODEL_STORE_PATH
 
 
 def test_compile_vllm_args_served_name_without_namespace():

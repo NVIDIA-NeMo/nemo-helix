@@ -9,26 +9,45 @@ from pathlib import Path
 from typing import Any
 
 from nemo_data_designer_plugin.config import get_config
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_data_designer_plugin.retrieval.corpus import HF_TOKEN_ENVVAR
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
     EnvironmentVariable,
+    EnvironmentVariableFromSecret,
     GPUExecutionProviderSpec,
-    PlatformJobStep,
+    HelixJobStep,
 )
-from nemo_platform_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
-from nemo_platform_plugin.jobs.image import get_qualified_image
-from nmp.customization_common.schemas.file_io import DownloadItem, FileIOTaskConfig, FileSetRef
+from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_helix_plugin.jobs.image import get_qualified_image
+from nhx.customization_common.schemas.file_io import DownloadItem, FileIOTaskConfig, FileSetRef
 from pydantic import BaseModel
 
 _ENTRYPOINT = ["python", "-m"]
-RETRIEVAL_MINE_MODULE = "nmp.automodel.tasks.retrieval_mine"
-_FILE_IO_MODULE = "nmp.customization_common.tasks.file_io"
+RETRIEVAL_MINE_MODULE = "nhx.automodel.tasks.retrieval_mine"
+_FILE_IO_MODULE = "nhx.customization_common.tasks.file_io"
 _FILE_IO_ARGS = ["--service-source", "automodel", "--service-name", "customizer"]
 
 
 def _persistent_storage_environment() -> list[EnvironmentVariable]:
     return [EnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value=DEFAULT_JOB_STORAGE_PATH)]
+
+
+def _hf_token_environment(hf_token_secret: str | None) -> list[EnvironmentVariable]:
+    """Project a ``hf_token_secret`` reference into the step env, never its plaintext.
+
+    The jobs service resolves ``from_secret`` against the job workspace, so an
+    unqualified secret name works the same way it does for every other job.
+    """
+    if not hf_token_secret:
+        return []
+    return [
+        EnvironmentVariable(
+            name=HF_TOKEN_ENVVAR,
+            from_secret=EnvironmentVariableFromSecret(name=hf_token_secret),
+        )
+    ]
 
 
 def cpu_retrieval_step(
@@ -37,9 +56,10 @@ def cpu_retrieval_step(
     spec: BaseModel,
     profile: str | None,
     module_args: list[str] | None = None,
-    image: str = "nmp-cpu-tasks",
-) -> PlatformJobStep:
-    return PlatformJobStep(
+    image: str = "nhx-tasks",
+    hf_token_secret: str | None = None,
+) -> HelixJobStep:
+    return HelixJobStep(
         name=name,
         executor=CPUExecutionProviderSpec(
             profile=profile or get_config().job_executor_profile,
@@ -51,23 +71,23 @@ def cpu_retrieval_step(
             ),
         ),
         config=spec.model_dump(mode="json"),
-        environment=_persistent_storage_environment(),
+        environment=[*_persistent_storage_environment(), *_hf_token_environment(hf_token_secret)],
     )
 
 
-def gpu_retrieval_step(name: str, module: str, spec: BaseModel, profile: str | None) -> PlatformJobStep:
+def gpu_retrieval_step(name: str, module: str, spec: BaseModel, profile: str | None) -> HelixJobStep:
     """GPU step in the automodel training image.
 
     Falls back to the plugin's ``job_executor_profile``. The profile must name a
     registered GPU executor: the jobs API rejects a spec whose (provider, profile) is unknown.
     """
-    return PlatformJobStep(
+    return HelixJobStep(
         name=name,
         executor=GPUExecutionProviderSpec(
             profile=profile or get_config().job_executor_profile,
             provider="gpu",
             container=ContainerSpec(
-                image=get_qualified_image("nmp-automodel-training"),
+                image=get_qualified_image("nhx-automodel-training"),
                 entrypoint=_ENTRYPOINT,
                 command=[module],
             ),
@@ -77,6 +97,7 @@ def gpu_retrieval_step(name: str, module: str, spec: BaseModel, profile: str | N
             *_persistent_storage_environment(),
             EnvironmentVariable(name="HF_HUB_OFFLINE", value="1"),
             EnvironmentVariable(name="TRANSFORMERS_OFFLINE", value="1"),
+            EnvironmentVariable(name="PYTHONUNBUFFERED", value="1"),
         ],
     )
 
@@ -86,22 +107,24 @@ async def retrieval_step(
     module: str,
     spec: BaseModel,
     profile: str | None,
-    async_sdk: object,
+    async_client: AsyncNemoClient,
     gpu: bool = False,
-) -> PlatformJobStep:
-    del async_sdk
+    hf_token_secret: str | None = None,
+) -> HelixJobStep:
+    del async_client
     if gpu:
+        # The GPU mining step runs with ``HF_HUB_OFFLINE``; it never reaches the Hub.
         return gpu_retrieval_step(name, module, spec, profile)
-    return cpu_retrieval_step(name, module, spec, profile)
+    return cpu_retrieval_step(name, module, spec, profile, hf_token_secret=hf_token_secret)
 
 
 async def model_download_step(
     fileset: str,
     profile: str | None,
-    async_sdk: object,
-) -> PlatformJobStep:
+    async_client: AsyncNemoClient,
+) -> HelixJobStep:
     """Download a model fileset into the job's shared ``model`` directory."""
-    del async_sdk
+    del async_client
     config = FileIOTaskConfig(download=[DownloadItem(src=FileSetRef.model_validate(fileset), dest="model")])
     return cpu_retrieval_step(
         "retrieval-model-download",
@@ -109,7 +132,7 @@ async def model_download_step(
         config,
         profile,
         module_args=_FILE_IO_ARGS,
-        image="nmp-customizer-tasks",
+        image="nhx-customizer-tasks",
     )
 
 

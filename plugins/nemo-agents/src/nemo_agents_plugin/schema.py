@@ -6,7 +6,7 @@
 This module contains only API-layer Pydantic models.  Entity definitions
 (classes stored in the entity store) live in :mod:`nemo_agents_plugin.entities`.
 
-Entity objects (subclasses of :class:`~nemo_platform_plugin.entity.NemoEntity`) are
+Entity objects (subclasses of :class:`~nemo_helix_plugin.entity.NemoEntity`) are
 returned directly from route handlers as the API response — no separate
 response model is needed.  Use ``NemoListResponse[Agent]`` /
 ``NemoListResponse[AgentDeployment]`` for list endpoints.
@@ -14,88 +14,45 @@ response model is needed.  Use ``NemoListResponse[Agent]`` /
 Naming conventions:
 - ``CreateXRequest`` / ``UpdateXRequest`` — plain :class:`~pydantic.BaseModel`
   for request bodies.
-- ``XFilter`` — extends :class:`~nemo_platform_plugin.schema.NemoFilter` to inherit
+- ``XFilter`` — extends :class:`~nemo_helix_plugin.schema.NemoFilter` to inherit
   ``extra="forbid"``.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from nemo_agents_plugin.entities import (
-    NAT_WORKFLOW_CONFIG_FORMAT,
     Agent,
     AgentComputeSpec,
     AgentDeployment,
     AgentEnvironment,
-    AgentEnvironmentInline,
     AgentEnvironmentSpec,
     AgentSession,
-    ComputeSpecInline,
     DeploymentMode,
     DeploymentStatus,
-    EnvironmentSpecInline,
 )
 from nemo_agents_plugin.mcp_status import McpServerStatus
-from nemo_platform_plugin.schema import NemoFilter, NemoListResponse
+from nemo_helix_plugin.agents.types import (
+    CreateAgentRequest as CreateAgentRequest,
+)
+from nemo_helix_plugin.agents.types import (
+    CreateComputeSpecRequest as CreateComputeSpecRequest,
+)
+from nemo_helix_plugin.agents.types import (
+    CreateDeploymentRequest as CreateDeploymentRequest,
+)
+from nemo_helix_plugin.agents.types import (
+    CreateEnvironmentRequest as CreateEnvironmentRequest,
+)
+from nemo_helix_plugin.agents.types import (
+    CreateEnvironmentSpecRequest as CreateEnvironmentSpecRequest,
+)
+from nemo_helix_plugin.agents.types import (
+    CreateSessionRequest as CreateSessionRequest,
+)
+from nemo_helix_plugin.schema import NemoFilter, NemoListResponse
 from pydantic import BaseModel, Field
-
-# ---------------------------------------------------------------------------
-# Request bodies — plain BaseModel, named by convention
-# ---------------------------------------------------------------------------
-
-
-class CreateAgentRequest(BaseModel):
-    """Request body for ``POST /v2/workspaces/{workspace}/agents``."""
-
-    name: str = Field(description="Unique agent name within the workspace.")
-    description: str = Field(default="", description="Human-readable description.")
-    config: dict[str, Any] = Field(description="Agent config dict interpreted according to config_format.")
-    config_format: str = Field(default=NAT_WORKFLOW_CONFIG_FORMAT, description="Config format identifier.")
-
-
-class CreateDeploymentRequest(BaseModel):
-    """Request body for ``POST /v2/workspaces/{workspace}/deployments``."""
-
-    agent: str = Field(description="Name of the Agent to deploy.")
-    name: str | None = Field(
-        default=None,
-        description="Optional deployment name.  Auto-generated from agent name + random suffix if omitted.",
-    )
-    deployment_mode: DeploymentMode = Field(
-        default="subprocess",
-        description="Runtime backend: subprocess (default), docker, or k8s.",
-    )
-    image: str = Field(
-        default="",
-        description="Container image for docker/k8s modes. Ignored for subprocess.",
-    )
-    use_image_entrypoint: bool = Field(
-        default=False,
-        description=(
-            "For docker/k8s modes, leave the container command and args empty so the image's "
-            "ENTRYPOINT/CMD starts the agent server."
-        ),
-    )
-    environment: str | AgentEnvironmentInline | None = Field(
-        default=None,
-        description=(
-            'Optional AgentEnvironment: a "workspace/name" ref, an inline environment, or None. '
-            "Resolved and snapshotted onto the deployment at create time."
-        ),
-    )
-
-
-class CreateSessionRequest(BaseModel):
-    """Request body for ``POST /v2/workspaces/{workspace}/sessions``."""
-
-    deployment_id: str = Field(min_length=1, description="ID of the AgentDeployment to create a session for.")
-    name: str | None = Field(
-        default=None,
-        description="Optional session name. Auto-generated from deployment name + random suffix if omitted.",
-    )
-
 
 # ---------------------------------------------------------------------------
 # Filters — extend NemoFilter so extra fields are rejected (extra="forbid")
@@ -173,24 +130,6 @@ class SessionFilter(NemoFilter):
     )
 
 
-class CreateEnvironmentRequest(AgentEnvironmentInline):
-    """Request body for ``POST /v2/workspaces/{workspace}/environments``."""
-
-    name: str = Field(description="Unique environment name within the workspace.")
-
-
-class CreateEnvironmentSpecRequest(EnvironmentSpecInline):
-    """Request body for ``POST /v2/workspaces/{workspace}/environment-specs``."""
-
-    name: str = Field(description="Unique environment-spec name within the workspace.")
-
-
-class CreateComputeSpecRequest(ComputeSpecInline):
-    """Request body for ``POST /v2/workspaces/{workspace}/compute-specs``."""
-
-    name: str = Field(description="Unique compute-spec name within the workspace.")
-
-
 class EnvironmentFilter(NemoFilter):
     """Query filter for ``GET /v2/workspaces/{workspace}/environments``."""
 
@@ -201,6 +140,24 @@ class EnvironmentSpecFilter(NemoFilter):
 
 class ComputeSpecFilter(NemoFilter):
     """Query filter for ``GET /v2/workspaces/{workspace}/compute-specs``."""
+
+
+class DeploymentModeAvailability(BaseModel):
+    """Whether this platform can run deployments in one ``deployment_mode``."""
+
+    mode: DeploymentMode = Field(description="The deployment mode.")
+    enabled: bool = Field(
+        description="True when a deployment in this mode would run on a matching executor backend.",
+    )
+    requires_image: bool = Field(
+        description="True when a deployment in this mode must set 'image' because no default image is configured.",
+    )
+
+
+class DeploymentModeList(BaseModel):
+    """Response for ``GET /v2/workspaces/{workspace}/deployment-modes``."""
+
+    data: list[DeploymentModeAvailability]
 
 
 # ---------------------------------------------------------------------------

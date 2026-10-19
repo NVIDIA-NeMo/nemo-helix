@@ -31,7 +31,7 @@ export const ReadmeBody: FC<ReadmeBodyProps> = ({
   if (!readmePath) {
     return (
       <Flex className="min-h-80" align="center" justify="center">
-        <Text color="secondary">No README.md found at the root of this fileset.</Text>
+        <Text className="text-secondary">No README.md found at the root of this fileset.</Text>
       </Flex>
     );
   }

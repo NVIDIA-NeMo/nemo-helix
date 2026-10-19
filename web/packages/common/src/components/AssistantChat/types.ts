@@ -40,6 +40,7 @@ export interface AssistantChatThreadProps {
   emptyState?: {
     slotHeading?: string;
     slotSubheading?: string;
+    slotAction?: ReactNode;
   };
   contentClassName?: string;
   composerContainerClassName?: string;
@@ -131,6 +132,7 @@ export interface AssistantChatProps {
   emptyState?: {
     slotHeading?: string;
     slotSubheading?: string;
+    slotAction?: ReactNode;
   };
   /** Overrides used when rendering Markdown inside chat messages. */
   messageContentProps?: AssistantChatMessageContentProps;
@@ -161,4 +163,9 @@ export interface AssistantMessageCompletion {
   completionTokens: number;
   /** Completion tokens per second of streaming wall-time (excludes TTFT). */
   tokensPerSec: number;
+  /**
+   * The `model` the backend reported serving the response. For a routing VirtualModel this is
+   * the upstream model the request was sent to, not the VirtualModel's own name.
+   */
+  responseModel?: string;
 }

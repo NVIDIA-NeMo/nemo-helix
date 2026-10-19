@@ -5,7 +5,7 @@
 title: "Authorization Concepts"
 description: ""
 ---
-NeMo Platform uses **workspace-scoped RBAC**: resources live in workspaces, users get roles (Viewer, Editor, Admin) per workspace, and a policy engine evaluates every request against role bindings and token scopes.
+NeMo Helix uses **workspace-scoped RBAC**: resources live in workspaces, users get roles (Viewer, Editor, Admin) per workspace, and a policy engine evaluates every request against role bindings and token scopes.
 
 For the security architecture and trust boundaries, see [Security Model](/documentation/access-control/security-model). For hands-on setup, see [Managing Access](/documentation/access-control/authorization/managing-access).
 
@@ -77,11 +77,11 @@ flowchart BT
     Viewer["Viewer<br/>list, read, run inference"]
     Editor["Editor<br/>create, update, delete resources"]
     Admin["Admin<br/>manage members, change visibility"]
-    PlatformAdmin["PlatformAdmin<br/>all operations across all workspaces"]
+    HelixAdmin["HelixAdmin<br/>all operations across all workspaces"]
 
     Viewer --> Editor
     Editor --> Admin
-    Admin --> PlatformAdmin
+    Admin --> HelixAdmin
 ```
 
 Custom roles can be defined at deployment time with arbitrary permission sets â€” they do not need to follow this hierarchy. For the complete permission matrix, see [Roles & Permissions](/documentation/access-control/authorization/roles-and-permissions).
@@ -111,7 +111,7 @@ Custom roles can be defined at deployment time with arbitrary permission sets â€
 
 ### Platform Admin Role
 
-The **PlatformAdmin** role is a special highly privileged role that provides full access to all workspaces and all operations across the entire platform. This role is typically reserved for platform operators.
+The **HelixAdmin** role is a special highly privileged role that provides full access to all workspaces and all operations across the entire platform. This role is typically reserved for platform operators.
 
 Platform admins can:
 
@@ -120,7 +120,7 @@ Platform admins can:
 - Create and delete any workspace
 - Bypass all authorization checks
 
-The PlatformAdmin role is granted via the `admin_email` config setting. See [Auth Configuration](/documentation/access-control/deployment).
+The HelixAdmin role is granted via the `admin_email` config setting. See [Auth Configuration](/documentation/access-control/deployment).
 
 ## Role Bindings
 
@@ -128,7 +128,7 @@ The PlatformAdmin role is granted via the `admin_email` config setting. See [Aut
 
 A role binding contains:
 
-- **Principal**: The user being granted access (e.g., `alice@company.com`)
+- **Principal**: The identity being granted access, such as a user, group, wildcard `*`, or service account
 - **Workspace**: The workspace where access is granted (e.g., `team-ml`)
 - **Role**: The role being assigned (e.g., `Editor`)
 
@@ -158,7 +158,7 @@ Creating a workspace is a system-scoped RBAC operation:
 
 ### Default Workspaces
 
-NeMo Platform automatically provisions role bindings for the wildcard principal `*` on certain workspaces:
+NeMo Helix automatically provisions role bindings for the wildcard principal `*` on certain workspaces:
 
 - **`default`**: All authenticated users have **Editor** role, allowing everyone to create and manage resources immediately
 - **`system`**: All authenticated users have **Viewer** role, providing read-only access to system-level resources
@@ -172,7 +172,9 @@ If a user tries to access a workspace they don't have permission for, the API re
 
 ## Policy Decision Point (PDP)
 
-Every authorized request is evaluated by the PDP, which checks role bindings and scopes. The PDP runs in one of two modes:
+Every authorized request is evaluated by the PDP, which checks role bindings and,
+when the token carries platform API scopes, scopes. The PDP runs in one of two
+modes:
 
 - **Embedded** (default): A WASM-based policy engine built into the auth service. No external dependencies.
 - **External OPA**: An Open Policy Agent instance (sidecar or standalone service) fetches policy bundles from the auth service.

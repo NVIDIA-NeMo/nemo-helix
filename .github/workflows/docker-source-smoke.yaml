@@ -17,7 +17,7 @@ permissions:
 
 env:
   TOOLCHAIN: system
-  NMP_COLLECT_SOURCES: "1"
+  NHX_COLLECT_SOURCES: "1"
 
 jobs:
   build-source-images:
@@ -46,7 +46,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
         with:
-          name: nmp-builder
+          name: nhx-builder
           driver: docker-container
           cleanup: true
 
@@ -77,3 +77,71 @@ jobs:
       - name: Build Docker images with sources
         shell: bash
         run: make docker-build TARGET=docker
+
+  check-source-coverage:
+    name: Check ${{ matrix.image }} carries its sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - nhx-builder-tasks
+          - nhx-kaniko
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Free disk space
+        uses: ./.github/actions/free-disk-space
+        with:
+          disable_swap: "true"
+          remove_go: "true"
+          remove_haskell: "true"
+          remove_java: "true"
+          remove_node: "true"
+          remove_pypy: "true"
+          remove_ruby: "true"
+          remove_swift: "true"
+          prune_docker: "true"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          name: nhx-builder
+          driver: docker-container
+          cleanup: true
+
+      - name: Configure bake variables
+        shell: bash
+        env:
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          image_registry="ghcr.io/${GITHUB_REPOSITORY,,}"
+          source_sha="${SOURCE_SHA:-$GITHUB_SHA}"
+          bake_tag="${INPUT_IMAGE_TAG:-$source_sha}"
+
+          {
+            printf 'IMAGE_REGISTRY=%s\n' "$image_registry"
+            printf 'BASE_REGISTRY=%s\n' "$image_registry"
+            printf 'CACHE_REGISTRY=%s\n' "$image_registry"
+            printf 'BAKE_TAG=%s\n' "$bake_tag"
+            printf 'CI_COMMIT_SHA=%s\n' "$source_sha"
+          } >> "$GITHUB_ENV"
+
+      - name: Build ${{ matrix.image }} with sources
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: make docker-load TARGET="${IMAGE}-docker"
+
+      - name: Check every component syft finds has its source in the image
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: make docker-check-sources IMAGE="${IMAGE}"

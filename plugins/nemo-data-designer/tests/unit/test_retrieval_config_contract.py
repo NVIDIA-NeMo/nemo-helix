@@ -67,6 +67,7 @@ def _build(job: RetrievalGenerateJobConfig, tmp_path: Path):
         reasoning_counts=job.reasoning_counts,
         min_complexity=job.min_complexity,
         similarity_threshold=job.similarity_threshold,
+        max_parallel_requests_for_gen=job.max_parallel_requests_for_gen,
         buffer_size=job.buffer_size,
         resume=job.resume,
         num_records=job.num_records,
@@ -74,6 +75,10 @@ def _build(job: RetrievalGenerateJobConfig, tmp_path: Path):
         qa_generation_model=job.qa_generation_model,
         quality_judge_model=job.quality_judge_model,
         embed_model=job.embed_model,
+        multi_doc=job.multi_doc,
+        bundle_size=job.bundle_size,
+        bundle_strategy=job.bundle_strategy,
+        max_docs_per_bundle=job.max_docs_per_bundle,
     )
 
 
@@ -110,6 +115,30 @@ def test_chat_and_embedding_providers_can_be_split(tmp_path: Path) -> None:
     assert config.pipeline.qa_generation_provider == "default/local-chat"
     assert config.pipeline.quality_judge_provider == "default/local-chat"
     assert config.pipeline.embed_provider == "default/local-embed"
+
+
+def test_quality_controls_reach_generation_config(tmp_path: Path) -> None:
+    job = _job(
+        corpus=str(tmp_path),
+        file_extensions=[".txt", ".text"],
+        sentences_per_chunk=8,
+        multi_doc=True,
+        bundle_size=3,
+        bundle_strategy="doc_balanced",
+        max_docs_per_bundle=2,
+        max_artifacts_per_type=4,
+        max_parallel_requests_for_gen=6,
+    )
+    config = _build(job, tmp_path)
+
+    assert config.seed_source.file_extensions == [".txt", ".text"]
+    assert config.seed_source.sentences_per_chunk == 8
+    assert config.seed_source.multi_doc is True
+    assert config.seed_source.bundle_size == 3
+    assert config.seed_source.bundle_strategy == "doc_balanced"
+    assert config.seed_source.max_docs_per_bundle == 2
+    assert config.pipeline.max_artifacts_per_type == 4
+    assert config.pipeline.max_parallel_requests_for_gen == 6
 
 
 def test_count_distribution_mismatch_is_rejected_at_spec_time() -> None:

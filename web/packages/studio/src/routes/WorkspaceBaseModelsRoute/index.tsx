@@ -15,7 +15,6 @@ import {
   useBaseModels,
   type ModelEntityFilterInput,
 } from '@nemo/common/src/api/entity-store/useBaseModels';
-import { usePromptTunableBaseModelIds } from '@nemo/common/src/api/entity-store/usePromptTunableBaseModelIds';
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { dateTimeFilter } from '@nemo/common/src/components/DataView/dateTimeFilter';
 import * as DataView from '@nemo/common/src/components/DataView/internal';
@@ -25,7 +24,7 @@ import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getModelEntityChatStatus } from '@nemo/common/src/utils/models';
 import { getSortParam } from '@nemo/common/src/utils/query';
-import { useModelsGetModel } from '@nemo/sdk/generated/platform/api';
+import { useModelsGetModel } from '@nemo/sdk/generated/platform/models';
 import type { ModelEntity, ModelEntitySortField } from '@nemo/sdk/generated/platform/schema';
 import {
   Checkbox,
@@ -60,11 +59,8 @@ const TAB_SEARCH_PARAM = 'tab';
 
 const CUSTOMIZABLE_FILTER_ID = 'customizable';
 const FINE_TUNABLE_KEY = 'fine_tunable';
-const PROMPT_TUNABLE_KEY = 'prompt_tunable';
 
-type CustomizableFilterState = Partial<
-  Record<typeof FINE_TUNABLE_KEY | typeof PROMPT_TUNABLE_KEY, true>
->;
+type CustomizableFilterState = Partial<Record<typeof FINE_TUNABLE_KEY, true>>;
 
 /**
  * Column definitions used solely for filter metadata. The columns are never rendered as a table;
@@ -74,22 +70,19 @@ type CustomizableFilterState = Partial<
 const makeFilterColumns: ComponentProps<typeof DataView.Root<ModelEntity>>['makeColumns'] = ({
   accessor,
 }) => [
-  // Customizable filtering depends on Customizer capabilities, so hide both the
+  // Fine-tunable filtering depends on Customizer capabilities, so hide both the
   // column filter and toolbar checkbox while Customizer is launch-disabled.
   ...(CUSTOMIZER_ENABLED
     ? [
         accessor(() => '', {
           id: CUSTOMIZABLE_FILTER_ID,
-          header: 'Customizable',
+          header: 'Fine-tunable',
           enableSorting: false,
           meta: {
             filter: {
               type: 'multi-select',
-              label: 'Customizable',
-              options: [
-                { value: FINE_TUNABLE_KEY, label: 'Fine-tunable' },
-                { value: PROMPT_TUNABLE_KEY, label: 'Prompt tunable' },
-              ],
+              label: 'Fine-tunable',
+              options: [{ value: FINE_TUNABLE_KEY, label: 'Fine-tunable' }],
             },
           },
         }),
@@ -117,7 +110,7 @@ export const WorkspaceBaseModelsRoute: FC = () => {
   const tabFromUrl = (searchParams.get(TAB_SEARCH_PARAM) ?? 'model-details') as ModelPanelTab;
 
   useBreadcrumbs({
-    items: [{ slotLabel: 'Base Models' }],
+    items: [{ slotLabel: 'Model Catalog' }],
   });
 
   const dataViewState = useStudioDataViewState<
@@ -178,29 +171,17 @@ export const WorkspaceBaseModelsRoute: FC = () => {
     sort,
   });
 
-  const { promptTunableIds } = usePromptTunableBaseModelIds({ workspace });
-
   const visibleModels = useMemo(() => {
-    const wantFineTunable = !!customizableFilter?.[FINE_TUNABLE_KEY];
-    const wantPromptTunable = !!customizableFilter?.[PROMPT_TUNABLE_KEY];
-    if (!wantFineTunable && !wantPromptTunable) return models;
-    return models.filter((model) => {
-      const isFineTuneable = Boolean(model.fileset);
-      const isChatAvailable = getModelEntityChatStatus(model) === 'enabled';
-      const canPromptTune = promptTunableIds.has(model.id);
-      if (wantFineTunable && isFineTuneable) return true;
-      if (wantPromptTunable && canPromptTune && isChatAvailable) return true;
-      return false;
-    });
-  }, [models, customizableFilter, promptTunableIds]);
+    if (!customizableFilter?.[FINE_TUNABLE_KEY]) return models;
+    return models.filter((model) => Boolean(model.fileset));
+  }, [models, customizableFilter]);
 
   const liveCustomizableFilter = CUSTOMIZER_ENABLED
     ? (dataViewState.columnFiltering.state.find((f) => f.id === CUSTOMIZABLE_FILTER_ID)?.value as
         | CustomizableFilterState
         | undefined)
     : undefined;
-  const customizableChecked =
-    !!liveCustomizableFilter?.[FINE_TUNABLE_KEY] || !!liveCustomizableFilter?.[PROMPT_TUNABLE_KEY];
+  const customizableChecked = !!liveCustomizableFilter?.[FINE_TUNABLE_KEY];
 
   const handleCustomizableToggle = (checked: boolean) => {
     dataViewState.columnFiltering.set((prev) => {
@@ -210,7 +191,7 @@ export const WorkspaceBaseModelsRoute: FC = () => {
         ...others,
         {
           id: CUSTOMIZABLE_FILTER_ID,
-          value: { [FINE_TUNABLE_KEY]: true, [PROMPT_TUNABLE_KEY]: true },
+          value: { [FINE_TUNABLE_KEY]: true },
         },
       ];
     });
@@ -283,7 +264,7 @@ export const WorkspaceBaseModelsRoute: FC = () => {
     : 'name';
 
   return (
-    <AccessibleTitle title="Base Models">
+    <AccessibleTitle title="Model Catalog">
       <ModelPanel
         allowModelDelete={allowModelDelete}
         onModelDeleted={() => {
@@ -319,7 +300,7 @@ export const WorkspaceBaseModelsRoute: FC = () => {
         onOpenChange={(open) => !open && handleClosePanel()}
       />
       <Stack className="h-full min-h-0" gap="density-2xl" padding="density-2xl">
-        <PageHeader className="p-0 shrink-0" slotHeading="Base Models" />
+        <PageHeader className="p-0 shrink-0" slotHeading="Model Catalog" />
         <StudioDataView<ModelEntity>
           dataViewState={dataViewState}
           makeColumns={makeFilterColumns}
@@ -332,8 +313,8 @@ export const WorkspaceBaseModelsRoute: FC = () => {
                   slotContent={
                     <div className={tooltipClassName}>
                       <Text>
-                        Show only models that can be fine-tuned or prompt-tuned. Inference-only
-                        models (e.g. from custom providers) are hidden.
+                        Show only models that can be fine-tuned. Inference-only models (e.g. from
+                        custom providers) are hidden.
                       </Text>
                     </div>
                   }
@@ -341,15 +322,19 @@ export const WorkspaceBaseModelsRoute: FC = () => {
                 >
                   <Flex
                     align="center"
-                    className="h-10 px-density-md rounded-md border border-base bg-surface-raised"
+                    className="h-10 shrink-0 px-density-md rounded-md border border-base bg-surface-raised"
                   >
                     <Checkbox
                       attributes={{
                         CheckboxInput: { id: 'base-models-filter-customizable' },
-                        Label: { htmlFor: 'base-models-filter-customizable' },
+                        Label: {
+                          htmlFor: 'base-models-filter-customizable',
+                          // "Fine-tunable" otherwise wraps at the hyphen when the toolbar is tight.
+                          className: 'whitespace-nowrap',
+                        },
                       }}
                       checked={customizableChecked}
-                      slotLabel="Customizable"
+                      slotLabel="Fine-tunable"
                       onCheckedChange={(checked) => handleCustomizableToggle(!!checked)}
                     />
                   </Flex>
@@ -410,7 +395,6 @@ export const WorkspaceBaseModelsRoute: FC = () => {
                   <BaseModelCard
                     model={model}
                     isChatAvailable={getModelEntityChatStatus(model) === 'enabled'}
-                    canPromptTune={promptTunableIds.has(model.id)}
                     showCustomizationBadges={CUSTOMIZER_ENABLED}
                     onClick={() => handleOpenPanel(model)}
                   />

@@ -44,3 +44,21 @@ const FALLBACK_CONFIG: SpanKindConfig = SPAN_KIND_CONFIG[SpanKind.UNKNOWN];
 /** Resolves the color/icon/label for a span kind, falling back to "Unknown". */
 export const getSpanKindConfig = (kind: SpanKind | string | undefined): SpanKindConfig =>
   (kind && SPAN_KIND_CONFIG[kind as SpanKind]) || FALLBACK_CONFIG;
+
+/**
+ * Badge color → icon text color. Shared by every surface that renders a span
+ * kind (badge, tree, graph card) so a kind reads the same color everywhere.
+ */
+const KIND_ICON_COLOR_CLASS: Record<string, string> = {
+  teal: 'text-[color:var(--text-color-accent-teal)]',
+  purple: 'text-[color:var(--text-color-accent-purple)]',
+  blue: 'text-[color:var(--text-color-accent-blue)]',
+  green: 'text-[color:var(--text-color-accent-green)]',
+  yellow: 'text-[color:var(--text-color-accent-yellow)]',
+  red: 'text-[color:var(--text-color-accent-red)]',
+  gray: 'text-[color:var(--text-color-secondary)]',
+};
+
+/** Icon/accent text color class for a span kind. */
+export const getSpanKindColorClass = (kind: SpanKind | string | undefined): string =>
+  KIND_ICON_COLOR_CLASS[getSpanKindConfig(kind).color] ?? KIND_ICON_COLOR_CLASS.gray;

@@ -3,14 +3,14 @@ SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES.
 SPDX-License-Identifier: Apache-2.0
 */}}
 
-{{- include "nemo-platform.validateEnvoyKeepAliveTimeouts" . }}
-{{- if and (include "nemo-platform.authEnabled" .) .Values.envoyProxy.enabled }}
+{{- include "nemo-helix.validateEnvoyKeepAliveTimeouts" . }}
+{{- if and (include "nemo-helix.authEnabled" .) .Values.envoyProxy.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "nmp-envoy.servicename" . }}
+  name: {{ include "nhx-envoy.servicename" . }}
   labels:
-    {{- include "nmp-envoy.labels" . | nindent 4 }}
+    {{- include "nhx-envoy.labels" . | nindent 4 }}
 data:
   envoy.yaml: |
 {{- if .Values.envoyProxy.configOverride }}
@@ -82,7 +82,7 @@ data:
                   - endpoint:
                       address:
                         socket_address:
-                          address: {{ include "nmp-api.api-servicename" . }}
+                          address: {{ include "nhx-api.api-servicename" . }}
                           port_value: {{ .Values.api.service.port }}
 {{- end }}
 {{- end }}

@@ -14,12 +14,14 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from kubernetes.client.models import V1Deployment, V1Pod, V1ReplicaSet
 from kubernetes.client.rest import ApiException
 from nemo_deployments_plugin.backends.base import BackendStatusUpdate, LogResult
 from nemo_deployments_plugin.backends.k8s.client import KubernetesClients, k8s_client_module
 from nemo_deployments_plugin.backends.k8s.compiler import (
     CompiledWorkload,
     DeploymentConfigError,
+    ExecutorK8sDefaults,
     compile_workload,
     create_configmap,
     create_secret,
@@ -40,6 +42,17 @@ from nemo_deployments_plugin.backends.k8s.status import (
     resource_labels_match,
     status_from_deployment,
 )
+from nemo_deployments_plugin.backends.k8s.workload_identity import (
+    POD_LIST_UNAVAILABLE,
+    PodListResult,
+    PodListUnavailable,
+    ReplicaSetOwner,
+    ReplicaSetOwnerListResult,
+    deployment_pod_uid_delegation_pods,
+    reconcile_pod_uid_delegations,
+    replica_set_owner_from_resource,
+    revoke_workload_delegations,
+)
 from nemo_deployments_plugin.backends.labels import (
     CONFIG_NAME_LABEL,
     DEPLOYMENT_NAME_LABEL,
@@ -51,8 +64,15 @@ from nemo_deployments_plugin.backends.labels import (
     k8s_deployment_secret_name,
     managed_by_label_selector,
 )
+from nemo_deployments_plugin.backends.workload_identity import (
+    workload_identity_activation_error,
+    workload_identity_reconcile_allowed,
+    workload_identity_requested,
+)
 from nemo_deployments_plugin.entities import Container, DeploymentConfig, K8sDeploymentConfig
 from nemo_deployments_plugin.types import Endpoint, RestartPolicy
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.auth.workload_delegations import WorkloadDelegationStore
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +81,7 @@ logger = logging.getLogger(__name__)
 class BuiltDeployment:
     """An apps/v1.Deployment plus the compiled workload used to build its pod template."""
 
-    deployment: Any
+    deployment: V1Deployment
     compiled: CompiledWorkload
 
 
@@ -82,6 +102,7 @@ def build_deployment_body(
     deployment_name: str,
     k8s_config: K8sDeploymentConfig | None,
     executor_image_pull_secrets: list | None = None,
+    executor_defaults: ExecutorK8sDefaults | None = None,
     secret_env: dict[str, str] | None = None,
 ) -> BuiltDeployment:
     """Build an ``apps/v1.Deployment`` for create and its compiled workload."""
@@ -96,6 +117,7 @@ def build_deployment_body(
         k8s_config=k8s_config,
         pod_restart_policy="Always",
         executor_image_pull_secrets=executor_image_pull_secrets,
+        executor_defaults=executor_defaults,
         secret_env=secret_env,
     )
     deployment = k8s.client.V1Deployment(
@@ -106,7 +128,10 @@ def build_deployment_body(
             replicas=1,
             selector=k8s.client.V1LabelSelector(match_labels=selector_labels),
             template=k8s.client.V1PodTemplateSpec(
-                metadata=k8s.client.V1ObjectMeta(labels=pod_labels),
+                metadata=k8s.client.V1ObjectMeta(
+                    labels=pod_labels,
+                    annotations=compiled.pod_annotations or None,
+                ),
                 spec=k8s.client.V1PodSpec(**compiled.pod_spec_kwargs),
             ),
         ),
@@ -188,30 +213,106 @@ def _label_selector(match_labels: dict[str, str]) -> str:
     return ",".join(f"{key}={value}" for key, value in match_labels.items())
 
 
-async def _read_newest_pod(
+async def _read_pods(
     clients: KubernetesClients,
     *,
     namespace: str,
     match_labels: dict[str, str],
-) -> Any | None:
+) -> PodListResult:
     timeout = clients.request_timeout
     core_v1 = clients.core_v1
 
-    def _list() -> Any | None:
+    def _list() -> list[V1Pod]:
         pods = core_v1.list_namespaced_pod(
             namespace=namespace,
             label_selector=_label_selector(match_labels),
             _request_timeout=timeout,
         )
-        if not pods.items:
-            return None
-        return newest_pod(list(pods.items))
+        return list(pods.items or [])
 
     try:
         return await asyncio.to_thread(_list)
     except Exception:
         logger.debug("Could not list pods for selector %s", match_labels, exc_info=True)
+        return POD_LIST_UNAVAILABLE
+
+
+async def _read_replica_set_owners(
+    clients: KubernetesClients,
+    *,
+    namespace: str,
+    match_labels: dict[str, str],
+) -> ReplicaSetOwnerListResult:
+    timeout = clients.request_timeout
+    apps_v1 = clients.apps_v1
+
+    def _list() -> list[V1ReplicaSet]:
+        replica_sets = apps_v1.list_namespaced_replica_set(
+            namespace=namespace,
+            label_selector=_label_selector(match_labels),
+            _request_timeout=timeout,
+        )
+        return list(replica_sets.items or [])
+
+    try:
+        owners: list[ReplicaSetOwner] = []
+        for replica_set in await asyncio.to_thread(_list):
+            owner = replica_set_owner_from_resource(replica_set)
+            if owner is not None:
+                owners.append(owner)
+        return owners
+    except Exception:
+        logger.debug("Could not list ReplicaSets for selector %s", match_labels, exc_info=True)
+        return POD_LIST_UNAVAILABLE
+
+
+def _metadata_uid(resource: V1Deployment) -> str | None:
+    metadata = resource.metadata
+    if metadata is None:
         return None
+    return metadata.uid or None
+
+
+def _newest_available_pod(pods: PodListResult) -> V1Pod | None:
+    if isinstance(pods, PodListUnavailable):
+        return None
+    return newest_pod(pods)
+
+
+async def _read_deployment_pod_uid_delegation_pods(
+    clients: KubernetesClients,
+    *,
+    namespace: str,
+    resource_name: str,
+    deployment: V1Deployment,
+    config: DeploymentConfig,
+    k8s_config: K8sDeploymentConfig | None,
+    pods: PodListResult,
+) -> PodListResult:
+    if not workload_identity_requested(config) or isinstance(pods, PodListUnavailable):
+        return pods
+    replica_set_owners = await _read_replica_set_owners(
+        clients,
+        namespace=namespace,
+        match_labels=app_selector_labels(resource_name),
+    )
+    return deployment_pod_uid_delegation_pods(
+        config=config,
+        k8s_config=k8s_config,
+        resource_name=resource_name,
+        deployment_uid=_metadata_uid(deployment),
+        replica_sets=replica_set_owners,
+        pods=pods,
+    )
+
+
+async def _read_newest_pod(
+    clients: KubernetesClients,
+    *,
+    namespace: str,
+    match_labels: dict[str, str],
+) -> V1Pod | None:
+    return _newest_available_pod(await _read_pods(clients, namespace=namespace, match_labels=match_labels))
 
 
 def _log_cleanup_ignored(resource_name: str, exc: ApiException) -> None:
@@ -233,13 +334,19 @@ async def create_deployment(
     backend_config: dict[str, Any],
     config: DeploymentConfig,
     executor_image_pull_secrets: list | None = None,
+    executor_defaults: ExecutorK8sDefaults | None = None,
     secret_env: dict[str, str] | None = None,
+    auth_context: AuthContext | None = None,
+    workload_delegation_store: WorkloadDelegationStore | None = None,
 ) -> BackendStatusUpdate:
     resource_name = k8s_deployment_resource_name(workspace, name)
     try:
         validate_config_for_deployment(config)
         k8s_config = resolve_k8s_deployment_config(backend_config)
         namespace = resolve_deployment_namespace(default_namespace=default_namespace, k8s_config=k8s_config)
+        identity_error = workload_identity_activation_error(config=config, auth_context=auth_context)
+        if identity_error is not None:
+            return BackendStatusUpdate(status="FAILED", status_message=identity_error)
         identity_labels = deployment_identity_labels(
             workspace,
             name,
@@ -256,6 +363,7 @@ async def create_deployment(
             deployment_name=name,
             k8s_config=k8s_config,
             executor_image_pull_secrets=executor_image_pull_secrets,
+            executor_defaults=executor_defaults,
             secret_env=secret_env,
         )
         deployment_body = built.deployment
@@ -407,7 +515,35 @@ async def create_deployment(
             namespace=namespace,
             containers=compiled.service_containers,
         )
-        pod = await _read_newest_pod(clients, namespace=namespace, match_labels=app_selector_labels(resource_name))
+        if not resource_labels_match(deployment, identity_labels):
+            return status_from_deployment(
+                deployment=deployment,
+                deployment_name=resource_name,
+                expected_labels=identity_labels,
+                endpoints=endpoints,
+            )
+        pods = await _read_pods(clients, namespace=namespace, match_labels=app_selector_labels(resource_name))
+        if workload_identity_reconcile_allowed(config, auth_context):
+            pod_uid_delegation_pods = await _read_deployment_pod_uid_delegation_pods(
+                clients,
+                namespace=namespace,
+                resource_name=resource_name,
+                deployment=deployment,
+                config=config,
+                k8s_config=k8s_config,
+                pods=pods,
+            )
+            await reconcile_pod_uid_delegations(
+                workload_delegation_store,
+                config=config,
+                auth_context=auth_context,
+                workspace=workspace,
+                deployment_name=name,
+                namespace=namespace,
+                k8s_config=k8s_config,
+                pods=pod_uid_delegation_pods,
+            )
+        pod = _newest_available_pod(pods)
         return status_from_deployment(
             deployment=deployment,
             deployment_name=resource_name,
@@ -433,6 +569,9 @@ async def read_deployment_status(
     restart_policy: RestartPolicy,
     backoff_limit: int,
     containers: tuple[Container, ...],
+    config: DeploymentConfig | None = None,
+    auth_context: AuthContext | None = None,
+    workload_delegation_store: WorkloadDelegationStore | None = None,
 ) -> BackendStatusUpdate:
     resource_name = k8s_deployment_resource_name(workspace, name)
     expected_labels = deployment_identity_labels(
@@ -462,12 +601,41 @@ async def read_deployment_status(
                 status="FAILED",
                 status_message=f"Deployment {resource_name} is missing deployment config identity labels",
             )
+        service_containers = tuple(config.containers) if config is not None else containers
         endpoints = build_in_cluster_endpoints(
             resource_name=resource_name,
             namespace=namespace,
-            containers=containers,
+            containers=service_containers,
         )
-        pod = await _read_newest_pod(clients, namespace=namespace, match_labels=app_selector_labels(resource_name))
+        if not resource_labels_match(deployment, expected_labels):
+            return status_from_deployment(
+                deployment=deployment,
+                deployment_name=resource_name,
+                expected_labels=expected_labels,
+                endpoints=endpoints,
+            )
+        pods = await _read_pods(clients, namespace=namespace, match_labels=app_selector_labels(resource_name))
+        if config is not None and workload_identity_reconcile_allowed(config, auth_context):
+            pod_uid_delegation_pods = await _read_deployment_pod_uid_delegation_pods(
+                clients,
+                namespace=namespace,
+                resource_name=resource_name,
+                deployment=deployment,
+                config=config,
+                k8s_config=k8s_config,
+                pods=pods,
+            )
+            await reconcile_pod_uid_delegations(
+                workload_delegation_store,
+                config=config,
+                auth_context=auth_context,
+                workspace=workspace,
+                deployment_name=name,
+                namespace=namespace,
+                k8s_config=k8s_config,
+                pods=pod_uid_delegation_pods,
+            )
+        pod = _newest_available_pod(pods)
         return status_from_deployment(
             deployment=deployment,
             deployment_name=resource_name,
@@ -491,6 +659,8 @@ async def delete_deployment(
     name: str,
     backend_config: dict[str, Any],
     expected_labels: dict[str, str],
+    config: DeploymentConfig | None = None,
+    workload_delegation_store: WorkloadDelegationStore | None = None,
 ) -> BackendStatusUpdate:
     resource_name = k8s_deployment_resource_name(workspace, name)
     configmap_name = k8s_deployment_configmap_name(workspace, name)
@@ -592,6 +762,12 @@ async def delete_deployment(
                 status="FAILED",
                 status_message=f"Deployment {resource_name} exists but is not managed by this plugin",
             )
+        await revoke_workload_delegations(
+            workload_delegation_store,
+            config=config,
+            workspace=workspace,
+            deployment_name=name,
+        )
         return BackendStatusUpdate(status="SUCCEEDED", status_message=f"Deployment {resource_name} deleted")
     except Exception as exc:
         return BackendStatusUpdate(status="FAILED", status_message=f"Failed to delete Deployment: {exc}")

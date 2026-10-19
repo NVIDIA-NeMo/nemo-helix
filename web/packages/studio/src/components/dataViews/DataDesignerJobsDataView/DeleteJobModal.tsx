@@ -4,7 +4,7 @@
 import {
   getDataDesignerListCreateJobsQueryKey,
   useDataDesignerDeleteCreateJob,
-} from '@nemo/sdk/generated/data-designer/api';
+} from '@nemo/sdk/generated/data-designer/data-designer';
 import type { CreateJob as DataDesignerJob } from '@nemo/sdk/generated/data-designer/schema';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';

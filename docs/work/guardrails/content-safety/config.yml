@@ -4,7 +4,7 @@
 models:
   - type: main
     engine: nim
-    model: nvdev/nvidia/nemotron-3-nano-30b-a3b
+    model: nvdev/nvidia/nemotron-3.5-lightning-30b-a3b
     parameters:
       base_url: https://integrate.api.nvidia.com/v1
 

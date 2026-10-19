@@ -67,6 +67,7 @@ export interface SharedModelEntry {
   id: number;
   /** Full URN, e.g. "abacusai/dracarys-llama-70b". Null means unassigned. */
   modelURN: string | null;
+  adapter?: string | null;
   locked?: boolean;
 }
 
@@ -76,6 +77,7 @@ export interface PanelState {
   collapsed: boolean;
   /** Full model URN ("workspace/name"), or null if unassigned. */
   modelURN: string | null;
+  adapter?: string | null;
   roleColor: PanelRoleColor;
   roleLabel: string;
   /** True when this is the only panel — drives the larger per-panel action bar. */

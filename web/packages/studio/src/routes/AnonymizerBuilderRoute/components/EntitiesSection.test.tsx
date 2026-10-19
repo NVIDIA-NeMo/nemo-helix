@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { EntitiesSection } from '@studio/routes/AnonymizerBuilderRoute/components/EntitiesSection';
-import { ENTITY_MODE_AUTO } from '@studio/routes/AnonymizerBuilderRoute/constants';
+import {
+  ENTITY_MODE_AUTO,
+  ENTITY_MODE_CUSTOM,
+} from '@studio/routes/AnonymizerBuilderRoute/constants';
 import {
   type AnonymizerFormData,
   getAnonymizerFormDefaults,
@@ -11,7 +14,7 @@ import { render, screen } from '@testing-library/react';
 import type { FC, ReactNode } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 
-vi.mock('@nemo/sdk/generated/anonymizer/api', () => ({
+vi.mock('@nemo/sdk/generated/anonymizer/anonymizer', () => ({
   useAnonymizerListEntityLabels: () => ({
     data: { data: ['email', 'ssn', 'first_name'] },
     isLoading: false,
@@ -41,14 +44,14 @@ describe('EntitiesSection', () => {
     );
 
     expect(
-      await screen.findByText(/Auto-detect includes all 3 default entities/)
+      await screen.findByText(/Auto-detect includes all 3 available entities/)
     ).toBeInTheDocument();
-    expect(screen.queryByText(/Also include all 3 default entities/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Also include all 3 available entities/)).not.toBeInTheDocument();
   });
 
   it('offers the defaults checkbox in custom mode', async () => {
     render(
-      <TestWrapper>
+      <TestWrapper defaultValues={{ entityMode: ENTITY_MODE_CUSTOM }}>
         <EntitiesSection />
       </TestWrapper>
     );
@@ -56,6 +59,6 @@ describe('EntitiesSection', () => {
     expect(
       await screen.findByText(/Custom mode only outputs the labels selected below/)
     ).toBeInTheDocument();
-    expect(screen.getByText('Also include all 3 default entities')).toBeInTheDocument();
+    expect(screen.getByText('Also include all 3 available entities')).toBeInTheDocument();
   });
 });

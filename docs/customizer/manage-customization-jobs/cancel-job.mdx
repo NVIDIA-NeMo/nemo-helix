@@ -8,14 +8,7 @@ description: ""
 <a id="ft-cancel-customization-job"></a>
 ## Prerequisites
 
-Before you can cancel a customization job, make sure that you have:
-
-- Obtained the base URL of your NeMo Platform.
-- Set the `NMP_BASE_URL` environment variable to your NeMo Platform endpoint
-
-```bash
-export NMP_BASE_URL="https://your-nmp-base-url"
-```
+Before you can cancel a customization job, make sure that you have configured a CLI context that points at your NeMo Helix deployment. Refer to [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
 ---
 
@@ -26,24 +19,22 @@ Running jobs may be cancelled. A cancelled job does not upload checkpoints. Cust
 Use the SDK to cancel a job:
 
 ```python
-import os
-from nemo_platform import NeMoPlatform
+from nemo_helix_plugin.client.client import NemoClient
 
 # Initialize the client
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 # Cancel a job (use the job name and workspace from List Active Jobs)
 job_name = "automodel-a1b2c3d4e5f6"
 workspace = "default"
-cancelled_job = client.jobs.cancel(name=job_name, workspace=workspace)
+cancelled_job = client.jobs.cancel_job(name=job_name, workspace=workspace).data()
 
 print(f"Job {cancelled_job.name} has been cancelled")
 print(f"Current status: {cancelled_job.status}")
 print(f"Updated at: {cancelled_job.updated_at}")
 ```
+
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
 
 <Accordion title="Example Response">
 
@@ -54,10 +45,10 @@ print(f"Updated at: {cancelled_job.updated_at}")
   "name": "automodel-a1b2c3d4e5f6",
   "workspace": "default",
   "id": "platform-job-2k8i3i1HqJHHPVB5M6Bk9Z",
-  "source": "automodel",
+  "source": "customization",
   "status": "cancelled",
   "spec": {
-    "model": "default/qwen3-1.7b",
+    "model": "default/qwen3-0.6b",
     "dataset": { "training": "default/my-training-dataset" },
     "training": {
       "training_type": "sft",
@@ -68,8 +59,8 @@ print(f"Updated at: {cancelled_job.updated_at}")
     "batch": { "global_batch_size": 16, "micro_batch_size": 1 },
     "optimizer": { "learning_rate": 1e-05 },
     "parallelism": {
-      "num_gpus_per_node": 2,
-      "tensor_parallel_size": 2
+      "num_gpus_per_node": 1,
+      "tensor_parallel_size": 1
     },
     "output": {
       "name": "my-finetuned-qwen",

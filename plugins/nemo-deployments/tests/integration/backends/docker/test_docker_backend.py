@@ -62,7 +62,7 @@ def _build_docker_backend(
 ) -> DockerDeploymentBackend:
     if mock_entities is None:
         mock_entities = AsyncMock()
-    mock_sdk = MagicMock()
+    mock_client = MagicMock()
     port_base = _worker_port_base(worker_id)
     executor_config: dict[str, Any] = {
         "pull_images": True,
@@ -71,11 +71,11 @@ def _build_docker_backend(
         **config_overrides,
     }
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
     ):
-        backend = DockerDeploymentBackend(mock_sdk, executor_config)
+        backend = DockerDeploymentBackend(mock_client, executor_config)
     backend._entities = mock_entities
     return backend
 
@@ -89,7 +89,7 @@ def _never_config() -> DeploymentConfig:
     return DeploymentConfig(
         name="echo-cfg",
         workspace="itest",
-        restart_policy="Never",  # ty: ignore[unknown-argument]
+        restart_policy="Never",
         containers=[Container(name="main", image=ALPINE_IMAGE, command=["echo"], args=["hello"])],
     )
 
@@ -98,7 +98,7 @@ def _never_sleep_config(*, sleep_seconds: int) -> DeploymentConfig:
     return DeploymentConfig(
         name="sleep-cfg",
         workspace="itest",
-        restart_policy="Never",  # ty: ignore[unknown-argument]
+        restart_policy="Never",
         containers=[
             Container(
                 name="main",
@@ -129,7 +129,7 @@ def _always_http_config() -> DeploymentConfig:
     return DeploymentConfig(
         name="http-cfg",
         workspace="itest",
-        restart_policy="Always",  # ty: ignore[unknown-argument]
+        restart_policy="Always",
         containers=[
             Container(
                 name="main",

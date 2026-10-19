@@ -4,7 +4,7 @@
 import { withOperators } from '@nemo/common/src/api/filterOperators';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParam } from '@nemo/common/src/utils/query';
-import { useFilesDeleteFileset, useFilesListFilesets } from '@nemo/sdk/generated/platform/api';
+import { useFilesDeleteFileset, useFilesListFilesets } from '@nemo/sdk/generated/platform/files';
 import {
   type FilesetFilter,
   type FilesetOutput as Dataset,
@@ -187,8 +187,12 @@ export function useDatasetsTable({
   const handleBulkDeleteSuccess = useCallback(() => {
     onDatasetsSelected?.([]);
     dataViewState.rowSelection.set({});
+  }, [dataViewState.rowSelection, onDatasetsSelected]);
+
+  const handleBulkDeleteSettled = useCallback(() => {
+    invalidateDatasetCaches(workspace, undefined, ['list']);
     refetch();
-  }, [dataViewState.rowSelection, onDatasetsSelected, refetch]);
+  }, [refetch, workspace]);
 
   const handleModalClose = () => setModalOpen('none');
 
@@ -211,6 +215,7 @@ export function useDatasetsTable({
     handleDatasetDeleted,
     handleDeleteDataset,
     handleBulkDeleteSuccess,
+    handleBulkDeleteSettled,
     handleModalClose,
   };
 }

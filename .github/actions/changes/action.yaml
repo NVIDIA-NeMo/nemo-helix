@@ -16,12 +16,21 @@ outputs:
   deps:
     description: "'true' if any dependency-related files changed"
     value: ${{ steps.filter.outputs.deps }}
+  agents-harnesses:
+    description: "'true' if harness adapter integration code or tests changed"
+    value: ${{ steps.filter.outputs.agents-harnesses }}
   fabric:
     description: "'true' if the Fabric agent-eval runtime, its tests, or its dependency extra changed"
     value: ${{ steps.filter.outputs.fabric }}
+  harbor-integration:
+    description: "'true' if the Harbor runtime, its tests/fixtures, or its dependency extra changed"
+    value: ${{ steps.filter.outputs.harbor-integration }}
   evaluator-sdk-closure:
     description: "'true' if anything that can change the agent_eval import closure changed"
     value: ${{ steps.filter.outputs.evaluator-sdk-closure }}
+  evaluator-integration:
+    description: "'true' if anything the evaluator integration tests exercise changed"
+    value: ${{ steps.filter.outputs.evaluator-integration }}
   scaled-evals:
     description: "'true' if the temporary scaled-evals plugin changed"
     value: ${{ steps.filter.outputs.scaled-evals }}
@@ -37,6 +46,9 @@ outputs:
   web-studio:
     description: "'true' if any web files changed"
     value: ${{ steps.filter.outputs.web-studio }}
+  customizer-skill-references:
+    description: "'true' if the customizer skill references Studio inlines at build time changed"
+    value: ${{ steps.filter.outputs.customizer-skill-references }}
   github-scripts:
     description: "'true' if GitHub JavaScript scripts or their validation changes"
     value: ${{ steps.filter.outputs.github-scripts }}
@@ -61,6 +73,9 @@ outputs:
   deployments-openshell:
     description: "'true' if the nemo-deployments plugin changed (OpenShell backend coverage)"
     value: ${{ steps.filter.outputs.deployments-openshell }}
+  jobs-openshell:
+    description: "'true' if the jobs service or jobs-launcher changed (OpenShell job backend coverage)"
+    value: ${{ steps.filter.outputs.jobs-openshell }}
   ngc-metadata:
     description: "'true' if NGC metadata scripts, tests, or assets changed"
     value: ${{ steps.filter.outputs.ngc-metadata }}
@@ -70,6 +85,9 @@ outputs:
   auth-idp:
     description: "'true' if auth-idp tests or their containerized E2E harness inputs changed"
     value: ${{ steps.filter.outputs.auth-idp == 'true' }}
+  customization-auth:
+    description: "'true' if anything a customization job step touches on an auth-enabled cluster changed"
+    value: ${{ steps.filter.outputs.customization-auth == 'true' || steps.filter.outputs.deps == 'true' || steps.filter.outputs.docker == 'true' || steps.filter.outputs.helm == 'true' }}
 
 runs:
   using: "composite"
@@ -87,10 +105,10 @@ runs:
             - 'plugins/*/openapi/**'
             - 'plugins/*/src/**'
             - 'plugins/*/pyproject.toml'
-            - 'packages/nmp_common/src/nmp_common/api/**'
-            - 'packages/nmp_common/src/nmp_common/datamodel/**'
-            - 'packages/nemo_platform_plugin/src/**'
-            - 'packages/nemo_evaluator_sdk/src/**'
+            - 'packages/nhx_common/src/nhx_common/api/**'
+            - 'packages/nhx_common/src/nhx_common/datamodel/**'
+            - 'packages/nemo_helix_plugin/src/**'
+            - 'packages/nhx_evals_sdk/src/**'
             - 'script/generate_openapi_spec.py'
             - 'script/generate-openapi-spec.sh'
             - 'script/openapi_helper/**'
@@ -105,32 +123,108 @@ runs:
             - 'tools/common/**'
             - 'tools/osv-scanner/**'
             - 'tools/python/**'
-          fabric:
-            - 'packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/agent_eval/runtimes/fabric/**'
-            - 'packages/nemo_evaluator_sdk/tests/agent_eval/test_fabric_*.py'
-            - 'packages/nemo_evaluator_sdk/pyproject.toml'
+          agents-harnesses:
+            - 'script/dev-install-hermes.sh'
+            - 'plugins/nemo-agents/**'
+            - 'packages/nemo_helix_plugin/**'
+            - 'packages/nemo_helix/pyproject.toml'
+            - 'conftest.py'
+            - 'pytest.ini'
             - '.github/workflows/ci.yaml'
             - '.github/actions/changes/action.yaml'
+          fabric:
+            - 'packages/nhx_evals_sdk/src/nhx_evals_sdk/agent_eval/runtimes/fabric/**'
+            - 'packages/nhx_evals_sdk/src/nhx_evals_sdk/agent_eval/**'
+            - 'packages/nhx_evals_sdk/tests/agent_eval/test_fabric_*.py'
+            - 'packages/nhx_evals_sdk/pyproject.toml'
+            - '.github/workflows/ci.yaml'
+            - '.github/actions/changes/action.yaml'
+          harbor-integration:
+            - 'plugins/nemo-evals/src/nemo_evals/harbor/**'
+            - 'plugins/nemo-evals/src/nemo_evals/revisions.py'
+            - 'plugins/nemo-evals/src/nemo_evals/sdk/**'
+            - 'plugins/nemo-evals/src/nemo_evals/jobs/**'
+            - 'plugins/nemo-evals/src/nemo_evals/api/**'
+            - 'plugins/nemo-evals/src/nemo_evals/task_refs.py'
+            - 'plugins/nemo-evals/src/nemo_evals/task_identity.py'
+            - 'packages/nhx_evals_sdk/src/nhx_evals_sdk/agent_eval/**'
+            - 'packages/nhx_evals_sdk/tests/agent_eval/test_harbor_*.py'
+            - 'packages/nhx_evals_sdk/pyproject.toml'
+            - 'plugins/nemo-evals/tests/integration/test_harbor_*.py'
+            - 'plugins/nemo-evals/tests/integration/conftest.py'
+            - 'plugins/nemo-evals/examples/harbor_taskset/**'
+            - 'plugins/nemo-evals/src/nemo_evals/examples/harbor_test_agent.py'
+            - 'plugins/nemo-evals/pyproject.toml'
+            - '.github/workflows/ci.yaml'
+            - '.github/actions/changes/action.yaml'
+          evaluator-integration:
+            # What the evaluator integration suite actually drives. The harness starts a real
+            # platform (`nemo services run --service-group all`), so a change to a service it calls
+            # can break these tests without touching evaluator code at all -- and because the job is
+            # required, a filter that missed those paths would let the skip count as a pass.
+            #
+            # The services listed are the ones the suite calls, not everything `--service-group all`
+            # happens to start: entities (workspaces, tasks, tasksets, metrics), jobs (submission and
+            # reconciliation), files (filesets, derived metrics), models + inference-gateway (model
+            # targets via the IGW mock provider), secrets (env_secrets references), auth (the
+            # auth-enabled platform fixture) and intake (result publishing). Extend it deliberately
+            # when the suite starts calling something new.
+            - 'plugins/nemo-evals/**'
+            - 'packages/nhx_evals_sdk/**'
+            - 'packages/nemo_helix_plugin/**'
+            - 'packages/nhx_common/**'  # shared contracts every service above is built on
+            - 'services/core/entities/**'
+            - 'services/core/jobs/**'
+            - 'services/core/files/**'
+            - 'services/core/models/**'
+            - 'services/core/inference-gateway/**'
+            - 'services/core/secrets/**'
+            - 'services/core/auth/**'
+            - 'services/intake/**'
+            # The suite runs under `uv run --frozen`, so the lockfile decides every version it
+            # executes against, and the root manifest decides which workspace members and
+            # dependency groups exist at all. Per-package manifests are already covered by the
+            # globs above. Without these two, a lockfile-only PR skips a required job.
+            - 'pyproject.toml'
+            - 'uv.lock'
+            - '.github/workflows/ci.yaml'  # the job definition itself
+            - '.github/actions/changes/action.yaml'  # this filter (self-coverage)
           evaluator-sdk-closure:
-            # Paths that can change what `import ...harbor_runtime` loads or how the smoke job runs.
-            - 'packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/**'  # package-wide import closure
-            - 'packages/nemo_evaluator_sdk/pyproject.toml'  # declared [project] dependencies
+            # Paths that can change what `import ...harbor.runtime` loads or how the smoke job runs.
+            - 'packages/nhx_evals_sdk/src/nhx_evals_sdk/**'  # package-wide import closure
+            - 'packages/nhx_evals_sdk/tests/test_lazy_public_api.py'  # smoke test file
+            - 'packages/nhx_evals_sdk/pyproject.toml'  # declared [project] dependencies
             - 'uv.lock'  # locked versions installed for the package
             - '.github/workflows/ci.yaml'  # smoke job definition
             - '.github/actions/changes/action.yaml'  # this filter (self-coverage)
           scaled-evals:
             - 'plugins/_temporary-scaled-evals/**'
+            - 'packages/nemo_helix_plugin/**'
+            - 'packages/nhx_platform_runner/**'
+            - 'packages/nhx_sandbox/**'
+            # test_files_backend.py imports these from outside the plugin tree.
+            - 'packages/filesets/src/filesets/resources.py'
+            - 'packages/nhx_testing/src/nhx/testing/**'
+            - 'services/core/files/src/nhx/core/files/service.py'
+            - 'services/core/secrets/src/nhx/core/secrets/service.py'
           e2e:
             - 'e2e/**'
           docs:
             - 'docs/**'
-            - 'sdk/python/nemo-platform/src/**'
           tools:
             - 'tools/**'
+            - 'packages/nemo_helix_ext/**'
+            - 'packages/nemo_helix_plugin/**'
+            - 'packages/nhx_common/**'
           web-studio:
             - 'web/**'
             - '.nvmrc'
             - 'tools/nodejs/**'
+            # Studio inlines these at build time (see web/packages/studio/tsconfig.json).
+            - 'plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/references/**'
+          # Lives outside web/, so pnpm's changed-package filter never selects Studio for it.
+          customizer-skill-references:
+            - 'plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/references/**'
           github-scripts:
             - '.github/scripts/**/*.cjs'
             - '.github/eslint.config.mjs'
@@ -155,7 +249,6 @@ runs:
             - 'packages/**'
             - 'services/**'
             - 'plugins/**'
-            - 'sdk/python/nemo-platform/**'
           k8s-smoke:
             - 'e2e/k8s/scripts/**'
             - 'e2e/k8s/values/**'
@@ -165,12 +258,42 @@ runs:
           guardrails-benchmark:
             - 'plugins/nemo-guardrails/**'
             - 'services/guardrails/**'
+            - 'packages/nemo_helix_plugin/**'
           deployments-openshell:
             - 'plugins/nemo-deployments/**'
+            - 'packages/nemo_helix_plugin/**'
+          jobs-openshell:
+            - 'services/core/jobs/**'
+            - 'packages/nemo_helix_plugin/**'
+            - 'packages/nhx_common/src/nhx/common/jobs/**'
+            - 'packages/nhx_testing/src/nhx/testing/**'
           ngc-metadata:
             - '.github/scripts/ngc_metadata.py'
             - '.github/scripts/tests/test_ngc_metadata.py'
             - '.github/assets/ngc/**'
+          customization-auth:
+            - 'packages/nhx_common/**'
+            - 'services/core/auth/**'
+            - 'services/core/entities/**'
+            - 'services/core/files/**'
+            - 'services/core/jobs/**'
+            - 'services/core/models/**'
+            - 'services/automodel/**'
+            - 'services/unsloth/**'
+            - 'services/rl/**'
+            - 'packages/nhx_customization_common/**'
+            - 'packages/nemo_helix_plugin/src/**'
+            - 'plugins/nemo-customizer/**'
+            - 'plugins/nemo-automodel/**'
+            - 'plugins/nemo-unsloth/**'
+            - 'plugins/nemo-rl/**'
+            - 'e2e/test_customization_auth.py'
+            - 'e2e/conftest.py'
+            - 'e2e/services_pool*.py'
+            - 'e2e/k8s/**'
+            - '.github/actions/setup-kind-cluster/**'
+            - '.github/actions/changes/**'
+            - '.github/workflows/ci.yaml'
           auth-idp:
             - 'conftest.py'
             - 'pytest.ini'

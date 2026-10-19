@@ -5,104 +5,52 @@ import { generateDefaultName } from '@nemo/common/src/utils/generateDefaultName'
 import {
   type AutomodelJobInput,
   type AutomodelJobsJobRequest,
-  BatchingStrategy,
-  OptimizerType,
-  PolicyBackend,
   RlGRPOTrainingFinetuningType,
   type RlDPOTraining,
   type RlGRPOTraining,
   type RlJobInput,
   type RlJobsJobRequest,
-  type RlLoRAParams,
   type UnslothJobInput,
+  type IntegrationsSpec,
   type UnslothJobsJobRequest,
+  type CustomizationJobTemplate,
 } from '@nemo/sdk/generated/customizer/schema';
 import { CustomizationCreateAutomodelJobBody } from '@nemo/sdk/generated/customizer/zod/automodel-jobs';
 import { CustomizationCreateRlJobBody } from '@nemo/sdk/generated/customizer/zod/rl-jobs';
 import { CustomizationCreateUnslothJobBody } from '@nemo/sdk/generated/customizer/zod/unsloth-jobs';
 import {
   CustomizationBackend,
-  isAutomodelJob,
-  isRlJob,
+  getCustomizationBackend,
+  toCustomizationBackend,
+  isAutomodelSpec,
+  isRlSpec,
+  isUnslothSpec,
   type CustomizationJob,
 } from '@studio/util/customizationBackend';
 import type { TrainingType } from '@studio/util/customizerSchema';
+import {
+  AUTOMODEL_DEFAULT_SPEC,
+  RL_DPO_DEFAULT_SPEC,
+  RL_GRPO_DEFAULT_SPEC,
+  UNSLOTH_DEFAULT_SPEC,
+} from '@studio/util/forms/specDefaults';
 import { z } from 'zod';
-
-/**
- * The LoRA knobs the GRPO form exposes. `target_modules`/`exclude_modules` are left
- * to the backend, and the rest are required here because every control is always
- * rendered with a value.
- */
-export type GrpoLoraFields = Required<
-  Pick<RlLoRAParams, 'rank' | 'alpha' | 'dropout' | 'use_triton'>
-> &
-  Pick<RlLoRAParams, 'target_modules' | 'exclude_modules'>;
 
 /**
  * GRPO-only hyperparameters, kept in their own namespace because `rl.training` holds
  * a single object shared with the DPO form. Derived from `RlGRPOTraining` so the form
  * cannot drift from the API — field docs come from the generated schema.
  */
-export interface GrpoFormFields extends Required<
-  Pick<
-    RlGRPOTraining,
-    | 'num_generations_per_prompt'
-    | 'num_prompts_per_step'
-    | 'max_rollout_turns'
-    | 'normalize_rewards'
-    | 'ratio_clip_min'
-    | 'ratio_clip_max'
-    | 'finetuning_type'
-    | 'temperature'
-    | 'val_at_start'
-    | 'overlong_filtering'
-    | 'use_dynamic_sampling'
-    | 'batch_multiplier'
-    | 'dynamic_sampling_max_gen_batches'
-    | 'use_leave_one_out_baseline'
-    | 'use_importance_sampling_correction'
-    | 'use_on_policy_kl_approximation'
-    | 'policy_backend'
-    | 'batching_strategy'
-    | 'sequence_length_round'
-    | 'vllm_gpu_memory_utilization'
-  >
-> {
+/**
+ * GRPO-only form state: the spec's GRPO arm plus the two fields that exist only in the UI.
+ *
+ * A field the form has no control for is inert — `formToRlCreate` picks what it sends.
+ */
+export interface GrpoFormFields extends RlGRPOTraining {
   /** 'grpo' shows the GRPO form sections; 'dpo' shows DPO sections. Maps to training.type on submit. */
   trainingType: RlDPOTraining['type'] | RlGRPOTraining['type'];
   /** Fileset reference for the NeMo Gym reward environment. */
   environmentFileset: string;
-  /**
-   * Seeded to match the default `max_seq_length`, which is what the backend would
-   * derive it from anyway. It has to carry a value because its slider needs a reset
-   * target, and a reset target that differs from the form default is a control whose
-   * ↺ silently changes the request. Raising Max Sequence Length does NOT raise this —
-   * the two are set independently, and the backend rejects this exceeding that.
-   */
-  max_new_tokens: RlGRPOTraining['max_new_tokens'];
-  /** LoRA hyperparameters; only sent when finetuning_type is 'lora'. */
-  lora: GrpoLoraFields;
-  /**
-   * Fields the backend leaves unset by default. They stay optional here so an untouched
-   * control sends nothing and the backend keeps its own behaviour, rather than the form
-   * switching a feature on with a value the user never chose.
-   */
-  ratio_clip_c: RlGRPOTraining['ratio_clip_c'];
-  advantage_clip_low: RlGRPOTraining['advantage_clip_low'];
-  advantage_clip_high: RlGRPOTraining['advantage_clip_high'];
-  truncated_importance_sampling_type: RlGRPOTraining['truncated_importance_sampling_type'];
-  truncated_importance_sampling_ratio: RlGRPOTraining['truncated_importance_sampling_ratio'];
-  truncated_importance_sampling_ratio_min: RlGRPOTraining['truncated_importance_sampling_ratio_min'];
-  top_k: RlGRPOTraining['top_k'];
-  train_mb_tokens: RlGRPOTraining['train_mb_tokens'];
-  router_aux_loss_coef: RlGRPOTraining['router_aux_loss_coef'];
-  vllm_tensor_parallel_size: RlGRPOTraining['vllm_tensor_parallel_size'];
-  reward_scaling: RlGRPOTraining['reward_scaling'];
-  reward_shaping: RlGRPOTraining['reward_shaping'];
-  /** Free-form passthrough dicts, edited via ControlledJsonInput. */
-  hf_config_overrides: RlGRPOTraining['hf_config_overrides'];
-  automodel_kwargs: RlGRPOTraining['automodel_kwargs'];
 }
 
 export interface CustomizationFormFields {
@@ -122,6 +70,65 @@ export const DATASET_FIELD_BY_BACKEND: Record<CustomizationBackend, DatasetField
   automodel: 'automodel.dataset.training',
   unsloth: 'unsloth.dataset.path',
   rl: 'rl.dataset',
+};
+
+/**
+ * The subset of the form these predicates read.
+ *
+ * Stated structurally rather than as `Partial<CustomizationFormFields>` so that
+ * callers watching two or three individual fields can pass what they have —
+ * `Partial` only loosens the top level, which would force a cast at every call
+ * site. `CustomizationFormFields` satisfies this shape.
+ */
+export interface FinetuningTypeSource {
+  backend: CustomizationBackend;
+  automodel?: { training?: { finetuning_type?: string } };
+  unsloth?: { training?: { finetuning_type?: string }; output?: { save_method?: string } };
+  grpo?: { trainingType?: string; finetuning_type?: string };
+}
+
+/**
+ * The active backend's `finetuning_type`, or undefined when it has none.
+ *
+ * The field lives at a different path per backend, and RL keeps it in the
+ * form-only `grpo` namespace rather than on `rl.training` (see `GrpoFormFields`).
+ * DPO has no `finetuning_type` at all — it is always full-weight.
+ */
+export const getActiveFinetuningType = (fields: FinetuningTypeSource): string | undefined => {
+  switch (fields.backend) {
+    case 'automodel':
+      return fields.automodel?.training?.finetuning_type;
+    case 'unsloth':
+      return fields.unsloth?.training?.finetuning_type;
+    case 'rl':
+      return fields.grpo?.trainingType === 'grpo' ? fields.grpo?.finetuning_type : undefined;
+    default:
+      return undefined;
+  }
+};
+
+/**
+ * Whether the run's **output** is a separately deployable LoRA adapter.
+ *
+ * Deliberately narrower than "trains with LoRA": `lora_merged` uses LoRA during
+ * training but merges the result into full weights, so its output is a normal
+ * model, not an adapter. Anything reasoning about how the output gets *served*
+ * wants this predicate; anything deciding whether to show LoRA hyperparameter
+ * controls wants the broader test and must not use it.
+ *
+ * `finetuning_type` alone is not enough for unsloth. Automodel spends a separate
+ * `finetuning_type` on the distinction (`lora` vs `lora_merged`), but unsloth
+ * expresses it at save time instead: `finetuning_type: 'lora'` with
+ * `save_method: 'merged_16bit' | 'merged_4bit'` trains an adapter and then merges
+ * it into the base, emitting full weights. Mirrors `is_lora_adapter` in
+ * `nemo_unsloth_plugin/schema.py`, which is the authority the job itself uses.
+ */
+export const producesAdapter = (fields: FinetuningTypeSource): boolean => {
+  if (getActiveFinetuningType(fields) !== 'lora') return false;
+  if (fields.backend !== 'unsloth') return true;
+  // Absent means the API default, which is `lora` — an unmerged adapter.
+  const saveMethod = fields.unsloth?.output?.save_method;
+  return saveMethod === undefined || saveMethod === 'lora';
 };
 
 type ModelFieldName = 'automodel.model' | 'unsloth.model.name' | 'rl.model';
@@ -149,203 +156,42 @@ export const resolveTrainingType = (
   }
 };
 
-const UNSLOTH_DEFAULT_TARGET_MODULES = [
-  'q_proj',
-  'k_proj',
-  'v_proj',
-  'o_proj',
-  'gate_proj',
-  'up_proj',
-  'down_proj',
-];
-
-const RL_DPO_DEFAULTS: RlJobInput = {
-  model: '',
-  dataset: '',
-  training: {
-    type: 'dpo',
-    epochs: 1,
-    learning_rate: 1e-4,
-    batch_size: 32,
-    micro_batch_size: 1,
-    max_seq_length: 2048,
-    warmup_steps: 0,
-    weight_decay: 0.01,
-    ref_policy_kl_penalty: 0.1,
-    preference_loss_weight: 1,
-    sft_loss_weight: 0,
-    preference_average_log_probs: false,
-    sft_average_log_probs: false,
-    parallelism: {
-      num_nodes: 1,
-      num_gpus_per_node: 1,
-      tensor_parallel_size: 1,
-      pipeline_parallel_size: 1,
-      context_parallel_size: 1,
-      sequence_parallel: false,
-    },
-  },
-};
-
-/** Fields both RL forms bind to. `RL_DPO_DEFAULTS.training` is `RlDPOTraining` and omits them. */
-const RL_SHARED_TRAINING_DEFAULTS = {
-  optimizer_type: OptimizerType.adamw_with_cosine_annealing,
-  min_learning_rate: 0,
-  adam_beta1: 0.9,
-  adam_beta2: 0.999,
-  adam_eps: 1e-8,
-  max_grad_norm: 1.0,
-  seed: 42,
-  val_check_interval: 1.0,
-  keep_top_k: 1,
-  activation_checkpointing: false,
-};
+/**
+ * Every default below comes from `specDefaults.ts`, which parses each backend's generated
+ * Zod schema once and lets Zod apply the spec's `default:` values. A field the spec leaves
+ * without a default arrives `undefined` — the form's signal to render it unset rather than
+ * invent a starting value.
+ */
 
 /**
- * `rl.training` is shared by the DPO and GRPO forms, so each method's defaults must
- * stand alone — a GRPO seed left here would silently override the backend for DPO.
- * DPO matches the backend (`max_steps: None`, `val_at_end: True`); GRPO runs to a
- * step budget and skips the trailing validation pass.
- *
- * The casts are required: spreading `RlDPOTraining` with GRPO-only fields yields an
- * object valid for either arm, but TS will not infer the discriminated union itself.
+ * `rl.training` is shared by the DPO and GRPO forms, so each method's defaults must stand
+ * alone: a GRPO value left in the DPO object would silently override the backend. Each
+ * comes from its own arm of the discriminated union, so values that differ per method —
+ * `ref_policy_kl_penalty` is 0.05 on DPO and 0 on GRPO — stay correct without restating.
  */
-export const RL_DPO_TRAINING_DEFAULTS = {
-  ...RL_DPO_DEFAULTS.training,
-  ...RL_SHARED_TRAINING_DEFAULTS,
-  val_at_end: true,
-} as RlJobInput['training'];
+export const RL_DPO_TRAINING_DEFAULTS = RL_DPO_DEFAULT_SPEC.training;
 
-export const RL_GRPO_TRAINING_DEFAULTS = {
-  ...RL_DPO_DEFAULTS.training,
-  ...RL_SHARED_TRAINING_DEFAULTS,
-  max_steps: 500,
-  val_at_end: false,
-  // Backend default is 0.0 for GRPO and 0.05 for DPO; the 0.1 inherited from
-  // RL_DPO_DEFAULTS would otherwise apply a KL penalty the user never asked for.
-  ref_policy_kl_penalty: 0.0,
-} as RlJobInput['training'];
+const grpoTraining = RL_GRPO_DEFAULT_SPEC.training as RlGRPOTraining;
+
+/**
+ * Both arms come straight from the spec. The GRPO arm carries its own values for anything
+ * the two methods differ on, so nothing needs restating here — and a field the spec leaves
+ * without a default stays absent, which is how it reaches the form unset.
+ */
+export const RL_GRPO_TRAINING_DEFAULTS = RL_GRPO_DEFAULT_SPEC.training;
 
 export const FORM_DEFAULTS: CustomizationFormFields = {
   backend: 'automodel',
   outputName: '',
   description: '',
-  automodel: {
-    model: '',
-    dataset: { training: '' },
-    training: {
-      training_type: 'sft',
-      finetuning_type: 'lora',
-      lora: { rank: 16, alpha: 32, dropout: 0, merge: false, use_triton: true },
-      max_seq_length: 2048,
-      attn_implementation: 'sdpa',
-    },
-    schedule: { epochs: 1 },
-    batch: { global_batch_size: 8, micro_batch_size: 1, sequence_packing: false },
-    optimizer: {
-      learning_rate: 5e-6,
-      weight_decay: 0.01,
-      warmup_steps: 0,
-      adam_beta1: 0.9,
-      adam_beta2: 0.999,
-      optimizer: 'Adam',
-      lr_decay_style: 'cosine',
-    },
-    parallelism: {
-      num_nodes: 1,
-      num_gpus_per_node: 1,
-      tensor_parallel_size: 1,
-      pipeline_parallel_size: 1,
-      context_parallel_size: 1,
-      sequence_parallel: false,
-    },
-  },
-  unsloth: {
-    model: {
-      name: '',
-      max_seq_length: 2048,
-      load_in_4bit: true,
-      load_in_8bit: false,
-      dtype: 'auto',
-      trust_remote_code: false,
-    },
-    dataset: {
-      path: '',
-      text_field: 'text',
-      apply_chat_template: false,
-      packing: false,
-    },
-    training: {
-      training_type: 'sft',
-      finetuning_type: 'lora',
-      lora: {
-        rank: 16,
-        alpha: 16,
-        dropout: 0,
-        target_modules: UNSLOTH_DEFAULT_TARGET_MODULES,
-        bias: 'none',
-        use_rslora: false,
-        random_state: 3407,
-        init_lora_weights: true,
-      },
-      use_gradient_checkpointing: 'unsloth',
-    },
-    schedule: {
-      epochs: 1,
-      warmup_steps: 0,
-      lr_scheduler_type: 'linear',
-      logging_steps: 1,
-      seed: 3407,
-    },
-    batch: { per_device_train_batch_size: 1, gradient_accumulation_steps: 1 },
-    optimizer: { learning_rate: 2e-4, weight_decay: 0, optim: 'adamw_8bit' },
-    hardware: { precision: 'bf16' },
-  },
-  rl: {
-    ...RL_DPO_DEFAULTS,
-    training: RL_DPO_TRAINING_DEFAULTS,
-  },
+  automodel: AUTOMODEL_DEFAULT_SPEC,
+  unsloth: UNSLOTH_DEFAULT_SPEC,
+  rl: RL_DPO_DEFAULT_SPEC,
   grpo: {
+    /** 'grpo' shows the GRPO sections; 'dpo' shows DPO. Maps to training.type on submit. */
     trainingType: 'dpo',
     environmentFileset: '',
-    num_generations_per_prompt: 8,
-    num_prompts_per_step: 8,
-    overlong_filtering: false,
-    max_rollout_turns: 1,
-    normalize_rewards: true,
-    ratio_clip_min: 0.2,
-    ratio_clip_max: 0.28,
-    temperature: 1.0,
-    val_at_start: false,
-    max_new_tokens: 2048,
-    finetuning_type: RlGRPOTrainingFinetuningType.all_weights,
-    lora: { rank: 16, alpha: 32, dropout: 0, use_triton: true },
-    use_dynamic_sampling: false,
-    batch_multiplier: 1.0,
-    dynamic_sampling_max_gen_batches: 10,
-    use_leave_one_out_baseline: true,
-    use_importance_sampling_correction: true,
-    use_on_policy_kl_approximation: true,
-    policy_backend: PolicyBackend.automodel,
-    batching_strategy: BatchingStrategy.dynamic,
-    sequence_length_round: 64,
-    vllm_gpu_memory_utilization: 0.5,
-    // Left unset: the backend treats absence as "feature off", so seeding any number
-    // here would silently enable it. Their controls reset to empty rather than to a value.
-    ratio_clip_c: undefined,
-    advantage_clip_low: undefined,
-    advantage_clip_high: undefined,
-    truncated_importance_sampling_type: undefined,
-    truncated_importance_sampling_ratio: undefined,
-    truncated_importance_sampling_ratio_min: undefined,
-    top_k: undefined,
-    train_mb_tokens: undefined,
-    router_aux_loss_coef: undefined,
-    vllm_tensor_parallel_size: undefined,
-    reward_scaling: undefined,
-    reward_shaping: undefined,
-    hf_config_overrides: undefined,
-    automodel_kwargs: undefined,
+    ...grpoTraining,
   },
 };
 
@@ -407,16 +253,54 @@ export const customizationFormSchema = z
       spec = rlSpecSchema;
       value = data.rl;
       const grpo = data.grpo as Partial<GrpoFormFields> | undefined;
-      if (grpo?.trainingType === 'grpo' && !grpo.environmentFileset) {
-        // Form-completeness only. Every other GRPO rule (generation length, advantage
-        // clip range, policy-backend conflicts, truncated importance sampling, HF
-        // override collisions) is enforced by the backend, which reports it with a
-        // precise message; mirroring them here just creates two sources of truth.
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'A reward environment fileset is required for GRPO training',
-          path: ['grpo', 'environmentFileset'],
-        });
+      if (grpo?.trainingType === 'grpo') {
+        if (!grpo.environmentFileset) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'A reward environment fileset is required for GRPO training',
+            path: ['grpo', 'environmentFileset'],
+          });
+        }
+        const training = (data.rl as RlJobInput | undefined)?.training;
+        // Mirrors the backend's _generation_length_fits_context validator: max_seq_length
+        // is the whole prompt + generation budget, so a larger generation cap is
+        // unsatisfiable and the job is rejected at submit.
+        const maxSeqLength = training?.max_seq_length;
+        if (
+          grpo.max_new_tokens != null &&
+          maxSeqLength != null &&
+          grpo.max_new_tokens > maxSeqLength
+        ) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Max new tokens cannot exceed the max sequence length (${maxSeqLength}), which is the total prompt + generation budget`,
+            path: ['grpo', 'max_new_tokens'],
+          });
+        }
+        // Mirrors the backend's validate_for_training: a remainder otherwise surfaces
+        // only as an assert at the first optimizer step, once the job holds GPUs.
+        const batchSize = training?.batch_size;
+        const generations = grpo.num_generations_per_prompt;
+        // Omitting num_prompts_per_step does not skip the rule: the backend derives it,
+        // and the floor division is the case its own comment flags as the failure.
+        const prompts =
+          grpo.num_prompts_per_step ??
+          (batchSize != null && generations
+            ? Math.max(Math.floor(batchSize / generations), 1)
+            : null);
+        const rolloutBatch = prompts != null && generations != null ? prompts * generations : null;
+        if (
+          rolloutBatch != null &&
+          batchSize != null &&
+          batchSize > 0 &&
+          rolloutBatch % batchSize !== 0
+        ) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Prompts per step × rollouts per prompt (${rolloutBatch}) must be a multiple of the global batch size (${batchSize})`,
+            path: ['grpo', 'num_prompts_per_step'],
+          });
+        }
       }
     }
     const result = spec.safeParse(value);
@@ -427,23 +311,53 @@ export const customizationFormSchema = z
     }
   });
 
-export const formToAutomodelCreate = (f: CustomizationFormFields): AutomodelJobsJobRequest => {
+/**
+ * `deployment_config` on a job spec: the name of a `ModelDeploymentConfig` the job's
+ * model_entity task resolves and deploys from once training finishes.
+ *
+ * Every builder below sets this **unconditionally**, including to `undefined`, rather
+ * than spreading it in only when present. `jobToFormFields` clones a job by copying its
+ * whole spec into the form (`automodel: stripNulls(job.spec)`, and the same for RL and
+ * unsloth), so a cloned job arrives carrying whatever `deployment_config` it ran with.
+ * A conditional spread leaves that value in place when the user opts out — the job then
+ * deploys a model they declined to deploy.
+ *
+ * Assigning `undefined` is safe against `extra="forbid"`: `JSON.stringify` drops
+ * undefined-valued keys, so the field is absent on the wire exactly as if it had never
+ * been set, while still overriding the spread.
+ */
+export const formToAutomodelCreate = (
+  f: CustomizationFormFields,
+  deploymentConfig?: string
+): AutomodelJobsJobRequest => {
   const { training } = f.automodel;
   const usesLora =
     training.finetuning_type === 'lora' || training.finetuning_type === 'lora_merged';
   const isDistillation = training.training_type === 'distillation';
+  const spec: AutomodelJobInput = {
+    ...f.automodel,
+    integrations: cleanIntegrations(f.automodel.integrations),
+    training: {
+      ...training,
+      // The backend merges when `finetuning_type` is lora_merged *or* `lora.merge` is
+      // set, so the two say the same thing. The form only offers the first, and sends
+      // the second to match rather than letting a cloned job's stale flag decide.
+      lora: usesLora
+        ? { ...training.lora, merge: training.finetuning_type === 'lora_merged' }
+        : undefined,
+      teacher_model: isDistillation ? training.teacher_model || undefined : undefined,
+      teacher_precision: isDistillation ? training.teacher_precision : undefined,
+      distillation_ratio: isDistillation ? training.distillation_ratio : undefined,
+      distillation_temperature: isDistillation ? training.distillation_temperature : undefined,
+      offload_teacher: isDistillation ? training.offload_teacher : undefined,
+    },
+    output: { name: f.outputName, description: f.description || undefined },
+    deployment_config: deploymentConfig,
+  };
   return {
     name: f.outputName || undefined,
     description: f.description || undefined,
-    spec: {
-      ...f.automodel,
-      training: {
-        ...training,
-        lora: usesLora ? training.lora : undefined,
-        teacher_model: isDistillation ? training.teacher_model || undefined : undefined,
-      },
-      output: { name: f.outputName, description: f.description || undefined },
-    },
+    spec,
   };
 };
 
@@ -452,8 +366,8 @@ export const formToAutomodelCreate = (f: CustomizationFormFields): AutomodelJobs
  * empty values, then drop a provider whose fields are all empty, then the whole block.
  */
 const cleanIntegrations = (
-  integrations: RlJobInput['integrations']
-): RlJobInput['integrations'] => {
+  integrations: IntegrationsSpec | undefined | null
+): IntegrationsSpec | undefined => {
   if (!integrations) return undefined;
   const prune = <T extends object>(obj: T | undefined | null): T | undefined => {
     if (!obj) return undefined;
@@ -483,91 +397,96 @@ const omitIfEmpty = <T extends object>(group: T | undefined | null): T | undefin
 /** An empty list is not a filter — send nothing so the backend keeps its own default. */
 const emptyToUndefined = (v: string[] | undefined | null) => (v && v.length > 0 ? v : undefined);
 
-export const formToRlCreate = (f: CustomizationFormFields): RlJobsJobRequest => {
+export const formToRlCreate = (
+  f: CustomizationFormFields,
+  deploymentConfig?: string
+): RlJobsJobRequest => {
   if (f.grpo.trainingType === 'grpo') {
     const t = f.rl.training;
     const isLora = f.grpo.finetuning_type === RlGRPOTrainingFinetuningType.lora;
+    const spec: RlJobInput = {
+      model: f.rl.model,
+      dataset: f.rl.dataset,
+      environment: f.grpo.environmentFileset || undefined,
+      integrations: cleanIntegrations(f.rl.integrations),
+      training: {
+        type: 'grpo',
+        optimizer_type: t.optimizer_type,
+        learning_rate: t.learning_rate,
+        min_learning_rate: t.min_learning_rate,
+        weight_decay: t.weight_decay,
+        adam_beta1: t.adam_beta1,
+        adam_beta2: t.adam_beta2,
+        adam_eps: t.adam_eps,
+        warmup_steps: t.warmup_steps,
+        max_steps: t.max_steps,
+        val_check_interval: t.val_check_interval,
+        val_at_end: t.val_at_end,
+        keep_top_k: t.keep_top_k,
+        batch_size: t.batch_size,
+        micro_batch_size: t.micro_batch_size,
+        activation_checkpointing: t.activation_checkpointing,
+        max_seq_length: t.max_seq_length,
+        seed: t.seed,
+        parallelism: t.parallelism,
+        max_grad_norm: t.max_grad_norm,
+        finetuning_type: f.grpo.finetuning_type,
+        lora: isLora
+          ? {
+              ...f.grpo.lora,
+              target_modules: emptyToUndefined(f.grpo.lora?.target_modules),
+              exclude_modules: emptyToUndefined(f.grpo.lora?.exclude_modules),
+            }
+          : undefined,
+        num_generations_per_prompt: f.grpo.num_generations_per_prompt,
+        num_prompts_per_step: f.grpo.num_prompts_per_step,
+        overlong_filtering: f.grpo.overlong_filtering,
+        temperature: f.grpo.temperature,
+        max_new_tokens: f.grpo.max_new_tokens,
+        val_at_start: f.grpo.val_at_start,
+        normalize_rewards: f.grpo.normalize_rewards,
+        max_rollout_turns: f.grpo.max_rollout_turns,
+        ref_policy_kl_penalty: t.ref_policy_kl_penalty,
+        ratio_clip_min: f.grpo.ratio_clip_min,
+        ratio_clip_max: f.grpo.ratio_clip_max,
+        epochs: t.epochs,
+        execution_profile: t.execution_profile || undefined,
+        ratio_clip_c: f.grpo.ratio_clip_c,
+        advantage_clip_low: f.grpo.advantage_clip_low,
+        advantage_clip_high: f.grpo.advantage_clip_high,
+        use_dynamic_sampling: f.grpo.use_dynamic_sampling,
+        // The backend rejects a multiplier other than 1.0 unless dynamic sampling is on,
+        // so the two always travel together.
+        batch_multiplier: f.grpo.use_dynamic_sampling ? f.grpo.batch_multiplier : undefined,
+        dynamic_sampling_max_gen_batches: f.grpo.use_dynamic_sampling
+          ? f.grpo.dynamic_sampling_max_gen_batches
+          : undefined,
+        use_leave_one_out_baseline: f.grpo.use_leave_one_out_baseline,
+        use_importance_sampling_correction: f.grpo.use_importance_sampling_correction,
+        use_on_policy_kl_approximation: f.grpo.use_on_policy_kl_approximation,
+        truncated_importance_sampling_type: f.grpo.truncated_importance_sampling_type,
+        truncated_importance_sampling_ratio: f.grpo.truncated_importance_sampling_ratio,
+        truncated_importance_sampling_ratio_min: f.grpo.truncated_importance_sampling_ratio_min,
+        reward_scaling: omitIfEmpty(f.grpo.reward_scaling),
+        reward_shaping: omitIfEmpty(f.grpo.reward_shaping),
+        policy_backend: f.grpo.policy_backend,
+        batching_strategy: f.grpo.batching_strategy,
+        sequence_length_round: f.grpo.sequence_length_round,
+        top_k: f.grpo.top_k,
+        train_mb_tokens: f.grpo.train_mb_tokens,
+        router_aux_loss_coef: f.grpo.router_aux_loss_coef,
+        vllm_tensor_parallel_size: f.grpo.vllm_tensor_parallel_size,
+        vllm_gpu_memory_utilization: f.grpo.vllm_gpu_memory_utilization,
+        hf_config_overrides: f.grpo.hf_config_overrides,
+        automodel_kwargs: f.grpo.automodel_kwargs,
+      },
+      output: { name: f.outputName || undefined },
+      deployment_config: deploymentConfig,
+    };
     return {
       name: f.outputName || undefined,
       description: f.description || undefined,
-      spec: {
-        model: f.rl.model,
-        dataset: f.rl.dataset,
-        environment: f.grpo.environmentFileset || undefined,
-        integrations: cleanIntegrations(f.rl.integrations),
-        training: {
-          type: 'grpo',
-          optimizer_type: t.optimizer_type,
-          learning_rate: t.learning_rate,
-          min_learning_rate: t.min_learning_rate,
-          weight_decay: t.weight_decay,
-          adam_beta1: t.adam_beta1,
-          adam_beta2: t.adam_beta2,
-          adam_eps: t.adam_eps,
-          warmup_steps: t.warmup_steps,
-          max_steps: t.max_steps,
-          val_check_interval: t.val_check_interval,
-          val_at_end: t.val_at_end,
-          keep_top_k: t.keep_top_k,
-          batch_size: t.batch_size,
-          micro_batch_size: t.micro_batch_size,
-          activation_checkpointing: t.activation_checkpointing,
-          max_seq_length: t.max_seq_length,
-          seed: t.seed,
-          parallelism: t.parallelism,
-          max_grad_norm: t.max_grad_norm,
-          finetuning_type: f.grpo.finetuning_type,
-          lora: isLora
-            ? {
-                ...f.grpo.lora,
-                target_modules: emptyToUndefined(f.grpo.lora.target_modules),
-                exclude_modules: emptyToUndefined(f.grpo.lora.exclude_modules),
-              }
-            : undefined,
-          num_generations_per_prompt: f.grpo.num_generations_per_prompt,
-          num_prompts_per_step: f.grpo.num_prompts_per_step,
-          overlong_filtering: f.grpo.overlong_filtering,
-          temperature: f.grpo.temperature,
-          max_new_tokens: f.grpo.max_new_tokens,
-          val_at_start: f.grpo.val_at_start,
-          normalize_rewards: f.grpo.normalize_rewards,
-          max_rollout_turns: f.grpo.max_rollout_turns,
-          ref_policy_kl_penalty: t.ref_policy_kl_penalty,
-          ratio_clip_min: f.grpo.ratio_clip_min,
-          ratio_clip_max: f.grpo.ratio_clip_max,
-          epochs: t.epochs,
-          execution_profile: t.execution_profile || undefined,
-          ratio_clip_c: f.grpo.ratio_clip_c,
-          advantage_clip_low: f.grpo.advantage_clip_low,
-          advantage_clip_high: f.grpo.advantage_clip_high,
-          use_dynamic_sampling: f.grpo.use_dynamic_sampling,
-          // The backend rejects a multiplier other than 1.0 unless dynamic sampling is on,
-          // so the two always travel together.
-          batch_multiplier: f.grpo.use_dynamic_sampling ? f.grpo.batch_multiplier : undefined,
-          dynamic_sampling_max_gen_batches: f.grpo.use_dynamic_sampling
-            ? f.grpo.dynamic_sampling_max_gen_batches
-            : undefined,
-          use_leave_one_out_baseline: f.grpo.use_leave_one_out_baseline,
-          use_importance_sampling_correction: f.grpo.use_importance_sampling_correction,
-          use_on_policy_kl_approximation: f.grpo.use_on_policy_kl_approximation,
-          truncated_importance_sampling_type: f.grpo.truncated_importance_sampling_type,
-          truncated_importance_sampling_ratio: f.grpo.truncated_importance_sampling_ratio,
-          truncated_importance_sampling_ratio_min: f.grpo.truncated_importance_sampling_ratio_min,
-          reward_scaling: omitIfEmpty(f.grpo.reward_scaling),
-          reward_shaping: omitIfEmpty(f.grpo.reward_shaping),
-          policy_backend: f.grpo.policy_backend,
-          batching_strategy: f.grpo.batching_strategy,
-          sequence_length_round: f.grpo.sequence_length_round,
-          top_k: f.grpo.top_k,
-          train_mb_tokens: f.grpo.train_mb_tokens,
-          router_aux_loss_coef: f.grpo.router_aux_loss_coef,
-          vllm_tensor_parallel_size: f.grpo.vllm_tensor_parallel_size,
-          vllm_gpu_memory_utilization: f.grpo.vllm_gpu_memory_utilization,
-          hf_config_overrides: f.grpo.hf_config_overrides,
-          automodel_kwargs: f.grpo.automodel_kwargs,
-        },
-        output: { name: f.outputName || undefined },
-      },
+      spec,
     };
   }
 
@@ -613,11 +532,19 @@ export const formToRlCreate = (f: CustomizationFormFields): RlJobsJobRequest => 
         execution_profile: dpo.execution_profile || undefined,
       },
       output: { name: f.outputName || undefined },
+      // Both arms of this builder take the same `deploymentConfig`. DPO is always
+      // full-weight, so the form offers the output-model deployment for it and creates
+      // the config -- dropping the name here left that config orphaned and the trained
+      // model unserved.
+      deployment_config: deploymentConfig,
     },
   };
 };
 
-export const formToUnslothCreate = (f: CustomizationFormFields): UnslothJobsJobRequest => {
+export const formToUnslothCreate = (
+  f: CustomizationFormFields,
+  deploymentConfig?: string
+): UnslothJobsJobRequest => {
   const { training } = f.unsloth;
   const usesLora = training?.finetuning_type === 'lora';
   return {
@@ -625,17 +552,31 @@ export const formToUnslothCreate = (f: CustomizationFormFields): UnslothJobsJobR
     description: f.description || undefined,
     spec: {
       ...f.unsloth,
+      integrations: cleanIntegrations(f.unsloth.integrations),
       model: usesLora
         ? f.unsloth.model
         : { ...f.unsloth.model, load_in_4bit: false, load_in_8bit: false },
       hardware: { ...f.unsloth.hardware, gpus: f.unsloth.hardware?.gpus || undefined },
       training: training && { ...training, lora: usesLora ? training.lora : undefined },
-      output: { name: f.outputName || undefined, description: f.description || undefined },
+      // `save_method` is carried through rather than dropped: `producesAdapter` reads it
+      // to decide whether the output is an adapter, and a value the predicate honours but
+      // the request discards would let Studio and the job disagree about what a run emits.
+      output: {
+        name: f.outputName || undefined,
+        description: f.description || undefined,
+        save_method: f.unsloth.output?.save_method,
+      },
+      // Unconditional, overriding the `...f.unsloth` spread above — see the note on
+      // `formToAutomodelCreate`. Unsloth's is the one that can also carry an inline
+      // `DeploymentParams` object rather than a config name, which a clone would
+      // otherwise replay in full.
+      deployment_config: deploymentConfig,
     },
   };
 };
 
-const stripNulls = <T>(value: T): T => {
+/** Null means "unset" in API responses and skill templates; the generated schemas want absent. */
+export const stripNulls = <T>(value: T): T => {
   if (value === null) return undefined as unknown as T;
   if (Array.isArray(value)) return value.map(stripNulls) as unknown as T;
   if (typeof value === 'object') {
@@ -646,17 +587,40 @@ const stripNulls = <T>(value: T): T => {
   return value;
 };
 
-export const jobToFormFields = (job: CustomizationJob): CustomizationFormFields => {
-  if (isAutomodelJob(job)) {
+/** What the form replays. A saved template carries the same spec under `config`. */
+export interface ReplayableJob {
+  /** A job's spec as stored, or one about to be submitted. */
+  spec: CustomizationJob['spec'] | AutomodelJobInput | UnslothJobInput | RlJobInput;
+  description?: string | null;
+  /**
+   * Which arm to replay into. A job has to be inferred from its spec, but a saved template
+   * persists this — and inference would drop a valid config that omits the optional field
+   * it keys on, e.g. an automodel config with no `parallelism`.
+   */
+  backend?: CustomizationBackend;
+}
+
+export const jobToFormFields = (job: ReplayableJob): CustomizationFormFields => {
+  const backend = job.backend ?? getCustomizationBackend(job.spec);
+
+  if (backend === CustomizationBackend.automodel) {
+    const spec = stripNulls(job.spec) as AutomodelJobInput;
+    // A job submitted outside Studio can ask to merge either way round. Both merge, and
+    // the form only shows `finetuning_type`, so a job carrying `lora.merge` has to come
+    // back as lora_merged or it would replay as an unmerged adapter.
+    const merges = spec.training?.lora?.merge === true;
     return {
       ...FORM_DEFAULTS,
       outputName: generateDefaultName(),
       description: job.description ?? '',
       backend: 'automodel',
-      automodel: stripNulls(job.spec) as AutomodelJobInput,
+      automodel:
+        merges && spec.training.finetuning_type === 'lora'
+          ? { ...spec, training: { ...spec.training, finetuning_type: 'lora_merged' } }
+          : spec,
     };
   }
-  if (isRlJob(job)) {
+  if (backend === CustomizationBackend.rl) {
     const spec = stripNulls(job.spec) as RlJobInput;
     // GRPO-only hyperparameters live in the `grpo` namespace, not on spec.training,
     // so replaying the spec alone would present a cloned GRPO job as a default DPO one.
@@ -727,4 +691,47 @@ export const jobToFormFields = (job: CustomizationJob): CustomizationFormFields 
     backend: 'unsloth',
     unsloth: stripNulls(job.spec) as UnslothJobInput,
   };
+};
+
+/**
+ * Form values for a route entered with state: either a template supplying `initialValues`
+ * outright, or a job to clone.
+ */
+export const getInitialFormValuesFromState = (
+  state: unknown
+): CustomizationFormFields | undefined => {
+  if (typeof state !== 'object' || state === null) return undefined;
+  const { initialValues, cloneFromJob } = state as {
+    initialValues?: unknown;
+    cloneFromJob?: unknown;
+  };
+
+  if (customizationFormSchema.safeParse(initialValues).success) {
+    return initialValues as CustomizationFormFields;
+  }
+
+  if (typeof cloneFromJob === 'object' && cloneFromJob !== null) {
+    const spec = (cloneFromJob as Record<string, unknown>).spec;
+    if (isAutomodelSpec(spec) || isUnslothSpec(spec) || isRlSpec(spec)) {
+      return jobToFormFields(cloneFromJob as CustomizationJob);
+    }
+  }
+
+  return undefined;
+};
+
+/**
+ * Null when the template names a backend the form has no arm for: `jobToFormFields` falls
+ * back to a default form, which would present it as the wrong backend rather than refuse it.
+ */
+export const templateToFormFields = (
+  template: Pick<CustomizationJobTemplate, 'backend' | 'config' | 'description'>
+): CustomizationFormFields | null => {
+  const backend = toCustomizationBackend(template.backend);
+  if (!backend) return null;
+  return jobToFormFields({
+    spec: template.config as unknown as CustomizationJob['spec'],
+    description: template.description,
+    backend,
+  });
 };

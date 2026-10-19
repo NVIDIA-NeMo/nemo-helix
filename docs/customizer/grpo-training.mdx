@@ -10,7 +10,7 @@ GRPO (Group Relative Policy Optimization) trains a model against a **reward envi
 
 That last part is why GRPO behaves differently from every other customization method here: the learning signal is the *spread* of rewards inside a group. If every response to a prompt earns the same score, that prompt contributes nothing.
 
-GRPO runs on the `rl` backend, the same one that runs DPO, and requires a NeMo Platform configured with `platform.runtime: kubernetes` — it provisions a Ray cluster and has no local Docker fallback.
+GRPO runs on the `rl` backend, the same one that runs DPO, and requires a NeMo Helix deployment configured with `platform.runtime: kubernetes` — it provisions a Ray cluster and has no local Docker fallback.
 
 ## What you need
 
@@ -24,7 +24,7 @@ Unlike SFT or DPO, GRPO takes **two** FileSets:
 Plus a registered model entity, exactly as for the other backends.
 
 <Note>
-Prompt JSONL must **not** live inside the environment package. Validation rejects any `.jsonl` in the environment FileSet, so keep the two FileSets separate.
+Prompt JSONL must **not** live inside the environment package. Schema validation rejects any `.jsonl` in the environment FileSet, so keep the two FileSets separate.
 </Note>
 
 ## Choose an environment format
@@ -34,25 +34,31 @@ The environment package declares its format in a `nemo-environment.yaml` manifes
 | You have | Format | Ships wheels | `config_paths` live under |
 | --- | --- | --- | --- |
 | A Gym server tree whose dependencies are already resolvable at spin-up | `native-v1` | No | `responses_api_agents/`, `resources_servers/`, `responses_api_models/` |
-| A Prime Intellect hub environment, or any `verifiers` environment installable as a wheel | `adapter-wheels-v1` | Yes | `configs/` |
+| Any `verifiers` environment installable as a wheel like a Prime Intellect hub environment | `adapter-wheels-v1` | Yes | `configs/` |
 | Any other environment code, including a Gym server tree whose dependencies you want vendored | `wheels-v1` | Yes | Anywhere in the package |
 
-`adapter-wheels-v1` includes a converter (`pi-to-gym-conversion`). Set `adapter.agent` to `verifiers_agent`.
+All three formats run on the same Gym runtime and are supported equally. The format decides two things only: where a package's dependencies come from, and where its `config_paths` may live.
 
-### Manifest
+### The manifest
+
+Every package declares itself in `nemo-environment.yaml` at its root. The shape is the same in all three formats:
 
 ```yaml
-format: adapter-wheels-v1
-config_paths:
+format: wheels-v1              # or native-v1, adapter-wheels-v1
+config_paths:                  # at least one, relative to the package root
   - configs/policy_model.yaml
-  - configs/verifiers_agent.yaml
-adapter:                       # adapter-wheels-v1 only
-  agent: verifiers_agent
-  agent_type: responses_api_agents
+  - configs/my_env.yaml
 metadata:
-  name: ascii-tree
-  hub_id: primeintellect/ascii-tree
-  vf_env_id: ascii-tree
+  name: my-env                 # required
+  description: Custom reward environment
+```
+
+`adapter-wheels-v1` adds one additional block, because the agent harness comes from the training image rather than the package:
+
+```yaml
+adapter:
+  agent: verifiers_agent       # the only harness built into the image
+  agent_type: responses_api_agents
 ```
 
 Rules that apply to every format:
@@ -63,16 +69,109 @@ Rules that apply to every format:
 - `wheels/` is non-empty and contains only `.whl` files, for the two wheels formats.
 - Unknown manifest keys are rejected.
 
-## Convert a Prime Intellect environment
+## How dependencies are installed
 
-The platform ships a converter that downloads the hub package, vendors its full wheel closure, writes the configs and manifest, and builds the prompt JSONL.
+The format you choose does not change *what runs* — all three start on the same Gym runtime. It changes where dependencies come from, and that is what usually decides whether a job starts at all.
 
-Run it on a machine with internet access. Training clusters have no hub egress and consume uploaded FileSets only.
+There are two installs at job start:
 
-The converter is `pi-to-gym-conversion`. From a platform install, run it on `PATH`. From this repository:
+1. Gym builds **one venv per server** from that server's `pyproject.toml` or `requirements.txt`, plus `nemo-gym` at the image version and Gym's pinned `ray[default]` and `openai`. A package's `wheels/` directory is offered here as a *candidate pool* — **a package index is still enabled**, so anything the wheelhouse misses is fetched from it.
+2. The job then installs the package's vendored closure into each agent and resources-server venv with `--no-index`. Fully offline, but only for what `wheels/` already carries, and only after step 1 succeeded.
+
+| Format | Server dependencies come from | Needs egress at spin-up |
+| --- | --- | --- |
+| `native-v1` | A package index, resolved from the server's `requirements.txt` | Yes |
+| `wheels-v1` | The package's `wheels/`, for anything it vendors | No, **if the closure also covers step 1** |
+| `adapter-wheels-v1` | The package's `wheels/`, plus the agent harness's own requirements | No, when built by the converter |
+
+A `wheels-v1` job runs with no egress only when `wheels/` carries all of:
+
+- the server's own requirement closure;
+- `nemo-gym` at exactly the training-image version;
+- `ray[default]` and `openai` at the versions the image pins, which Gym appends to every install;
+- **`pip`** — `uv venv --seed` installs it into each new virtualenv *before* any dependency install, resolving it like any other package.
+
+The virtualenv is created empty, so nothing carries over from the image. Completeness of `wheels/` is what makes an offline run work, not the format name. Full detail: [GRPO Environment Packages](/documentation/customizer-reference/tutorials/grpo-environment-packages#dependencies).
+
+`adapter-wheels-v1` can run without network access at job start. Its converter builds
+source-only dependencies such as `verifiers` into wheels, and the image-bundled harness
+uses a version requirement that can resolve from that wheelhouse. Conversion still
+requires an internet-connected host.
+
+Egress is an operator setting, not a job field: `NHX_RL_SANDBOX_ALLOW_INTERNET`, plus `NHX_RL_SANDBOX_PUBLIC_DNS_ALLOW` for hosts outside the built-in `*.com` / `*.org` allowance. Ask your platform operator which is configured before choosing a format.
+
+### Vendoring a wheel closure
+
+Wheels must match the **architecture of the nodes that run GRPO training**, not the machine that builds the package. The training images are published for both `linux/amd64` and `linux/arm64`, so there is no single correct answer — check what your cluster runs and target that:
 
 ```bash
-uv run --package nmp-rl pi-to-gym-conversion \
+kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.architecture}'   # amd64 or arm64
+ARCH=x86_64        # amd64 nodes
+# ARCH=aarch64     # arm64 nodes
+```
+
+The interpreter is **Python 3.13** on every architecture. A closure resolved for the wrong architecture passes `--validate-only`, which checks layout rather than wheel tags, and then fails on the cluster with `has no wheels with a matching platform tag`.
+
+```bash
+pip download <requirements> pip --dest my-env/wheels \
+  --only-binary=:all: \
+  --python-version 3.13 \
+  --platform "manylinux_2_39_$ARCH" \
+  --platform "manylinux_2_28_$ARCH" \
+  --platform "manylinux_2_17_$ARCH" \
+  --platform "manylinux2014_$ARCH"
+```
+
+`--platform` is repeated because pip matches these tags literally rather than expanding a compatibility range. Name each tag you need, including older glibc floors.
+
+Clear `wheels/` before rebuilding into it. Copies overwrite by filename, so a wheel from an earlier run survives whenever the new closure resolved that project to a different version, and the package then vendors both.
+
+## Build the environment package
+
+Pick the subsection matching the format you chose above. Each produces a directory you validate and then upload.
+
+### `native-v1` — a Gym server tree, dependencies resolved at spin-up
+
+For `native-v1`, the package is a slice of the Gym source tree with its directory structure preserved, plus a manifest you add at the root:
+
+```text
+resources_servers/example_single_tool_call/
+  app.py
+  configs/example_single_tool_call.yaml
+  requirements.txt
+responses_api_models/vllm_model/
+  configs/policy_model.yaml
+nemo-environment.yaml
+```
+
+```yaml
+format: native-v1
+config_paths:
+  - responses_api_models/vllm_model/configs/policy_model.yaml
+  - resources_servers/example_single_tool_call/configs/example_single_tool_call.yaml
+metadata:
+  name: example-single-tool-call
+```
+
+<Warning>
+Gym's own configs point `datasets[].jsonl_fpath` at a file inside the server directory. That file cannot ship in the environment package. Remove the data directory and supply prompts through the dataset FileSet instead.
+</Warning>
+
+`native-v1` ships no wheels, so its server's dependencies resolve from a package index at spin-up and the job needs egress. If that is not available on your cluster, package the same server tree as `wheels-v1` instead and vendor the closure — see [How dependencies are installed](#how-dependencies-are-installed).
+
+### `wheels-v1` — any environment, dependencies vendored
+
+Use the same directory layout as `native-v1` — the server's own tree, copied from a Gym checkout — and add a `wheels/` directory holding the full dependency closure so nothing is fetched at job start. `config_paths` may live anywhere in the package. This is the format to choose when the cluster has no egress. Layout, the closure contents, and a worked example: [GRPO Environment Packages](/documentation/customizer-reference/tutorials/grpo-environment-packages).
+
+### `adapter-wheels-v1` — a `verifiers` environment, via the converter
+
+A `verifiers` environment — a Prime Intellect hub package, for example — is the one case with a scripted path. `pi-to-gym-conversion` downloads the package, vendors its full wheel closure, writes the configs and manifest, and builds the prompt JSONL.
+
+Run it on a machine with internet access. Training clusters have no hub egress and consume uploaded FileSets only. From a source checkout, create a dedicated conversion environment once so the optional `conversion` dependencies are installed without changing the Platform runtime environment. Keep it separate because conversion installs the downloaded hub package and `verifiers` into the interpreter that runs the converter; using the repo `.venv` can both prune those packages on the next sync and pollute the platform development environment.
+
+```bash
+UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --package nhx-rl --extra conversion
+.venv-conversion/bin/pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree \
   --hub-version 0.1.5 \
   --out-dir ./ascii-tree-pkg \
@@ -97,41 +196,7 @@ ascii-tree-data/
   validation.jsonl                # only with --validation-fraction > 0
 ```
 
-Add `--upload` (with `NMP_BASE_URL` set) to create both FileSets and upload them in the same command.
-
-### Validate before uploading
-
-```bash
-uv run --package nmp-rl pi-to-gym-conversion --validate-only ./ascii-tree-pkg
-```
-
-Prints `{"valid": true, "format": "...", "name": "..."}` or exits non-zero with the specific violation. The same checks run at submit time, so validating locally catches the failure earlier and for free.
-
-## Package an existing NeMo Gym environment
-
-For `native-v1`, the package is a slice of the Gym source tree with its directory structure preserved, plus a manifest you add at the root:
-
-```text
-resources_servers/example_single_tool_call/
-  app.py
-  configs/example_single_tool_call.yaml
-  requirements.txt
-nemo-environment.yaml
-```
-
-```yaml
-format: native-v1
-config_paths:
-  - resources_servers/example_single_tool_call/configs/example_single_tool_call.yaml
-metadata:
-  name: example-single-tool-call
-```
-
-<Warning>
-Gym's own configs point `datasets[].jsonl_fpath` at a file inside the server directory. That file cannot ship in the environment package. Remove the data directory and supply prompts through the dataset FileSet instead.
-</Warning>
-
-`native-v1` ships no wheels, so its server's dependencies resolve from a package index at spin-up and the job needs egress. If that is not available on your cluster, package the same server tree as `wheels-v1` instead and vendor the closure — see [How dependencies are installed](#how-dependencies-are-installed).
+Add `--upload` to create both FileSets and upload them in the same command. The converter does not read your CLI context, so export `NHX_BASE_URL` with your deployment URL first.
 
 ### Every package needs a `policy_model` server
 
@@ -162,46 +227,17 @@ For `native-v1` only the server-type prefix is checked, so `responses_api_models
 
 Custom implementations need `{server_type}/{implementation}/` (with `app.py` and `requirements.txt`) in the FileSet for `native-v1` and `wheels-v1`. YAML under `configs/` does not replace that directory, and a directory without `requirements.txt` or `pyproject.toml` is not recognised as a server at all. Details: [GRPO Environment Packages](/documentation/customizer-reference/tutorials/grpo-environment-packages).
 
-## How dependencies are installed
+<Note>
+`pi-to-gym-conversion` currently only vendors wheels for `x86_64` today. On an `arm64` cluster, build the closure yourself with the `pip download` command above and pass it via `--wheels-dir`.
+</Note>
 
-The format you choose does not change *what runs* — all three start on the same Gym runtime. It changes where dependencies come from, and that is what usually decides whether a job starts at all.
-
-There are two installs at job start:
-
-1. Gym builds **one venv per server** from that server's `pyproject.toml` or `requirements.txt`, plus `nemo-gym` at the image version and Gym's pinned `ray[default]` and `openai`. A package's `wheels/` directory is offered here as a *candidate pool* — **a package index is still enabled**, so anything the wheelhouse misses is fetched from it.
-2. The job then installs the package's vendored closure into each agent and resources-server venv with `--no-index`. Fully offline, but only for what `wheels/` already carries, and only after step 1 succeeded.
-
-| Format | Server dependencies come from | Needs egress at spin-up |
-| --- | --- | --- |
-| `native-v1` | A package index, resolved from the server's `requirements.txt` | Yes |
-| `wheels-v1` | The package's `wheels/`, for anything it vendors | No, **if the closure also covers step 1** |
-| `adapter-wheels-v1` | The package's `wheels/`, plus the agent harness's own requirements | Yes — see below |
-
-A `wheels-v1` job runs with no egress only when `wheels/` carries the server's full requirement closure, `nemo-gym` at exactly the training-image version, and Gym's pinned `ray[default]` and `openai` — the venv is seeded empty, so nothing carries over from the image. Completeness of `wheels/` is what makes an offline run work, not the format name. Full detail: [GRPO Environment Packages](/documentation/customizer-reference/tutorials/grpo-environment-packages#dependencies).
-
-<Warning>
-`adapter-wheels-v1` requires network access when the job starts. The package `wheels/` directory covers the hub environment; `verifiers_agent` also installs `verifiers` from GitHub.
-</Warning>
-
-Egress is an operator setting, not a job field: `NMP_RL_SANDBOX_ALLOW_INTERNET`, plus `NMP_RL_SANDBOX_PUBLIC_DNS_ALLOW` for hosts outside the built-in `*.com` / `*.org` allowance. Ask your platform operator which is configured before choosing a format.
-
-### Vendoring a wheel closure
-
-Wheels must match the training image's interpreter and platform, not your laptop's. The image is **Python 3.13 on `x86_64` manylinux**; a closure downloaded on macOS or arm64 passes `--validate-only` and then fails to install on the cluster, because local validation checks layout, not wheel tags.
+### Validate before uploading, whichever format you built
 
 ```bash
-pip download <requirements> --dest my-env/wheels \
-  --only-binary=:all: \
-  --python-version 3.13 \
-  --platform manylinux_2_39_x86_64 \
-  --platform manylinux_2_28_x86_64 \
-  --platform manylinux_2_17_x86_64 \
-  --platform manylinux2014_x86_64
+uv run --package nhx-rl pi-to-gym-conversion --validate-only ./my-env-pkg
 ```
 
-`--platform` is repeated because pip matches these tags literally rather than expanding a compatibility range. Name each tag you need, including older glibc floors.
-
-Clear `wheels/` before rebuilding into it. Copies overwrite by filename, so a wheel from an earlier run survives whenever the new closure resolved that project to a different version, and the package then vendors both.
+Despite the command's name this validates any of the three formats, not just converter output. It prints `{"valid": true, "format": "...", "name": "..."}` or exits non-zero with the specific violation. The same checks run at submit time, so validating locally catches the failure earlier and for free.
 
 ## Prompt dataset format
 
@@ -262,7 +298,7 @@ These are the names `--upload` would have used: it derives them from the hub slu
 
 ## Submit the job
 
-There is no `grpo` subcommand. GRPO submits through `nemo customization rl submit`, selected by `training.type`.
+There is no `grpo` subcommand. GRPO submits through `nemo customization rl --job-json`, selected by `training.type`.
 
 ```json
 {
@@ -285,12 +321,12 @@ There is no `grpo` subcommand. GRPO submits through `nemo customization rl submi
 ```
 
 ```bash
-nemo customization rl submit ./job.json --workspace default
+nemo customization rl --job-json ./job.json --workspace default
 ```
 
 `training.type` is required — it is the union discriminator, and omitting it fails with `union_tag_not_found` rather than defaulting to DPO. `model`, `dataset`, and `environment` are plain string references.
 
-Read the `rl-<hex>` job id from the `name` field of the submit response; `rl submit` has no `--name` flag.
+Read the `rl-<hex>` job id from the `name` field of the command's JSON output; `nemo customization rl` has no `--name` flag.
 
 ## Train an adapter instead of full weights
 
@@ -323,7 +359,6 @@ GRPO trains every weight by default. Set `finetuning_type` to train a LoRA adapt
 You do not set the output type. It is inferred from `finetuning_type`, so `output` carries only `name` either way.
 </Note>
 
-DPO is full-weight only. LoRA applies to GRPO.
 
 ### LoRA fields
 
@@ -334,7 +369,7 @@ DPO is full-weight only. LoRA applies to GRPO.
 | `dropout` | `0.0` | Dropout applied after the adapter. |
 | `target_modules` | `null` | Module names to adapt. |
 | `exclude_modules` | `null` | Module name patterns to skip. |
-| `use_triton` | `true` | Triton LoRA kernels. Automatically disabled when `tensor_parallel_size` is above 1 — you do not need to set it. |
+| `use_triton` | unset → compiler picks | Triton LoRA kernels: `true` at `tensor_parallel_size` 1, `false` above. Leave it unset. Setting it `true` with `tensor_parallel_size` above 1 is rejected at submit, because the kernels cannot accept the sharded adapter weights tensor parallelism produces. |
 
 <Warning>
 Module selection is either/or. Leaving both `target_modules` and `exclude_modules` unset adapts **every** linear layer. Setting either list turns that behavior off, so `exclude_modules` on its own does not mean "all linear layers except these." Use `target_modules` when you want a specific set, and neither field when you want all of them.
@@ -348,17 +383,81 @@ The adapter hot-reloads onto a **READY** deployment of the base model that has `
 
 A full-weight GRPO job instead registers a new model entity, which does need its own deployment.
 
+## Deploy automatically when the job finishes
+
+Set `deployment_config` on the job spec and the platform deploys once training completes, instead of leaving you to create the deployment by hand. Omit it and nothing is deployed.
+
+Create the deployment config first and pass its name. This is the recommended path; see [Set up automatic deployment](/documentation/customizer-reference/manage-customization-jobs/customization-job-reference#set-up-automatic-deployment) for a reusable vLLM template:
+
+```json
+{
+  "model": "default/qwen3-0.6b",
+  "dataset": "default/ascii-tree-env-dataset",
+  "environment": "default/ascii-tree-env",
+  "training": { "type": "grpo", "finetuning_type": "lora" },
+  "deployment_config": "default/qwen3-base-cfg"
+}
+```
+
+Or an object to have one created inline. It deploys with vLLM, the recommended engine for Customizer outputs. Set `"engine": "nim"` only if you know that the NIM image you use supports the model, or that the model works with the default multi-LLM NIM:
+
+```json
+{
+  "deployment_config": {
+    "gpu": 1,
+    "lora_enabled": true
+  }
+}
+```
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `engine` | `vllm` | `vllm` or `nim`. |
+| `gpu` | `1` | GPUs the deployment requests. |
+| `lora_enabled` | `true` | Whether the deployment can load LoRA adapters. |
+| `image_name` | platform default for the engine | Container image. For vLLM, the default is `docker.io/vllm/vllm-openai`; for NIM, the multi-LLM NIM, `nvcr.io/nim/nvidia/llm-nim`. |
+| `image_tag` | platform default for the engine | Container image tag. For NIM, the default is `latest`. |
+| `disk_size` | unset | Disk size for the deployment. |
+| `additional_envs` | unset | Extra environment variables. |
+| `tool_call_config` | unset | Tool-calling overrides. Requires NIM: setting it without `engine` deploys with NIM, and it is rejected with `"engine": "vllm"`. Setting `tool_call_plugin` requires the `models.tool-call-plugin.set` permission. |
+
+vLLM loads LoRA adapters up to rank 16. To serve a higher `rank`, reference a deployment config that sets `"additional_args": ["--max-lora-rank", "<rank>"]` in its `executor_config`.
+
+A LoRA job deploys the **base** model with `lora_enabled: true` and serves the adapter from it, so `lora_enabled: false` on a LoRA job is rejected at submit — that deployment could never load the adapter. A full-weight job deploys the new model entity it registers.
+
+Bad configurations fail before training starts, not after the run. These are rejected at submit:
+
+- A string reference that does not resolve to a deployment config.
+- On a LoRA job, a referenced config with `lora_enabled: false`.
+- On a full-weight job, a referenced config that names a *different* model. The output entity does not have to exist yet — a config may point forward at the model the run will produce — but a config built for some other model cannot serve it.
+
+A deployment config that names no model — neither `model_entity_id` nor `model_spec.model_name` — is an **unbound template**. It carries only engine and executor settings, so it is accepted by any job: the trained model is stamped onto a copy of it at deploy time, leaving the template reusable for the next run. This is the only way to share engine/executor settings across full-weight jobs, whose output model does not exist when the job is submitted.
+
 ## Key hyperparameters
+
+All GRPO knobs live under `training`, including `policy_backend` (a sibling of `parallelism`, not a field on it).
 
 | Field | Default | Notes |
 | --- | --- | --- |
 | `num_generations_per_prompt` | `8` | Group size. The spread of rewards within a group is the entire learning signal. |
-| `num_prompts_per_step` | Derived | From `batch_size / num_generations_per_prompt`. Their product must be a multiple of `batch_size`. |
+| `num_prompts_per_step` | Derived | From `batch_size / num_generations_per_prompt`. Their product must be a multiple of `batch_size`, so prefer a value that divides `batch_size` evenly. |
 | `temperature` | `1.0` | Must be greater than 0. Greedy sampling makes every response in a group identical and the run a no-op. |
 | `max_rollout_turns` | `1` | Multi-turn rollouts. Most single-step environments use `1`. |
 | `overlong_filtering` | `false` | Zero the loss contribution of responses truncated at the generation cap. |
 | `ref_policy_kl_penalty` | `0.0` | KL coefficient against the reference policy. |
 | `val_at_start` | `false` | Run validation before the first step, so baseline and result come from one job. |
+| `policy_backend` | Follows `finetuning_type` | The NeMo-RL worker that trains the model. Set it on `training`, not under `training.parallelism`. **`lora` requires `automodel`**. **`all_weights` defaults to `dtensor`** and may be set to `automodel` for a consolidated HuggingFace export. MoE models that use expert parallelism also require `automodel`, because `dtensor` does not support `expert_parallel_size` above 1. Leave it unset to get the default. `automodel` needs Transformer Engine (Hopper or newer) and supports `automodel_kwargs`; `dtensor` runs stock HuggingFace on PyTorch FSDP2 and is the pre-Hopper option. `dtensor` plus LoRA, expert parallelism, or `automodel_kwargs` is rejected at submit, every conflict at once. |
+| `v4_compatible` | `true` | `GRPOTraining.v4_compatible`. On Automodel full-weight export, keep the base transformers-v4 `config.json` so the platform's vLLM can load the published model; the v5 config is written beside it as `config.v5.json`. Set `false` to export the v5 `config.json` instead. If the base checkpoint already uses transformers v5, the job logs warn you to set this to `false`. No effect on `dtensor` or LoRA jobs. |
+| `batching_strategy` | `dynamic` | How rollouts are grouped into training micro-batches. `dynamic` fills each micro-batch to a token budget, so short rollouts share a batch instead of each paying for a full-length pad. `static` puts one rollout per slot. `sequence_packing` concatenates rollouts, and is rejected for VLM, multimodal, and context-parallel runs. |
+| `train_mb_tokens` | Derived | Token budget per micro-batch, read by `dynamic` and `sequence_packing`. Defaults to `max_seq_length × micro_batch_size`. |
+| `sequence_length_round` | `64` | Round bucketed sequence lengths up to a multiple of this. Read only by `dynamic`. |
+| `router_aux_loss_coef` | Unset | MoE router auxiliary-loss coefficient, applied as a **top-level** HuggingFace config override. Set `0.0` to drop the load-balancing term during RL. |
+| `hf_config_overrides` | Unset | Passed to NeMo-RL verbatim and forwarded to the training model as config kwargs and to vLLM as `hf_overrides`. Nested keys are preserved, so use this for models that namespace their config — Qwen3.5 reads `router_aux_loss_coef` under `text_config`. |
+| `automodel_kwargs` | Unset | Passed through to Automodel. `{"force_hf": true}` loads stock HuggingFace modules when a model's custom backbone is not compatible with the parallelizer. Requires `policy_backend: automodel`. |
+
+<Warning>
+Setting `router_aux_loss_coef` **and** a `router_aux_loss_coef` key inside `hf_config_overrides` is rejected — they write the same top-level key. Keep one. Use `hf_config_overrides` when the model nests it, because a top-level key the model does not read is absorbed silently and the aux loss stays on, surfacing only as degraded accuracy many steps in.
+</Warning>
 
 Advanced clipping and advantage-estimation settings (`ratio_clip_c`, `advantage_clip_low` / `advantage_clip_high`, `normalize_rewards`, `use_leave_one_out_baseline`, `top_k`) are documented in [Training Configuration](/documentation/customizer-reference/manage-customization-jobs/training-configuration).
 
@@ -411,14 +510,14 @@ GRPO fails at submit, before any GPU is claimed, unless the platform operator ha
 
 | Setting | Why |
 | --- | --- |
-| `NMP_SANDBOX_CLUSTER_CAPABLE=true` (Helm: `sandboxClusterCapable`) | Declares that OpenSandbox is installed. The platform chart does **not** install it. GRPO defaults to sandboxed Gym (`NMP_RL_SANDBOXED_GYM_DEFAULT`) and fails closed without this |
-| `NMP_RL_JOB_STORAGE_PVC_CLAIM` | The Gym sandbox mounts the job-storage claim itself to read the downloaded environment and dataset, and only learns the claim by name |
-| `NMP_RL_SANDBOX_ALLOW_INTERNET` | Needed whenever an environment's venv build has to reach a package index — which is every `native-v1` package, and every `adapter-wheels-v1` one |
-| `NMP_RL_SANDBOX_PUBLIC_DNS_ALLOW` | Extra hosts, consulted only when the above is on. The built-in allowance covers `*.com` and `*.org`, so a host on another TLD (for example `hub.primeintellect.ai`) must be named |
+| `NHX_SANDBOX_CLUSTER_CAPABLE=true` (Helm: `sandboxClusterCapable`) | Declares that OpenSandbox is installed. The platform chart does **not** install it. GRPO defaults to sandboxed Gym (`NHX_RL_SANDBOXED_GYM_DEFAULT`) and fails closed without this |
+| `NHX_RL_JOB_STORAGE_PVC_CLAIM` | The Gym sandbox mounts the job-storage claim itself to read the downloaded environment and dataset, and only learns the claim by name |
+| `NHX_RL_SANDBOX_ALLOW_INTERNET` | Needed whenever an environment's venv build has to reach a package index — every `native-v1` package and any wheels package whose closure is incomplete. Converter-built `adapter-wheels-v1` packages do not need it at job start. |
+| `NHX_RL_SANDBOX_PUBLIC_DNS_ALLOW` | Extra hosts, consulted only when the above is on. The built-in allowance covers `*.com` and `*.org`, so a host on another TLD (for example `hub.primeintellect.ai`) must be named |
 
 If a submit fails on either of the first two, that is a platform configuration gap, not a problem with your package. Neither is settable per job.
 
-Installing OpenSandbox is a separate operator task: [OpenSandbox](/documentation/self-managed-deployment/setup/helm/opensandbox), or [OpenSandbox with Kata](/documentation/self-managed-deployment/setup/helm/opensandbox-kata) for the Kata runtime.
+Installing OpenSandbox is a separate operator task: [OpenSandbox](/documentation/kubernetes-deployment/setup/helm/open-sandbox), or [OpenSandbox with Kata](/documentation/kubernetes-deployment/setup/helm/opensandbox-kata) for the Kata runtime.
 
 ## Next Steps
 

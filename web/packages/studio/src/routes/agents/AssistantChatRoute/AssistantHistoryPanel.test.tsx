@@ -35,9 +35,9 @@ describe('AssistantHistoryPanel', () => {
       {
         name: 'inference',
         claude_name: 'nemo-inference',
-        description: 'Use NeMo Platform inference.',
-        source: 'nemo-platform',
-        source_path: 'packages/nemo_platform_ext/src/nemo_platform_ext/skills/inference',
+        description: 'Use NeMo Helix inference.',
+        source: 'nemo-helix',
+        source_path: 'packages/nemo_helix_ext/src/nemo_helix_ext/skills/inference',
         install_path: '.claude/skills/nemo-inference/SKILL.md',
         installed: false,
       },
@@ -347,9 +347,9 @@ describe('AssistantHistoryPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Expand Skills' }));
 
     expect(await screen.findByText('Inference')).toBeInTheDocument();
-    expect(screen.getByText('Use NeMo Platform inference.')).toBeInTheDocument();
+    expect(screen.getByText('Use NeMo Helix inference.')).toBeInTheDocument();
     expect(screen.getByText('nemo-inference')).toBeInTheDocument();
-    expect(screen.queryByText('Source: nemo-platform')).not.toBeInTheDocument();
+    expect(screen.queryByText('Source: nemo-helix')).not.toBeInTheDocument();
     expect(screen.queryByText(/Skill file:/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Claude file:/)).not.toBeInTheDocument();
   });

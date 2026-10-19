@@ -5,7 +5,7 @@ import { Flex, Text } from '@nvidia/foundations-react-core';
 import { DagCanvas } from '@studio/components/DagCanvas';
 import { buildGraph } from '@studio/routes/DataDesignerJobBuildRoute/columns';
 import type { JobBuilderFormValues } from '@studio/routes/DataDesignerJobBuildRoute/useJobBuilder';
-import { type FC, useMemo } from 'react';
+import { type FC, memo, useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 export interface BuilderCanvasProps {
@@ -15,11 +15,11 @@ export interface BuilderCanvasProps {
 }
 
 /** The graph is the sole subscriber for prompt/reference edits in canvas view. */
-export const BuilderCanvas: FC<BuilderCanvasProps> = ({
+export const BuilderCanvas: FC<BuilderCanvasProps> = memo(function BuilderCanvas({
   focusNodeId,
   onNodeClick,
   onNodeDelete,
-}) => {
+}) {
   const { control } = useFormContext<JobBuilderFormValues>();
   const columnRecord = useWatch({ control, name: 'columns' });
   const { nodes, edges } = useMemo(() => buildGraph(columnRecord), [columnRecord]);
@@ -43,4 +43,4 @@ export const BuilderCanvas: FC<BuilderCanvasProps> = ({
       focusNodeId={focusNodeId}
     />
   );
-};
+});

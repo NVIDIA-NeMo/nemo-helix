@@ -24,30 +24,32 @@ import httpx
 import pytest
 import yaml
 from _pytest.nodes import Node
-from nmp.testing.e2e import Docker as DockerE2EBackend
-from nmp.testing.e2e.config import deep_merge
+from nhx.testing.docker import remove_intake_clickhouse
+from nhx.testing.e2e import Docker as DockerE2EBackend
+from nhx.testing.e2e.config import deep_merge
 
 from e2e.backends.docker_compose import DockerComposeE2EBackend
 
 logger = logging.getLogger(__name__)
 _E2E_HARNESS_DEBUG = os.environ.get("E2E_HARNESS_DEBUG") == "1"
 
-_HEALTH_TIMEOUT = 60
+# Loading all services and plugins can exceed a minute on CPU CI runners.
+_HEALTH_TIMEOUT = 180
 _HEALTH_POLL_INTERVAL = 1.0
 _AUTH_READY_TIMEOUT = 60
 _E2E_ADMIN_EMAIL = "admin@example.com"
 _E2E_REPO_ROOT = Path(__file__).resolve().parents[1]
-_DEFAULT_E2E_PLATFORM_CONFIG = _E2E_REPO_ROOT / "packages/nmp_platform/config/local.yaml"
+_DEFAULT_E2E_PLATFORM_CONFIG = _E2E_REPO_ROOT / "packages/nhx_platform/config/local.yaml"
 # Layered on the default config so pooled platforms that are not testing
 # deployments orphan cleanup cannot delete peer platforms' docker containers.
 _DEFAULT_E2E_DISABLE_DEPLOYMENTS_ORPHAN_CLEANUP = _E2E_REPO_ROOT / "e2e/configs/disable-deployments-orphan-cleanup.yaml"
-_E2E_COMPOSE_LIFECYCLE_ENV = "NMP_E2E_COMPOSE_LIFECYCLE"
+_E2E_COMPOSE_LIFECYCLE_ENV = "NHX_E2E_COMPOSE_LIFECYCLE"
 
 
 def admin_headers() -> dict[str, str]:
     return {
-        "X-NMP-Principal-Id": _E2E_ADMIN_EMAIL,
-        "X-NMP-Principal-Email": _E2E_ADMIN_EMAIL,
+        "X-NHX-Principal-Id": _E2E_ADMIN_EMAIL,
+        "X-NHX-Principal-Email": _E2E_ADMIN_EMAIL,
     }
 
 
@@ -92,6 +94,7 @@ class RunningServices:
     docker_container_alias: str | None = None
     docker_container_port: int | None = None
     compose_project_name: str | None = None
+    data_dir: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -155,7 +158,7 @@ class E2EServicesPool:
         return self._acquire_for_registered_owner(owner_id, state)
 
     def _acquire_for_registered_owner(self, owner_id: str, state: ModuleConfigState) -> RunningServices:
-        external_url = os.environ.get("NMP_BASE_URL")
+        external_url = os.environ.get("NHX_BASE_URL")
         if external_url:
             return RunningServices(
                 url=external_url,
@@ -204,7 +207,7 @@ class E2EServicesPool:
 
     def _release_for_registered_owner(self, owner_id: str) -> None:
         self._active_service_key_by_module.pop(owner_id, None)
-        if os.environ.get("NMP_BASE_URL"):
+        if os.environ.get("NHX_BASE_URL"):
             return
         state = self._module_states.get(owner_id)
         if state is None:
@@ -300,7 +303,7 @@ class E2EServicesPool:
             state.key.config_hash,
         )
         rendered_config = yaml.safe_dump(rendered_config_data, default_flow_style=False, sort_keys=True)
-        config_path = self._get_generated_config_dir() / f"platform-{state.key.config_hash}.yaml"
+        config_path = self._get_generated_config_dir(state.harness_config) / f"platform-{state.key.config_hash}.yaml"
         if not config_path.exists():
             config_path.write_text(rendered_config)
             self._log_debug(
@@ -319,7 +322,9 @@ class E2EServicesPool:
             auth_enabled=state.auth_enabled,
         )
 
-    def _get_generated_config_dir(self) -> Path:
+    def _get_generated_config_dir(self, harness_config: E2EHarnessConfig) -> Path:
+        if _e2e_backend(harness_config) == "docker_compose":
+            return _docker_compose_generated_config_dir()
         if self._generated_config_dir is None:
             self._generated_config_dir = self._get_log_dir() / "generated-configs"
             self._generated_config_dir.mkdir(parents=True, exist_ok=True)
@@ -346,15 +351,19 @@ class E2EServicesPool:
                 returncode=services.proc.returncode,
                 url=services.url,
             )
-            return
-        logger.info("Terminating nemo services (pid %d)", services.proc.pid)
-        services.proc.terminate()
-        try:
-            services.proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            logger.warning("Process %d did not exit after SIGTERM, sending SIGKILL", services.proc.pid)
-            services.proc.kill()
-            services.proc.wait(timeout=5)
+        else:
+            logger.info("Terminating nemo services (pid %d)", services.proc.pid)
+            services.proc.terminate()
+            try:
+                services.proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                logger.warning("Process %d did not exit after SIGTERM, sending SIGKILL", services.proc.pid)
+                services.proc.kill()
+                services.proc.wait(timeout=5)
+        # Intake keeps its local ClickHouse container across shutdowns, keyed by data dir, and the
+        # data dir lives under this session's tmp dir.
+        if services.data_dir is not None:
+            remove_intake_clickhouse(services.data_dir)
 
     def describe_module_binding(
         self,
@@ -406,9 +415,18 @@ def _services_log_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return tmp_path_factory.mktemp("e2e-services-logs")
 
 
+def _docker_compose_generated_config_dir() -> Path:
+    directory = _E2E_REPO_ROOT / ".pytest_cache" / "e2e-services" / f"generated-configs-{os.getpid()}"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
 def _resolve_e2e_config_layers_from_node(node: Node) -> list[str | dict[str, Any]]:
     marker = node.get_closest_marker("e2e_config")
     if marker is None or not marker.args:
+        config_ref = os.environ.get("NHX_E2E_CONFIG_REF")
+        if config_ref:
+            return [config_ref]
         return [
             str(_DEFAULT_E2E_PLATFORM_CONFIG),
             str(_DEFAULT_E2E_DISABLE_DEPLOYMENTS_ORPHAN_CLEANUP),
@@ -425,7 +443,7 @@ def _resolve_e2e_config_layers_from_node(node: Node) -> list[str | dict[str, Any
 def _resolve_e2e_harness_config_from_node(node: Node) -> E2EHarnessConfig:
     marker = node.get_closest_marker("e2e_config")
     if marker is None:
-        return {"backend": "subprocess"}
+        return _normalize_e2e_harness_config({"backend": os.environ.get("NHX_E2E_HARNESS_BACKEND", "subprocess")})
     unknown = set(marker.kwargs) - {"harness"}
     if unknown:
         raise pytest.UsageError(f"pytest.mark.e2e_config only supports the 'harness' keyword, got: {sorted(unknown)}")
@@ -658,24 +676,26 @@ class DockerBackendOverrides(TypedDict, total=False):
 
 
 def _docker_backend_overrides() -> DockerBackendOverrides:
-    registry = os.environ.get("NMP_E2E_IMAGE_REGISTRY") or os.environ.get("IMAGE_REGISTRY")
-    tag = os.environ.get("NMP_E2E_IMAGE_TAG") or os.environ.get("BAKE_TAG")
+    registry = os.environ.get("NHX_E2E_IMAGE_REGISTRY") or os.environ.get("IMAGE_REGISTRY")
+    tag = os.environ.get("NHX_E2E_IMAGE_TAG") or os.environ.get("BAKE_TAG")
     overrides: DockerBackendOverrides = {}
     if registry:
         overrides["registry"] = registry
     if tag:
         overrides["tag"] = tag
+    if os.environ.get("NHX_E2E_GPU_REQUESTED", "").lower() in {"1", "true", "yes"}:
+        overrides["gpu_requested"] = True
     return overrides
 
 
 def e2e_services_env(config_path: Path, data_dir: Path) -> dict[str, str]:
     """Environment for the ``nemo services run`` child process."""
     env = os.environ.copy()
-    env["NMP_SEED_ON_STARTUP"] = "true"
-    env["NMP_INFERENCE_GATEWAY_MOCK_PROVIDER_PREFIX"] = "igw-mock-"
-    env["NMP_CONFIG_FILE_PATH"] = str(config_path)
-    env["NMP_CONFIG_WARNINGS_DISABLED"] = "1"
-    env["NMP_DATA_DIR"] = str(data_dir)
+    env["NHX_SEED_ON_STARTUP"] = "true"
+    env["NHX_INFERENCE_GATEWAY_MOCK_PROVIDER_PREFIX"] = "igw-mock-"
+    env["NHX_CONFIG_FILE_PATH"] = str(config_path)
+    env["NHX_CONFIG_WARNINGS_DISABLED"] = "1"
+    env["NHX_DATA_DIR"] = str(data_dir)
     allowlist = _real_service_plugin_allowlist()
     if allowlist is not None:
         env.setdefault("NEMO_PLUGIN_SERVICES_ALLOWLIST", allowlist)
@@ -785,7 +805,7 @@ def _request_verify_from_env(env: Mapping[str, str] | None = None) -> str | bool
     if env:
         source.update(env)
     return (
-        source.get("NMP_CLIENT_SSL_CERT_FILE")
+        source.get("NHX_CLIENT_SSL_CERT_FILE")
         or source.get("REQUESTS_CA_BUNDLE")
         or source.get("SSL_CERT_FILE")
         or True
@@ -880,7 +900,7 @@ def _start_services_subprocess(
     #      (e.g. the docker bridge 172.17.0.1) as well as loopback.
     #   2. Rewrite platform.base_url on disk to http://<host>:<this port>. The
     #      free port is only known here, after the config file was materialized.
-    #      The platform seeds NMP_BASE_URL from this, so both the platform's own
+    #      The platform seeds NHX_BASE_URL from this, so both the platform's own
     #      in-process clients and the injected agent LLM base_url point at a
     #      host the agent container can reach.
     container_host = harness_config.get("container_base_url_host")
@@ -906,6 +926,7 @@ def _start_services_subprocess(
         except Exception:
             proc.kill()
             proc.wait(timeout=5)
+        remove_intake_clickhouse(data_dir)
         pytest.fail(
             f"nemo services run did not become healthy within {_HEALTH_TIMEOUT}s.\nlog:\n{log_path.read_text()}"
         )
@@ -917,6 +938,7 @@ def _start_services_subprocess(
         except Exception:
             proc.kill()
             proc.wait(timeout=5)
+        remove_intake_clickhouse(data_dir)
         pytest.fail(
             f"Platform auth seed did not become ready within {_AUTH_READY_TIMEOUT}s.\nlog:\n{log_path.read_text()}"
         )
@@ -929,6 +951,7 @@ def _start_services_subprocess(
         config_path=config_path,
         auth_enabled=auth_enabled,
         key=_services_pool_key(config_hash),
+        data_dir=data_dir,
     )
 
 

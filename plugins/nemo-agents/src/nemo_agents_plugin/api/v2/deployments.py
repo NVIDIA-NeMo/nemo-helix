@@ -16,21 +16,26 @@ process and removes the entity.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
-from typing import Any
+from typing import Any, get_args
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, resolve_agent_config_for_deployment
 from nemo_agents_plugin.api.v2._perms import DeploymentPerms
-from nemo_agents_plugin.api.v2.dependencies import get_entity_client
+from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_files_client
 from nemo_agents_plugin.authz import scope
+from nemo_agents_plugin.config import AgentsConfig, DeploymentsRunnerConfig
 from nemo_agents_plugin.entities import (
+    NEMO_AGENTS_SPEC_CONFIG_FORMAT,
     Agent,
     AgentDeployment,
     AgentEnvironmentInline,
+    DeploymentMode,
     EnvironmentSpecInline,
     is_container_deployment_mode,
+    supports_image_entrypoint,
 )
 from nemo_agents_plugin.environment_resolution import (
     EnvironmentResolutionError,
@@ -39,15 +44,29 @@ from nemo_agents_plugin.environment_resolution import (
     merge_environment_spec_into_agent_config,
     resolve_environment,
 )
+from nemo_agents_plugin.runner.deployments_backend import (
+    image_entrypoint_unsupported_message,
+    require_deployment_mode_available,
+)
 from nemo_agents_plugin.schema import (
     CreateDeploymentRequest,
     DeploymentFilter,
+    DeploymentModeAvailability,
+    DeploymentModeList,
     DeploymentPage,
 )
-from nemo_platform_plugin.api.filters import make_filter_obj_dep
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
-from nemo_platform_plugin.schema import PaginationData
+from nemo_agents_plugin.spec_revision import SpecRevision, read_spec_revision
+from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.auth import current_auth_context
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.entity_client import (
+    NemoEntitiesClient,
+    NemoEntityConflictError,
+    NemoEntityNotFoundError,
+    NemoEntityValidationError,
+)
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.schema import PaginationData
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +85,9 @@ _DELETE_MARK_ATTEMPTS = 3
 async def create_deployment(
     workspace: str,
     body: CreateDeploymentRequest,
+    request: Request,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
+    files_client: AsyncFilesClient = Depends(get_files_client),
 ) -> AgentDeployment:
     """Create a new deployment for an existing agent.
 
@@ -93,6 +114,26 @@ async def create_deployment(
             status_code=400,
             detail="use_image_entrypoint requires deployment_mode 'docker' or 'k8s'.",
         )
+    if body.use_image_entrypoint and not supports_image_entrypoint(body.deployment_mode):
+        raise HTTPException(status_code=400, detail=image_entrypoint_unsupported_message(body.deployment_mode))
+
+    # Stricter than the controller's reconcile-time check, which runs after a pending deployment exists.
+    try:
+        await asyncio.to_thread(require_deployment_mode_available, AgentsConfig.get().deployments, body.deployment_mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # The runner fails the deployment for this; the answer is already available here.
+    if is_container_deployment_mode(body.deployment_mode) and not (
+        body.image or AgentsConfig.get().deployments.default_image
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"deployment_mode '{body.deployment_mode}' requires a container image. "
+                "Set 'image' on the request, or configure 'deployments.default_image'."
+            ),
+        )
 
     # 3. Resolve deployment-time config. NAT workflows need legacy injection;
     # Platform-owned agent configs stay strict and are translated by the runner.
@@ -108,7 +149,12 @@ async def create_deployment(
     )
     merged = _merge_environment(resolved_config, resolved_environment.environment_spec)
 
-    # 5. Create the entity with status "pending"
+    # 5. Only a Fabric agent stages a spec fileset; a same-named one would mislead.
+    spec = SpecRevision()
+    if agent.config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT:
+        spec = await read_spec_revision(files_client, workspace=workspace, agent_name=body.agent)
+
+    # 6. Create the entity with status "pending"
     deployment = AgentDeployment(
         name=deployment_name,
         workspace=workspace,
@@ -117,12 +163,14 @@ async def create_deployment(
         environment=body.environment,
         compute=resolved_environment.compute_spec,
         secrets=merged.secrets,
+        spec_revision=spec.revision,
+        spec_tracked_revision=spec.tracked_revision,
         status="pending",
         deployment_mode=body.deployment_mode,
         image=body.image,
         use_image_entrypoint=body.use_image_entrypoint,
         plugin_deployment=deployment_name if is_container_deployment_mode(body.deployment_mode) else "",
-    )
+    ).with_auth_context(current_auth_context())
     try:
         saved = await entity_client.create(deployment)
     except NemoEntityConflictError as exc:
@@ -130,6 +178,8 @@ async def create_deployment(
             status_code=409,
             detail=f"Deployment '{deployment_name}' already exists in workspace '{workspace}'.",
         ) from exc
+    except NemoEntityValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Failed to create deployment for agent '%s'", body.agent)
         raise HTTPException(status_code=500, detail="Failed to create deployment.") from exc
@@ -171,6 +221,34 @@ def _merge_environment(config: dict[str, Any], env_spec: EnvironmentSpecInline |
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@router.get("/deployment-modes", response_model=DeploymentModeList, tags=["Agent Deployments"])
+@scope.read
+@path_rule(
+    callers=[CallerKind.PRINCIPAL],
+    permissions=[DeploymentPerms.LIST],
+)
+async def list_deployment_modes(workspace: str) -> DeploymentModeList:
+    """List every deployment mode and whether this platform can run it."""
+    return DeploymentModeList(data=await asyncio.to_thread(_all_mode_availability, AgentsConfig.get().deployments))
+
+
+def _all_mode_availability(runner_config: DeploymentsRunnerConfig) -> list[DeploymentModeAvailability]:
+    return [_mode_availability(runner_config, mode) for mode in get_args(DeploymentMode)]
+
+
+def _mode_availability(runner_config: DeploymentsRunnerConfig, mode: DeploymentMode) -> DeploymentModeAvailability:
+    try:
+        require_deployment_mode_available(runner_config, mode)
+        enabled = True
+    except ValueError:
+        enabled = False
+    return DeploymentModeAvailability(
+        mode=mode,
+        enabled=enabled,
+        requires_image=is_container_deployment_mode(mode) and not runner_config.default_image,
+    )
+
+
 @router.get("/deployments", response_model=DeploymentPage, tags=["Agent Deployments"])
 @scope.read
 @path_rule(
@@ -201,8 +279,12 @@ async def list_deployments(
         raise HTTPException(status_code=500, detail="Failed to list deployments.") from exc
 
     pagination = PaginationData.model_validate(result.pagination.model_dump()) if result.pagination else None
+    # Startup diagnostics may include child-process log content. Keep them on
+    # the READ-protected detail endpoint rather than exposing them to callers
+    # that only have permission to list deployments.
+    deployments = [deployment.model_copy(update={"error": ""}) for deployment in result.data]
     return DeploymentPage(
-        data=result.data,
+        data=deployments,
         pagination=pagination,
         sort=sort,
         filter=filter,

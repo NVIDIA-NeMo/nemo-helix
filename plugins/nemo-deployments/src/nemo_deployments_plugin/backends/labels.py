@@ -3,11 +3,11 @@
 
 """Shared deployment/volume identity labels and substrate-safe resource naming.
 
-Naming uses ``nemo_platform_plugin.k8s_naming`` (plugins cannot import ``nmp_common``).
+Naming uses ``nemo_helix_plugin.k8s_naming`` (plugins cannot import ``nhx_common``).
 Identity labels drive orphan cleanup and idempotency across docker and k8s backends.
 
 Label domain is ``nemo.nvidia.com/*`` (deployments plugin scope). Core services such as
-jobs and models use ``nmp.nvidia.com/*`` today; converging prefixes is out of scope for 757.
+jobs and models use ``nhx.nvidia.com/*`` today; converging prefixes is out of scope for 757.
 
 Deployment and volume resources use separate workspace label keys
 (``deployment-workspace`` vs ``volume-workspace``) so list/watch queries can target one
@@ -17,7 +17,7 @@ resource kind without ambiguous selectors, even though the workspace value is th
 from typing import Any
 
 from nemo_deployments_plugin.constants import MANAGED_BY_LABEL
-from nemo_platform_plugin.k8s_naming import k8s_safe_name, workspace_name_identity
+from nemo_helix_plugin.k8s_naming import k8s_safe_name, workspace_name_identity
 
 MANAGED_BY_KEY = "managed-by"
 DEPLOYMENT_WORKSPACE_LABEL = "nemo.nvidia.com/deployment-workspace"

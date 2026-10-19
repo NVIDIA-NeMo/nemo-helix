@@ -1,0 +1,253 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "v0.4.0 - 2026-08-12"
+description: ""
+---
+NeMo Helix v0.4.0 introduces a research-preview optimization loop for
+improving agents from real telemetry. Agent owners can send traces to Intake,
+use agents to diagnose recurring issues, create targeted evaluation coverage,
+experiment against a local code base, and review validated candidate changes.
+The release also moves new agent workflows toward `agent.yaml` packages backed
+by [Fabric](https://github.com/NVIDIA/nemo-fabric/) while keeping NAT workflows
+available as a legacy path.
+
+## Highlights
+
+- **Research-preview agent optimization.** Analyst and Experimentalist
+  workflows now support the observe, diagnose, experiment, and evaluate loop for
+  agents under active development.
+- **Trace-driven diagnosis.** NeMo Intake ingests OTLP, chat-completions, and
+  ATIF telemetry, stores traces in ClickHouse, and attaches annotations and
+  evaluator results so agents and humans can investigate failures from the same
+  evidence.
+- **Validated candidate changes.** Experimentalist can run against a local
+  agent source tree or git source, evaluate candidates with Harbor, write
+  optimization artifacts locally, and open a draft PR when a changed
+  winner is found.
+- **Fabric-first agents.** New Platform-managed agents use the
+  `nemo-agents-spec-v1` `agent.yaml` contract. Fabric-backed agents can run
+  through supported harnesses and route model traffic through the Inference
+  Gateway; NAT remains supported for existing workflows.
+- **Experiments for review.** NeMo Experiments compares evaluation runs using
+  cost, latency, token, and evaluator-score rollups computed from Intake
+  telemetry, with Studio leaderboard and drill-down views behind the Experiments
+  feature flag.
+- **Customizer DPO.** Customizer adds DPO training through the `rl` backend,
+  powered by NeMo-RL and Ray on Kubernetes, with backend-specific
+  hyperparameter guidance for Automodel, Unsloth, and RL jobs.
+
+## What's included
+
+### Insight-Driven Optimization
+
+- `nemo agents analyst` scans Intake traces, evaluator scores, and reviewer
+  annotations to produce evidence-backed Insights.
+- `nemo agents experimentalist` turns an Insight, or a dataset-only objective,
+  into candidate code changes, train/validation evaluations, local artifacts,
+  and an optional draft PR or MR.
+- `optimizer.yaml` provides the shared per-agent profile for the loop, including
+  the agent name, workspace, agent source, `ETHOS.md`, datasets, task
+  template, and experiment configuration.
+- `ETHOS.md` is the durable Markdown contract for intended agent behavior. It
+  can be consumed by the Analyst and Experimentalist when present. It records
+  `Principles`, `Trade-offs`, `Constraints`, `Metric Semantics`, and `Vision`
+  alongside the original inventory sections. Every canonical body section is
+  required. Parsing fails if a required heading is missing. Write `_(none)_`
+  when a section has nothing to say. Extra `##` headings and extra YAML
+  front-matter keys are allowed; the parser does not reject them. Front matter
+  includes `schema_version: 1`. `Change Scope` levers accept `with-approval`
+  alongside `yes` and `no`.
+- `ETHOS.md` keeps mission and the agent's accountable outcome in a single
+  `Purpose & Outcomes` section, so they stay together.
+- `ETHOS.md` does not use the earlier AGENT-SPEC headings `Framework`, `Model`,
+  `Signals`, or `Purpose`. Nothing read `Framework`, and a container's
+  framework label comes from `agent.yaml`. Describe how the agent runs in
+  `Harness`, or write `_(none)_`. Do not map the implementation onto a named
+  platform harness. `Model` restated configuration that changes without
+  touching the Ethos, so state permitted providers and model families in
+  `Constraints` and swap permission in `Change Scope`. `Signals` was one
+  consumer's configuration, not durable intent. How a consumer reads evidence
+  belongs in that consumer. `Purpose` merged into `Purpose & Outcomes`.
+- Coding agents that find `agents/<name>-spec/AGENT-SPEC.md` read it as
+  prior answers, write `ETHOS.md` with `nemo-ethos`, and delete the spec
+  package after the user confirms the Ethos. `nemo agents create` prints the
+  same instruction when the config still lives in a spec package.
+- `ETHOS.md` records durable intent, so run-scoped optimizer settings such as a
+  per-experiment spend ceiling belong in the optimizer's own configuration.
+  State a standing production cost ceiling in `Constraints` instead.
+- `nemo-explore` scans the repository first, then asks at least three intent
+  questions, one at a time. It always confirms `Purpose & Outcomes`,
+  `Principles`, and `Vision` with the user, even when the scan produced a
+  plausible draft, before handing off to `nemo-ethos`. After `nemo-ethos`
+  writes `ETHOS.md`, it states a short gut-check of the agent so the user can
+  judge the write before reading the full file.
+- The `nemo-spec` skill is `nemo-ethos`, matching the contract it writes.
+- Benchmark and proof assets include Terminal-Bench 2.1, Tau3 Airline, Banking,
+  Retail, and Telecom suites, plus a guided Tau3 example-agent walkthrough.
+
+### Intake and Experiments
+
+- Intake supports OTLP, chat-completions, and ATIF ingest paths for agent
+  telemetry.
+- Traces, spans, sessions, annotations, and evaluator results are queryable by
+  API and reviewable in Studio.
+- Local setup can automatically provision and reuse a local ClickHouse
+  container for Intake unless an external ClickHouse URL is configured.
+- The Helm chart includes an embedded ClickHouse option for development and
+  non-critical single-node installations, plus configuration for external
+  ClickHouse in production-oriented deployments.
+- Experiments and Evaluations are durable entities whose leaderboard metrics are
+  computed from retained Intake telemetry.
+- The `nemo-experiments-upload` skill helps coding agents publish evaluation
+  runs and verify rollups.
+
+### Agents and Fabric
+
+- New agents use Platform-managed `agent.yaml` files with the
+  `nemo-agents-spec-v1` config format.
+- NeMo Fabric is the preferred runtime wrapper for new agents, with support for
+  harness adapters, shared model bindings, skills, MCP servers, tool policy, and
+  Relay/ATIF/ATOF telemetry configuration.
+- `nemo agents create`, `deploy`, `invoke`, `run`, and `package` support the
+  Fabric-backed agent path.
+- Fabric agent artifacts can be staged into Docker and Kubernetes deployments.
+- Streaming responses are supported through Fabric-backed agents.
+- Legacy NAT workflow YAMLs continue to work for existing NAT-specific
+  evaluation and deployment workflows.
+
+### Agent Evaluation
+
+- The evals SDK adds Fabric runtime support, Docker Compose sandboxing,
+  native agent-eval aggregation, pass-at-k scoring, typed run metadata, and
+  task/taskset revisions.
+- Agent evaluations can publish results to Intake so Experiments and Insights
+  can consume the same run telemetry.
+
+### Customizer
+
+- The `rl` customization backend supports full-weight DPO jobs through NeMo-RL.
+- DPO schemas expose schedule, optimizer, batch, DPO-specific loss, gradient,
+  activation-checkpointing, and parallelism controls.
+- Customizer skills and references now cover backend-specific job JSON for
+  Automodel, Unsloth, and RL, including dataset formats, batch sizing,
+  integrations, and troubleshooting.
+- Customizer adds local Optuna HPO workflows for tuning hyperparameters from a
+  developer workstation.
+
+### Studio
+
+- Studio includes primary surfaces for Agents, Data Designer, Guardrails,
+  Safe Synthesizer, Intake traces, Optimizer Insights, Experiments, and Jobs,
+  with Customizer and Anonymizer surfaces available behind their feature flags.
+- Guardrails in Studio can create and delete configurations and manage
+  guardrail test cases through the checks surface.
+- Data Designer adds more seed sources, AI-assisted job configuration, preview,
+  and file transform workflows.
+- Safe Synthesizer reports include score-driven gauges.
+- Studio can load plugin web bundles through `/apis/plugins` and render them
+  inside the Studio React tree with trusted bundle URL checks.
+- NeMo Studio Assistant adds a packaged agent, chat history, tool-call rendering,
+  and reasoning display for Studio-assisted workflows.
+
+### Platform, CLI, and Deployment
+
+- Early access: Agent deployment to an OpenShell Gateway with customizable
+  network policies (default-deny).
+- Deployment readiness now gates on workload reachability for container-backed
+  deployments.
+- Optional scoped access keys are available for authenticated deployments.
+- The CLI adds machine-readable output controls, Intake and Experiments command
+  exposure, anonymous usage telemetry, and a Telemetry and Privacy reference
+  page.
+- Python 3.12 is now the minimum supported Python version for the source
+  checkout and `nemo-helix` distribution.
+- Auditor adds a blocking submit option and an aggregated artifacts endpoint.
+
+## Install
+
+For a fresh local checkout:
+
+```bash
+git clone https://github.com/NVIDIA-NeMo/nemo-helix.git
+cd nemo-helix
+make bootstrap
+source .venv/bin/activate
+nemo setup
+```
+
+See [Setup](/documentation/get-started/setup) for prerequisites and provider
+configuration.
+
+For self-managed Kubernetes, start with
+[Install NeMo Helix Helm Chart](/documentation/kubernetes-deployment/setup/helm/install).
+
+## Upgrade from v0.3.x
+
+From an existing local checkout:
+
+```bash
+git pull
+make bootstrap
+source .venv/bin/activate
+nemo setup
+```
+
+After setup, restart local services before using CLI, SDK, Studio, or plugin
+workflows against the upgraded checkout.
+
+## Compatibility
+
+- Python 3.12-3.13
+- macOS and Linux for local CLI, SDK, Studio, and hosted-provider workflows
+- Linux x86_64 for local NVIDIA GPU workloads
+- CUDA 13-capable NVIDIA drivers for local GPU workloads
+- Self-managed Kubernetes clusters deployed with Helm
+- Docker for local services, Docker-backed platform jobs, local ClickHouse,
+  Docker Sandboxes, and local model-serving workflows
+- ClickHouse for Intake trace storage and Experiments rollups
+- NVIDIA GPU access for local training, model serving, and GPU-backed
+  synthetic data workflows
+- Node 22.18.0+ for Studio assets
+- Platform API and `nemo-helix` Python SDK `0.4.0`
+
+## Current constraints
+
+- **Research-preview optimizer.** Analyst and Experimentalist are early agentic
+  workflows. They are useful for guided optimization, but quality and autonomy
+  are still research-preview and require developer review.
+- **Local-first issue-driven loop.** The full Insight to Experimentalist loop
+  runs from a local developer environment against local paths or a git source.
+  A remote platform can provide Intake and entity APIs, but the issue-driven
+  optimization agents do not yet run as a horizontally scaled cluster service.
+- **Evaluation backend scope.** The Experimentalist loop validates candidates
+  with Harbor-compatible train and validation datasets. Other evaluator
+  backends are not the validated path for this loop yet.
+- **Optuna HPO runtime.** Optuna-based hyperparameter optimization runs locally
+  from a developer workstation. It is not available as a horizontally scaled
+  cluster service in this release.
+- **DPO runtime.** Customizer `rl` DPO jobs run on Kubernetes/Ray and do not
+  have a local Docker fallback. DPO is full-weight only; PEFT/adapter output is
+  not supported for RL jobs.
+- **Experiments feature flag.** The Experiments Studio surface is gated by
+  `VITE_FF_EXPERIMENT`, which is off by default.
+- **Embedded ClickHouse scope.** Helm's embedded ClickHouse is intended for
+  development, evaluation, and non-critical single-node deployments. Use an
+  externally managed ClickHouse for production deployments that require high
+  availability, backups, or larger scale.
+- **Python support.** Python 3.11 is no longer part of the supported source
+  checkout or `nemo-helix` distribution matrix.
+
+## Known issues
+
+- **Deep Agents trials can be scored as failures.** Agent-eval trials run
+  through the NeMo Fabric Deep Agents adapter can be recorded as failures even
+  when the agent completed successfully. This will be fixed in the next release.
+
+## Links
+
+- Repository: [https://github.com/NVIDIA-NeMo/nemo-helix](https://github.com/NVIDIA-NeMo/nemo-helix)
+- Issues: [https://github.com/NVIDIA-NeMo/nemo-helix/issues](https://github.com/NVIDIA-NeMo/nemo-helix/issues)
+- NeMo Fabric: [https://docs.nvidia.com/nemo/fabric/about-nemo-fabric/overview/](https://docs.nvidia.com/nemo/fabric/about-nemo-fabric/overview/)
+- NeMo Agent Toolkit: [https://docs.nvidia.com/nemo/agent-toolkit/latest/](https://docs.nvidia.com/nemo/agent-toolkit/latest/)

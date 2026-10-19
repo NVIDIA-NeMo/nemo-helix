@@ -3,44 +3,64 @@
 
 """Unsloth remote-submit training job (NemoJob).
 
-Submit-only — Unsloth executes as a 4-step ``PlatformJobSpec`` (download
+Submit-only — Unsloth executes as a 4-step ``HelixJobSpec`` (download
 → train → upload → model-entity) on the platform's GPU cluster.
 
 Shared scaffold (``to_spec`` + the Docker-runtime guard) lives in
-:class:`nmp.customization_common.contributor.jobs.BaseSubmitJob`; ``compile`` stays here
+:class:`nhx.customization_common.contributor.jobs.BaseSubmitJob`; ``compile`` stays here
 because the compiler call convention and profile resolution are backend-specific.
 """
 
 from __future__ import annotations
 
 import asyncio
-from typing import ClassVar, cast
+from typing import ClassVar, Literal
 
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
-from nemo_platform_plugin.jobs.docker import validate_gpu_available_for_docker
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.jobs.api_factory import BaseJobsListFilter, HelixJobSpec
+from nemo_helix_plugin.jobs.docker import validate_gpu_available_for_docker
 from nemo_unsloth_plugin.schema import UnslothJobInput
 from nemo_unsloth_plugin.transform import transform_input_to_output
-from nmp.customization_common.contributor.jobs import BaseSubmitJob, require_container_runtime
-from nmp.unsloth.compile import platform_job_config_compiler
-from nmp.unsloth.config import config as unsloth_config
-from nmp.unsloth.schemas import UnslothJobOutput
+from nhx.customization_common.contributor.jobs import BaseSubmitJob, require_container_runtime
+from nhx.customization_common.service.platform_client import (
+    AsyncCustomizationHelixClients,
+    async_customization_platform_clients_from_platform,
+)
+from nhx.unsloth.compile import platform_job_config_compiler
+from nhx.unsloth.config import config as unsloth_config
+from nhx.unsloth.schemas import UnslothJobOutput
 from pydantic import BaseModel
 
 
-class UnslothJob(BaseSubmitJob):
-    """GPU Unsloth fine-tuning job under the customization router (submit-only)."""
+class UnslothJobsListFilter(BaseJobsListFilter):
+    """Unsloth jobs only. ``backend`` is the literal stored on the job spec."""
+
+    backend: Literal["unsloth"] = "unsloth"
+
+
+class UnslothJob(BaseSubmitJob[UnslothJobInput, UnslothJobOutput]):
+    """GPU Unsloth fine-tuning job under the customization router (Jobs-service-only)."""
 
     name: ClassVar[str] = "unsloth.jobs"
     description: ClassVar[str] = "Unsloth SFT (LoRA / full / merged) training jobs on the platform GPU cluster."
     job_collection_path: ClassVar[str | None] = "/unsloth/jobs"
-    input_spec_schema: ClassVar[type[BaseModel] | None] = UnslothJobInput
-    spec_schema: ClassVar[type[BaseModel] | None] = UnslothJobOutput
+    input_spec_schema: ClassVar[type[UnslothJobInput] | None] = UnslothJobInput
+    spec_schema: ClassVar[type[UnslothJobOutput] | None] = UnslothJobOutput
+    jobs_list_filter: ClassVar[type[UnslothJobsListFilter]] = UnslothJobsListFilter
     runtime_label: ClassVar[str] = "Unsloth"
 
     @classmethod
-    async def _transform(cls, job_input: BaseModel, workspace: str, async_sdk: AsyncNeMoPlatform) -> UnslothJobOutput:
-        return await transform_input_to_output(cast(UnslothJobInput, job_input), workspace, async_sdk)
+    def _job_input_schema(cls) -> type[UnslothJobInput]:
+        return UnslothJobInput
+
+    @classmethod
+    async def _transform(
+        cls,
+        job_input: UnslothJobInput,
+        workspace: str,
+        platform: AsyncCustomizationHelixClients,
+    ) -> UnslothJobOutput:
+        return await transform_input_to_output(job_input, workspace, platform)
 
     @classmethod
     async def compile(
@@ -49,10 +69,10 @@ class UnslothJob(BaseSubmitJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: object,
+        async_sdk: AsyncNemoClient,
         profile: str | None = None,
         options: dict | None = None,
-    ) -> PlatformJobSpec:
+    ) -> HelixJobSpec:
         """Compile a validated :class:`UnslothJobOutput` into a 4-step container job.
 
         Unsloth's :class:`HardwareSpec` does not expose an ``execution_profile``
@@ -60,6 +80,7 @@ class UnslothJob(BaseSubmitJob):
         ``unsloth_config.default_training_execution_profile``.
         """
         del entity_client, options
+        platform = async_customization_platform_clients_from_platform(async_sdk)
         # Probe is sync (≤5s); keep it off the event loop.
         await asyncio.to_thread(require_container_runtime, cls.runtime_label)
         canonical = spec if isinstance(spec, UnslothJobOutput) else UnslothJobOutput.model_validate(spec.model_dump())
@@ -69,7 +90,7 @@ class UnslothJob(BaseSubmitJob):
         platform_spec = await platform_job_config_compiler(
             workspace=workspace,
             spec=canonical,
-            sdk=cast(AsyncNeMoPlatform, async_sdk),
+            platform=platform,
             job_name=job_name,
             profile=execution_profile,
         )

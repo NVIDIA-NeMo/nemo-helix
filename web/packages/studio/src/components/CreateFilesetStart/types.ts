@@ -3,32 +3,19 @@
 
 import type { CreateJobRequest as DataDesignerJobRequest } from '@nemo/sdk/generated/data-designer/schema';
 import type { InferenceParams } from '@nemo/sdk/generated/platform/schema';
-import type { BadgeProps } from '@nvidia/foundations-react-core';
 import type { AddColumnSelection } from '@studio/components/AddColumnPalette/types';
+import type {
+  StartOption as SharedStartOption,
+  StartOptionTag,
+} from '@studio/components/StartOptions/types';
 import type { GeneratedConfigValidation } from '@studio/routes/DataDesignerJobBuildRoute/aiSeed';
 import type { LucideIcon } from 'lucide-react';
 
-export type StartOptionId = 'ai' | 'template' | 'clone' | 'scratch';
+export type StartOptionId = 'ai' | 'template' | 'scratch';
 
-export interface StartOptionTag {
-  label: string;
-  color: NonNullable<BadgeProps['color']>;
-  kind: NonNullable<BadgeProps['kind']>;
-}
+export type { StartOptionTag };
 
-export interface StartOption {
-  id: StartOptionId;
-  title: string;
-  description: string;
-  icon: LucideIcon;
-  tag?: StartOptionTag;
-  /**
-   * Whether this option is wired up. Disabled options still render (so the full set
-   * of future entry points is visible) but are no-ops — they cannot be selected and
-   * never reveal a detail panel or the Continue footer.
-   */
-  enabled: boolean;
-}
+export type StartOption = SharedStartOption<StartOptionId>;
 
 export interface TemplateColumnSpec extends AddColumnSelection {
   /** The column name (Jinja2 identifier); referenced by later columns via `{{ name }}`. */
@@ -65,25 +52,6 @@ export interface FilesetTemplate {
   models?: TemplateModelSpec[];
 }
 
-export interface TemplateCardProps {
-  template: FilesetTemplate;
-  selected: boolean;
-  onSelect: () => void;
-}
-
-export interface StartOptionCardProps {
-  option: StartOption;
-  selected: boolean;
-  /** Fired on click / keyboard activation. Only invoked for enabled options. */
-  onSelect: () => void;
-}
-
-export interface DetailPoint {
-  icon: LucideIcon;
-  title: string;
-  description: string;
-}
-
 export interface DescribeWithAiPanelProps {
   /** Workspace whose models are offered, and against which the draft is validated. */
   workspace: string;
@@ -113,19 +81,11 @@ export interface GeneratedConfigPanelProps {
   /** Pretty-printed JSON shown in the snippet. */
   config: string;
   onClose: () => void;
+  /** Replaces the default note about what the builder substitutes. */
+  description?: string;
 }
 
-export interface StartOptionDetailProps {
-  option: StartOption;
-  /** Id of the currently-chosen template, when {@link option} is "template". */
-  selectedTemplateId: string | null;
-  onSelectTemplate: (templateId: string) => void;
-  /** Workspace passed through to the "ai" option's panel. */
-  workspace: string;
-  onValidConfig: (jobRequest: DataDesignerJobRequest | null) => void;
-}
-
-/** What the user confirmed via the Continue footer, carrying that option's payload. */
+/** How the user chose to start, carrying that option's payload. */
 export type StartSelection =
   | { optionId: 'scratch' }
   | { optionId: 'template'; templateId: string }
@@ -134,6 +94,6 @@ export type StartSelection =
 export interface CreateFilesetStartProps {
   /** Workspace whose models the "Describe with AI" option draws from. */
   workspace: string;
-  /** Fired when the user confirms a selected start option via the Continue footer. */
+  /** Fired once a way in is chosen and, for AI, its config has validated. */
   onContinue: (selection: StartSelection) => void;
 }

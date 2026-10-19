@@ -1,9 +1,20 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ModelDeploymentStatus, type ModelEntity } from '@nemo/sdk/generated/platform/schema';
+import {
+  type Adapter,
+  FinetuningType,
+  ModelDeploymentStatus,
+  type ModelEntity,
+} from '@nemo/sdk/generated/platform/schema';
 
-import { getModelEntityChatStatus, groupModelsByWorkspace } from './models';
+import {
+  getModelEntityChatStatus,
+  groupModelsByWorkspace,
+  isServedByBaseModel,
+  toInferenceModelEntityId,
+  toInferenceModelName,
+} from './models';
 
 const createModel = (overrides: Partial<ModelEntity> = {}): ModelEntity => ({
   id: 'test-id',
@@ -12,6 +23,79 @@ const createModel = (overrides: Partial<ModelEntity> = {}): ModelEntity => ({
   created_at: '2025-01-07T12:00:00Z',
   updated_at: '2025-01-07T12:00:00Z',
   ...overrides,
+});
+
+const createAdapter = (overrides: Partial<Adapter> = {}): Adapter => ({
+  name: 'test-adapter',
+  workspace: 'test-namespace',
+  fileset: 'test-namespace/test-adapter',
+  finetuning_type: FinetuningType.lora,
+  ...overrides,
+});
+
+describe('toInferenceModelName', () => {
+  it('returns the bare model name when there is no adapter', () => {
+    const model = createModel({ workspace: 'default', name: 'qwen3-0.6b' });
+    expect(toInferenceModelName(model)).toBe('qwen3-0.6b');
+    expect(toInferenceModelName(model, null)).toBe('qwen3-0.6b');
+  });
+
+  // The gateway splits on "&adapters/" and looks the VirtualModel up by the base
+  // segment, taking the workspace from the URL. A workspace-qualified base segment
+  // would key a VM that does not exist.
+  it('leaves the base segment unqualified so the gateway can key the base VM', () => {
+    const model = createModel({ workspace: 'default', name: 'qwen3-0.6b' });
+    const adapter = createAdapter({ workspace: 'default', name: 'pirate-voice' });
+    expect(toInferenceModelName(model, adapter)).toBe('qwen3-0.6b&adapters/default/pirate-voice');
+  });
+
+  it('qualifies the adapter segment, which may live in another workspace', () => {
+    const model = createModel({ workspace: 'nvidia', name: 'qwen3-0.6b' });
+    const adapter = createAdapter({ workspace: 'default', name: 'pirate-voice' });
+    expect(toInferenceModelName(model, adapter)).toBe('qwen3-0.6b&adapters/default/pirate-voice');
+  });
+});
+
+describe('toInferenceModelEntityId', () => {
+  it('returns the plain entity ref when there is no adapter', () => {
+    const model = createModel({ workspace: 'default', name: 'qwen3-0.6b' });
+    expect(toInferenceModelEntityId(model)).toBe('default/qwen3-0.6b');
+    expect(toInferenceModelEntityId(model, null)).toBe('default/qwen3-0.6b');
+  });
+
+  it('builds the composite id the provider reconciler writes for an adapter', () => {
+    const model = createModel({ workspace: 'default', name: 'qwen3-0.6b' });
+    const adapter = createAdapter({ workspace: 'default', name: 'pirate-voice' });
+    expect(toInferenceModelEntityId(model, adapter)).toBe(
+      'default/qwen3-0.6b&adapters/default/pirate-voice'
+    );
+  });
+
+  it('carries the adapter workspace, which may differ from the base model workspace', () => {
+    const model = createModel({ workspace: 'nvidia', name: 'qwen3-0.6b' });
+    const adapter = createAdapter({ workspace: 'default', name: 'pirate-voice' });
+    expect(toInferenceModelEntityId(model, adapter)).toBe(
+      'nvidia/qwen3-0.6b&adapters/default/pirate-voice'
+    );
+  });
+
+  it('matches a served_models entry by identity', () => {
+    // This id exists to look up `provider.served_models`; the value that goes on
+    // the wire is that entry's `served_model_name`, never this.
+    const model = createModel({ workspace: 'default', name: 'qwen3-0.6b' });
+    const adapter = createAdapter({ workspace: 'default', name: 'pirate-voice' });
+    const servedModels = [
+      { model_entity_id: 'default/qwen3-0.6b', served_model_name: 'default/qwen3-0.6b' },
+      {
+        model_entity_id: 'default/qwen3-0.6b&adapters/default/pirate-voice',
+        served_model_name: 'default--pirate-voice',
+      },
+    ];
+    const match = servedModels.find(
+      (sm) => sm.model_entity_id === toInferenceModelEntityId(model, adapter)
+    );
+    expect(match?.served_model_name).toBe('default--pirate-voice');
+  });
 });
 
 describe('getModelEntityChatStatus', () => {
@@ -32,6 +116,39 @@ describe('getModelEntityChatStatus', () => {
     });
 
     expect(getModelEntityChatStatus(model)).toBe('pending');
+  });
+
+  it('skips the grace period for a freshly created model that already has an api_endpoint', () => {
+    // Autodiscovered from an external provider (e.g. build.nvidia.com): the endpoint is
+    // live the moment the entity exists, so there is no deployment to wait for.
+    vi.setSystemTime(new Date('2025-01-07T12:00:00Z').getTime());
+
+    const model = createModel({
+      created_at: '2025-01-07T11:57:00Z', // 3 minutes ago
+      api_endpoint: { url: 'https://integrate.api.nvidia.com/v1/chat/completions' },
+    });
+
+    expect(getModelEntityChatStatus(model)).toBe('enabled');
+  });
+
+  it('still applies the grace period to a fresh model with no api_endpoint', () => {
+    // Deployment-backed: the artifact genuinely is still being populated.
+    vi.setSystemTime(new Date('2025-01-07T12:00:00Z').getTime());
+
+    const model = createModel({ created_at: '2025-01-07T11:57:00Z' });
+
+    expect(getModelEntityChatStatus(model, { deploymentStatus: null })).toBe('pending');
+  });
+
+  it('still reports pending while the deployment chain is loading, endpoint or not', () => {
+    vi.setSystemTime(new Date('2025-01-07T12:00:00Z').getTime());
+
+    const model = createModel({
+      created_at: '2025-01-07T11:57:00Z',
+      api_endpoint: { url: 'https://integrate.api.nvidia.com/v1/chat/completions' },
+    });
+
+    expect(getModelEntityChatStatus(model, { deploymentLoading: true })).toBe('pending');
   });
 
   it('returns enabled when model created more than 5 minutes ago', () => {
@@ -189,5 +306,65 @@ describe('groupModelsByWorkspace', () => {
       { sort: true }
     );
     expect(groups.map((g) => g.workspace)).toEqual(['deepseek', 'meta', 'nvidia']);
+  });
+});
+
+describe('isServedByBaseModel', () => {
+  // The reported bug: a full-weight run registers its own model, deployment and
+  // provider, but sets `base_model` like any fine-tune. Reading that as "served by
+  // the base" resolved status against a base that is usually not deployed, so the
+  // chat panel said "This model does not have an active deployment".
+  it('is false for a full-weight fine-tune', () => {
+    expect(
+      isServedByBaseModel(
+        createModel({
+          base_model: 'default/qwen3-0.6b',
+          finetuning_type: FinetuningType.all_weights,
+        })
+      )
+    ).toBe(false);
+  });
+
+  // Merged weights are a complete model despite the `lora` in the name — which is
+  // why the set is explicit rather than a prefix match.
+  it('is false for a merged LoRA', () => {
+    expect(
+      isServedByBaseModel(
+        createModel({
+          base_model: 'default/qwen3-0.6b',
+          finetuning_type: FinetuningType.lora_merged,
+        })
+      )
+    ).toBe(false);
+  });
+
+  it('is false for a preference-optimisation run', () => {
+    expect(
+      isServedByBaseModel(
+        createModel({ base_model: 'default/qwen3-0.6b', finetuning_type: FinetuningType.dpo })
+      )
+    ).toBe(false);
+  });
+
+  it.each([
+    FinetuningType.lora,
+    FinetuningType.qlora,
+    FinetuningType.dora,
+    FinetuningType.prompt_tuning,
+    FinetuningType.p_tuning,
+    FinetuningType.soft_prompt,
+  ])('is true for %s, which has no weights of its own', (finetuning_type) => {
+    expect(
+      isServedByBaseModel(createModel({ base_model: 'default/qwen3-0.6b', finetuning_type }))
+    ).toBe(true);
+  });
+
+  it('is false without a base model at all', () => {
+    expect(isServedByBaseModel(createModel({ finetuning_type: FinetuningType.lora }))).toBe(false);
+  });
+
+  // Not a fine-tune: nothing says it is served by anything but itself.
+  it('is false when the finetuning type is absent', () => {
+    expect(isServedByBaseModel(createModel({ base_model: 'default/qwen3-0.6b' }))).toBe(false);
   });
 });

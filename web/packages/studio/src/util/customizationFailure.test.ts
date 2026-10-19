@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { PlatformJobStepStatusResponse } from '@nemo/sdk/generated/customizer/schema';
+import type { HelixJobStepStatusResponse } from '@nemo/sdk/generated/customizer/schema';
 import {
   failedGrpoCustomizationJob,
   failedGrpoJobSteps,
@@ -15,7 +15,7 @@ import {
   resolveCustomizationFailure,
 } from '@studio/util/customizationFailure';
 
-const steps = (value: unknown) => value as PlatformJobStepStatusResponse[];
+const steps = (value: unknown) => value as HelixJobStepStatusResponse[];
 
 describe('resolveCustomizationFailure', () => {
   it('returns undefined for a job that has not failed', () => {

@@ -1,0 +1,46 @@
+{
+  "schema_version": "ATIF-v1.5",
+  "session_id": "3f2a1c00-0010-4a00-8000-000000000010",
+  "trajectory_id": "3f2a1c00-0010-4a00-8000-000000000010",
+  "agent": {
+    "name": "email-security-triage",
+    "version": "0.7.0",
+    "model_name": "nvidia-nemotron-3-nano-30b-a3b"
+  },
+  "final_metrics": {
+    "total_prompt_tokens": 4210,
+    "total_completion_tokens": 196,
+    "total_cost_usd": 0.0007491,
+    "total_steps": 2
+  },
+  "extra": {
+    "task_id": "email-security-triage/misroute-multiselect-10",
+    "verifier_result": {
+      "rewards": {
+        "correctness": 1.0,
+        "format": 0.0,
+        "routing": 0.0
+      }
+    }
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "timestamp": "2026-08-25T22:18:55Z",
+      "source": "user",
+      "message": "{\"user_message\": \"can I act on this one?\", \"emails\": [{\"from\": \"cfo@company-finance.net\", \"subject\": \"Wire authorization needed today\", \"body\": \"Please process the attached wire for $62,000 before close of business.\"}, {\"from\": \"it@company.com\", \"subject\": \"Scheduled maintenance Saturday\", \"body\": \"Mail will be unavailable 02:00-04:00 Saturday.\"}]}"
+    },
+    {
+      "step_id": 2,
+      "timestamp": "2026-08-25T22:19:01Z",
+      "source": "agent",
+      "model_name": "default/nvidia-nemotron-3-nano-30b-a3b",
+      "message": "ANALYSIS\n\n[1]\nVERDICT: phishing\nATTACK_TYPE: bec\nIOCS: company-finance.net\nACTION: quarantine\nREASONING: Executive impersonation from a lookalike finance domain with same-day wire pressure.\n\n[2]\nVERDICT: benign\nATTACK_TYPE: benign\nIOCS: none\nACTION: deliver\nREASONING: Routine internal maintenance notice.",
+      "metrics": {
+        "prompt_tokens": 4210,
+        "completion_tokens": 196,
+        "cost_usd": 0.0007491
+      }
+    }
+  ]
+}

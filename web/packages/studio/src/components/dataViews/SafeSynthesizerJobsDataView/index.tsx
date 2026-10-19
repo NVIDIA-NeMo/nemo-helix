@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { withOperators } from '@nemo/common/src/api/filterOperators';
 import { dateTimeFilter } from '@nemo/common/src/components/DataView/dateTimeFilter';
 import * as DataView from '@nemo/common/src/components/DataView/internal';
@@ -10,19 +11,21 @@ import {
   StudioDataView,
 } from '@nemo/common/src/components/DataView/StudioDataView';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
+import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { ScoreGauge } from '@nemo/common/src/components/ScoreGauge';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParam } from '@nemo/common/src/utils/query';
-import { useJobsCancelJob, useJobsDeleteJob } from '@nemo/sdk/generated/platform/api';
+import { useJobsCancelJob, useJobsDeleteJob } from '@nemo/sdk/generated/platform/jobs';
 import {
   getSafeSynthesizerDownloadJobResultSummaryQueryOptions as getDownloadJobResultSummaryQueryOptions,
   getSafeSynthesizerListJobsQueryKey,
   useSafeSynthesizerListJobs,
-} from '@nemo/sdk/generated/safe-synthesizer/api';
+} from '@nemo/sdk/generated/safe-synthesizer/safe-synthesizer';
 import {
   GenerateJob,
   GenerateJobsListFilter,
@@ -48,6 +51,7 @@ type GenerateJobWithId = GenerateJob & { id: string };
 
 export const GenerateJobsDataView: FC = () => {
   const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const workspace = useWorkspaceFromPath();
   const queryClient = useQueryClient();
 
@@ -117,7 +121,12 @@ export const GenerateJobsDataView: FC = () => {
   );
 
   // Fetch jobs using dataViewState for pagination, sorting, search, and filters
-  const { data: safeSynthesizerResponse, isLoading } = useSafeSynthesizerListJobs(
+  const {
+    data: safeSynthesizerResponse,
+    isLoading,
+    error,
+    refetch,
+  } = useSafeSynthesizerListJobs(
     workspace,
     {
       sort: getSortParam(dataViewState.sorting.state) as GenerateJobsSortField,
@@ -135,7 +144,8 @@ export const GenerateJobsDataView: FC = () => {
     {
       query: {
         placeholderData: keepPreviousData,
-        refetchInterval: JOB_POLLING_INTERVAL_MS,
+        refetchInterval: (query) =>
+          query.state.status === 'error' ? false : JOB_POLLING_INTERVAL_MS,
         refetchOnMount: 'always',
       },
     }
@@ -339,9 +349,9 @@ export const GenerateJobsDataView: FC = () => {
         dataViewState={dataViewState}
         searchField="name"
         makeColumns={makeColumns}
-        onRowClick={(row: GenerateJobWithId) => {
+        onRowClick={(row: GenerateJobWithId, _index, event) => {
           if (row.name) {
-            navigate(getGenerateJobRoute(workspace, row.name));
+            openRow(event, getGenerateJobRoute(workspace, row.name));
           }
         }}
         renderBulkActions={({ selectedRows }) => (
@@ -360,9 +370,29 @@ export const GenerateJobsDataView: FC = () => {
           DataViewRoot: {
             data: jobs,
             totalCount: totalResults,
-            requestStatus: isLoading && !safeSynthesizerResponse ? 'loading' : undefined,
+            requestStatus: error
+              ? 'error'
+              : isLoading && !safeSynthesizerResponse
+                ? 'loading'
+                : undefined,
           },
           DataViewTableContent: {
+            renderErrorState: () => (
+              <ErrorPanel
+                errorMessage={
+                  getErrorMessage(error ?? new Error()) || 'Failed to load Safe Synthesizer jobs'
+                }
+                attributes={{
+                  ErrorMessage: {
+                    slotFooter: (
+                      <Button kind="secondary" onClick={() => refetch()}>
+                        Retry
+                      </Button>
+                    ),
+                  },
+                }}
+              />
+            ),
             renderEmptyState: () =>
               hasActiveFilters ? (
                 <EntityEmptyState

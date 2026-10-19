@@ -3,20 +3,24 @@
 
 """Deployment-config resolution through the typed Models client, over a mocked httpx transport.
 
-Driving a real ``AsyncNeMoPlatform`` -> ``client_from_platform`` ->
-``AsyncModelsClient`` chain asserts the wire contract (method, path, parsed
-model and error mapping) rather than restating the call the implementation
-happens to make.
+Driving a real ``AsyncNemoClient`` -> ``AsyncModelsClient`` chain asserts the
+wire contract (method, path, parsed model and error mapping) rather than
+restating the call the implementation happens to make.
 """
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import httpx
 import pytest
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
-from nemo_platform_plugin.models.types import ModelDeploymentConfig
-from nmp.automodel.app.jobs.compiler import _resolve_deployment_config_ref
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+from nemo_helix_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.models.types import ModelDeploymentConfig
+from nhx.automodel.app.jobs.compiler import _resolve_deployment_config_ref
+from nhx.customization_common.service.platform_client import AsyncCustomizationHelixClients
 
 BASE = "http://test:8000"
 
@@ -49,15 +53,18 @@ def _recording_transport(
     return httpx.MockTransport(handler), seen
 
 
-def _sdk(transport: httpx.MockTransport) -> AsyncNeMoPlatform:
-    return AsyncNeMoPlatform(base_url=BASE, workspace="default", http_client=httpx.AsyncClient(transport=transport))
+def _platform(transport: httpx.MockTransport) -> AsyncCustomizationHelixClients:
+    client = AsyncNemoClient(base_url=BASE, workspace="default", http_client=httpx.AsyncClient(transport=transport))
+    return AsyncCustomizationHelixClients(
+        files=AsyncMock(), models=AsyncModelsClient.from_client(client), jobs=AsyncJobsClient.from_client(client)
+    )
 
 
 @pytest.mark.asyncio
 async def test_resolve_deployment_config_hits_the_deployment_config_endpoint() -> None:
     transport, seen = _recording_transport()
 
-    result = await _resolve_deployment_config_ref("other/config", "default", _sdk(transport))
+    result = await _resolve_deployment_config_ref("other/config", "default", _platform(transport))
 
     assert isinstance(result, ModelDeploymentConfig)
     assert (result.workspace, result.name) == ("other", "config")
@@ -71,7 +78,7 @@ async def test_resolve_deployment_config_hits_the_deployment_config_endpoint() -
 async def test_resolve_deployment_config_defaults_to_the_job_workspace() -> None:
     transport, seen = _recording_transport(payload=_config_json(workspace="default"))
 
-    await _resolve_deployment_config_ref("config", "default", _sdk(transport))
+    await _resolve_deployment_config_ref("config", "default", _platform(transport))
 
     assert str(seen[0].url) == f"{BASE}/apis/models/v2/workspaces/default/deployment-configs/config"
 
@@ -80,5 +87,5 @@ async def test_resolve_deployment_config_defaults_to_the_job_workspace() -> None
 async def test_resolve_deployment_config_maps_404_to_compilation_error() -> None:
     transport, _ = _recording_transport(404, {"detail": "missing"})
 
-    with pytest.raises(PlatformJobCompilationError, match="does not exist in workspace 'other'"):
-        await _resolve_deployment_config_ref("other/config", "default", _sdk(transport))
+    with pytest.raises(HelixJobCompilationError, match="does not exist in workspace 'other'"):
+        await _resolve_deployment_config_ref("other/config", "default", _platform(transport))

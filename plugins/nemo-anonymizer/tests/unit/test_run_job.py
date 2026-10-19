@@ -5,17 +5,22 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import cast
 from unittest.mock import AsyncMock, Mock
 
 import data_designer.config as dd
 import nemo_anonymizer_plugin.tasks.anonymizer.run as task_run_module
+import pandas as pd
 import pytest
 from anonymizer.config.anonymizer_config import AnonymizerConfig
 from anonymizer.config.replace_strategies import Redact
+from anonymizer.engine.constants import COL_REPLACEMENT_APPLICATION
+from anonymizer.engine.replace.strategies import ReplacementApplication
 from data_designer.engine.model_provider import ModelProvider as NDDModelProvider
 from data_designer.engine.model_provider import ModelProviderRegistry
+from data_designer.engine.models.usage_events import TokenUsageEvent, emit_token_usage_event
+from data_designer.engine.observability import runtime_correlation_provider
 from data_designer_nemo.errors import NDDInvalidConfigError
 from nemo_anonymizer_plugin.app import context as context_module
 from nemo_anonymizer_plugin.app.input import AnonymizerInputSpec
@@ -23,10 +28,31 @@ from nemo_anonymizer_plugin.app.model_configs import SelectedModelsOverrides
 from nemo_anonymizer_plugin.app.task_config import AnonymizerRequest, AnonymizerStepConfig
 from nemo_anonymizer_plugin.jobs import run as run_module
 from nemo_anonymizer_plugin.jobs.run import RunJob
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_anonymizer_plugin.sdk.job_results import AnonymizerJobResults
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.job_usage import LocalJobUsageReporter
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+
+
+def _patch_gliner_build(monkeypatch: pytest.MonkeyPatch, anonymizer_factory: Callable[..., object]) -> None:
+    """Stub the in-process GLiNER seams the run-job uses.
+
+    ``anonymizer_factory`` stands in for the constructed ``Anonymizer``; the
+    weight-ensure and runtime-stop calls are no-ops under test.
+    """
+    monkeypatch.setattr(task_run_module, "ensure_gliner_weights", lambda *a, **k: None)
+    monkeypatch.setattr(task_run_module, "stop_gliner_runtime", lambda: None)
+    monkeypatch.setattr(
+        task_run_module,
+        "build_gliner_anonymizer",
+        lambda *, model_configs_yaml, dd_providers, artifact_path=None: anonymizer_factory(
+            model_configs=model_configs_yaml,
+            model_providers=dd_providers,
+            artifact_path=artifact_path,
+        ),
+    )
 
 
 def _make_job_context(tmp_path: Path, *, workspace: str = "team-a") -> JobContext:
@@ -56,22 +82,22 @@ def _restore_task_loggers(snapshot: dict[str, tuple[list[logging.Handler], int, 
         logger.propagate = propagate
 
 
+def _make_async_sdk() -> AsyncNemoClient:
+    return AsyncMock(spec=AsyncNemoClient)
+
+
 async def _to_run_spec(
     request: AnonymizerRequest,
     *,
-    async_sdk: AsyncNeMoPlatform | None = None,
+    async_sdk: AsyncNemoClient,
 ) -> AnonymizerStepConfig:
-    resolved_async_sdk = (
-        async_sdk if async_sdk is not None else cast(AsyncNeMoPlatform, AsyncMock(spec=AsyncNeMoPlatform))
-    )
-    spec = await RunJob.to_spec(
+    return await RunJob.to_spec(
         request,
         workspace="team-a",
         entity_client=object(),
-        async_sdk=resolved_async_sdk,
+        async_sdk=async_sdk,
         is_local=False,
     )
-    return cast(AnonymizerStepConfig, spec)
 
 
 @pytest.mark.asyncio
@@ -85,8 +111,8 @@ async def test_run_job_rejects_selected_models_without_model_configs(
     )
     monkeypatch.setattr(RunJob, "_validate_anonymizer_config", classmethod(lambda cls, config: None))
 
-    with pytest.raises(PlatformJobCompilationError, match="selected_models requires model_configs"):
-        await _to_run_spec(request)
+    with pytest.raises(HelixJobCompilationError, match="selected_models requires model_configs"):
+        await _to_run_spec(request, async_sdk=_make_async_sdk())
 
 
 @pytest.mark.asyncio
@@ -105,8 +131,8 @@ async def test_run_job_wraps_shared_provider_config_errors(
         AsyncMock(side_effect=NDDInvalidConfigError("bad provider")),
     )
 
-    with pytest.raises(PlatformJobCompilationError, match="bad provider"):
-        await _to_run_spec(request)
+    with pytest.raises(HelixJobCompilationError, match="bad provider"):
+        await _to_run_spec(request, async_sdk=_make_async_sdk())
 
 
 @pytest.mark.asyncio
@@ -119,8 +145,8 @@ async def test_run_submit_requires_model_configs(
     )
     monkeypatch.setattr(RunJob, "_validate_anonymizer_config", classmethod(lambda cls, config: None))
 
-    with pytest.raises(PlatformJobCompilationError, match="model_configs are required"):
-        await _to_run_spec(request)
+    with pytest.raises(HelixJobCompilationError, match="model_configs are required"):
+        await _to_run_spec(request, async_sdk=_make_async_sdk())
 
 
 @pytest.mark.asyncio
@@ -138,13 +164,13 @@ async def test_run_job_uses_igw_provider_registry(
     )
     monkeypatch.setattr(RunJob, "_validate_anonymizer_config", classmethod(lambda cls, config: None))
     monkeypatch.setattr(context_module, "make_model_provider_registry", igw_lookup)
-    async_sdk = AsyncMock(spec=AsyncNeMoPlatform)
+    async_sdk = _make_async_sdk()
 
     step_config = await _to_run_spec(request, async_sdk=async_sdk)
 
     igw_lookup.assert_awaited_once()
     assert igw_lookup.await_args is not None
-    assert igw_lookup.await_args.kwargs["sdk"] is async_sdk
+    assert igw_lookup.await_args.kwargs["client"] is async_sdk
     assert isinstance(step_config, AnonymizerStepConfig)
     assert len(step_config.dd_model_providers) == 1
     assert step_config.dd_model_providers[0]["name"] == "provider"
@@ -164,13 +190,13 @@ async def test_run_serialized_step_config_can_be_revalidated(
     monkeypatch.setattr(context_module, "make_model_provider_registry", AsyncMock(return_value=None))
     monkeypatch.setattr(run_module, "run_step_config", lambda *args, **kwargs: 0)
 
-    step_config = await _to_run_spec(request)
+    step_config = await _to_run_spec(request, async_sdk=_make_async_sdk())
 
     ctx = _make_job_context(tmp_path)
     assert RunJob().run(
         step_config.model_dump(),
         ctx=ctx,
-        sdk=Mock(spec=NeMoPlatform),
+        sdk=Mock(spec=NemoClient),
     ) == {"exit_code": 0}
 
 
@@ -181,6 +207,11 @@ def test_run_step_config_uses_ctx_results(
     captured: dict[str, object] = {}
 
     class FakeFrame:
+        # No ``_replacement_application`` column, so the trace is written as-is. See
+        # test_run_step_config_writes_trace_with_roundtrippable_skipped_span_label_counts
+        # for the real-dataframe coverage of that column.
+        columns: list[str] = []
+
         def __init__(self, rows: int, body: str):
             self._rows = rows
             self._body = body
@@ -212,6 +243,15 @@ def test_run_step_config_uses_ctx_results(
         def run(self, *, config: AnonymizerConfig, data: object) -> FakeResult:
             captured["config"] = config
             captured["data"] = data
+            emit_token_usage_event(
+                TokenUsageEvent(
+                    model_alias="detector",
+                    model_name="test/model",
+                    input_tokens=13,
+                    output_tokens=5,
+                    correlation=runtime_correlation_provider.current(),
+                )
+            )
             return FakeResult()
 
     step_config = AnonymizerStepConfig(
@@ -223,7 +263,7 @@ def test_run_step_config_uses_ctx_results(
         dd_model_providers=[],
     )
 
-    monkeypatch.setattr(task_run_module, "Anonymizer", FakeAnonymizer)
+    _patch_gliner_build(monkeypatch, FakeAnonymizer)
     ctx = _make_job_context(tmp_path)
     logging_snapshot = _snapshot_task_loggers()
 
@@ -232,7 +272,7 @@ def test_run_step_config_uses_ctx_results(
             task_run_module.run_step_config(
                 step_config,
                 ctx=ctx,
-                sdk=Mock(spec=NeMoPlatform),
+                sdk=Mock(spec=NemoClient),
             )
             == 0
         )
@@ -248,6 +288,10 @@ def test_run_step_config_uses_ctx_results(
     assert (saved_artifacts_dir / "dataset.parquet").read_text() == "dataset"
     assert captured["dataset_index"] is False
     assert captured["trace_index"] is False
+    assert isinstance(ctx.usage, LocalJobUsageReporter)
+    assert ctx.usage.latest is not None
+    assert ctx.usage.latest.input_tokens == 13
+    assert ctx.usage.latest.output_tokens == 5
 
 
 def test_run_step_config_remote_requires_sdk(tmp_path: Path) -> None:
@@ -281,12 +325,14 @@ def test_run_step_config_requires_resolved_model_configs(
         dd_model_providers=[],
     )
     anonymizer = Mock(side_effect=AssertionError("Anonymizer should not be constructed"))
-    monkeypatch.setattr(task_run_module, "Anonymizer", anonymizer)
+    monkeypatch.setattr(task_run_module, "ensure_gliner_weights", lambda *a, **k: None)
+    monkeypatch.setattr(task_run_module, "stop_gliner_runtime", lambda: None)
+    monkeypatch.setattr(task_run_module, "build_gliner_anonymizer", anonymizer)
     ctx = _make_job_context(tmp_path)
     logging_snapshot = _snapshot_task_loggers()
 
     try:
-        assert task_run_module.run_step_config(step_config, ctx=ctx, sdk=Mock(spec=NeMoPlatform)) == 1
+        assert task_run_module.run_step_config(step_config, ctx=ctx, sdk=Mock(spec=NemoClient)) == 1
     finally:
         _restore_task_loggers(logging_snapshot)
     anonymizer.assert_not_called()
@@ -306,5 +352,74 @@ async def test_run_submit_rejects_local_file(
     )
     monkeypatch.setattr(RunJob, "_validate_anonymizer_config", classmethod(lambda cls, config: None))
 
-    with pytest.raises(PlatformJobCompilationError, match="local path"):
-        await _to_run_spec(request)
+    with pytest.raises(HelixJobCompilationError, match="local path"):
+        await _to_run_spec(request, async_sdk=_make_async_sdk())
+
+
+@pytest.mark.parametrize(
+    "skipped_span_label_counts",
+    [
+        pytest.param({}, id="all-empty"),
+        pytest.param({"full_name": 2}, id="populated"),
+    ],
+)
+def test_run_step_config_writes_trace_with_roundtrippable_skipped_span_label_counts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    skipped_span_label_counts: dict[str, int],
+) -> None:
+    """The trace must survive Parquet even when no spans were skipped.
+
+    ``ReplacementApplication.skipped_span_label_counts`` is a nested mapping. When it
+    is ``{}`` on every row, Arrow infers a struct with no child fields and Parquet
+    refuses to write it, failing the whole job after a successful pipeline. Use real
+    dataframes here: a stubbed frame would not exercise the Arrow type inference that
+    actually breaks.
+    """
+    application = ReplacementApplication(
+        targeted_span_count=2,
+        applied_span_count=2 - sum(skipped_span_label_counts.values()),
+        skipped_span_count=sum(skipped_span_label_counts.values()),
+        skipped_span_label_counts=skipped_span_label_counts,
+    ).to_metrics()
+    trace = pd.DataFrame(
+        {
+            "text": ["alice", "bob"],
+            COL_REPLACEMENT_APPLICATION: [application, application],
+        }
+    )
+
+    class FakeResult:
+        dataframe = pd.DataFrame({"text": ["<redacted>", "<redacted>"]})
+        trace_dataframe = trace
+        failed_records: list[object] = []
+
+    class FakeAnonymizer:
+        def __init__(self, **_: object) -> None: ...
+
+        def run(self, *, config: AnonymizerConfig, data: object) -> FakeResult:
+            return FakeResult()
+
+    step_config = AnonymizerStepConfig(
+        request=AnonymizerRequest(
+            config=AnonymizerConfig(replace=Redact()),
+            data=AnonymizerInputSpec(source="https://example.com/input.csv", text_column="text"),
+        ),
+        model_configs_yaml="model_configs:\n- alias: detector\n  model: test/model\n  provider: provider\n",
+        dd_model_providers=[],
+    )
+
+    _patch_gliner_build(monkeypatch, FakeAnonymizer)
+    ctx = _make_job_context(tmp_path)
+    logging_snapshot = _snapshot_task_loggers()
+    try:
+        assert task_run_module.run_step_config(step_config, ctx=ctx, sdk=Mock(spec=NemoClient)) == 0
+    finally:
+        _restore_task_loggers(logging_snapshot)
+
+    loaded = AnonymizerJobResults(ctx.storage.persistent / "artifacts").load_trace()
+    for value in loaded[COL_REPLACEMENT_APPLICATION]:
+        assert value["skipped_span_label_counts"] == skipped_span_label_counts
+
+    # The in-memory frame handed to us by the library keeps its documented dict shape.
+    assert trace[COL_REPLACEMENT_APPLICATION].iloc[0]["skipped_span_label_counts"] == skipped_span_label_counts

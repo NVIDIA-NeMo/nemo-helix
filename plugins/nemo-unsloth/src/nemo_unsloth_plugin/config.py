@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from nmp.customization_common.contributor.config import BaseTrainingPluginConfig, generate_job_id
+from nhx.customization_common.contributor.config import BaseTrainingPluginConfig, generate_job_id
 from pydantic_settings import SettingsConfigDict
 
 
@@ -18,7 +18,7 @@ class UnslothPluginConfig(BaseTrainingPluginConfig):
     a sensible profile when the submitter omits one.
     """
 
-    model_config = SettingsConfigDict(env_prefix="NMP_UNSLOTH_", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="NHX_UNSLOTH_", extra="ignore")
 
 
 def get_config() -> UnslothPluginConfig:

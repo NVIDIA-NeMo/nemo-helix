@@ -23,7 +23,7 @@ harnesses:
     kind: hermes
     model:
       provider: nvidia
-      model: nvidia/nemotron-3-nano-30b-a3b
+      model: nvidia/nemotron-3.5-lightning-30b-a3b
       api_key_env: NVIDIA_API_KEY
       base_url: https://integrate.api.nvidia.com/v1
       temperature: 0.0
@@ -44,7 +44,7 @@ harnesses:
 models:
   default:
     provider: nvidia
-    model: nvidia-nemotron-3-nano-30b-a3b
+    model: nvidia-nemotron-3-5-lightning-30b-a3b
     api_key_env: NVIDIA_API_KEY
 
 skills:

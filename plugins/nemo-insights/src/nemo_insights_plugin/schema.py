@@ -1,19 +1,27 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Request/response schemas for the insights plugin HTTP API."""
+"""Request/response schemas for the insights plugin HTTP API.
+
+These live here rather than beside their routes so the SDK resources can share
+them: importing :mod:`nemo_insights_plugin.analysis_runs` from an SDK client
+would drag FastAPI and the whole Analyst agent stack in with it.
+"""
 
 from datetime import datetime
+from typing import Annotated, Any
 
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.schema import NemoListResponse
 from nemo_insights_plugin.entities import (
     AnalysisConfig,
     AnalysisConfigStatus,
+    AnalysisRun,
     AnalysisRunStatus,
     Insight,
     InsightStatus,
 )
-from nemo_platform_plugin.schema import NemoListResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 
 class CreateInsightRequest(BaseModel):
@@ -79,6 +87,77 @@ class UpdateAnalysisConfigRequest(BaseModel):
     enabled: bool | None = None
 
 
+NonBlankString = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
+class CreateAnalysisRunRequest(BaseModel):
+    """Client-facing request to run the Insights Analyst through ``agents.execute``."""
+
+    agent: NonBlankString = Field(description="Agent whose telemetry should be analyzed.")
+    default_model: NonBlankString = Field(
+        description=(
+            "Model Entity the Analyst uses for analysis work, as a name or a "
+            "'<workspace>/<name>' ref; a bare name resolves in the run's workspace and is "
+            "stored qualified. Required: the model pair is the operator's choice and is not "
+            "persisted anywhere the Platform process can read it."
+        ),
+    )
+    fast_model: NonBlankString = Field(
+        description=(
+            "Model Entity used for context summarization, in the same form as default_model. "
+            "Required for the same reason."
+        ),
+    )
+    ethos: NonBlankString | None = Field(
+        default=None,
+        description=(
+            "Optional Ethos Markdown for the agent under test. Sent inline rather than as a "
+            "reference: the execute job's Fabric adapter has no Files access."
+        ),
+    )
+    since: datetime | None = Field(
+        default=None,
+        description="Optional lower bound enforced on the Analyst's trace/span reads.",
+    )
+    evaluation_id: NonBlankString | None = Field(
+        default=None,
+        description="Optional run scope AND-pinned onto every span read.",
+    )
+    timeout_seconds: float | None = Field(default=None, gt=0, description="Optional execute job timeout.")
+
+
+class AnalysisRunResponse(BaseModel):
+    """An analysis run plus the live state of the job backing it."""
+
+    run: AnalysisRun
+    job: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "The backing execute-agent job, or null when no job exists under the run's name — "
+            "meaning submission never landed and the run can be resubmitted."
+        ),
+    )
+
+    @property
+    def job_status(self) -> str | None:
+        """Status of the backing job, or None when no job exists under the run's name."""
+        if self.job is None:
+            return None
+        status = self.job.get("status")
+        return str(status) if status else None
+
+    @property
+    def job_is_terminal(self) -> bool:
+        """Whether the backing job has finished, successfully or not.
+
+        A run with no job is *not* terminal: it never landed and can be
+        resubmitted, which is a different outcome from a job that ran and
+        failed.
+        """
+        status = self.job_status
+        return status in {terminal.value for terminal in HelixJobStatus.terminals()}
+
+
 class UpdateAnalysisRunStatusRequest(BaseModel):
     """Body for ``PATCH /analysis-run-statuses/{agent}``."""
 
@@ -91,4 +170,5 @@ class UpdateAnalysisRunStatusRequest(BaseModel):
 
 
 AnalysisConfigPage = NemoListResponse[AnalysisConfig]
+AnalysisRunPage = NemoListResponse[AnalysisRun]
 AnalysisRunStatusPage = NemoListResponse[AnalysisRunStatus]

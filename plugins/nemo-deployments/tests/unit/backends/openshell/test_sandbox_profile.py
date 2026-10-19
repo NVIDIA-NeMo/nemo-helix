@@ -16,12 +16,14 @@ def test_openshell_profile_shape() -> None:
     assert len(sandbox_users) == 1
     assert sandbox_users[0].system is True
     assert sandbox_users[0].resolved_home() == "/home/sandbox"
+    # The supervisor refuses an image whose WORKDIR the sandbox identity cannot write.
+    assert PROFILE.workdir_group == sandbox_users[0].resolved_group()
 
 
 def test_openshell_profile_is_discoverable() -> None:
     # Registered under nemo.sandbox_profiles so the agent packager can find it
     # by name without importing anything OpenShell-specific.
-    from nemo_platform_plugin import discovery
+    from nemo_helix_plugin import discovery
 
     discovery.discover.cache_clear()
     discovery.discover_entry_points.cache_clear()

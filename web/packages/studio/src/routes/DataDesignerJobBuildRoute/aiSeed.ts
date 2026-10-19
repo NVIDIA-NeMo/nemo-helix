@@ -8,6 +8,7 @@ import type {
 } from '@nemo/sdk/generated/data-designer/schema';
 import {
   buildColumnsFromConfig,
+  MODEL_ALIAS_KEY,
   validateColumns,
 } from '@studio/routes/DataDesignerJobBuildRoute/columns';
 import {
@@ -16,9 +17,6 @@ import {
   validateModels,
 } from '@studio/routes/DataDesignerJobBuildRoute/models';
 import type { JobBuilderSeed } from '@studio/routes/DataDesignerJobBuildRoute/useJobBuilder';
-
-/** Values key holding an LLM column's `model_alias` (see `MODEL_ALIAS_FIELD` in columns.ts). */
-const MODEL_ALIAS_KEY = 'model_alias';
 
 export const DEFAULT_GENERATED_NAME = 'untitled-dataset';
 export const DEFAULT_GENERATED_ROWS = 100;

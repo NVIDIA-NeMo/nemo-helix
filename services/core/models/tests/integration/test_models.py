@@ -13,15 +13,14 @@ Uses the create_test_client pattern for fast in-memory testing.
 """
 
 import uuid
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
-from nemo_platform import ConflictError
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
-from nmp.core.models.config import ControllerConfig, ModelsConfig
-from nmp.core.models.controllers.backends.registry import BackendRegistry
-from nmp.testing import ClientContext
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
+from nhx.core.models.config import ControllerConfig, ModelsConfig
+from nhx.core.models.controllers.backends.registry import BackendRegistry
+from nhx.testing import ClientContext
 
 # Default workspace for tests
 DEFAULT_WORKSPACE = "default"
@@ -31,11 +30,11 @@ def ensure_workspace_exists(test_clients: ClientContext, workspace_id: str) -> N
     """Ensure a workspace exists, creating it if necessary.
 
     Args:
-        test_clients: ClientContext with SDK client
+        test_clients: ClientContext with typed client
         workspace_id: The workspace ID to ensure exists
     """
     try:
-        client_from_platform(test_clients.sdk, WorkspacesClient).create_workspace(
+        WorkspacesClient.from_client(test_clients.client).create_workspace(
             body=CreateWorkspaceRequest(name=workspace_id, description=f"Test workspace: {workspace_id}")
         ).data()
     except ConflictError:
@@ -1149,7 +1148,6 @@ def test_deployment_crud_lifecycle(test_clients: ClientContext):
     # First create a deployment config (required dependency)
     config_data = {
         "name": config_name,
-        "workspace": DEFAULT_WORKSPACE,
         "engine": "nim",
         "model_spec": {},
         "executor_config": {"gpu": 1},
@@ -1163,7 +1161,6 @@ def test_deployment_crud_lifecycle(test_clients: ClientContext):
         # CREATE deployment
         deployment_data = {
             "name": deployment_name,
-            "workspace": DEFAULT_WORKSPACE,
             "config": config_name,
         }
         response = test_clients.test_client.post(
@@ -1222,7 +1219,6 @@ def test_deployment_duplicate_returns_409(test_clients: ClientContext):
     # Create config first
     config_data = {
         "name": config_name,
-        "workspace": DEFAULT_WORKSPACE,
         "engine": "nim",
         "model_spec": {},
         "executor_config": {"gpu": 1},
@@ -1236,7 +1232,6 @@ def test_deployment_duplicate_returns_409(test_clients: ClientContext):
         # Create first deployment
         deployment_data = {
             "name": deployment_name,
-            "workspace": DEFAULT_WORKSPACE,
             "config": config_name,
         }
         response = test_clients.test_client.post(
@@ -1282,7 +1277,6 @@ def test_deployment_invalid_input_returns_422(test_clients: ClientContext):
     # Missing required 'config' field
     invalid_data = {
         "name": "test-deployment-invalid",
-        "workspace": DEFAULT_WORKSPACE,
         # Missing 'config' - required field
     }
     response = test_clients.test_client.post(
@@ -1300,7 +1294,6 @@ def test_deployment_status_lifecycle(test_clients: ClientContext):
     # Create deployment config first
     config_data = {
         "name": config_name,
-        "workspace": DEFAULT_WORKSPACE,
         "engine": "nim",
         "model_spec": {},
         "executor_config": {"gpu": 1},
@@ -1314,7 +1307,6 @@ def test_deployment_status_lifecycle(test_clients: ClientContext):
         # Create deployment - starts in CREATED status
         deployment_data = {
             "name": deployment_name,
-            "workspace": DEFAULT_WORKSPACE,
             "config": config_name,
         }
         response = test_clients.test_client.post(
@@ -1382,7 +1374,6 @@ def test_deployment_list_pagination(test_clients: ClientContext):
     # Create deployment config first
     config_data = {
         "name": config_name,
-        "workspace": DEFAULT_WORKSPACE,
         "engine": "nim",
         "model_spec": {},
         "executor_config": {"gpu": 1},
@@ -1397,7 +1388,6 @@ def test_deployment_list_pagination(test_clients: ClientContext):
         for name in deployment_names:
             deployment_data = {
                 "name": name,
-                "workspace": DEFAULT_WORKSPACE,
                 "config": config_name,
             }
             response = test_clients.test_client.post(
@@ -1454,7 +1444,6 @@ def test_deployment_workspace_isolation(test_clients: ClientContext):
     # Create config in workspace1
     config_data = {
         "name": config_name,
-        "workspace": workspace1,
         "engine": "nim",
         "model_spec": {},
         "executor_config": {"gpu": 1},
@@ -1468,7 +1457,6 @@ def test_deployment_workspace_isolation(test_clients: ClientContext):
         # Create deployment in workspace1
         deployment_data = {
             "name": deployment_name,
-            "workspace": workspace1,
             "config": config_name,
         }
         response = test_clients.test_client.post(
@@ -1522,21 +1510,21 @@ def test_deployment_workspace_isolation(test_clients: ClientContext):
 
 def test_backend_config_key_deployments_plugin_works_end_to_end():
     """Verify deployments_plugin key in ModelsConfig works with BackendRegistry."""
-    from nmp.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginBackendConfigModel
+    from nhx.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginBackendConfigModel
 
     config = ModelsConfig(
         controller=ControllerConfig(
             backends={"deployments_plugin": DeploymentsPluginBackendConfigModel(enabled=True)},
         )
     )
+    backend_configs: dict[str, DeploymentsPluginBackendConfigModel] = {
+        "deployments_plugin": config.controller.backends["deployments_plugin"],
+    }
 
-    with patch(
-        "nmp.core.models.controllers.backends.deployments_plugin.backend.NemoEntitiesClient",
-    ):
-        registry = BackendRegistry.from_config(
-            nmp_sdk=AsyncMock(),
-            backend_configs=config.controller.backends,
-            huggingface_model_puller=config.huggingface_model_puller,
-        )
+    registry = BackendRegistry.from_config(
+        client=AsyncMock(),
+        backend_configs=backend_configs,
+        huggingface_model_puller=config.huggingface_model_puller,
+    )
 
     assert registry.list_backends() == ["deployments_plugin"]

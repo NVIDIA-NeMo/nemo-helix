@@ -3,7 +3,7 @@
 
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
 import { snakeCaseToTitleCase } from '@nemo/common/src/utils/formatters';
-import type { EvaluateJob, Model } from '@nemo/sdk/generated/evaluator/schema';
+import type { EvaluateJob, Model } from '@nemo/sdk/generated/evals/schema';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 
 /**

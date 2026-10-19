@@ -3,7 +3,7 @@
 
 """Span storage helper tests."""
 
-from nmp.intake.spans.storage import (
+from nhx.intake.spans.storage import (
     json_loads_or_none,
     stable_id,
     text_for_mode,

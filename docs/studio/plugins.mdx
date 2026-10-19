@@ -3,32 +3,32 @@
 # SPDX-License-Identifier: Apache-2.0
 
 title: "Plugin UIs in NeMo Studio"
-description: "Find and use Studio pages contributed by installed NeMo Platform plugins."
+description: "Find and use Studio pages contributed by installed NeMo Helix plugins."
 ---
 
-NeMo Platform plugins can contribute pages to Studio at runtime. A plugin UI runs inside Studio and shares the current workspace, navigation, authentication, notifications, and visual theme. You do not open a separate application.
+NeMo Helix plugins can contribute pages to Studio at runtime. A plugin UI runs inside Studio and shares the current workspace, navigation, authentication, notifications, and visual theme. You do not open a separate application.
 
 Plugin entries only appear when all of the following are true:
 
-- The plugin is installed and registered with NeMo Platform.
+- The plugin is installed and registered with NeMo Helix.
 - The plugin includes a Studio web bundle.
 - Studio can load the platform's plugin manifest.
 
 A plugin chooses where its entry appears. It can join a built-in group such as **Governance** or **Data**, or add its own sidebar group. Consequently, the navigation in one deployment can differ from another deployment of the same Studio version.
 
-## Iron Swarm
+## Agent Hardener
 
-When Iron Swarm meets the plugin UI prerequisites above, open its Studio UI from **Governance > Iron Swarm**. The entry is supplied by the plugin and does not require a separate Studio feature flag.
+When Agent Hardener meets the plugin UI prerequisites above, open its Studio UI from **Governance > Agent Hardening**. The entry is supplied by the plugin and does not require a separate Studio feature flag.
 
-Iron Swarm runs an attack, defend, and validate war-game against a sandboxed copy of an agent. The UI lets you:
+Agent Hardener runs an attack, defend, and validate war-game against a sandboxed copy of an agent. The UI lets you:
 
 - View war-game runs and their status.
 - Open a run to inspect progress and results.
 - View, create, edit, and delete saved target manifests.
 - Start a war-game from a saved manifest.
 
-The plugin and its runtime prerequisites must be configured before a run can succeed. If **Iron Swarm** is absent, ask the platform administrator whether the plugin is installed and registered. If the entry is present but a run cannot start, check the plugin setup and health from the NeMo CLI.
+The plugin and its runtime prerequisites must be configured before a run can succeed. If **Agent Hardening** is absent, ask the platform administrator whether the plugin is installed and registered. If the entry is present but a run cannot start, check the plugin setup and health from the NeMo CLI.
 
 ## Version and Availability
 
-Plugin UIs are released with their plugins and can evolve independently of Studio's built-in pages. When a plugin page differs from this documentation, compare the NeMo Platform version and installed plugin version, and use the plugin's CLI documentation for detailed setup and troubleshooting.
+Plugin UIs are released with their plugins and can evolve independently of Studio's built-in pages. When a plugin page differs from this documentation, compare NeMo Helix version and installed plugin version, and use the plugin's CLI documentation for detailed setup and troubleshooting.

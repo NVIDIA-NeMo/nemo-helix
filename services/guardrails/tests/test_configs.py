@@ -3,8 +3,8 @@
 
 from unittest.mock import patch
 
-from nmp.guardrails.app.utils.cli_utils import get_args
-from nmp.guardrails.config import GuardrailsServiceConfig
+from nhx.guardrails.app.utils.cli_utils import get_args
+from nhx.guardrails.config import GuardrailsServiceConfig
 
 
 def test_configuration_loading():

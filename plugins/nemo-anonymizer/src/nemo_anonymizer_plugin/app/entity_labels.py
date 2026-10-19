@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from anonymizer import DEFAULT_ENTITY_LABELS
 from fastapi import APIRouter, status
-from nemo_platform_plugin.authz import AuthzScope, CallerKind, PermissionSet, path_rule, perm
+from nemo_helix_plugin.authz import AuthzScope, CallerKind, PermissionSet, path_rule, perm
 from pydantic import BaseModel
 
 scope = AuthzScope("anonymizer")

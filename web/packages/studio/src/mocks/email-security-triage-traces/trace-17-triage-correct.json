@@ -1,0 +1,46 @@
+{
+  "schema_version": "ATIF-v1.5",
+  "session_id": "3f2a1c00-0017-4a00-8000-000000000017",
+  "trajectory_id": "3f2a1c00-0017-4a00-8000-000000000017",
+  "agent": {
+    "name": "email-security-triage",
+    "version": "0.7.0",
+    "model_name": "nvidia-nemotron-3-nano-30b-a3b"
+  },
+  "final_metrics": {
+    "total_prompt_tokens": 3644,
+    "total_completion_tokens": 71,
+    "total_cost_usd": 0.0005892,
+    "total_steps": 2
+  },
+  "extra": {
+    "task_id": "email-security-triage/triage-correct-17",
+    "verifier_result": {
+      "rewards": {
+        "correctness": 1.0,
+        "format": 1.0,
+        "routing": 1.0
+      }
+    }
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "timestamp": "2026-08-18T22:18:55Z",
+      "source": "user",
+      "message": "{\"user_message\": \"is this phishing?\", \"emails\": [{\"from\": \"alerts@github.com\", \"subject\": \"A new SSH key was added to your account\", \"body\": \"If you did not add this key, review your account security settings at https://github.com/settings/keys.\"}]}"
+    },
+    {
+      "step_id": 2,
+      "timestamp": "2026-08-18T22:19:01Z",
+      "source": "agent",
+      "model_name": "default/nvidia-nemotron-3-nano-30b-a3b",
+      "message": "benign\nThe notification comes from the genuine GitHub domain, links to that same domain's settings page, and asks for no credentials.",
+      "metrics": {
+        "prompt_tokens": 3644,
+        "completion_tokens": 71,
+        "cost_usd": 0.0005892
+      }
+    }
+  ]
+}

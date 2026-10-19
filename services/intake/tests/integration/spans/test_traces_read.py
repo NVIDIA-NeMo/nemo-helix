@@ -9,7 +9,26 @@ from decimal import Decimal
 from fastapi.testclient import TestClient
 
 
+def _create_evaluation(client: TestClient, name: str) -> None:
+    """Create the Evaluation the spans below name; ingest rejects one that resolves to nothing."""
+    group = client.post("/apis/intake/v2/workspaces/default/experiments", json={"name": "trace-read-group"})
+    if group.status_code == 409:
+        group = client.get("/apis/intake/v2/workspaces/default/experiments/trace-read-group")
+    group.raise_for_status()
+    created = client.post(
+        "/apis/intake/v2/workspaces/default/evaluations",
+        json={
+            "name": name,
+            "experiment_group_id": group.json()["id"],
+            "dataset_name": "trace-read-dataset",
+            "dataset_version": "v1",
+        },
+    )
+    assert created.status_code == 201, created.text
+
+
 def test_traces_read_returns_core_trace_summary(client: TestClient, make_otlp_request):
+    _create_evaluation(client, "experiment-a")
     base_ns = int(datetime.now(timezone.utc).replace(microsecond=0).timestamp() * 1_000_000_000)
     input_text = "i" * 350
     output_text = "o" * 350

@@ -28,10 +28,6 @@ openapi/**/*.yaml.txt linguist-generated
 plugins/*/openapi/**/*.yaml linguist-generated
 # Generated Models service types
 services/core/infrastructure/models/src/models/nim_operator_types/*.py linguist-generated
-# Generated SDK client bindings
-sdk/python/** linguist-generated
-# Generated CLI
-packages/nemo_platform_ext/src/nemo_platform_ext/cli/commands/api/** linguist-generated
 # Built plugin web bundles (vite output, shipped in the wheel)
 plugins/*/src/*/web/dist/** linguist-generated
 # Rolled-up Studio plugin surface types (pnpm --filter @nemo/common types:plugin)
@@ -48,6 +44,8 @@ documentation/docs/generate-synthetic-data/images/* filter=lfs diff=lfs merge=lf
 # Files maintained by external garak project
 packages/garak_api/garakapi/_config.py linguist-generated
 packages/garak_api/garakapi/_plugins.py linguist-generated
+packages/garak_api/garakapi/_selection.py linguist-generated
+packages/garak_api/garakapi/_spec.py linguist-generated
 packages/garak_api/garakapi/exception.py linguist-generated
 packages/garak_api/garakapi/resources/plugin_cache.json linguist-generated
 # Tiktoken artifact

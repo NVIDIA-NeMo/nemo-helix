@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 import pytest
-from nmp.rl.tasks.training.datasets.preparation import DatasetFormatError, _create_val_split
+from nhx.rl.tasks.training.datasets.preparation import DatasetFormatError, _create_val_split
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:

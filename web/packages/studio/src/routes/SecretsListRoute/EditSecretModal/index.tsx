@@ -16,11 +16,11 @@ import { ControlledTextArea } from '@nemo/common/src/components/form/ControlledT
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { FormModal, FormModalProps } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import type { HelixSecretResponse } from '@nemo/sdk/generated/platform/schema';
 import {
   getSecretsListSecretsQueryKey,
   useSecretsUpdateSecret,
-} from '@nemo/sdk/generated/platform/api';
-import { PlatformSecretResponse } from '@nemo/sdk/generated/platform/schema';
+} from '@nemo/sdk/generated/platform/secrets';
 import { FormField, Stack, Text, TextInput } from '@nvidia/foundations-react-core';
 import { useQueryClient } from '@tanstack/react-query';
 import { FC } from 'react';
@@ -37,7 +37,7 @@ type EditSecretFormData = z.infer<typeof editSecretFormSchema>;
 
 interface EditSecretModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
   workspace: string;
-  secret: PlatformSecretResponse;
+  secret: HelixSecretResponse;
 }
 
 export const EditSecretModal: FC<EditSecretModalProps> = ({ workspace, secret, open, onClose }) => {
@@ -143,6 +143,7 @@ export const EditSecretModal: FC<EditSecretModalProps> = ({ workspace, secret, o
           <TextInput value="••••••••••••••••••••••••••••••••••••••••" disabled />
         </FormField>
         <ControlledTextInput
+          masked
           useControllerProps={{ control, name: 'value' }}
           name="value"
           label="New Value"

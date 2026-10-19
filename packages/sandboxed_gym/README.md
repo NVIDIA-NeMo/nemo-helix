@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# sandboxed-gym
+# nemo-sandboxed-gym
 
 Trusted **episode broker** + **job-level Gym host** orchestrator for running NeMo-Gym
 inside an OpenSandbox (or compatible) isolation boundary.
@@ -10,9 +10,21 @@ This package has **no NeMo-RL / GRPO dependency**. Callers get raw Gym host
 `/health` and `/rollouts/run` results. RL-specific postprocessing belongs in the
 training client (e.g. NeMo-RL's thin `SandboxedGymActor` adapter).
 
+## Provenance
+
+Vendored from [`soluwalana/RL`](https://github.com/soluwalana/RL) branch `nhx/customizer` at
+**`67821a9`** (2026-08-03), the fork this code still shares an ancestor with. Upstream changes have
+been applied selectively since; the divergences are deliberate and documented where they occur.
+
+Recorded because the original vendoring landed as one squashed commit with no provenance, and
+recovering this took a per-file comparison against every revision of the upstream tree. Diffing
+from any earlier commit shows `host/entrypoint.py` and `host/gym_host.sh` as drift when they are
+already here. Update this line whenever upstream is merged again; it becomes moot once the shared
+wheel exists.
+
 ## Architecture
 
-![Architecture](docs/architecture.png)
+![Architecture](docs/architecture.svg)
 
 The trusted side holds the OpenSandbox credential and the episode broker; the sandbox gets a
 per-run token and nothing else. The episode tier is only used by environments that ask for nested
@@ -20,7 +32,7 @@ sandboxes -- an ordinary evaluation never creates one.
 
 ### Two job-host providers
 
-![Host provider paths](docs/host-provider-paths.png)
+![Host provider paths](docs/host-provider-paths.svg)
 
 `get_host_provider` selects by name. **`docker` is for local execution only**: it runs the host as
 a container, records the egress allowlist rather than applying it, and bind-mounts host
@@ -76,5 +88,5 @@ See `examples/serve.yaml`. Key fields:
 
 - `sandbox.environment_pvc_claim` / `dataset_pvc_claim` / `workspace_pvc_claim`
 - `episode_broker` (allowlists, TTL, `advertise_url`)
-- `gym_global_config` — opaque Gym JSON injected as `NMP_GYM_GLOBAL_CONFIG`
+- `gym_global_config` — opaque Gym JSON injected as `NHX_GYM_GLOBAL_CONFIG`
 - `rollout_auth_token` — optional bearer for the orchestrator proxy

@@ -175,6 +175,7 @@ _TASKS_PATH_RE = re.compile(
 )
 _PROFILE_ENV_KEYS = ("env", "environment", "vars")
 _PROFILE_TEMPLATE_KEYS = ("config", "harbor_config", "template", "harbor_template")
+_PROFILE_METADATA_KEYS = ("dataset_only", "dataset_image_mode")
 # The file that marks the root of a Harbor task tree inside an uploaded pack.
 _TASK_TREE_MARKER = "task.toml"
 _EVALUATION_LABEL = "scaled-evals.nvidia.com/evaluation-id"
@@ -195,6 +196,10 @@ def _should_stage_uploaded_task_tree(spec: LaunchSpec) -> bool:
     return bool(spec.image_ref and spec.tarball_object_key)
 
 
+def _dataset_image_map(spec: LaunchSpec) -> dict[str, str]:
+    return {str(item["source_image"]): str(item["runtime_image"]) for item in spec.harbor_dataset_image_imports}
+
+
 def load_env_file(path: Path) -> dict[str, str]:
     """Parse a ``targets/<target>.env`` file (KEY=VALUE, ``#`` comments) into a dict."""
     env: dict[str, str] = {}
@@ -210,6 +215,14 @@ def load_env_file(path: Path) -> dict[str, str]:
             parts = []
         env[key.strip()] = " ".join(parts) if parts else value.strip('"').strip("'")
     return env
+
+
+def _staged_task_name(spec: LaunchSpec) -> str:
+    # Harbor derives local task names from the directory basename.
+    name = spec.task_slug or "task"
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", name):
+        raise ValueError("task slug is not a safe directory name")
+    return name
 
 
 def render_harbor_config(
@@ -229,6 +242,7 @@ def render_harbor_config(
     writable_root_authorized: bool = False,
     agent_bundle: Mapping[str, Any] | None = None,
     benchmark_run_id: str | None = None,
+    dataset_image_map: Mapping[str, str] | None = None,
 ) -> str:
     """Interpolate ``${VAR}`` from ``env`` and set ``job_name`` to the evaluation id.
 
@@ -253,10 +267,20 @@ def render_harbor_config(
     run uses the uploaded task tree rather than one baked into the runner image.
     Falsy ``task_path`` leaves the baked/global task path untouched.
     """
-    profile_text, profile_env = _normalize_harbor_profile_config(profile_config or {})
-    template = profile_text or config_text
+    profile = profile_config or {}
+    dataset_only = _is_dataset_only_harbor_profile(profile)
+    profile_text, profile_env = _normalize_harbor_profile_config(profile)
+    template = (
+        _dataset_only_harbor_template(
+            config_text,
+            profile_text,
+            dataset_image_map=dataset_image_map,
+        )
+        if dataset_only
+        else profile_text or config_text
+    )
     sub_env = {**env, **profile_env}
-    if image_ref:
+    if image_ref and not dataset_only:
         sub_env["TASK_IMAGE"] = image_ref
     if task_path:
         # Resolve the task-path placeholder to the staged tree so configs that
@@ -284,7 +308,7 @@ def render_harbor_config(
         rendered, replaced = pattern.subn(f"{key}: {value}", rendered, count=1)
         if replaced == 0:
             rendered = f"{key}: {value}\n{rendered}"
-    if image_ref:
+    if image_ref and not dataset_only:
         rendered = _bind_task_image(rendered, image_ref)
     if task_path:
         rendered = _TASKS_PATH_RE.sub(lambda m: f"{m.group('lead')}{task_path}", rendered, count=1)
@@ -309,6 +333,53 @@ def render_harbor_config(
     rendered = _bind_writable_root_authorization(rendered, writable_root_authorized)
     rendered = _bind_default_inference_priority(rendered)
     return _enforce_sandbox_tls_policy(rendered, allow_insecure_tls=allow_insecure_tls)
+
+
+def _dataset_only_harbor_template(
+    base_text: str,
+    profile_text: str | None,
+    *,
+    dataset_image_map: Mapping[str, str] | None = None,
+) -> str:
+    """Merge a dataset selector into the target's K8s Harbor environment.
+
+    A Harbor dataset provides task paths and task-local images, but not the
+    deployment's K8s connection settings.  Keep those settings from the target
+    template while removing its anchor task and image, then let the adapter
+    select each resolved task's declared image.
+    """
+    try:
+        base = yaml.safe_load(base_text) or {}
+        profile = yaml.safe_load(profile_text or "") or {}
+    except yaml.YAMLError as exc:
+        raise ValueError(f"invalid Harbor config: {exc}") from exc
+    if not isinstance(base, dict) or not isinstance(profile, dict):
+        raise ValueError("Harbor config must be an object")
+
+    merged = _deep_merge_harbor_config(base, profile)
+    merged.pop("tasks", None)
+    environment = merged.get("environment")
+    if not isinstance(environment, dict):
+        raise ValueError("dataset-only Harbor profiles require a target environment object")
+    kwargs = environment.setdefault("kwargs", {})
+    if not isinstance(kwargs, dict):
+        raise ValueError("dataset-only Harbor environment.kwargs must be an object")
+    kwargs.pop("image", None)
+    kwargs["_scaled_evals_prefer_task_image"] = True
+    if dataset_image_map:
+        kwargs["_scaled_evals_task_image_map"] = dict(dataset_image_map)
+    return yaml.safe_dump(merged, sort_keys=False)
+
+
+def _deep_merge_harbor_config(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        existing = merged.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            merged[key] = _deep_merge_harbor_config(existing, value)
+        else:
+            merged[key] = value
+    return merged
 
 
 def _bind_default_inference_priority(config_text: str) -> str:
@@ -686,13 +757,20 @@ def _root_authorized_for_spec(spec: LaunchSpec) -> bool:
     """Return whether operators approved root for this immutable task image."""
     if not settings.sandbox_k8s_allow_root:
         return False
-    digest_match = re.search(
-        r"(?:^|@)(sha256:[0-9a-f]{64})$",
-        (spec.image_digest or "").strip().lower(),
-    )
-    if digest_match is None:
+    values = [str(item.get("image_digest") or "") for item in spec.harbor_dataset_image_imports] or [
+        spec.image_digest or ""
+    ]
+    digests = []
+    for value in values:
+        digest_match = re.search(
+            r"(?:^|@)(sha256:[0-9a-f]{64})$",
+            value.strip().lower(),
+        )
+        if digest_match is None:
+            return False
+        digests.append(digest_match.group(1))
+    if not digests:
         return False
-    digest = digest_match.group(1)
     if settings.sandbox_k8s_root_allow_all_images:
         return True
     allowed = {
@@ -705,7 +783,7 @@ def _root_authorized_for_spec(spec: LaunchSpec) -> bool:
             )
         )
     }
-    return digest in allowed
+    return set(digests) <= allowed
 
 
 def _task_image_ref_for_sandbox(spec: LaunchSpec) -> str:
@@ -717,7 +795,12 @@ def _task_image_ref_for_sandbox(spec: LaunchSpec) -> str:
     the recorded digest remains mandatory provenance and dispatch verifies
     mutable tags before launch.
     """
-    image_ref = spec.image_ref.strip()
+    return _image_ref_for_sandbox(spec.image_ref, spec.image_digest)
+
+
+def _image_ref_for_sandbox(image_ref: str, image_digest: str | None) -> str:
+    """``_task_image_ref_for_sandbox`` for any recorded image, such as a separate verifier image."""
+    image_ref = image_ref.strip()
     if settings.sandbox_k8s_task_image_reference_mode == "tag":
         last_slash = image_ref.rfind("/")
         last_colon = image_ref.rfind(":")
@@ -727,7 +810,7 @@ def _task_image_ref_for_sandbox(spec: LaunchSpec) -> str:
                 "digest-only and tag-plus-digest references are not admitted"
             )
         return image_ref
-    digest = (spec.image_digest or "").strip()
+    digest = (image_digest or "").strip()
     if re.fullmatch(r"[^\s]+@sha256:[0-9a-fA-F]{64}", digest):
         return digest
     if re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest):
@@ -761,12 +844,7 @@ def _bind_network_policy(
     network_policy: str,
     network_policy_config: Mapping[str, Any],
 ) -> str:
-    """Make the evaluation's direct-egress policy authoritative.
-
-    Switchyard may add a separate, evaluation-scoped grant to its own proxy.
-    Kubernetes combines matching policies additively, so this function owns
-    only direct sandbox egress and never infers a Switchyard book mode.
-    """
+    """Make the evaluation's direct-egress policy authoritative."""
     config = yaml.safe_load(config_text) or {}
     if not isinstance(config, dict):
         raise ValueError("rendered Harbor config must be an object")
@@ -917,7 +995,10 @@ def _normalize_harbor_profile_config(
         # API-created profiles may store the Harbor YAML parsed as a JSON object
         # instead of wrapping the raw YAML under ``harbor_config``. Treat that
         # shape as an equivalent full template.
-        profile_text = yaml.safe_dump(dict(profile_config), sort_keys=False)
+        profile_text = yaml.safe_dump(
+            {key: value for key, value in profile_config.items() if key not in _PROFILE_METADATA_KEYS},
+            sort_keys=False,
+        )
 
     top_level_env = {
         key: value
@@ -928,7 +1009,28 @@ def _normalize_harbor_profile_config(
     return profile_text, profile_env
 
 
+def _is_dataset_only_harbor_profile(profile_config: Mapping[str, Any]) -> bool:
+    """Return whether a profile delegates task resolution to Harbor's dataset registry."""
+    value = profile_config.get("dataset_only", False)
+    if not isinstance(value, bool):
+        raise ValueError("harbor profile 'dataset_only' must be a boolean")
+    if not value:
+        return False
+    template, _ = _normalize_harbor_profile_config(profile_config)
+    try:
+        config = yaml.safe_load(template or "")
+    except yaml.YAMLError as exc:
+        raise ValueError("dataset-only Harbor profile must contain valid YAML") from exc
+    if not isinstance(config, dict) or not isinstance(config.get("datasets"), list) or not config["datasets"]:
+        raise ValueError("dataset-only Harbor profile requires a non-empty datasets list")
+    if config.get("tasks"):
+        raise ValueError("dataset-only Harbor profile must not define tasks")
+    return True
+
+
 def _is_structured_harbor_profile_config(profile_config: Mapping[str, Any]) -> bool:
+    if profile_config.get("dataset_only") is True and isinstance(profile_config.get("datasets"), list):
+        return True
     environment = profile_config.get("environment")
     if not isinstance(environment, Mapping):
         return False
@@ -977,13 +1079,22 @@ def _augment_harbor_env(
 
 
 def _extract_pack(tarball_path: Path, dest: Path) -> None:
-    """Extract a gzip pack into ``dest``, rejecting unsafe member paths.
+    """Extract a bounded gzip pack into ``dest``, rejecting unsafe paths."""
 
-    Mirrors the build path's extraction (api/build/buildkit.py): the 3.12
-    ``data`` filter blocks absolute paths and ``..`` traversal out of ``dest``.
-    """
     with tarfile.open(tarball_path, "r:gz") as tar:
-        tar.extractall(dest, filter="data")
+        members = tar.getmembers()
+        if len(members) > settings.task_pack_max_members:
+            raise ValueError(
+                f"task pack exceeds configured member limit ({len(members)} > {settings.task_pack_max_members})"
+            )
+        extracted_size = sum(member.size for member in members)
+        if extracted_size > settings.task_pack_max_extracted_size_bytes:
+            raise ValueError(
+                "task pack exceeds configured extracted-size limit "
+                f"({extracted_size} bytes > "
+                f"{settings.task_pack_max_extracted_size_bytes} bytes)"
+            )
+        tar.extractall(dest, members=members, filter="data")
 
 
 def _find_task_tree(root: Path) -> Path | None:
@@ -1018,6 +1129,33 @@ def _task_trees_match(source: Path, dest: Path) -> bool:
     return True
 
 
+_COMPOSE_FILENAMES = ("docker-compose.yaml", "docker-compose.yml")
+
+
+def _restore_compose_definition(pack_root: Path, task_tree: Path) -> None:
+    """Put a pack-root compose file back where Harbor looks for it.
+
+    Packing flattens ``environment/`` to the pack root so the root doubles as the
+    image build context, which leaves the staged task tree without the
+    ``environment/docker-compose.yaml`` a multi-service task declares upstream.
+    Harbor reads that path to decide whether a task's compose services can exist,
+    and refuses any artifact entry or verifier collect hook naming a service when
+    it finds nothing -- so the file has to travel with the tree.
+
+    This only restores a declaration. Nothing on this runtime builds or runs
+    compose: the services themselves come from the profile's ``sidecars`` list.
+    A pack with no compose file is left alone, so single-container tasks see no
+    change at all.
+    """
+    environment_dir = task_tree / "environment"
+    for filename in _COMPOSE_FILENAMES:
+        source = pack_root / filename
+        if not source.is_file() or (environment_dir / filename).exists():
+            continue
+        environment_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, environment_dir / filename)
+
+
 def _stage_task_tree(tarball_object_key: str, dest: Path) -> Path | None:
     """Download the task revision pack and stage its Harbor task tree at ``dest``.
 
@@ -1038,9 +1176,8 @@ def _stage_task_tree(tarball_object_key: str, dest: Path) -> Path | None:
     failures are also fatal: falling back after a partial local stage can launch
     Harbor against the wrong or incomplete task.
     """
-    from botocore.exceptions import BotoCoreError, ClientError
-
-    from scaled_evals.api import s3
+    from scaled_evals.api import artifacts
+    from scaled_evals.api._files_backend import MissingObjectError
 
     try:
         with tempfile.TemporaryDirectory(prefix="se-task-") as tmp:
@@ -1049,12 +1186,18 @@ def _stage_task_tree(tarball_object_key: str, dest: Path) -> Path | None:
             extracted = tmp_path / "extracted"
             extracted.mkdir()
             try:
-                s3.download_object(tarball_object_key, str(tarball_path))
-            except (BotoCoreError, ClientError) as exc:
+                artifacts.download_object(tarball_object_key, str(tarball_path))
+            except MissingObjectError as exc:
                 raise RuntimeError(
                     f"could not fetch task pack object {tarball_object_key!r} from "
-                    f"the object store: {exc}. The revision's artifact may be missing "
-                    f"(re-upload + finalize the task) or the store unreachable."
+                    f"storage: {exc}. The revision's artifact is missing "
+                    f"(re-upload + finalize the task)."
+                ) from exc
+            except Exception as exc:  # noqa: BLE001 - any Files transport error (5xx/connection) is a fetch failure, not a 'no task tree' signal
+                raise RuntimeError(
+                    f"could not fetch task pack object {tarball_object_key!r} from "
+                    f"storage: {exc}. The object store may be unreachable; retry, or "
+                    f"re-upload + finalize the task."
                 ) from exc
             _extract_pack(tarball_path, extracted)
             task_src = _find_task_tree(extracted)
@@ -1065,6 +1208,7 @@ def _stage_task_tree(tarball_object_key: str, dest: Path) -> Path | None:
             lock_path = dest.with_name(f".{dest.name}.lock")
             try:
                 shutil.copytree(task_src, staging)
+                _restore_compose_definition(extracted, staging)
                 with lock_path.open("a+") as lock_file:
                     fcntl.flock(lock_file, fcntl.LOCK_EX)
                     if dest.exists():
@@ -1092,7 +1236,7 @@ def _inject_extra_skills(task_tree: Path, object_keys: list[str]) -> list[dict[s
     <name> is derived from the key. Best-effort: failures are logged and skipped
     so a bad key doesn't abort the whole launch.
     """
-    from scaled_evals.api import s3
+    from scaled_evals.api import artifacts
 
     # Harbor sets environment_dir = task_tree/environment/ (it appends /environment
     # to the task path). Candidate 0 in _upload_environment_skills is
@@ -1113,7 +1257,7 @@ def _inject_extra_skills(task_tree: Path, object_keys: list[str]) -> list[dict[s
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / filename
         try:
-            s3.download_object(key, str(dest))
+            artifacts.download_object(key, str(dest))
         except Exception as exc:  # noqa: BLE001
             LOG.warning("could not inject extra skill %s: %s", key, exc)
             materials.append({"object_key": key, "status": "download_failed"})
@@ -1136,11 +1280,12 @@ def _save_extra_skill_materials_artifact(
     evaluation_id: str,
     *,
     harbor_dir: Path | None = None,
+    jobs_dir: str | None = None,
 ) -> None:
     if not materials:
         return
     root = harbor_dir or Path(settings.harbor_dir).expanduser()
-    artifact_dir = root / settings.sandbox_k8s_jobs_dir / evaluation_id
+    artifact_dir = root / (jobs_dir or settings.sandbox_k8s_jobs_dir) / evaluation_id
     artifact_dir.mkdir(parents=True, exist_ok=True)
     path = artifact_dir / "scaled-evals-extra-skill-materials.json"
     path.write_text(json.dumps({"materials": materials}, indent=2, sort_keys=True) + "\n")
@@ -1235,13 +1380,15 @@ def apply_agent_timeout_floor(task_tree: Path | None, floor_sec: int) -> dict[st
     return {"original": original, "effective": effective}
 
 
-def _save_instruction_artifact(task_tree: Path, evaluation_id: str, *, harbor_dir: Path | None = None) -> None:
+def _save_instruction_artifact(
+    task_tree: Path, evaluation_id: str, *, harbor_dir: Path | None = None, jobs_dir: str | None = None
+) -> None:
     """Copy the final instruction.md (post-patch) into the job artifact directory."""
     instr = task_tree / "instruction.md"
     if not instr.exists():
         return
     root = harbor_dir or Path(settings.harbor_dir).expanduser()
-    artifact_dir = root / settings.sandbox_k8s_jobs_dir / evaluation_id
+    artifact_dir = root / (jobs_dir or settings.sandbox_k8s_jobs_dir) / evaluation_id
     artifact_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(instr, artifact_dir / "instruction.md")
 
@@ -1254,7 +1401,7 @@ def _harbor_run_argv(harbor_dir: Path) -> tuple[str, ...]:
     return HARBOR_RUN
 
 
-def _spawn_detached(argv: list[str], cwd: Path, log_path: Path) -> None:
+def _spawn_detached(argv: list[str], cwd: Path, log_path: Path, *, env: Mapping[str, str] | None = None) -> None:
     """Fire-and-forget ``harbor run``, detached, logging to ``log_path``."""
     pid_path = log_path.with_suffix(f"{log_path.suffix}.pid")
     exit_path = log_path.with_suffix(f"{log_path.suffix}.exit.json")
@@ -1274,6 +1421,7 @@ def _spawn_detached(argv: list[str], cwd: Path, log_path: Path) -> None:
             ],
             cwd=cwd,
             log=log,
+            env=env,
         )
     start_ticks = _process_start_ticks(proc.pid)
     pid_path.write_text(json.dumps({"pid": proc.pid, "start_ticks": start_ticks, "token": token}))
@@ -1357,7 +1505,7 @@ def _resolve_host_path(path: str) -> Path:
     """Resolve a path to an absolute HOST path for docker bind mounts.
 
     Relative paths are anchored to SCALED_EVALS_HOST_DIR (the host checkout root)
-    so they work correctly when resolved from inside the dispatch-worker container.
+    so they work correctly when resolved from inside a container.
     """
     return resolve_host_path(path, host_root=settings.scaled_evals_host_dir)
 
@@ -1438,6 +1586,39 @@ def make_sandbox_k8s_docker_terminator() -> Callable[[LaunchHandle], None]:
     return terminate
 
 
+def _kubectl_target_flags(recorded_path: object, context: object, api_server: object = None) -> list[str]:
+    """Return the ``--kubeconfig`` and ``--context`` flags for a cleanup.
+
+    Both are captured when the sandbox launches. Under Platform Jobs that
+    happens inside a Job pod, and the controller that later cleans up runs in
+    another pod, so the path can name a file that only ever existed on the
+    Job pod's filesystem. The context is defined by that file, so it is dropped
+    with it; otherwise kubectl fails every call on an unknown context and the
+    evaluation wedges. With neither flag, kubectl resolves through the cleanup
+    process's own ``KUBECONFIG`` or its in-cluster service account.
+
+    That fallback reaches the same cluster only for the Job's service-account
+    context, or for a user-token kubeconfig whose recorded ``api_server`` is the
+    in-cluster API. Any other context can name another API server; cleanup there
+    treats "not found" as done and would orphan the sandbox, so it raises instead.
+
+    Raises:
+        RuntimeError: The recorded kubeconfig is missing and its target is not
+            known to be this cluster.
+    """
+    if recorded_path and Path(str(recorded_path)).exists():
+        flags = ["--kubeconfig", str(recorded_path)]
+        if context:
+            flags.extend(["--context", str(context)])
+        return flags
+    if not context or context == _IN_CLUSTER_CONTEXT or api_server == _IN_CLUSTER_API:
+        return []
+    raise RuntimeError(
+        f"kubeconfig for kubectl context {context!r} is not available to this process; "
+        "refusing to clean up through its own cluster credentials"
+    )
+
+
 def _cleanup_sandbox_k8s_resources(handle: LaunchHandle) -> None:
     """Delete and verify per-evaluation Sandbox resources.
 
@@ -1469,10 +1650,7 @@ def _cleanup_sandbox_k8s_resources(handle: LaunchHandle) -> None:
         raise RuntimeError("sandbox cleanup requires kubectl or oc")
 
     base = [kubectl]
-    if kubeconfig_path:
-        base.extend(["--kubeconfig", str(kubeconfig_path)])
-    if context:
-        base.extend(["--context", str(context)])
+    base.extend(_kubectl_target_flags(kubeconfig_path, context, cleanup_metadata.get("api_server")))
     if cleanup_metadata.get("verify_ssl") is False:
         base.append("--insecure-skip-tls-verify=true")
     base.extend(["-n", namespace])
@@ -1511,8 +1689,8 @@ def _cleanup_sandbox_k8s_resources(handle: LaunchHandle) -> None:
     # Claim mode returns warm-pool capacity through the claim controller. Do not
     # directly delete its adopted Sandbox/Pod. Direct CRD mode owns both the pod
     # and the optional NetworkPolicy, including old-UID orphans left by a failed
-    # controller reconciliation. The evaluation label is shared with Switchyard,
-    # so it must never be used for dependent deletion. Discover the Sandbox CR
+    # controller reconciliation. The evaluation label may select resources other
+    # than the sandbox, so it must never be used for dependent deletion. Discover the Sandbox CR
     # names first, then use sandbox-k8s's ownership label on Pods and policies.
     dependent_selector = f"sandbox-k8s/sandbox in ({','.join(sandbox_names)})"
     if not template_name:
@@ -1649,10 +1827,12 @@ def _sandbox_kubectl_base(handle: LaunchHandle) -> tuple[list[str], str] | None:
     if kubectl is None:
         return None
     base = [kubectl]
-    if cleanup.get("kubeconfig_path"):
-        base.extend(["--kubeconfig", str(cleanup["kubeconfig_path"])])
-    if cleanup.get("context"):
-        base.extend(["--context", str(cleanup["context"])])
+    try:
+        base.extend(
+            _kubectl_target_flags(cleanup.get("kubeconfig_path"), cleanup.get("context"), cleanup.get("api_server"))
+        )
+    except RuntimeError:
+        return None
     if cleanup.get("verify_ssl") is False:
         base.append("--insecure-skip-tls-verify=true")
     base.extend(["-n", str(cleanup.get("namespace") or "default")])
@@ -1865,14 +2045,15 @@ def make_sandbox_k8s_docker_submitter(
         # uses the task's own task definition. The work dir is mounted into
         # the harbor-runner at /work, so the staged tree is addressed there.
         staged_task_path: str | None = None
-        staged_task_dir = work / spec.evaluation_id / "task"
+        staged_task_dir = work / spec.evaluation_id / _staged_task_name(spec)
         tarball_object_key = spec.tarball_object_key
         if (
-            _should_stage_uploaded_task_tree(spec)
+            not _is_dataset_only_harbor_profile(spec.harbor_config)
+            and _should_stage_uploaded_task_tree(spec)
             and tarball_object_key is not None
             and _stage_task_tree(tarball_object_key, staged_task_dir)
         ):
-            staged_task_path = f"/work/{spec.evaluation_id}/task"
+            staged_task_path = f"/work/{spec.evaluation_id}/{staged_task_dir.name}"
             if spec.extra_skill_object_keys:
                 materials = _inject_extra_skills(staged_task_dir, spec.extra_skill_object_keys)
                 _save_extra_skill_materials_artifact(
@@ -1913,6 +2094,7 @@ def make_sandbox_k8s_docker_submitter(
             writable_root_authorized=writable_root_authorized,
             agent_bundle=spec.agent_bundle,
             benchmark_run_id=spec.benchmark_run_id,
+            dataset_image_map=_dataset_image_map(spec),
         )
         writable_root_requested = _writable_root_requested(rendered)
         if writable_root_requested:
@@ -1980,6 +2162,7 @@ def make_sandbox_k8s_docker_submitter(
                 "writable_root_requested": writable_root_requested,
                 "writable_root_authorized": writable_root_authorized,
                 "task_image_ref": task_image_ref,
+                "harbor_dataset_image_imports": spec.harbor_dataset_image_imports,
             },
         )
 
@@ -2215,6 +2398,8 @@ def make_sandbox_k8s_docker_status_reader(
 _IN_CLUSTER_API = "https://kubernetes.default.svc"
 _IN_CLUSTER_CA = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 _USER_CONTEXT = "user"
+# The context the evaluation Job's kubeconfig gives its own service account.
+_IN_CLUSTER_CONTEXT = "incluster"
 _NAMESPACE_RE = re.compile(r"^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$")
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
 
@@ -2366,11 +2551,12 @@ def make_sandbox_k8s_submitter(
         )
         # Host path: harbor runs in-process, so the staged tree is referenced by
         # its real filesystem path rather than a /work container path.
-        staged_task_dir = work / spec.evaluation_id / "task"
+        staged_task_dir = work / spec.evaluation_id / _staged_task_name(spec)
         staged_task_path: str | None = None
         tarball_object_key = spec.tarball_object_key
         if (
-            _should_stage_uploaded_task_tree(spec)
+            not _is_dataset_only_harbor_profile(spec.harbor_config)
+            and _should_stage_uploaded_task_tree(spec)
             and tarball_object_key is not None
             and _stage_task_tree(tarball_object_key, staged_task_dir)
         ):
@@ -2432,6 +2618,7 @@ def make_sandbox_k8s_submitter(
             writable_root_authorized=writable_root_authorized,
             agent_bundle=spec.agent_bundle,
             benchmark_run_id=spec.benchmark_run_id,
+            dataset_image_map=_dataset_image_map(spec),
         )
         writable_root_requested = _writable_root_requested(rendered)
         if writable_root_requested:
@@ -2446,6 +2633,8 @@ def make_sandbox_k8s_submitter(
         rendered_path = work / f"{spec.evaluation_id}.yaml"
         rendered_path.write_text(rendered)
         cleanup_metadata = _sandbox_cleanup_metadata(rendered, spec.evaluation_id)
+        if user_kubeconfig is not None:
+            cleanup_metadata["api_server"] = env.get("SANDBOX_API_SERVER", _IN_CLUSTER_API)
         run_work_dir = work / spec.evaluation_id
         run_work_dir.mkdir(parents=True, exist_ok=True)
         log_path = run_work_dir / "harbor.log"
@@ -2484,6 +2673,7 @@ def make_sandbox_k8s_submitter(
                 "writable_root_requested": writable_root_requested,
                 "writable_root_authorized": writable_root_authorized,
                 "task_image_ref": task_image_ref,
+                "harbor_dataset_image_imports": spec.harbor_dataset_image_imports,
             },
         )
 

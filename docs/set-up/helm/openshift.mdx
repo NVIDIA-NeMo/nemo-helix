@@ -7,45 +7,56 @@ description: ""
 ---
 <a id="nemo-ms-install-openshift"></a>
 
-The NeMo Platform chart works on Red Hat OpenShift when security context overrides are applied. OpenShift’s **restricted** or **restricted-v2** Security Context Constraint (SCC) requires pods to run as non-root with explicit `runAsUser` and `runAsNonRoot`.
+Deploying the NeMo Helix chart on Red Hat OpenShift requires security context overrides and images and storage that support the assigned identities. OpenShift's **restricted** and **restricted-v2** Security Context Constraints (SCCs) use `MustRunAsRange`: when `runAsUser` is omitted, admission assigns a UID from the namespace's allocated range. An explicit UID must be in that range; do not hard-code `1000` or PostgreSQL's `999` for these SCCs. Group IDs such as `fsGroup` must also satisfy the SCC.
+
+See [OpenShift SCC management](https://docs.openshift.com/container-platform/latest/authentication/managing-security-context-constraints.html) for UID and group allocation rules.
 
 ## Values
 
-You can override the default values for the NeMo Platform chart to make it compatible with OpenShift.
+You can override the default values for NeMo Helix chart to make it compatible with OpenShift.
 
 1. **Create the OpenShift values file.** Save the following as `openshift-values.yaml`:
 
- ```yaml
- # openshift-values.yaml
+```yaml
+# openshift-values.yaml
 
- podSecurityContext:
- runAsNonRoot: true
- fsGroup: 1000
- seccompProfile:
- type: RuntimeDefault
+# Leave runAsUser and fsGroup unset so SCC admission can assign them.
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
 
- securityContext:
- allowPrivilegeEscalation: false
- capabilities:
- drop:
- - ALL
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
 
- # If using the embedded PostgreSQL, otherwise skip this section
- postgresql:
- securityContext:
- runAsUser: 999
- runAsNonRoot: true
- podSecurityContext:
- runAsNonRoot: true
- fsGroup: 999
- ```
+# Remove component-level fsGroup defaults so they do not override SCC allocation.
+api:
+  podSecurityContext:
+    fsGroup: null
+core:
+  controller:
+    podSecurityContext:
+      fsGroup: null
+envoyProxy:
+  podSecurityContext:
+    fsGroup: null
+```
 
-2. **Install** with your custom values and the OpenShift overrides (order matters; later files override earlier). Complete the [Prerequisites](/documentation/self-managed-deployment/setup/helm/prerequisites) and follow [Install](/documentation/self-managed-deployment/setup/helm/install), using the provided OpenShift values file.
+<Note>
+
+Remove any fixed `runAsUser`, `runAsGroup`, or `fsGroup` overrides from your other values files, including PostgreSQL overrides. Verify that each enabled image supports an arbitrary non-root UID and that mounted directories are writable by the SCC-assigned UID or group. These security settings alone do not guarantee image or storage compatibility. If an image requires a fixed UID, use an image compatible with your namespace allocation or consult your cluster administrator about a suitably scoped SCC; do not grant `anyuid` as a blanket workaround.
+
+</Note>
+
+2. **Install** with your custom values and the OpenShift overrides (order matters; later files override earlier). Complete the [Prerequisites](/documentation/kubernetes-deployment/setup/helm/prerequisites) and follow [Install](/documentation/kubernetes-deployment/setup/helm/install), using the provided OpenShift values file.
 
  ```sh
- helm upgrade --install "$NMP_HELM_RELEASE" nemo-platform/nemo-platform \
-   --version "$NMP_HELM_CHART_VERSION" \
-   --namespace "$NMP_NAMESPACE" \
+ helm upgrade --install "$NHX_HELM_RELEASE" nemo-helix/nemo-helix \
+   --version "$NHX_HELM_CHART_VERSION" \
+   --namespace "$NHX_NAMESPACE" \
    --create-namespace \
    -f values.yaml \
    -f openshift-values.yaml
@@ -55,20 +66,21 @@ You can override the default values for the NeMo Platform chart to make it compa
 
 You can expose the API using the following methods:
 
-- **Kubernetes Ingress** - supported by OpenShift's default IngressController; set `ingress.enabled: true` and `ingress.defaultHost` as in [Ingress](/documentation/self-managed-deployment/setup/helm/ingress).
-- **Gateway API HTTPRoute** - optional; configure `httpRoute` in values. See [Gateway API HTTPRoute](/documentation/self-managed-deployment/setup/helm/ingress#gateway-api-httproute).
-- **OpenShift Route** - enable the chart's Route and set an optional hostname. See [OpenShift Route](/documentation/self-managed-deployment/setup/helm/ingress#openshift-route) for steps.
+- **Kubernetes Ingress** - supported by OpenShift's default IngressController; set `ingress.enabled: true` and `ingress.defaultHost` as in [Ingress](/documentation/kubernetes-deployment/setup/helm/ingress).
+- **Gateway API HTTPRoute** - optional; configure `httpRoute` in values. See [Gateway API HTTPRoute](/documentation/kubernetes-deployment/setup/helm/ingress#gateway-api-httproute).
+- **OpenShift Route** - enable the chart's Route and set an optional hostname. See [OpenShift Route](/documentation/kubernetes-deployment/setup/helm/ingress#openshift-route) for steps.
 
 ## Troubleshooting
 
 ### Security Context Constraints
 
-If you see "unable to validate against any security context constraint" or "container has runAsNonRoot and image will run as root", ensure you pass the necessary pod security context overrides. See [Values](#values) for steps.
-If you want to validate your values are being applied correctly, you can use the `helm template` command to see the rendered templates.
+If you see "unable to validate against any security context constraint", check for fixed UIDs or group IDs outside the namespace's allowed ranges. If you see "container has runAsNonRoot and image will run as root", inspect the admitted pod's security context and the SCC used by its service account. Under a restricted SCC, admission should supply a non-root UID when none is specified. See [Values](#values) for steps.
+
+Use `helm template` to check that your overrides are applied and that rendered workloads do not retain fixed UID or group settings. Rendering does not test SCC admission or filesystem permissions; verify those in the target OpenShift cluster.
 
 ```sh
-helm template "$NMP_HELM_RELEASE" nemo-platform/nemo-platform \
-  --version "$NMP_HELM_CHART_VERSION" \
+helm template "$NHX_HELM_RELEASE" nemo-helix/nemo-helix \
+  --version "$NHX_HELM_CHART_VERSION" \
   -f values.yaml \
   -f openshift-values.yaml
 ```

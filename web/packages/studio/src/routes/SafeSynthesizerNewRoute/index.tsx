@@ -4,7 +4,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { logger } from '@nemo/common/src/utils/logger';
-import { useSafeSynthesizerCreateJob } from '@nemo/sdk/generated/safe-synthesizer/api';
+import { useSafeSynthesizerCreateJob } from '@nemo/sdk/generated/safe-synthesizer/safe-synthesizer';
 import { Banner, Button, Divider, Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
 import { SAFE_SYNTHESIZER_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';

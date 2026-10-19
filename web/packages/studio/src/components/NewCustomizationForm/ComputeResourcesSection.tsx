@@ -12,9 +12,13 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { ControlledJsonInput } from '@studio/components/NewCustomizationForm/ControlledJsonInput';
 import { FormSection } from '@studio/components/NewCustomizationForm/FormSection';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';
+import {
+  AUTOMODEL_SPEC_DEFAULTS,
+  DPO_SPEC_DEFAULTS,
+  specSliderProps,
+} from '@studio/util/forms/specDefaults';
 import { useFormContext } from 'react-hook-form';
 
 const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
@@ -23,8 +27,8 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
     <Stack gap="density-lg">
       <ControlledSliderWithTextInput
         useControllerProps={{ name: 'automodel.parallelism.num_nodes', control }}
-        formFieldProps={{ slotLabel: 'Nodes' }}
-        defaultValue={1}
+        formFieldProps={{ slotLabel: 'Nodes', slotInfo: 'Number of nodes to train on.' }}
+        {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_num_nodes')}
         min={1}
         max={16}
         step={1}
@@ -32,8 +36,11 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
       />
       <ControlledSliderWithTextInput
         useControllerProps={{ name: 'automodel.parallelism.num_gpus_per_node', control }}
-        formFieldProps={{ slotLabel: 'GPUs per Node' }}
-        defaultValue={1}
+        formFieldProps={{
+          slotLabel: 'GPUs per Node',
+          slotInfo: 'GPUs used on each node. Total GPUs is nodes multiplied by this.',
+        }}
+        {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_num_gpus_per_node')}
         min={1}
         max={8}
         step={1}
@@ -48,8 +55,11 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
             <Stack gap="density-md" className="pt-density-md">
               <ControlledSliderWithTextInput
                 useControllerProps={{ name: 'automodel.parallelism.tensor_parallel_size', control }}
-                formFieldProps={{ slotLabel: 'Tensor Parallel Size' }}
-                defaultValue={1}
+                formFieldProps={{
+                  slotLabel: 'Tensor Parallel Size',
+                  slotInfo: 'Splits each layer across GPUs.',
+                }}
+                {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_tensor_parallel_size')}
                 min={1}
                 max={8}
                 step={1}
@@ -60,8 +70,11 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
                   name: 'automodel.parallelism.pipeline_parallel_size',
                   control,
                 }}
-                formFieldProps={{ slotLabel: 'Pipeline Parallel Size' }}
-                defaultValue={1}
+                formFieldProps={{
+                  slotLabel: 'Pipeline Parallel Size',
+                  slotInfo: 'Splits layers into stages across GPUs.',
+                }}
+                {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_pipeline_parallel_size')}
                 min={1}
                 max={8}
                 step={1}
@@ -72,8 +85,25 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
                   name: 'automodel.parallelism.context_parallel_size',
                   control,
                 }}
-                formFieldProps={{ slotLabel: 'Context Parallel Size' }}
-                defaultValue={1}
+                formFieldProps={{
+                  slotLabel: 'Context Parallel Size',
+                  slotInfo:
+                    'Splits the sequence dimension across GPUs, for long-sequence training.',
+                }}
+                {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_context_parallel_size')}
+                min={1}
+                max={8}
+                step={1}
+                disabled={disabled}
+              />
+              <ControlledSliderWithTextInput
+                useControllerProps={{ name: 'automodel.parallelism.expert_parallel_size', control }}
+                formFieldProps={{
+                  slotLabel: 'Expert Parallel Size',
+                  slotInfo:
+                    'Expert parallel size for MoE models. Must divide data_parallel_size × context_parallel_size, and tensor parallel size must be 1 when this is above 1.',
+                }}
+                {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_expert_parallel_size')}
                 min={1}
                 max={8}
                 step={1}
@@ -81,7 +111,12 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
               />
               <ControlledSwitch
                 useControllerProps={{ name: 'automodel.parallelism.sequence_parallel', control }}
-                formFieldProps={{ slotLabel: 'Sequence Parallel', labelPosition: 'left' }}
+                formFieldProps={{
+                  slotLabel: 'Sequence Parallel',
+                  slotInfo:
+                    'Shards layer-norm and dropout activations along the sequence axis to save memory.',
+                  labelPosition: 'left',
+                }}
                 disabled={disabled}
               />
             </Stack>
@@ -98,8 +133,11 @@ const RlParallelism = ({ disabled }: { disabled: boolean }) => {
     <Stack gap="density-lg">
       <ControlledSliderWithTextInput
         useControllerProps={{ name: 'rl.training.parallelism.num_nodes', control }}
-        formFieldProps={{ slotLabel: 'Nodes' }}
-        defaultValue={1}
+        formFieldProps={{
+          slotLabel: 'Nodes',
+          slotInfo: 'Number of nodes (>1 → multi-node Ray cluster).',
+        }}
+        {...specSliderProps(DPO_SPEC_DEFAULTS, 'parallelism_num_nodes')}
         min={1}
         max={16}
         step={1}
@@ -107,8 +145,11 @@ const RlParallelism = ({ disabled }: { disabled: boolean }) => {
       />
       <ControlledSliderWithTextInput
         useControllerProps={{ name: 'rl.training.parallelism.num_gpus_per_node', control }}
-        formFieldProps={{ slotLabel: 'GPUs per Node' }}
-        defaultValue={1}
+        formFieldProps={{
+          slotLabel: 'GPUs per Node',
+          slotInfo: 'GPUs used on each node. Total GPUs is nodes multiplied by this.',
+        }}
+        {...specSliderProps(DPO_SPEC_DEFAULTS, 'parallelism_num_gpus_per_node')}
         min={1}
         max={8}
         step={1}
@@ -118,10 +159,10 @@ const RlParallelism = ({ disabled }: { disabled: boolean }) => {
       <ControlledSliderWithTextInput
         useControllerProps={{ name: 'rl.training.parallelism.tensor_parallel_size', control }}
         formFieldProps={{
-          slotLabel: 'Tensor (TP)',
+          slotLabel: 'Tensor Parallel Size',
           slotInfo: 'Splits each layer across GPUs. NeMo RL key: tensor_parallel_size.',
         }}
-        defaultValue={1}
+        {...specSliderProps(DPO_SPEC_DEFAULTS, 'parallelism_tensor_parallel_size')}
         min={1}
         max={8}
         step={1}
@@ -130,10 +171,10 @@ const RlParallelism = ({ disabled }: { disabled: boolean }) => {
       <ControlledSliderWithTextInput
         useControllerProps={{ name: 'rl.training.parallelism.pipeline_parallel_size', control }}
         formFieldProps={{
-          slotLabel: 'Pipeline (PP)',
+          slotLabel: 'Pipeline Parallel Size',
           slotInfo: 'Splits layers into stages across GPUs. NeMo RL key: pipeline_parallel_size.',
         }}
-        defaultValue={1}
+        {...specSliderProps(DPO_SPEC_DEFAULTS, 'parallelism_pipeline_parallel_size')}
         min={1}
         max={8}
         step={1}
@@ -142,11 +183,11 @@ const RlParallelism = ({ disabled }: { disabled: boolean }) => {
       <ControlledSliderWithTextInput
         useControllerProps={{ name: 'rl.training.parallelism.context_parallel_size', control }}
         formFieldProps={{
-          slotLabel: 'Context (CP)',
+          slotLabel: 'Context Parallel Size',
           slotInfo:
             'Splits the sequence dimension across GPUs — how long-sequence GRPO becomes feasible at all. NeMo RL key: context_parallel_size.',
         }}
-        defaultValue={1}
+        {...specSliderProps(DPO_SPEC_DEFAULTS, 'parallelism_context_parallel_size')}
         min={1}
         max={8}
         step={1}
@@ -155,11 +196,11 @@ const RlParallelism = ({ disabled }: { disabled: boolean }) => {
       <ControlledSliderWithTextInput
         useControllerProps={{ name: 'rl.training.parallelism.expert_parallel_size', control }}
         formFieldProps={{
-          slotLabel: 'Expert (EP)',
+          slotLabel: 'Expert Parallel Size',
           slotInfo:
             'Expert parallel size for MoE models. GRPO only — a value above 1 selects the DTensor v2 backend. NeMo RL key: expert_parallel_size.',
         }}
-        defaultValue={1}
+        {...specSliderProps(DPO_SPEC_DEFAULTS, 'parallelism_expert_parallel_size')}
         min={1}
         max={8}
         step={1}
@@ -187,12 +228,6 @@ const UnslothHardware = ({ disabled }: { disabled: boolean }) => {
         useControllerProps={{ name: 'unsloth.hardware.gpus', control }}
         label="GPU Indices"
         placeholder="0  or  0,1"
-        disabled={disabled}
-      />
-      <ControlledJsonInput
-        useControllerProps={{ name: 'unsloth.deployment_config', control }}
-        formFieldProps={{ slotLabel: 'Deployment Config (name or JSON)' }}
-        placeholder='"my-config"  or  { "gpu": 1 }'
         disabled={disabled}
       />
     </Stack>

@@ -11,14 +11,14 @@ from anonymizer.interface.errors import AnonymizerError, InvalidConfigError
 from data_designer_nemo.errors import NDDInternalError, NDDInvalidConfigError
 from fastapi import Request
 from nemo_anonymizer_plugin.app.errors import AnonymizerInternalError, AnonymizerInvalidConfigError
-from nemo_platform_plugin.service import NemoService, RouterSpec
+from nemo_helix_plugin.service import NemoService, RouterSpec
 from pydantic import ValidationError
 from starlette import status
 from starlette.responses import JSONResponse
 
 
 class AnonymizerService(NemoService):
-    """Anonymizer service for NeMo Platform."""
+    """Anonymizer service for NeMo Helix."""
 
     name: ClassVar[str] = "anonymizer"
     dependencies: ClassVar[list[str]] = [
@@ -34,9 +34,9 @@ class AnonymizerService(NemoService):
         from nemo_anonymizer_plugin.app import entity_labels
         from nemo_anonymizer_plugin.functions.preview import PreviewFunction
         from nemo_anonymizer_plugin.jobs.run import RunJob
-        from nemo_platform_plugin.authz import AuthzScope
-        from nemo_platform_plugin.functions.routes import add_function_routes
-        from nemo_platform_plugin.jobs.routes import add_job_routes
+        from nemo_helix_plugin.authz import AuthzScope
+        from nemo_helix_plugin.functions.routes import add_function_routes
+        from nemo_helix_plugin.jobs.routes import add_job_routes
 
         scope = AuthzScope("anonymizer")
         return [

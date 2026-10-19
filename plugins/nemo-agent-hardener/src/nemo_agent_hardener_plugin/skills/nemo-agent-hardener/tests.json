@@ -1,0 +1,65 @@
+{
+  "skill": "nemo-agent-hardener",
+  "tests": [
+    {
+      "type": "explicit",
+      "prompt": "Use nemo-agent-hardener to harden my ledger agent.",
+      "expected_skill": "nemo-agent-hardener"
+    },
+    {
+      "type": "explicit",
+      "prompt": "Use the nemo-agent-hardener skill to attack the agent I deployed.",
+      "expected_skill": "nemo-agent-hardener"
+    },
+    {
+      "type": "explicit",
+      "prompt": "Invoke nemo-agent-hardener and walk me through a war-game.",
+      "expected_skill": "nemo-agent-hardener"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Red-team my agent and harden whatever gets through.",
+      "expected_skill": "nemo-agent-hardener"
+    },
+    {
+      "type": "implicit",
+      "prompt": "I want a security war-game to attack and harden my banking agent.",
+      "expected_skill": "nemo-agent-hardener"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Attack my deployed agent, then harden it with a war-game.",
+      "expected_skill": "nemo-agent-hardener"
+    },
+    {
+      "type": "contextual",
+      "prompt": "I have a LangGraph agent with its own Dockerfile in ./my-agent \u2014 it moves money between accounts. Before we ship it I want proof it survives prompt-injection attempts without blocking real customers.",
+      "expected_skill": "nemo-agent-hardener"
+    },
+    {
+      "type": "contextual",
+      "prompt": "The ledger agent is registered on the platform as 'ledger'. Attack it, write guardrails for whatever gets through, and give me the hardened war-game image.",
+      "expected_skill": "nemo-agent-hardener"
+    },
+    {
+      "type": "contextual",
+      "prompt": "My last agent hardener war-game says validation_failed - is that a crash or a red-team finding?",
+      "expected_skill": "nemo-agent-hardener"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Restore last night's Postgres backup to the staging database.",
+      "expected_skill_not": "nemo-agent-hardener"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Add a PII-redaction guardrail to my chatbot's config.",
+      "expected_skill_not": "nemo-agent-hardener"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Is the platform up? Show me what's deployed right now.",
+      "expected_skill_not": "nemo-agent-hardener"
+    }
+  ]
+}

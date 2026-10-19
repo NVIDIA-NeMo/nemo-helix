@@ -6,7 +6,6 @@ import { ControlledTextInput } from '@nemo/common/src/components/form/Controlled
 import { ModelSelectV2, type ModelSelection } from '@nemo/common/src/components/ModelSelectV2';
 import { FormField, Stack } from '@nvidia/foundations-react-core';
 import { FormSection } from '@studio/components/NewCustomizationForm/FormSection';
-import { canFineTuneModel } from '@studio/hooks/useModelCustomizationEligibility';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import {
   MODEL_FIELD_BY_BACKEND,
@@ -32,7 +31,7 @@ export const ModelSelectionSection = () => {
   const modelSearch = useModelSearch({
     workspace,
     enabled: open,
-    include: canFineTuneModel,
+    filter: { fileset: true },
   });
 
   const selectedValue: ModelSelection | null = modelField.value

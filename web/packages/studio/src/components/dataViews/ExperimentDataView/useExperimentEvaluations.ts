@@ -9,7 +9,7 @@ import {
   usePatchEvaluation,
   usePinEvaluation,
   useUnpinEvaluation,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/evaluations';
 import type {
   EvaluationFilter,
   EvaluationResponse,

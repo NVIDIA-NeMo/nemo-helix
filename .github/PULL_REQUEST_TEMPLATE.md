@@ -5,9 +5,6 @@
 ## Summary
 <!-- In 1-3 plain sentences, explain what changes and why. Describe before-and-after behavior when it applies. -->
 
-## Related Issue
-<!-- Use Fixes #NNN or Closes #NNN for a related issue. Remove this section if there is none. -->
-
 ## Changes
 <!-- List the concrete changes included in this pull request. -->
 

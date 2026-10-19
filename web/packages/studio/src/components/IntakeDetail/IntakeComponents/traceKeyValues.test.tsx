@@ -4,6 +4,7 @@
 import {
   buildEvaluationContextEntries,
   buildSessionHighlightMetrics,
+  buildTraceHighlightMetrics,
   buildTraceSummaryEntries,
 } from '@studio/components/IntakeDetail/IntakeComponents/traceKeyValues';
 import { mockSessionById, mockTraceById } from '@studio/mocks/intake/telemetry';
@@ -33,6 +34,18 @@ describe('traceKeyValues', () => {
     );
   });
 
+  it('leaves the agent out of the summary entries since the header links it', () => {
+    const trace = mockTraceById('trace-agent-run-001');
+    expect(trace).toBeDefined();
+
+    const entries = buildTraceSummaryEntries(
+      { ...trace!, agent_name: 'react-agent' },
+      { workspace: 'default' }
+    );
+
+    expect(entries.map(({ id }) => id)).not.toContain('agent_name');
+  });
+
   it('builds session headline metrics without a trace error count', () => {
     const session = mockSessionById('session-agent-run-001');
     expect(session).toBeDefined();
@@ -45,6 +58,15 @@ describe('traceKeyValues', () => {
       'total_tokens',
       'cost_usd',
     ]);
+  });
+
+  it('builds trace headline metrics from trace totals', () => {
+    const trace = mockTraceById('trace-agent-run-003');
+    expect(trace).toBeDefined();
+
+    const metrics = buildTraceHighlightMetrics(trace!);
+
+    expect(metrics.map(({ value }) => value)).toEqual(['2', '9s 130ms', '1,194', '$0.0021']);
   });
 
   it('includes evaluation context entries when present', () => {

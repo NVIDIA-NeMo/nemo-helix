@@ -28,9 +28,9 @@ from pathlib import Path
 
 import pytest
 import yaml
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
 from nemo_optimization.router import OptimizeRouter
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
 
 _EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "hermes-optimize"
 _FABRIC_REPO = Path(os.environ.get("NEMO_FABRIC_REPO", ""))
@@ -60,16 +60,14 @@ def _build_payload(dataset_path: Path) -> dict:
         {
             "model": _MODEL,
             "base_url": _BASE_URL,
-            "api_key": "not-used",
-            "allow_empty_api_key": True,
+            "api_key_env": "NEMO_AGENTS_IGW_API_KEY",
         }
     )
     agent["models"]["judge"].update(
         {
             "model": _MODEL,
             "base_url": _BASE_URL,
-            "api_key": "not-used",
-            "allow_empty_api_key": True,
+            "api_key_env": "NEMO_AGENTS_IGW_API_KEY",
         }
     )
     agent["eval"]["general"]["dataset"] = {"file_path": str(dataset_path)}

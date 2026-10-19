@@ -42,7 +42,7 @@ esac
 
 KUBE_CONTEXT_NAMESPACE="$(kubectl config view --minify -o 'jsonpath={..namespace}' 2>/dev/null || true)"
 NAMESPACE="${NAMESPACE:-${KUBE_NAMESPACE:-${KUBE_CONTEXT_NAMESPACE:-default}}}"
-HELM_RELEASE_NAME="${HELM_RELEASE_NAME:-nemo-platform}"
+HELM_RELEASE_NAME="${HELM_RELEASE_NAME:-nemo-helix}"
 
 CHAINSAW_IMAGE="${CHAINSAW_IMAGE:-ghcr.io/kyverno/chainsaw:v0.2.3}"
 CHAINSAW_TEST_DIR="${CHAINSAW_TEST_DIR:-${REPO_ROOT}/e2e/k8s/chainsaw/network-policies}"
@@ -50,8 +50,8 @@ CHAINSAW_REPORT_FORMAT="${CHAINSAW_REPORT_FORMAT:-nil}"
 CHAINSAW_REPORT_NAME="${CHAINSAW_REPORT_NAME:-report-network-policy-smoke}"
 CHAINSAW_REPORT_PATH="${CHAINSAW_REPORT_PATH:-${REPO_ROOT}}"
 
-if [ "${HELM_RELEASE_NAME}" != "nemo-platform" ]; then
-    log_error "NetworkPolicy Chainsaw smoke test expects HELM_RELEASE_NAME=nemo-platform"
+if [ "${HELM_RELEASE_NAME}" != "nemo-helix" ]; then
+    log_error "NetworkPolicy Chainsaw smoke test expects HELM_RELEASE_NAME=nemo-helix"
     exit 1
 fi
 

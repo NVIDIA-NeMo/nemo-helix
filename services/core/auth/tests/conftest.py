@@ -4,7 +4,7 @@
 """Test configuration for auth service."""
 
 import pytest
-from nmp.testing.blockbuster import blockbuster_fixture
+from nhx.testing.blockbuster import blockbuster_fixture
 
 # Enable BlockBuster to detect blocking calls in async code
 blockbuster = blockbuster_fixture(autouse=True)
@@ -13,6 +13,6 @@ blockbuster = blockbuster_fixture(autouse=True)
 @pytest.fixture
 def auth_config():
     """Fixture for auth service config."""
-    from nmp.core.auth.config import AuthConfig
+    from nhx.core.auth.config import AuthConfig
 
     return AuthConfig()

@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from nemo_anonymizer_plugin.service import AnonymizerService
-from nemo_platform_plugin.authz_discovery import _derive_service_contribution
+from nemo_helix_plugin.authz_discovery import _derive_service_contribution
 
 
 def test_anonymizer_authz_derivation_has_no_problems() -> None:

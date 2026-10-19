@@ -21,7 +21,9 @@ export const ModelDetailsPanel: FC<ModelDetailsPanelProps> = ({ model, adapter }
   const createdAt = adapter?.created_at ?? model.created_at;
   const updatedAt = adapter?.updated_at ?? model.updated_at;
   const isChatModel = model.spec?.is_chat;
-  const isEmbeddingModel = model.spec?.is_embedding_model;
+  const headType = model.spec?.head_type;
+  const isEmbeddingModel = headType === 'embedding' || Boolean(model.spec?.is_embedding_model);
+  const isCrossEncoder = headType === 'cross_encoder';
 
   // Hooks must be called unconditionally per React rules; empty string is safe fallback
   const createdRelative = useRelativeTimeSince(createdAt ?? '');
@@ -38,7 +40,7 @@ export const ModelDetailsPanel: FC<ModelDetailsPanelProps> = ({ model, adapter }
           {description}
         </Text>
       )}
-      {(isChatModel || isEmbeddingModel) && (
+      {(isChatModel || isEmbeddingModel || isCrossEncoder) && (
         <Flex gap="density-sm" wrap="wrap">
           {isChatModel && (
             <Tag color="gray" kind="outline" readOnly>
@@ -48,6 +50,11 @@ export const ModelDetailsPanel: FC<ModelDetailsPanelProps> = ({ model, adapter }
           {isEmbeddingModel && (
             <Tag color="gray" kind="outline" readOnly>
               Embedding Model
+            </Tag>
+          )}
+          {isCrossEncoder && (
+            <Tag color="gray" kind="outline" readOnly>
+              Cross-Encoder Model
             </Tag>
           )}
         </Flex>

@@ -18,16 +18,19 @@ import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
 import {
   agentsListDeployments,
-  getAgentsListAgentsQueryKey,
   getAgentsListDeploymentsQueryKey,
-  useAgentsDeleteAgent,
   useAgentsDeleteDeployment,
-  useAgentsListAgents,
   useAgentsListDeployments,
-} from '@nemo/sdk/generated/agents/api';
+} from '@nemo/sdk/generated/agents/agent-deployments';
+import {
+  getAgentsListAgentsQueryKey,
+  useAgentsDeleteAgent,
+  useAgentsListAgents,
+} from '@nemo/sdk/generated/agents/agents';
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import { Button, type DropdownEntry, Text } from '@nvidia/foundations-react-core';
+import { hasAgentConfig } from '@studio/api/agents/hasAgentConfig';
 import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
 import { MODEL_COMPARE_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -99,7 +102,7 @@ type DeleteState =
   | null;
 
 export interface CombinedAgentsTableProps {
-  onAgentRowClick?: (agent: AgentTableRow) => void;
+  onAgentRowClick?: (agent: AgentTableRow, event: React.MouseEvent) => void;
   onCreateDeployment?: (agentName: string) => void;
   onCloneAgent?: (agent: AgentTableRow) => void;
   onAgentsLoaded?: (agents: Agent[]) => void;
@@ -296,6 +299,7 @@ export const AgentsTable: FC<CombinedAgentsTableProps> = ({
       rowActions: (row: AgentTableRow): DropdownEntry[] => [
         {
           children: 'Deploy',
+          disabled: !hasAgentConfig(row.config),
           onSelect: () => onCreateDeployment?.(row.name),
         },
         ...(canTestModels
@@ -339,8 +343,8 @@ export const AgentsTable: FC<CombinedAgentsTableProps> = ({
             <Trash /> Delete
           </Button>
         )}
-        onRowClick={(row: AgentTableRow) => {
-          onAgentRowClick?.(row);
+        onRowClick={(row: AgentTableRow, _index, event) => {
+          onAgentRowClick?.(row, event);
         }}
         attributes={{
           DataViewRoot: {

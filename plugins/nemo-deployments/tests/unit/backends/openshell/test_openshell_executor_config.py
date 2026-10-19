@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import pytest
-from nemo_deployments_plugin.backends.openshell.config import OpenShellExecutorConfig
+from nemo_deployments_plugin.backends.openshell.config import OpenShellExecutorConfig, OpenShellTLSConfig
 from pydantic import ValidationError
 
 
@@ -71,17 +71,23 @@ def test_platform_egress_rejects_unknown_key() -> None:
 
 
 def test_platform_egress_accepts_proto_value_sets() -> None:
-    # Value sets follow openshell/proto/sandbox.proto, not the shorter summaries: "graphql"/""
-    # protocol and "passthrough" tls are valid and must not be rejected.
+    # Value sets follow OpenShell's authored policy schema, not the shorter summaries:
+    # "graphql"/"" protocol and "skip" tls are valid and must not be rejected.
     config = OpenShellExecutorConfig.model_validate(
-        {"platform_egress": {"protocol": "graphql", "tls": "passthrough", "access": "read-only"}}
+        {"platform_egress": {"protocol": "graphql", "tls": "skip", "access": "read-only"}}
     )
     assert config.platform_egress is not None
     assert (config.platform_egress.protocol, config.platform_egress.tls, config.platform_egress.access) == (
         "graphql",
-        "passthrough",
+        "skip",
         "read-only",
     )
+
+
+@pytest.mark.parametrize("tls", ["terminate", "passthrough"])
+def test_platform_egress_rejects_tls_modes_openshell_removed(tls: str) -> None:
+    with pytest.raises(ValidationError):
+        OpenShellExecutorConfig.model_validate({"platform_egress": {"tls": tls}})
 
 
 def test_platform_egress_rejects_invalid_protocol() -> None:
@@ -107,3 +113,60 @@ def test_serve_virtual_env_defaults_to_the_packaged_venv() -> None:
 def test_serve_virtual_env_is_overridable_and_can_be_disabled() -> None:
     assert OpenShellExecutorConfig.model_validate({"serve_virtual_env": "/opt/venv"}).serve_virtual_env == "/opt/venv"
     assert OpenShellExecutorConfig.model_validate({"serve_virtual_env": ""}).serve_virtual_env == ""
+
+
+def test_service_transport_defaults_to_the_gateway_endpoint_without_tls() -> None:
+    transport = OpenShellExecutorConfig(gateway_endpoint="http://127.0.0.1:17670").service_transport()
+    assert transport.connect_base == "http://127.0.0.1:17670"
+    assert transport.ca_cert is None
+    assert transport.client_cert is None
+
+
+def test_service_transport_prefers_service_router_endpoint() -> None:
+    config = OpenShellExecutorConfig(
+        gateway_endpoint="https://openshell.openshell.svc.cluster.local:8080",
+        service_router_endpoint="https://openshell-router.openshell.svc.cluster.local:8443",
+    )
+    assert config.service_transport().connect_base == "https://openshell-router.openshell.svc.cluster.local:8443"
+
+
+_TLS = OpenShellTLSConfig(ca_cert_path="/tls/ca.crt", client_cert_path="/tls/tls.crt", client_key_path="/tls/tls.key")
+
+
+def test_service_transport_carries_the_grpc_tls_material() -> None:
+    config = OpenShellExecutorConfig(gateway_endpoint="https://openshell.openshell.svc.cluster.local:8080", tls=_TLS)
+    transport = config.service_transport()
+    assert transport.ca_cert == "/tls/ca.crt"
+    assert transport.client_cert == ("/tls/tls.crt", "/tls/tls.key")
+
+
+def test_service_transport_ignores_tls_material_on_a_plaintext_channel() -> None:
+    config = OpenShellExecutorConfig(gateway_endpoint="https://gw:8080", insecure=True, tls=_TLS)
+    transport = config.service_transport()
+    assert transport.ca_cert is None
+    assert transport.client_cert is None
+
+
+def test_service_router_endpoint_must_be_a_url() -> None:
+    with pytest.raises(ValidationError, match="service_router_endpoint must be a URL"):
+        OpenShellExecutorConfig(service_router_endpoint="openshell:8080")
+
+
+@pytest.mark.parametrize(
+    ("gateway", "router", "insecure", "expect_tls"),
+    [
+        ("http://gw:8080", "https://router:8443", None, True),
+        ("https://gw:8443", "http://router:8080", None, False),
+        ("http://gw:8080", "https://router:8443", True, False),
+        ("https://gw:8443", "http://router:8080", False, False),
+    ],
+)
+def test_service_transport_uses_router_scheme_for_tls(
+    gateway: str, router: str, insecure: bool | None, expect_tls: bool
+) -> None:
+    transport = OpenShellExecutorConfig(
+        gateway_endpoint=gateway, service_router_endpoint=router, insecure=insecure, tls=_TLS
+    ).service_transport()
+    assert transport.connect_base == router
+    assert transport.ca_cert == ("/tls/ca.crt" if expect_tls else None)
+    assert transport.client_cert == (("/tls/tls.crt", "/tls/tls.key") if expect_tls else None)

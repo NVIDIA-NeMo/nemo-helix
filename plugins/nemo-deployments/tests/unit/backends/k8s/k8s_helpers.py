@@ -5,8 +5,10 @@
 
 from __future__ import annotations
 
+import datetime
 from unittest.mock import MagicMock
 
+from kubernetes import client
 from nemo_deployments_plugin.backends.labels import (
     BACKOFF_LIMIT_LABEL,
     CONFIG_NAME_LABEL,
@@ -18,8 +20,15 @@ from nemo_deployments_plugin.backends.labels import (
     k8s_deployment_resource_name,
 )
 from nemo_deployments_plugin.constants import MANAGED_BY_LABEL
-from nemo_deployments_plugin.entities import Container, ContainerPort, Deployment, DeploymentConfig
+from nemo_deployments_plugin.entities import (
+    Container,
+    ContainerPort,
+    Deployment,
+    DeploymentConfig,
+    WorkloadIdentitySpec,
+)
 from nemo_deployments_plugin.types import RestartPolicy
+from nemo_helix_plugin.auth import AuthContext
 
 
 def sample_config(*, restart_policy: RestartPolicy = "Never") -> DeploymentConfig:
@@ -60,6 +69,95 @@ def sample_always_config(*, with_port: bool = True) -> DeploymentConfig:
     ).model_copy(update={"restart_policy": "Always"})
 
 
+def workload_auth_context() -> AuthContext:
+    return AuthContext(
+        principal_id="user:alice",
+        principal_email="alice@example.com",
+        principal_groups=["research"],
+    )
+
+
+def with_workload_identity(
+    config: DeploymentConfig,
+    *,
+    workload_kind: str = "agent_deployment",
+    workload_id: str = "logical-task",
+    service_account_name: str = "dep-sa",
+) -> DeploymentConfig:
+    return config.model_copy(
+        update={
+            "workload_identity": WorkloadIdentitySpec(
+                enabled=True,
+                workloadKind=workload_kind,
+                workloadId=workload_id,
+                serviceAccountName=service_account_name,
+                tokenExpirationSeconds=900,
+            )
+        }
+    )
+
+
+def live_pod(
+    pod_uid: str,
+    *,
+    phase: str = "Running",
+    name: str = "task-pod-1",
+    owner_kind: str | None = None,
+    owner_name: str | None = None,
+    owner_uid: str | None = None,
+    service_account_name: str = "default",
+) -> client.V1Pod:
+    owner_references = (
+        [
+            client.V1OwnerReference(
+                api_version="batch/v1" if owner_kind == "Job" else "apps/v1",
+                kind=owner_kind,
+                name=owner_name,
+                uid=owner_uid or f"{owner_name}-uid",
+                controller=True,
+            )
+        ]
+        if owner_kind is not None and owner_name is not None
+        else None
+    )
+    return client.V1Pod(
+        metadata=client.V1ObjectMeta(
+            name=name,
+            uid=pod_uid,
+            creation_timestamp=datetime.datetime(2026, 1, 2, tzinfo=datetime.UTC),
+            owner_references=owner_references,
+        ),
+        spec=client.V1PodSpec(containers=[], service_account_name=service_account_name),
+        status=client.V1PodStatus(phase=phase, container_statuses=[]),
+    )
+
+
+def mock_replicaset(
+    *,
+    name: str,
+    uid: str | None = None,
+    deployment_name: str,
+    deployment_uid: str = "deployment-uid",
+    controller: bool = True,
+    owner_kind: str = "Deployment",
+) -> client.V1ReplicaSet:
+    return client.V1ReplicaSet(
+        metadata=client.V1ObjectMeta(
+            name=name,
+            uid=uid or f"{name}-uid",
+            owner_references=[
+                client.V1OwnerReference(
+                    api_version="apps/v1",
+                    kind=owner_kind,
+                    name=deployment_name,
+                    uid=deployment_uid,
+                    controller=controller,
+                )
+            ],
+        )
+    )
+
+
 def always_identity_labels(
     workspace: str = "default",
     name: str = "task",
@@ -80,18 +178,29 @@ def mock_deployment(
     *,
     workspace: str = "default",
     name: str = "task",
+    uid: str = "deployment-uid",
     ready_replicas: int = 0,
     deleting: bool = False,
-) -> MagicMock:
+) -> client.V1Deployment:
     labels = always_identity_labels(workspace=workspace, name=name)
     resource_name = k8s_deployment_resource_name(workspace, name)
-    deployment = MagicMock()
-    deployment.metadata.labels = labels
-    deployment.metadata.deletion_timestamp = "2026-01-01T00:00:00Z" if deleting else None
-    deployment.status.ready_replicas = ready_replicas
-    deployment.status.available_replicas = ready_replicas
-    deployment.spec.selector.match_labels = {"app": resource_name}
-    return deployment
+    return client.V1Deployment(
+        metadata=client.V1ObjectMeta(
+            name=resource_name,
+            uid=uid,
+            labels=labels,
+            deletion_timestamp=datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC) if deleting else None,
+        ),
+        spec=client.V1DeploymentSpec(
+            replicas=1,
+            selector=client.V1LabelSelector(match_labels={"app": resource_name}),
+            template=client.V1PodTemplateSpec(spec=client.V1PodSpec(containers=[])),
+        ),
+        status=client.V1DeploymentStatus(
+            ready_replicas=ready_replicas,
+            available_replicas=ready_replicas,
+        ),
+    )
 
 
 def mock_pod(
@@ -152,6 +261,7 @@ def mock_job(
     name: str = "task",
     restart_policy: RestartPolicy = "Never",
     config_name: str = "config1",
+    backoff_limit: int = 6,
     active: int = 0,
     complete: bool = False,
     failed: bool = False,
@@ -162,9 +272,11 @@ def mock_job(
         name,
         restart_policy=restart_policy,
         config_name=config_name,
+        backoff_limit=backoff_limit,
     )
     job = MagicMock()
     job.metadata.labels = labels
+    job.metadata.uid = f"{k8s_deployment_resource_name(workspace, name)}-uid"
     job.metadata.deletion_timestamp = "2026-01-01T00:00:00Z" if deleting else None
     job.status.active = active
     job.status.succeeded = 1 if complete else 0

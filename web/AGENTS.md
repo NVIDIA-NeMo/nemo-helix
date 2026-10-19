@@ -5,7 +5,7 @@
 
 ## Project Context
 
-- NeMo Studio — React + TypeScript monorepo for the NeMo Platform UI
+- NeMo Studio — React + TypeScript monorepo for the NeMo Helix UI
 - Tech Stack: React 18, TypeScript, Vite, Vitest, Playwright, pnpm workspaces
 - Uses KUI (Kaizen UI) React components, TanStack Query
 
@@ -32,6 +32,34 @@ The `kaizen-ui` skill is not committed — it is synced from the `@nvidia/founda
   - `@nemo/common/` → `packages/common/src/`
   - `@nemo/sdk` → `packages/sdk/`
 - Use `import type` for type-only imports
+
+## Importing the generated SDK
+
+`packages/sdk/generated/<service>/` is regenerated per service into one file per
+OpenAPI tag (e.g. `generated/platform/files.ts`, `generated/agents/agents.ts`) —
+not a single `api.ts`. Import a hook from its specific tag file:
+
+```ts
+import { useFilesDeleteFileset } from '@nemo/sdk/generated/platform/files';
+```
+
+- **Never** `import * as sdk from '@nemo/sdk/generated/<service>/index'` (or the
+  old `.../api'` path — it no longer exists) just to reach one or two hooks.
+  That barrel re-exports the entire service and defeats the point of the
+  per-tag split; it exists only for the two call sites that genuinely need the
+  whole surface (`packages/studio/src/plugins/PluginRenderer.tsx` and
+  `plugins/types.ts`'s `PluginSdk`).
+- You don't know which tag file a hook lives in ahead of time — grep
+  `packages/sdk/generated/<service>/*.ts` for `export const <hookName>`, or let
+  your editor's auto-import resolve it.
+- `vi.mock('@nemo/sdk/generated/<service>/api', ...)` from before this split no
+  longer resolves. Mock the specific tag file(s) the test actually imports from;
+  if a test's mocked hooks span more than one tag file, that's multiple
+  `vi.mock()` calls, one per file — don't merge them back into a single call
+  against a nonexistent path.
+- The generated tree is gitignored and gets rebuilt by `pnpm gen:<service>` /
+  `pnpm gen:all` (see `packages/sdk/package.json`) — file layout can shift on
+  regeneration if the OpenAPI spec's tags change.
 
 ## Package Management
 

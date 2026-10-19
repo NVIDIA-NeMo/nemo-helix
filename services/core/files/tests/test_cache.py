@@ -9,12 +9,12 @@ from unittest.mock import AsyncMock
 
 import anyio
 import pytest
-from nmp.core.files.app.cache import (
+from nhx.core.files.app.cache import (
     cache_file_directly,
     reset_background_cache_limiter,
     warm_fileset_cache,
 )
-from nmp.core.files.exceptions import NotFoundError
+from nhx.core.files.exceptions import NotFoundError
 
 
 @pytest.fixture(autouse=True)

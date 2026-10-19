@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Dataset-driven eval config for the agentEvaluation e2e test, scored over the rows of
+# public/sample-agents/email-phishing-analyzer/smaller_test.csv.
+#
+# `dataset` is absent on purpose: Studio's Run Agent Evaluation flow writes the ref to the
+# dataset uploaded beside this file at submit time.
+#
+# The metric is a string-check rather than an llm-judge so the run needs no judge model and
+# scores deterministically — an e2e test asserts that a score arrives, not that a model is
+# good. That also keeps the "Override all LLM models" field out of the form.
+prompt_template: |-
+  is this legit?
+
+  Subject: {{ item.subject }}
+  From: {{ item.sender }}
+
+  {{ item.body }}
+metrics:
+  - bundle_kind: metric-bundle
+    bundle_format_version: v1
+    metric_type: string-check
+    metadata:
+      description: The triage verdict on line one must equal the row's label. Everything after it is
+        the agent's reasoning, which routinely names the other verdict.
+      labels: {}
+    outputs:
+      - name: string-check
+        description: null
+        value_json_schema:
+          description: Continuous numeric metric value.
+          title: ContinuousScore
+          type: number
+    secrets: {}
+    payload:
+      kind: inline
+      metric:
+        type: string-check
+        operation: equals
+        left_template: '{{ (sample.output_text or '''').split(''\n'')[0] | trim | lower }}'
+        right_template: '{{ item.label | trim | lower }}'

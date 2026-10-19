@@ -23,8 +23,7 @@ evaluation result before promotion.
 | Suggestion type     | Signal                                                                                                        | Result                                                                                                      |
 | ------------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | Model optimization  | An agent uses a single frontier model where a smaller model or route split may preserve quality at lower cost | Suggests a model swap or Switchyard random-routing virtual model                                            |
-| Skill optimization  | The agent uses skills and has an evaluation suite                                                             | Suggests running `nemo agents optimize-skills` to improve skill files and keep changes that pass evaluation |
-| Prompt optimization | The agent has an optimization config and baseline dataset                                                     | Suggests `nemo agents optimize run` for Fabric-backed tuning                                                |
+| Prompt optimization | The agent has an optimization config and baseline dataset                                                     | Suggests staging with `nemo agents optimize prepare-fileset`, then running `nemo agents optimize run-strategy` for Fabric-backed tuning |
 | New model scan      | Difference between the current model list and the previous optimizer snapshot                                 | Suggests evaluating or auditing newly available models                                                      |
 
 Optimizer state is stored in the `nemo-agent-optimizer` fileset:
@@ -32,8 +31,9 @@ Optimizer state is stored in the `nemo-agent-optimizer` fileset:
 - `optimizer_suggestions.jsonl`: one suggestion per line, including applied state.
 - `optimizer_snapshot.json`: model and agent names from the latest run.
 
-Security-oriented suggestions such as missing guardrails, PII exposure, or
-leaked secrets are covered in [Secure Agents](/documentation/agents/secure-agents).
+Suggestions about missing guardrails are covered in
+[Add Guardrails to an Agent](/documentation/agents/add-guardrails). PII exposure and
+leaked secrets are covered in [Scan Trace Data](/documentation/agents/scan-trace-data).
 
 ## Prerequisites
 
@@ -55,10 +55,16 @@ If you need a demo agent, start the platform and create the ReAct example:
 nemo services run
 ```
 
+If `nemo setup` already selected a default model, skip the
+`NEMO_DEFAULT_MODEL` export below—the example uses the model saved in your
+active context. Otherwise, choose a model from `nemo models list` and set
+`NEMO_DEFAULT_MODEL`. An exported value overrides the context value.
+
 In another terminal:
 
+{/* @nemo-docs: allow-nhx-base-url */}
 ```bash
-export NMP_BASE_URL=http://127.0.0.1:8080
+export NHX_BASE_URL=http://127.0.0.1:8080  # targets the platform started above
 cd plugins/nemo-agents
 
 printf '%s' "$NVIDIA_API_KEY" | nemo secrets create ngc-api-key --from-file -
@@ -67,6 +73,8 @@ nemo inference providers create nvidia-build \
   --api-key-secret-name ngc-api-key
 nemo wait inference provider nvidia-build
 
+# Choose a model entity shown by `nemo models list`.
+export NEMO_DEFAULT_MODEL=nvidia-nemotron-3-5-lightning-30b-a3b
 nemo agents create \
   --name react-agent \
   --agent-config examples/react-agent/react-agent.yml
@@ -74,9 +82,9 @@ nemo agents deploy --agent react-agent
 nemo agents deployments wait --agent react-agent
 ```
 
-The example agent uses `nvidia-nemotron-3-nano-30b-a3b`, so it can produce a
-model optimization suggestion when the workspace model catalog contains a
-smaller compatible model.
+The example agent reads `NEMO_DEFAULT_MODEL`, so it can produce a model
+optimization suggestion when the workspace model catalog contains a smaller
+compatible model.
 
 ## Optimize with Switchyard Routing
 
@@ -86,8 +94,21 @@ across multiple backend models. The common optimization pattern is to create a
 cheaper model, then evaluate whether the route split preserves application
 quality.
 
-Run `nemo models list` first and replace the placeholders below with model
-entity names from your workspace that use the `OPENAI_CHAT` backend format.
+The `switchyard` optimization strategy automates this for a platform agent: it
+creates one virtual model per (model pair × routing strategy) and saves a copy
+of the agent config per combination, pointed at that virtual model, to the job
+results.
+
+```bash
+nemo agents optimize run-strategy --strategy switchyard --agent my-agent \
+  --spec '{"models": ["default/model-a", "default/model-b"], "routing_strategies": ["random_routing", "stage_router"]}'
+```
+
+See the [Switchyard plugin README](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/plugins/nemo-switchyard/README.md#optimization-strategy)
+for the spec fields and how to fetch the results. To hand-build a single
+virtual model instead, run `nemo models list` first and replace the
+placeholders below with model entity names from your workspace that use the
+`OPENAI_CHAT` backend format.
 
 <Tabs>
 
@@ -152,101 +173,47 @@ What it does under the hood:
 <Tab title="Python SDK">
 
 ```python
-import os
-from nemo_platform import NeMoPlatform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.inference_middleware import BackendFormat
+from nemo_helix_plugin.inference_middleware_models import MiddlewareCall, VirtualModelInferenceConfig
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
+from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
-client.inference.virtual_models.create(
-    name="routed-agent-model",
-    workspace="default",
-    models=[
-        {"model": "default/<strong-model-entity>", "backend_format": "OPENAI_CHAT"},
-        {"model": "default/<weak-model-entity>", "backend_format": "OPENAI_CHAT"},
-    ],
-    request_middleware=[{
-        "name": "nemo-switchyard",
-        "config_type": "random_routing",
-        "config": {
-            "strong": {"model": "default/<strong-model-entity>"},
-            "weak": {"model": "default/<weak-model-entity>"},
-            "strong_probability": 0.8,
-            "enable_stats": False,
-        },
-    }],
-)
-```
-
-</Tab>
-
-</Tabs>
-## Optimize Skills
-
-Skill optimization applies when the agent depends on local skill files and has
-an evaluation suite. The loop runs evaluations, analyzes failures, lets the
-coding agent edit only the configured skills directory, reruns verification,
-and keeps the change only when the evaluation result improves.
-
-<Tabs>
-
-<Tab title="CLI">
-
-```bash
-nemo agents optimize-skills run --spec-file .agent-improver.yml
-```
-
-Set `open_pr: true` in the YAML when you want the loop to prepare a
-reviewable branch.
-
-A sample `.agent-improver.yml` is in
-`plugins/nemo-agents/examples/agent-improver.example.yml`.
-
-</Tab>
-<Tab title="Skill">
-
-Ask your coding agent:
-
-> Optimize the skills used by my agent and keep the changes that improve evaluation scores.
-
-The `agents-optimize` skill drives the skill-optimization loop when the
-selected agent has skills and an evaluation suite. Verify it is installed:
-
-```bash
-nemo skills show agents-optimize
-```
-
-What it does under the hood:
-
-- Confirms the agent uses skills (a `--skills-path`, a `.agent-improver.yml`,
-  or skill files referenced from the config).
-- Runs `nemo agents optimize-skills` against the configured skills directory.
-- Re-runs evaluation and keeps the change only when scores improve.
-- Persists outcomes to the `nemo-agent-optimizer` fileset.
-
-</Tab>
-<Tab title="Python SDK">
-
-```python
-import yaml
-from pathlib import Path
-
-from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
-from nemo_platform_plugin.scheduler import NemoJobScheduler
-
-spec = yaml.safe_load(Path(".agent-improver.yml").read_text())
-NemoJobScheduler().run_local(
-    OptimizeSkillsJob,
-    spec,
-    workspace="default",
+VirtualModelsClient.from_client(client).create_virtual_model(
+    body=CreateVirtualModelRequest(
+        name="routed-agent-model",
+        models=[
+            VirtualModelInferenceConfig(
+                model="default/<strong-model-entity>", backend_format=BackendFormat.OPENAI_CHAT
+            ),
+            VirtualModelInferenceConfig(
+                model="default/<weak-model-entity>", backend_format=BackendFormat.OPENAI_CHAT
+            ),
+        ],
+        request_middleware=[
+            MiddlewareCall(
+                name="nemo-switchyard",
+                config_type="random_routing",
+                config={
+                    "strong": {"model": "default/<strong-model-entity>"},
+                    "weak": {"model": "default/<weak-model-entity>"},
+                    "strong_probability": 0.8,
+                    "enable_stats": False,
+                },
+            )
+        ],
+    )
 )
 ```
 
 </Tab>
 
 </Tabs>
+
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
+
 ## Inspect Saved Results
 
 Use the Files service to inspect what the optimizer saved:
@@ -273,9 +240,12 @@ nemo files list nemo-agent-telemetry
 
 ## Run Prompt and Parameter Tuning
 
-The `nemo agents optimize run` command runs Fabric-backed numeric
-optimization through `agents.optimize` (implementation in
-`nemo-optimization`). Input must be a Fabric-native agent package
+The `nemo agents optimize run-strategy` command submits Fabric-backed numeric
+optimization. `nemo agents optimize` is a shared command group, one per
+installed optimization strategy; `--strategy config-tuning` selects the Fabric-backed
+numeric study implemented in `nemo-optimization`. Run
+`nemo agents optimize list-strategies` to see what this environment has.
+Input must be a Fabric-native agent package
 (`schema_version: fabric.agent/v1alpha1`). The golden-path harness is
 Hermes (`nvidia.fabric.hermes`); see
 `plugins/nemo-optimization/examples/hermes-optimize/` (install steps live in
@@ -284,11 +254,12 @@ that README).
 After `uv sync --package nemo-agents-plugin` (and activating `.venv`), invoke
 `nemo` directly.
 
-`--optimize-config` must be an **absolute** path for `run`, and paths *inside*
-the YAML (`dataset`, `eval.fabric.base_dir`, hook and MCP configs) resolve
-against your current working directory. Keep the config and everything it
-references in one directory — an *optimize bundle* — and run from there. The
-same layout is what [`submit`](#submit-a-study-to-the-platform) needs.
+For CLI platform runs, keep the config and everything it references in one
+directory — an *optimize bundle* — stage that bundle with `prepare-fileset`,
+and pass `--optimize-config` as a path relative to the staged fileset root.
+For local Python SDK runs, `optimize_config` must be an **absolute** host path;
+paths *inside* the YAML (`dataset`, `eval.fabric.base_dir`, hook and MCP configs)
+resolve against your current working directory.
 
 ```bash
 export BUNDLE="$(pwd)/plugins/nemo-optimization/examples/hermes-optimize"
@@ -302,8 +273,15 @@ cd "$BUNDLE"
 <Tab title="CLI">
 
 ```bash
-nemo agents optimize run \
-  --optimize-config "$BUNDLE/optimize-chatonly.yaml" \
+nemo agents optimize prepare-fileset \
+  --source "$BUNDLE" \
+  --optimize-config optimize-chatonly.yaml \
+  --fileset hermes-optimize-chatonly \
+  --workspace default
+nemo agents optimize run-strategy \
+  --strategy config-tuning \
+  --optimize-config-fileset default/hermes-optimize-chatonly \
+  --optimize-config optimize-chatonly.yaml \
   --workspace default
 ```
 
@@ -314,8 +292,8 @@ Ask your coding agent:
 
 > Run prompt tuning on my deployed agent against this optimization config.
 
-The `agents-optimize` skill suggests `nemo agents optimize run` when the
-agent has an optimization config and a baseline dataset. Verify it is
+The `agents-optimize` skill suggests `nemo agents optimize run-strategy` when the agent
+has an optimization config and a baseline dataset. Verify it is
 installed:
 
 ```bash
@@ -325,7 +303,8 @@ nemo skills show agents-optimize
 What it does under the hood:
 
 - Confirms the agent has a Fabric-native optimization YAML.
-- Runs `nemo agents optimize run` (or `submit` for platform jobs).
+- Stages the optimize bundle with `nemo agents optimize prepare-fileset`,
+  then submits it with `nemo agents optimize run-strategy --strategy config-tuning`.
 - Compares results against the evaluation baseline and surfaces deltas
   for review.
 
@@ -333,31 +312,23 @@ What it does under the hood:
 <Tab title="Python SDK">
 
 ```python
-import os
-from pathlib import Path
+from nemo_agent_optimization_plugin.jobs.run_strategy import RunStrategyJob
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.scheduler import NemoJobScheduler
 
-from nemo_optimization.jobs.optimize import OptimizeJob
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.scheduler import NemoJobScheduler
+client = NemoClient.from_config()
+workspace = client.resolve_workspace()
 
-WORKSPACE = "default"
-bundle = Path("plugins/nemo-optimization/examples/hermes-optimize").resolve()
-optimize_config = bundle / "optimize-chatonly.yaml"
-os.chdir(bundle)  # dataset / base_dir are relative to the bundle
-
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
-    workspace=WORKSPACE,
-)
-
-result = NemoJobScheduler().run_local(
-    OptimizeJob,
+result = NemoJobScheduler().submit_remote(
+    RunStrategyJob,
     {
-        "optimize_config": str(optimize_config),
-        "workspace": WORKSPACE,
+        "strategy": "config-tuning",
+        "optimize_config": "optimize-chatonly.yaml",
+        "optimize_config_fileset": f"{workspace}/hermes-optimize-chatonly",
+        "workspace": workspace,
     },
-    workspace=WORKSPACE,
-    sdk=client,
+    base_url=client.base_url,
+    workspace=workspace,
 )
 print(result)
 ```
@@ -368,24 +339,31 @@ print(result)
 
 ### MCP Hermes (phishing analyzer)
 
-Point `PHISHING_AGENT_SRC` / `PHISHING_MCP_BIN` at an
-`email-phishing-analyzer-harnesses` checkout (its own `.venv` after
-`uv sync`). Do **not** pip-install that agent into the platform venv.
-Full setup steps are in `plugins/nemo-optimization/examples/hermes-optimize/README.md`.
+The agent calls the email-phishing-analyzer MCP server from the
+`email-phishing-analyzer-harnesses` checkout, declared statically like any
+production MCP server: its console script as `url` and its key in `env`
+(`PHISHING_MCP_BIN`, `PHISHING_ANALYZER_API_KEY`; the analyzer calls
+`integrate.api.nvidia.com` while the coordinator uses `inference-api.nvidia.com`). Trials are scored on the judged
+classification, on the analyzer being called exactly once, and on the email
+reaching the tool verbatim; the last two are read from the ATIF trajectory.
+`optimize-mcp-mock.yaml` runs the same study against a fixture shipped in the
+bundle that replays recorded analyzer results, so it needs no checkout or
+analyzer credential. Full steps are in `plugins/nemo-optimization/examples/hermes-optimize/README.md`.
 
 <Tabs>
 
 <Tab title="CLI">
 
 ```bash
-export PHISHING_AGENT_ROOT="${PHISHING_AGENT_ROOT:-$HOME/work/email-phishing-analyzer-harnesses}"
-export PHISHING_AGENT_SRC="$PHISHING_AGENT_ROOT/src"
-export PHISHING_MCP_BIN="$PHISHING_AGENT_ROOT/.venv/bin/email-phishing-analyzer-mcp"
-
-# These environment variables are templated into optimize-mcp.yaml.
-
-nemo agents optimize run \
-  --optimize-config "$BUNDLE/optimize-mcp.yaml" \
+nemo agents optimize prepare-fileset \
+  --source "$BUNDLE" \
+  --optimize-config optimize-mcp.yaml \
+  --fileset hermes-optimize-mcp \
+  --workspace default
+nemo agents optimize run-strategy \
+  --strategy config-tuning \
+  --optimize-config-fileset default/hermes-optimize-mcp \
+  --optimize-config optimize-mcp.yaml \
   --workspace default
 ```
 
@@ -393,43 +371,23 @@ nemo agents optimize run \
 <Tab title="Python SDK">
 
 ```python
-import os
-from pathlib import Path
+from nemo_agent_optimization_plugin.jobs.run_strategy import RunStrategyJob
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.scheduler import NemoJobScheduler
 
-from nemo_optimization.jobs.optimize import OptimizeJob
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.scheduler import NemoJobScheduler
+client = NemoClient.from_config()
+workspace = client.resolve_workspace()
 
-WORKSPACE = "default"
-agent_root = Path(
-    os.environ.get(
-        "PHISHING_AGENT_ROOT",
-        Path.home() / "work/email-phishing-analyzer-harnesses",
-    )
-)
-os.environ.setdefault("PHISHING_AGENT_SRC", str(agent_root / "src"))
-os.environ.setdefault(
-    "PHISHING_MCP_BIN",
-    str(agent_root / ".venv/bin/email-phishing-analyzer-mcp"),
-)
-
-bundle = Path("plugins/nemo-optimization/examples/hermes-optimize").resolve()
-optimize_config = bundle / "optimize-mcp.yaml"
-os.chdir(bundle)  # dataset / base_dir are relative to the bundle
-
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
-    workspace=WORKSPACE,
-)
-
-result = NemoJobScheduler().run_local(
-    OptimizeJob,
+result = NemoJobScheduler().submit_remote(
+    RunStrategyJob,
     {
-        "optimize_config": str(optimize_config),
-        "workspace": WORKSPACE,
+        "strategy": "config-tuning",
+        "optimize_config": "optimize-mcp.yaml",
+        "optimize_config_fileset": f"{workspace}/hermes-optimize-mcp",
+        "workspace": workspace,
     },
-    workspace=WORKSPACE,
-    sdk=client,
+    base_url=client.base_url,
+    workspace=workspace,
 )
 print(result)
 ```
@@ -448,13 +406,12 @@ optimize mode was removed. Use a platform-managed agent reference or an inline
 Fabric agent package in `--optimize-config`.
 
 
-## Submit a Study to the Platform
+## Run a Study on the Platform
 
-`nemo agents optimize run` executes in your shell. `submit` hands the study to
-the platform's Jobs service, which runs it on the platform host or cluster and
-therefore **cannot read your filesystem**. So `submit` accepts no host paths:
-it takes a fileset holding the whole optimize bundle, plus a config path
-relative to that fileset's root.
+`nemo agents optimize run-strategy` hands the study to the platform's Jobs service, which
+runs it on the platform host or cluster and therefore **cannot read your
+filesystem**. The command accepts no host paths: it takes a fileset holding the
+whole optimize bundle, plus a config path relative to that fileset's root.
 
 ### 1. Stage the bundle
 
@@ -466,15 +423,15 @@ nemo agents optimize prepare-fileset \
   --workspace default
 ```
 
-`prepare-fileset` validates before it uploads, and prints the matching `submit`
-command on success. It checks that:
+`prepare-fileset` validates before it uploads, and prints the matching
+`nemo agents optimize run-strategy` command on success. It checks that:
 
 - the YAML parses and enables an optimizer with a non-empty search space;
 - there is an Agent under Test — either an inline
   `schema_version: fabric.agent/v1alpha1` package or a resolvable `--agent`;
-- every path the config references (dataset, `eval.fabric.base_dir`,
-  `eval.run_hook.path` / `agent_src`, MCP `config_paths`) is relative and
-  present under `--source`;
+- every path the config references (dataset, `eval.fabric.base_dir`, stdio MCP
+  server scripts in `mcp.servers.*.args`) is relative and present under
+  `--source`;
 - no absolute host path would be shipped to the worker.
 
 Use `--dry-run` to validate without uploading, and `--no-check-models` to skip
@@ -485,29 +442,33 @@ The upload is recursive. Delete local run output (`artifacts/`, `.tmp/`) from
 the bundle before staging.
 </Note>
 
-### 2. Submit
+### 2. Run
 
 ```bash
-nemo agents optimize submit \
+nemo agents optimize run-strategy \
+  --strategy config-tuning \
   --optimize-config-fileset default/hermes-optimize-chatonly \
   --optimize-config optimize-chatonly.yaml \
   --workspace default
 ```
 
-`--optimize-config-fileset` is required: submitting an absolute path fails at
+`--optimize-config-fileset` is required: passing an absolute host path fails at
 compile time with a pointer back to `prepare-fileset`. Add
 `--output <fileset-or-dir>` to publish the study's artifacts (optimized config,
 trials dataframe, ATIF evidence) somewhere addressable when it finishes.
 
 ### Where the study runs
 
-`OptimizeJob` picks its executor from the execution profiles the platform
-actually registered, for the requested profile (currently always `default`):
+`run-strategy` does no optimization itself: it resolves `--strategy` to the
+installed strategy job and delegates `compile` to it, so the executor and entry
+point below are the `config-tuning` strategy's own. That job picks its executor from the
+execution profiles the platform actually registered, for the requested profile
+(currently always `default`):
 
 | Registered profile | Executor | What the deployment must provide |
 |--------------------|----------|----------------------------------|
 | `subprocess` | Host subprocess running `python -m nemo_optimization.tasks.optimize` | The jobs host venv must carry the optimization and Fabric harness dependencies (and the Docker socket, if trials need it) |
-| `cpu` (docker or `kubernetes_job`) | The `nmp-cpu-tasks` image, same entry point | The task image must carry those dependencies; `nemo-optimization-plugin` is in the `cpu-tasks` dependency group for this reason |
+| `cpu` (docker or `kubernetes_job`) | The `nhx-tasks` image, same entry point | The task image must carry those dependencies; `nemo-agent-optimization-plugin` and `nemo-optimization-plugin` are in the `cpu-tasks` dependency group for this reason |
 
 Subprocess wins when both are registered, because a study drives Fabric trials
 that often need the host's Docker daemon and harness adapters. If neither is
@@ -521,7 +482,7 @@ registered under the profile, compile fails and lists what is available.
 
 **Data safety suggestions do not appear.** Telemetry is optional. The optimizer only scans `nemo-agent-telemetry` when that fileset exists and contains JSONL trace files.
 
-## Next steps
+## Next Steps
 
 - [Agent overview](/documentation/agents): review how platform-managed agents are registered, deployed, invoked, evaluated, and optimized.
 - [Agent evaluation](/documentation/evaluate-models/metrics/agent-configuration): configure agents as online evaluation targets and choose the right agent response mapping.

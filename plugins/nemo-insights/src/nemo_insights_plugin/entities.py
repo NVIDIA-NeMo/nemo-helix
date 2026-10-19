@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Insights plugin entity definitions — stored in the NeMo Platform entity store."""
+"""Insights plugin entity definitions — stored in the NeMo Helix entity store."""
 
 from datetime import datetime
 from enum import StrEnum
 
-from nemo_platform_plugin.entity import NemoEntity
+from nemo_helix_plugin.entity import NemoEntity
 from pydantic import Field
 
 
@@ -66,6 +66,42 @@ class Insight(NemoEntity, entity_type="insights_insight"):
             "can also be used to identify other similar traces that might "
             "experience the same issue."
         ),
+    )
+
+
+class AnalysisRun(NemoEntity, entity_type="insights_analysis_run"):
+    """One Insights analysis run — what was asked for, not how it went.
+
+    The record's ``name`` is also the name of the backing ``agents.execute``
+    job. Insights mints that name before submitting, so the link between a run
+    and its job is *derivable* rather than written back after the fact. That
+    removes the dual write, and with it the failure mode where a job exists
+    that no run points at: a run whose job name 404s simply never landed. There
+    is no resubmit-under-an-existing-name route yet, so such a run is a read
+    today, not something a caller can drive back to completion.
+
+    Progress is deliberately absent. Status, logs, and results belong to the
+    Job and are read from it; mirroring them here would go stale immediately.
+    Insights owns only what no lower layer knows: that this job was an analysis
+    run, over which agent and scope.
+    """
+
+    agent: str = Field(description="Agent whose telemetry this run analyzed.")
+    since: datetime | None = Field(
+        default=None,
+        description="Lower bound the run enforced on trace/span reads.",
+    )
+    evaluation_id: str = Field(
+        default="",
+        description="Run scope AND-pinned onto every span read, when one was requested.",
+    )
+    default_model: str = Field(
+        default="",
+        description="Workspace-qualified Model Entity the run used for analysis work.",
+    )
+    fast_model: str = Field(
+        default="",
+        description="Workspace-qualified Model Entity the run used for context summarization.",
     )
 
 

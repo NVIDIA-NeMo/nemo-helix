@@ -4,7 +4,7 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import { useDataDesignerCreateJob } from '@nemo/sdk/generated/data-designer/api';
+import { useDataDesignerCreateJob } from '@nemo/sdk/generated/data-designer/data-designer';
 import {
   Banner,
   Divider,

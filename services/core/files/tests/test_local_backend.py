@@ -7,9 +7,9 @@ from pathlib import Path
 
 import anyio
 import pytest
-from nmp.core.files.app.backends.base import ByteRange
-from nmp.core.files.app.backends.local import LocalStorageConfig, LocalStorageImpl
-from nmp.core.files.exceptions import InvalidPathError, NotFoundError
+from nhx.core.files.app.backends.base import ByteRange
+from nhx.core.files.app.backends.local import LocalStorageConfig, LocalStorageImpl
+from nhx.core.files.exceptions import InvalidPathError, NotFoundError
 
 
 @pytest.fixture
@@ -247,6 +247,14 @@ def test_local_config_owns_storage_data(storage_path: Path):
     """Local is platform-owned source storage."""
     config = LocalStorageConfig(path=str(storage_path))
     assert config.owns_storage_data is True
+
+
+def test_local_tracks_no_revision(storage_impl: LocalStorageImpl):
+    """Uploaded files have no upstream ref, so there is nothing to refresh them against."""
+    assert storage_impl.tracked_revision is None
+
+    with pytest.raises(NotImplementedError):
+        storage_impl.config_at_tracked_revision()
 
 
 async def test_delete_all_removes_directory_and_contents(storage_impl: LocalStorageImpl, storage_path: Path):

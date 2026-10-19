@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 import pytest
-from nmp.core.models.tasks.model_spec.utils import is_embedding_model_v2
+from nhx.core.models.tasks.model_spec.utils import infer_model_head_type, is_embedding_model_v2
 
 TEST_MODEL_FIXTURES_DIR = Path(__file__).parent / "test_data" / "models"
 
@@ -48,7 +48,7 @@ class TestIsEmbeddingModelV2:
         is_embedding, reason = is_embedding_model_v2(str(model_dir))
 
         assert is_embedding is True
-        assert "strong_positive" in reason
+        assert reason.startswith("embedding:")
         assert "artifact:modules.json" in reason
 
     def test_returns_true_for_embedding_pipeline_tag(self, tmp_path: Path) -> None:
@@ -71,9 +71,9 @@ class TestIsEmbeddingModelV2:
         is_embedding, reason = is_embedding_model_v2(str(model_dir))
 
         assert is_embedding is False
-        assert "strong_negative" in reason
+        assert reason.startswith("causal_lm:")
         assert "pipeline_tag:text-generation" in reason
-        assert "architectures:LlamaForCausalLM" in reason
+        assert "architecture:LlamaForCausalLM" in reason
 
     def test_returns_false_for_generative_architecture_without_positive_signals(self, tmp_path: Path) -> None:
         model_dir = tmp_path / "model"
@@ -83,7 +83,7 @@ class TestIsEmbeddingModelV2:
         is_embedding, reason = is_embedding_model_v2(str(model_dir))
 
         assert is_embedding is False
-        assert "strong_negative" in reason
+        assert reason.startswith("causal_lm:")
         assert "Qwen2ForConditionalGeneration" in reason
 
     def test_returns_false_for_encoder_without_embedding_signals(self, tmp_path: Path) -> None:
@@ -94,7 +94,141 @@ class TestIsEmbeddingModelV2:
         is_embedding, reason = is_embedding_model_v2(str(model_dir))
 
         assert is_embedding is False
-        assert reason == "inconclusive:no_strong_embedding_signals"
+        assert reason == "inconclusive:no_strong_head_signals"
+
+
+class TestInferModelHeadType:
+    def test_detects_cross_encoder_from_sequence_classification_head(self, tmp_path: Path) -> None:
+        model_dir = tmp_path / "model"
+        model_dir.mkdir()
+        _write_json(
+            model_dir / "config.json",
+            {
+                "architectures": ["LlamaBidirectionalForSequenceClassification"],
+                "num_labels": 1,
+            },
+        )
+
+        head_type, reason = infer_model_head_type(str(model_dir))
+
+        assert head_type == "cross_encoder"
+        assert "ForSequenceClassification" in reason
+
+    def test_bidirectional_sequence_classification_is_a_reranker_without_num_labels(self, tmp_path: Path) -> None:
+        model_dir = tmp_path / "model"
+        model_dir.mkdir()
+        _write_json(
+            model_dir / "config.json",
+            {
+                "architectures": ["LlamaBidirectionalForSequenceClassification"],
+                "model_type": "llama_bidirec",
+                "pooling": "avg",
+            },
+        )
+
+        head_type, reason = infer_model_head_type(str(model_dir))
+
+        assert head_type == "cross_encoder"
+        assert "LlamaBidirectionalForSequenceClassification" in reason
+
+    def test_onnx_primary_fileset_uses_nested_hf_checkpoint(self, tmp_path: Path) -> None:
+        model_dir = tmp_path / "model"
+        hf_dir = model_dir / "alternates" / "hf"
+        hf_dir.mkdir(parents=True)
+        (model_dir / "model.onnx").write_text("onnx", encoding="utf-8")
+        _write_readme_frontmatter(model_dir / "README.md", pipeline_tag="text-generation")
+        _write_json(
+            hf_dir / "config.json",
+            {"architectures": ["LlamaBidirectionalForSequenceClassification"]},
+        )
+
+        head_type, reason = infer_model_head_type(str(model_dir))
+
+        assert head_type == "cross_encoder"
+        assert reason.endswith("source=alternates/hf")
+
+    def test_both_checkpoint_fileset_ignores_the_nested_last_checkpoint(self, tmp_path: Path) -> None:
+        model_dir = tmp_path / "model"
+        hf_dir = model_dir / "alternates" / "hf"
+        last_dir = model_dir / "alternates" / "last"
+        hf_dir.mkdir(parents=True)
+        last_dir.mkdir(parents=True)
+        (model_dir / "model.onnx").write_text("onnx", encoding="utf-8")
+        _write_json(hf_dir / "config.json", {"architectures": ["LlamaBidirectionalModel"]})
+        _write_json(last_dir / "config.json", {"architectures": ["LlamaForCausalLM"]})
+
+        head_type, reason = infer_model_head_type(str(model_dir))
+
+        assert head_type == "embedding"
+        assert "LlamaBidirectionalModel" in reason
+        assert "LlamaForCausalLM" not in reason
+
+    def test_hf_primary_both_checkpoint_keeps_the_root_checkpoint(self, tmp_path: Path) -> None:
+        model_dir = tmp_path / "model"
+        last_dir = model_dir / "alternates" / "last"
+        model_dir.mkdir()
+        last_dir.mkdir(parents=True)
+        _write_json(model_dir / "config.json", {"architectures": ["LlamaBidirectionalModel"]})
+        _write_json(last_dir / "config.json", {"architectures": ["LlamaForCausalLM"]})
+
+        head_type, reason = infer_model_head_type(str(model_dir))
+
+        assert head_type == "embedding"
+        assert "source=alternates/hf" not in reason
+
+    def test_detects_automodel_bi_encoder_architecture(self, tmp_path: Path) -> None:
+        model_dir = tmp_path / "model"
+        model_dir.mkdir()
+        _write_json(model_dir / "config.json", {"architectures": ["LlamaBidirectionalModel"]})
+
+        head_type, reason = infer_model_head_type(str(model_dir))
+
+        assert head_type == "embedding"
+        assert "LlamaBidirectionalModel" in reason
+
+    def test_cross_encoder_head_wins_over_embedding_card_metadata(self, tmp_path: Path) -> None:
+        model_dir = tmp_path / "model"
+        model_dir.mkdir()
+        _write_json(
+            model_dir / "config.json",
+            {"architectures": ["BertForSequenceClassification"], "num_labels": 1},
+        )
+        _write_readme_frontmatter(model_dir / "README.md", pipeline_tag="feature-extraction")
+
+        head_type, _ = infer_model_head_type(str(model_dir))
+
+        assert head_type == "cross_encoder"
+
+    def test_generic_sequence_classifier_is_not_assumed_to_be_a_reranker(self, tmp_path: Path) -> None:
+        model_dir = tmp_path / "model"
+        model_dir.mkdir()
+        _write_json(
+            model_dir / "config.json",
+            {"architectures": ["BertForSequenceClassification"], "num_labels": 3},
+        )
+        _write_readme_frontmatter(model_dir / "README.md", pipeline_tag="text-classification")
+
+        head_type, reason = infer_model_head_type(str(model_dir))
+
+        assert head_type == "unknown"
+        assert reason == "inconclusive:no_strong_head_signals"
+
+    def test_sequence_classification_auto_map_is_not_enough_without_rerank_evidence(self, tmp_path: Path) -> None:
+        model_dir = tmp_path / "model"
+        model_dir.mkdir()
+        _write_json(
+            model_dir / "config.json",
+            {
+                "architectures": ["BertModel"],
+                "num_labels": 3,
+                "auto_map": {"AutoModelForSequenceClassification": "modeling.CustomClassifier"},
+            },
+        )
+
+        head_type, reason = infer_model_head_type(str(model_dir))
+
+        assert head_type == "unknown"
+        assert "auto_map:AutoModelForSequenceClassification" not in reason
 
     @pytest.mark.parametrize(
         "repo_id, expected",

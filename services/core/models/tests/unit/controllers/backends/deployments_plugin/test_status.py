@@ -4,8 +4,8 @@
 import pytest
 from nemo_deployments_plugin.entities import Deployment, Volume
 from nemo_deployments_plugin.types import Endpoint
-from nmp.core.models.controllers.backends.backends import DeploymentStatusUpdate
-from nmp.core.models.controllers.backends.deployments_plugin.status import (
+from nhx.core.models.controllers.backends.backends import DeploymentStatusUpdate
+from nhx.core.models.controllers.backends.deployments_plugin.status import (
     aggregate_status,
     apply_deleting_timeout,
     apply_pending_timeout,

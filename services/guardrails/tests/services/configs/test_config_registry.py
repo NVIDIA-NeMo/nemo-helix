@@ -6,10 +6,10 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from nmp.guardrails.app.services.configs.registry import ConfigCacheEntry, ConfigRegistry
-from nmp.guardrails.app.utils.key_generator import generate_key
-from nmp.guardrails.entities import GuardrailConfig
-from nmp.guardrails.entities.values._private import RailsConfig
+from nhx.guardrails.app.services.configs.registry import ConfigCacheEntry, ConfigRegistry
+from nhx.guardrails.app.utils.key_generator import generate_key
+from nhx.guardrails.entities import GuardrailConfig
+from nhx.guardrails.entities.values._private import RailsConfig
 
 
 class TestConfigRegistry(unittest.TestCase):
@@ -163,8 +163,8 @@ class TestConfigRegistryAsync(unittest.IsolatedAsyncioTestCase):
 
     async def test_get_config_not_found_raises_guardrail_configuration_not_found_error(self):
         """Test that get raises GuardrailConfigurationNotFoundError when the entity store returns EntityNotFoundError."""
-        from nmp.common.entities.client import EntityNotFoundError
-        from nmp.guardrails.app.exceptions.application_exceptions import GuardrailConfigurationNotFoundError
+        from nhx.common.entities.client import EntityNotFoundError
+        from nhx.guardrails.app.exceptions.application_exceptions import GuardrailConfigurationNotFoundError
 
         self.mock_entities_client.get = AsyncMock(side_effect=EntityNotFoundError("Not found"))
 
@@ -350,7 +350,7 @@ class TestConfigRegistryRefreshAll(unittest.IsolatedAsyncioTestCase):
         self.config_registry._configs["old-key"] = old_entry
 
         # Mock entity client to raise exception (simulating config doesn't exist)
-        from nmp.common.entities.client import EntityNotFoundError
+        from nhx.common.entities.client import EntityNotFoundError
 
         self.mock_entities_client.get = AsyncMock(side_effect=EntityNotFoundError("Not found"))
 
@@ -368,7 +368,7 @@ class TestConfigRegistryRefreshAll(unittest.IsolatedAsyncioTestCase):
         self.config_registry._configs["test-key"] = entry
 
         # Mock entity client to raise exception (config doesn't exist)
-        from nmp.common.entities.client import EntityNotFoundError
+        from nhx.common.entities.client import EntityNotFoundError
 
         self.mock_entities_client.get = AsyncMock(side_effect=EntityNotFoundError("Not found"))
 

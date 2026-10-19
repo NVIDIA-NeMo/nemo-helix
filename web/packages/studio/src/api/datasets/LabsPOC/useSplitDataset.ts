@@ -9,7 +9,7 @@ import {
   getFileMimeType,
   SupportedFileExtension,
 } from '@nemo/common/src/LabsPOC/dataset-file-utils';
-import { filesUploadFile } from '@nemo/sdk/generated/platform/api';
+import { filesUploadFile } from '@nemo/sdk/generated/platform/files';
 import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 import {
   FILESET_EVAL_FILE_NAME,
@@ -122,7 +122,7 @@ export interface SplitDatasetOutput {
 }
 
 /**
- * @deprecated Use useUploadFilesetsFileV2 from '@nemo/sdk/generated/platform/api' directly.
+ * @deprecated Use useUploadFilesetsFileV2 from the per-tag modules under '@nemo/sdk/generated/platform/' directly.
  * Implement split logic separately and upload each split file using the generated hook.
  */
 export const useSplitDataset = (

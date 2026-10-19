@@ -4,7 +4,7 @@
 import {
   filesDeleteFile,
   getFilesListFilesetFilesQueryKey,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/files';
 import type {
   FilesetFileOutput,
   ListFilesetFilesResponse,

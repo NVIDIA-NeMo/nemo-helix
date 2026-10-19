@@ -13,6 +13,7 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 
 from scaled_evals.api.repositories import (
     AgentBundleRepository,
+    BenchmarkImportRepository,
     BenchmarkRepository,
     BenchmarkRunRepository,
     ConfigProfileRepository,
@@ -22,11 +23,10 @@ from scaled_evals.api.repositories import (
     ExecutionTelemetryRepository,
     OperationsRepository,
     ResourceUsageRepository,
-    RuntimeResourceRepository,
-    SwitchyardCampaignRepository,
     TaskRepository,
     UserRepository,
 )
+from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
 from scaled_evals.api.settings import settings
 
 _pool: ConnectionPool | None = None
@@ -88,6 +88,14 @@ class Database:
         return BenchmarkRepository(self.conn)
 
     @property
+    def benchmark_imports(self) -> BenchmarkImportRepository:
+        return BenchmarkImportRepository(self.conn)
+
+    @property
+    def benchmark_archives(self) -> BenchmarkArchiveRepository:
+        return BenchmarkArchiveRepository(self.conn)
+
+    @property
     def benchmark_runs(self) -> BenchmarkRunRepository:
         return BenchmarkRunRepository(self.conn)
 
@@ -116,16 +124,8 @@ class Database:
         return OperationsRepository(self.conn)
 
     @property
-    def runtime_resources(self) -> RuntimeResourceRepository:
-        return RuntimeResourceRepository(self.conn)
-
-    @property
     def resource_usage(self) -> ResourceUsageRepository:
         return ResourceUsageRepository(self.conn)
-
-    @property
-    def switchyard_campaigns(self) -> SwitchyardCampaignRepository:
-        return SwitchyardCampaignRepository(self.conn)
 
     @property
     def users(self) -> UserRepository:

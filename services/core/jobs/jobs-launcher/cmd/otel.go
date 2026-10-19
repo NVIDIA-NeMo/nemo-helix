@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA-NeMo/nemo-platform/services/core/jobs/jobs-launcher/nmpclient"
+	"github.com/NVIDIA-NeMo/nemo-helix/services/core/jobs/jobs-launcher/nhxclient"
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	name                    = "nmp.nvidia.com/nemo-platform/jobs-launcher"
+	name                    = "nhx.nvidia.com/nemo-helix/jobs-launcher"
 	NEMO_JOB_WORKSPACE      = "NEMO_JOB_WORKSPACE"
 	NEMO_JOB_ID_ENV         = "NEMO_JOB_ID"
 	NEMO_JOB_ATTEMPT_ID_ENV = "NEMO_JOB_ATTEMPT_ID"
@@ -32,7 +32,7 @@ const (
 	NEMO_JOB_TASK_ID_ENV    = "NEMO_JOB_TASK"
 	serviceJobsPrincipal    = "service:jobs"
 
-	launcherOTLPLogsEndpointEnv = "NMP_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT"
+	launcherOTLPLogsEndpointEnv = "NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT"
 	otlpHTTPLogExportTimeout    = 10 * time.Second
 )
 
@@ -228,7 +228,7 @@ func logOTLPLogAuthMechanism(mechanism string, reason string) {
 type serviceIdentityPrincipalHeaderSource struct{}
 
 func (serviceIdentityPrincipalHeaderSource) Headers(context.Context) (map[string]string, error) {
-	return map[string]string{"X-NMP-Principal-Id": serviceJobsPrincipal}, nil
+	return map[string]string{"X-NHX-Principal-Id": serviceJobsPrincipal}, nil
 }
 
 func otlpHTTPLogExporter(ctx context.Context, opts ...otlploghttp.Option) (log.Exporter, error) {
@@ -236,8 +236,8 @@ func otlpHTTPLogExporter(ctx context.Context, opts ...otlploghttp.Option) (log.E
 }
 
 func launcherOTLPHTTPClient() *http.Client {
-	endpoint, err := nmpclient.ResolvePlatformEndpointFromEnv()
-	if err != nil || endpoint.Transport != nmpclient.TransportUDS {
+	endpoint, err := nhxclient.ResolveHelixEndpointFromEnv()
+	if err != nil || endpoint.Transport != nhxclient.TransportUDS {
 		return nil
 	}
 	return endpoint.HTTPClient()

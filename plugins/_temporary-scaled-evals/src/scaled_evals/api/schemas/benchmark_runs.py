@@ -32,11 +32,17 @@ class CreateBenchmarkRunRequest(BaseModel):
         description="Exact supported framework version or documented alias.",
     )
     framework_profile_id: str | None = None
+    member_framework_profile_ids: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Optional task_id to framework profile mapping. A member override takes precedence "
+            "over framework_profile_id for that task."
+        ),
+    )
     harbor_profile_id: str | None = Field(
         default=None,
         description="Compatibility alias for framework_profile_id on Harbor requests.",
     )
-    switchyard_profile_id: str | None = None
     intake_profile_id: str | None = None
     credentials: dict[str, str] = Field(default_factory=dict)
     agent_bundle_id: str | None = None
@@ -55,10 +61,7 @@ class CreateBenchmarkRunRequest(BaseModel):
         default=None,
         ge=1,
         le=4096,
-        description=(
-            "Benchmark-run member concurrency cap. With a Switchyard profile, the same cap "
-            "also limits members sharing the managed Switchyard gateway."
-        ),
+        description="Caps how many of the run's members are provisioning or running at once.",
     )
     visibility: Visibility = "private"
 
@@ -77,11 +80,6 @@ class CreateBenchmarkRunRequest(BaseModel):
             raise ValueError("agent_bundle_id requires a Harbor framework_profile_id")
         if self.initial_user_turns and self.framework != "harbor":
             raise ValueError('initial_user_turns is only valid for framework="harbor"')
-        if self.switchyard_profile_id is not None:
-            if self.runtime != "sandbox_k8s":
-                raise ValueError("shared Switchyard campaigns require runtime='sandbox_k8s'")
-            if self.parallelism != 1:
-                raise ValueError("shared Switchyard campaigns require parallelism=1")
         if self.framework == "harbor":
             if self.framework_profile_id is not None and self.harbor_profile_id is not None:
                 if self.framework_profile_id != self.harbor_profile_id:
@@ -108,6 +106,7 @@ class BenchmarkRunLinks(BaseModel):
     evaluations: str
     reproduce: str
     cancel: str
+    archive: str | None = None
 
 
 class ReproduceBenchmarkRunResponse(BaseModel):
@@ -135,7 +134,6 @@ class BenchmarkRun(BaseModel):
     benchmark_revision: int
     framework_profile_id: str | None = None
     harbor_profile_id: str | None = None
-    switchyard_profile_id: str | None = None
     intake_profile_id: str | None = None
     credentials: dict[str, str] = Field(default_factory=dict)
     runtime: str

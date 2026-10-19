@@ -1,11 +1,20 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import asyncio
+import collections
+import io
 import json
+import os
 import socket
+import subprocess
 import threading
-from http.server import HTTPServer
-from types import ModuleType
+import time
+import urllib.error
+from email.message import Message
+from http.server import HTTPServer, ThreadingHTTPServer
+from types import ModuleType, SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock
 from urllib.parse import urlsplit
 
@@ -30,6 +39,8 @@ def ready_server():
     runtime._ROLLOUT_HELPER = _FakeRolloutHelper()
     runtime.Handler.max_request_bytes = 1024
     runtime.Handler.max_response_bytes = 4096
+    runtime.Handler.heartbeat_interval_s = runtime._HEARTBEAT_INTERVAL_S
+    runtime.Handler.rollout_deadline_s = runtime._DEFAULT_ROLLOUT_DEADLINE_S
 
     server = HTTPServer(("127.0.0.1", 0), runtime.Handler)
     port = server.server_address[1]
@@ -43,6 +54,8 @@ def ready_server():
         runtime._READY = False
         runtime._HEAD_SERVER_CONFIG = None
         runtime._ROLLOUT_HELPER = None
+        runtime.Handler.heartbeat_interval_s = runtime._HEARTBEAT_INTERVAL_S
+        runtime.Handler.rollout_deadline_s = runtime._DEFAULT_ROLLOUT_DEADLINE_S
 
 
 def test_health_not_ready():
@@ -63,6 +76,26 @@ def test_health_not_ready():
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_health_is_not_ready_until_the_rollout_helpers_are(ready_server):
+    """/health must gate on what do_POST gates on.
+
+    Reporting ready off ``_READY`` alone lets a host pass ``wait_ready`` and then refuse every
+    rollout with 503 bootstrap_failed -- a state the caller has no way to observe until it has
+    already committed a batch.
+    """
+    import urllib.error
+    import urllib.request
+
+    runtime._ROLLOUT_HELPER = None
+    try:
+        with pytest.raises(urllib.error.HTTPError) as excinfo:
+            urllib.request.urlopen(f"{ready_server}/health", timeout=5)
+        assert excinfo.value.code == 503
+        assert json.loads(excinfo.value.read())["status"] == "starting"
+    finally:
+        runtime._ROLLOUT_HELPER = _FakeRolloutHelper()
 
 
 def test_health_ready(ready_server):
@@ -183,7 +216,7 @@ def test_apply_uv_dirs_does_not_override_explicit_config(monkeypatch):
 
 def test_uv_cache_dir_prefers_the_configured_env_var(monkeypatch):
     """`uv cache dir` exits non-zero when the CWD's pyproject pins a conflicting
-    [tool.uv] required-version - true in the nemo-platform image - so an explicit
+    [tool.uv] required-version - true in the nemo-helix image - so an explicit
     UV_CACHE_DIR must win without shelling out at all."""
     monkeypatch.setenv("NRL_CONTAINER", "1")
     monkeypatch.setenv("UV_CACHE_DIR", "/home/ubuntu/.cache/uv")
@@ -301,6 +334,38 @@ def test_a_non_mapping_result_is_left_alone(result):
     assert runtime._with_row_identity(result, {"_ng_task_index": 1}) is result
 
 
+def test_a_caller_example_id_is_carried_onto_the_result():
+    """The case Gym's own indices cannot express: several examples under one task.
+
+    Both examples below share ``_ng_task_index``, so a consumer joining on it sees a duplicate
+    and cannot tell the two apart. ``SG_EXAMPLE_ID`` is what distinguishes them, and Gym never
+    sets it, so a result carries it only because this host copied it across.
+    """
+    rows = [
+        {"_ng_task_index": 4, runtime.SG_EXAMPLE_ID: 17},
+        {"_ng_task_index": 4, runtime.SG_EXAMPLE_ID: 18},
+    ]
+    results = [runtime._with_row_identity({"_ng_task_index": 4, "reward": 1.0}, row) for row in rows]
+
+    assert [result[runtime.SG_EXAMPLE_ID] for result in results] == [17, 18]
+    # Gym's own identity is passed through untouched, not displaced by the caller's.
+    assert [result["_ng_task_index"] for result in results] == [4, 4]
+
+
+def test_a_caller_example_id_returned_by_gym_is_not_overwritten():
+    """Same additive rule as the Gym indices: what came back wins over what went out."""
+    result = runtime._with_row_identity({runtime.SG_EXAMPLE_ID: 99}, {runtime.SG_EXAMPLE_ID: 17})
+
+    assert result[runtime.SG_EXAMPLE_ID] == 99
+
+
+def test_an_example_without_a_caller_id_gains_no_key():
+    """Existing callers stamp nothing, so their results must look exactly as they did before."""
+    result = runtime._with_row_identity({"reward": 1.0}, {"_ng_task_index": 4})
+
+    assert runtime.SG_EXAMPLE_ID not in result
+
+
 # --------------------------------------------------------------------------------------------
 # wheels-v1 dependency install
 # --------------------------------------------------------------------------------------------
@@ -315,13 +380,136 @@ def _write_manifest(env_dir, **fields):
         config = env_dir / relative_path
         config.parent.mkdir(parents=True, exist_ok=True)
         config.write_text("test: {}\n", encoding="utf-8")
+        # Gym only discovers a server directory that carries an install marker.
+        server_dir = config.parent.parent
+        if server_dir.parent.name in ("resources_servers", "responses_api_agents"):
+            (server_dir / "requirements.txt").write_text("", encoding="utf-8")
     manifest_path = env_dir / runtime.ENVIRONMENT_MANIFEST_FILENAME
     manifest_path.write_text(yaml.safe_dump(fields), encoding="utf-8")
+
+
+def _load_composition_package(env_dir, *, agents=(), resources_servers=(), package_format="native-v1"):
+    import yaml
+
+    config_paths = [
+        *(f"responses_api_agents/{name}/configs/{name}.yaml" for name in agents),
+        *(f"resources_servers/{name}/configs/{name}.yaml" for name in resources_servers),
+    ]
+    _write_manifest(env_dir, format=package_format, config_paths=config_paths)
+    for name, relative_path in zip((*agents, *resources_servers), config_paths, strict=True):
+        component_type = (
+            "responses_api_agents" if relative_path.startswith("responses_api_agents/") else "resources_servers"
+        )
+        (env_dir / relative_path).write_text(
+            yaml.safe_dump({name: {component_type: {f"{name}_implementation": {"entrypoint": "app.py"}}}}),
+            encoding="utf-8",
+        )
+    if package_format == "wheels-v1":
+        wheels_dir = env_dir / WHEELS_V1_SUBDIR
+        wheels_dir.mkdir(exist_ok=True)
+        (wheels_dir / "example_dependency-1.0-py3-none-any.whl").write_bytes(b"")
+    return runtime._load_runtime_environment_package(str(env_dir), required=True)
+
+
+def _component_selection(*, agent_config):
+    return {
+        runtime.ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY: {
+            "agent_instance": "selected_agent",
+            "agent_config": agent_config,
+            "resources_server_instance": "selected_resources",
+            "resources_server_config": "resources_servers/selected_resources/configs/selected_resources.yaml",
+            "model_config": "responses_api_models/inference_provider/configs/inference_provider.yaml",
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    ("agents", "resources_servers", "agent_config", "expected_fallbacks"),
+    [
+        (("selected_agent",), ("selected_resources",), None, []),
+        (
+            ("selected_agent",),
+            ("other_resources",),
+            None,
+            ["resources_servers/selected_resources/configs/selected_resources.yaml"],
+        ),
+        (
+            ("other_agent",),
+            ("selected_resources",),
+            "responses_api_agents/selected_agent/configs/selected_agent.yaml",
+            ["responses_api_agents/selected_agent/configs/selected_agent.yaml"],
+        ),
+        (
+            ("other_agent",),
+            ("other_resources",),
+            "responses_api_agents/selected_agent/configs/selected_agent.yaml",
+            [
+                "responses_api_agents/selected_agent/configs/selected_agent.yaml",
+                "resources_servers/selected_resources/configs/selected_resources.yaml",
+            ],
+        ),
+    ],
+    ids=["all-custom", "custom-agent", "custom-resources", "all-built-in"],
+)
+def test_environment_config_composes_custom_components_with_builtin_fallbacks(
+    tmp_path,
+    agents,
+    resources_servers,
+    agent_config,
+    expected_fallbacks,
+):
+    package = _load_composition_package(tmp_path, agents=agents, resources_servers=resources_servers)
+    global_config = _component_selection(agent_config=agent_config)
+    original_config = dict(global_config)
+
+    configured = runtime._compose_gym_config_with_environment_package(global_config, package)
+
+    package_paths = [str(path) for path in package.config_paths]
+    model_config = "responses_api_models/inference_provider/configs/inference_provider.yaml"
+    expected = [
+        *package_paths,
+        *(path for path in expected_fallbacks if path.startswith("responses_api_agents/")),
+        model_config,
+        *(path for path in expected_fallbacks if path.startswith("resources_servers/")),
+    ]
+    assert configured["config_paths"] == expected
+    assert runtime.ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY not in configured
+    assert configured is not global_config
+    assert global_config == original_config
+
+
+def test_environment_config_requires_agent_fallback_when_selected_agent_is_absent(tmp_path):
+    package = _load_composition_package(tmp_path, agents=("other_agent",), resources_servers=("selected_resources",))
+    global_config = _component_selection(agent_config=None)
+    original_config = dict(global_config)
+
+    with pytest.raises(RuntimeError, match="no built-in agent_config fallback"):
+        runtime._compose_gym_config_with_environment_package(global_config, package)
+    assert global_config == original_config
 
 
 def test_no_manifest_is_a_no_op(tmp_path, monkeypatch):
     # Image-provided environments have no manifest and must retain the existing startup behavior.
     assert runtime._load_runtime_environment_package(str(tmp_path), required=False) is None
+
+
+def test_compose_without_selection_keeps_caller_config_paths(tmp_path):
+    package = _load_composition_package(tmp_path, agents=("selected_agent",), resources_servers=("selected_resources",))
+    global_config = {"config_paths": ["/job/environment/responses_api_models/vllm_model/configs/policy_model.yaml"]}
+
+    configured = runtime._compose_gym_config_with_environment_package(global_config, package)
+
+    assert configured["config_paths"] == global_config["config_paths"]
+    assert configured is not global_config
+
+
+def test_compose_without_package_returns_a_copy():
+    global_config = {"config_paths": ["image-owned.yaml"]}
+
+    configured = runtime._compose_gym_config_with_environment_package(global_config, None)
+
+    assert configured == global_config
+    assert configured is not global_config
 
 
 def test_no_environment_path_is_a_no_op(monkeypatch):
@@ -334,11 +522,19 @@ def test_explicit_environment_requires_a_manifest(tmp_path):
         runtime._load_runtime_environment_package(str(tmp_path), required=True)
 
 
-def test_native_v1_is_rejected_as_unsupported(tmp_path, monkeypatch):
+def test_native_v1_is_loaded_without_installing_wheels(tmp_path, monkeypatch):
     _write_manifest(tmp_path, format="native-v1")
 
-    with pytest.raises(RuntimeError, match="native-v1 environment packages are not supported"):
-        runtime._load_runtime_environment_package(str(tmp_path), required=True)
+    package = runtime._load_runtime_environment_package(str(tmp_path), required=True)
+
+    assert package is not None
+    assert package.manifest.format == "native-v1"
+
+    def fail_install(*args, **kwargs):
+        pytest.fail("native-v1 must not install wheels")
+
+    monkeypatch.setattr(runtime.subprocess, "run", fail_install)
+    runtime._install_wheels_v1_dependencies(package, str(tmp_path / "work"))
 
 
 def test_wheels_v1_with_no_wheels_directory_raises(tmp_path):
@@ -376,7 +572,12 @@ def test_wheels_v1_installs_every_wheel_with_no_index_access(tmp_path, monkeypat
 
     # Capture the uv command without trying to install these intentionally empty wheel fixtures.
     calls = []
-    monkeypatch.setattr(runtime.subprocess, "run", lambda *a, **k: calls.append((a, k)))
+
+    def record(*a, **k):
+        calls.append((a, k))
+        return subprocess.CompletedProcess(a[0], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(runtime.subprocess, "run", record)
     monkeypatch.setenv("PYTHONPATH", "/image/packages")
 
     package = runtime._load_runtime_environment_package(str(tmp_path), required=True)
@@ -402,22 +603,134 @@ def test_wheels_v1_installs_every_wheel_with_no_index_access(tmp_path, monkeypat
         str(wheels_dir / "a_dep-1.0-py3-none-any.whl"),
         str(wheels_dir / "b_dep-2.0-py3-none-any.whl"),
     ]
-    assert kwargs == {"check": True}
+    assert kwargs == {"capture_output": True, "text": True, "check": False}
     assert install_dir.is_dir()
     assert runtime.os.environ[runtime.UV_FIND_LINKS_ENV_KEY] == str(wheels_dir)
     # Child processes and the already-running host both prefer staged packages over image packages.
     assert runtime.os.environ["PYTHONPATH"] == f"{install_dir}{runtime.os.pathsep}/image/packages"
     assert runtime.sys.path[0] == str(install_dir)
+    # Index fallback is left in place unless the caller declares the wheelhouse self-sufficient.
+    assert runtime.UV_OFFLINE_ENV_KEY not in runtime.os.environ
 
 
-def test_bootstrap_preserves_caller_config_paths_with_a_wheels_package(monkeypatch):
-    events = []
+def _stage_wheelhouse(tmp_path, monkeypatch):
+    """A wheels-v1 package staged for install, with uv stubbed out."""
+    _write_manifest(tmp_path, format="wheels-v1")
+    wheels_dir = tmp_path / WHEELS_V1_SUBDIR
+    wheels_dir.mkdir()
+    (wheels_dir / "a_dep-1.0-py3-none-any.whl").write_bytes(b"")
+    monkeypatch.setattr(
+        runtime.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout="", stderr="")
+    )
+    return runtime._load_runtime_environment_package(str(tmp_path), required=True)
+
+
+def _fail_uv(monkeypatch, stderr: str) -> None:
+    monkeypatch.setattr(
+        runtime.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 1, stdout="", stderr=stderr)
+    )
+
+
+def test_a_failed_wheel_install_raises_uvs_reason_instead_of_the_command(
+    tmp_path, monkeypatch, isolated_gym_host_process_state
+):
+    """uv writes to the raw stderr fd, so without capture the failure would carry no reason."""
+    package = _stage_wheelhouse(tmp_path, monkeypatch)
+    _fail_uv(monkeypatch, "Resolved 1 package\n  × No solution found when resolving dependencies\n")
+
+    with pytest.raises(RuntimeError) as excinfo:
+        runtime._install_wheels_v1_dependencies(package, str(tmp_path / "work"))
+
+    message = str(excinfo.value)
+    assert "failed with exit code 1" in message
+    assert "× No solution found when resolving dependencies" in message
+    # The command lists every wheel; with a real wheelhouse it buries the reason.
+    assert "a_dep-1.0-py3-none-any.whl" not in message
+
+
+def test_a_failed_wheel_install_reaches_the_output_tail(tmp_path, monkeypatch, isolated_gym_host_process_state):
+    package = _stage_wheelhouse(tmp_path, monkeypatch)
+    _fail_uv(monkeypatch, "error: Failed to install: a_dep-1.0-py3-none-any.whl\n")
+    monkeypatch.setattr(runtime, "_OUTPUT_TAIL", collections.deque(maxlen=runtime._OUTPUT_TAIL_LINES))
+    monkeypatch.setattr(runtime.sys, "stderr", runtime._OutputTail(io.StringIO(), runtime._OUTPUT_TAIL))
+
+    with pytest.raises(RuntimeError):
+        runtime._install_wheels_v1_dependencies(package, str(tmp_path / "work"))
+
+    assert runtime._OUTPUT_TAIL[-1] == "error: Failed to install: a_dep-1.0-py3-none-any.whl"
+
+
+def test_a_failed_wheel_install_keeps_only_the_last_stderr_lines_and_masks_secrets(
+    tmp_path, monkeypatch, isolated_gym_host_process_state
+):
+    package = _stage_wheelhouse(tmp_path, monkeypatch)
+    monkeypatch.setenv("NHX_TEST_API_KEY", "sk-secret-value")
+    noise = "".join(f"+ pkg{i}==1.0\n" for i in range(50))
+    _fail_uv(monkeypatch, noise + "error: token sk-secret-value rejected\n")
+
+    with pytest.raises(RuntimeError) as excinfo:
+        runtime._install_wheels_v1_dependencies(package, str(tmp_path / "work"))
+
+    reason = str(excinfo.value).split(":\n", 1)[1].splitlines()
+    assert len(reason) == runtime._UV_FAILURE_REASON_LINES
+    assert reason[-1] == "error: token *** rejected"
+
+
+def test_an_offline_environment_takes_uv_off_the_index(tmp_path, monkeypatch, isolated_gym_host_process_state):
+    """A wheelhouse the caller calls complete must resolve without an index.
+
+    `--find-links` alone is not enough: a configured but unreachable index makes uv fail to
+    resolve the `uv venv --seed` packages for Gym's per-component venvs rather than fall back
+    to the staged wheels.
+    """
+    package = _stage_wheelhouse(tmp_path, monkeypatch)
+    monkeypatch.setenv(runtime.ENVIRONMENT_OFFLINE_ENV_KEY, "true")
+
+    runtime._install_wheels_v1_dependencies(package, str(tmp_path / "work"))
+
+    assert runtime.os.environ[runtime.UV_OFFLINE_ENV_KEY] == "1"
+
+
+def test_an_operators_own_uv_offline_setting_is_not_overwritten(tmp_path, monkeypatch, isolated_gym_host_process_state):
+    """Whoever set it in the image knows something this flag does not."""
+    package = _stage_wheelhouse(tmp_path, monkeypatch)
+    monkeypatch.setenv(runtime.ENVIRONMENT_OFFLINE_ENV_KEY, "true")
+    monkeypatch.setenv(runtime.UV_OFFLINE_ENV_KEY, "0")
+
+    runtime._install_wheels_v1_dependencies(package, str(tmp_path / "work"))
+
+    assert runtime.os.environ[runtime.UV_OFFLINE_ENV_KEY] == "0"
+
+
+def test_search_root_puts_the_image_gym_checkout_after_the_package(tmp_path, monkeypatch):
+    package = tmp_path / "pkg"
+    image = tmp_path / "gym"
+    package.mkdir()
+    image.mkdir()
+    monkeypatch.delenv(runtime.IMAGE_GYM_SRC_ENV_KEY, raising=False)
+    monkeypatch.setattr(runtime, "DEFAULT_IMAGE_GYM_SRC", str(image))
+    monkeypatch.setenv(runtime.NEMO_GYM_EXTRA_ROOTS_ENV_KEY, "/operator/root")
+
+    runtime._prepend_environment_search_root(str(package))
+
+    assert runtime.os.environ[runtime.NEMO_GYM_EXTRA_ROOTS_ENV_KEY] == os.pathsep.join(
+        (str(package), str(image.resolve()), "/operator/root")
+    )
+
+
+def test_bootstrap_composes_a_wheels_package_like_native_v1(tmp_path, monkeypatch):
+    # wheels-v1 and native-v1 are the same environment; only dependency install differs.
+    package = _load_composition_package(
+        tmp_path,
+        agents=("selected_agent",),
+        resources_servers=("selected_resources",),
+        package_format="wheels-v1",
+    )
     captured: dict[str, object] = {}
 
     class FakeRunHelper:
         def start(self, config):
             captured["config"] = config
-            events.append("gym-started")
 
     class FakeBaseServerConfig:
         def __init__(self, *, host, port):
@@ -439,30 +752,37 @@ def test_bootstrap_preserves_caller_config_paths_with_a_wheels_package(monkeypat
     for name, module in fake_modules.items():
         monkeypatch.setitem(runtime.sys.modules, name, module)
 
-    caller_paths = ["responses_api_agents/simple_agent/configs/simple_agent.yaml"]
-    monkeypatch.setattr(runtime, "_load_global_config_dict", lambda: {"config_paths": list(caller_paths)})
+    caller_agent_config = "responses_api_agents/simple_agent/configs/simple_agent.yaml"
+    model_config = "responses_api_models/inference_provider/configs/inference_provider.yaml"
+    monkeypatch.setattr(
+        runtime,
+        "_load_global_config_dict",
+        lambda: {
+            "config_paths": [caller_agent_config],
+            **_component_selection(agent_config=caller_agent_config),
+        },
+    )
     monkeypatch.setattr(runtime, "_apply_uv_dirs", lambda config: None)
     monkeypatch.setattr(runtime, "_allocate_head_server_port", lambda config: 5000)
     monkeypatch.setattr(runtime, "_create_rollout_helper", lambda: "rollout-helper")
-    package = object()
-    monkeypatch.setattr(
-        runtime,
-        "_load_runtime_environment_package",
-        lambda environment_path, required: events.append("environment-validated") or package,
-    )
-    monkeypatch.setattr(
-        runtime,
-        "_install_wheels_v1_dependencies",
-        lambda loaded_package, work_path: events.append("wheels-installed") if loaded_package is package else None,
-    )
-    monkeypatch.setenv("NMP_ENVIRONMENT_PATH", "/job/environment")
+    monkeypatch.setattr(runtime, "_install_wheels_v1_dependencies", lambda loaded_package, work_path: None)
+    monkeypatch.setenv("NHX_ENVIRONMENT_PATH", str(tmp_path))
     monkeypatch.setenv(runtime.ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY, "true")
-    monkeypatch.setenv("NMP_WORK_PATH", "/job/work")
+    monkeypatch.setenv("NHX_WORK_PATH", str(tmp_path / "work"))
+    monkeypatch.setenv(runtime.NEMO_GYM_EXTRA_ROOTS_ENV_KEY, "/operator/root")
+    monkeypatch.setattr(runtime, "_image_gym_search_root", lambda: None)
 
     runtime.bootstrap_gym_host()
 
-    assert events == ["environment-validated", "wheels-installed", "gym-started"]
-    assert captured["config"]["initial_global_config_dict"]["config_paths"] == caller_paths
+    config = cast(dict[str, Any], captured["config"])
+    composed = cast(dict[str, Any], config["initial_global_config_dict"])
+    assert composed["config_paths"] == [
+        *[str(path) for path in package.config_paths],
+        model_config,
+    ]
+    assert caller_agent_config not in composed["config_paths"]
+    assert runtime.ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY not in composed
+    assert runtime.os.environ[runtime.NEMO_GYM_EXTRA_ROOTS_ENV_KEY] == f"{tmp_path.resolve()}:/operator/root"
 
 
 def test_bootstrap_installs_wheels_before_starting_gym(monkeypatch):
@@ -499,7 +819,7 @@ def test_bootstrap_installs_wheels_before_starting_gym(monkeypatch):
     monkeypatch.setattr(runtime, "_apply_uv_dirs", lambda config: None)
     monkeypatch.setattr(runtime, "_allocate_head_server_port", lambda config: 5000)
     monkeypatch.setattr(runtime, "_create_rollout_helper", lambda: "rollout-helper")
-    package = object()
+    package = MagicMock(root="/job/environment")
     monkeypatch.setattr(
         runtime,
         "_load_runtime_environment_package",
@@ -507,17 +827,1450 @@ def test_bootstrap_installs_wheels_before_starting_gym(monkeypatch):
     )
     monkeypatch.setattr(
         runtime,
+        "_compose_gym_config_with_environment_package",
+        lambda config, loaded_package: (
+            (
+                events.append("environment-composed"),
+                config,
+            )[1]
+            if loaded_package is package
+            else config
+        ),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_prepend_environment_search_root",
+        lambda environment_root: events.append("environment-root-prepended"),
+    )
+    monkeypatch.setattr(
+        runtime,
         "_install_wheels_v1_dependencies",
         lambda loaded_package, work_path: events.append("wheels-installed") if loaded_package is package else None,
     )
-    monkeypatch.setenv("NMP_ENVIRONMENT_PATH", "/job/environment")
+    monkeypatch.setattr(
+        runtime,
+        "_install_huggingface_cache_fallback",
+        lambda dataset_path, work_path: events.append(f"hf-cache-installed:{dataset_path}:{work_path}"),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_apply_huggingface_offline_policy",
+        lambda: events.append("hf-offline-policy-applied"),
+    )
+    monkeypatch.setenv("NHX_ENVIRONMENT_PATH", "/job/environment")
     monkeypatch.setenv(runtime.ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY, "true")
-    monkeypatch.setenv("NMP_WORK_PATH", "/job/work")
+    monkeypatch.setenv("NHX_WORK_PATH", "/job/work")
+    monkeypatch.setenv("NHX_DATASET_PATH", "/job/dataset")
 
     _, head_server_config, rollout_helper = runtime.bootstrap_gym_host()
 
     # Dependencies must be ready before RunHelper starts any Gym servers.
-    assert events == ["environment-validated", "wheels-installed", "gym-started"]
+    assert events == [
+        "hf-offline-policy-applied",
+        "hf-cache-installed:/job/dataset:/job/work",
+        "environment-validated",
+        "environment-composed",
+        "environment-root-prepended",
+        "wheels-installed",
+        "gym-started",
+    ]
     assert head_server_config.host == "127.0.0.1"
     assert head_server_config.port == 5000
     assert rollout_helper == "rollout-helper"
+
+
+# --------------------------------------------------------------------------------------------
+# Long-running rollouts
+#
+# The sandbox proxy caps how long it waits for a response's first byte, so a batch that takes
+# longer than the cap fails in transit no matter how healthy the host is. These cover the host
+# answering early and heartbeating, and the deadline that replaces the timeout no hop is left to
+# apply. Docker has no proxy in the path, which is why none of this was caught by running it.
+# --------------------------------------------------------------------------------------------
+
+
+class _SlowRolloutHelper:
+    """Blocks each rollout until released, so a batch's duration is controlled by the test.
+
+    ``cancelled`` records that the collector was actually cancelled, which is the only way to tell
+    an abandoned batch from one that merely finished while nobody was reading.
+    """
+
+    def __init__(self, release: threading.Event, *, fail: bool = False) -> None:
+        self._release = release
+        self._fail = fail
+        self.cancelled = threading.Event()
+
+    def run_examples(self, examples, head_server_config=None):
+        async def _one(row):
+            try:
+                await asyncio.get_running_loop().run_in_executor(None, self._release.wait, 30)
+            except asyncio.CancelledError:
+                self.cancelled.set()
+                raise
+            if self._fail:
+                raise RuntimeError("environment exploded")
+            return row, {"response": {"output": []}, "reward": 1.0}
+
+        return [_one(row) for row in examples]
+
+
+@pytest.fixture
+def slow_server():
+    """A threaded host whose rollouts block until the test releases them."""
+    release = threading.Event()
+    original = (
+        runtime.Handler.heartbeat_interval_s,
+        runtime.Handler.rollout_deadline_s,
+        runtime.Handler.max_request_bytes,
+        runtime.Handler.max_response_bytes,
+    )
+    started: list[ThreadingHTTPServer] = []
+
+    def _start(*, fail: bool = False, heartbeat_s: float = 0.05, deadline_s: float = 30.0):
+        runtime._READY = True
+        runtime._RUN_HELPER = MagicMock()
+        runtime._HEAD_SERVER_CONFIG = MagicMock()
+        runtime._ROLLOUT_HELPER = _SlowRolloutHelper(release, fail=fail)
+        runtime.Handler.max_request_bytes = 4096
+        runtime.Handler.max_response_bytes = 4096
+        runtime.Handler.heartbeat_interval_s = heartbeat_s
+        runtime.Handler.rollout_deadline_s = deadline_s
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), runtime.Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        started.append(server)
+        return f"http://127.0.0.1:{server.server_address[1]}", release
+
+    try:
+        yield _start
+    finally:
+        release.set()
+        for server in started:
+            server.shutdown()
+            server.server_close()
+        runtime._READY = False
+        runtime._HEAD_SERVER_CONFIG = None
+        runtime._ROLLOUT_HELPER = None
+        (
+            runtime.Handler.heartbeat_interval_s,
+            runtime.Handler.rollout_deadline_s,
+            runtime.Handler.max_request_bytes,
+            runtime.Handler.max_response_bytes,
+        ) = original
+
+
+def _post_rollouts(base_url: str, examples: list[dict], timeout: float = 30.0):
+    import urllib.request
+
+    payload = json.dumps({"examples": examples}).encode()
+    request = urllib.request.Request(
+        f"{base_url}/rollouts/run", data=payload, headers={"Content-Type": "application/json"}
+    )
+    return urllib.request.urlopen(request, timeout=timeout)
+
+
+def test_rollouts_run_answers_before_the_batch_finishes(slow_server):
+    """The status line must leave immediately, and the connection stay visibly alive after it.
+
+    A proxy that has seen no byte for its cap gives up on the request, so a batch slower than the
+    cap fails in transit however healthy the host is. Heartbeat whitespace is a valid JSON prefix,
+    so it holds the connection open without the reader having to know about it.
+    """
+    base_url, release = slow_server(heartbeat_s=0.05)
+
+    response = _post_rollouts(base_url, [{"id": 1}])
+    # Headers are readable while the rollout is still blocked: proof the host answered first.
+    assert response.status == 200
+    assert response.headers.get("Content-Length") is None
+
+    time.sleep(0.3)
+    release.set()
+    raw = response.read().decode()
+
+    assert raw.startswith(" "), "no heartbeat preceded the payload"
+    assert json.loads(raw)["results"][0]["reward"] == 1.0
+
+
+def test_rollouts_run_gives_up_at_the_host_deadline(slow_server):
+    """Nothing else can time a wedged batch out, so the host has to.
+
+    Every other hop has been taught to wait, so without this a stuck rollout heartbeats until the
+    sandbox's ttl_s and the caller learns nothing about why.
+    """
+    base_url, _ = slow_server(heartbeat_s=0.05, deadline_s=0.2)
+
+    body = json.loads(_post_rollouts(base_url, [{"id": 1}]).read().decode())
+
+    assert body["error"]["code"] == "deadline_exceeded"
+    assert "0.2s" in body["error"]["message"]
+
+
+def test_rollouts_run_reports_a_failed_batch_in_the_body(slow_server):
+    """After the status line is committed, a failure can only be reported in the body.
+
+    It carries a traceback because the host's stdout never reaches the job: without one the caller
+    sees the exception's ``str`` and has no idea which of Gym's layers raised it.
+    """
+    base_url, release = slow_server(fail=True)
+    release.set()
+
+    body = json.loads(_post_rollouts(base_url, [{"id": 1}]).read().decode())
+
+    assert body["error"]["code"] == "internal"
+    assert "environment exploded" in body["error"]["message"]
+    assert "Traceback" in body["error"]["message"]
+
+
+def test_health_stays_answerable_during_a_rollout(slow_server):
+    """A single-threaded server would queue /health behind the batch and read as unhealthy."""
+    import urllib.request
+
+    base_url, release = slow_server()
+    rollout = threading.Thread(target=lambda: _post_rollouts(base_url, [{"id": 1}]).read())
+    rollout.start()
+    try:
+        time.sleep(0.2)
+        with urllib.request.urlopen(f"{base_url}/health", timeout=5) as health:
+            assert json.loads(health.read().decode()) == {"status": "ready"}
+    finally:
+        release.set()
+        rollout.join(timeout=10)
+
+
+def test_a_disconnected_caller_cancels_the_batch(slow_server):
+    """Nothing will read the results, so the host should stop paying for them.
+
+    Without this the batch runs to completion against a socket that is gone, and with chunking
+    several abandoned batches can pile up on the shared loop at once.
+    """
+    import urllib.request
+
+    base_url, release = slow_server(heartbeat_s=0.05)
+    helper = runtime._ROLLOUT_HELPER
+    payload = json.dumps({"examples": [{"id": 1}]}).encode()
+    request = urllib.request.Request(
+        f"{base_url}/rollouts/run", data=payload, headers={"Content-Type": "application/json"}
+    )
+    response = urllib.request.urlopen(request, timeout=10)
+
+    # Drop the connection while the host is still heartbeating into it.
+    response.close()
+
+    assert helper.cancelled.wait(10), "the abandoned batch kept running after the caller left"
+
+    release.set()
+    # And the server stays healthy for the next caller rather than wedging on the broken one.
+    with urllib.request.urlopen(f"{base_url}/health", timeout=5) as health:
+        assert json.loads(health.read().decode()) == {"status": "ready"}
+
+
+def test_rollouts_reuse_one_live_event_loop():
+    """Gym's shared HTTP client binds to the loop that created it.
+
+    A loop per request would leave the client pointing at a closed one, so the second batch fails
+    inside Gym rather than here.
+    """
+    first = runtime._ensure_event_loop()
+    second = runtime._ensure_event_loop()
+
+    assert first is second
+    assert first.is_running()
+
+
+def test_concurrent_rollout_batches_interleave_on_that_loop():
+    """Chunked callers post several batches at once; they must not serialize or deadlock."""
+    helper = _FakeRolloutHelper()
+    config = MagicMock()
+
+    futures = [runtime.submit_rollouts([{"id": index}], config, helper) for index in range(4)]
+    results = [future.result(timeout=10) for future in futures]
+
+    assert [len(batch) for batch in results] == [1, 1, 1, 1]
+
+
+def _capture_line(**overrides):
+    call = {"model_call_id": "c0", "status_code": 200, "started_at": 1.5, "completed_at": 1.75}
+    return json.dumps({**call, **overrides})
+
+
+def test_capture_is_enabled_so_a_rollout_records_per_call_timing(tmp_path):
+    # Set, not defaulted: a caller's global config that left observability off would produce traces
+    # with no per-call timing, which reads the same as a model that was never called.
+    config = {"observability_enabled": False}
+
+    runtime._apply_model_call_capture(config, str(tmp_path))
+
+    assert config["observability_enabled"] is True
+    assert config["model_call_capture_dir"] == str(tmp_path / runtime.MODEL_CALL_CAPTURE_SUBDIR)
+    assert (tmp_path / runtime.MODEL_CALL_CAPTURE_SUBDIR).is_dir()
+
+
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [
+        ({"_ng_task_index": 0, "_ng_rollout_index": 1}, "0-1.capture.jsonl"),
+        ({"_ng_task_index": 0, "_ng_rollout_index": 1, "_ng_attempt_index": 0}, "0-1.capture.jsonl"),
+        ({"_ng_task_index": 0, "_ng_rollout_index": 1, "_ng_attempt_index": 2}, "0-1-a2.capture.jsonl"),
+        ({"_ng_task_index": 0}, None),
+        ({"_ng_task_index": True, "_ng_rollout_index": 1}, None),
+    ],
+)
+def test_capture_filename_follows_gyms_rollout_id(result, expected):
+    assert runtime._capture_filename(result) == expected
+
+
+def test_a_capture_is_read_back_onto_its_rollout(tmp_path):
+    # Trailing blank line included: Gym appends per call, so a partially-flushed file has one.
+    (tmp_path / "0-1.capture.jsonl").write_text(f"{_capture_line()}\n\n", encoding="utf-8")
+
+    calls, spent = runtime._read_capture(str(tmp_path), {"_ng_task_index": 0, "_ng_rollout_index": 1}, budget=10_000)
+
+    assert [call["model_call_id"] for call in calls] == ["c0"]
+    assert spent > 0
+
+
+def test_a_capture_over_budget_is_dropped_whole_rather_than_truncated(tmp_path):
+    # Half a capture would project into a trace that looks complete while under-reporting the calls
+    # the agent actually made.
+    (tmp_path / "0-1.capture.jsonl").write_text(f"{_capture_line()}\n{_capture_line(model_call_id='c1')}\n")
+
+    calls, spent = runtime._read_capture(str(tmp_path), {"_ng_task_index": 0, "_ng_rollout_index": 1}, budget=10)
+
+    assert calls == []
+    assert spent == 0
+
+
+@pytest.mark.parametrize("body", ["", "{not json}\n", "[1, 2]\n"])
+def test_an_unreadable_capture_costs_the_timing_not_the_rollout(tmp_path, body):
+    (tmp_path / "0-1.capture.jsonl").write_text(body, encoding="utf-8")
+
+    assert runtime._read_capture(str(tmp_path), {"_ng_task_index": 0, "_ng_rollout_index": 1}, budget=10_000) == ([], 0)
+
+
+def test_a_missing_capture_is_not_an_error(tmp_path):
+    assert runtime._read_capture(str(tmp_path), {"_ng_task_index": 9, "_ng_rollout_index": 9}, budget=10_000) == ([], 0)
+
+
+def test_an_unwritable_work_path_disables_capture_rather_than_failing_the_host(tmp_path):
+    # Whether the work path is writable varies by sandbox provider. A host that refuses to start is
+    # a far worse outcome than one whose traces lack per-call timing.
+    unwritable = tmp_path / "file-not-a-dir"
+    unwritable.write_text("", encoding="utf-8")
+    config = {}
+
+    runtime._apply_model_call_capture(config, str(unwritable))
+
+    assert config == {}
+
+
+class _IndexedRolloutHelper:
+    """Yields a result per example, carrying the rollout identity a capture is keyed by."""
+
+    def run_examples(self, examples, head_server_config=None):
+        async def _one(row):
+            return row, {"response": {"output": []}, "reward": 0.0, **row}
+
+        return [_one(row) for row in examples]
+
+
+def _rollout_examples(count):
+    return [{"_ng_task_index": i, "_ng_rollout_index": 0} for i in range(count)]
+
+
+async def _collect(tmp_path, examples, budget):
+    return await runtime._collect_rollout_results(examples, MagicMock(), _IndexedRolloutHelper(), str(tmp_path), budget)
+
+
+def test_each_rollouts_capture_is_attached_to_its_own_result(tmp_path):
+    # The whole point of the hop: without this the record crosses the wire bare and the trace it
+    # projects into has no per-call timing.
+    for index in range(2):
+        (tmp_path / f"{index}-0.capture.jsonl").write_text(f"{_capture_line(model_call_id=f'c{index}')}\n")
+
+    results = asyncio.run(_collect(tmp_path, _rollout_examples(2), 10_000))
+
+    attached = [[call["model_call_id"] for call in result[runtime.MODEL_CALLS_RESULT_KEY]] for result in results]
+    assert attached == [["c0"], ["c1"]]
+
+
+def test_the_budget_is_spent_across_rollouts_not_per_rollout(tmp_path):
+    # Captures share one response, so the budget has to deplete. Applied per rollout instead, a
+    # large run would blow the response cap and the host would refuse every result.
+    for index in range(3):
+        (tmp_path / f"{index}-0.capture.jsonl").write_text(f"{_capture_line(model_call_id=f'c{index}')}\n")
+    one_capture = (tmp_path / "0-0.capture.jsonl").stat().st_size
+
+    results = asyncio.run(_collect(tmp_path, _rollout_examples(3), one_capture * 2))
+
+    # The first two fit; the third finds nothing left and returns without its capture.
+    assert [runtime.MODEL_CALLS_RESULT_KEY in result for result in results] == [True, True, False]
+
+
+def test_rollouts_still_return_when_no_capture_was_written(tmp_path):
+    # The reward and output stand on their own; only the per-call timing is missing.
+    results = asyncio.run(_collect(tmp_path, _rollout_examples(2), 10_000))
+
+    assert len(results) == 2
+    assert all(runtime.MODEL_CALLS_RESULT_KEY not in result for result in results)
+
+
+def test_capture_spend_is_measured_in_bytes_not_characters(tmp_path):
+    # The budget is spent against a byte cap. `len` on decoded text counts code points, so a CJK
+    # capture would report about a third of what it costs on the wire -- the aggregate then
+    # overshoots `max_response_bytes`, and an oversized response is refused whole.
+    # `ensure_ascii=False` on purpose: escaped to \uXXXX the file would be pure ASCII, byte count
+    # would equal character count, and the test would pass against the bug it is written for.
+    payload = json.dumps(
+        {"model_call_id": "c0", "note": "四十二といえば生命、宇宙、そして万物についての究極の疑問の答え"},
+        ensure_ascii=False,
+    )
+    path = tmp_path / "0-1.capture.jsonl"
+    path.write_text(f"{payload}\n", encoding="utf-8")
+    assert path.stat().st_size > len(payload) + 1, "test data must be genuinely multibyte"
+
+    _, spent = runtime._read_capture(str(tmp_path), {"_ng_task_index": 0, "_ng_rollout_index": 1}, budget=10_000)
+
+    assert spent == path.stat().st_size
+
+
+def test_a_capture_that_is_not_valid_utf8_costs_the_timing_not_the_rollout(tmp_path):
+    (tmp_path / "0-1.capture.jsonl").write_bytes(b'{"model_call_id": "\xff\xfe"}\n')
+
+    assert runtime._read_capture(str(tmp_path), {"_ng_task_index": 0, "_ng_rollout_index": 1}, budget=10_000) == ([], 0)
+
+
+# ------------------------------------------------------------------------------------------
+# Response framing
+# ------------------------------------------------------------------------------------------
+
+
+class _DelayedRolloutHelper:
+    """A helper whose rollouts take long enough for the heartbeat to fire.
+
+    Distinct from `_SlowRolloutHelper` above, which blocks until a test releases it: these
+    tests read the wire to the end of the body, so the rollout has to finish on its own.
+    """
+
+    def __init__(self, delay_s: float) -> None:
+        self.delay_s = delay_s
+
+    def run_examples(self, examples, head_server_config=None):
+        async def _one(row):
+            await asyncio.sleep(self.delay_s)
+            return row, {"response": {"output": []}, "reward": 0.0}
+
+        return [_one(row) for row in examples]
+
+
+def _body_is_complete(received: bytes) -> bool:
+    """Whether the framing in ``received`` marks the body as finished."""
+    head, sep, body = received.partition(b"\r\n\r\n")
+    if not sep:
+        return False
+    if b"Transfer-Encoding: chunked" in head:
+        return body.endswith(b"0\r\n\r\n")
+    for line in head.split(b"\r\n"):
+        if line.lower().startswith(b"content-length:"):
+            return len(body) >= int(line.split(b":")[1])
+    return False
+
+
+def _decode_chunked_body(received: bytes) -> str:
+    """Reassemble the chunked body in ``received``, heartbeats included."""
+    _, _, rest = received.partition(b"\r\n\r\n")
+    decoded = ""
+    while True:
+        size_line, _, rest = rest.partition(b"\r\n")
+        size = int(size_line, 16)
+        if size == 0:
+            return decoded
+        decoded += rest[:size].decode()
+        rest = rest[size + 2 :]
+
+
+def _raw_rollout_exchange(base_url: str, payload: str, version: str) -> bytes:
+    """POST /rollouts/run over a bare socket and return the response bytes as sent.
+
+    urllib de-chunks transparently, which is the framing under test, so these assertions
+    have to read the wire.
+    """
+    parsed = urlsplit(base_url)
+    body = payload.encode()
+    request = (
+        f"POST /rollouts/run {version}\r\n"
+        f"Host: {parsed.hostname}\r\n"
+        "Content-Type: application/json\r\n"
+        f"Content-Length: {len(body)}\r\n"
+        "\r\n"
+    ).encode() + body
+
+    with socket.create_connection((parsed.hostname, parsed.port), timeout=10) as sock:
+        sock.sendall(request)
+        sock.settimeout(10)
+        received = b""
+        while not _body_is_complete(received):
+            part = sock.recv(4096)
+            if not part:
+                break
+            received += part
+    return received
+
+
+def _one_example() -> str:
+    return json.dumps({"examples": [{"agent_ref": {"name": "a"}, "_rowidx": 0}]})
+
+
+def test_rollouts_run_frames_the_body_so_a_heartbeat_cannot_end_it(ready_server):
+    """The heartbeat and the payload must be separately framed chunks.
+
+    Regression guard for nvbug 6716627. The host used to flush the status line with neither
+    a length nor chunking, leaving the body delimited only by connection close. The
+    OpenSandbox proxy does not wait for that close: it returned HTTP 200 with the lone " "
+    heartbeat -- or nothing at all -- as the finished response, and the caller failed with
+    `JSONDecodeError: Expecting value: line 1 column 1 (char 0)`. Only the zero-length chunk
+    may end this body.
+    """
+    runtime.Handler.heartbeat_interval_s = 0.02
+    runtime._ROLLOUT_HELPER = _DelayedRolloutHelper(0.3)
+
+    received = _raw_rollout_exchange(ready_server, _one_example(), "HTTP/1.1")
+
+    head, _, body = received.partition(b"\r\n\r\n")
+    assert b"Transfer-Encoding: chunked" in head
+    assert b"Content-Length" not in head
+    # The terminator, and nothing after it.
+    assert body.endswith(b"0\r\n\r\n")
+    # A heartbeat is its own chunk -- length-prefixed, so it cannot read as the end.
+    assert body.startswith(b"1\r\n \r\n")
+    decoded = ""
+    rest = body
+    while True:
+        size_line, _, rest = rest.partition(b"\r\n")
+        size = int(size_line, 16)
+        if size == 0:
+            break
+        decoded += rest[:size].decode()
+        rest = rest[size + 2 :]
+    assert len(json.loads(decoded)["results"]) == 1
+
+
+def test_rollouts_run_reports_an_unencodable_result_in_the_body(ready_server):
+    """An unencodable result is a failed batch, not an empty one.
+
+    Serializing happens after the status line, so a raised encoder used to escape the
+    handler with the terminating chunk unwritten -- which every hop downstream reports
+    as a well-formed empty 200, i.e. a batch that succeeded with no rewards.
+    """
+
+    class _UnencodableHelper:
+        def run_examples(self, examples, head_server_config=None):
+            async def _one(row):
+                return row, {"reward": object()}
+
+            return [_one(row) for row in examples]
+
+    runtime._ROLLOUT_HELPER = _UnencodableHelper()
+
+    received = _raw_rollout_exchange(ready_server, _one_example(), "HTTP/1.1")
+
+    assert _body_is_complete(received), received
+    head, _, _ = received.partition(b"\r\n\r\n")
+    assert b"200" in head.split(b"\r\n")[0]
+
+    body = json.loads(_decode_chunked_body(received).strip())
+    assert body["error"]["code"] == "internal"
+    assert "not JSON-serializable" in body["error"]["message"]
+
+
+def test_rollouts_run_never_answers_with_an_empty_body(ready_server):
+    """A body of zero bytes is indistinguishable from a stream that was dropped."""
+
+    def _empty(self, future, started):
+        return b""
+
+    original = runtime.Handler._await_results
+    runtime.Handler._await_results = _empty
+    try:
+        received = _raw_rollout_exchange(ready_server, _one_example(), "HTTP/1.1")
+    finally:
+        runtime.Handler._await_results = original
+
+    assert _body_is_complete(received), received
+    body = json.loads(_decode_chunked_body(received).strip())
+    assert body["error"]["code"] == "internal"
+    assert "empty response body" in body["error"]["message"]
+
+
+def test_rollouts_run_sends_a_length_to_an_http_10_caller(ready_server):
+    """A 1.0 caller cannot parse chunks, so it gets the whole body with a length.
+
+    Still explicitly framed -- that is the point. 1.0's own answer for a body of unknown
+    length is the close-delimited one that lost the response, so the host buffers instead and
+    pays for it in latency rather than in correctness.
+    """
+    runtime.Handler.heartbeat_interval_s = 0.02
+    runtime._ROLLOUT_HELPER = _DelayedRolloutHelper(0.1)
+
+    received = _raw_rollout_exchange(ready_server, _one_example(), "HTTP/1.0")
+
+    head, _, body = received.partition(b"\r\n\r\n")
+    assert b"Transfer-Encoding" not in head
+    assert b"Content-Length: " in head
+    # Buffered whole, so no heartbeat leaked into a body that is now length-delimited.
+    assert not body.startswith(b" ")
+    assert len(json.loads(body.decode())["results"]) == 1
+
+
+def test_connections_are_never_reused(ready_server):
+    """1.1 is here for chunked framing only; its connection reuse is declined.
+
+    The sharp hazard: a request whose body the handler never reads (the 413 path declines on
+    purpose) leaves those bytes in the socket, and the server parses them as the next request
+    line. Pipelined here to prove it cannot happen -- before the connection was closed per
+    request, this exact exchange answered `400 Bad request syntax` and swallowed the real
+    /health.
+    """
+    parsed = urlsplit(ready_server)
+    body = _one_example().encode()
+    pipelined = (
+        (
+            "POST /rollouts/run HTTP/1.1\r\n"
+            f"Host: {parsed.hostname}\r\n"
+            "Content-Type: application/json\r\n"
+            # Oversize by declaration: the 413 check reads Content-Length, not the body.
+            f"Content-Length: {runtime.Handler.max_request_bytes + 1}\r\n"
+            "\r\n"
+        ).encode()
+        + body
+        + f"GET /health HTTP/1.1\r\nHost: {parsed.hostname}\r\n\r\n".encode()
+    )
+
+    with socket.create_connection((parsed.hostname, parsed.port), timeout=10) as sock:
+        sock.settimeout(10)
+        sock.sendall(pipelined)
+        received = b""
+        while True:
+            part = sock.recv(4096)
+            if not part:
+                break
+            received += part
+
+    assert received.startswith(b"HTTP/1.1 413")
+    # One response, and the leftover body was never parsed as a request of its own.
+    assert received.count(b"HTTP/1.1") == 1
+    assert b"Bad request" not in received
+    # Advertised, so a pooling proxy drops the socket instead of reusing it.
+    assert b"Connection: close" in received
+
+
+def test_the_rollout_response_declines_reuse_too(ready_server):
+    """The zero-length chunk says where the body ends; Connection: close says the socket is
+    done. Neither substitutes for the other."""
+    runtime.Handler.heartbeat_interval_s = 0.02
+    runtime._ROLLOUT_HELPER = _DelayedRolloutHelper(0.1)
+
+    received = _raw_rollout_exchange(ready_server, _one_example(), "HTTP/1.1")
+
+    head, _, body = received.partition(b"\r\n\r\n")
+    assert b"Transfer-Encoding: chunked" in head
+    assert b"Connection: close" in head
+    assert body.endswith(b"0\r\n\r\n")
+
+
+def test_bodiless_responses_carry_a_length(ready_server):
+    """HTTP/1.1 keep-alive reuses the socket, so even a 404 must say where it ends."""
+    import urllib.error
+    import urllib.request
+
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        urllib.request.urlopen(f"{ready_server}/nope", timeout=10)
+    assert excinfo.value.code == 404
+    assert excinfo.value.headers.get("Content-Length") == "0"
+
+
+def test_an_empty_chunk_is_never_written():
+    """A zero-length chunk is the terminator, so writing one for empty data ends the body early.
+
+    Reached when a heartbeat or a result body is empty: the caller would see a well-formed but
+    truncated response rather than an error.
+    """
+    written: list[bytes] = []
+    handler = runtime.Handler.__new__(runtime.Handler)
+    handler.wfile = cast(Any, SimpleNamespace(write=written.append, flush=lambda: None))
+
+    handler._write_chunk(b"")
+    assert written == []
+
+    handler._write_chunk(b" ")
+    assert written == [b"1\r\n \r\n"]
+
+
+@pytest.fixture(autouse=True)
+def _isolated_hf_environment(monkeypatch):
+    for key in ("HF_HOME", "HF_DATASETS_CACHE", "HF_HUB_CACHE", "HF_HUB_OFFLINE", "HF_DATASETS_OFFLINE"):
+        monkeypatch.delenv(key, raising=False)
+
+
+def _vendored_hf_cache(tmp_path):
+    dataset_path = tmp_path / "dataset"
+    (dataset_path / runtime.HF_CACHE_DIRNAME / "hub").mkdir(parents=True)
+    (dataset_path / runtime.HF_CACHE_DIRNAME / "hub" / "snapshot.bin").write_text("weights")
+    work_path = tmp_path / "work"
+    work_path.mkdir()
+    return dataset_path, work_path
+
+
+def test_a_vendored_hf_cache_is_copied_into_writable_work(tmp_path, monkeypatch):
+    dataset_path, work_path = _vendored_hf_cache(tmp_path)
+    monkeypatch.delenv(runtime.ENVIRONMENT_OFFLINE_ENV_KEY, raising=False)
+
+    runtime._install_huggingface_cache_fallback(str(dataset_path), str(work_path))
+
+    copied = work_path / runtime.HF_CACHE_DIRNAME
+    assert (copied / "hub" / "snapshot.bin").read_text() == "weights"
+    assert os.environ["HF_HOME"] == str(copied)
+    assert os.environ["HF_DATASETS_CACHE"] == str(copied / "datasets")
+    assert os.environ["HF_HUB_CACHE"] == str(copied / "hub")
+
+
+def test_the_copy_is_writable_so_datasets_can_take_its_lock(tmp_path, monkeypatch):
+    dataset_path, work_path = _vendored_hf_cache(tmp_path)
+    dataset_path.chmod(0o555)
+    (dataset_path / runtime.HF_CACHE_DIRNAME).chmod(0o555)
+
+    runtime._install_huggingface_cache_fallback(str(dataset_path), str(work_path))
+
+    lock = work_path / runtime.HF_CACHE_DIRNAME / "hub" / "datasets.lock"
+    lock.write_text("held")
+    assert lock.read_text() == "held"
+
+
+def test_offline_environments_pin_the_hf_libraries_offline(monkeypatch):
+    monkeypatch.setenv(runtime.ENVIRONMENT_OFFLINE_ENV_KEY, "true")
+
+    runtime._apply_huggingface_offline_policy()
+
+    assert os.environ["HF_HUB_OFFLINE"] == "1"
+    assert os.environ["HF_DATASETS_OFFLINE"] == "1"
+
+
+def test_an_offline_job_is_pinned_offline_even_with_no_snapshot_to_fall_back_on(monkeypatch):
+    monkeypatch.setenv(runtime.ENVIRONMENT_OFFLINE_ENV_KEY, "true")
+
+    runtime._apply_huggingface_offline_policy()
+    runtime._install_huggingface_cache_fallback("", "")
+
+    # Without this the libraries hit a blocked network instead of reporting a missing file.
+    assert os.environ["HF_HUB_OFFLINE"] == "1"
+    assert os.environ["HF_DATASETS_OFFLINE"] == "1"
+
+
+def test_an_online_environment_may_still_reach_the_hub_for_what_the_snapshot_lacks(monkeypatch):
+    monkeypatch.setenv(runtime.ENVIRONMENT_OFFLINE_ENV_KEY, "false")
+
+    runtime._apply_huggingface_offline_policy()
+
+    assert "HF_HUB_OFFLINE" not in os.environ
+    assert "HF_DATASETS_OFFLINE" not in os.environ
+
+
+def test_an_online_job_keeps_offline_flags_a_caller_set_deliberately(monkeypatch):
+    monkeypatch.setenv(runtime.ENVIRONMENT_OFFLINE_ENV_KEY, "false")
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+
+    runtime._apply_huggingface_offline_policy()
+
+    assert os.environ["HF_HUB_OFFLINE"] == "1"
+
+
+def test_a_hub_snapshot_stays_a_symlink_instead_of_duplicating_every_blob(tmp_path):
+    dataset_path = tmp_path / "dataset"
+    model = dataset_path / runtime.HF_CACHE_DIRNAME / "hub" / "models--org--name"
+    (model / "blobs").mkdir(parents=True)
+    (model / "snapshots" / "rev1").mkdir(parents=True)
+    blob = model / "blobs" / "deadbeef"
+    blob.write_bytes(b"x" * 8192)
+    entry = model / "snapshots" / "rev1" / "model.bin"
+    os.symlink(os.path.relpath(blob, entry.parent), entry)
+    work_path = tmp_path / "work"
+    work_path.mkdir()
+
+    runtime._install_huggingface_cache_fallback(str(dataset_path), str(work_path))
+
+    copied = work_path / runtime.HF_CACHE_DIRNAME / "hub" / "models--org--name"
+    copied_entry = copied / "snapshots" / "rev1" / "model.bin"
+    assert copied_entry.is_symlink()
+    # Resolving inside the copy, not back to the read-only mount.
+    assert copied_entry.resolve() == (copied / "blobs" / "deadbeef").resolve()
+    on_disk = sum(p.stat().st_size for p in copied.rglob("*") if p.is_file() and not p.is_symlink())
+    assert on_disk == 8192
+
+
+def test_a_stale_copy_from_an_earlier_run_is_replaced(tmp_path, monkeypatch):
+    dataset_path, work_path = _vendored_hf_cache(tmp_path)
+    stale = work_path / runtime.HF_CACHE_DIRNAME
+    (stale / "hub").mkdir(parents=True)
+    (stale / "hub" / "snapshot.bin").write_text("stale")
+    (stale / "hub" / "gone.bin").write_text("gone")
+
+    runtime._install_huggingface_cache_fallback(str(dataset_path), str(work_path))
+
+    assert (stale / "hub" / "snapshot.bin").read_text() == "weights"
+    assert not (stale / "hub" / "gone.bin").exists()
+
+
+@pytest.mark.parametrize("kind", ["regular-file", "directory-symlink", "dangling-symlink"])
+def test_whatever_the_environment_left_at_the_cache_path_is_replaced(tmp_path, kind):
+    dataset_path, work_path = _vendored_hf_cache(tmp_path)
+    stale = work_path / runtime.HF_CACHE_DIRNAME
+    if kind == "regular-file":
+        stale.write_text("not a directory")
+    elif kind == "directory-symlink":
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        os.symlink(elsewhere, stale)
+    else:
+        os.symlink(tmp_path / "never-existed", stale)
+
+    runtime._install_huggingface_cache_fallback(str(dataset_path), str(work_path))
+
+    assert not stale.is_symlink()
+    assert (stale / "hub" / "snapshot.bin").read_text() == "weights"
+
+
+@pytest.mark.parametrize(
+    "dataset_path,work_path",
+    [("", "work"), ("dataset", ""), ("dataset-without-snapshot", "work")],
+)
+def test_the_fallback_is_inert_without_a_vendored_snapshot(tmp_path, monkeypatch, dataset_path, work_path):
+    (tmp_path / "dataset-without-snapshot").mkdir()
+
+    runtime._install_huggingface_cache_fallback(
+        str(tmp_path / dataset_path) if dataset_path else "",
+        str(tmp_path / work_path) if work_path else "",
+    )
+
+    assert "HF_HOME" not in os.environ
+
+
+def _policy_config(key: str = "${oc.env:GYM_POLICY_API_KEY}") -> dict[str, Any]:
+    return {
+        "policy_base_url": "https://integrate.api.nvidia.com/v1",
+        "policy_api_key": key,
+        "policy_model_name": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    }
+
+
+def _opener(open_fn):
+    """The preflight calls ``_NO_REDIRECT_OPENER.open``, so stubs must present that surface."""
+    return SimpleNamespace(open=open_fn)
+
+
+def _raising_urlopen(status: int):
+    def _urlopen(request, timeout=None):
+        raise urllib.error.HTTPError(request.full_url, status, "", Message(), io.BytesIO(b""))
+
+    return _urlopen
+
+
+def test_preflight_rejects_a_credential_the_policy_endpoint_refuses(monkeypatch) -> None:
+    """An auth refusal fails the host before Gym's servers are built.
+
+    Without this the refusal reaches the caller as a 500 from a loopback address: the component
+    server discards the upstream status, and the sandbox carrying the only log of it is destroyed.
+    """
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "sk-expired")
+    monkeypatch.setattr(runtime, "_NO_REDIRECT_OPENER", _opener(_raising_urlopen(401)))
+
+    config = _policy_config()
+
+    with pytest.raises(runtime.PolicyCredentialRejected) as excinfo:
+        runtime._preflight_policy_credential(config)
+
+    assert str(excinfo.value) == (
+        f"the policy endpoint {config['policy_base_url']} rejected the configured credential "
+        f"(HTTP 401) for model {config['policy_model_name']}, read from $GYM_POLICY_API_KEY. "
+        "Every rollout would fail the same way."
+    )
+
+
+@pytest.mark.parametrize("status", [403, 429, 500, 502, 503])
+def test_preflight_lets_a_non_auth_failure_through(monkeypatch, status: int) -> None:
+    """Only authentication fails the run.
+
+    A provider that is overloaded, rate-limiting, or refuses this probe would otherwise turn a
+    retryable rollout error into an unrecoverable startup failure.
+    """
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "sk-live")
+    monkeypatch.setattr(runtime, "_NO_REDIRECT_OPENER", _opener(_raising_urlopen(status)))
+
+    runtime._preflight_policy_credential(_policy_config())
+
+
+def test_preflight_survives_a_network_error(monkeypatch) -> None:
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "sk-live")
+
+    def _urlopen(request, timeout=None):
+        raise OSError("name resolution failed")
+
+    monkeypatch.setattr(runtime, "_NO_REDIRECT_OPENER", _opener(_urlopen))
+
+    runtime._preflight_policy_credential(_policy_config())
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        pytest.param({"policy_base_url": "https://x/v1"}, id="incomplete"),
+        pytest.param(
+            {"policy_base_url": "${policy_root}", "policy_api_key": "k", "policy_model_name": "m"},
+            id="interpolation-gym-resolves-later",
+        ),
+    ],
+)
+def test_preflight_skips_what_it_cannot_resolve(monkeypatch, config: dict[str, Any]) -> None:
+    """Skipping beats probing an endpoint assembled from unresolved template text."""
+
+    def _never(request, timeout=None):  # pragma: no cover - asserted by not being called
+        raise AssertionError("preflight probed an endpoint it could not resolve")
+
+    monkeypatch.setattr(runtime, "_NO_REDIRECT_OPENER", _opener(_never))
+
+    runtime._preflight_policy_credential(config)
+
+
+def test_preflight_reads_the_key_from_the_environment(monkeypatch) -> None:
+    """The key travels as ``${oc.env:VAR}`` so it stays out of the stored job spec."""
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "sk-live")
+    sent: dict[str, Any] = {}
+
+    def _urlopen(request, timeout=None):
+        sent["auth"] = request.headers.get("Authorization")
+        sent["url"] = request.full_url
+        raise urllib.error.HTTPError(request.full_url, 500, "", Message(), io.BytesIO(b""))
+
+    monkeypatch.setattr(runtime, "_NO_REDIRECT_OPENER", _opener(_urlopen))
+    runtime._preflight_policy_credential(_policy_config())
+
+    assert sent["auth"] == "Bearer sk-live", "the resolved value, not the interpolation text"
+    # GET /v1/models is commonly unauthenticated, so it would pass for a key every rollout is refused for.
+    assert sent["url"].endswith("/chat/completions")
+
+
+def test_a_failure_carries_the_host_output_that_the_sandbox_destroys(monkeypatch) -> None:
+    """The error envelope is the only channel out: the sandbox dies with its logs."""
+    monkeypatch.setattr(runtime, "_OUTPUT_TAIL", collections.deque(maxlen=runtime._OUTPUT_TAIL_LINES))
+    runtime._OUTPUT_TAIL.append("(policy_model) upstream returned 401")
+
+    envelope = runtime._runtime_error("internal", "ClientResponseError: 500")
+
+    assert envelope["error"]["host_output_tail"] == ["(policy_model) upstream returned 401"]
+
+
+def test_an_error_with_no_host_output_omits_the_tail(monkeypatch) -> None:
+    monkeypatch.setattr(runtime, "_OUTPUT_TAIL", collections.deque(maxlen=runtime._OUTPUT_TAIL_LINES))
+
+    assert "host_output_tail" not in runtime._runtime_error("internal", "boom")["error"]
+
+
+def test_the_output_tail_keeps_the_most_recent_lines_and_still_writes_through() -> None:
+    """Bounded so a chatty host cannot crowd the rollout results out of the response."""
+    buffer: collections.deque[str] = collections.deque(maxlen=2)
+    underlying = io.StringIO()
+    tail = runtime._OutputTail(underlying, buffer)
+
+    tail.write("first\nsecond\n")
+    tail.write("third\n")
+
+    assert list(buffer) == ["second", "third"]
+    assert underlying.getvalue() == "first\nsecond\nthird\n", "output must still reach the real stream"
+
+
+@pytest.fixture
+def failed_bootstrap_server(monkeypatch):
+    """A host that recorded a bootstrap failure and is serving anyway."""
+    monkeypatch.setattr(runtime, "_READY", False)
+    monkeypatch.setattr(
+        runtime,
+        "_BOOTSTRAP_ERROR",
+        {
+            "error": {
+                "code": "bootstrap_failed",
+                "message": "PolicyCredentialRejected: the policy endpoint rejected the configured credential",
+            }
+        },
+    )
+    server = HTTPServer(("127.0.0.1", 0), runtime.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_health_reports_a_failed_bootstrap_rather_than_starting(failed_bootstrap_server):
+    """A terminal failure reported as "starting" is polled to the readiness deadline.
+
+    The caller then reports a timeout, and the reason the host gave is never read.
+    """
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(f"{failed_bootstrap_server}/health", timeout=5)
+
+    body = json.loads(exc.value.read().decode())
+    assert body["status"] == "failed"
+    assert "rejected the configured credential" in body["error"]["message"]
+
+
+def test_a_rollout_against_a_failed_host_carries_the_bootstrap_error(failed_bootstrap_server):
+    """Nothing guarantees the caller polled /health before posting its first batch."""
+    request = urllib.request.Request(
+        f"{failed_bootstrap_server}/rollouts/run",
+        data=json.dumps({"rollouts": []}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(request, timeout=5)
+
+    body = json.loads(exc.value.read().decode())
+    assert "rejected the configured credential" in body["error"]["message"]
+
+
+def test_a_bootstrap_failure_starts_the_server_instead_of_exiting(monkeypatch):
+    """Exiting takes the sandbox down with its logs, so the diagnosis dies with it.
+
+    The caller is left polling an address that never answers, and reports a readiness timeout.
+    """
+    import urllib.request
+
+    monkeypatch.setattr(runtime, "_READY", False)
+    monkeypatch.setattr(runtime, "_BOOTSTRAP_ERROR", None)
+    monkeypatch.setattr(runtime, "_ensure_event_loop", lambda: None)
+    monkeypatch.setattr(runtime, "_install_output_tail", lambda: None)
+
+    def _reject():
+        raise runtime.PolicyCredentialRejected("the policy endpoint rejected the configured credential")
+
+    monkeypatch.setattr(runtime, "bootstrap_gym_host", _reject)
+    # Port 0 asks the kernel for a free port. main() otherwise binds 8080 and
+    # serve_forever never returns, so the test process stays on that socket.
+    monkeypatch.setenv("NHX_RUNTIME_HTTP_PORT", "0")
+    servers: list[runtime._Server] = []
+    real_serve = runtime._Server.serve_forever
+
+    def _serve_on_a_background_thread(self, poll_interval: float = 0.5) -> None:
+        servers.append(self)
+        threading.Thread(
+            target=real_serve,
+            args=(self,),
+            kwargs={"poll_interval": poll_interval},
+            daemon=True,
+        ).start()
+
+    monkeypatch.setattr(runtime._Server, "serve_forever", _serve_on_a_background_thread)
+
+    runtime.main()
+
+    assert servers, "main() did not start the server"
+    server = servers[0]
+    port = server.server_address[1]
+    try:
+        deadline = time.time() + 5
+        body = None
+        last_error: Exception | None = None
+        while time.time() < deadline:
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1)
+            except urllib.error.HTTPError as exc:
+                body = json.loads(exc.read().decode())
+                break
+            except (urllib.error.URLError, ConnectionError, TimeoutError) as exc:
+                last_error = exc
+                time.sleep(0.05)
+        else:
+            raise AssertionError(f"server on port {port} never answered /health: {last_error}")
+        assert body is not None
+        assert body["status"] == "failed"
+        assert "rejected the configured credential" in body["error"]["message"]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert runtime._READY is False
+    assert runtime._BOOTSTRAP_ERROR is not None
+    assert "rejected the configured credential" in runtime._BOOTSTRAP_ERROR["error"]["message"]
+
+
+def test_captured_output_masks_secret_env_values(monkeypatch):
+    """The tail is returned to the caller and stored in job logs.
+
+    A component that echoes its own environment would otherwise publish the credential it was
+    given to everyone who can read the evaluation's failure.
+    """
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-secretvalue123")
+    monkeypatch.setenv("HOME", "/root")
+    buffer: collections.deque[str] = collections.deque(maxlen=10)
+    tail = runtime._OutputTail(io.StringIO(), buffer, runtime._captured_output_secrets())
+
+    tail.write("resolved policy_api_key=nvapi-secretvalue123 for HOME=/root\n")
+
+    assert list(buffer) == ["resolved policy_api_key=*** for HOME=/root"]
+
+
+def test_captured_output_bounds_a_single_line(monkeypatch):
+    """One runaway line must not fill the failure response on its own."""
+    buffer: collections.deque[str] = collections.deque(maxlen=10)
+    tail = runtime._OutputTail(io.StringIO(), buffer)
+
+    tail.write("x" * 5000 + "\n")
+
+    assert len(buffer[0]) == runtime._MAX_CAPTURED_LINE_CHARS
+
+
+def test_captured_output_reaches_the_underlying_stream_unchanged(monkeypatch):
+    """Masking applies to what is captured, not to what the host logs for an operator."""
+    stream = io.StringIO()
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-secretvalue123")
+    tail = runtime._OutputTail(stream, collections.deque(maxlen=10), runtime._captured_output_secrets())
+
+    tail.write("key=nvapi-secretvalue123\n")
+
+    assert stream.getvalue() == "key=nvapi-secretvalue123\n"
+
+
+def test_a_list_valued_policy_base_url_is_still_preflighted(monkeypatch):
+    """A vLLM-backed policy is configured with a list of endpoints, not a scalar.
+
+    Stringifying the list produces a URL no provider answers, the probe fails as inconclusive, and
+    a bad credential reaches the rollouts it was meant to be caught before.
+    """
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-key")
+    assert runtime._resolved_policy_route(
+        {
+            "policy_base_url": ["http://vllm-0.svc.cluster.local:8000/v1"],
+            "policy_api_key": "${oc.env:GYM_POLICY_API_KEY}",
+            "policy_model_name": ["meta/llama-3.1-8b-instruct"],
+        }
+    ) == ("http://vllm-0.svc.cluster.local:8000/v1", "nvapi-key", "meta/llama-3.1-8b-instruct")
+
+
+def test_captured_output_masks_a_policy_key_the_config_holds_literally(monkeypatch):
+    """A config may inline the key instead of referencing ``${oc.env:VAR}``.
+
+    No env var then holds that value, so a name-based sweep of the environment misses it entirely
+    and the key reaches the caller in the failure the tail was added to produce.
+    """
+    monkeypatch.setenv(
+        runtime.GYM_GLOBAL_CONFIG_ENV_KEY,
+        json.dumps({"policy_api_key": "nvapi-literalkey123", "policy_base_url": "https://x/v1"}),
+    )
+    buffer: collections.deque[str] = collections.deque(maxlen=10)
+    tail = runtime._OutputTail(io.StringIO(), buffer, runtime._captured_output_secrets())
+
+    tail.write("POST https://x/v1 key=nvapi-literalkey123\n")
+
+    assert list(buffer) == ["POST https://x/v1 key=***"]
+
+
+def test_captured_output_secrets_survive_an_unset_global_config(monkeypatch):
+    """The tail is installed before bootstrap, so the config may be absent or unparseable."""
+    monkeypatch.delenv(runtime.GYM_GLOBAL_CONFIG_ENV_KEY, raising=False)
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-fromenv123")
+
+    assert "nvapi-fromenv123" in runtime._captured_output_secrets()
+
+
+def test_preflight_lets_a_403_through_rather_than_refusing_to_start(monkeypatch):
+    """A 403 is equally an egress proxy, a per-path policy, or a quota rule.
+
+    Refusing to start is unrecoverable, so a status that does not single out the credential must
+    not spend it. The run proceeds and reports per-example, as it did before the preflight existed.
+    """
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-key")
+    monkeypatch.setattr(runtime, "_NO_REDIRECT_OPENER", _opener(_raising_urlopen(403)))
+
+    runtime._preflight_policy_credential(_policy_config())
+
+
+def test_a_secret_split_across_two_writes_is_still_masked(monkeypatch):
+    """A stream splits where the writer flushes, not where a secret ends.
+
+    Masking each write on its own stores the halves as two unmasked fragments, and the tail goes
+    to the caller and the job log.
+    """
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-splitsecret123")
+    buffer: collections.deque[str] = collections.deque(maxlen=10)
+    tail = runtime._OutputTail(io.StringIO(), buffer, runtime._captured_output_secrets())
+
+    tail.write("key=nvapi-split")
+    tail.write("secret123 done\n")
+
+    assert list(buffer) == ["key=*** done"]
+
+
+def test_an_unterminated_write_is_held_rather_than_captured(monkeypatch):
+    """Capturing it early is what splits a secret in the first place."""
+    buffer: collections.deque[str] = collections.deque(maxlen=10)
+    tail = runtime._OutputTail(io.StringIO(), buffer)
+
+    tail.write("no newline yet")
+
+    assert list(buffer) == []
+
+
+def test_the_preflight_refuses_to_follow_a_redirect() -> None:
+    """Following one re-sends the Authorization header wherever the endpoint points.
+
+    Only the sandbox egress policy would stand between the policy key and an arbitrary origin, and
+    Docker applies none. Returning None from ``redirect_request`` makes urllib surface the 3xx as
+    its own status, which the preflight then treats as inconclusive.
+    """
+    # `handlers` is real but absent from typeshed's OpenerDirector stub.
+    handlers = [type(handler) for handler in getattr(runtime._NO_REDIRECT_OPENER, "handlers")]
+    assert runtime._RefuseRedirect in handlers, "the preflight opener must refuse redirects"
+
+    refused = runtime._RefuseRedirect().redirect_request(
+        MagicMock(), MagicMock(), 302, "Found", Message(), "https://evil.example/v1/chat/completions"
+    )
+
+    assert refused is None
+
+
+def test_an_endless_unterminated_write_does_not_grow_without_bound():
+    """Nothing obliges a writer to emit a newline, and this buffer lives in the host process."""
+    tail = runtime._OutputTail(io.StringIO(), collections.deque(maxlen=10))
+
+    for _ in range(100):
+        tail.write("x" * 1000)
+
+    assert len(tail._partial) <= runtime._MAX_CAPTURED_LINE_CHARS
+
+
+def test_a_secret_straddling_the_retention_bound_is_still_masked(monkeypatch):
+    """Bounding what is held must not cut a secret in half and publish the visible end.
+
+    The secret has to cross the bound while the line is still unterminated, which is the only
+    moment the bound applies. Retaining the captured width plus the longest secret keeps one that
+    starts inside that width whole, so the scrub at end-of-line still matches it.
+    """
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-straddlingsecret")
+    buffer: collections.deque[str] = collections.deque(maxlen=10)
+    tail = runtime._OutputTail(io.StringIO(), buffer, runtime._captured_output_secrets())
+
+    tail.write("y" * (runtime._MAX_CAPTURED_LINE_CHARS - 3))
+    tail.write("nvapi-straddlingsecret")
+    tail.write(" trailing\n")
+
+    assert "nvapi-straddlingsecret" not in buffer[0]
+    assert "***" in buffer[0], "the secret crossed the bound and must survive whole to be masked"
+
+
+def _wheels_package_with_servers(
+    tmp_path, monkeypatch, *, servers=("resources_servers/custom",), markers=("requirements.txt",)
+):
+    """A wheels-v1 package whose server directories carry the given install markers, with uv stubbed."""
+    config_paths = [f"{server}/configs/{server.rsplit('/', 1)[1]}.yaml" for server in servers]
+    _write_manifest(tmp_path, format="wheels-v1", config_paths=config_paths)
+    for server in servers:
+        for existing in ("requirements.txt", "pyproject.toml"):
+            (tmp_path / server / existing).unlink(missing_ok=True)
+        for marker in markers:
+            (tmp_path / server / marker).write_text("", encoding="utf-8")
+    wheels_dir = tmp_path / WHEELS_V1_SUBDIR
+    wheels_dir.mkdir(exist_ok=True)
+    (wheels_dir / "a_dep-1.0-py3-none-any.whl").write_bytes(b"")
+    monkeypatch.setattr(runtime.subprocess, "run", lambda *a, **k: None)
+    return runtime._load_runtime_environment_package(str(tmp_path), required=True)
+
+
+def _fake_container_venv(tmp_path, monkeypatch):
+    venv = tmp_path / "container-venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "bin" / "python").write_text("", encoding="utf-8")
+    (venv / "bin" / "activate").write_text("", encoding="utf-8")
+    monkeypatch.setenv("VIRTUAL_ENV", str(venv))
+    # The caller's opt-in; Evaluator sets it, GRPO does not.
+    monkeypatch.setenv(runtime.REUSE_IMAGE_GYM_INSTALL_ENV_KEY, "true")
+    return venv
+
+
+def test_without_the_callers_opt_in_wheels_v1_servers_build_their_own_venvs(tmp_path, monkeypatch):
+    """GRPO shares this host and documents a vendor-the-full-closure contract; it is not changed unasked."""
+    package = _wheels_package_with_servers(tmp_path, monkeypatch)
+    _fake_container_venv(tmp_path, monkeypatch)
+    monkeypatch.delenv(runtime.REUSE_IMAGE_GYM_INSTALL_ENV_KEY, raising=False)
+    venv_root = tmp_path / "gym_venvs"
+
+    runtime._link_wheels_v1_component_venvs(
+        package,
+        {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(venv_root)},
+        str(tmp_path / "work"),
+    )
+
+    assert not venv_root.exists()
+
+
+def test_wheels_v1_servers_get_the_containers_gym_install_as_their_venv(tmp_path, monkeypatch):
+    """The wheelhouse carries only the servers' extras; Gym itself comes from the image.
+
+    Gym skips a component's venv build when the venv path already holds bin/python and
+    bin/activate, so each package server's venv path is pointed at the container venv.
+    """
+    package = _wheels_package_with_servers(
+        tmp_path, monkeypatch, servers=("resources_servers/custom", "responses_api_agents/custom_agent")
+    )
+    container_venv = _fake_container_venv(tmp_path, monkeypatch)
+    venv_root = tmp_path / "gym_venvs"
+    config = {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(venv_root)}
+
+    runtime._link_wheels_v1_component_venvs(package, config, str(tmp_path / "work"))
+
+    for kind, name in (("resources_servers", "custom"), ("responses_api_agents", "custom_agent")):
+        venv_path = venv_root / kind / name / runtime.COMPONENT_VENV_DIRNAME
+        assert venv_path.is_symlink()
+        assert venv_path.resolve() == container_venv.resolve()
+        # What Gym's skip check looks for.
+        assert (venv_path / "bin" / "python").exists() and (venv_path / "bin" / "activate").exists()
+    # The root was writable, so Gym keeps reading it from the same config key.
+    assert config[runtime.UV_VENV_DIR_KEY] == str(venv_root)
+
+
+def test_an_existing_component_venv_is_kept(tmp_path, monkeypatch):
+    """An image-baked venv for a same-named built-in is not replaced."""
+    package = _wheels_package_with_servers(tmp_path, monkeypatch)
+    _fake_container_venv(tmp_path, monkeypatch)
+    venv_root = tmp_path / "gym_venvs"
+    baked = venv_root / "resources_servers" / "custom" / runtime.COMPONENT_VENV_DIRNAME
+    baked.mkdir(parents=True)
+
+    runtime._link_wheels_v1_component_venvs(
+        package,
+        {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(venv_root)},
+        str(tmp_path / "work"),
+    )
+
+    assert baked.is_dir() and not baked.is_symlink()
+
+
+def test_a_server_without_an_install_marker_is_not_linked(tmp_path, monkeypatch):
+    """Gym would not discover it, so there is nothing to build and nothing to link."""
+    package = _wheels_package_with_servers(tmp_path, monkeypatch)
+    (tmp_path / "resources_servers" / "custom" / "requirements.txt").unlink()
+    _fake_container_venv(tmp_path, monkeypatch)
+    venv_root = tmp_path / "gym_venvs"
+
+    runtime._link_wheels_v1_component_venvs(
+        package,
+        {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(venv_root)},
+        str(tmp_path / "work"),
+    )
+
+    assert not (venv_root / "resources_servers" / "custom").exists()
+
+
+def test_without_skip_venv_if_present_nothing_is_linked(tmp_path, monkeypatch):
+    """With the skip off, Gym would `uv venv --allow-existing` into the link target: the container venv."""
+    package = _wheels_package_with_servers(tmp_path, monkeypatch)
+    _fake_container_venv(tmp_path, monkeypatch)
+    venv_root = tmp_path / "gym_venvs"
+
+    runtime._link_wheels_v1_component_venvs(
+        package,
+        {runtime.SKIP_VENV_IF_PRESENT_KEY: False, runtime.UV_VENV_DIR_KEY: str(venv_root)},
+        str(tmp_path / "work"),
+    )
+
+    assert not venv_root.exists()
+
+
+def test_native_v1_servers_keep_building_their_own_venvs(tmp_path, monkeypatch):
+    _write_manifest(tmp_path, format="native-v1")
+    package = runtime._load_runtime_environment_package(str(tmp_path), required=True)
+    _fake_container_venv(tmp_path, monkeypatch)
+    venv_root = tmp_path / "gym_venvs"
+
+    runtime._link_wheels_v1_component_venvs(
+        package,
+        {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(venv_root)},
+        str(tmp_path / "work"),
+    )
+
+    assert not venv_root.exists()
+
+
+def test_a_read_only_venv_root_is_mirrored_into_the_work_mount(tmp_path, monkeypatch):
+    """`/opt/gym_venvs` is often read-only for the sandbox uid; the image's baked venvs must stay visible."""
+    package = _wheels_package_with_servers(tmp_path, monkeypatch)
+    container_venv = _fake_container_venv(tmp_path, monkeypatch)
+    image_root = tmp_path / "opt-gym_venvs"
+    baked = image_root / "resources_servers" / "mcqa"
+    (baked / runtime.COMPONENT_VENV_DIRNAME / "bin").mkdir(parents=True)
+    real_access = runtime.os.access
+    monkeypatch.setattr(
+        runtime.os, "access", lambda path, mode: False if str(path) == str(image_root) else real_access(path, mode)
+    )
+    work = tmp_path / "work"
+    config = {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(image_root)}
+
+    runtime._link_wheels_v1_component_venvs(package, config, str(work))
+
+    mirrored_root = work / runtime.COMPONENT_VENV_ROOT_SUBDIR
+    # Gym is pointed at the writable root...
+    assert config[runtime.UV_VENV_DIR_KEY] == str(mirrored_root)
+    # ...which still exposes the image's baked venv...
+    assert (mirrored_root / "resources_servers" / "mcqa").resolve() == baked.resolve()
+    # ...beside the package server's link to the container venv.
+    linked = mirrored_root / "resources_servers" / "custom" / runtime.COMPONENT_VENV_DIRNAME
+    assert linked.is_symlink() and linked.resolve() == container_venv.resolve()
+
+
+def _extras_only_wheels_package(tmp_path, monkeypatch):
+    """A wheels-v1 package that adds wheels for the image's built-in servers and declares no component."""
+    import yaml
+
+    (tmp_path / runtime.ENVIRONMENT_MANIFEST_FILENAME).write_text(
+        yaml.safe_dump({"format": "wheels-v1", "config_paths": [], "metadata": {"name": "extras-only"}}),
+        encoding="utf-8",
+    )
+    wheels_dir = tmp_path / WHEELS_V1_SUBDIR
+    wheels_dir.mkdir()
+    (wheels_dir / "extra_dep-1.0-py3-none-any.whl").write_bytes(b"")
+    monkeypatch.setattr(runtime.subprocess, "run", lambda *a, **k: None)
+    return runtime._load_runtime_environment_package(str(tmp_path), required=True)
+
+
+def test_an_extras_only_wheels_package_runs_the_selected_built_in_components(tmp_path, monkeypatch):
+    """Expectation: a FileSet may carry just the extra wheels a built-in environment needs."""
+    package = _extras_only_wheels_package(tmp_path, monkeypatch)
+    agent_config = "responses_api_agents/simple_agent/configs/simple_agent.yaml"
+
+    configured = runtime._compose_gym_config_with_environment_package(
+        _component_selection(agent_config=agent_config), package
+    )
+
+    assert configured["config_paths"] == [
+        agent_config,
+        "responses_api_models/inference_provider/configs/inference_provider.yaml",
+        "resources_servers/selected_resources/configs/selected_resources.yaml",
+    ]
+
+
+def test_an_extras_only_wheels_package_links_no_venv_but_still_stages_its_wheels(
+    tmp_path, monkeypatch, isolated_gym_host_process_state
+):
+    """Nothing to link (no package server), yet the wheels must reach the built-in servers via PYTHONPATH."""
+    package = _extras_only_wheels_package(tmp_path, monkeypatch)
+    _fake_container_venv(tmp_path, monkeypatch)
+    venv_root = tmp_path / "gym_venvs"
+    work = tmp_path / "work"
+
+    runtime._install_wheels_v1_dependencies(package, str(work))
+    runtime._link_wheels_v1_component_venvs(
+        package, {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(venv_root)}, str(work)
+    )
+
+    assert not venv_root.exists()
+    assert runtime.os.environ["PYTHONPATH"].split(runtime.os.pathsep)[0] == str(work / runtime.WHEELS_V1_INSTALL_SUBDIR)

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
-  title: Nemo Platform API
-  description: API for Nemo Platform services
+  title: Nemo Helix API
+  description: API for Nemo Helix services
   version: 0.0.0
 paths:
   /apis/auth/authenticate:
@@ -60,16 +60,12 @@ paths:
       summary: Discover auth configuration
       description: "Return authentication configuration for CLI/SDK discovery.\n\n\
         This endpoint is unauthenticated and returns the information clients\nneed\
-        \ to authenticate with this NeMo Platform deployment.\n\n**Response fields:**\n\
+        \ to authenticate with this NeMo Helix deployment.\n\n**Response fields:**\n\
         \n- `auth_enabled`: Whether authentication is enabled on this cluster\n- `oidc`:\
         \ OIDC configuration (only present when OIDC is enabled)\n  - `issuer`: The\
-        \ OIDC issuer URL\n  - `authorization_endpoint`: Authorization endpoint for\
-        \ browser-based flows\n  - `token_endpoint`: Token exchange endpoint\n  -\
-        \ `device_authorization_endpoint`: Device flow authorization endpoint (for\
-        \ CLI)\n  - `userinfo_endpoint`: UserInfo endpoint\n  - `client_id`: OAuth\
-        \ client ID to use\n  - `default_scopes`: OAuth scopes to request during authentication\n\
-        \  - `scope_prefix`: Prefix to prepend to custom scopes (those with ':' or\
-        \ '.default')\n  - `workload_token_exchange_enabled`: Whether SDK workload\
+        \ OIDC issuer URL\n  - `userinfo_endpoint`: UserInfo endpoint\n  - `clients`:\
+        \ Complete public and confidential user-login client contracts. Exactly one\
+        \ is the default.\n  - `workload_token_exchange_enabled`: Whether SDK workload\
         \ identity token exchange is enabled\n  - `workload_client_id`: OAuth client\
         \ ID to use for workload identity token exchange\n  - `workload_token_endpoint`:\
         \ Token endpoint to use only for workload identity token exchange\n  - `workload_audience`:\
@@ -104,7 +100,7 @@ paths:
       - Workload Identity
       summary: Exchange a workload identity subject token
       description: Exchange a configured workload identity subject token for a NeMo
-        Platform access token.
+        Helix access token.
       operationId: token_exchange_apis_auth_token_post
       requestBody:
         content:
@@ -205,7 +201,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/AccessKeyErrorResponse'
         '403':
-          description: Service-bound Scoped Access Keys require PlatformAdmin
+          description: Service-bound Scoped Access Keys require HelixAdmin
           content:
             application/json:
               schema:
@@ -333,6 +329,66 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/access-keys/{jti}/rotate:
+    post:
+      tags:
+      - Scoped Access Keys
+      summary: Rotate Access Key
+      operationId: rotate_access_key_apis_auth_v2_access_keys__jti__rotate_post
+      parameters:
+      - name: jti
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^ak_[0-9a-f]{32}$
+          description: Stable JWT ID of the Scoped Access Key for the lifecycle operation.
+          title: Jti
+        description: Stable JWT ID of the Scoped Access Key for the lifecycle operation.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/AccessKeyRotateRequest'
+              default: {}
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessKeyRotateResponse'
+        '400':
+          description: Scoped Access Key rotation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessKeyErrorResponse'
+        '404':
+          description: Scoped Access Keys are not enabled or the key was not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessKeyErrorResponse'
+        '409':
+          description: Invalid or concurrent access-key state transition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessKeyErrorResponse'
+        '501':
+          description: Not Implemented
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessKeyNotImplementedErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/auth/v2/access-keys/{jti}/suspend:
     post:
       tags:
@@ -421,6 +477,72 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AccessKeyNotImplementedErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/authorize:
+    post:
+      tags:
+      - Authentication
+      summary: Start Token Authorization
+      operationId: start_token_authorization_apis_auth_v2_authorize_post
+      parameters:
+      - name: client
+        in: query
+        required: false
+        schema:
+          enum:
+          - public
+          - confidential
+          type: string
+          default: confidential
+          title: Client
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenAuthorizationStart'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+                title: Response Start Token Authorization Apis Auth V2 Authorize Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/authorize/{transaction_id}:
+    get:
+      tags:
+      - Authentication
+      summary: Continue Token Authorization
+      operationId: continue_token_authorization_apis_auth_v2_authorize__transaction_id__get
+      parameters:
+      - name: transaction_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Transaction Id
+      responses:
+        '302':
+          description: Redirect to the identity provider or the CLI loopback callback
+          headers:
+            Location:
+              description: Redirect target
+              schema:
+                type: string
         '422':
           description: Validation Error
           content:
@@ -587,6 +709,173 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/login:
+    get:
+      tags:
+      - Authentication
+      summary: Start Web Session Login
+      operationId: start_web_session_login_apis_auth_v2_login_get
+      parameters:
+      - name: return_to
+        in: query
+        required: false
+        schema:
+          type: string
+          default: /
+          title: Return To
+      - name: client
+        in: query
+        required: false
+        schema:
+          enum:
+          - public
+          - confidential
+          type: string
+          default: confidential
+          title: Client
+      responses:
+        '302':
+          description: Redirect to the identity provider or the CLI loopback callback
+          headers:
+            Location:
+              description: Redirect target
+              schema:
+                type: string
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/login/callback:
+    get:
+      tags:
+      - Authentication
+      summary: Token Authorization Callback
+      operationId: token_authorization_callback_apis_auth_v2_login_callback_get
+      parameters:
+      - name: state
+        in: query
+        required: true
+        schema:
+          type: string
+          title: State
+      - name: code
+        in: query
+        required: false
+        schema:
+          title: Code
+          type: string
+      - name: error
+        in: query
+        required: false
+        schema:
+          title: Error
+          type: string
+      - name: error_description
+        in: query
+        required: false
+        schema:
+          title: Error Description
+          type: string
+      responses:
+        '302':
+          description: Redirect to the identity provider or the CLI loopback callback
+          headers:
+            Location:
+              description: Redirect target
+              schema:
+                type: string
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/logout:
+    post:
+      tags:
+      - Authentication
+      summary: Logout
+      operationId: logout_apis_auth_v2_logout_post
+      responses:
+        '204':
+          description: Successful Response
+      x-codeSamples:
+      - lang: Python
+        source: "import requests\n\nresponse = requests.post(\n    \"http://localhost:8080/apis/auth/v2/logout\"\
+          ,\n    headers={\"X-Source\": \"NeMo Studio\"},\n    cookies={\"nhx_session\"\
+          : \"YOUR_SESSION_COOKIE\"},\n)\nresponse.raise_for_status()\nprint(response.status_code)\
+          \  # 204: no response body\n"
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/auth/v2/logout\"\
+          , {\n  method: \"POST\",\n  headers: {\"X-Source\": \"NeMo Studio\"},\n\
+          \  credentials: \"include\",\n});\nif (!response.ok) throw new Error(`Logout\
+          \ failed: ${response.status}`);\nconsole.log(response.status); // 204: no\
+          \ response body\n"
+  /apis/auth/v2/session:
+    get:
+      tags:
+      - Authentication
+      summary: Web Session
+      operationId: web_session_apis_auth_v2_session_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebSessionResponse'
+  /apis/auth/v2/token:
+    post:
+      tags:
+      - Authentication
+      summary: Broker Token
+      operationId: broker_token_apis_auth_v2_token_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - $ref: '#/components/schemas/AuthorizationCodeBrokerTokenRequest'
+              - $ref: '#/components/schemas/RefreshTokenBrokerTokenRequest'
+              title: Body
+              discriminator:
+                propertyName: grant_type
+                mapping:
+                  authorization_code: '#/components/schemas/AuthorizationCodeBrokerTokenRequest'
+                  refresh_token: '#/components/schemas/RefreshTokenBrokerTokenRequest'
+            examples:
+              authorization_code:
+                summary: Exchange an authorization code using PKCE
+                value:
+                  grant_type: authorization_code
+                  code: YOUR_AUTHORIZATION_CODE
+                  code_verifier: YOUR_PKCE_CODE_VERIFIER_AT_LEAST_43_CHARACTERS_LONG
+              refresh_token:
+                summary: Refresh an access token
+                value:
+                  grant_type: refresh_token
+                  refresh_token: YOUR_REFRESH_TOKEN
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  anyOf:
+                  - type: string
+                  - type: integer
+                type: object
+                title: Response Broker Token Apis Auth V2 Token Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/entities/v2/entities/{id}:
     get:
       tags:
@@ -633,7 +922,8 @@ paths:
       description: "Create a new workspace.\n\nThe creator is automatically granted\
         \ Admin role on the workspace.\nBy default, this endpoint waits for the Admin\
         \ role to propagate before returning.\nUse `wait_role_propagation=false` to\
-        \ skip waiting (useful for bulk operations).\n\nExample:\n```\nPOST /apis/entities/v2/workspaces\n\
+        \ skip waiting (useful for bulk operations).\n\nNames beginning with `sample-`\
+        \ are reserved for the Agents sample flow.\n\nExample:\n```\nPOST /apis/entities/v2/workspaces\n\
         {\n    \"name\": \"ml-team\",\n    \"description\": \"Machine Learning Team\
         \ workspace\"\n}\n```"
       operationId: create_workspace_apis_entities_v2_workspaces_post
@@ -919,6 +1209,15 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/EntityCreateInput'
+            examples:
+              entity:
+                summary: Create an entity with required data
+                value:
+                  name: my-config
+                  data:
+                    target_id: llama-2-7b
+                    training_options:
+                      learning_rate: 0.01
       responses:
         '201':
           description: Successful Response
@@ -1163,6 +1462,14 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/EntityUpdate'
+            examples:
+              entity:
+                summary: Update an entity with required data
+                value:
+                  data:
+                    target_id: llama-2-7b
+                    training_options:
+                      learning_rate: 0.02
       responses:
         '200':
           description: Successful Response
@@ -1855,9 +2162,9 @@ paths:
       description: 'Delete Fileset.
 
 
-        Permanently deletes a fileset from the platform.
+        Permanently deletes an unreferenced fileset from the platform.
 
-        Returns metadata about the deleted fileset.
+        Referencing model or adapter entities must be relinked or deleted first.
 
         For local storage backends, this also deletes the underlying files.'
       operationId: delete_fileset_apis_files_v2_workspaces__workspace__filesets__name__delete
@@ -1881,6 +2188,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FilesetOutput'
+        '409':
+          description: Fileset is referenced by a model or adapter entity
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '503':
+          description: Fileset references could not be verified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -1961,15 +2286,58 @@ paths:
       responses:
         '200':
           description: Successful Response
-          content:
-            application/json:
-              schema: {}
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt"
+
+          response = requests.head(url)
+
+          response.raise_for_status()
+
+          print(response.status_code)
+
+          print(response.headers)'
+      - lang: JavaScript
+        source: "const response = await fetch(\n  \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt\"\
+          ,\n  { method: \"HEAD\" },\n);\n\nif (!response.ok) {\n  throw new Error(`HTTP\
+          \ ${response.status}`);\n}\nconsole.log(response.status);\nconsole.log(Object.fromEntries(response.headers));"
+      - lang: Go
+        source: "package main\n\nimport (\n  \"fmt\"\n  \"net/http\"\n)\n\nfunc main()\
+          \ {\n  req, err := http.NewRequest(\"HEAD\", \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt\"\
+          , nil)\n  if err != nil {\n    panic(err)\n  }\n  res, err := http.DefaultClient.Do(req)\n\
+          \  if err != nil {\n    panic(err)\n  }\n  defer res.Body.Close()\n\n  fmt.Println(res.Status)\n\
+          \  fmt.Println(res.Header)\n}"
+      - lang: Ruby
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt\"\
+          )\nresponse = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme ==\
+          \ \"https\") do |http|\n  http.request(Net::HTTP::Head.new(uri))\nend\n\n\
+          puts response.code\nputs response.to_hash"
+      - lang: PHP
+        source: '<?php
+
+          $ch = curl_init("http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt");
+
+          curl_setopt($ch, CURLOPT_NOBODY, true);
+
+          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+          curl_exec($ch);
+
+          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+          curl_close($ch);
+
+
+          echo $status;'
     get:
       tags:
       - Files
@@ -2265,7 +2633,91 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/files/v2/workspaces/{workspace}/filesets/{name}/refresh:
+    post:
+      tags:
+      - Files
+      summary: Refresh Fileset Revision
+      description: 'Re-resolve a fileset''s tracked revision against its source.
+
+
+        A fileset created from a mutable ref is pinned to an immutable id so its
+
+        contents cannot shift under a deployment. This re-resolves that same ref and
+
+        repoints the fileset at whatever it names now. Everything else about the
+
+        storage config, including the repository and directory, is left alone.
+
+
+        A running deployment keeps serving the revision it staged. It moves to this
+        one
+
+        when the runner next stages the fileset, and records the revision it staged.'
+      operationId: refresh_fileset_apis_files_v2_workspaces__workspace__filesets__name__refresh_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FilesetOutput'
+        '400':
+          description: Storage configuration, secret, or source rejected the refresh
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '404':
+          description: Fileset not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '409':
+          description: Fileset does not track a mutable revision
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '502':
+          description: Storage backend unavailable
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -3645,6 +4097,13 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/AnnotationInput'
+            examples:
+              note:
+                summary: Annotate a session with a note
+                value:
+                  kind: note
+                  session_id: session-123
+                  text: Helpful response.
       responses:
         '201':
           description: Successful Response
@@ -4262,6 +4721,15 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/EvaluatorResultInput'
+            examples:
+              numeric:
+                summary: Record a numeric evaluator score
+                value:
+                  span_id: span-123
+                  session_id: session-123
+                  name: faithfulness/v1
+                  data_type: NUMERIC
+                  value: 0.95
       responses:
         '201':
           description: Successful Response
@@ -5222,6 +5690,7 @@ paths:
                   - $ref: '#/components/schemas/VolcanoJobExecutionProfile'
                   - $ref: '#/components/schemas/SubprocessJobExecutionProfile'
                   - $ref: '#/components/schemas/E2EJobExecutionProfile'
+                  - $ref: '#/components/schemas/OpenShellJobExecutionProfile'
                 type: array
                 title: Response Get Execution Profiles Apis Jobs V2 Execution Profiles
                   Get
@@ -5244,14 +5713,35 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreatePlatformJobRequest'
+              $ref: '#/components/schemas/CreateHelixJobRequest'
+            examples:
+              job:
+                summary: Create a CPU container job
+                value:
+                  name: hello-world
+                  spec:
+                    message: Hello from NeMo Helix
+                  source: api-reference
+                  platform_spec:
+                    steps:
+                    - name: run
+                      executor:
+                        provider: cpu
+                        container:
+                          image: python:3.11
+                          command:
+                          - python
+                          - -c
+                          - print('Hello from NeMo Helix')
+                      config:
+                        message: Hello from NeMo Helix
       responses:
         '201':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResponse'
+                $ref: '#/components/schemas/HelixJobResponse'
         '422':
           description: Validation Error
           content:
@@ -5296,7 +5786,7 @@ paths:
         required: false
         schema:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobListSortField'
+          - $ref: '#/components/schemas/HelixJobListSortField'
           description: The field to sort by. To sort in decreasing order, use `-`
             in front of the field name.
           default: -created_at
@@ -5308,7 +5798,7 @@ paths:
         required: false
         explode: true
         schema:
-          $ref: '#/components/schemas/PlatformJobsListFilter'
+          $ref: '#/components/schemas/HelixJobsListFilter'
         description: Filter jobs by workspace, project, name, status, source, created_at,
           and updated_at.
       responses:
@@ -5317,7 +5807,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResponsesPage'
+                $ref: '#/components/schemas/HelixJobResponsesPage'
         '422':
           description: Validation Error
           content:
@@ -5355,14 +5845,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PlatformJobResultCreateRequest'
+              $ref: '#/components/schemas/HelixJobResultCreateRequest'
       responses:
         '201':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '404':
           description: Job not Found
         '422':
@@ -5402,7 +5892,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '404':
           description: Not Found
         '422':
@@ -5485,7 +5975,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStep'
+                $ref: '#/components/schemas/HelixJobStep'
         '404':
           description: Not Found
         '422':
@@ -5525,14 +6015,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PlatformJobStatusUpdateRequest'
+              $ref: '#/components/schemas/HelixJobStatusUpdateRequest'
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStep'
+                $ref: '#/components/schemas/HelixJobStep'
         '404':
           description: Not Found
         '409':
@@ -5575,7 +6065,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListTaskResponse'
+                $ref: '#/components/schemas/HelixJobListTaskResponse'
         '404':
           description: Not Found
         '422':
@@ -5621,14 +6111,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PlatformJobTaskUpdate'
+              $ref: '#/components/schemas/HelixJobTaskUpdate'
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobTask'
+                $ref: '#/components/schemas/HelixJobTask'
         '404':
           description: Not Found
         '422':
@@ -5674,7 +6164,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobTask'
+                $ref: '#/components/schemas/HelixJobTask'
         '404':
           description: Not Found
         '422':
@@ -5709,7 +6199,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResponse'
+                $ref: '#/components/schemas/HelixJobResponse'
         '404':
           description: Job not Found
         '422':
@@ -5742,6 +6232,9 @@ paths:
           description: Successful Response
         '404':
           description: Job not Found
+        '409':
+          description: Job, attempt, or step is not terminal; paused or cancelling
+            jobs must reach a terminal state before deletion.
         '422':
           description: Validation Error
           content:
@@ -5774,7 +6267,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResponse'
+                $ref: '#/components/schemas/HelixJobResponse'
         '404':
           description: Job not Found
         '422':
@@ -5807,20 +6300,31 @@ paths:
         in: query
         required: false
         schema:
-          type: integer
-          exclusiveMinimum: 0
           description: Maximum number of logs to return
-          default: 100
           title: Limit
+          default: 100
+          type: integer
+          maximum: 10000
+          exclusiveMinimum: 0
         description: Maximum number of logs to return
       - name: page_cursor
         in: query
         required: false
         schema:
-          type: string
           description: Page cursor
           title: Page Cursor
+          type: string
         description: Page cursor
+      - name: tail
+        in: query
+        required: false
+        schema:
+          description: Number of newest log lines to return
+          title: Tail
+          type: integer
+          maximum: 10000
+          exclusiveMinimum: 0
+        description: Number of newest log lines to return
       - name: attempt_id
         in: query
         required: false
@@ -5851,7 +6355,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '404':
           description: Job not Found
         '422':
@@ -5886,7 +6390,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResponse'
+                $ref: '#/components/schemas/HelixJobResponse'
         '404':
           description: Job not Found
         '422':
@@ -5920,7 +6424,7 @@ paths:
         required: false
         schema:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobSortField'
+          - $ref: '#/components/schemas/HelixJobSortField'
           description: The field to sort by. To sort in decreasing order, use `-`
             in front of the field name.
           default: -created_at
@@ -5932,7 +6436,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '404':
           description: Job not Found
         '422':
@@ -5967,7 +6471,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResponse'
+                $ref: '#/components/schemas/HelixJobResponse'
         '404':
           description: Job not Found
         '422':
@@ -6002,7 +6506,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '404':
           description: Job not Found
         '422':
@@ -6098,7 +6602,7 @@ paths:
         required: false
         schema:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobSortField'
+          - $ref: '#/components/schemas/HelixJobSortField'
           description: The field to sort by. To sort in decreasing order, use `-`
             in front of the field name.
           default: created_at
@@ -6110,7 +6614,7 @@ paths:
         required: false
         explode: true
         schema:
-          $ref: '#/components/schemas/PlatformJobStepsListFilter'
+          $ref: '#/components/schemas/HelixJobStepsListFilter'
         description: Filter steps by job, status, and source.
       responses:
         '200':
@@ -6118,7 +6622,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStepWithContextsPage'
+                $ref: '#/components/schemas/HelixJobStepWithContextsPage'
         '422':
           description: Validation Error
           content:
@@ -6410,6 +6914,17 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateModelDeploymentConfigRequest'
+            examples:
+              deployment_config:
+                summary: Create a NIM deployment config
+                value:
+                  name: nim-config-v1
+                  engine: nim
+                  model_spec:
+                    model_namespace: meta
+                    model_name: llama-3.1-8b-instruct
+                  executor_config:
+                    gpu: 1
       responses:
         '201':
           description: Create a new model deployment configuration
@@ -6566,6 +7081,16 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/UpdateModelDeploymentConfigRequest'
+            examples:
+              deployment_config:
+                summary: Update a NIM deployment config
+                value:
+                  engine: nim
+                  model_spec:
+                    model_namespace: meta
+                    model_name: llama-3.1-8b-instruct
+                  executor_config:
+                    gpu: 1
       responses:
         '201':
           description: Update a model deployment configuration (creates new version)
@@ -7235,7 +7760,8 @@ paths:
         schema:
           $ref: '#/components/schemas/ModelEntityFilter'
         description: Filter models by name, project, workspace, base_model, adapters,
-          finetuning_type, prompt, lora_enabled, description, created_at, and updated_at.
+          finetuning_type, prompt, lora_enabled, family, model_providers, description,
+          created_at, and updated_at.
       responses:
         '200':
           description: Return a list of models
@@ -7963,7 +8489,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformSecretAdminRotationResponse'
+                $ref: '#/components/schemas/HelixSecretAdminRotationResponse'
   /apis/secrets/v2/workspaces/{workspace}/secrets:
     post:
       tags:
@@ -7983,14 +8509,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PlatformSecretCreateRequest'
+              $ref: '#/components/schemas/HelixSecretCreateRequest'
       responses:
         '201':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformSecretResponse'
+                $ref: '#/components/schemas/HelixSecretResponse'
         '422':
           description: Validation Error
           content:
@@ -8036,7 +8562,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformSecretResponsesPage'
+                $ref: '#/components/schemas/HelixSecretResponsesPage'
         '422':
           description: Validation Error
           content:
@@ -8069,7 +8595,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformSecretResponse'
+                $ref: '#/components/schemas/HelixSecretResponse'
         '422':
           description: Validation Error
           content:
@@ -8100,14 +8626,20 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PlatformSecretUpdateRequest'
+              $ref: '#/components/schemas/HelixSecretUpdateRequest'
+            examples:
+              secret:
+                summary: Update secret metadata and value
+                value:
+                  description: Updated secret description
+                  value: new-secret-value
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformSecretResponse'
+                $ref: '#/components/schemas/HelixSecretResponse'
         '422':
           description: Validation Error
           content:
@@ -8168,7 +8700,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformSecretAccessResponse'
+                $ref: '#/components/schemas/HelixSecretAccessResponse'
         '422':
           description: Validation Error
           content:
@@ -8244,12 +8776,38 @@ components:
         service_account_id:
           title: Service Account Id
           description: Optional non-human service account to bind the key to. Service-bound
-            keys can only be created by a PlatformAdmin and authenticate as service-account:<id>.
+            keys can only be created by a HelixAdmin and authenticate as service-account:<id>.
           nullable: true
           type: string
           maxLength: 240
           minLength: 1
           pattern: ^[a-zA-Z0-9][a-zA-Z0-9._+/-]*$
+        scope:
+          items:
+            type: string
+            pattern: ^\s*[^\s:]+\s*$
+          title: Scope
+          description: Optional service names that restrict this key to read and write
+            access for those services.
+          nullable: true
+          type: array
+          minItems: 1
+        rotates:
+          title: Rotates
+          description: JTI of a prior Scoped Access Key owned by the caller to revoke
+            after creation. Intended primarily for personal keys without a service-account
+            identity.
+          nullable: true
+          type: string
+          pattern: ^ak_[0-9a-f]{32}$
+        workspaces:
+          title: Workspaces
+          description: Optional workspace memberships to grant to the newly created
+            key principal.
+          nullable: true
+          items:
+            $ref: '#/components/schemas/AccessKeyWorkspaceGrant'
+          type: array
       type: object
       title: AccessKeyCreateRequest
       description: Request body for creating a Scoped Access Key.
@@ -8288,6 +8846,7 @@ components:
           - EXPIRED
           - REVOKED
           - SUSPENDED
+          - ROTATING
           title: Status
         issuer:
           type: string
@@ -8300,12 +8859,32 @@ components:
           uniqueItems: true
           title: Audiences
           description: Audiences accepted for the Scoped Access Key JWT.
+        scope:
+          items:
+            type: string
+          type: array
+          title: Scope
+          description: Services this key is restricted to. An empty list means the
+            key is unscoped.
         created_at:
           type: string
           format: date-time
           title: Created At
         expires_at:
           title: Expires At
+          nullable: true
+          type: string
+          format: date-time
+        grace_period_expires_at:
+          title: Grace Period Expires At
+          description: Timestamp when the rotated-out key's grace period expires.
+          nullable: true
+          type: string
+          format: date-time
+        last_used_at:
+          title: Last Used At
+          description: Timestamp of the most recent successful authentication with
+            this Scoped Access Key.
           nullable: true
           type: string
           format: date-time
@@ -8397,6 +8976,7 @@ components:
           - EXPIRED
           - REVOKED
           - SUSPENDED
+          - ROTATING
           title: Status
         issuer:
           type: string
@@ -8409,12 +8989,32 @@ components:
           uniqueItems: true
           title: Audiences
           description: Audiences accepted for the Scoped Access Key JWT.
+        scope:
+          items:
+            type: string
+          type: array
+          title: Scope
+          description: Services this key is restricted to. An empty list means the
+            key is unscoped.
         created_at:
           type: string
           format: date-time
           title: Created At
         expires_at:
           title: Expires At
+          nullable: true
+          type: string
+          format: date-time
+        grace_period_expires_at:
+          title: Grace Period Expires At
+          description: Timestamp when the rotated-out key's grace period expires.
+          nullable: true
+          type: string
+          format: date-time
+        last_used_at:
+          title: Last Used At
+          description: Timestamp of the most recent successful authentication with
+            this Scoped Access Key.
           nullable: true
           type: string
           format: date-time
@@ -8454,6 +9054,68 @@ components:
       - revoked
       title: AccessKeyRevokeResponse
       description: Response returned after a Scoped Access Key revoke request.
+    AccessKeyRotateRequest:
+      properties:
+        grace_period_seconds:
+          title: Grace Period Seconds
+          description: Grace period in seconds for the rotated-out key. Omit to use
+            auth.access_keys.rotation_grace_period_seconds. Subject to auth.access_keys.max_rotation_grace_period_seconds.
+          nullable: true
+          type: integer
+          minimum: 1.0
+      type: object
+      title: AccessKeyRotateRequest
+      description: Request body for rotating a Scoped Access Key.
+    AccessKeyRotateResponse:
+      properties:
+        new_key:
+          allOf:
+          - $ref: '#/components/schemas/AccessKeyCreateResponse'
+          description: Newly minted successor Scoped Access Key. Its raw token is
+            returned only once.
+        previous_jti:
+          type: string
+          title: Previous Jti
+          description: Stable JWT ID of the Scoped Access Key that was rotated out.
+        previous_status:
+          type: string
+          enum:
+          - ACTIVE
+          - EXPIRED
+          - REVOKED
+          - SUSPENDED
+          - ROTATING
+          title: Previous Status
+          description: Effective status of the rotated-out key immediately after this
+            request. Normally ROTATING, but may already read as REVOKED or EXPIRED
+            if reconciling this request's outcome was itself delayed past the grace
+            deadline or a concurrent revoke.
+        grace_period_seconds:
+          type: integer
+          title: Grace Period Seconds
+          description: Seconds the rotated-out key remains usable before it is treated
+            as revoked.
+        grace_period_expires_at:
+          title: Grace Period Expires At
+          description: Timestamp when the rotated-out key's grace period expires.
+          nullable: true
+          type: string
+          format: date-time
+      type: object
+      required:
+      - new_key
+      - previous_jti
+      - previous_status
+      - grace_period_seconds
+      title: AccessKeyRotateResponse
+      description: 'Response returned after rotating a Scoped Access Key.
+
+
+        The rotated-out key (``previous_jti``) remains usable for ``grace_period_seconds``
+
+        (the dual-active grace period) so callers can cut traffic over to ``new_key``
+
+        before the old key is treated as revoked.'
     AccessKeyStatusChangeResponse:
       properties:
         jti:
@@ -8479,6 +9141,30 @@ components:
       - changed
       title: AccessKeyStatusChangeResponse
       description: Response returned after a reversible Scoped Access Key status change.
+    AccessKeyWorkspaceGrant:
+      properties:
+        workspace:
+          type: string
+          pattern: ^\s*\S.*$
+          title: Workspace
+          description: Workspace name. Must not be blank.
+        roles:
+          items:
+            type: string
+          contains:
+            pattern: ^\s*\S.*$
+          type: array
+          minContains: 1
+          title: Roles
+          description: Roles to grant in the workspace. Defaults to ['Editor'] when
+            omitted.
+          default:
+          - Editor
+      type: object
+      required:
+      - workspace
+      title: AccessKeyWorkspaceGrant
+      description: Workspace membership to grant to a newly created access key principal.
     ActionRails:
       properties:
         instant_actions:
@@ -8583,8 +9269,11 @@ components:
         fileset:
           type: string
           title: Fileset
-          description: Fileset where the adapter files are stored expected format
-            {workspace}/{fileset_name}
+          description: 'Fileset where the adapter files are stored. Either a fileset
+            name or ''workspace/fileset_name''. A bare name is resolved in the request
+            workspace (the platform default workspace is named ''default''). Each
+            segment is 2-63 characters: lowercase letters, digits, hyphens, and temporarily
+            @ . + _; no consecutive hyphens, and it cannot end with a hyphen.'
         finetuning_type:
           allOf:
           - $ref: '#/components/schemas/FinetuningType'
@@ -8645,8 +9334,15 @@ components:
           description: Filter by description.
           title: Description
         fileset:
-          description: Filter by fileset reference in the form {workspace}/{fileset_name}.
+          description: 'Filter by fileset reference. Either a fileset name or ''workspace/fileset_name''.
+            A bare name is resolved in the request workspace (the platform default
+            workspace is named ''default''). Each segment is 2-63 characters: lowercase
+            letters, digits, hyphens, and temporarily @ . + _; no consecutive hyphens,
+            and it cannot end with a hyphen.'
           title: Fileset
+          maxLength: 127
+          minLength: 2
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
           type: string
         finetuning_type:
           allOf:
@@ -9300,6 +9996,10 @@ components:
           type: string
           title: Principal Id
           description: The principal's unique identifier
+        principal_account_id:
+          title: Principal Account Id
+          description: Stable NeMo account identifier for the principal
+          type: string
         principal_email:
           title: Principal Email
           description: The principal's email address
@@ -9310,6 +10010,12 @@ components:
           type: array
           title: Principal Groups
           description: Groups the principal belongs to
+        principal_authz_aliases:
+          items:
+            type: string
+          type: array
+          title: Principal Authz Aliases
+          description: Alternate trusted identifiers for the principal
         principal_on_behalf_of:
           title: Principal On Behalf Of
           description: If acting on behalf of another principal, their principal ID
@@ -9324,6 +10030,16 @@ components:
           title: Principal On Behalf Of Email
           description: The on-behalf-of principal's email address
           type: string
+        principal_on_behalf_of_account_id:
+          title: Principal On Behalf Of Account Id
+          description: Stable NeMo account identifier for the on-behalf-of principal
+          type: string
+        principal_on_behalf_of_authz_aliases:
+          items:
+            type: string
+          type: array
+          title: Principal On Behalf Of Authz Aliases
+          description: Alternate trusted identifiers for the on-behalf-of principal
       type: object
       required:
       - principal_id
@@ -9345,7 +10061,7 @@ components:
       required:
       - auth_enabled
       title: AuthDiscoveryResponse
-      description: Auth discovery response for CLI/SDK.
+      description: Auth discovery response returned by the auth discovery endpoint.
     AuthenticateErrorResponse:
       properties:
         detail:
@@ -9406,6 +10122,28 @@ components:
       - token_kind
       title: AuthenticateResponse
       description: Successful bearer token authentication response for direct callers.
+    AuthorizationCodeBrokerTokenRequest:
+      properties:
+        grant_type:
+          type: string
+          const: authorization_code
+          title: Grant Type
+        code:
+          type: string
+          title: Code
+        code_verifier:
+          type: string
+          maxLength: 128
+          minLength: 43
+          pattern: ^[A-Za-z0-9._~-]+$
+          title: Code Verifier
+      additionalProperties: false
+      type: object
+      required:
+      - grant_type
+      - code
+      - code_verifier
+      title: AuthorizationCodeBrokerTokenRequest
     AutoAlignOptions:
       properties:
         guardrails_config:
@@ -9892,6 +10630,31 @@ components:
       - policy
       title: ClavataRailOptions
       description: Configuration data for the Clavata API
+    ColumnLayout:
+      properties:
+        order:
+          items:
+            type: string
+          type: array
+          title: Order
+          description: 'Column ids in display order. Empty means no saved order: the
+            table falls back to its natural column order.'
+        hidden:
+          items:
+            type: string
+          type: array
+          title: Hidden
+          description: Column ids hidden from the table. Any column not listed is
+            shown.
+      type: object
+      title: ColumnLayout
+      description: "A saved table layout for a group's evaluations list: column order\
+        \ and which columns are hidden.\n\nColumn ids are Studio's and cannot be enumerated\
+        \ here \u2014 the table builds a column per evaluator\nand metadata key found\
+        \ in the rows \u2014 so ids are stored and echoed back unvalidated.\n\nVisibility\
+        \ is stored as the *hidden* ids rather than a map over every column, so a\
+        \ column that\nappears later (a new evaluator, a new metadata key) shows up\
+        \ by default."
     ComputeResourceSpec:
       properties:
         cpu:
@@ -9934,6 +10697,52 @@ components:
       type: object
       title: ComputeResources
       description: Resource requirements matching k8s ResourceRequirements format.
+    ConfidentialOidcAdvertisedClient:
+      properties:
+        client_id:
+          type: string
+          title: Client Id
+        default:
+          type: boolean
+          title: Default
+        bearer_token_source:
+          type: string
+          enum:
+          - access_token
+          - id_token
+          title: Bearer Token Source
+          default: access_token
+        default_scopes:
+          type: string
+          title: Default Scopes
+          default: openid profile email offline_access
+        scope_prefix:
+          title: Scope Prefix
+          type: string
+        name:
+          type: string
+          const: confidential
+          title: Name
+          default: confidential
+        client_authentication:
+          type: string
+          const: client_secret_basic
+          title: Client Authentication
+          default: client_secret_basic
+        authorization_start_endpoint:
+          type: string
+          title: Authorization Start Endpoint
+        broker_token_endpoint:
+          type: string
+          title: Broker Token Endpoint
+      type: object
+      required:
+      - client_id
+      - default
+      - authorization_start_endpoint
+      - broker_token_endpoint
+      title: ConfidentialOidcAdvertisedClient
+      description: Confidential client that talks only to the NeMo Helix broker.
     ContainerExecutorConfig:
       properties:
         gpu:
@@ -10008,7 +10817,12 @@ components:
             keys: image, command, args, resources, env, readinessProbe, livenessProbe,
             startupProbe, nodeSelector, tolerations, userID, groupID, labels, initContainers,
             sidecarContainers. Unsupported keys are rejected at compile time. Ignored
-            by non-NIM engines and docker runtime.'
+            by non-NIM engines and docker runtime. One key is a platform directive
+            rather than a Spec fragment and is honored on both runtimes: nimLegacy
+            (default true) emits the legacy NIM_MODEL_NAME / NIM_MODEL_PATH weight
+            env vars; set it false for images that retired those names and expect
+            NIM_ENGINE_MODEL_NAME / NIM_ENGINE_MODEL_PATH, since such images fail
+            config validation when a retired name is set.'
           additionalProperties: true
           type: object
       type: object
@@ -10145,8 +10959,15 @@ components:
           maxLength: 1000
         fileset:
           type: string
+          maxLength: 127
+          minLength: 2
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
           title: Fileset
-          description: Location where adapter files are stored - expected format {workspace}/{fileset_name}
+          description: 'Location where adapter files are stored. Either a fileset
+            name or ''workspace/fileset_name''. A bare name is resolved in the request
+            workspace (the platform default workspace is named ''default''). Each
+            segment is 2-63 characters: lowercase letters, digits, hyphens, and temporarily
+            @ . + _; no consecutive hyphens, and it cannot end with a hyphen.'
         finetuning_type:
           allOf:
           - $ref: '#/components/schemas/FinetuningType'
@@ -10209,6 +11030,7 @@ components:
           - $ref: '#/components/schemas/NGCStorageConfig'
           - $ref: '#/components/schemas/HuggingfaceStorageConfig'
           - $ref: '#/components/schemas/S3StorageConfig'
+          - $ref: '#/components/schemas/GithubStorageConfig'
           title: Storage
           description: The storage configuration for the fileset. If not provided,
             uses default storage.
@@ -10236,6 +11058,62 @@ components:
       required:
       - name
       title: CreateFilesetRequest
+    CreateHelixJobRequest:
+      properties:
+        name:
+          title: Name
+          type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
+        description:
+          title: Description
+          type: string
+        project:
+          title: Project
+          type: string
+        spec:
+          additionalProperties: true
+          type: object
+          title: Spec
+        platform_spec:
+          $ref: '#/components/schemas/HelixJobSpec'
+        source:
+          type: string
+          title: Source
+        ownership:
+          title: Ownership
+          additionalProperties: true
+          type: object
+        custom_fields:
+          title: Custom Fields
+          additionalProperties: true
+          type: object
+        output_location:
+          title: Output Location
+          type: string
+      type: object
+      required:
+      - spec
+      - platform_spec
+      - source
+      title: CreateHelixJobRequest
+      description: Request model for creating a new platform job.
+      examples:
+      - name: hello-world
+        platform_spec:
+          steps:
+          - config: {}
+            executor:
+              container:
+                image: python:3.11
+              provider: cpu
+            name: run
+        source: api-reference
+        spec: {}
     CreateModelAdapterRequest:
       properties:
         name:
@@ -10257,8 +11135,15 @@ components:
           maxLength: 1000
         fileset:
           type: string
+          maxLength: 127
+          minLength: 2
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
           title: Fileset
-          description: Location where adapter files are stored - expected format {workspace}/{fileset_name}
+          description: 'Location where adapter files are stored. Either a fileset
+            name or ''workspace/fileset_name''. A bare name is resolved in the request
+            workspace (the platform default workspace is named ''default''). Each
+            segment is 2-63 characters: lowercase letters, digits, hyphens, and temporarily
+            @ . + _; no consecutive hyphens, and it cannot end with a hyphen.'
         finetuning_type:
           allOf:
           - $ref: '#/components/schemas/FinetuningType'
@@ -10323,6 +11208,7 @@ components:
           description: Optional reference to the base model entity ID for this deployment
           type: string
           maxLength: 255
+      additionalProperties: false
       type: object
       required:
       - name
@@ -10331,6 +11217,12 @@ components:
       - executor_config
       title: CreateModelDeploymentConfigRequest
       description: Request model for creating a ModelDeploymentConfig.
+      examples:
+      - engine: nim
+        executor_config:
+          gpu: 1
+        model_spec: {}
+        name: nim-config-v1
     CreateModelDeploymentRequest:
       properties:
         name:
@@ -10360,6 +11252,7 @@ components:
           description: Reference to a specific ModelDeploymentConfig version. If not
             specified, uses latest.
           type: integer
+      additionalProperties: false
       type: object
       required:
       - name
@@ -10401,9 +11294,16 @@ components:
           description: Set for full weight finetuned models
         fileset:
           title: Fileset
-          description: A set of checkpoint files, configs, and other auxiliary info
-            associated with this model - expected format {workspace}/{fileset_name}
+          description: 'A set of checkpoint files, configs, and other auxiliary info
+            associated with this model. Either a fileset name or ''workspace/fileset_name''.
+            A bare name is resolved in the request workspace (the platform default
+            workspace is named ''default''). Each segment is 2-63 characters: lowercase
+            letters, digits, hyphens, and temporarily @ . + _; no consecutive hyphens,
+            and it cannot end with a hyphen.'
           type: string
+          maxLength: 127
+          minLength: 2
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
         base_model:
           title: Base Model
           description: Link to another model which is used as a base for the current
@@ -10553,44 +11453,6 @@ components:
       - host_url
       title: CreateModelProviderRequest
       description: Request model for creating a ModelProvider.
-    CreatePlatformJobRequest:
-      properties:
-        name:
-          title: Name
-          type: string
-        description:
-          title: Description
-          type: string
-        project:
-          title: Project
-          type: string
-        spec:
-          additionalProperties: true
-          type: object
-          title: Spec
-        platform_spec:
-          $ref: '#/components/schemas/PlatformJobSpec'
-        source:
-          type: string
-          title: Source
-        ownership:
-          title: Ownership
-          additionalProperties: true
-          type: object
-        custom_fields:
-          title: Custom Fields
-          additionalProperties: true
-          type: object
-        output_location:
-          title: Output Location
-          type: string
-      type: object
-      required:
-      - spec
-      - platform_spec
-      - source
-      title: CreatePlatformJobRequest
-      description: Request model for creating a new platform job.
     CreatePromptRequest:
       properties:
         name:
@@ -10981,7 +11843,7 @@ components:
           title: Default Task Image
           description: Default container image for job task pods. Used when a job
             step omits container.image. When unset, falls back to the platform CPU
-            tasks image (platform.image_registry/nmp-cpu-tasks:platform.image_tag).
+            tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
           type: string
           minLength: 1
         env:
@@ -11235,6 +12097,10 @@ components:
           title: Data
           description: Entity-specific data (schema is opaque to entity store, validated
             by client SDK)
+          examples:
+          - target_id: llama-2-7b
+            training_options:
+              learning_rate: 0.01
       type: object
       required:
       - data
@@ -11245,6 +12111,12 @@ components:
         Name is optional - if not provided, it will be auto-generated.
 
         Workspace and entity_type come from the URL path parameters.'
+      examples:
+      - data:
+          target_id: llama-2-7b
+          training_options:
+            learning_rate: 0.01
+        name: my-config
     EntityUpdate:
       properties:
         new_name:
@@ -11266,6 +12138,10 @@ components:
           type: object
           title: Data
           description: Updated entity-specific data
+          examples:
+          - target_id: llama-2-7b
+            training_options:
+              learning_rate: 0.02
         expected_db_version:
           title: Expected Db Version
           description: Optional database version for optimistic locking. Update only
@@ -11276,6 +12152,11 @@ components:
       - data
       title: EntityUpdate
       description: Schema for updating an entity.
+      examples:
+      - data:
+          target_id: llama-2-7b
+          training_options:
+            learning_rate: 0.02
     EnvironmentMetadataContent:
       properties:
         format:
@@ -11794,6 +12675,13 @@ components:
           title: Evaluator Scores
           description: Per-evaluator session-mean score. Includes NUMERIC and BOOLEAN
             evaluator results only; text/categorical results are omitted.
+        failed_evaluators:
+          items:
+            type: string
+          type: array
+          title: Failed Evaluators
+          description: Evaluators that recorded a FAILED result for this session (ran,
+            produced no value).
       type: object
       required:
       - workspace
@@ -11856,6 +12744,13 @@ components:
           type: integer
           title: Count
           default: 0
+        failed_count:
+          type: integer
+          title: Failed Count
+          description: Sessions whose evaluator recorded a FAILED result (ran, produced
+            no value). They are already counted as 0 in `mean`; this says how many
+            of the attempts behind that mean were failures.
+          default: 0
       type: object
       title: EvaluatorAggregate
       description: Aggregate statistics over evaluator scores or session-level metric
@@ -11885,6 +12780,10 @@ components:
           type: string
         data_type:
           $ref: '#/components/schemas/EvaluatorResultDataType'
+        status:
+          allOf:
+          - $ref: '#/components/schemas/EvaluatorResultStatus'
+          default: SCORED
         comment:
           title: Comment
           type: string
@@ -11937,6 +12836,10 @@ components:
           allOf:
           - $ref: '#/components/schemas/EvaluatorResultDataType'
           description: Filter by data_type.
+        status:
+          allOf:
+          - $ref: '#/components/schemas/EvaluatorResultStatus'
+          description: Filter by status (SCORED or FAILED).
         created_by:
           description: Filter by principal/system that wrote the row.
           title: Created By
@@ -11981,6 +12884,14 @@ components:
           - $ref: '#/components/schemas/EvaluatorResultDataType'
           description: Discriminator for which of value / string_value carries the
             payload.
+        status:
+          allOf:
+          - $ref: '#/components/schemas/EvaluatorResultStatus'
+          description: SCORED when the evaluator produced a value; FAILED when it
+            ran but could not score this target (no value or string_value; put the
+            reason in `comment`). Rollups count a FAILED result as a failed attempt
+            instead of inferring failure from a missing row.
+          default: SCORED
         comment:
           title: Comment
           description: Free-text rationale or explanation.
@@ -12005,6 +12916,22 @@ components:
       - value
       - -value
       title: EvaluatorResultSortField
+    EvaluatorResultStatus:
+      type: string
+      enum:
+      - SCORED
+      - FAILED
+      title: EvaluatorResultStatus
+      description: 'Whether the evaluator produced a value for its target.
+
+
+        A FAILED result carries no value: the evaluator ran and could not score (judge
+        unreachable,
+
+        unparseable output, errored trial). Rollups count it as a failed attempt rather
+        than inferring
+
+        failure from the absence of a row.'
     EvaluatorResultsPage:
       properties:
         data:
@@ -12145,6 +13072,14 @@ components:
           description: Default X/Y metrics for the experiment's Pareto view. Omit
             to preserve the existing value on update; on create, defaults to cost
             vs. latency.
+        column_layout:
+          allOf:
+          - $ref: '#/components/schemas/ColumnLayout'
+          description: "Saved column order and column visibility for the experiment's\
+            \ evaluations table. Omit to leave the saved layout unchanged; on create\
+            \ that means no layout is saved. An empty order and hidden pair is itself\
+            \ a saved layout \u2014 one that shows every column \u2014 and is distinct\
+            \ from having none."
         is_favorite:
           type: boolean
           title: Is Favorite
@@ -12194,6 +13129,13 @@ components:
           title: Default Sort
         pareto:
           $ref: '#/components/schemas/ParetoConfig'
+        column_layout:
+          allOf:
+          - $ref: '#/components/schemas/ColumnLayout'
+          description: Saved column order and column visibility for the experiment's
+            evaluations table. Null when no layout has been saved, which is distinct
+            from a saved layout that hides nothing.
+          nullable: true
         is_favorite:
           type: boolean
           title: Is Favorite
@@ -12296,6 +13238,14 @@ components:
           description: Default X/Y metrics for the experiment's Pareto view. Omit
             to preserve the existing value on update; on create, defaults to cost
             vs. latency.
+        column_layout:
+          allOf:
+          - $ref: '#/components/schemas/ColumnLayout'
+          description: "Saved column order and column visibility for the experiment's\
+            \ evaluations table. Omit to leave the saved layout unchanged; on create\
+            \ that means no layout is saved. An empty order and hidden pair is itself\
+            \ a saved layout \u2014 one that shows every column \u2014 and is distinct\
+            \ from having none."
         is_favorite:
           type: boolean
           title: Is Favorite
@@ -12536,6 +13486,7 @@ components:
           - $ref: '#/components/schemas/NGCStorageConfig'
           - $ref: '#/components/schemas/HuggingfaceStorageConfig'
           - $ref: '#/components/schemas/S3StorageConfig'
+          - $ref: '#/components/schemas/GithubStorageConfig'
           title: Storage
         metadata:
           $ref: '#/components/schemas/FilesetMetadata'
@@ -13042,6 +13993,60 @@ components:
         with ``-`` for
 
         descending order.'
+    GithubStorageConfig:
+      properties:
+        read_chunk_size:
+          type: integer
+          title: Read Chunk Size
+          description: 'Chunk size in bytes for reading/streaming files. Larger chunks
+            reduce async overhead but increase memory per concurrent download. Default:
+            1MB.'
+          default: 1048576
+        type:
+          type: string
+          const: github
+          title: Type
+          default: github
+        owner:
+          type: string
+          title: Owner
+          description: GitHub repository owner (user or organization)
+        repo:
+          type: string
+          title: Repo
+          description: GitHub repository name
+        revision:
+          type: string
+          title: Revision
+          description: Branch, tag, or commit SHA. 'HEAD' resolves to the repository's
+            default branch.
+          default: HEAD
+        original_revision:
+          title: Original Revision
+          description: The original revision requested by the user before resolution
+            (e.g., 'main'). The 'revision' field contains the resolved commit SHA.
+          type: string
+        path:
+          type: string
+          title: Path
+          description: Optional directory within the repository. All paths are relative
+            to it.
+          default: ''
+        token_secret:
+          allOf:
+          - $ref: '#/components/schemas/SecretRef'
+          description: GitHub personal access token secret name, required for private
+            repositories
+        api_base_url:
+          type: string
+          title: Api Base Url
+          description: GitHub API base URL. Use for GitHub Enterprise instances.
+          default: https://api.github.com
+      type: object
+      required:
+      - owner
+      - repo
+      title: GithubStorageConfig
     GuardrailCheckRequest:
       properties:
         model:
@@ -13527,6 +14532,1044 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    HelixJobEnvironmentVariable:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: The environment variable name
+        value:
+          title: Value
+          description: The environment variable value
+          type: string
+        from_secret:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobSecretEnvironmentVariableRef'
+          description: Reference to a secret environment variable to populate the
+            environment variable
+      type: object
+      required:
+      - name
+      title: HelixJobEnvironmentVariable
+      description: Environment variable for a job step
+    HelixJobListResultResponse:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobResultResponse'
+          type: array
+          title: Data
+      type: object
+      required:
+      - data
+      title: HelixJobListResultResponse
+    HelixJobListSortField:
+      type: string
+      enum:
+      - created_at
+      - -created_at
+      - updated_at
+      - -updated_at
+      - source
+      - -source
+      title: HelixJobListSortField
+      description: Sort fields for the job *list* endpoint.
+    HelixJobListTaskResponse:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobTask'
+          type: array
+          title: Data
+      type: object
+      required:
+      - data
+      title: HelixJobListTaskResponse
+      description: Response model for listing job tasks.
+    HelixJobLog:
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          title: Timestamp
+        job:
+          type: string
+          title: Job
+        job_step:
+          type: string
+          title: Job Step
+        job_task:
+          type: string
+          title: Job Task
+        message:
+          type: string
+          title: Message
+      type: object
+      required:
+      - timestamp
+      - job
+      - job_step
+      - job_task
+      - message
+      title: HelixJobLog
+    HelixJobLogPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobLog'
+          type: array
+          title: Data
+        total:
+          type: integer
+          title: Total
+        next_page:
+          title: Next Page
+          type: string
+        prev_page:
+          title: Prev Page
+          type: string
+      type: object
+      required:
+      - data
+      - total
+      - next_page
+      - prev_page
+      title: HelixJobLogPage
+    HelixJobResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        attempt_id:
+          type: string
+          title: Attempt Id
+        name:
+          type: string
+          title: Name
+        workspace:
+          type: string
+          title: Workspace
+          description: Workspace identifier
+        project:
+          title: Project
+          description: Project URN
+          type: string
+        description:
+          title: Description
+          type: string
+        source:
+          type: string
+          title: Source
+        spec:
+          additionalProperties: true
+          type: object
+          title: Spec
+          description: Job Spec
+        platform_spec:
+          $ref: '#/components/schemas/HelixJobSpec'
+        fileset:
+          type: string
+          title: Fileset
+          description: Fileset ID for storing job artifacts
+        output_location:
+          title: Output Location
+          description: Caller-supplied artifact fileset; None when the fileset was
+            auto-created
+          type: string
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+          description: Details about the job status
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        ownership:
+          title: Ownership
+          additionalProperties: true
+          type: object
+        custom_fields:
+          title: Custom Fields
+          description: Custom Fields
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - id
+      - attempt_id
+      - name
+      - workspace
+      - source
+      - platform_spec
+      - fileset
+      - status
+      title: HelixJobResponse
+      description: Response model for a platform job.
+    HelixJobResponsesPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobResponse'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: HelixJobResponsesPage
+    HelixJobResultCreateRequest:
+      properties:
+        artifact_url:
+          type: string
+          title: Artifact Url
+        artifact_storage_type:
+          $ref: '#/components/schemas/FileStorageType'
+      type: object
+      required:
+      - artifact_url
+      - artifact_storage_type
+      title: HelixJobResultCreateRequest
+    HelixJobResultResponse:
+      properties:
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        project:
+          title: Project
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        artifact_url:
+          type: string
+          title: Artifact Url
+        artifact_storage_type:
+          $ref: '#/components/schemas/FileStorageType'
+        download_url:
+          title: Download Url
+          type: string
+      type: object
+      required:
+      - name
+      - job
+      - workspace
+      - artifact_url
+      - artifact_storage_type
+      title: HelixJobResultResponse
+    HelixJobSecret:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: The name of the secret
+        value:
+          title: Value
+          description: The secret value submitted with the job
+          type: string
+        ref_id:
+          title: Ref Id
+          description: Reference id for the stored secret value
+          type: string
+      type: object
+      required:
+      - name
+      title: HelixJobSecret
+      description: Inline secret material submitted with a job spec.
+    HelixJobSecretEnvironmentVariableRef:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: The name of the secret to reference
+      type: object
+      required:
+      - name
+      title: HelixJobSecretEnvironmentVariableRef
+      description: Reference to a secret to populate an environment variable for a
+        job step.
+    HelixJobSortField:
+      type: string
+      enum:
+      - created_at
+      - -created_at
+      - updated_at
+      - -updated_at
+      title: HelixJobSortField
+    HelixJobSpec:
+      properties:
+        steps:
+          items:
+            $ref: '#/components/schemas/HelixJobStepSpec'
+          type: array
+          title: Steps
+          description: List of steps to be executed in the job
+        secrets:
+          title: Secrets
+          description: Secrets referenced by the job
+          items:
+            $ref: '#/components/schemas/HelixJobSecret'
+          type: array
+      type: object
+      required:
+      - steps
+      title: HelixJobSpec
+      description: Specification for a platform job, containing steps and secrets.
+    HelixJobStatus:
+      type: string
+      enum:
+      - created
+      - pending
+      - active
+      - cancelled
+      - cancelling
+      - error
+      - completed
+      - paused
+      - pausing
+      - resuming
+      title: HelixJobStatus
+      description: 'Enumeration of possible job statuses.
+
+
+        This enum represents the various states a job can be in during its lifecycle,
+
+        from creation to a terminal state.'
+    HelixJobStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        steps:
+          items:
+            $ref: '#/components/schemas/HelixJobStepStatusResponse'
+          type: array
+          title: Steps
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - steps
+      - created_at
+      - updated_at
+      title: HelixJobStatusResponse
+    HelixJobStatusUpdateRequest:
+      properties:
+        status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: The new status to set for the job.
+        expected_step_id:
+          title: Expected Step Id
+          description: Reject the update if the step's entity ID has changed.
+          type: string
+        status_details:
+          title: Status Details
+          description: Optional status details related to the status update.
+          additionalProperties: true
+          type: object
+        error_details:
+          title: Error Details
+          description: Optional error details related to the status update.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - status
+      title: HelixJobStatusUpdateRequest
+      description: Request model for updating job status.
+    HelixJobStep:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Entity name within the workspace
+          default: ''
+        workspace:
+          type: string
+          pattern: ^[\w\-\+.@:]+$
+          title: Workspace
+          description: Workspace identifier
+        project:
+          title: Project
+          description: The name of the project associated with this entity.
+          type: string
+        attempt_id:
+          type: string
+          title: Attempt Id
+          description: Parent attempt ID
+        config:
+          additionalProperties: true
+          type: object
+          title: Config
+          description: Configuration for the step
+        status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: Step status
+          default: created
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+          description: Status details
+        error_details:
+          title: Error Details
+          description: Error details if applicable
+          additionalProperties: true
+          type: object
+        id:
+          type: string
+          title: Id
+          readOnly: true
+        created_at:
+          title: Created At
+          readOnly: true
+          type: string
+          format: date-time
+        created_by:
+          title: Created By
+          readOnly: true
+          nullable: true
+          type: string
+        updated_at:
+          title: Updated At
+          readOnly: true
+          type: string
+          format: date-time
+        updated_by:
+          title: Updated By
+          readOnly: true
+          nullable: true
+          type: string
+        entity_id:
+          type: string
+          title: Entity Id
+          description: Alias for id for backwards compatibility.
+          readOnly: true
+        parent:
+          title: Parent
+          description: Parent entity ID for nested entities.
+          readOnly: true
+          type: string
+        db_version:
+          type: integer
+          title: Db Version
+          description: Database version of the entity for optimistic locking.
+          readOnly: true
+      type: object
+      required:
+      - workspace
+      - attempt_id
+      - id
+      - created_at
+      - created_by
+      - updated_at
+      - updated_by
+      - entity_id
+      - parent
+      - db_version
+      title: HelixJobStep
+      description: 'A single step within an attempt.
+
+
+        Parent-scoped: unique within (workspace, entity_type, parent=attempt_id).'
+    HelixJobStepSpec:
+      properties:
+        name:
+          type: string
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          title: Name
+          description: The name of the step. Must be unique for all steps in a job.
+            Name must start with a lowercase letter, be 2-63 characters, and use lowercase
+            letters, digits, hyphens, and dots (no consecutive hyphens, cannot end
+            with a hyphen).
+          examples:
+          - preprocess
+          - train-model
+          - eval-step-v1
+        environment:
+          title: Environment
+          description: Environment variables for the step
+          items:
+            $ref: '#/components/schemas/HelixJobEnvironmentVariable'
+          type: array
+        executor:
+          oneOf:
+          - $ref: '#/components/schemas/CPUExecutionProvider'
+          - $ref: '#/components/schemas/GPUExecutionProvider'
+          - $ref: '#/components/schemas/DistributedGPUExecutionProvider'
+          - $ref: '#/components/schemas/SubprocessExecutionProvider'
+          title: Executor
+          description: The executor for the step
+          discriminator:
+            propertyName: provider
+            mapping:
+              cpu: '#/components/schemas/CPUExecutionProvider'
+              gpu: '#/components/schemas/GPUExecutionProvider'
+              gpu_distributed: '#/components/schemas/DistributedGPUExecutionProvider'
+              subprocess: '#/components/schemas/SubprocessExecutionProvider'
+        config:
+          additionalProperties: true
+          type: object
+          title: Config
+          description: Configuration for the step
+        lifecycle:
+          allOf:
+          - $ref: '#/components/schemas/StepLifecycle'
+          description: Lifecycle configuration settings for the step
+      type: object
+      required:
+      - name
+      - executor
+      title: HelixJobStepSpec
+      description: Specification for a single step in a platform job.
+    HelixJobStepStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        tasks:
+          items:
+            $ref: '#/components/schemas/HelixJobTaskStatusResponse'
+          type: array
+          title: Tasks
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - tasks
+      - created_at
+      - updated_at
+      title: HelixJobStepStatusResponse
+    HelixJobStepWithContext:
+      properties:
+        id:
+          type: string
+          title: Id
+        job:
+          type: string
+          title: Job
+        attempt_id:
+          type: string
+          title: Attempt Id
+        fileset:
+          type: string
+          title: Fileset
+        artifact_base_path:
+          title: Artifact Base Path
+          description: Folder inside the fileset that this job's artifacts nest under;
+            None when the job owns the whole fileset and its artifacts sit at the
+            root
+          type: string
+        workspace:
+          type: string
+          title: Workspace
+        name:
+          type: string
+          title: Name
+        step_spec:
+          $ref: '#/components/schemas/HelixJobStepSpec'
+        status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          default: created
+        status_details:
+          title: Status Details
+          additionalProperties: true
+          type: object
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        auth_context:
+          allOf:
+          - $ref: '#/components/schemas/AuthContext'
+          description: Auth context for task execution
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - job
+      - attempt_id
+      - fileset
+      - workspace
+      - name
+      title: HelixJobStepWithContext
+      description: Step with additional context from parent job/attempt.
+    HelixJobStepWithContextsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobStepWithContext'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: HelixJobStepWithContextsPage
+    HelixJobStepsListFilter:
+      additionalProperties: false
+      description: Filter options for listing platform job steps.
+      properties:
+        job:
+          description: The ID of the job to filter steps by.
+          title: Job
+          type: string
+        status:
+          description: The list of statuses to filter steps by.
+          title: Status
+          items:
+            $ref: '#/components/schemas/HelixJobStatus'
+          type: array
+        source:
+          description: The source of the job steps.
+          title: Source
+          type: string
+        task_cleanup_pending:
+          description: Whether terminal child-task cleanup is unfinished.
+          title: Task Cleanup Pending
+          type: boolean
+      title: HelixJobStepsListFilter
+      type: object
+    HelixJobTask:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Entity name within the workspace
+          default: ''
+        workspace:
+          type: string
+          pattern: ^[\w\-\+.@:]+$
+          title: Workspace
+          description: Workspace identifier
+        project:
+          title: Project
+          description: The name of the project associated with this entity.
+          type: string
+        step_id:
+          type: string
+          title: Step Id
+          description: Parent step ID
+        status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: Task status
+          default: pending
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+          description: Details about the task status
+        error_details:
+          title: Error Details
+          description: Details about task errors
+          additionalProperties: true
+          type: object
+        error_stack:
+          title: Error Stack
+          description: Error stack trace if applicable
+          type: string
+        id:
+          type: string
+          title: Id
+          readOnly: true
+        created_at:
+          title: Created At
+          readOnly: true
+          type: string
+          format: date-time
+        created_by:
+          title: Created By
+          readOnly: true
+          nullable: true
+          type: string
+        updated_at:
+          title: Updated At
+          readOnly: true
+          type: string
+          format: date-time
+        updated_by:
+          title: Updated By
+          readOnly: true
+          nullable: true
+          type: string
+        entity_id:
+          type: string
+          title: Entity Id
+          description: Alias for id for backwards compatibility.
+          readOnly: true
+        parent:
+          title: Parent
+          description: Parent entity ID for nested entities.
+          readOnly: true
+          type: string
+        db_version:
+          type: integer
+          title: Db Version
+          description: Database version of the entity for optimistic locking.
+          readOnly: true
+      type: object
+      required:
+      - workspace
+      - step_id
+      - id
+      - created_at
+      - created_by
+      - updated_at
+      - updated_by
+      - entity_id
+      - parent
+      - db_version
+      title: HelixJobTask
+      description: 'A task within a step (for parallel execution).
+
+
+        Parent-scoped: unique within (workspace, entity_type, parent=step_id).'
+    HelixJobTaskStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        error_stack:
+          title: Error Stack
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - error_stack
+      - created_at
+      - updated_at
+      title: HelixJobTaskStatusResponse
+    HelixJobTaskUpdate:
+      properties:
+        status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          default: pending
+        status_details:
+          title: Status Details
+          additionalProperties: true
+          type: object
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        error_stack:
+          title: Error Stack
+          type: string
+      type: object
+      title: HelixJobTaskUpdate
+      description: Request model for updating a platform job task.
+    HelixJobsListFilter:
+      additionalProperties: false
+      description: Filter options for listing platform jobs.
+      properties:
+        workspace:
+          description: Workspace of the job.
+          title: Workspace
+          type: string
+        project:
+          description: Project of the job.
+          title: Project
+          type: string
+        name:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Name of the job.
+          title: Name
+        created_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs created at 'gte' datetime or 'lte' datetime.
+        updated_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs updated at 'gte' datetime or 'lte' datetime.
+        status:
+          anyOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          - items:
+              $ref: '#/components/schemas/HelixJobStatus'
+            type: array
+          description: The current status.
+          title: Status
+        source:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: The source of the job.
+          title: Source
+        spec:
+          description: Filter on a path within the job's plugin-defined spec, e.g.
+            `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
+      title: HelixJobsListFilter
+      type: object
+    HelixSecretAccessResponse:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: The name of the secret
+        workspace:
+          type: string
+          title: Workspace
+          description: The workspace ID the secret belongs to
+        value:
+          type: string
+          title: Value
+          description: The payload of the secret
+      type: object
+      required:
+      - name
+      - workspace
+      - value
+      title: HelixSecretAccessResponse
+      description: Response model for accessing a platform secret's value.
+    HelixSecretAdminRotationResponse:
+      properties:
+        rotated_secrets:
+          type: integer
+          title: Rotated Secrets
+        success:
+          type: boolean
+          title: Success
+      type: object
+      required:
+      - rotated_secrets
+      - success
+      title: HelixSecretAdminRotationResponse
+      description: Response schema for admin secret rotation routine.
+    HelixSecretCreateRequest:
+      properties:
+        name:
+          type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          title: Name
+          description: The name of the secret to create. Name must start with a lowercase
+            letter, be 2-63 characters, and use lowercase letters, digits, hyphens,
+            and dots (no consecutive hyphens, cannot end with a hyphen).
+          examples:
+          - hf-token
+          - wandb-api-key
+        description:
+          title: Description
+          description: An optional description of the secret
+          type: string
+        value:
+          type: string
+          format: password
+          title: Value
+          description: The payload of the secret
+          writeOnly: true
+      type: object
+      required:
+      - name
+      - value
+      title: HelixSecretCreateRequest
+      description: Request body for creating a new platform secret.
+    HelixSecretResponse:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: The name of the secret
+        workspace:
+          type: string
+          title: Workspace
+          description: The workspace ID the secret belongs to
+        description:
+          title: Description
+          description: An optional description of the secret
+          type: string
+        created_at:
+          title: Created At
+          type: string
+          format: date-time
+        updated_at:
+          title: Updated At
+          type: string
+          format: date-time
+      type: object
+      required:
+      - name
+      - workspace
+      title: HelixSecretResponse
+      description: Response model for a platform secret.
+    HelixSecretResponsesPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixSecretResponse'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: HelixSecretResponsesPage
+    HelixSecretUpdateRequest:
+      properties:
+        description:
+          title: Description
+          description: An optional description of the secret
+          type: string
+        value:
+          title: Value
+          description: The new secret value
+          type: string
+          format: password
+          writeOnly: true
+      type: object
+      title: HelixSecretUpdateRequest
+      description: Request body for updating a platform secret's metadata.
+      examples:
+      - description: Updated secret description
+        value: new-secret-value
     HuggingfaceStorageConfig:
       properties:
         read_chunk_size:
@@ -13808,7 +15851,7 @@ components:
           title: Default Task Image
           description: Default container image for job task pods. Used when a job
             step omits container.image. When unset, falls back to the platform CPU
-            tasks image (platform.image_registry/nmp-cpu-tasks:platform.image_tag).
+            tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
           type: string
           minLength: 1
         env:
@@ -13823,7 +15866,6 @@ components:
       title: JobExecutionProfileConfig
     JsonValue:
       title: JsonValue
-      x-stainless-any: true
     JsonWebKey:
       properties: {}
       additionalProperties: true
@@ -13979,7 +16021,7 @@ components:
           title: Default Task Image
           description: Default container image for job task pods. Used when a job
             step omits container.image. When unset, falls back to the platform CPU
-            tasks image (platform.image_registry/nmp-cpu-tasks:platform.image_tag).
+            tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
           type: string
           minLength: 1
         env:
@@ -13990,6 +16032,14 @@ components:
           description: Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys
             must not conflict with platform-reserved names. Job steps may override
             these variables.
+        ttl_seconds_image_pull:
+          type: integer
+          minimum: 0.0
+          title: Ttl Seconds Image Pull
+          description: How long a pod may spend in image-pull backoff before the pull
+            is treated as unrecoverable and the step fails naming the image. 0 disables
+            it.
+          default: 600
         namespace:
           title: Namespace
           description: Kubernetes namespace to submit the job to. If not set, it will
@@ -14262,7 +16312,7 @@ components:
         token_audience:
           title: Token Audience
           description: Audience for the projected service account token. Defaults
-            to auth.oidc.workload_client_id, auth.oidc.client_id, then 'nemo-platform'.
+            to auth.oidc.workload.client_id, then 'nemo-helix'.
           type: string
       additionalProperties: false
       type: object
@@ -14582,16 +16632,22 @@ components:
           title: Filters
           description: Key-value filters to apply to the query
         limit:
-          type: integer
-          maximum: 1000.0
-          exclusiveMinimum: 0.0
           title: Limit
           description: Maximum number of results to return
           default: 100
+          type: integer
+          maximum: 10000.0
+          exclusiveMinimum: 0.0
         page_cursor:
           title: Page Cursor
           description: Cursor for pagination
           type: string
+        tail:
+          title: Tail
+          description: Number of newest log lines to return
+          type: integer
+          maximum: 10000.0
+          exclusiveMinimum: 0.0
         artifact_base_path:
           title: Artifact Base Path
           description: Folder inside the fileset the logs were nested under (must
@@ -15363,8 +17419,12 @@ components:
           description: Set for full weight finetuned models
         fileset:
           title: Fileset
-          description: A set of checkpoint files, configs, and other auxiliary info
-            associated with this model - expected format {workspace}/{fileset_name}
+          description: 'A set of checkpoint files, configs, and other auxiliary info
+            associated with this model. Either a fileset name or ''workspace/fileset_name''.
+            A bare name is resolved in the request workspace (the platform default
+            workspace is named ''default''). Each segment is 2-63 characters: lowercase
+            letters, digits, hyphens, and temporarily @ . + _; no consecutive hyphens,
+            and it cannot end with a hyphen.'
           type: string
         trust_remote_code:
           type: boolean
@@ -15478,8 +17538,28 @@ components:
           description: Filter by description.
           title: Description
         fileset:
-          description: Filter by fileset reference in the form {workspace}/{fileset_name}.
+          anyOf:
+          - type: boolean
+          - maxLength: 127
+            minLength: 2
+            pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
+            type: string
+          description: 'Filter by fileset: true = has a fileset, false = no fileset,
+            string = match a fileset reference. Either a fileset name or ''workspace/fileset_name''.
+            A bare name is resolved in the request workspace (the platform default
+            workspace is named ''default''). Each segment is 2-63 characters: lowercase
+            letters, digits, hyphens, and temporarily @ . + _; no consecutive hyphens,
+            and it cannot end with a hyphen.'
           title: Fileset
+        family:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Filter by model architecture family (e.g. 'llama', 'mixtral').
+          title: Family
+        model_providers:
+          description: Filter models served by this ModelProvider, in the form {workspace}/{provider_name}.
+          title: Model Providers
           type: string
         created_at:
           allOf:
@@ -15819,11 +17899,22 @@ components:
           title: Is Chat
           description: Whether this is a chat model
           type: boolean
+        head_type:
+          type: string
+          enum:
+          - causal_lm
+          - embedding
+          - cross_encoder
+          - unknown
+          title: Head Type
+          description: Task-specific head persisted in the checkpoint.
+          default: unknown
         is_embedding_model:
           type: boolean
           title: Is Embedding Model
-          description: Whether this is an embedding model
+          description: Deprecated compatibility alias for head_type == 'embedding'.
           default: false
+          deprecated: true
         checkpoint_model_name:
           type: string
           title: Checkpoint Model Name
@@ -16142,28 +18233,21 @@ components:
         issuer:
           type: string
           title: Issuer
-        authorization_endpoint:
-          title: Authorization Endpoint
-          type: string
-        token_endpoint:
-          title: Token Endpoint
-          type: string
-        device_authorization_endpoint:
-          title: Device Authorization Endpoint
-          type: string
         userinfo_endpoint:
           title: Userinfo Endpoint
           type: string
-        client_id:
-          type: string
-          title: Client Id
-        default_scopes:
-          type: string
-          title: Default Scopes
-          default: openid profile email offline_access
-        scope_prefix:
-          title: Scope Prefix
-          type: string
+        clients:
+          items:
+            oneOf:
+            - $ref: '#/components/schemas/PublicOidcAdvertisedClient'
+            - $ref: '#/components/schemas/ConfidentialOidcAdvertisedClient'
+            discriminator:
+              propertyName: name
+              mapping:
+                confidential: '#/components/schemas/ConfidentialOidcAdvertisedClient'
+                public: '#/components/schemas/PublicOidcAdvertisedClient'
+          type: array
+          title: Clients
         workload_token_exchange_enabled:
           type: boolean
           title: Workload Token Exchange Enabled
@@ -16183,9 +18267,8 @@ components:
       type: object
       required:
       - issuer
-      - client_id
       title: OIDCDiscoveryResponse
-      description: OIDC discovery response for CLI/SDK.
+      description: OIDC discovery response returned by the auth discovery endpoint.
     OpenAIListModelsResp:
       properties:
         data:
@@ -16225,6 +18308,229 @@ components:
       title: OpenAIModelResp
       description: Duplicated structure for an OpenAI /v1/models individual model
         response.
+    OpenShellJobEgressConfig:
+      properties:
+        host:
+          type: string
+          title: Host
+          description: Platform host reachable from inside a sandbox.
+          default: host.docker.internal
+        port:
+          type: integer
+          minimum: 1.0
+          title: Port
+          description: Platform port (the inference gateway / API listener).
+          default: 8080
+        protocol:
+          type: string
+          enum:
+          - rest
+          - websocket
+          - graphql
+          - sql
+          - ''
+          title: Protocol
+          description: 'OpenShell L7 protocol: "rest", "websocket", "graphql", "sql",
+            or "" for L4-only.'
+          default: rest
+        tls:
+          type: string
+          enum:
+          - ''
+          - skip
+          title: Tls
+          description: 'TLS handling: "" (default) for automatic inspection, "skip"
+            to disable inspection.'
+          default: ''
+        access:
+          type: string
+          enum:
+          - read-only
+          - read-write
+          - full
+          title: Access
+          description: 'OpenShell access preset: "read-only", "read-write", or "full".'
+          default: full
+        binaries:
+          items:
+            type: string
+          type: array
+          title: Binaries
+          description: Binaries permitted to open the egress connection. Empty uses
+            the backend default set, which must include the jobs-launcher and the
+            task venv python.
+      additionalProperties: false
+      type: object
+      title: OpenShellJobEgressConfig
+      description: 'The NeMo Helix endpoint a job sandbox must be able to reach directly.
+
+
+        Becomes the platform egress rule in the generated sandbox policy. This shape
+
+        is separate from the deployments plugin''s ``HelixEgressConfig`` so the jobs
+
+        service does not depend on that plugin; the values track it.'
+    OpenShellJobExecutionProfile:
+      properties:
+        provider:
+          type: string
+          title: Provider
+          description: The compute provider for the executor, e.g., cpu, gpu
+          default: cpu
+        profile:
+          type: string
+          title: Profile
+          description: The profile name for the executor, e.g., high_priority_a100,
+            low_priority, etc.
+          default: default
+        backend:
+          type: string
+          const: openshell
+          title: Backend
+          default: openshell
+        config:
+          allOf:
+          - $ref: '#/components/schemas/OpenShellJobExecutionProfileConfig'
+          description: Additional configuration for the OpenShell executor
+      type: object
+      required:
+      - config
+      title: OpenShellJobExecutionProfile
+      description: Execution configuration for an OpenShell job.
+    OpenShellJobExecutionProfileConfig:
+      properties:
+        ttl_seconds_before_active:
+          type: integer
+          title: Ttl Seconds Before Active
+          default: 1800
+        ttl_seconds_active:
+          type: integer
+          title: Ttl Seconds Active
+          default: 86400
+        ttl_seconds_after_finished:
+          type: integer
+          title: Ttl Seconds After Finished
+          default: 3600
+        cleanup_completed_jobs_immediately:
+          type: boolean
+          title: Cleanup Completed Jobs Immediately
+          default: true
+        launcher_tool_path:
+          type: string
+          title: Launcher Tool Path
+          description: Path to the jobs launcher tool
+          default: /tools/jobs-launcher
+        default_task_image:
+          title: Default Task Image
+          description: Default container image for job task pods. Used when a job
+            step omits container.image. When unset, falls back to the platform CPU
+            tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
+          type: string
+          minLength: 1
+        env:
+          additionalProperties:
+            type: string
+          type: object
+          title: Env
+          description: Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys
+            must not conflict with platform-reserved names. Job steps may override
+            these variables.
+        gateway_endpoint:
+          type: string
+          title: Gateway Endpoint
+          description: OpenShell gateway endpoint as a URL (http://host:port or https://host:port).
+            The gRPC target is the same host:port; http implies plaintext, https implies
+            TLS.
+          default: http://127.0.0.1:17670
+        workspace:
+          type: string
+          title: Workspace
+          description: OpenShell gateway workspace that every sandbox RPC is scoped
+            to. The gateway creates 'default'.
+          default: default
+        insecure:
+          title: Insecure
+          description: Force plaintext (True) or TLS (False). When None, derived from
+            the endpoint scheme.
+          type: boolean
+        tls:
+          allOf:
+          - $ref: '#/components/schemas/OpenShellJobTLSConfig'
+          description: mTLS material for an https gateway.
+        request_timeout_seconds:
+          type: integer
+          minimum: 1.0
+          title: Request Timeout Seconds
+          description: Per-RPC deadline for control-plane calls (create/get/delete/list).
+          default: 120
+        platform_egress:
+          allOf:
+          - $ref: '#/components/schemas/OpenShellJobEgressConfig'
+          description: Platform endpoint a job sandbox reaches directly. Drives the
+            generated default sandbox policy and is injected into a policy_path policy
+            as a mandatory egress rule. Set to null to grant the sandbox NO direct
+            egress (breaks secrets fetch and OTLP log export).
+        policy_path:
+          title: Policy Path
+          description: Path to a hand-written OpenShell SandboxPolicy YAML applied
+            to created sandboxes. When unset, a default-deny policy is generated from
+            platform_egress plus the sandbox filesystem defaults.
+          type: string
+        image:
+          title: Image
+          description: Sandbox image for job steps. When unset, falls back to the
+            platform CPU tasks image (nhx-tasks); OpenShell needs the openshell variant
+            (nhx-tasks-openshell).
+          type: string
+        default_entrypoint:
+          title: Default Entrypoint
+          description: Entrypoint for job steps that do not declare one. The OpenShell
+            supervisor ignores the image ENTRYPOINT, so the sandbox command must name
+            the binary explicitly. When unset, defaults to the nhx-tasks entrypoint
+            (/app/.venv/bin/nemo-helix).
+          items:
+            type: string
+          type: array
+        egress_proxy:
+          title: Egress Proxy
+          description: 'HTTP proxy URL injected as HTTP_PROXY/HTTPS_PROXY for the
+            sandbox workload. The docker driver gives sandboxes no network of their
+            own: all egress goes through the supervisor''s proxy at http://127.0.0.1:3128,
+            which enforces the sandbox policy. The k8s driver fences with NetworkPolicies
+            instead, so leave this unset there.'
+          type: string
+      additionalProperties: false
+      type: object
+      title: OpenShellJobExecutionProfileConfig
+      description: 'Configuration for the OpenShell job execution profile.
+
+
+        Schedules job steps as OpenShell sandboxes via the gateway gRPC API. The
+
+        sandbox runs the jobs-launcher as its canonical main process
+
+        (``SandboxSpec.command``), which fetches the step config from the platform
+
+        (``jobs-launcher run --fetch-step-config``) and then runs the task command.'
+    OpenShellJobTLSConfig:
+      properties:
+        ca_cert_path:
+          title: Ca Cert Path
+          description: Path to the CA bundle that signed the gateway cert.
+          type: string
+        client_cert_path:
+          title: Client Cert Path
+          description: Path to the client certificate (mTLS).
+          type: string
+        client_key_path:
+          title: Client Key Path
+          description: Path to the client private key (mTLS).
+          type: string
+      additionalProperties: false
+      type: object
+      title: OpenShellJobTLSConfig
+      description: mTLS material for an https OpenShell gateway. Unused for plaintext
+        gateways.
     OtelExportLogsPartialSuccess:
       properties:
         rejectedLogRecords:
@@ -16378,9 +18684,9 @@ components:
       title: ParetoConfig
       description: "Default X/Y metrics for a group's cost-vs-accuracy Pareto view.\n\
         \nMetric ids use the same vocabulary as the evaluations list sort/filter fields\
-        \ \u2014 ``cost_usd``,\n``latency_ms``, or ``evaluators.<name>``. Defaults\
-        \ to cost (x) vs latency (y): both exist for\nevery group, so the chart always\
-        \ has something to render before anyone customizes it."
+        \ \u2014 ``cost_usd``,\n``latency_ms``, ``tokens``, or ``evaluators.<name>``.\
+        \ Defaults to cost (x) vs latency (y): both exist for\nevery group, so the\
+        \ chart always has something to render before anyone customizes it."
     PatronusEvaluateApiParams:
       properties:
         success_strategy:
@@ -16434,1027 +18740,6 @@ components:
       type: object
       title: PatronusRailConfig
       description: Configuration data for the Patronus Evaluate API
-    PlatformJobEnvironmentVariable:
-      properties:
-        name:
-          type: string
-          title: Name
-          description: The environment variable name
-        value:
-          title: Value
-          description: The environment variable value
-          type: string
-        from_secret:
-          allOf:
-          - $ref: '#/components/schemas/PlatformJobSecretEnvironmentVariableRef'
-          description: Reference to a secret environment variable to populate the
-            environment variable
-      type: object
-      required:
-      - name
-      title: PlatformJobEnvironmentVariable
-      description: Environment variable for a job step
-    PlatformJobListResultResponse:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/PlatformJobResultResponse'
-          type: array
-          title: Data
-      type: object
-      required:
-      - data
-      title: PlatformJobListResultResponse
-    PlatformJobListSortField:
-      type: string
-      enum:
-      - created_at
-      - -created_at
-      - updated_at
-      - -updated_at
-      - source
-      - -source
-      title: PlatformJobListSortField
-      description: Sort fields for the job *list* endpoint.
-    PlatformJobListTaskResponse:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/PlatformJobTask'
-          type: array
-          title: Data
-      type: object
-      required:
-      - data
-      title: PlatformJobListTaskResponse
-      description: Response model for listing job tasks.
-    PlatformJobLog:
-      properties:
-        timestamp:
-          type: string
-          format: date-time
-          title: Timestamp
-        job:
-          type: string
-          title: Job
-        job_step:
-          type: string
-          title: Job Step
-        job_task:
-          type: string
-          title: Job Task
-        message:
-          type: string
-          title: Message
-      type: object
-      required:
-      - timestamp
-      - job
-      - job_step
-      - job_task
-      - message
-      title: PlatformJobLog
-    PlatformJobLogPage:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/PlatformJobLog'
-          type: array
-          title: Data
-        total:
-          type: integer
-          title: Total
-        next_page:
-          title: Next Page
-          type: string
-        prev_page:
-          title: Prev Page
-          type: string
-      type: object
-      required:
-      - data
-      - total
-      - next_page
-      - prev_page
-      title: PlatformJobLogPage
-    PlatformJobResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        attempt_id:
-          type: string
-          title: Attempt Id
-        name:
-          type: string
-          title: Name
-        workspace:
-          type: string
-          title: Workspace
-          description: Workspace identifier
-        project:
-          title: Project
-          description: Project URN
-          type: string
-        description:
-          title: Description
-          type: string
-        source:
-          type: string
-          title: Source
-        spec:
-          additionalProperties: true
-          type: object
-          title: Spec
-          description: Job Spec
-        platform_spec:
-          $ref: '#/components/schemas/PlatformJobSpec'
-        fileset:
-          type: string
-          title: Fileset
-          description: Fileset ID for storing job artifacts
-        output_location:
-          title: Output Location
-          description: Caller-supplied artifact fileset; None when the fileset was
-            auto-created
-          type: string
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-          description: Details about the job status
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-        ownership:
-          title: Ownership
-          additionalProperties: true
-          type: object
-        custom_fields:
-          title: Custom Fields
-          description: Custom Fields
-          additionalProperties: true
-          type: object
-      type: object
-      required:
-      - id
-      - attempt_id
-      - name
-      - workspace
-      - source
-      - platform_spec
-      - fileset
-      - status
-      title: PlatformJobResponse
-      description: Response model for a platform job.
-    PlatformJobResponsesPage:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/PlatformJobResponse'
-          type: array
-          title: Data
-        pagination:
-          allOf:
-          - $ref: '#/components/schemas/PaginationData'
-          description: Pagination information.
-        sort:
-          title: Sort
-          description: The field on which the results are sorted.
-          type: string
-        filter:
-          title: Filter
-          description: Filtering information.
-          additionalProperties: true
-          type: object
-      type: object
-      required:
-      - data
-      title: PlatformJobResponsesPage
-    PlatformJobResultCreateRequest:
-      properties:
-        artifact_url:
-          type: string
-          title: Artifact Url
-        artifact_storage_type:
-          $ref: '#/components/schemas/FileStorageType'
-      type: object
-      required:
-      - artifact_url
-      - artifact_storage_type
-      title: PlatformJobResultCreateRequest
-    PlatformJobResultResponse:
-      properties:
-        name:
-          type: string
-          title: Name
-        job:
-          type: string
-          title: Job
-        workspace:
-          type: string
-          title: Workspace
-        project:
-          title: Project
-          type: string
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-        artifact_url:
-          type: string
-          title: Artifact Url
-        artifact_storage_type:
-          $ref: '#/components/schemas/FileStorageType'
-        download_url:
-          title: Download Url
-          type: string
-      type: object
-      required:
-      - name
-      - job
-      - workspace
-      - artifact_url
-      - artifact_storage_type
-      title: PlatformJobResultResponse
-    PlatformJobSecret:
-      properties:
-        name:
-          type: string
-          title: Name
-          description: The name of the secret
-        value:
-          title: Value
-          description: The secret value submitted with the job
-          type: string
-        ref_id:
-          title: Ref Id
-          description: Reference id for the stored secret value
-          type: string
-      type: object
-      required:
-      - name
-      title: PlatformJobSecret
-      description: Inline secret material submitted with a job spec.
-    PlatformJobSecretEnvironmentVariableRef:
-      properties:
-        name:
-          type: string
-          title: Name
-          description: The name of the secret to reference
-      type: object
-      required:
-      - name
-      title: PlatformJobSecretEnvironmentVariableRef
-      description: Reference to a secret to populate an environment variable for a
-        job step.
-    PlatformJobSortField:
-      type: string
-      enum:
-      - created_at
-      - -created_at
-      - updated_at
-      - -updated_at
-      title: PlatformJobSortField
-    PlatformJobSpec:
-      properties:
-        steps:
-          items:
-            $ref: '#/components/schemas/PlatformJobStepSpec'
-          type: array
-          title: Steps
-          description: List of steps to be executed in the job
-        secrets:
-          title: Secrets
-          description: Secrets referenced by the job
-          items:
-            $ref: '#/components/schemas/PlatformJobSecret'
-          type: array
-      type: object
-      required:
-      - steps
-      title: PlatformJobSpec
-      description: Specification for a platform job, containing steps and secrets.
-    PlatformJobStatus:
-      type: string
-      enum:
-      - created
-      - pending
-      - active
-      - cancelled
-      - cancelling
-      - error
-      - completed
-      - paused
-      - pausing
-      - resuming
-      title: PlatformJobStatus
-      description: 'Enumeration of possible job statuses.
-
-
-        This enum represents the various states a job can be in during its lifecycle,
-
-        from creation to a terminal state.'
-    PlatformJobStatusResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        name:
-          type: string
-          title: Name
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        steps:
-          items:
-            $ref: '#/components/schemas/PlatformJobStepStatusResponse'
-          type: array
-          title: Steps
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - name
-      - status
-      - status_details
-      - error_details
-      - steps
-      - created_at
-      - updated_at
-      title: PlatformJobStatusResponse
-    PlatformJobStatusUpdateRequest:
-      properties:
-        status:
-          allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
-          description: The new status to set for the job.
-        status_details:
-          title: Status Details
-          description: Optional status details related to the status update.
-          additionalProperties: true
-          type: object
-        error_details:
-          title: Error Details
-          description: Optional error details related to the status update.
-          additionalProperties: true
-          type: object
-      type: object
-      required:
-      - status
-      title: PlatformJobStatusUpdateRequest
-      description: Request model for updating job status.
-    PlatformJobStep:
-      properties:
-        name:
-          type: string
-          title: Name
-          description: Entity name within the workspace
-          default: ''
-        workspace:
-          type: string
-          pattern: ^[\w\-\+.@:]+$
-          title: Workspace
-          description: Workspace identifier
-        project:
-          title: Project
-          description: The name of the project associated with this entity.
-          type: string
-        attempt_id:
-          type: string
-          title: Attempt Id
-          description: Parent attempt ID
-        config:
-          additionalProperties: true
-          type: object
-          title: Config
-          description: Configuration for the step
-        status:
-          allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
-          description: Step status
-          default: created
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-          description: Status details
-        error_details:
-          title: Error Details
-          description: Error details if applicable
-          additionalProperties: true
-          type: object
-        id:
-          type: string
-          title: Id
-          readOnly: true
-        created_at:
-          title: Created At
-          readOnly: true
-          type: string
-          format: date-time
-        created_by:
-          title: Created By
-          readOnly: true
-          nullable: true
-          type: string
-        updated_at:
-          title: Updated At
-          readOnly: true
-          type: string
-          format: date-time
-        updated_by:
-          title: Updated By
-          readOnly: true
-          nullable: true
-          type: string
-        entity_id:
-          type: string
-          title: Entity Id
-          description: Alias for id for backwards compatibility.
-          readOnly: true
-        parent:
-          title: Parent
-          description: Parent entity ID for nested entities.
-          readOnly: true
-          type: string
-        db_version:
-          type: integer
-          title: Db Version
-          description: Database version of the entity for optimistic locking.
-          readOnly: true
-      type: object
-      required:
-      - workspace
-      - attempt_id
-      - id
-      - created_at
-      - created_by
-      - updated_at
-      - updated_by
-      - entity_id
-      - parent
-      - db_version
-      title: PlatformJobStep
-      description: 'A single step within an attempt.
-
-
-        Parent-scoped: unique within (workspace, entity_type, parent=attempt_id).'
-    PlatformJobStepSpec:
-      properties:
-        name:
-          type: string
-          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
-          title: Name
-          description: The name of the step. Must be unique for all steps in a job.
-            Name must start with a lowercase letter, be 2-63 characters, and use lowercase
-            letters, digits, hyphens, and dots (no consecutive hyphens, cannot end
-            with a hyphen).
-          examples:
-          - preprocess
-          - train-model
-          - eval-step-v1
-        environment:
-          title: Environment
-          description: Environment variables for the step
-          items:
-            $ref: '#/components/schemas/PlatformJobEnvironmentVariable'
-          type: array
-        executor:
-          oneOf:
-          - $ref: '#/components/schemas/CPUExecutionProvider'
-          - $ref: '#/components/schemas/GPUExecutionProvider'
-          - $ref: '#/components/schemas/DistributedGPUExecutionProvider'
-          - $ref: '#/components/schemas/SubprocessExecutionProvider'
-          title: Executor
-          description: The executor for the step
-          discriminator:
-            propertyName: provider
-            mapping:
-              cpu: '#/components/schemas/CPUExecutionProvider'
-              gpu: '#/components/schemas/GPUExecutionProvider'
-              gpu_distributed: '#/components/schemas/DistributedGPUExecutionProvider'
-              subprocess: '#/components/schemas/SubprocessExecutionProvider'
-        config:
-          additionalProperties: true
-          type: object
-          title: Config
-          description: Configuration for the step
-        lifecycle:
-          allOf:
-          - $ref: '#/components/schemas/StepLifecycle'
-          description: Lifecycle configuration settings for the step
-      type: object
-      required:
-      - name
-      - executor
-      title: PlatformJobStepSpec
-      description: Specification for a single step in a platform job.
-    PlatformJobStepStatusResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        name:
-          type: string
-          title: Name
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        tasks:
-          items:
-            $ref: '#/components/schemas/PlatformJobTaskStatusResponse'
-          type: array
-          title: Tasks
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - name
-      - status
-      - status_details
-      - error_details
-      - tasks
-      - created_at
-      - updated_at
-      title: PlatformJobStepStatusResponse
-    PlatformJobStepWithContext:
-      properties:
-        id:
-          type: string
-          title: Id
-        job:
-          type: string
-          title: Job
-        attempt_id:
-          type: string
-          title: Attempt Id
-        fileset:
-          type: string
-          title: Fileset
-        artifact_base_path:
-          title: Artifact Base Path
-          description: Folder inside the fileset that this job's artifacts nest under;
-            None when the job owns the whole fileset and its artifacts sit at the
-            root
-          type: string
-        workspace:
-          type: string
-          title: Workspace
-        name:
-          type: string
-          title: Name
-        step_spec:
-          $ref: '#/components/schemas/PlatformJobStepSpec'
-        status:
-          allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
-          default: created
-        status_details:
-          title: Status Details
-          additionalProperties: true
-          type: object
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        auth_context:
-          allOf:
-          - $ref: '#/components/schemas/AuthContext'
-          description: Auth context for task execution
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - job
-      - attempt_id
-      - fileset
-      - workspace
-      - name
-      title: PlatformJobStepWithContext
-      description: Step with additional context from parent job/attempt.
-    PlatformJobStepWithContextsPage:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/PlatformJobStepWithContext'
-          type: array
-          title: Data
-        pagination:
-          allOf:
-          - $ref: '#/components/schemas/PaginationData'
-          description: Pagination information.
-        sort:
-          title: Sort
-          description: The field on which the results are sorted.
-          type: string
-        filter:
-          title: Filter
-          description: Filtering information.
-          additionalProperties: true
-          type: object
-      type: object
-      required:
-      - data
-      title: PlatformJobStepWithContextsPage
-    PlatformJobStepsListFilter:
-      additionalProperties: false
-      description: Filter options for listing platform job steps.
-      properties:
-        job:
-          description: The ID of the job to filter steps by.
-          title: Job
-          type: string
-        status:
-          description: The list of statuses to filter steps by.
-          title: Status
-          items:
-            $ref: '#/components/schemas/PlatformJobStatus'
-          type: array
-        source:
-          description: The source of the job steps.
-          title: Source
-          type: string
-      title: PlatformJobStepsListFilter
-      type: object
-    PlatformJobTask:
-      properties:
-        name:
-          type: string
-          title: Name
-          description: Entity name within the workspace
-          default: ''
-        workspace:
-          type: string
-          pattern: ^[\w\-\+.@:]+$
-          title: Workspace
-          description: Workspace identifier
-        project:
-          title: Project
-          description: The name of the project associated with this entity.
-          type: string
-        step_id:
-          type: string
-          title: Step Id
-          description: Parent step ID
-        status:
-          allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
-          description: Task status
-          default: pending
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-          description: Details about the task status
-        error_details:
-          title: Error Details
-          description: Details about task errors
-          additionalProperties: true
-          type: object
-        error_stack:
-          title: Error Stack
-          description: Error stack trace if applicable
-          type: string
-        id:
-          type: string
-          title: Id
-          readOnly: true
-        created_at:
-          title: Created At
-          readOnly: true
-          type: string
-          format: date-time
-        created_by:
-          title: Created By
-          readOnly: true
-          nullable: true
-          type: string
-        updated_at:
-          title: Updated At
-          readOnly: true
-          type: string
-          format: date-time
-        updated_by:
-          title: Updated By
-          readOnly: true
-          nullable: true
-          type: string
-        entity_id:
-          type: string
-          title: Entity Id
-          description: Alias for id for backwards compatibility.
-          readOnly: true
-        parent:
-          title: Parent
-          description: Parent entity ID for nested entities.
-          readOnly: true
-          type: string
-        db_version:
-          type: integer
-          title: Db Version
-          description: Database version of the entity for optimistic locking.
-          readOnly: true
-      type: object
-      required:
-      - workspace
-      - step_id
-      - id
-      - created_at
-      - created_by
-      - updated_at
-      - updated_by
-      - entity_id
-      - parent
-      - db_version
-      title: PlatformJobTask
-      description: 'A task within a step (for parallel execution).
-
-
-        Parent-scoped: unique within (workspace, entity_type, parent=step_id).'
-    PlatformJobTaskStatusResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        name:
-          type: string
-          title: Name
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        error_stack:
-          title: Error Stack
-          type: string
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - name
-      - status
-      - status_details
-      - error_details
-      - error_stack
-      - created_at
-      - updated_at
-      title: PlatformJobTaskStatusResponse
-    PlatformJobTaskUpdate:
-      properties:
-        status:
-          allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
-          default: pending
-        status_details:
-          title: Status Details
-          additionalProperties: true
-          type: object
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        error_stack:
-          title: Error Stack
-          type: string
-      type: object
-      title: PlatformJobTaskUpdate
-      description: Request model for updating a platform job task.
-    PlatformJobsListFilter:
-      additionalProperties: false
-      description: Filter options for listing platform jobs.
-      properties:
-        workspace:
-          description: Workspace of the job.
-          title: Workspace
-          type: string
-        project:
-          description: Project of the job.
-          title: Project
-          type: string
-        name:
-          anyOf:
-          - $ref: '#/components/schemas/StringFilter'
-          - type: string
-          description: Name of the job.
-          title: Name
-        created_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs created at 'gte' datetime or 'lte' datetime.
-        updated_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs updated at 'gte' datetime or 'lte' datetime.
-        status:
-          anyOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
-          - items:
-              $ref: '#/components/schemas/PlatformJobStatus'
-            type: array
-          description: The current status.
-          title: Status
-        source:
-          anyOf:
-          - $ref: '#/components/schemas/StringFilter'
-          - type: string
-          description: The source of the job.
-          title: Source
-      title: PlatformJobsListFilter
-      type: object
-    PlatformSecretAccessResponse:
-      properties:
-        name:
-          type: string
-          title: Name
-          description: The name of the secret
-        workspace:
-          type: string
-          title: Workspace
-          description: The workspace ID the secret belongs to
-        value:
-          type: string
-          title: Value
-          description: The payload of the secret
-      type: object
-      required:
-      - name
-      - workspace
-      - value
-      title: PlatformSecretAccessResponse
-      description: Response model for accessing a platform secret's value.
-    PlatformSecretAdminRotationResponse:
-      properties:
-        rotated_secrets:
-          type: integer
-          title: Rotated Secrets
-        success:
-          type: boolean
-          title: Success
-      type: object
-      required:
-      - rotated_secrets
-      - success
-      title: PlatformSecretAdminRotationResponse
-      description: Response schema for admin secret rotation routine.
-    PlatformSecretCreateRequest:
-      properties:
-        name:
-          type: string
-          maxLength: 63
-          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
-          title: Name
-          description: The name of the secret to create. Name must start with a lowercase
-            letter, be 2-63 characters, and use lowercase letters, digits, hyphens,
-            and dots (no consecutive hyphens, cannot end with a hyphen).
-          examples:
-          - hf-token
-          - wandb-api-key
-        description:
-          title: Description
-          description: An optional description of the secret
-          type: string
-        value:
-          type: string
-          format: password
-          title: Value
-          description: The payload of the secret
-          writeOnly: true
-      type: object
-      required:
-      - name
-      - value
-      title: PlatformSecretCreateRequest
-      description: Request body for creating a new platform secret.
-    PlatformSecretResponse:
-      properties:
-        name:
-          type: string
-          title: Name
-          description: The name of the secret
-        workspace:
-          type: string
-          title: Workspace
-          description: The workspace ID the secret belongs to
-        description:
-          title: Description
-          description: An optional description of the secret
-          type: string
-        created_at:
-          title: Created At
-          type: string
-          format: date-time
-        updated_at:
-          title: Updated At
-          type: string
-          format: date-time
-      type: object
-      required:
-      - name
-      - workspace
-      title: PlatformSecretResponse
-      description: Response model for a platform secret.
-    PlatformSecretResponsesPage:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/PlatformSecretResponse'
-          type: array
-          title: Data
-        pagination:
-          allOf:
-          - $ref: '#/components/schemas/PaginationData'
-          description: Pagination information.
-        sort:
-          title: Sort
-          description: The field on which the results are sorted.
-          type: string
-        filter:
-          title: Filter
-          description: Filtering information.
-          additionalProperties: true
-          type: object
-      type: object
-      required:
-      - data
-      title: PlatformSecretResponsesPage
-    PlatformSecretUpdateRequest:
-      properties:
-        description:
-          title: Description
-          description: An optional description of the secret
-          type: string
-        value:
-          title: Value
-          description: The new secret value
-          type: string
-          format: password
-          writeOnly: true
-      type: object
-      title: PlatformSecretUpdateRequest
-      description: Request body for updating a platform secret's metadata.
     PolygrafDetection:
       properties:
         server_endpoint:
@@ -17842,6 +19127,74 @@ components:
       required:
       - data
       title: PromptsPage
+    PublicOidcAdvertisedClient:
+      properties:
+        client_id:
+          type: string
+          title: Client Id
+        default:
+          type: boolean
+          title: Default
+        bearer_token_source:
+          type: string
+          enum:
+          - access_token
+          - id_token
+          title: Bearer Token Source
+          default: access_token
+        default_scopes:
+          type: string
+          title: Default Scopes
+          default: openid profile email offline_access
+        scope_prefix:
+          title: Scope Prefix
+          type: string
+        name:
+          type: string
+          const: public
+          title: Name
+          default: public
+        client_authentication:
+          type: string
+          const: public
+          title: Client Authentication
+          default: public
+        server_side_sessions:
+          type: boolean
+          title: Server Side Sessions
+          default: false
+        authorization_endpoint:
+          title: Authorization Endpoint
+          type: string
+        token_endpoint:
+          title: Token Endpoint
+          type: string
+        device_authorization_endpoint:
+          title: Device Authorization Endpoint
+          type: string
+        device_authorization_requires_device_id:
+          type: boolean
+          title: Device Authorization Requires Device Id
+          default: false
+        device_authorization_display_name:
+          title: Device Authorization Display Name
+          type: string
+        device_token_request_includes_scope:
+          type: boolean
+          title: Device Token Request Includes Scope
+          default: true
+        authorization_start_endpoint:
+          title: Authorization Start Endpoint
+          type: string
+        broker_token_endpoint:
+          title: Broker Token Endpoint
+          type: string
+      type: object
+      required:
+      - client_id
+      - default
+      title: PublicOidcAdvertisedClient
+      description: Public client using direct provider tokens or NeMo-managed sessions.
     RailStatus:
       properties:
         status:
@@ -18102,6 +19455,21 @@ components:
       type: object
       title: ReasoningConfig
       description: Configuration for reasoning mode in content safety models.
+    RefreshTokenBrokerTokenRequest:
+      properties:
+        grant_type:
+          type: string
+          const: refresh_token
+          title: Grant Type
+        refresh_token:
+          type: string
+          title: Refresh Token
+      additionalProperties: false
+      type: object
+      required:
+      - grant_type
+      - refresh_token
+      title: RefreshTokenBrokerTokenRequest
     RegexDetection:
       properties:
         input:
@@ -18938,6 +20306,7 @@ components:
       - ngc
       - huggingface
       - s3
+      - github
       title: StorageConfigType
       type: string
     StringFilter:
@@ -19039,7 +20408,7 @@ components:
           title: Default Task Image
           description: Default container image for job task pods. Used when a job
             step omits container.image. When unset, falls back to the platform CPU
-            tasks image (platform.image_registry/nmp-cpu-tasks:platform.image_tag).
+            tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
           type: string
           minLength: 1
         env:
@@ -19055,7 +20424,7 @@ components:
           title: Working Directory
           description: Root directory for subprocess job state, config, storage, and
             logs.
-          default: /tmp/nmp-subprocess-jobs
+          default: /tmp/nhx-subprocess-jobs
         graceful_shutdown_timeout_seconds:
           type: integer
           title: Graceful Shutdown Timeout Seconds
@@ -19125,6 +20494,28 @@ components:
       - task
       title: TaskPrompt
       description: Configuration for prompts that will be used for a specific task.
+    TokenAuthorizationStart:
+      properties:
+        redirect_uri:
+          type: string
+          title: Redirect Uri
+        code_challenge:
+          type: string
+          maxLength: 128
+          minLength: 43
+          pattern: ^[A-Za-z0-9_-]+$
+          title: Code Challenge
+        state:
+          type: string
+          maxLength: 512
+          minLength: 16
+          title: State
+      type: object
+      required:
+      - redirect_uri
+      - code_challenge
+      - state
+      title: TokenAuthorizationStart
     TokenRollupResponse:
       properties:
         sum:
@@ -19552,8 +20943,15 @@ components:
           type: boolean
         fileset:
           title: Fileset
-          description: Updated fileset for the adapter
+          description: 'Updated fileset for the adapter. Either a fileset name or
+            ''workspace/fileset_name''. A bare name is resolved in the request workspace
+            (the platform default workspace is named ''default''). Each segment is
+            2-63 characters: lowercase letters, digits, hyphens, and temporarily @
+            . + _; no consecutive hyphens, and it cannot end with a hyphen.'
           type: string
+          maxLength: 127
+          minLength: 2
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
       type: object
       title: UpdateAdapterRequest
       description: Request model for updating Adapter Sub Entity metadata.
@@ -19610,6 +21008,7 @@ components:
           description: Optional reference to the base model entity ID for this deployment
           type: string
           maxLength: 255
+      additionalProperties: false
       type: object
       required:
       - engine
@@ -19618,6 +21017,11 @@ components:
       title: UpdateModelDeploymentConfigRequest
       description: Request model for updating a ModelDeploymentConfig (creates new
         version).
+      examples:
+      - engine: nim
+        executor_config:
+          gpu: 1
+        model_spec: {}
     UpdateModelDeploymentRequest:
       properties:
         config:
@@ -19630,6 +21034,7 @@ components:
           description: Reference to a specific ModelDeploymentConfig version. If not
             specified, uses latest.
           type: integer
+      additionalProperties: false
       type: object
       required:
       - config
@@ -19653,6 +21058,7 @@ components:
             (format: workspace/name)'
           type: string
           maxLength: 255
+      additionalProperties: false
       type: object
       required:
       - status
@@ -19671,9 +21077,16 @@ components:
           description: Detailed specification for the model
         fileset:
           title: Fileset
-          description: A set of checkpoint files, configs, and other auxiliary info
-            associated with this model - expected format {workspace}/{fileset_name}
+          description: 'A set of checkpoint files, configs, and other auxiliary info
+            associated with this model. Either a fileset name or ''workspace/fileset_name''.
+            A bare name is resolved in the request workspace (the platform default
+            workspace is named ''default''). Each segment is 2-63 characters: lowercase
+            letters, digits, hyphens, and temporarily @ . + _; no consecutive hyphens,
+            and it cannot end with a hyphen.'
           type: string
+          maxLength: 127
+          minLength: 2
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
         finetuning_type:
           allOf:
           - $ref: '#/components/schemas/FinetuningType'
@@ -20296,7 +21709,7 @@ components:
           title: Default Task Image
           description: Default container image for job task pods. Used when a job
             step omits container.image. When unset, falls back to the platform CPU
-            tasks image (platform.image_registry/nmp-cpu-tasks:platform.image_tag).
+            tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
           type: string
           minLength: 1
         env:
@@ -20307,6 +21720,14 @@ components:
           description: Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys
             must not conflict with platform-reserved names. Job steps may override
             these variables.
+        ttl_seconds_image_pull:
+          type: integer
+          minimum: 0.0
+          title: Ttl Seconds Image Pull
+          description: How long a pod may spend in image-pull backoff before the pull
+            is treated as unrecoverable and the step fails naming the image. 0 disables
+            it.
+          default: 600
         namespace:
           title: Namespace
           description: Kubernetes namespace to submit the job to. If not set, it will
@@ -20408,6 +21829,34 @@ components:
       type: object
       title: VolcanoJobExecutionProfileConfig
       description: Configuration for Volcano Job Execution Profile
+    WebSessionResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        email:
+          title: Email
+          type: string
+        groups:
+          items:
+            type: string
+          type: array
+          title: Groups
+        account_id:
+          type: string
+          title: Account Id
+        authz_aliases:
+          items:
+            type: string
+          type: array
+          title: Authz Aliases
+      type: object
+      required:
+      - id
+      - groups
+      - account_id
+      - authz_aliases
+      title: WebSessionResponse
     WorkloadTokenExchangeErrorResponse:
       properties:
         error:

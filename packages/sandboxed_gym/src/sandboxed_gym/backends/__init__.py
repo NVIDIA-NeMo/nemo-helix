@@ -6,7 +6,7 @@
 from sandboxed_gym.backends.base import (
     EpisodeBackendError,
     EpisodeSandboxBackend,
-    PlatformMount,
+    HelixMount,
     SanitizedEpisodeSpec,
     UnsupportedEpisodeOperationError,
 )
@@ -15,7 +15,7 @@ from sandboxed_gym.backends.registry import build_backend
 __all__ = [
     "EpisodeBackendError",
     "EpisodeSandboxBackend",
-    "PlatformMount",
+    "HelixMount",
     "SanitizedEpisodeSpec",
     "UnsupportedEpisodeOperationError",
     "build_backend",

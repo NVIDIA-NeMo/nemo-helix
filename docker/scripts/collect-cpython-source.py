@@ -13,13 +13,13 @@ import os
 import re
 import subprocess
 import sys
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import zlib
 from html.parser import HTMLParser
 from pathlib import Path, PurePosixPath
+from time import sleep
 
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
@@ -115,14 +115,14 @@ def verify_sha256(data: bytes, expected: str) -> None:
 
 
 def source_collection_enabled() -> bool:
-    return os.environ.get("NMP_COLLECT_SOURCES", "0").strip().lower() in {"1", "true", "yes", "on"}
+    return os.environ.get("NHX_COLLECT_SOURCES", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def record_source_collection_disabled(output_dir: Path) -> None:
     manifests = output_dir / "manifests"
     manifests.mkdir(parents=True, exist_ok=True)
     (manifests / "source-collection-disabled.txt").write_text(
-        "source collection disabled; set NMP_COLLECT_SOURCES=1 to enable\n",
+        "source collection disabled; set NHX_COLLECT_SOURCES=1 to enable\n",
         encoding="utf-8",
     )
 
@@ -152,7 +152,7 @@ def download(url: str, destination: Path) -> None:
             return
         except (OSError, RuntimeError, urllib.error.URLError) as error:
             last_error = error
-            time.sleep(2**attempt)
+            sleep(2**attempt)
     raise RuntimeError(str(last_error))
 
 

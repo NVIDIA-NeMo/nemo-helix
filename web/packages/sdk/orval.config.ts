@@ -28,7 +28,7 @@ const configs = {
       schemas,
       client,
       clean: true,
-      mode: isZodClient ? 'tags' : 'single',
+      mode: 'tags',
       urlEncodeParameters: true, // Use this property to enable URL encoding of path/query parameters.
       override: {
         header: (info: { title?: string }): string[] => [

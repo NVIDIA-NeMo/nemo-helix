@@ -3,7 +3,7 @@
 
 """Integration tests for deployment reconciliation.
 
-Requires AIRCORE-756 DockerDeploymentBackend to be registered in BACKEND_CLASSES.
+Requires the DockerDeploymentBackend to be registered in BACKEND_CLASSES.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ import docker
 pytestmark = [
     pytest.mark.skipif(
         "docker" not in BACKEND_CLASSES,
-        reason="Requires DockerDeploymentBackend (AIRCORE-756)",
+        reason="Requires DockerDeploymentBackend",
     ),
     skip_without_docker,
 ]
@@ -43,13 +43,13 @@ pytestmark = [
 
 @pytest.fixture
 def docker_registry() -> ExecutorRegistry:
-    mock_sdk = MagicMock()
+    mock_client = MagicMock()
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
     ):
-        backend = DockerDeploymentBackend(mock_sdk, {"pull_images": True})
+        backend = DockerDeploymentBackend(mock_client, {"pull_images": True})
     return ExecutorRegistry({"docker": backend}, default_executor="docker")
 
 
@@ -83,7 +83,7 @@ async def test_puller_server_prerequisite_chain(docker_registry: ExecutorRegistr
     puller_cfg = DeploymentConfig(
         name="puller-cfg",
         workspace="itest",
-        restart_policy="OnFailure",  # ty: ignore[unknown-argument]  # pyright: ignore[reportCallIssue]
+        restart_policy="OnFailure",  # pyright: ignore[reportCallIssue]
         containers=[
             Container(
                 name="puller",
@@ -98,7 +98,7 @@ async def test_puller_server_prerequisite_chain(docker_registry: ExecutorRegistr
     server_cfg = DeploymentConfig(
         name="server-cfg",
         workspace="itest",
-        restart_policy="Always",  # ty: ignore[unknown-argument]  # pyright: ignore[reportCallIssue]
+        restart_policy="Always",  # pyright: ignore[reportCallIssue]
         containers=[
             Container(
                 name="server",
@@ -109,7 +109,7 @@ async def test_puller_server_prerequisite_chain(docker_registry: ExecutorRegistr
                     VolumeMount(
                         name="weights",
                         mountPath="/data",
-                        read_only=True,  # ty: ignore[unknown-argument]  # pyright: ignore[reportCallIssue]
+                        read_only=True,  # pyright: ignore[reportCallIssue]
                     )
                 ],
             )

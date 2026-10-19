@@ -13,6 +13,15 @@ from scaled_evals.api.settings import settings
 from scaled_evals.harbor_runners import resolve_harbor_runner
 from scaled_evals.models.gym_identity import GYM_RUNTIME_LANES
 
+# Runtime name evaluations select to run Harbor trials in OpenSandbox sandboxes.
+HARBOR_OPENSANDBOX_RUNTIME = "harbor_opensandbox"
+# Harbor releases the runtime accepts: those whose runner venv carries the OpenSandbox SDK and
+# NemoOpenSandboxEnvironment, and whose environment API it is tested against.
+HARBOR_OPENSANDBOX_HARBOR_VERSIONS = ("0.13.2", "0.20.0")
+# What an evaluation on this runtime gets when it omits framework_version. Not the catalog default
+# (0.13.2): Harbor 0.13.2 silently ignores task features 0.20 added, such as [[verifier.collect]].
+HARBOR_OPENSANDBOX_DEFAULT_VERSION = "0.20.0"
+
 
 @dataclass(frozen=True)
 class ResolvedFrameworkRunner:
@@ -29,8 +38,24 @@ class ResolvedFrameworkRunner:
 def resolve_framework_runner(
     framework: str, requested_version: str | None, *, runtime: str | None = None
 ) -> ResolvedFrameworkRunner:
+    """Resolve the requested framework version, or the runtime's default, to a pinned runner.
+
+    Raises:
+        ValueError: The version isn't selectable, or the runtime can't run it.
+    """
+    if runtime == HARBOR_OPENSANDBOX_RUNTIME and framework != "harbor":
+        raise ValueError(f"runtime {runtime!r} requires framework 'harbor'")
     if framework == "harbor":
-        runner = resolve_harbor_runner(requested_version)
+        # requested_version is recorded as the caller sent it; only the lookup gets the runtime default.
+        selector = requested_version
+        if runtime == HARBOR_OPENSANDBOX_RUNTIME and selector is None:
+            selector = HARBOR_OPENSANDBOX_DEFAULT_VERSION
+        runner = resolve_harbor_runner(selector)
+        if runtime == HARBOR_OPENSANDBOX_RUNTIME and runner.version not in HARBOR_OPENSANDBOX_HARBOR_VERSIONS:
+            raise ValueError(
+                f"runtime {runtime!r} supports Harbor {', '.join(HARBOR_OPENSANDBOX_HARBOR_VERSIONS)}, "
+                f"not {runner.version}"
+            )
         resolved = ResolvedFrameworkRunner(
             requested_version=requested_version,
             version=runner.version,

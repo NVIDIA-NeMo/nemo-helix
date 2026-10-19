@@ -8,7 +8,7 @@ import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataView
 import {
   getFilesListFilesetFilesQueryKey,
   useFilesRetrieveFileset,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/files';
 import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 import { Anchor, Banner, Card, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
 import { Empty } from '@studio/components/Empty';

@@ -1,12 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Seed NMP with the workspace, providers, guardrail config, and VirtualModel
-required by the IGW guardrails benchmark.
-
-Replaces the previous ``setup_nmp_guardrails_benchmark.sh`` flow with direct
-NMP SDK calls (``client.workspaces``, ``client.inference``, ``client.guardrail``).
-"""
+"""Seed NHX with resources required by the IGW guardrails benchmark."""
 
 from __future__ import annotations
 
@@ -32,14 +27,22 @@ from nemo_guardrails_plugin.benchmarks.constants import (
     VM_NAME,
     WORKSPACE,
 )
-from nemo_platform import NeMoPlatform, NotFoundError
-from nemo_platform.types.inference.middleware_call_param import MiddlewareCallParam
-from nemo_platform.types.inference.virtual_model_inference_config_param import (
-    VirtualModelInferenceConfigParam,
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
+from nemo_helix_plugin.guardrail.client import GuardrailClient
+from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
+from nemo_helix_plugin.inference_middleware import BackendFormat
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.types import CreateModelProviderRequest, ModelProvider
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
+from nemo_helix_plugin.virtual_models.types import (
+    CreateVirtualModelRequest,
+    MiddlewareCall,
+    VirtualModel,
+    VirtualModelInferenceConfig,
 )
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
 log = logging.getLogger(__name__)
 
@@ -73,7 +76,7 @@ class SeededResources:
 
 
 def seed_benchmark(
-    client: NeMoPlatform,
+    client: NemoClient,
     *,
     nemoguardrails_repo_root: Path,
     generated_dir: Path,
@@ -82,45 +85,53 @@ def seed_benchmark(
     """Create workspace, providers, GuardrailConfig, and VirtualModel.
 
     All ``create`` calls are idempotent (``exist_ok=True``) so this is safe to
-    rerun against a reused NMP instance.
+    rerun against a reused NHX instance.
     """
     generated_dir.mkdir(parents=True, exist_ok=True)
+    workspaces_client = WorkspacesClient.from_client(client)
+    models_client = ModelsClient.from_client(client)
+    guardrail_client = GuardrailClient.from_client(client)
+    virtual_models_client = VirtualModelsClient.from_client(client)
 
     log.info("Creating workspace %s", WORKSPACE)
-    client_from_platform(client, WorkspacesClient).create_workspace(
+    workspaces_client.create_workspace(
         exist_ok=True,
         body=CreateWorkspaceRequest(name=WORKSPACE, description="Local IGW guardrails benchmark workspace"),
     ).data()
 
     log.info("Registering app mock provider %s", APP_PROVIDER)
-    client.inference.providers.create(
+    models_client.create_provider(
         workspace=WORKSPACE,
-        name=APP_PROVIDER,
-        host_url=APP_PROVIDER_URL,
-        enabled_models=[APP_MODEL_NAME],
-        description=f"Benchmark mock app LLM on {APP_PROVIDER_URL}",
+        body=CreateModelProviderRequest(
+            name=APP_PROVIDER,
+            host_url=APP_PROVIDER_URL,
+            enabled_models=[APP_MODEL_NAME],
+            description=f"Benchmark mock app LLM on {APP_PROVIDER_URL}",
+        ),
         exist_ok=True,
     )
 
     log.info("Registering content-safety mock provider %s", CS_PROVIDER)
-    client.inference.providers.create(
+    models_client.create_provider(
         workspace=WORKSPACE,
-        name=CS_PROVIDER,
-        host_url=CS_PROVIDER_URL,
-        enabled_models=[CS_MODEL_NAME],
-        description=f"Benchmark mock content-safety LLM on {CS_PROVIDER_URL}",
+        body=CreateModelProviderRequest(
+            name=CS_PROVIDER,
+            host_url=CS_PROVIDER_URL,
+            enabled_models=[CS_MODEL_NAME],
+            description=f"Benchmark mock content-safety LLM on {CS_PROVIDER_URL}",
+        ),
         exist_ok=True,
     )
 
     log.info("Waiting for provider discovery")
     app_provider = _wait_for_served_model(
-        client,
+        models_client,
         provider_name=APP_PROVIDER,
         served_model_name=APP_MODEL_NAME,
         timeout_seconds=provider_wait_timeout,
     )
     cs_provider = _wait_for_served_model(
-        client,
+        models_client,
         provider_name=CS_PROVIDER,
         served_model_name=CS_MODEL_NAME,
         timeout_seconds=provider_wait_timeout,
@@ -138,7 +149,7 @@ def seed_benchmark(
         content_safety_model_entity=cs_entity,
     )
     # Persist the same payload shape the old shell harness produced for debuggability.
-    (generated_dir / "content_safety_local_nmp_request.json").write_text(
+    (generated_dir / "content_safety_local_nhx_request.json").write_text(
         json.dumps(
             {
                 "name": GUARDRAIL_CONFIG,
@@ -153,44 +164,50 @@ def seed_benchmark(
     )
 
     log.info("Creating GuardrailConfig %s", GUARDRAIL_CONFIG)
-    client.guardrail.configs.create(
+    guardrail_client.create_guardrail_config(
         workspace=WORKSPACE,
-        name=GUARDRAIL_CONFIG,
-        description="Benchmark content_safety_local config routed through IGW",
-        data=config_data,
+        body=CreateGuardrailConfigRequest(
+            name=GUARDRAIL_CONFIG,
+            description="Benchmark content_safety_local config routed through IGW",
+            data=config_data,
+        ),
         exist_ok=True,
     )
 
-    middleware_call: MiddlewareCallParam = {
-        "name": GUARDRAILS_MIDDLEWARE_NAME,
-        "config_type": GUARDRAILS_MIDDLEWARE_CONFIG_TYPE,
-        "config_id": f"{WORKSPACE}/{GUARDRAIL_CONFIG}",
-    }
-    vm_models: list[VirtualModelInferenceConfigParam] = [{"model": app_entity, "backend_format": "OPENAI_CHAT"}]
+    middleware_call = MiddlewareCall(
+        name=GUARDRAILS_MIDDLEWARE_NAME,
+        config_type=GUARDRAILS_MIDDLEWARE_CONFIG_TYPE,
+        config_id=f"{WORKSPACE}/{GUARDRAIL_CONFIG}",
+    )
+    vm_models = [VirtualModelInferenceConfig(model=app_entity, backend_format=BackendFormat.OPENAI_CHAT)]
 
     log.info("Creating VirtualModel %s/%s", WORKSPACE, VM_NAME)
-    vm = client.inference.virtual_models.create(
+    vm = _create_virtual_model_exist_ok(
+        virtual_models_client,
         workspace=WORKSPACE,
-        name=VM_NAME,
-        default_model_entity=app_entity,
-        models=vm_models,
-        request_middleware=[middleware_call],
-        response_middleware=[middleware_call],
-        exist_ok=True,
+        body=CreateVirtualModelRequest(
+            name=VM_NAME,
+            default_model_entity=app_entity,
+            models=vm_models,
+            request_middleware=[middleware_call],
+            response_middleware=[middleware_call],
+        ),
     )
     _dump_model(generated_dir / "virtual_model.json", vm)
 
     # Control VM: identical to the guardrails VM but no middleware, so the
     # with-vs-without delta isolates middleware overhead.
     log.info("Creating control VirtualModel %s/%s", WORKSPACE, NO_GUARDRAILS_VM_NAME)
-    no_guardrails_vm = client.inference.virtual_models.create(
+    no_guardrails_vm = _create_virtual_model_exist_ok(
+        virtual_models_client,
         workspace=WORKSPACE,
-        name=NO_GUARDRAILS_VM_NAME,
-        default_model_entity=app_entity,
-        models=vm_models,
-        request_middleware=[],
-        response_middleware=[],
-        exist_ok=True,
+        body=CreateVirtualModelRequest(
+            name=NO_GUARDRAILS_VM_NAME,
+            default_model_entity=app_entity,
+            models=vm_models,
+            request_middleware=[],
+            response_middleware=[],
+        ),
     )
     _dump_model(generated_dir / "virtual_model_no_guardrails.json", no_guardrails_vm)
 
@@ -207,12 +224,12 @@ def seed_benchmark(
 
 
 def _wait_for_served_model(
-    client: NeMoPlatform,
+    client: ModelsClient,
     *,
     provider_name: str,
     served_model_name: str,
     timeout_seconds: float,
-) -> Any:
+) -> ModelProvider:
     """Poll a provider until ``served_models`` lists the expected entry.
 
     Gateway readiness alone is not enough: VirtualModel creation needs the
@@ -223,14 +240,14 @@ def _wait_for_served_model(
     last_error: Exception | None = None
     while time.monotonic() < deadline:
         try:
-            provider = client.inference.providers.retrieve(provider_name, workspace=WORKSPACE)
+            provider = client.get_provider(name=provider_name, workspace=WORKSPACE).data()
         except NotFoundError as exc:
             last_error = exc
             time.sleep(_PROVIDER_POLL_INTERVAL_SECONDS)
             continue
-        served_models = getattr(provider, "served_models", None) or []
-        for m in served_models:
-            if getattr(m, "served_model_name", None) == served_model_name and getattr(m, "model_entity_id", None):
+        served_models = provider.served_models or []
+        for served_model in served_models:
+            if served_model.served_model_name == served_model_name and served_model.model_entity_id:
                 return provider
         time.sleep(_PROVIDER_POLL_INTERVAL_SECONDS)
 
@@ -240,12 +257,22 @@ def _wait_for_served_model(
     )
 
 
-def _extract_model_entity(provider: Any, served_model_name: str, *, provider_name: str) -> str:
-    for m in getattr(provider, "served_models", None) or []:
-        if getattr(m, "served_model_name", None) == served_model_name:
-            entity = getattr(m, "model_entity_id", None)
-            if entity:
-                return entity
+def _create_virtual_model_exist_ok(
+    client: VirtualModelsClient,
+    *,
+    workspace: str,
+    body: CreateVirtualModelRequest,
+) -> VirtualModel:
+    try:
+        return client.create_virtual_model(workspace=workspace, body=body).data()
+    except ConflictError:
+        return client.get_virtual_model(workspace=workspace, name=body.name).data()
+
+
+def _extract_model_entity(provider: ModelProvider, served_model_name: str, *, provider_name: str) -> str:
+    for served_model in provider.served_models or []:
+        if served_model.served_model_name == served_model_name and served_model.model_entity_id:
+            return served_model.model_entity_id
     raise RuntimeError(f"Provider {provider_name!r} does not expose served model {served_model_name!r}")
 
 
@@ -254,9 +281,9 @@ def build_guardrail_config_data(
     source_config_dir: Path,
     content_safety_model_entity: str,
 ) -> dict[str, Any]:
-    """Read the upstream content_safety_local config and rewrite it for NMP.
+    """Read the upstream content_safety_local config and rewrite it for NHX.
 
-    The upstream config references an HTTP base_url; in NMP we instead route by
+    The upstream config references an HTTP base_url; in NHX we instead route by
     ``model_entity_id`` resolved via the inference gateway. Prompts are inlined
     from the sibling ``prompts.yml`` file.
     """

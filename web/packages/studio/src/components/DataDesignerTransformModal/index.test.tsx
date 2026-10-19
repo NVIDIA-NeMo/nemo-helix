@@ -28,7 +28,7 @@ vi.mock('@studio/api/datasets/useDatasetFileContent', () => ({
   }),
 }));
 
-vi.mock('@nemo/sdk/generated/data-designer/api', () => ({
+vi.mock('@nemo/sdk/generated/data-designer/data-designer', () => ({
   useDataDesignerCreateJob: () => ({
     mutateAsync: createJobMock,
     isPending: false,

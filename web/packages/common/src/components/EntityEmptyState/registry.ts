@@ -83,9 +83,9 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
   },
   customModels: {
     heading: 'No custom models yet',
-    subheading: 'Customize a model with fine-tuning or prompt tuning to meet your specific needs.',
+    subheading: 'Customize a model with fine-tuning to meet your specific needs.',
     createAction: { label: 'Customize Model' },
-    cliCommand: 'nemo customization automodel submit <job-spec>.json --workspace <workspace>',
+    cliCommand: 'nemo customization automodel --job-json <job-spec>.json --workspace <workspace>',
     skillPrompt: 'Help me create my first custom model with the nemo-customizer skill',
   },
   baseModels: {
@@ -169,17 +169,15 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     heading: 'No evaluation jobs yet',
     subheading:
       'Apply a model_optimization suggestion or submit an evaluate-agent job to see results here.',
-    cliCommand:
-      'nemo evaluator agent-evaluate submit --spec-file <spec>.json --workspace <workspace>',
-    skillPrompt:
-      'Help me create my first agent evaluation with the nemo-nemo-evaluator-plugin skill',
+    cliCommand: 'nemo evals agent-evaluate --spec-file <spec>.json --workspace <workspace>',
+    skillPrompt: 'Help me create my first agent evaluation with the nemo-nemo-evals-plugin skill',
   },
   evaluationResults: {
     heading: 'No evaluations yet',
     subheading: 'Submit an evaluation job to score a model or agent against a benchmark.',
     createAction: { label: 'Create Evaluation' },
-    cliCommand: 'nemo evaluator evaluate submit --spec-file <spec>.json --workspace <workspace>',
-    skillPrompt: 'Help me create my first evaluation with the nemo-nemo-evaluator-plugin skill',
+    cliCommand: 'nemo evals evaluate --spec-file <spec>.json --workspace <workspace>',
+    skillPrompt: 'Help me create my first evaluation with the nemo-nemo-evals-plugin skill',
   },
   evaluationSessions: {
     heading: 'No test cases',
@@ -199,13 +197,12 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
   optimizerInsights: {
     heading: 'No insights yet',
     subheading: 'Run an optimizer analysis on an agent to surface insights here.',
-    cliCommand: 'nemo agents optimize-skills run --spec-file <spec>.yml',
-    skillPrompt: 'Help me run my first optimizer analysis with the nemo-skills-optimization skill',
+    cliCommand: 'nemo insights analysis-runs create --agent <agent-name> --workspace <workspace>',
+    skillPrompt: 'Help me run my first analysis of my agent with the nemo-analyst skill',
   },
   insightExperiments: {
     heading: 'No experiments yet',
     subheading: 'This insight has no linked experiments yet.',
-    createAction: { label: 'Run Experiment' },
   },
   insightTraces: {
     heading: 'No traces yet',
@@ -216,7 +213,6 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     subheading: 'Trace summaries will appear here after spans are ingested.',
     cliCommand:
       'nemo intake ingest otlp v1 traces create --input-file <otlp-traces>.json --workspace <workspace>',
-    // The skill id is what makes an agent load it; rewording it to prose matches nothing.
     skillPrompt:
       'Help me import traces into the "<workspace>" workspace with the nemo-intake skill.',
   },
@@ -228,6 +224,15 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     heading: 'No runs yet',
     subheading:
       'Agent invocations populate this list once telemetry reaches the nemo-agent-telemetry fileset.',
+  },
+  agentOptimizations: {
+    heading: 'No optimizations yet',
+    subheading:
+      "Sweep your agent's parameters against an evaluation to find a config that scores better.",
+    cliCommand:
+      'nemo agents optimize --optimize-config-fileset <workspace>/<bundle> --optimize-config <config>.yaml --agent <agent-name> --workspace <workspace>',
+    skillPrompt: 'Help me run my first agent optimization with the nemo-optimization skill',
+    createAction: { label: 'Optimize' },
   },
   agents: {
     heading: 'No agents yet',

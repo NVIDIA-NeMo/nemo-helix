@@ -2,15 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { filesDeleteFileset } from '@nemo/sdk/generated/platform/files';
 import {
-  filesDeleteFileset,
   modelsDeleteAllDeploymentConfigVersions,
-  modelsDeleteAllDeploymentVersions,
-  modelsDeleteModel,
-  modelsGetModel,
-  modelsGetLatestDeployment,
   modelsGetLatestDeploymentConfig,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/model-deployment-configs';
+import {
+  modelsDeleteAllDeploymentVersions,
+  modelsGetLatestDeployment,
+} from '@nemo/sdk/generated/platform/model-deployments';
+import { modelsDeleteModel, modelsGetModel } from '@nemo/sdk/generated/platform/models';
 import { ModelDeploymentStatus, type ModelDeployment } from '@nemo/sdk/generated/platform/schema';
 import {
   HUGGING_FACE_DEPLOYMENT_SOURCE_FIELD,
@@ -21,18 +22,34 @@ import { wrapper } from '@studio/tests/util/TestQueryClient';
 import { act, renderHook } from '@testing-library/react';
 
 vi.mock('@nemo/common/src/providers/toast/useToast');
-vi.mock('@nemo/sdk/generated/platform/api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@nemo/sdk/generated/platform/api')>();
+vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@nemo/sdk/generated/platform/files')>();
+  return { ...actual, filesDeleteFileset: vi.fn() };
+});
+
+vi.mock('@nemo/sdk/generated/platform/model-deployment-configs', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@nemo/sdk/generated/platform/model-deployment-configs')>();
   return {
     ...actual,
-    filesDeleteFileset: vi.fn(),
     modelsDeleteAllDeploymentConfigVersions: vi.fn(),
-    modelsDeleteAllDeploymentVersions: vi.fn(),
-    modelsDeleteModel: vi.fn(),
-    modelsGetModel: vi.fn(),
-    modelsGetLatestDeployment: vi.fn(),
     modelsGetLatestDeploymentConfig: vi.fn(),
   };
+});
+
+vi.mock('@nemo/sdk/generated/platform/model-deployments', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@nemo/sdk/generated/platform/model-deployments')>();
+  return {
+    ...actual,
+    modelsDeleteAllDeploymentVersions: vi.fn(),
+    modelsGetLatestDeployment: vi.fn(),
+  };
+});
+
+vi.mock('@nemo/sdk/generated/platform/models', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@nemo/sdk/generated/platform/models')>();
+  return { ...actual, modelsDeleteModel: vi.fn(), modelsGetModel: vi.fn() };
 });
 
 const mockUseToast = vi.mocked(useToast);

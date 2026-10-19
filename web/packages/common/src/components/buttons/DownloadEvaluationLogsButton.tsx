@@ -5,7 +5,7 @@ import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { triggerDownload } from '@nemo/common/src/utils/file';
 import { formatLogs } from '@nemo/common/src/utils/logs';
-import { useJobsPageJobLogs } from '@nemo/sdk/generated/platform/api';
+import { useJobsPageJobLogs } from '@nemo/sdk/generated/platform/jobs';
 import { Button, ButtonProps } from '@nvidia/foundations-react-core';
 import { Download } from 'lucide-react';
 import { FC, useCallback, useState } from 'react';

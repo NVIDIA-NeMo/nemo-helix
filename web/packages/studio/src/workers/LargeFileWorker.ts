@@ -3,7 +3,7 @@
 
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import { toError } from '@nemo/common/src/utils/logger';
-import { filesDownloadFile } from '@nemo/sdk/generated/platform/api';
+import { filesDownloadFile } from '@nemo/sdk/generated/platform/files';
 import axios from 'axios';
 
 export interface LargeFileWorkerMessage {
@@ -11,7 +11,7 @@ export interface LargeFileWorkerMessage {
   workspace?: string;
   action: 'downloadAsFile';
   path: string;
-  /** Access token passed from the main thread (localStorage is unavailable in workers). */
+  /** Configured OIDC bearer passed from the main thread (localStorage is unavailable in workers). */
   accessToken?: string;
 }
 

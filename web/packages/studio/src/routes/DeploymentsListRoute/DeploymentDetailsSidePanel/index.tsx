@@ -16,10 +16,8 @@ import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useLiveSeconds } from '@nemo/common/src/hooks/useLiveSeconds';
 import { formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
-import {
-  useModelsGetDeploymentConfigVersion,
-  useModelsGetLatestDeployment,
-} from '@nemo/sdk/generated/platform/api';
+import { useModelsGetDeploymentConfigVersion } from '@nemo/sdk/generated/platform/model-deployment-configs';
+import { useModelsGetLatestDeployment } from '@nemo/sdk/generated/platform/model-deployments';
 import {
   Engine,
   type ModelDeployment,

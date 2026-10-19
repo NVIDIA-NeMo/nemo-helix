@@ -6,7 +6,7 @@ export interface BaseQueryOptions {
 }
 
 /**
- * @deprecated When migrating to the generated hooks from '@nemo/sdk/generated/platform/api',
+ * @deprecated When migrating to the generated hooks from the per-tag modules under '@nemo/sdk/generated/platform/',
  * use workspace and name parameters directly instead of this interface.
  */
 export interface EntityIdentifier {

@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type {
-  PlatformJobStepStatusResponse,
-  PlatformJobTaskStatusResponse,
+  HelixJobStepStatusResponse,
+  HelixJobTaskStatusResponse,
 } from '@nemo/sdk/generated/customizer/schema';
-import { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import type { CustomizationJob } from '@studio/util/customizationBackend';
 
 /**
@@ -70,20 +70,19 @@ const STEP_LABELS: Record<string, string> = {
 export const formatPipelineStepName = (step: string): string =>
   STEP_LABELS[step] ?? step.replace(/[-_]+/g, ' ').trim();
 
-const isErrored = (status: PlatformJobStatus | undefined): boolean =>
-  status === PlatformJobStatus.error;
+const isErrored = (status: HelixJobStatus | undefined): boolean => status === HelixJobStatus.error;
 
 /** Prefers a task whose message actually explains something over a boilerplate sibling. */
 const findFailingTask = (
-  step: PlatformJobStepStatusResponse | undefined
-): PlatformJobTaskStatusResponse | undefined => {
+  step: HelixJobStepStatusResponse | undefined
+): HelixJobTaskStatusResponse | undefined => {
   const tasks = step?.tasks ?? [];
   const errored = tasks.filter((task) => isErrored(task.status));
-  const explains = (task: PlatformJobTaskStatusResponse) => {
+  const explains = (task: HelixJobTaskStatusResponse) => {
     const message = readString(task.error_details, 'message');
     return message !== undefined && !isGenericMessage(message);
   };
-  const hasMessage = (task: PlatformJobTaskStatusResponse) =>
+  const hasMessage = (task: HelixJobTaskStatusResponse) =>
     readString(task.error_details, 'message') !== undefined;
 
   return (
@@ -102,7 +101,7 @@ const findFailingTask = (
  */
 export const resolveCustomizationFailure = (
   job: CustomizationJob | undefined,
-  steps: PlatformJobStepStatusResponse[] = []
+  steps: HelixJobStepStatusResponse[] = []
 ): CustomizationFailure | undefined => {
   if (!job || !isErrored(job.status)) {
     return undefined;

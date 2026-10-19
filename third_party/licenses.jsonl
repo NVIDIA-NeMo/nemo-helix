@@ -22,6 +22,7 @@
 {"name": "asyncpg", "license": "APACHE-2.0", "compatible": true}
 {"name": "attrs", "license": "MIT", "compatible": true}
 {"name": "authlib", "license": "BSD-3-CLAUSE", "compatible": true}
+{"name": "backports-zstd", "license": "PSF-2.0", "compatible": true}
 {"name": "base58", "license": "MIT", "compatible": true}
 {"name": "beartype", "license": "MIT", "compatible": true}
 {"name": "bitsandbytes", "license": "MIT", "compatible": true}
@@ -237,16 +238,22 @@
 {"name": "narwhals", "license": "MIT", "compatible": true}
 {"name": "nemo-anonymizer", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric", "license": "APACHE-2.0", "compatible": true}
+{"name": "nemo-fabric-adapter-catalog", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-adapter-contract", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-adapters-claude", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-adapters-codex", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-adapters-common", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-adapters-deepagents", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-adapters-hermes", "license": "APACHE-2.0", "compatible": true}
+{"name": "nemo-fabric-adapters-mini-swe-agent", "license": "APACHE-2.0", "compatible": true}
+{"name": "nemo-fabric-adapters-nooa", "license": "APACHE-2.0", "compatible": true}
+{"name": "nemo-fabric-adapters-remote-agent", "license": "APACHE-2.0", "compatible": true}
+{"name": "nemo-fabric-collector", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-runtime", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-relay", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-relay-cli-bin", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-safe-synthesizer", "license": "APACHE-2.0", "compatible": true}
+{"name": "nemo-switchyard", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemoguardrails", "license": "APACHE-2.0", "compatible": true}
 {"name": "nest-asyncio", "license": "BSD-3-CLAUSE", "compatible": true}
 {"name": "nest-asyncio2", "license": "BSD-3-CLAUSE", "compatible": true}
@@ -287,6 +294,7 @@
 {"name": "openinference-instrumentation", "license": "APACHE-2.0", "compatible": true}
 {"name": "openinference-instrumentation-litellm", "license": "APACHE-2.0", "compatible": true}
 {"name": "openinference-semantic-conventions", "license": "APACHE-2.0", "compatible": true}
+{"name": "opensandbox", "license": "APACHE-2.0", "compatible": true}
 {"name": "openshell", "license": "APACHE-2.0", "compatible": true}
 {"name": "opentelemetry-api", "license": "APACHE-2.0", "compatible": true}
 {"name": "opentelemetry-distro", "license": "APACHE-2.0", "compatible": true}
@@ -354,6 +362,7 @@
 {"name": "python-json-logger", "license": "BSD-2-CLAUSE", "compatible": true}
 {"name": "python-multipart", "license": "APACHE-2.0", "compatible": true}
 {"name": "python-on-whales", "license": "MIT", "compatible": true}
+{"name": "pytrec-eval-terrier", "license": "MIT", "compatible": true}
 {"name": "pytz", "license": "MIT", "compatible": true}
 {"name": "pyyaml", "license": "MIT", "compatible": true}
 {"name": "ragas", "license": "APACHE-2.0", "compatible": true}

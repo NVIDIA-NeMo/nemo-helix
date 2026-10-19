@@ -7,8 +7,11 @@ import { ControlledSearchableSelect } from '@nemo/common/src/components/form/Con
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import { getAgentsListAgentsQueryKey, useAgentsCreateAgent } from '@nemo/sdk/generated/agents/api';
-import { useModelsListModels } from '@nemo/sdk/generated/platform/api';
+import {
+  getAgentsListAgentsQueryKey,
+  useAgentsCreateAgent,
+} from '@nemo/sdk/generated/agents/agents';
+import { useModelsListModels } from '@nemo/sdk/generated/platform/models';
 import { DEFAULT_LARGE_PAGE_SIZE } from '@studio/constants/constants';
 import {
   applyModelToConfig,

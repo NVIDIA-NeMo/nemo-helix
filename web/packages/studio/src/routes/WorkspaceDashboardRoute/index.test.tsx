@@ -4,11 +4,9 @@
 import { LINK_GITHUB_ISSUES } from '@studio/constants/links';
 import { ROUTES } from '@studio/constants/routes';
 import { WorkspaceDashboardRoute } from '@studio/routes/WorkspaceDashboardRoute';
-import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
 import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, generatePath, RouterProvider } from 'react-router';
 
 const TEST_WORKSPACE = 'test-workspace';
@@ -56,7 +54,7 @@ describe('WorkspaceDashboardRoute', () => {
       expect(await screen.findByText('Welcome to NeMo Studio')).toBeInTheDocument();
       expect(
         screen.getByText(
-          'Fine-tune and evaluate models, generate synthetic data, and monitor NeMo Platform jobs.'
+          'Fine-tune and evaluate models, generate synthetic data, and monitor NeMo Helix jobs.'
         )
       ).toBeInTheDocument();
     });
@@ -79,11 +77,6 @@ describe('WorkspaceDashboardRoute', () => {
         description: 'Chat with base models and explore capabilities.',
         actionButtonName: 'Chat' as string | undefined,
       },
-      {
-        title: 'Prompt Tune a Model',
-        description: 'Optimize model responses using prompt-based techniques without fine-tuning.',
-        actionButtonName: 'Prompt Tune' as string | undefined,
-      },
     ])(
       'should render the $title card and conditionally display the action button',
       async ({ title, description, actionButtonName }) => {
@@ -105,21 +98,6 @@ describe('WorkspaceDashboardRoute', () => {
         expect(link).toHaveAttribute('target', '_blank');
         expect(link).toHaveAttribute('rel', 'noopener noreferrer');
       });
-    });
-  });
-
-  describe('navigation', () => {
-    it('should navigate to prompt tune route when clicking Prompt Tune button', async () => {
-      renderRoute();
-      const user = userEvent.setup();
-
-      const promptTuneButton = await screen.findByRole('button', { name: 'Prompt Tune' });
-      await user.click(promptTuneButton);
-
-      const locationDisplay = await screen.findByTestId(LOCATION_DISPLAY_TEST_ID);
-      expect(locationDisplay).toHaveTextContent(
-        generatePath(ROUTES.workspace.promptTuningForm, { workspace: TEST_WORKSPACE })
-      );
     });
   });
 

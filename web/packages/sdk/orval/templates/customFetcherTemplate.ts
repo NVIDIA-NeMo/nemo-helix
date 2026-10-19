@@ -4,51 +4,15 @@
 import axios from 'axios';
 import type { AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios';
 import qs from 'qs';
-import { User } from 'oidc-client-ts';
+import { withHelixBrowserAuthAxios } from '../../src/utils/platformRequest';
 import { resolveBrowserBaseUrl } from '../../src/utils/url';
-
-const headers = {
-  'X-Source': 'NeMo Studio',
-};
 
 interface RequestOptions extends AxiosRequestConfig {
   params?: Record<string, string | number | boolean | object | unknown>;
 }
 
-// Add X-Source header and OIDC Bearer token to ALL requests
-axios.interceptors.request.use((config) => {
-  Object.assign(config.headers, headers);
-
-  // If Authorization is already set (e.g. via axios.defaults in a Web Worker), skip OIDC lookup
-  if (config.headers.Authorization) {
-    return config;
-  }
-
-  // Attach OIDC access token as Bearer token if available
-  // Guard localStorage access — it is unavailable in Web Worker contexts
-  const authority = import.meta.env.VITE_AUTH_AUTHORITY;
-  const clientId = import.meta.env.VITE_AUTH_CLIENT_ID;
-  if (authority && clientId && typeof localStorage !== 'undefined') {
-    const oidcStorageKey = `oidc.user:${authority}:${clientId}`;
-    const oidcStorage = localStorage.getItem(oidcStorageKey);
-    if (oidcStorage) {
-      try {
-        const user = User.fromStorageString(oidcStorage);
-        if (user?.access_token && !user.expired) {
-          config.headers.Authorization = `Bearer ${user.access_token}`;
-        }
-      } catch {
-        // Remove malformed storage entry and trigger re-authentication
-        console.warn(
-          'Malformed OIDC storage entry detected. Clearing storage and re-authenticating.'
-        );
-        localStorage.removeItem(oidcStorageKey);
-      }
-    }
-  }
-
-  return config;
-});
+// Add X-Source and the configured browser authentication to all requests.
+axios.interceptors.request.use((config) => withHelixBrowserAuthAxios(config));
 
 const getBaseUrl = (): string | undefined => {
   // TEMPLATE_BASE_URL_CHECKS_START

@@ -40,7 +40,7 @@ SPDX-License-Identifier: Apache-2.0
 {{- $workerNetName = "nvidia.com/mlnxnics" }}
 {{- $workerNetQty = mul $gpuN (int .Values.multinodeNetworking.oci.rdmaDevicesPerGPU) | toString }}
 {{- end }}
-{{- $fullname := include "nemo-platform.fullname" . }}
+{{- $fullname := include "nemo-helix.fullname" . }}
 {{- $ncclTestBase := printf "%s-nccl-test" ($fullname | trunc 40 | trimSuffix "-") | trunc 42 }}
 {{- $hookDel := "before-hook-creation,hook-succeeded,hook-failed" }}
 ---
@@ -54,7 +54,7 @@ metadata:
     helm.sh/hook-weight: "-20"
     helm.sh/hook-delete-policy: {{ $hookDel | quote }}
   labels:
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -66,7 +66,7 @@ metadata:
     helm.sh/hook-weight: "-20"
     helm.sh/hook-delete-policy: {{ $hookDel | quote }}
   labels:
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
     resources: ["pods"]
@@ -93,7 +93,7 @@ metadata:
     helm.sh/hook-weight: "-20"
     helm.sh/hook-delete-policy: {{ $hookDel | quote }}
   labels:
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -112,7 +112,7 @@ metadata:
     helm.sh/hook-weight: "-20"
     helm.sh/hook-delete-policy: {{ $hookDel | quote }}
   labels:
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
     resources: ["nodes"]
@@ -127,7 +127,7 @@ metadata:
     helm.sh/hook-weight: "-20"
     helm.sh/hook-delete-policy: {{ $hookDel | quote }}
   labels:
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -147,7 +147,7 @@ metadata:
     helm.sh/hook-weight: "-25"
     helm.sh/hook-delete-policy: {{ $hookDel | quote }}
   labels:
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
 data:
   nccl_test.py: |
 {{ .Files.Get "files/nccl-test/nccl_test.py" | nindent 4 }}
@@ -168,14 +168,14 @@ metadata:
     helm.sh/hook-weight: "0"
     helm.sh/hook-delete-policy: "before-hook-creation,hook-succeeded"
   labels:
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
 spec:
   backoffLimit: 0
   ttlSecondsAfterFinished: 600
   template:
     metadata:
       labels:
-        {{- include "nemo-platform.selectorLabels" . | nindent 8 }}
+        {{- include "nemo-helix.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: nccl-test-orchestrator
     spec:
       restartPolicy: Never
@@ -288,14 +288,14 @@ metadata:
     helm.sh/hook-weight: "5"
     helm.sh/hook-delete-policy: {{ $hookDel | quote }}
   labels:
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
 spec:
   backoffLimit: 0
   ttlSecondsAfterFinished: 600
   template:
     metadata:
       labels:
-        {{- include "nemo-platform.selectorLabels" . | nindent 8 }}
+        {{- include "nemo-helix.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: nccl-test-cleanup-configmap
     spec:
       restartPolicy: Never

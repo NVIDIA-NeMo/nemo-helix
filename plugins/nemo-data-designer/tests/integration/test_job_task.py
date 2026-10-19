@@ -19,7 +19,7 @@ written its results.
 """
 
 import logging
-from collections.abc import Generator, Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
@@ -34,8 +34,7 @@ from nemo_data_designer_plugin.jobs.spec import DataDesignerJobConfig
 from nemo_data_designer_plugin.jobs.task_results import ANALYSIS_RESULT_NAME, ARTIFACTS_RESULT_NAME
 from nemo_data_designer_plugin.sdk.job_results import DataDesignerJobResults
 from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.client import JobsClient
 
 pytestmark = pytest.mark.integration
 
@@ -48,7 +47,7 @@ def _load_results(ctx: u.CreateJobTestContext, job_name: str, tmp_path: Path) ->
     resource's ``get_job_status`` to bypass that gate, then download artifacts
     the same way an end user would.
     """
-    job_resource = DataDesignerResource(ctx.sdk).get_job_resource(job_name, workspace="default")
+    job_resource = DataDesignerResource(ctx.client).get_job_resource(job_name, workspace="default")
     with patch.object(job_resource, "get_job_status", return_value="completed"):
         return job_resource.download_artifacts(tmp_path)
 
@@ -62,12 +61,12 @@ def _get_analysis(ctx: u.CreateJobTestContext, job_name: str, tmp_path: Path) ->
 
 
 def _list_job_results(ctx: u.CreateJobTestContext, job_name: str):
-    return client_from_platform(ctx.sdk, JobsClient).list_job_results(name=job_name).data()
+    return JobsClient.from_client(ctx.client).list_job_results(name=job_name).data()
 
 
 @pytest.fixture
 def _failing_result_manager() -> Generator[None]:
-    with patch("nemo_platform_plugin.jobs.result_manager.ResultManager", u.FailingResultManager):
+    with patch("nemo_helix_plugin.jobs.result_manager.ResultManager", u.FailingResultManager):
         yield
 
 
@@ -154,7 +153,7 @@ async def test_exiting_with_error() -> None:
 
     with (
         capture_job_log_messages() as log_messages,
-        patch("nemo_data_designer_plugin.jobs.run.create_data_designer_context", side_effect=RuntimeError("Yuck")),
+        patch("nemo_data_designer_plugin.jobs.run.create_execution_context", side_effect=RuntimeError("Yuck")),
     ):
         async with u.task_context(job_config, job_name) as ctx:
             result = ctx.run_task()
@@ -190,7 +189,7 @@ class _MessageCaptureHandler(logging.Handler):
 
 
 @contextmanager
-def capture_job_log_messages() -> Iterator[list[str]]:
+def capture_job_log_messages() -> Generator[list[str], None, None]:
     job_logger = logging.getLogger("nemo_data_designer_plugin.jobs.run")
     previous_level = job_logger.level
     handler = _MessageCaptureHandler()

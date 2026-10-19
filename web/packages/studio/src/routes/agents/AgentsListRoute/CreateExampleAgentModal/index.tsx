@@ -7,8 +7,12 @@ import { ControlledSearchableSelect } from '@nemo/common/src/components/form/Con
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import { getAgentsListAgentsQueryKey, useAgentsCreateAgent } from '@nemo/sdk/generated/agents/api';
-import { useModelsListModels } from '@nemo/sdk/generated/platform/api';
+import {
+  getAgentsListAgentsQueryKey,
+  useAgentsCreateAgent,
+} from '@nemo/sdk/generated/agents/agents';
+import type { CreateAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/CreateAgentRequestConfig';
+import { useModelsListModels } from '@nemo/sdk/generated/platform/models';
 import { loadSampleAgentConfig } from '@studio/api/agents/loadSampleAgentConfig';
 import { DEFAULT_LARGE_PAGE_SIZE } from '@studio/constants/constants';
 import {
@@ -144,7 +148,7 @@ const CreateExampleAgentModalInner: FC<CreateExampleAgentModalProps> = ({
   const onSubmit: SubmitHandler<ExampleAgentFormData> = async (formData) => {
     const example = getSampleAgent(formData.exampleKey);
     setLoadError(undefined);
-    let config: Record<string, unknown>;
+    let config: CreateAgentRequestConfig;
     try {
       config = await loadSampleAgentConfig(example.agentConfigPath, formData.modelName, workspace);
     } catch (err) {

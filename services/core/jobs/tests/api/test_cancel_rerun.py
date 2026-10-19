@@ -3,21 +3,63 @@
 
 import pytest
 from httpx import AsyncClient
-from nmp.core.jobs.api.v2.jobs.schemas import CreatePlatformJobRequest
-from nmp.core.jobs.app.schemas import PlatformJobSpec, PlatformJobStepSpec
-from nmp.core.jobs.app.test_helpers import TestConstants
+from nhx.core.jobs.api.v2.jobs.schemas import CreateHelixJobRequest
+from nhx.core.jobs.app.schemas import HelixJobSpec, HelixJobStepSpec
+from nhx.core.jobs.app.test_helpers import TestConstants
+
+
+@pytest.mark.asyncio
+async def test_cancelled_job_has_no_active_public_child_tasks(test_client: AsyncClient):
+    request = CreateHelixJobRequest(
+        name="cancel-with-public-task",
+        source="test-source",
+        spec={},
+        platform_spec=HelixJobSpec(
+            steps=[HelixJobStepSpec(name="training", executor=TestConstants.TEST_EXECUTOR, config={})]
+        ),
+    )
+    base = f"/apis/jobs/v2/workspaces/default/jobs/{request.name}"
+    response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=request.model_dump())
+    assert response.status_code == 201
+    response = await test_client.patch(f"{base}/steps/training/status", json={"status": "active"})
+    assert response.status_code == 200
+    response = await test_client.put(f"{base}/steps/training/tasks/pod-task", json={"status": "active"})
+    assert response.status_code == 200
+
+    response = await test_client.post(f"{base}/cancel")
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelling"
+    response = await test_client.get(f"{base}/steps/training/tasks/pod-task")
+    assert response.json()["status"] == "active"
+    response = await test_client.patch(f"{base}/steps/training/status", json={"status": "cancelled"})
+    assert response.status_code == 200
+
+    for task_name in ["pod-task", "late-task"]:
+        response = await test_client.put(
+            f"{base}/steps/training/tasks/{task_name}", json={"status": "active", "status_details": {"step": 100}}
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "cancelled"
+
+    response = await test_client.get(f"{base}/status")
+    assert response.status_code == 200
+    status = response.json()
+    assert status["status"] == "cancelled"
+    assert status["steps"][0]["status"] == "cancelled"
+    assert len(status["steps"][0]["tasks"]) == 2
+    assert all(task["status"] == "cancelled" for task in status["steps"][0]["tasks"])
 
 
 @pytest.mark.asyncio
 async def test_job_cancel_functionality(test_client: AsyncClient):
     """Test cancelling a job that is currently active."""
-    req = CreatePlatformJobRequest(
+    req = CreateHelixJobRequest(
         name="test-job-cancel",
         source="test-source",
         spec={"param1": "value1"},
-        platform_spec=PlatformJobSpec(
+        platform_spec=HelixJobSpec(
             steps=[
-                PlatformJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
             ]
         ),
     )
@@ -65,15 +107,46 @@ async def test_job_cancel_functionality(test_client: AsyncClient):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("terminal_status", ["cancelled", "error"])
+async def test_terminal_cleanup_from_old_attempt_cannot_stop_rerun(test_client: AsyncClient, terminal_status):
+    request = CreateHelixJobRequest(
+        name="stale-terminal-cleanup",
+        source="test-source",
+        spec={},
+        platform_spec=HelixJobSpec(
+            steps=[HelixJobStepSpec(name="training", executor=TestConstants.TEST_EXECUTOR, config={})]
+        ),
+    )
+    base = f"/apis/jobs/v2/workspaces/default/jobs/{request.name}"
+    response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=request.model_dump())
+    assert response.status_code == 201
+    response = await test_client.patch(f"{base}/steps/training/status", json={"status": terminal_status})
+    assert response.status_code == 200
+    old_step_id = response.json()["id"]
+    response = await test_client.post(f"{base}/rerun")
+    assert response.status_code == 200
+    assert response.json()["status"] == "created"
+
+    response = await test_client.patch(
+        f"{base}/steps/training/status",
+        json={"status": terminal_status, "expected_step_id": old_step_id},
+    )
+    assert response.status_code == 409
+    response = await test_client.get(base)
+    assert response.status_code == 200
+    assert response.json()["status"] == "created"
+
+
+@pytest.mark.asyncio
 async def test_job_rerun_functionality(test_client: AsyncClient):
     """Test rerunning a job that has completed."""
-    req = CreatePlatformJobRequest(
+    req = CreateHelixJobRequest(
         name="test-job-rerun",
         source="test-source",
         spec={"param1": "value1"},
-        platform_spec=PlatformJobSpec(
+        platform_spec=HelixJobSpec(
             steps=[
-                PlatformJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
             ]
         ),
     )
@@ -125,14 +198,14 @@ async def test_job_rerun_functionality(test_client: AsyncClient):
 @pytest.mark.asyncio
 async def test_job_cancel_rerun_lifecycle(test_client: AsyncClient):
     """Test complete cancel-rerun lifecycle of a job."""
-    req = CreatePlatformJobRequest(
+    req = CreateHelixJobRequest(
         name="test-job-cancel-rerun",
         source="test-source",
         spec={"param1": "value1"},
-        platform_spec=PlatformJobSpec(
+        platform_spec=HelixJobSpec(
             steps=[
-                PlatformJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
-                PlatformJobStepSpec(name="step2", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(name="step2", executor=TestConstants.TEST_EXECUTOR, config={}),
             ]
         ),
     )
@@ -202,13 +275,13 @@ async def test_job_cancel_while_resuming(test_client: AsyncClient):
     Regression test for: cancel while in RESUMING state raises StateTransitionConflictError
     because RESUMING -> CANCELLING is not in the valid state machine transitions.
     """
-    req = CreatePlatformJobRequest(
+    req = CreateHelixJobRequest(
         name="test-job-cancel-resuming",
         source="test-source",
         spec={"param1": "value1"},
-        platform_spec=PlatformJobSpec(
+        platform_spec=HelixJobSpec(
             steps=[
-                PlatformJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
             ]
         ),
     )
@@ -263,13 +336,13 @@ async def test_job_rerun_nonexistent_job(test_client: AsyncClient):
 @pytest.mark.asyncio
 async def test_job_cancel_no_active_steps(test_client: AsyncClient):
     """Test cancelling a job with no active steps (should handle gracefully)."""
-    req = CreatePlatformJobRequest(
+    req = CreateHelixJobRequest(
         name="test-job-cancel-no-active",
         source="test-source",
         spec={"param1": "value1"},
-        platform_spec=PlatformJobSpec(
+        platform_spec=HelixJobSpec(
             steps=[
-                PlatformJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
             ]
         ),
     )
@@ -295,13 +368,13 @@ async def test_job_cancel_no_active_steps(test_client: AsyncClient):
 @pytest.mark.asyncio
 async def test_job_rerun_active_job(test_client: AsyncClient):
     """Test rerunning a job that is still active."""
-    req = CreatePlatformJobRequest(
+    req = CreateHelixJobRequest(
         name="test-job-rerun-active",
         source="test-source",
         spec={"param1": "value1"},
-        platform_spec=PlatformJobSpec(
+        platform_spec=HelixJobSpec(
             steps=[
-                PlatformJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
             ]
         ),
     )

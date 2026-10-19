@@ -13,7 +13,7 @@ import { useLocation } from 'react-router';
  *   initialPath: ROUTES.model.index,
  *   otherRoutes: [
  *     {
- *       path: ROUTES.workspace.promptTuningForm,
+ *       path: ROUTES.workspace.newCustomizationJob,
  *       element: <LocationDisplay />,
  *     },
  *   ],
@@ -22,7 +22,7 @@ import { useLocation } from 'react-router';
  *
  * // Assert user was redirected to the new Model's playground route
  * const location = (await screen.findByTestId(LOCATION_DISPLAY_TEST_ID)).textContent;
- * expect(location).toEqual(getPromptTuningFormRoute(workspace, model1));
+ * expect(location).toEqual(getNewCustomizationJobRoute(workspace, model1));
  * ```
  *
  * See: https://testing-library.com/docs/example-react-router/

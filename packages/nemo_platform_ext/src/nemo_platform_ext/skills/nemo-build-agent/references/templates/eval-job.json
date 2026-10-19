@@ -1,7 +1,0 @@
-{
-  "_comment": "Substitute <name>, <model>, and the dataset reference. The dataset is the artifact path produced by `nemo data-designer preview-local --save-results`. Workspace prefix `default/` is the platform default.",
-  "name": "<name>-eval",
-  "benchmark": "default/agent-quality",
-  "model": "default/nim-llm/<model>",
-  "dataset": "default/agents/<name>.eval"
-}

@@ -6,14 +6,14 @@
 # Evaluation config for the react agent.
 # The agent runs remotely (already deployed).  Pass its name if it is platform-managed:
 #
-#   nemo agents evaluate run \
+#   nemo agents evaluate \
 #       --eval-config examples/react-agent/react-eval.yml \
 #       --agent react-agent
 
 llms:
   llm:
     _type: openai
-    model_name: nvidia-nemotron-3-nano-30b-a3b
+    model_name: nvidia-nemotron-3-5-lightning-30b-a3b
     temperature: 0.0
     max_tokens: 1024
 

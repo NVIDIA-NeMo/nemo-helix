@@ -2,13 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
+import { JOB_POLLING_INTERVAL_LONG } from '@nemo/common/src/constants';
+import { getListTracesQueryKey } from '@nemo/sdk/generated/platform/traces';
 import { IntakeTracesTable } from '@studio/components/IntakeLists/IntakeTracesTable';
 import { ROUTES } from '@studio/constants/routes';
 import { mockTracesPage } from '@studio/mocks/intake/telemetry';
+import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
+import { getAgentDetailRoute, getIntakeTracesRoute } from '@studio/routes/utils';
 import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
 import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
-import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
+import { act, renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
@@ -16,7 +20,7 @@ describe('IntakeTracesTable', () => {
   it('loads trace rows in preview mode for bounded payloads and aggregate metrics', async () => {
     const requestedModes: Array<string | null> = [];
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/traces', ({ request }) => {
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), ({ request }) => {
         requestedModes.push(new URL(request.url).searchParams.get('mode'));
         return HttpResponse.json(mockTracesPage);
       })
@@ -27,6 +31,7 @@ describe('IntakeTracesTable', () => {
     });
 
     await screen.findByText('Answer customer policy question');
+    expect(screen.getAllByText('session-agent-run-001')).not.toHaveLength(0);
     expect(screen.getByText('Can I deploy this model in a private workspace?')).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -63,11 +68,73 @@ describe('IntakeTracesTable', () => {
     );
   });
 
+  it('links registered trace agents to the agent page and leaves unknown names as text', async () => {
+    const [registered, unregistered] = mockTracesPage.data;
+    server.use(
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), () =>
+        HttpResponse.json({
+          ...mockTracesPage,
+          data: [
+            { ...registered, agent_name: 'react-agent' },
+            { ...unregistered, agent_name: 'unregistered-agent' },
+          ],
+        })
+      )
+    );
+
+    renderRoute(<IntakeTracesTable workspace="default" />, {
+      history: '/workspaces/default/intake/traces',
+    });
+
+    expect(await screen.findByRole('link', { name: 'react-agent' })).toHaveAttribute(
+      'href',
+      getAgentDetailRoute('default', 'react-agent')
+    );
+    expect(screen.getByText('unregistered-agent')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'unregistered-agent' })).not.toBeInTheDocument();
+  });
+
+  it('opens the agent page from the agent link instead of the trace row', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), () =>
+        HttpResponse.json({
+          ...mockTracesPage,
+          data: [{ ...mockTracesPage.data[0], agent_name: 'react-agent' }],
+        })
+      )
+    );
+
+    renderRoute(undefined, {
+      history: '/workspaces/default/intake/traces',
+      routes: [
+        {
+          path: ROUTES.workspace.intakeTraces,
+          element: <IntakeTracesTable workspace="default" />,
+        },
+        {
+          path: ROUTES.workspace.intakeSession,
+          element: <LocationDisplay />,
+        },
+        {
+          path: ROUTES.workspace.agentDetail,
+          element: <LocationDisplay />,
+        },
+      ],
+    });
+
+    await user.click(await screen.findByRole('link', { name: 'react-agent' }));
+
+    expect(await screen.findByTestId(LOCATION_DISPLAY_TEST_ID)).toHaveTextContent(
+      getAgentDetailRoute('default', 'react-agent')
+    );
+  });
+
   it('seeds a clearable 30-day started_at filter into trace list requests', async () => {
     const user = userEvent.setup();
     const startedAtParams: Array<string | null> = [];
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/traces', ({ request }) => {
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), ({ request }) => {
         startedAtParams.push(new URL(request.url).searchParams.get('filter[started_at][$gte]'));
         return HttpResponse.json(mockTracesPage);
       })
@@ -101,14 +168,31 @@ describe('IntakeTracesTable', () => {
 
     expect(await screen.findByText('Trace ID')).toBeInTheDocument();
     expect(screen.getByText('Started At')).toBeInTheDocument();
-    expect(screen.queryByText('Status')).not.toBeInTheDocument();
-    expect(screen.queryByText('Session ID')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Status')).not.toHaveLength(0);
+    expect(screen.getByText('Session ID')).toBeInTheDocument();
+    expect(screen.getAllByText('Agent')).not.toHaveLength(0);
     expect(screen.queryByText('Evaluation Run ID')).not.toBeInTheDocument();
+  });
+
+  it('filters trace list requests by agent from a deep link', async () => {
+    const agentParams: (string | null)[] = [];
+    server.use(
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), ({ request }) => {
+        agentParams.push(new URL(request.url).searchParams.get('filter[agent_name]'));
+        return HttpResponse.json(mockTracesPage);
+      })
+    );
+
+    renderRoute(<IntakeTracesTable workspace="default" />, {
+      history: getIntakeTracesRoute('default', { agentName: 'email-security-triage' }),
+    });
+
+    await waitFor(() => expect(agentParams).toContain('email-security-triage'));
   });
   it('offers the intake skill and CLI when no traces have been ingested', async () => {
     const user = userEvent.setup();
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/traces', () =>
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), () =>
         HttpResponse.json({ data: [], pagination: { total_results: 0 } })
       )
     );
@@ -128,9 +212,102 @@ describe('IntakeTracesTable', () => {
     expect(help).not.toHaveTextContent('<workspace>');
 
     await user.click(screen.getByRole('radio', { name: 'CLI' }));
-    expect(help).toHaveTextContent(
-      descriptor.cliCommand!.replaceAll('<workspace>', 'test-workspace')
+    // CodeSnippet updates its highlighted content asynchronously after the toggle.
+    await waitFor(() =>
+      expect(help).toHaveTextContent(
+        descriptor.cliCommand!.replaceAll('<workspace>', 'test-workspace')
+      )
     );
     expect(help).not.toHaveTextContent('<workspace>');
+  });
+
+  describe('polling', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('shows newly ingested traces without a reload', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const [newTrace, existingTrace] = mockTracesPage.data;
+      let traces = [existingTrace];
+      server.use(
+        http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), () =>
+          HttpResponse.json({
+            ...mockTracesPage,
+            data: traces,
+            pagination: { ...mockTracesPage.pagination, total_results: traces.length },
+          })
+        )
+      );
+
+      renderRoute(<IntakeTracesTable workspace="default" />, {
+        history: '/workspaces/default/intake/traces',
+      });
+      expect(await screen.findByText('Answer customer policy question')).toBeInTheDocument();
+      expect(
+        screen.queryByText('Explain private workspace access controls')
+      ).not.toBeInTheDocument();
+
+      traces = [newTrace, existingTrace];
+      await act(() => vi.advanceTimersByTimeAsync(JOB_POLLING_INTERVAL_LONG));
+
+      expect(
+        await screen.findByText('Explain private workspace access controls')
+      ).toBeInTheDocument();
+    });
+
+    it('keeps the current rows visible while a poll is in flight', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      let requestCount = 0;
+      let releasePoll: () => void = () => {};
+      const pollHeld = new Promise<void>((resolve) => {
+        releasePoll = resolve;
+      });
+      server.use(
+        http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), async () => {
+          requestCount += 1;
+          if (requestCount > 1) await pollHeld;
+          return HttpResponse.json(mockTracesPage);
+        })
+      );
+
+      renderRoute(<IntakeTracesTable workspace="default" />, {
+        history: '/workspaces/default/intake/traces',
+      });
+      expect(await screen.findByText('Answer customer policy question')).toBeInTheDocument();
+
+      await act(() => vi.advanceTimersByTimeAsync(JOB_POLLING_INTERVAL_LONG));
+      await waitFor(() => expect(requestCount).toBe(2));
+
+      expect(screen.getByText('Answer customer policy question')).toBeInTheDocument();
+
+      releasePoll();
+    });
+
+    it('keeps the current rows visible when a poll fails', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      let requestCount = 0;
+      server.use(
+        http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), () => {
+          requestCount += 1;
+          if (requestCount > 1) {
+            return HttpResponse.json({ detail: 'Service unavailable' }, { status: 503 });
+          }
+          return HttpResponse.json(mockTracesPage);
+        })
+      );
+
+      renderRoute(<IntakeTracesTable workspace="default" />, {
+        history: '/workspaces/default/intake/traces',
+      });
+      expect(await screen.findByText('Answer customer policy question')).toBeInTheDocument();
+
+      await act(() => vi.advanceTimersByTimeAsync(JOB_POLLING_INTERVAL_LONG));
+      await waitFor(() => expect(requestCount).toBeGreaterThan(1));
+      await act(() => vi.advanceTimersByTimeAsync(0));
+
+      expect(screen.getByText('Answer customer policy question')).toBeInTheDocument();
+      expect(screen.queryByText(/Service unavailable/)).not.toBeInTheDocument();
+    });
   });
 });

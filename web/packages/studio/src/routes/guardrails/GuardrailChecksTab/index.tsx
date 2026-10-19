@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useGuardrailsGetGuardrailConfig } from '@nemo/sdk/generated/platform/api';
+import { useGuardrailsGetGuardrailConfig } from '@nemo/sdk/generated/platform/guardrails';
 import { Flex, Text } from '@nvidia/foundations-react-core';
 import { useGuardrailChecksForConfig } from '@studio/api/guardrail-checks/hooks';
 import { Loading } from '@studio/components/Layouts/Loading';

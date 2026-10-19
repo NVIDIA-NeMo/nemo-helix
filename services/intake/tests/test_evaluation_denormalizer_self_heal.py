@@ -12,11 +12,11 @@ from __future__ import annotations
 
 from typing import cast
 
-from nmp.intake.api.v2.experiments.endpoints import _enqueue_stale_denormalization
-from nmp.intake.entities.experiments import Experiment
-from nmp.intake.experiments.denormalizer import EvaluationDenormalizer
-from nmp.intake.experiments.read_service import EvaluationRead
-from nmp.intake.repository.evaluation_rollup import EvaluationRollup
+from nhx.intake.api.v2.experiments.endpoints import _enqueue_stale_denormalization
+from nhx.intake.entities.experiments import Experiment
+from nhx.intake.experiments.denormalizer import EvaluationDenormalizer
+from nhx.intake.experiments.read_service import EvaluationRead
+from nhx.intake.repository.evaluation_rollup import EvaluationRollup
 
 
 class _CapturingRefresher:

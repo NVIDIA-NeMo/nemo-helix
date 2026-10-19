@@ -4,13 +4,14 @@
 from __future__ import annotations
 
 import logging
+import sys
 from importlib.metadata import EntryPoint
 from unittest.mock import patch
 
 import typer
 from nemo_agents_plugin.cli import AgentsCLI
-from nemo_platform_plugin.cli import NemoCLI
-from nemo_platform_plugin.discovery import AGENT_CLI_GROUP
+from nemo_helix_plugin.cli import NemoCLI
+from nemo_helix_plugin.discovery import AGENT_CLI_GROUP
 from typer.testing import CliRunner
 
 
@@ -38,15 +39,17 @@ class _BrokenCLI(NemoCLI):
         raise RuntimeError("broken extension")
 
 
-def test_broken_plugin_does_not_hide_other_agent_clis(caplog) -> None:
+def test_broken_plugin_does_not_hide_other_agent_clis(caplog, monkeypatch) -> None:
     # Agent CLI extensions are discovered lazily (metadata-only) and only
     # imported when their specific subcommand is resolved, so the entry
-    # points here must be real ``module:attr`` paths — not classes — and
-    # resolvable from this test module (pytest's default import mode puts
-    # this file on ``sys.path`` as a top-level module).
+    # points here must be real ``module:attr`` paths — not classes. This
+    # module's ``__name__`` depends on pytest's import mode and, under the root
+    # conftest's importlib mode, contains ``nemo-agents``, which is not a valid
+    # entry-point module path. Alias it under a stable importable name instead.
+    monkeypatch.setitem(sys.modules, "_agents_cli_extensions_test", sys.modules[__name__])
     entry_points = {
-        "broken": EntryPoint(name="broken", value="test_cli_extensions:_BrokenCLI", group=AGENT_CLI_GROUP),
-        "analyst": EntryPoint(name="analyst", value="test_cli_extensions:_AnalystCLI", group=AGENT_CLI_GROUP),
+        "broken": EntryPoint(name="broken", value="_agents_cli_extensions_test:_BrokenCLI", group=AGENT_CLI_GROUP),
+        "analyst": EntryPoint(name="analyst", value="_agents_cli_extensions_test:_AnalystCLI", group=AGENT_CLI_GROUP),
     }
     with patch("nemo_agents_plugin.cli.discover_entry_points", return_value=entry_points):
         app = AgentsCLI().get_cli()

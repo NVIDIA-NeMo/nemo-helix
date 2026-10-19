@@ -4,7 +4,7 @@
 /**
  * Strict, customizer-aligned schema detection for fine-tuning datasets.
  *
- * Mirrors services/customizer/src/nmp/customizer/tasks/training/datasets/schemas.py
+ * Mirrors services/customizer/src/nhx/customizer/tasks/training/datasets/schemas.py
  * (get_sft_dataset_discriminator and get_preference_dataset_discriminator).
  *
  * Common's detectFileStructure is too permissive for this purpose — it accepts
@@ -49,6 +49,10 @@ export const CUSTOMIZER_SCHEMA_LABELS: Record<CustomizerSchemaVariant, string> =
   'dpo-binary-preference': 'Binary Preference',
   'grpo-gym': 'GRPO Gym (responses_create_params + agent_ref)',
 };
+
+/** Unsloth renders chat rows through the model's chat template; other formats are raw text. */
+export const usesChatTemplate = (variant: CustomizerSchemaVariant): boolean =>
+  variant === 'sft-chat';
 
 export interface CustomizerSchemaDetection {
   variant: CustomizerSchemaVariant;

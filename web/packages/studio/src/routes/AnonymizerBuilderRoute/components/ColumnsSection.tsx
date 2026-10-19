@@ -5,7 +5,7 @@ import { parseFilesetLocation } from '@nemo/common/src/components/DatasetFileSel
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { ControlledTextArea } from '@nemo/common/src/components/form/ControlledTextArea';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
-import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/api';
+import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import { Stack, Text } from '@nvidia/foundations-react-core';
 import { useDatasetFileContent } from '@studio/api/datasets/useDatasetFileContent';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';

@@ -91,6 +91,26 @@ describe('MetricTrendPanel', () => {
     expect(deltaTag.querySelector('svg')).not.toBeInTheDocument();
   });
 
+  it('renders a neutral delta when a nonzero delta rounds to zero at the display precision', () => {
+    render(<MetricTrendPanel title="Primary use cases" series={[{ ...series[0], delta: 0.04 }]} />);
+
+    const deltaTag = screen.getByTestId('nv-tag-root');
+    expect(deltaTag).toHaveTextContent('+0.0');
+    expect(deltaTag.className).toContain('nv-tag--color-gray');
+    expect(deltaTag.querySelector('svg')).not.toBeInTheDocument();
+  });
+
+  it('renders a neutral delta when a negative delta rounds to zero at the display precision', () => {
+    render(
+      <MetricTrendPanel title="Primary use cases" series={[{ ...series[0], delta: -0.04 }]} />
+    );
+
+    const deltaTag = screen.getByTestId('nv-tag-root');
+    expect(deltaTag).toHaveTextContent('−0.0');
+    expect(deltaTag.className).toContain('nv-tag--color-gray');
+    expect(deltaTag.querySelector('svg')).not.toBeInTheDocument();
+  });
+
   it('does not show the loading skeleton for an empty series once pending finishes', () => {
     render(<MetricTrendPanel title="Primary use cases" series={[]} isPending={false} />);
 

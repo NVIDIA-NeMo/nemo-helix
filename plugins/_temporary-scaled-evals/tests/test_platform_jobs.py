@@ -1,0 +1,297 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+from __future__ import annotations
+
+import json
+import re
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+import typer
+from nemo_helix_plugin.commands import add_job_commands
+from typer.testing import CliRunner
+
+pytest.importorskip("nemo_scaled_evals_plugin")
+
+import nemo_scaled_evals_plugin.jobs.benchmark_archive_build as benchmark_archive_job_module
+import nemo_scaled_evals_plugin.jobs.evaluation_execution as evaluation_job_module
+import nemo_scaled_evals_plugin.jobs.task_image_build as build_job_module
+import nemo_scaled_evals_plugin.tasks.evaluation_execution as evaluation_task_module
+from nemo_helix_plugin.jobs.providers import CPUExecutionProvider, SubprocessExecutionProvider
+from nemo_scaled_evals_plugin.jobs.benchmark_archive_build import BenchmarkArchiveBuildJob
+from nemo_scaled_evals_plugin.jobs.evaluation_execution import EvaluationExecutionJob
+from nemo_scaled_evals_plugin.jobs.naming import (
+    benchmark_archive_job_name,
+    evaluation_execution_job_name,
+    task_image_build_job_name,
+)
+from nemo_scaled_evals_plugin.jobs.specs import BenchmarkArchiveBuildSpec, EvaluationExecutionSpec, TaskImageBuildSpec
+from nemo_scaled_evals_plugin.jobs.task_image_build import TaskImageBuildJob
+from pydantic import ValidationError
+from scaled_evals.api.settings import settings
+
+
+def _build_spec() -> TaskImageBuildSpec:
+    return TaskImageBuildSpec(
+        task_id="task_1",
+        revision=2,
+        build_attempt=3,
+        backend="buildkit",
+        object_key="tasks/task_1/revisions/2.tar.gz",
+    )
+
+
+def _evaluation_spec() -> EvaluationExecutionSpec:
+    return EvaluationExecutionSpec(
+        evaluation_id="eval_1",
+        execution_number=4,
+        runtime="sandbox_k8s",
+        deadline_seconds=7200,
+    )
+
+
+@pytest.mark.asyncio
+async def test_only_harbor_opensandbox_evaluations_get_opensandbox_key(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setattr(settings, "platform_jobs_opensandbox_api_key_secret", "scaled-evals-opensandbox-api-key")
+
+    async def environment_for(runtime: str) -> dict[str, str | None]:
+        job = await EvaluationExecutionJob.compile(
+            workspace="default",
+            spec=_evaluation_spec().model_copy(update={"runtime": runtime}),
+            entity_client=object(),
+            job_name=None,
+            async_sdk=object(),
+            options={"scaled_evals": {"application_image": "registry.example/scaled-evals:test"}},
+        )
+        return {
+            item.name: item.from_secret.name if item.from_secret else None for item in job.steps[0].environment or []
+        }
+
+    assert (await environment_for("harbor_opensandbox"))["OPENSANDBOX_API_KEY"] == "scaled-evals-opensandbox-api-key"
+    assert "OPENSANDBOX_API_KEY" not in await environment_for("sandbox_k8s")
+
+
+def test_specs_and_deterministic_names() -> None:
+    assert _build_spec().model_dump()["payload"] == {}
+    assert _evaluation_spec().deadline_seconds == 7200
+    with pytest.raises(ValidationError):
+        TaskImageBuildSpec.model_validate(
+            {
+                **_build_spec().model_dump(),
+                "build_attempt": 0,
+                "credentials": {"token": "secret"},
+            }
+        )
+    with pytest.raises(ValidationError):
+        EvaluationExecutionSpec.model_validate({**_evaluation_spec().model_dump(), "deadline_seconds": 0})
+
+    build_name = task_image_build_job_name("task_1", 2, 3)
+    assert build_name == task_image_build_job_name("task_1", 2, 3)
+    assert build_name != task_image_build_job_name("task_1", 2, 4)
+    long_name = evaluation_execution_job_name("EVAL/" + "x" * 100, 4)
+    assert len(long_name) <= 63 - len("job-fileset-")
+    assert len(f"job-fileset-{long_name}") <= 63
+    assert re.fullmatch(r"^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$", long_name)
+
+
+@pytest.mark.asyncio
+async def test_compile_outputs_use_current_platform_job_models(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setattr(settings, "platform_jobs_postgres_password_secret", "scaled-evals-postgres-password")
+    monkeypatch.setattr(
+        settings,
+        "platform_jobs_credentials_encryption_key_secret",
+        "scaled-evals-credentials-encryption-key",
+    )
+    monkeypatch.setattr(settings, "platform_jobs_registry_auth_secret", "scaled-evals-registry-auth")
+    monkeypatch.setattr(settings, "platform_jobs_opensandbox_api_key_secret", "scaled-evals-opensandbox-api-key")
+    build = await TaskImageBuildJob.compile(
+        workspace="default",
+        spec=_build_spec(),
+        entity_client=object(),
+        job_name=None,
+        async_sdk=object(),
+        profile="build-profile",
+        options={"scaled_evals": {"application_image": "registry.example/scaled-evals:test"}},
+    )
+    evaluation = await EvaluationExecutionJob.compile(
+        workspace="default",
+        spec=_evaluation_spec(),
+        entity_client=object(),
+        job_name=None,
+        async_sdk=object(),
+        profile="evaluation-profile",
+        options={"scaled_evals": {"application_image": "registry.example/scaled-evals:test"}},
+    )
+
+    build_step = build.steps[0]
+    assert build_step.name == "task-image-build"
+    assert build_step.executor.provider == "cpu"
+    assert build_step.executor.model_dump(exclude_unset=True)["provider"] == "cpu"
+    assert build_step.executor.profile == "build-profile"
+    assert build_step.executor.container.image == "registry.example/scaled-evals:test"
+    assert build_step.executor.container.command == ["nemo_scaled_evals_plugin.tasks.task_image_build"]
+    assert {
+        item.name: item.from_secret.name if item.from_secret else None for item in build_step.environment or []
+    } == {
+        "PGPASSWORD": "scaled-evals-postgres-password",
+        "CREDENTIALS_ENCRYPTION_KEY": "scaled-evals-credentials-encryption-key",
+        "TASK_IMAGE_REGISTRY_AUTH_JSON": "scaled-evals-registry-auth",
+    }
+    assert build_step.config == _build_spec().model_dump(mode="json")
+
+    evaluation_step = evaluation.steps[0]
+    assert evaluation_step.name == "evaluation-execution"
+    assert isinstance(evaluation_step.executor, CPUExecutionProvider)
+    assert evaluation_step.executor.profile == "evaluation-profile"
+    assert evaluation_step.executor.container.command == ["nemo_scaled_evals_plugin.tasks.evaluation_execution"]
+    assert {
+        item.name: item.from_secret.name if item.from_secret else None for item in evaluation_step.environment or []
+    } == {
+        "PGPASSWORD": "scaled-evals-postgres-password",
+        "CREDENTIALS_ENCRYPTION_KEY": "scaled-evals-credentials-encryption-key",
+        "TASK_IMAGE_REGISTRY_AUTH_JSON": "scaled-evals-registry-auth",
+    }
+    assert evaluation_step.executor.resources.requests.cpu == "50m"
+    assert evaluation_step.executor.resources.limits.memory == "1Gi"
+    assert evaluation_step.config["deadline_seconds"] == 7200
+    # The platform reaps a hung dispatcher only when this is non-zero, and it
+    # must outlast the run so finalize can build evidence and the archive.
+    assert evaluation_step.lifecycle.staleness_timeout_seconds == 7200 + 900
+
+    local_build = await TaskImageBuildJob.compile(
+        workspace="default",
+        spec=_build_spec(),
+        entity_client=object(),
+        job_name=None,
+        async_sdk=object(),
+        options={"scaled_evals": {"provider": "subprocess"}},
+    )
+    assert isinstance(local_build.steps[0].executor, SubprocessExecutionProvider)
+    assert local_build.steps[0].executor.model_dump(exclude_unset=True)["provider"] == "subprocess"
+    assert local_build.steps[0].executor.command == [
+        "python",
+        "-m",
+        "nemo_scaled_evals_plugin.tasks.task_image_build",
+    ]
+
+
+def test_direct_run_reuses_existing_backends(monkeypatch: pytest.MonkeyPatch) -> None:
+    worker = MagicMock()
+    worker.run.return_value = True
+    worker_factory = MagicMock(return_value=worker)
+    monkeypatch.setattr(build_job_module, "_task_build_worker_cls", lambda: worker_factory)
+    monkeypatch.setattr(build_job_module, "_backend_task_build_job_cls", lambda: SimpleNamespace)
+    assert TaskImageBuildJob().run(_build_spec().model_dump()) == {"status": "completed"}
+    worker_factory.assert_called_once_with(worker_id="scaled-evals-build-task_1-r2-a3")
+    backend_job = worker.run.call_args.args[0]
+    assert (backend_job.task_id, backend_job.revision, backend_job.attempt) == ("task_1", 2, 3)
+    assert backend_job.credentials == {}
+    worker.run.return_value = False
+    assert TaskImageBuildJob().run(_build_spec().model_dump()) == {"status": "failed"}
+
+    dispatcher = MagicMock()
+    monkeypatch.setattr(evaluation_job_module, "_dispatcher_cls", lambda: lambda: dispatcher)
+    assert EvaluationExecutionJob().run(_evaluation_spec().model_dump()) == {
+        "status": "completed",
+        "evaluation_id": "eval_1",
+        "execution_number": 4,
+    }
+    # A spec without a workspace predates the inputs entity and loads from Postgres.
+    dispatcher.run.assert_called_once_with("eval_1", expected_execution_number=4, inputs=None)
+    dispatcher.finalize.assert_called_once_with("eval_1")
+
+    # Otherwise the Job launches from the entity named after it.
+    dispatcher = MagicMock()
+    monkeypatch.setattr(evaluation_job_module, "_dispatcher_cls", lambda: lambda: dispatcher)
+    entities = MagicMock()
+    entities.get.return_value.inputs = {"name": "eval"}
+    monkeypatch.setattr(evaluation_job_module, "platform_entities", lambda: entities)
+    spec = _evaluation_spec().model_copy(update={"inputs_workspace": "ws"})
+    EvaluationExecutionJob().run(spec.model_dump())
+    assert entities.get.call_args.args[1] == evaluation_execution_job_name("eval_1", 4)
+    assert entities.get.call_args.kwargs == {"workspace": "ws"}
+    dispatcher.run.assert_called_once_with("eval_1", expected_execution_number=4, inputs={"name": "eval"})
+
+
+@pytest.mark.asyncio
+async def test_benchmark_archive_job_claims_only_its_own_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = BenchmarkArchiveBuildSpec(benchmark_run_id="run_1")
+    compiled = await BenchmarkArchiveBuildJob.compile(
+        workspace="default",
+        spec=spec,
+        entity_client=object(),
+        job_name=None,
+        async_sdk=object(),
+        options={"scaled_evals": {"application_image": "registry.example/scaled-evals:test"}},
+    )
+    assert compiled.steps[0].executor.container.command == ["nemo_scaled_evals_plugin.tasks.benchmark_archive_build"]
+    assert compiled.steps[0].config == {"benchmark_run_id": "run_1"}
+    # Each rebuild request and each lease attempt gets its own Job.
+    name = benchmark_archive_job_name("run_1", "0123456789abcdef", 1)
+    assert name == "scaled-evals-benchmark-archive-run_1-01234567-a1"
+    assert name != benchmark_archive_job_name("run_1", "fedcba9876543210", 1)
+
+    repo = MagicMock()
+    monkeypatch.setattr(benchmark_archive_job_module, "BenchmarkArchiveRepository", lambda _conn: repo)
+    dispatcher = MagicMock(claim_timeout=30.0)
+    monkeypatch.setattr(benchmark_archive_job_module, "Dispatcher", lambda: dispatcher)
+    claimed = {"benchmark_run_id": "run_1", "status": "building", "claim_token": "t"}
+    for row, built in ((claimed, True), (None, False), ({**claimed, "status": "failed"}, False)):
+        repo.claim.return_value = row
+        assert BenchmarkArchiveBuildJob().run(spec.model_dump())["built"] is built
+    repo.claim.assert_called_with(claim_timeout=30.0, run_id="run_1")
+    dispatcher.build_benchmark_archive.assert_called_once_with(claimed)
+
+
+def test_jobs_are_discovered_from_plugin_entry_points() -> None:
+    from nemo_helix_plugin.discovery import discover, discover_controllers, discover_jobs
+    from nemo_scaled_evals_plugin.controller import ScaledEvalsJobsController
+
+    discover.cache_clear()
+    jobs = discover_jobs()
+    assert jobs["scaled-evals.task-image-build"] is TaskImageBuildJob
+    assert jobs["scaled-evals.evaluation-execution"] is EvaluationExecutionJob
+    assert jobs["scaled-evals.benchmark-archive-build"] is BenchmarkArchiveBuildJob
+    assert discover_controllers()["scaled-evals-jobs"] is ScaledEvalsJobsController
+
+
+def test_platform_jobs_use_flat_generated_cli() -> None:
+    app = typer.Typer()
+
+    @app.callback()
+    def _noop() -> None:
+        pass
+
+    add_job_commands(
+        app,
+        {
+            "scaled-evals.task-image-build": TaskImageBuildJob,
+            "scaled-evals.evaluation-execution": EvaluationExecutionJob,
+        },
+    )
+    runner = CliRunner()
+
+    for command in ("task-image-build", "evaluation-execution"):
+        help_result = runner.invoke(app, [command, "--help"])
+        assert help_result.exit_code == 0
+        assert "explain" in help_result.output
+
+        legacy_submit = runner.invoke(app, [command, "submit", "--help"])
+        assert legacy_submit.exit_code == 2
+
+
+def test_evaluation_task_creates_in_cluster_kubeconfig(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    path = tmp_path / "kubeconfig"
+    monkeypatch.setenv("KUBECONFIG", str(path))
+    monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+    monkeypatch.setenv("KUBERNETES_SERVICE_PORT_HTTPS", "6443")
+    monkeypatch.setenv("POD_NAMESPACE", "test-namespace")
+
+    evaluation_task_module._ensure_in_cluster_kubeconfig()
+
+    config = json.loads(path.read_text())
+    assert config["clusters"][0]["cluster"]["server"] == "https://10.0.0.1:6443"
+    assert config["contexts"][0]["context"]["namespace"] == "test-namespace"
+    assert config["users"][0]["user"]["tokenFile"].endswith("/serviceaccount/token")

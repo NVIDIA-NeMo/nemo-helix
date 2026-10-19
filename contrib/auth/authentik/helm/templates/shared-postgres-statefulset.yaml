@@ -8,9 +8,9 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: {{ .Values.sharedPostgresql.serviceName }}
-  namespace: {{ include "nemo-platform-authentik.namespace" . }}
+  namespace: {{ include "nemo-helix-authentik.namespace" . }}
   labels:
-    {{- include "nemo-platform-authentik.labels" . | nindent 4 }}
+    {{- include "nemo-helix-authentik.labels" . | nindent 4 }}
     app.kubernetes.io/component: shared-postgresql
 spec:
   serviceName: {{ .Values.sharedPostgresql.serviceName }}
@@ -22,14 +22,14 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      {{- include "nemo-platform-authentik.sharedPostgresql.selectorLabels" . | nindent 6 }}
+      {{- include "nemo-helix-authentik.sharedPostgresql.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "nemo-platform-authentik.labels" . | nindent 8 }}
+        {{- include "nemo-helix-authentik.labels" . | nindent 8 }}
         app.kubernetes.io/component: shared-postgresql
     spec:
-      serviceAccountName: {{ include "nemo-platform-authentik.sharedPostgresql.serviceAccountName" . }}
+      serviceAccountName: {{ include "nemo-helix-authentik.sharedPostgresql.serviceAccountName" . }}
       {{- with .Values.sharedPostgresql.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -62,8 +62,8 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.sharedPostgresql.serviceName }}
-                  key: postgres-password
+                  name: {{ .Values.sharedPostgresql.existingSecret }}
+                  key: POSTGRES_PASSWORD
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
             - name: AUTHENTIK_DATABASE
@@ -73,8 +73,8 @@ spec:
             - name: AUTHENTIK_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.sharedPostgresql.serviceName }}
-                  key: authentik-password
+                  name: {{ .Values.sharedPostgresql.existingSecret }}
+                  key: AUTHENTIK_POSTGRES_PASSWORD
             - name: NEMO_DATABASE
               value: {{ .Values.sharedPostgresql.nemo.database | quote }}
             - name: NEMO_USERNAME
@@ -82,8 +82,8 @@ spec:
             - name: NEMO_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.sharedPostgresql.serviceName }}
-                  key: nemo-password
+                  name: {{ .Values.sharedPostgresql.existingSecret }}
+                  key: NEMO_POSTGRES_PASSWORD
           ports:
             - name: postgresql
               containerPort: 5432
@@ -139,7 +139,7 @@ spec:
     - metadata:
         name: data
         labels:
-          {{- include "nemo-platform-authentik.labels" . | nindent 10 }}
+          {{- include "nemo-helix-authentik.labels" . | nindent 10 }}
           app.kubernetes.io/component: shared-postgresql
       spec:
         accessModes:

@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 
 import pytest
+import typer
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_example_plugin.functions.greet import (
@@ -26,8 +27,10 @@ from nemo_example_plugin.functions.greet import (
     GreetFunction,
     GreetSpec,
 )
-from nemo_platform_plugin.function_context import FunctionContext
-from nemo_platform_plugin.functions.routes import NDJSON_MEDIA_TYPE, add_function_routes
+from nemo_helix_plugin.commands import add_function_commands
+from nemo_helix_plugin.function_context import FunctionContext
+from nemo_helix_plugin.functions.routes import NDJSON_MEDIA_TYPE, add_function_routes
+from typer.testing import CliRunner
 
 # ---------------------------------------------------------------------------
 # 1. Direct unit-test path — no FastAPI
@@ -107,3 +110,24 @@ def test_streaming_route_emits_ndjson_lines() -> None:
     # Heartbeat injection is disabled (interval=0) so the only frames
     # are the function's own ticks plus the terminator.
     assert kinds == ["tick", "tick", "done"]
+
+
+def test_functions_use_flat_generated_cli() -> None:
+    app = typer.Typer()
+
+    @app.callback()
+    def _noop() -> None:
+        pass
+
+    add_function_commands(app, {"example.greet": GreetFunction, "example.count": CountFunction})
+    runner = CliRunner()
+
+    command_names = {command.name for command in app.registered_commands}
+    group_names = {group.name for group in app.registered_groups}
+    assert {"greet", "count"} <= command_names
+    assert {"greet", "count"}.isdisjoint(group_names)
+
+    for command in ("greet", "count"):
+        help_result = runner.invoke(app, [command, "--help"])
+        assert help_result.exit_code == 0
+        assert "COMMAND" not in help_result.output

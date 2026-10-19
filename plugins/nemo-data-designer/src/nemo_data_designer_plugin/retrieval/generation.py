@@ -4,15 +4,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, TypeAlias, overload
 
 import data_designer.config as dd
 from nemo_data_designer_plugin.retrieval.manifest import write_generation_manifest
 
 if TYPE_CHECKING:
+    # Optional retrieval-SDG extra; runtime imports stay gated in the functions below.
     from data_designer_retrieval_sdg import GenerationPreviewResult, GenerationResult, GenerationRunConfig
 
 RETRIEVAL_SDG_SCHEMA_VERSION = 1
+ResumeMode: TypeAlias = Literal["never", "always", "if_possible"]
 
 
 def build_generation_run_config(
@@ -36,8 +38,9 @@ def build_generation_run_config(
     reasoning_counts: dict[str, int],
     min_complexity: int,
     similarity_threshold: float,
+    max_parallel_requests_for_gen: int | None,
     buffer_size: int,
-    resume: str,
+    resume: ResumeMode,
     num_records: int | None,
     artifact_extraction_model: str,
     qa_generation_model: str,
@@ -82,6 +85,7 @@ def build_generation_run_config(
         reasoning_counts=reasoning_counts,
         min_complexity=min_complexity,
         similarity_threshold=similarity_threshold,
+        max_parallel_requests_for_gen=max_parallel_requests_for_gen,
         artifact_extraction_model=artifact_extraction_model,
         artifact_extraction_provider=chat_provider_name,
         qa_generation_model=qa_generation_model,
@@ -98,7 +102,7 @@ def build_generation_run_config(
         artifact_path=artifact_path,
         dataset_name=dataset_name,
         buffer_size=buffer_size,
-        resume=resume,  # type: ignore[arg-type]
+        resume=resume,
         model_providers=model_providers,
         pipeline=pipeline,
         num_records=num_records,
@@ -106,16 +110,29 @@ def build_generation_run_config(
     )
 
 
+@overload
 def execute_generation(
-    config: GenerationRunConfig, preview: bool = False
+    config: GenerationRunConfig, preview: Literal[False] = False, num_records: int = 1
+) -> GenerationResult: ...
+
+
+@overload
+def execute_generation(
+    config: GenerationRunConfig, preview: Literal[True], num_records: int = 1
+) -> GenerationPreviewResult: ...
+
+
+def execute_generation(
+    config: GenerationRunConfig, preview: bool = False, num_records: int = 1
 ) -> GenerationResult | GenerationPreviewResult:
+    """Run or preview generation. ``num_records`` sizes the preview and is ignored for a full run."""
     try:
         from data_designer_retrieval_sdg import preview_generation, run_generation
     except ImportError as exc:
         raise ImportError("Retrieval generate and preview requires nemo-data-designer-plugin[retrieval-sdg].") from exc
 
     if preview:
-        return preview_generation(config)
+        return preview_generation(config, num_records)
     result = run_generation(config)
     write_generation_manifest(
         output_dir=config.output_dir,

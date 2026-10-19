@@ -15,6 +15,7 @@ model:
   l2_normalize: true
   use_liger_kernel: true
   use_sdpa_patching: true
+  attn_implementation: sdpa
 tokenizer:
   _target_: nemo_automodel._transformers.auto_tokenizer.NeMoAutoTokenizer.from_pretrained
   pretrained_model_name_or_path: nvidia/llama-nemotron-embed-1b-v2
@@ -34,7 +35,7 @@ step_scheduler:
   val_every_steps: 12
   ckpt_every_steps: 12
 optimizer:
-  _target_: torch.optim.Adam
+  _target_: transformer_engine.pytorch.optimizers.fused_adam.FusedAdam
   lr: 5.0e-06
   weight_decay: 0.01
   betas:

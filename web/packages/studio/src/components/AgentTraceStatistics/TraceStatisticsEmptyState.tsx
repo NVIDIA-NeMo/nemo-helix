@@ -23,8 +23,12 @@ export const TraceStatisticsEmptyState: FC<Props> = ({
     <Flex justify="center" padding="density-2xl">
       <StatusMessage
         slotMedia={<ChartNoAxesCombined className="size-12 text-placeholder" />}
-        slotHeading="No traces yet"
-        slotSubheading={`Cost, token, and latency averages are built from instrumented agent runs — nothing has reported. Send the agent's traces to Intake, then invoke it to start filling this in.`}
+        slotHeading="No traces"
+        slotSubheading={
+          onExpandRange
+            ? 'No traces in this date range.'
+            : `Cost, token, and latency averages are built from instrumented agent runs — nothing has reported. Send the agent's traces to Intake, then invoke it to start filling this in.`
+        }
         slotFooter={
           <Flex gap="density-sm" justify="center" wrap="wrap">
             {onRunAgent ? (
@@ -40,7 +44,7 @@ export const TraceStatisticsEmptyState: FC<Props> = ({
             ) : null}
             {onExpandRange ? (
               <Button kind="tertiary" onClick={onExpandRange}>
-                Look back a month
+                Look back further
               </Button>
             ) : null}
           </Flex>

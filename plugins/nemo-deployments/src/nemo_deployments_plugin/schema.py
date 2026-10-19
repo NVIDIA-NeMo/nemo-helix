@@ -27,8 +27,9 @@ from nemo_deployments_plugin.entities import (
     VolumeBackendConfig,
     VolumeMount,
     VolumeStatus,
+    WorkloadIdentitySpec,
 )
-from nemo_platform_plugin.schema import NemoFilter, NemoListResponse
+from nemo_helix_plugin.schema import NemoFilter, NemoListResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -98,18 +99,22 @@ class RequestContainer(BaseModel):
 class CreateDeploymentConfigRequest(BaseModel):
     name: str
     containers: list[RequestContainer] = Field(default_factory=list)
-    init_containers: list[RequestContainer] = Field(default_factory=list)
-    volume_mounts: list[VolumeMount] = Field(default_factory=list)
-    config_files: list[ConfigFile] = Field(default_factory=list)
-    restart_policy: RestartPolicy = "Always"
+    init_containers: list[RequestContainer] = Field(default_factory=list, alias="initContainers")
+    volume_mounts: list[VolumeMount] = Field(default_factory=list, alias="volumeMounts")
+    config_files: list[ConfigFile] = Field(default_factory=list, alias="configFiles")
+    restart_policy: RestartPolicy = Field(default="Always", alias="restartPolicy")
     backoff_limit: int = Field(
         default=6,
         ge=1,
+        alias="backoffLimit",
         description="Retry limit for OnFailure deployments; must be positive. Never deployments disable retries internally.",
     )
-    drift_recovery: DriftRecoveryPolicy | None = None
+    drift_recovery: DriftRecoveryPolicy | None = Field(default=None, alias="driftRecovery")
     labels: dict[str, str] = Field(default_factory=dict)
-    backend_config: DeploymentBackendConfig = Field(default_factory=DeploymentBackendConfig)
+    backend_config: DeploymentBackendConfig = Field(default_factory=DeploymentBackendConfig, alias="backendConfig")
+    workload_identity: WorkloadIdentitySpec | None = Field(default=None, alias="workloadIdentity")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class CreateDeploymentRequest(BaseModel):

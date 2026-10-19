@@ -6,11 +6,10 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from time import perf_counter
 
-import httpx
 from fastapi import APIRouter, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from scaled_evals.api import dispatch_health, s3
+from scaled_evals.api import artifacts, dispatch_health
 from scaled_evals.api.build import buildkit, registry
 from scaled_evals.api.db import pooled_connection
 from scaled_evals.api.repositories.ops_repository import OperationsRepository
@@ -77,7 +76,8 @@ def _enabled_required_check(
 
 
 @router.get("/healthz", response_model=HealthStatus)
-def healthz() -> HealthStatus:
+async def healthz() -> HealthStatus:
+    # A saturated request thread pool must not prevent the liveness response.
     return HealthStatus(status="ok")
 
 
@@ -108,17 +108,12 @@ def _schema_probe() -> None:
         OperationsRepository(conn).assert_schema_compatible()
 
 
-def _build_worker_probe() -> None:
+def _platform_jobs_controller_probe() -> None:
     with pooled_connection(timeout=3) as conn:
         if not OperationsRepository(conn).has_fresh_service_heartbeat(
-            "build_worker", stale_seconds=settings.build_worker_stale_seconds
+            "platform_jobs_controller", stale_seconds=settings.platform_jobs_controller_stale_seconds
         ):
-            raise RuntimeError("no fresh build worker heartbeat")
-
-
-def _dispatch_worker_probe() -> None:
-    response = httpx.get(settings.dispatch_worker_health_url, timeout=3)
-    response.raise_for_status()
+            raise RuntimeError("no fresh Platform Jobs controller heartbeat")
 
 
 def render_prometheus_metrics() -> str:
@@ -293,23 +288,6 @@ def render_prometheus_metrics() -> str:
     )
     samples.extend(
         _metric_family(
-            "scaled_evals_switchyard_teardown_resources",
-            "gauge",
-            "Switchyard runtime resources pending drain or retry after delete failure.",
-            [
-                (
-                    (("state", "draining"),),
-                    dispatch_snapshot["switchyard_teardown"].get("draining", 0),
-                ),
-                (
-                    (("state", "delete_failed"),),
-                    dispatch_snapshot["switchyard_teardown"].get("delete_failed", 0),
-                ),
-            ],
-        )
-    )
-    samples.extend(
-        _metric_family(
             "scaled_evals_dependency_ready",
             "gauge",
             "Required dependency readiness from the latest readiness probe.",
@@ -370,14 +348,8 @@ def _run_dependency_checks() -> tuple[dict[str, str], bool]:
     required_ok = True
     required_ok &= _required_check(checks, "postgres", lambda: _postgres_probe())
     required_ok &= _required_check(checks, "schema", _schema_probe)
-    required_ok &= _required_check(checks, "object_store", s3.check_bucket)
-    required_ok &= _enabled_required_check(
-        checks,
-        "dispatch_worker",
-        bool(settings.dispatch_worker_health_url),
-        _dispatch_worker_probe,
-    )
-    required_ok &= _enabled_required_check(checks, "build_worker", settings.build_worker_required, _build_worker_probe)
+    required_ok &= _required_check(checks, "object_store", artifacts.check_bucket)
+    required_ok &= _required_check(checks, "platform_jobs_controller", _platform_jobs_controller_probe)
     required_ok &= _enabled_required_check(checks, "buildkit", settings.buildkit_enabled, buildkit.check_buildkit)
     required_ok &= _enabled_required_check(checks, "registry", settings.registry_enabled, registry.check_registry)
     checks["gym_dispatch"] = dispatch_health.check_gym_dispatch()
@@ -386,15 +358,11 @@ def _run_dependency_checks() -> tuple[dict[str, str], bool]:
 
 
 def _dependency_is_required(name: str) -> bool:
-    if name == "dispatch_worker":
-        return bool(settings.dispatch_worker_health_url)
-    if name == "build_worker":
-        return settings.build_worker_required
     if name == "buildkit":
         return settings.buildkit_enabled
     if name == "registry":
         return settings.registry_enabled
-    return name in {"postgres", "schema", "object_store"}
+    return name in {"postgres", "schema", "object_store", "platform_jobs_controller"}
 
 
 def _dependency_state(status: str) -> str:
@@ -436,7 +404,6 @@ def _dispatch_observability_snapshot() -> dict:
         "oldest_worker_lease_seconds": 0.0,
         "stuck_jobs": [],
         "backend_failures": [],
-        "switchyard_teardown": {"draining": 0, "delete_failed": 0},
     }
     try:
         with pooled_connection(timeout=3) as conn:
@@ -465,7 +432,7 @@ def _task_pack_observability_snapshot() -> dict[str, int]:
             continue
         snapshot["checked_ready_revisions"] += 1
         try:
-            if not s3.object_exists(str(object_key)):
+            if not artifacts.object_exists(str(object_key)):
                 snapshot["missing_ready_revisions"] += 1
         except Exception:  # noqa: BLE001 — unreadable is alertable, scrape must continue
             snapshot["missing_ready_revisions"] += 1

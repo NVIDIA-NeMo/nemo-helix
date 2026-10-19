@@ -1,0 +1,46 @@
+{
+  "schema_version": "ATIF-v1.5",
+  "session_id": "3f2a1c00-0004-4a00-8000-000000000004",
+  "trajectory_id": "3f2a1c00-0004-4a00-8000-000000000004",
+  "agent": {
+    "name": "email-security-triage",
+    "version": "0.7.0",
+    "model_name": "nvidia-nemotron-3-nano-30b-a3b"
+  },
+  "final_metrics": {
+    "total_prompt_tokens": 3702,
+    "total_completion_tokens": 118,
+    "total_cost_usd": 0.0006261,
+    "total_steps": 2
+  },
+  "extra": {
+    "task_id": "email-security-triage/draft-warning",
+    "verifier_result": {
+      "rewards": {
+        "correctness": 1.0,
+        "format": 0.5,
+        "routing": 1.0
+      }
+    }
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "timestamp": "2026-08-29T21:50:23Z",
+      "source": "user",
+      "message": "{\"user_message\": \"write a warning I can send to staff about this one\", \"emails\": [{\"from\": \"payroll@hr-benefits-portal.net\", \"subject\": \"Update your direct deposit before Friday\", \"body\": \"Payroll records show your direct deposit details are out of date. Sign in at https://hr-benefits-portal.net/deposit before Friday to avoid a delayed paycheck.\"}]}"
+    },
+    {
+      "step_id": 2,
+      "timestamp": "2026-08-29T21:50:29Z",
+      "source": "agent",
+      "model_name": "default/nvidia-nemotron-3-nano-30b-a3b",
+      "message": "Heads up: a phishing email is circulating that claims your direct deposit details are out of date and pressures you to update them before Friday. It links to hr-benefits-portal.net, which is not our HR system. Do not click the link and do not enter your credentials. Forward the message to security@ as an attachment and then delete it. Payroll will never ask you to confirm banking details by email.",
+      "metrics": {
+        "prompt_tokens": 3702,
+        "completion_tokens": 118,
+        "cost_usd": 0.0006261
+      }
+    }
+  ]
+}

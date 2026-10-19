@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { modelsListModels } from '@nemo/sdk/generated/platform/api';
+import { modelsListModels } from '@nemo/sdk/generated/platform/models';
 import {
   ModelsListModelsParams,
   ModelEntitysPage,
@@ -19,25 +19,6 @@ import { DEFAULT_LARGE_PAGE_SIZE, QUERY_PREFIX_PLATFORM } from '../../constants/
 export const BASIC_ALL_MODELS_DROPDOWN_FILTER: ModelsListModelsParams = {
   page_size: DEFAULT_LARGE_PAGE_SIZE,
   sort: 'name',
-};
-
-/**
- * Query params that fetch only prompt-tuneable models.
- *
- * A model is prompt-tuneable when ALL of:
- *   1. It is a base model (base_model = false -> no parent)
- *   2. It has a NIM deployment with lora_enabled = true
- *
- * The backend's lora_enabled filter queries ModelDeploymentConfig.model_spec,
- * so conditions 2-4 of the flowchart (has deployment, is NIM, lora_enabled) are
- * all satisfied by lora_enabled: true.
- */
-export const QUERY_PROMPT_TUNEABLE_MODELS: ModelsListModelsParams = {
-  ...BASIC_ALL_MODELS_DROPDOWN_FILTER,
-  filter: {
-    base_model: false,
-    lora_enabled: true,
-  },
 };
 
 export interface UseModelsOptions {

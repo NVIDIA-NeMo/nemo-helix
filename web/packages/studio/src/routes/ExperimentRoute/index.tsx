@@ -14,7 +14,7 @@ import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { DEFAULT_PAGE_SIZE_OPTIONS } from '@nemo/common/src/constants/pagination';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { useListExperiments } from '@nemo/sdk/generated/platform/api';
+import { useListExperiments } from '@nemo/sdk/generated/platform/experiments';
 import type { ExperimentFilter, ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import {
   Block,

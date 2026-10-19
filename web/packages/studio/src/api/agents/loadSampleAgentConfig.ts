@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { CreateAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/CreateAgentRequestConfig';
 import { fetchSampleText } from '@studio/api/agents/fetchSampleText';
 import YAML from 'yaml';
 
@@ -8,7 +9,7 @@ import YAML from 'yaml';
  * Loads a sample agent's config from a public static asset and injects the
  * selected model plus the target workspace. Parse-then-set: the fetched YAML's
  * literals are overwritten, so the asset can stay byte-identical to the
- * plugin's ${NEMO_DEFAULT_MODEL} version (the platform service doesn't resolve
+ * plugin's ${NEMO_DEFAULT_MODEL} version (the Helix service doesn't resolve
  * that).
  *
  * Branches on the config's own `config_format`:
@@ -21,9 +22,9 @@ export const loadSampleAgentConfig = async (
   agentConfigPath: string,
   modelName: string,
   workspace: string
-): Promise<Record<string, unknown>> => {
+): Promise<CreateAgentRequestConfig> => {
   const text = await fetchSampleText(agentConfigPath);
-  const config = YAML.parse(text) as Record<string, unknown>;
+  const config = YAML.parse(text) as CreateAgentRequestConfig;
 
   const configFormat = config?.config_format;
 

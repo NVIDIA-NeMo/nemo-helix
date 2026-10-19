@@ -15,10 +15,10 @@ HELM_TEMPLATE_TIMEOUT_SECONDS = 60
 
 def _helm_template(*args: str) -> list[dict]:
     if shutil.which("helm") is None:
-        pytest.skip("helm is required to render the NeMo Platform chart")
+        pytest.skip("helm is required to render the NeMo Helix chart")
 
     completed = subprocess.run(
-        ["helm", "template", "nemo-platform", str(HELM_DIR), *args],
+        ["helm", "template", "nemo-helix", str(HELM_DIR), *args],
         check=True,
         capture_output=True,
         text=True,

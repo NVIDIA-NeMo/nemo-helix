@@ -4,13 +4,12 @@
 """Default entrypoint for the sandboxed Gym host.
 
 Paths are parameterized via constructor args / environment variables so the same
-package works in NeMo-RL training images and platform ``nmp-gym-runtime`` images.
+package works in NeMo-RL training images and platform ``nhx-gym-runtime`` images.
 
 Every path here describes the layout of the *host* image. A caller that is not itself running in
 that image must pass ``git_root`` explicitly: the packaged-file shortcuts below resolve against this
-process's own installation, which is the orchestrator's container, not the sandbox's. The
-orchestrator therefore leaves ``entrypoint`` unset and lets the runtime image's CMD start the host;
-these helpers build an entrypoint for an image that has no such CMD.
+process's own installation, which is the orchestrator's container, not the sandbox's. These helpers
+build an explicit entrypoint for a compatible image that needs the shell bootstrap.
 """
 
 from __future__ import annotations

@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Docker Compose for file_io task local testing
+#
+# Usage:
+#   # Start the task (runs once and exits)
+#   docker compose up
+#
+#   # Run with custom command
+#   docker compose run --rm file-io -m nhx.customization_common.tasks.file_io --service-source automodel --service-name customizer
+#
+# Prerequisites:
+#   - Build the image first (from Platform repo root):
+#       docker buildx bake -f docker-bake.hcl nhx-customizer-tasks
+#   - Have NeMo Helix running at http://localhost:8080
+#   - Create sample_config.json (or use the one provided)
+
+services:
+  file-io:
+    image: ${FILE_IO_IMAGE:-my-registry/nemo-helix-dev/nhx-customizer-tasks:local}
+    container_name: file-io-task
+
+    # Mount config file and storage directory
+    # Using test data from services/automodel/tests/tasks/file_io/data/
+    # files will be downloaded under services/automodel/tests/tasks/file_io/data/temp which is in .gitignore
+    volumes:
+      - ../../../../../tests/tasks/file_io/data:/var/run/scratch
+
+    environment:
+      # NeMo Helix URLs - use host.docker.internal to reach host services
+      NHX_BASE_URL: ${NHX_BASE_URL:-http://host.docker.internal:8000}
+      NHX_FILES_URL: ${NHX_FILES_URL:-http://host.docker.internal:8000}
+      NHX_JOBS_URL: ${NHX_JOBS_URL:-http://host.docker.internal:8000}
+
+      # Job configuration paths (container paths)
+      NEMO_JOB_STEP_CONFIG_FILE_PATH: /var/run/scratch/sample_config.json
+      NEMO_JOB_PERSISTENT_JOB_STORAGE_PATH: /var/run/scratch
+
+      # Job metadata
+      NEMO_JOB_ID: ${NEMO_JOB_ID:-multi-file-job}
+      NEMO_JOB_STEP: ${NEMO_JOB_STEP:-FileIO}
+      NEMO_JOB_TASK: ${NEMO_JOB_TASK:-file-io-task}
+      NEMO_JOB_WORKSPACE: ${NEMO_JOB_WORKSPACE:-default}
+
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+    # Default command - run the shared file_io task for automodel
+    # Note: ENTRYPOINT is already "/opt/venv/bin/python"
+    command:
+      - "-m"
+      - "nhx.customization_common.tasks.file_io"
+      - "--service-source"
+      - "automodel"
+      - "--service-name"
+      - "customizer"
+
+    # For macOS/Windows Docker Desktop - allows reaching host services
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

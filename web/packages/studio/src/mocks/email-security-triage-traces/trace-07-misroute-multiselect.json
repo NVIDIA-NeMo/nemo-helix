@@ -1,0 +1,46 @@
+{
+  "schema_version": "ATIF-v1.5",
+  "session_id": "3f2a1c00-0007-4a00-8000-000000000007",
+  "trajectory_id": "3f2a1c00-0007-4a00-8000-000000000007",
+  "agent": {
+    "name": "email-security-triage",
+    "version": "0.7.0",
+    "model_name": "nvidia-nemotron-3-nano-30b-a3b"
+  },
+  "final_metrics": {
+    "total_prompt_tokens": 4210,
+    "total_completion_tokens": 196,
+    "total_cost_usd": 0.0007491,
+    "total_steps": 2
+  },
+  "extra": {
+    "task_id": "email-security-triage/misroute-multiselect-7",
+    "verifier_result": {
+      "rewards": {
+        "correctness": 1.0,
+        "format": 0.0,
+        "routing": 0.0
+      }
+    }
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "timestamp": "2026-08-28T22:18:55Z",
+      "source": "user",
+      "message": "{\"user_message\": \"is this legit?\", \"emails\": [{\"from\": \"no-reply@dropbox-share.co\", \"subject\": \"A document was shared with you\", \"body\": \"View the shared file at https://dropbox-share.co/d/8812 before it expires.\"}, {\"from\": \"standup@company.com\", \"subject\": \"Notes from Tuesday standup\", \"body\": \"Attaching the notes. No action needed.\"}]}"
+    },
+    {
+      "step_id": 2,
+      "timestamp": "2026-08-28T22:19:01Z",
+      "source": "agent",
+      "model_name": "default/nvidia-nemotron-3-nano-30b-a3b",
+      "message": "ANALYSIS\n\n[1]\nVERDICT: phishing\nATTACK_TYPE: credential\nIOCS: dropbox-share.co\nACTION: quarantine\nREASONING: Lookalike file-sharing domain with an expiry deadline driving a click.\n\n[2]\nVERDICT: benign\nATTACK_TYPE: benign\nIOCS: none\nACTION: deliver\nREASONING: Internal sender, routine meeting notes, no links or requests.",
+      "metrics": {
+        "prompt_tokens": 4210,
+        "completion_tokens": 196,
+        "cost_usd": 0.0007491
+      }
+    }
+  ]
+}

@@ -7,8 +7,15 @@ from __future__ import annotations
 
 import os
 import re
+from copy import deepcopy
+from typing import Any
 
-from nemo_platform_plugin.config import ImagePullSecret
+from nemo_deployments_plugin.backends.k8s.compiler import ExecutorK8sDefaults
+from nemo_deployments_plugin.constants import (
+    DEFAULT_JOB_TTL_SECONDS_AFTER_FINISHED,
+    MIN_JOB_TTL_SECONDS_AFTER_FINISHED,
+)
+from nemo_helix_plugin.config import ImagePullSecret
 from pydantic import BaseModel, Field, field_validator
 
 _DNS_LABEL_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
@@ -50,6 +57,70 @@ class K8sExecutorConfig(BaseModel):
         default_factory=list,
         description="Image pull secrets merged with platform image_pull_secrets on every pod.",
     )
+    default_pod_annotations: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Executor-level default pod annotations stamped onto every Job/Deployment pod this "
+            "executor renders (all consumers: models, agents, ...). Merged key-wise with per-entity "
+            "backend_config.k8s.podAnnotations, where the per-entity value wins for a shared key. "
+            "Ships the Istio native-sidecar annotation so a mesh-injected proxy terminates when a "
+            "Job's main container exits."
+        ),
+    )
+    default_node_selector: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Executor-level default nodeSelector applied to every Job/Deployment pod this executor "
+            "renders when the entity does not set backend_config.k8s.nodeSelector."
+        ),
+    )
+    default_tolerations: list[dict[str, str | int]] = Field(
+        default_factory=list,
+        description=(
+            "Executor-level default pod tolerations applied to every Job/Deployment pod this executor "
+            "renders when the entity does not set backend_config.k8s.tolerations. Each entry is a raw "
+            "Kubernetes toleration object."
+        ),
+    )
+    default_affinity: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Executor-level default pod affinity applied to every Job/Deployment pod this executor "
+            "renders when the entity does not set backend_config.k8s.affinity. Raw Kubernetes affinity "
+            "object (nodeAffinity / podAffinity / podAntiAffinity)."
+        ),
+    )
+    default_topology_spread_constraints: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Executor-level default pod topology spread constraints applied to every Job/Deployment pod "
+            "this executor renders when the entity does not set backend_config.k8s.topologySpreadConstraints. "
+            "Each entry is a raw Kubernetes topologySpreadConstraint object."
+        ),
+    )
+    default_job_ttl_seconds_after_finished: int | None = Field(
+        default=DEFAULT_JOB_TTL_SECONDS_AFTER_FINISHED,
+        description=(
+            "Executor-level ttlSecondsAfterFinished applied to every finite (Never/OnFailure) Job this "
+            "executor renders, such as the weight-puller. A completed puller pod holds its ReadWriteOnce "
+            "weights volume attachment until reaped; a short TTL releases it promptly so the serving "
+            "Deployment can mount the volume instead of failing with MultiAttachError. Set to null to omit "
+            "the field and defer to the cluster default (effectively never reaped). A set value must be at "
+            f"least {MIN_JOB_TTL_SECONDS_AFTER_FINISHED}s so the reconciler can observe Job completion before "
+            "the pod is reaped. Overridden per-entity by backend_config.k8s.jobTtlSecondsAfterFinished."
+        ),
+    )
+
+    @field_validator("default_job_ttl_seconds_after_finished")
+    @classmethod
+    def _validate_job_ttl(cls, value: int | None) -> int | None:
+        if value is not None and value < MIN_JOB_TTL_SECONDS_AFTER_FINISHED:
+            raise ValueError(
+                f"default_job_ttl_seconds_after_finished must be >= {MIN_JOB_TTL_SECONDS_AFTER_FINISHED} "
+                "(or null to defer to the cluster default); a smaller value races the reconciler's "
+                "completion read and can mis-record the Job as FAILED"
+            )
+        return value
 
     @field_validator("default_namespace")
     @classmethod
@@ -73,3 +144,19 @@ class K8sExecutorConfig(BaseModel):
         if pod_namespace:
             return pod_namespace
         return _FALLBACK_NAMESPACE
+
+    def to_k8s_defaults(self) -> ExecutorK8sDefaults:
+        """Bundle the executor-level pod defaults for the workload compiler.
+
+        Shared by every deployments-plugin consumer (models, agents, ...): the
+        compiler applies these as the base layer, with per-entity
+        ``backend_config.k8s`` values overriding them.
+        """
+        return ExecutorK8sDefaults(
+            pod_annotations=dict(self.default_pod_annotations),
+            node_selector=dict(self.default_node_selector),
+            tolerations=deepcopy(self.default_tolerations),
+            affinity=deepcopy(self.default_affinity),
+            topology_spread_constraints=deepcopy(self.default_topology_spread_constraints),
+            job_ttl_seconds_after_finished=self.default_job_ttl_seconds_after_finished,
+        )

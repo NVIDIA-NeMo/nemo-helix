@@ -2,18 +2,22 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
-from scaled_evals.api import s3
+from scaled_evals.api import artifacts
 from scaled_evals.api.agent_bundle_registry import accessible_bundle_for_run
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
-from scaled_evals.api.db import Database, get_db
+from scaled_evals.api.db import Database, get_db, get_stream_database_factory
+from scaled_evals.api.repositories.base_repository import Conflict, NotFound
 from scaled_evals.api.repositories.benchmark_run_repository import derive_run_view
 from scaled_evals.api.routers.evaluations import teardown_cancelled_evaluation
 from scaled_evals.api.runnability import BlockedPreflight, preflight_benchmark_run
+from scaled_evals.api.schemas.benchmark_archives import BenchmarkArchiveRequest, BenchmarkArchiveResponse
 from scaled_evals.api.schemas.benchmark_runs import (
     BenchmarkRun,
     BenchmarkRunLinks,
@@ -29,6 +33,7 @@ from scaled_evals.api.utils import make_id
 router = APIRouter(prefix="/benchmark-runs", tags=["benchmark-runs"])
 
 Db = Annotated[Database, Depends(get_db)]
+StreamDatabaseFactory = Annotated[Callable[[], AbstractContextManager[Database]], Depends(get_stream_database_factory)]
 Principal = Annotated[CurrentPrincipal, Depends(current_principal)]
 
 
@@ -46,6 +51,7 @@ def _links(run_id: str) -> BenchmarkRunLinks:
         evaluations=f"{base}/evaluations",
         reproduce=f"{base}/reproduce",
         cancel=f"{base}/cancel",
+        archive=f"{base}/archive",
     )
 
 
@@ -61,6 +67,7 @@ def _agent_bundle_id(runner_metadata: Mapping[str, Any]) -> str | None:
 
 
 def _reproduce_request(run: Mapping[str, Any], member: Mapping[str, Any]) -> CreateBenchmarkRunRequest:
+    runner_metadata = run.get("runner_metadata") or {}
     return CreateBenchmarkRunRequest(
         name=_rerun_name(str(run["name"])),
         benchmark_id=str(run["benchmark_id"]),
@@ -68,10 +75,10 @@ def _reproduce_request(run: Mapping[str, Any], member: Mapping[str, Any]) -> Cre
         framework=run.get("framework") or "harbor",
         framework_version=run.get("framework_version"),
         framework_profile_id=run.get("framework_profile_id"),
-        switchyard_profile_id=run.get("switchyard_profile_id"),
+        member_framework_profile_ids=dict(runner_metadata.get("member_framework_profile_ids") or {}),
         intake_profile_id=run.get("intake_profile_id"),
         credentials=dict(run.get("credentials") or {}),
-        agent_bundle_id=_agent_bundle_id(run.get("runner_metadata") or {}),
+        agent_bundle_id=_agent_bundle_id(runner_metadata),
         extra_skill_object_keys=list(member.get("extra_skill_object_keys") or []),
         instruction_prefix=member.get("instruction_prefix"),
         instruction_postfix=member.get("instruction_postfix"),
@@ -121,12 +128,13 @@ def _create_command(body: CreateBenchmarkRunRequest) -> list[str]:
         )
     for option, value in (
         ("--framework-profile-id", body.framework_profile_id),
-        ("--switchyard-profile-id", body.switchyard_profile_id),
         ("--intake-profile-id", body.intake_profile_id),
         ("--agent-bundle", body.agent_bundle_id),
     ):
         if value:
             command.extend([option, value])
+    for task_id, profile_id in sorted(body.member_framework_profile_ids.items()):
+        command.extend(["--member-framework-profile", f"{task_id}={profile_id}"])
     for role, credential_id in sorted(body.credentials.items()):
         command.extend(["--credential", f"{role}={credential_id}"])
     for object_key in body.extra_skill_object_keys:
@@ -160,7 +168,7 @@ def preflight_benchmark_run_request(
         db,
         body,
         current,
-        object_exists=s3.object_exists,
+        object_exists=artifacts.object_exists,
         resolve_bundle=accessible_bundle_for_run,
     )
     return result.report
@@ -182,7 +190,7 @@ def create_benchmark_run(body: CreateBenchmarkRunRequest, db: Db, current: Princ
         db,
         body,
         current,
-        object_exists=s3.object_exists,
+        object_exists=artifacts.object_exists,
         resolve_bundle=accessible_bundle_for_run,
     )
     if isinstance(preflight, BlockedPreflight):
@@ -195,6 +203,8 @@ def create_benchmark_run(body: CreateBenchmarkRunRequest, db: Db, current: Princ
     revision = preflight.revision
     members = preflight.members
     runner_metadata = preflight.runner_metadata
+    if body.member_framework_profile_ids:
+        runner_metadata["member_framework_profile_ids"] = dict(body.member_framework_profile_ids)
 
     run_id = make_id("bmr")
     spawn = [
@@ -203,6 +213,7 @@ def create_benchmark_run(body: CreateBenchmarkRunRequest, db: Db, current: Princ
             "task_id": m["task_id"],
             "task_revision": m["task_revision"],
             "task_slug": m.get("task_slug"),
+            "framework_profile_id": body.member_framework_profile_ids.get(str(m["task_id"])),
         }
         for m in members
     ]
@@ -222,7 +233,6 @@ def create_benchmark_run(body: CreateBenchmarkRunRequest, db: Db, current: Princ
         members=spawn,
         framework_profile_id=body.framework_profile_id,
         harbor_profile_id=body.harbor_profile_id,
-        switchyard_profile_id=body.switchyard_profile_id,
         intake_profile_id=body.intake_profile_id,
         credentials=body.credentials,
         extra_skill_object_keys=body.extra_skill_object_keys,
@@ -234,11 +244,7 @@ def create_benchmark_run(body: CreateBenchmarkRunRequest, db: Db, current: Princ
         network_policy_config=body.network_policy_config,
         n_attempts=body.n_attempts,
         parallelism=body.parallelism,
-        max_concurrent_members=(
-            body.max_concurrent_members
-            if body.max_concurrent_members is not None
-            else (len(members) if body.switchyard_profile_id is not None else None)
-        ),
+        max_concurrent_members=body.max_concurrent_members,
         visibility=body.visibility,
         owner_id=current.owner_id,
     )
@@ -353,7 +359,7 @@ def cancel_benchmark_run(run_id: str, db: Db) -> BenchmarkRunResponse:
 
     Idempotent: a run already terminal is returned unchanged. The member
     evaluations are flipped to `cancelled`, then launched members follow the
-    same runtime and Switchyard teardown path as single-evaluation cancellation.
+    same runtime teardown path as single-evaluation cancellation.
     """
     row, _cancelled_now, cancelled_members = db.benchmark_runs.cancel(run_id)
     if row is None:
@@ -371,3 +377,46 @@ def delete_benchmark_run(run_id: str, db: Db) -> DeleteResponse:
         raise _http_error(404, "not_found", "benchmark run not found")
     db.commit()
     return DeleteResponse(id=run_id)
+
+
+def _benchmark_archive_response(run_id: str, row: dict | None) -> BenchmarkArchiveResponse:
+    if row is None:
+        return BenchmarkArchiveResponse(benchmark_run_id=run_id, status="missing")
+    return BenchmarkArchiveResponse(
+        **{key: value for key, value in row.items() if key != "download"},
+        download=(f"/benchmark-runs/{run_id}/archive/download" if row["status"] == "ready" else None),
+    )
+
+
+@router.get("/{run_id}/archive", response_model=BenchmarkArchiveResponse)
+def get_benchmark_archive(run_id: str, db: Db) -> BenchmarkArchiveResponse:
+    if not db.benchmark_runs.exists(run_id):
+        raise _http_error(404, "not_found", "benchmark run not found")
+    return _benchmark_archive_response(run_id, db.benchmark_archives.get(run_id))
+
+
+@router.post("/{run_id}/archive", response_model=BenchmarkArchiveResponse, status_code=202)
+def request_benchmark_archive(run_id: str, body: BenchmarkArchiveRequest, db: Db) -> BenchmarkArchiveResponse:
+    try:
+        row = db.benchmark_archives.request(run_id, force=body.force)
+    except NotFound as exc:
+        raise _http_error(404, "not_found", exc.message) from exc
+    except Conflict as exc:
+        raise _http_error(409, exc.code, exc.message) from exc
+    db.commit()
+    return _benchmark_archive_response(run_id, row)
+
+
+@router.get("/{run_id}/archive/download")
+def download_benchmark_archive(run_id: str, database_factory: StreamDatabaseFactory) -> StreamingResponse:
+    # Short-lived checkout: a request-scoped Db dependency would hold the pooled
+    # connection for the entire archive stream and can exhaust the pool.
+    with database_factory() as db:
+        row = db.benchmark_archives.get(run_id)
+    if row is None or row["status"] != "ready" or not row["object_key"]:
+        raise _http_error(404, "not_found", "benchmark archive not ready")
+    return StreamingResponse(
+        artifacts.stream_object(row["object_key"]),
+        media_type="application/gzip",
+        headers={"Content-Disposition": f'attachment; filename="{run_id}-results.tar.gz"'},
+    )

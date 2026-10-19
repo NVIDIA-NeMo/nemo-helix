@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Error compatibility helpers for plugin SDK resources."""
+
+from collections.abc import Generator
+from contextlib import contextmanager
+
+import httpx
+from nemo_helix_plugin.client.errors import NemoHTTPError
+
+
+@contextmanager
+def httpx_status_errors() -> Generator[None, None, None]:
+    """Preserve the historical raw-httpx error shape of plugin SDK resources."""
+    try:
+        yield
+    except NemoHTTPError as exc:
+        try:
+            exc.http_response.raise_for_status()
+        except httpx.HTTPStatusError as httpx_exc:
+            raise httpx_exc from exc
+        raise

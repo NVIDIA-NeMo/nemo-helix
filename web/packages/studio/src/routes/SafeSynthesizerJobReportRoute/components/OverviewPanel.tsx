@@ -5,7 +5,7 @@ import { triggerDownload } from '@nemo/common/src/utils/file';
 import {
   useSafeSynthesizerDownloadJobResultEvaluationReport as useDownloadJobResultEvaluationReportV1beta1GenerateJobsJobIdResultsEvaluationReportDownloadGet,
   useSafeSynthesizerGetJobSuspense as useGetJobV1beta1GenerateJobsJobIdGetSuspense,
-} from '@nemo/sdk/generated/safe-synthesizer/api';
+} from '@nemo/sdk/generated/safe-synthesizer/safe-synthesizer';
 import { Button, Panel } from '@nvidia/foundations-react-core';
 import { SafeSynthesizerFilesetPreview } from '@studio/components/SafeSynthesizerFilesetPreview';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';

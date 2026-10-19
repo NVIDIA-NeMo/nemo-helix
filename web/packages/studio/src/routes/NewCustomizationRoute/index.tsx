@@ -1,40 +1,20 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { NewCustomizationForm } from '@studio/components/NewCustomizationForm';
+import { CreateCustomizationStart } from '@studio/components/CreateCustomizationStart';
+import type { StartSelection } from '@studio/components/CreateCustomizationStart/types';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
-import { getWorkspaceCustomizationJobListRoute } from '@studio/routes/utils';
 import {
-  isAutomodelSpec,
-  isRlSpec,
-  isUnslothSpec,
-  type CustomizationJob,
-} from '@studio/util/customizationBackend';
-import { jobToFormFields } from '@studio/util/forms/customization';
-import { useMemo } from 'react';
-import { useLocation, useSearchParams } from 'react-router';
+  getNewCustomizationFormRoute,
+  getWorkspaceCustomizationJobListRoute,
+} from '@studio/routes/utils';
+import { useNavigate } from 'react-router';
 
-const isCloneFromJobState = (value: unknown): value is { cloneFromJob: CustomizationJob } => {
-  if (typeof value !== 'object' || value === null) return false;
-  const candidate = (value as Record<string, unknown>).cloneFromJob;
-  if (typeof candidate !== 'object' || candidate === null) return false;
-  const spec = (candidate as Record<string, unknown>).spec;
-  return isAutomodelSpec(spec) || isUnslothSpec(spec) || isRlSpec(spec);
-};
-
+/** The "how do you want to start?" page. The form it leads to lives at `/new/scratch`. */
 export const NewCustomizationRoute = () => {
   const workspace = useWorkspaceFromPath();
-  const [searchParams] = useSearchParams();
-  const initialModel = searchParams.get('model') ?? undefined;
-
-  const { state: locationState } = useLocation();
-  const cloneFromJob = isCloneFromJobState(locationState) ? locationState.cloneFromJob : undefined;
-
-  const initialValues = useMemo(
-    () => (cloneFromJob ? jobToFormFields(cloneFromJob) : undefined),
-    [cloneFromJob]
-  );
+  const navigate = useNavigate();
 
   useBreadcrumbs({
     items: [
@@ -48,11 +28,21 @@ export const NewCustomizationRoute = () => {
     ],
   });
 
-  return (
-    <NewCustomizationForm
-      workspace={workspace}
-      initialModel={initialModel}
-      initialValues={initialValues}
-    />
-  );
+  const handleContinue = (selection: StartSelection) => {
+    // Template and AI values go as router state rather than in the URL: they are a whole form
+    // payload, and the provisioning behind them has already happened by the time we get here.
+    navigate(
+      getNewCustomizationFormRoute(workspace),
+      selection.optionId === 'scratch'
+        ? undefined
+        : {
+            state: {
+              initialValues: selection.initialValues,
+              savedTemplateName: selection.savedTemplateName,
+            },
+          }
+    );
+  };
+
+  return <CreateCustomizationStart workspace={workspace} onContinue={handleContinue} />;
 };

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getEntityReference } from '@nemo/common/src/namedEntity';
-import { useFilesListFilesets as useListDatasets } from '@nemo/sdk/generated/platform/api';
+import { useFilesListFilesets as useListDatasets } from '@nemo/sdk/generated/platform/files';
 import { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Flex, Select, Text } from '@nvidia/foundations-react-core';
 import {

@@ -21,8 +21,11 @@ import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import { useSecretsDeleteSecret, useSecretsListSecrets } from '@nemo/sdk/generated/platform/api';
-import type { PlatformSecretResponse } from '@nemo/sdk/generated/platform/schema';
+import type { HelixSecretResponse } from '@nemo/sdk/generated/platform/schema';
+import {
+  useSecretsDeleteSecret,
+  useSecretsListSecrets,
+} from '@nemo/sdk/generated/platform/secrets';
 import { type DropdownEntry, Stack, Text } from '@nvidia/foundations-react-core';
 import { EditSecretModal } from '@studio/routes/SecretsListRoute/EditSecretModal';
 import { keepPreviousData } from '@tanstack/react-query';
@@ -36,7 +39,7 @@ export interface SecretsDataViewProps {
   };
 }
 
-type SecretWithId = PlatformSecretResponse & { id: string };
+type SecretWithId = HelixSecretResponse & { id: string };
 
 type ModalState = 'delete' | 'edit' | 'none';
 
@@ -47,7 +50,7 @@ export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate,
     defaultSort: [{ id: 'created_at', desc: true }],
   });
 
-  const [modalSecret, setModalSecret] = useState<PlatformSecretResponse>();
+  const [modalSecret, setModalSecret] = useState<HelixSecretResponse>();
   const [modalOpen, setModalOpen] = useState<ModalState>('none');
 
   const { data, refetch, isFetching, error } = useSecretsListSecrets(
@@ -72,7 +75,7 @@ export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate,
   const searchBar = dataViewState.searchBar.state;
   const filteredSecrets = useMemo(() => {
     if (!searchBar) return secrets;
-    return secrets.filter((secret: PlatformSecretResponse) =>
+    return secrets.filter((secret: HelixSecretResponse) =>
       secret.name?.toLowerCase().includes(searchBar.toLowerCase())
     );
   }, [secrets, searchBar]);
@@ -80,7 +83,7 @@ export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate,
   // Add id to each secret for DataView
   const secretsWithId = useMemo<SecretWithId[]>(
     () =>
-      filteredSecrets.map((secret: PlatformSecretResponse) => ({
+      filteredSecrets.map((secret: HelixSecretResponse) => ({
         ...secret,
         id: `${secret.workspace}/${secret.name}`,
       })),

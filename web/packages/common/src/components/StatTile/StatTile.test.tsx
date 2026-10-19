@@ -3,6 +3,9 @@
 
 import { StatTile } from '@nemo/common/src/components/StatTile';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { Bot } from 'lucide-react';
+import { MemoryRouter } from 'react-router';
 
 describe('StatTile', () => {
   it('renders the label and value', () => {
@@ -156,5 +159,59 @@ describe('StatTile', () => {
 
     expect(screen.getByText('Learning Rate')).toHaveClass('text-placeholder');
     expect(screen.getByText('at latest step')).toHaveClass('text-placeholder');
+  });
+
+  it('renders the actionable variant as a link with its icon, label, and value', () => {
+    render(
+      <MemoryRouter>
+        <StatTile
+          label="Agents"
+          value="1"
+          icon={<Bot data-testid="agents-icon" />}
+          to="/agents"
+          variant="actionable"
+        />
+      </MemoryRouter>
+    );
+
+    const link = screen.getByRole('link', { name: /agents/i });
+    expect(link).toHaveAttribute('href', '/agents');
+    expect(screen.getByTestId('agents-icon')).toBeInTheDocument();
+    expect(screen.getByText('1')).toBeInTheDocument();
+  });
+
+  it('renders the actionable variant as a button and fires onClick when there is no destination', async () => {
+    const onClick = vi.fn();
+    render(<StatTile label="Insights" value="4" onClick={onClick} variant="actionable" />);
+
+    const button = screen.getByRole('button', { name: /insights/i });
+    await userEvent.click(button);
+
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('still fires onClick for the actionable variant when a destination is also set', async () => {
+    const onClick = vi.fn();
+    render(
+      <MemoryRouter>
+        <StatTile label="Agents" value="1" to="/agents" onClick={onClick} variant="actionable" />
+      </MemoryRouter>
+    );
+
+    await userEvent.click(screen.getByRole('link', { name: /agents/i }));
+
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('tints the actionable variant border on status', () => {
+    render(
+      <MemoryRouter>
+        <StatTile label="Agents" value="1" to="/agents" status="error" variant="actionable" />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByTestId('stat-tile-surface')).toHaveClass(
+      'border-(--border-color-feedback-danger)'
+    );
   });
 });

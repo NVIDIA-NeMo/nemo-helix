@@ -5,19 +5,21 @@ import { Button, Flex, SegmentedControl } from '@nvidia/foundations-react-core';
 import { ChevronsDownUp, ChevronsUpDown } from 'lucide-react';
 import type { FC } from 'react';
 
-export type TraceViewMode = 'tree' | 'list';
+export type TraceViewMode = 'tree' | 'graph' | 'list';
 
 interface TraceViewToolbarProps {
   viewMode: TraceViewMode;
   onViewModeChange: (viewMode: TraceViewMode) => void;
+  showGraph?: boolean;
   onCollapseAll?: () => void;
   onExpandAll?: () => void;
 }
 
-/** Shared Tree/List toolbar for session and trace-selected detail bodies. */
+/** Shared trace view toolbar for session and trace-selected detail bodies. */
 export const TraceViewToolbar: FC<TraceViewToolbarProps> = ({
   viewMode,
   onViewModeChange,
+  showGraph = true,
   onCollapseAll,
   onExpandAll,
 }) => (
@@ -28,6 +30,7 @@ export const TraceViewToolbar: FC<TraceViewToolbarProps> = ({
       onValueChange={(value) => onViewModeChange(value as TraceViewMode)}
       items={[
         { value: 'tree', children: 'Tree' },
+        ...(showGraph ? [{ value: 'graph', children: 'Graph' }] : []),
         { value: 'list', children: 'List' },
       ]}
     />

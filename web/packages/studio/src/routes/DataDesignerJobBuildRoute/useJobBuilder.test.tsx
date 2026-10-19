@@ -1,15 +1,15 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { modelsListModels } from '@nemo/sdk/generated/platform/api';
+import { modelsListModels } from '@nemo/sdk/generated/platform/models';
 import type { ModelEntity, ModelEntitysPage } from '@nemo/sdk/generated/platform/schema';
 import type { FilesetTemplate } from '@studio/components/CreateFilesetStart/types';
 import { useJobBuilder } from '@studio/routes/DataDesignerJobBuildRoute/useJobBuilder';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
 
-vi.mock('@nemo/sdk/generated/platform/api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@nemo/sdk/generated/platform/api')>();
+vi.mock('@nemo/sdk/generated/platform/models', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@nemo/sdk/generated/platform/models')>();
   return { ...actual, modelsListModels: vi.fn() };
 });
 
@@ -145,5 +145,82 @@ describe('useJobBuilder template auto-fill', () => {
 
     await waitFor(() => expect(result.current.getBuilderValues().models).toEqual([]));
     expect(mockListModels).not.toHaveBeenCalled();
+  });
+});
+
+describe('useJobBuilder removeModel', () => {
+  const llmColumn = (name: string, modelAlias: string) => ({
+    columnType: 'llm-text',
+    name,
+    values: { prompt: 'Write something.', model_alias: modelAlias },
+  });
+  const twoModels = [
+    { alias: 'default', model: NEMOTRON },
+    { alias: 'model_1', model: 'some-other-model' },
+  ];
+  const templateWithModels = (models: { alias: string; model: string }[]) =>
+    ({
+      id: 'with-models',
+      models,
+      columns: [
+        { columnType: 'sampler', samplerType: 'uuid', name: 'id', values: {} },
+        llmColumn('subject', 'default'),
+        llmColumn('body', 'model_1'),
+      ],
+    }) as unknown as FilesetTemplate;
+
+  const renderAutoFilled = async (models: { alias: string; model: string }[]) => {
+    const view = renderHook(() => useJobBuilder(templateWithModels(models), 'ws1'));
+    await waitFor(() =>
+      expect(view.result.current.getBuilderValues().models.every((m) => m.provider)).toBe(true)
+    );
+    return view;
+  };
+
+  const columnAliases = (columns: { values: Record<string, string> }[]) =>
+    columns.map((column) => column.values.model_alias);
+
+  it('points every LLM column at the only model left', async () => {
+    const { result } = await renderAutoFilled(twoModels);
+    const defaultId = result.current.getBuilderValues().models[0].id;
+
+    act(() => result.current.removeModel(defaultId));
+
+    expect(columnAliases(result.current.getBuilderValues().columns)).toEqual([
+      undefined,
+      'model_1',
+      'model_1',
+    ]);
+  });
+
+  it('leaves column aliases alone while more than one model remains', async () => {
+    const { result } = await renderAutoFilled([
+      ...twoModels,
+      { alias: 'model_2', model: 'some-other-model' },
+    ]);
+    const defaultId = result.current.getBuilderValues().models[0].id;
+
+    act(() => result.current.removeModel(defaultId));
+
+    expect(columnAliases(result.current.getBuilderValues().columns)).toEqual([
+      undefined,
+      'default',
+      'model_1',
+    ]);
+  });
+
+  it('points every LLM column at a model added after the last one was removed', async () => {
+    const { result } = await renderAutoFilled([{ alias: 'default', model: NEMOTRON }]);
+    const defaultId = result.current.getBuilderValues().models[0].id;
+
+    act(() => result.current.removeModel(defaultId));
+    act(() => result.current.handleAddModel({ model: 'ws1/some-other-model' }, 'ws1/build'));
+
+    const [added] = result.current.getBuilderValues().models;
+    expect(columnAliases(result.current.getBuilderValues().columns)).toEqual([
+      undefined,
+      added.alias,
+      added.alias,
+    ]);
   });
 });

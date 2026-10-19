@@ -1,0 +1,19 @@
+/* SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
+/* SPDX-License-Identifier: Apache-2.0 */
+
+@keyframes nemo-dag-path-flow {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+
+.nemo-dag-path-edge .react-flow__edge-path {
+  animation: nemo-dag-path-flow 900ms linear infinite;
+  stroke-dasharray: 8 6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nemo-dag-path-edge .react-flow__edge-path {
+    animation: none;
+  }
+}

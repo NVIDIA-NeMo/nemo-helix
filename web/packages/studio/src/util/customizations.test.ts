@@ -16,7 +16,6 @@ import {
   formatTrainingPhase,
   getBaseModel,
   getCustomizationTrainingProgress,
-  getCustomizationTrainingSteps,
   getDatasetUri,
   getFinetuningType,
   getFormattedCustomizationStatus,
@@ -58,6 +57,8 @@ describe('getFormattedTrainingType', () => {
     expect(getFormattedTrainingType('sft')).toEqual('SFT');
     expect(getFormattedTrainingType('distillation')).toEqual('Distillation');
     expect(getFormattedTrainingType('all_weights')).toEqual('All Weights');
+    expect(getFormattedTrainingType('dpo')).toEqual('DPO');
+    expect(getFormattedTrainingType('grpo')).toEqual('GRPO');
   });
 });
 
@@ -177,50 +178,6 @@ describe('getCustomizationTrainingProgress', () => {
     const job = automodelJob({ schedule: { epochs: 3 } });
     (job as { status_details?: unknown }).status_details = { percentage_done: 60 };
     expect(getCustomizationTrainingProgress(job)).toBe('0/3 (60%)');
-  });
-});
-
-describe('getCustomizationTrainingSteps', () => {
-  it('returns 0 when epochs is 0', () => {
-    expect(getCustomizationTrainingSteps({ epochs: 0, trainingRecords: 100, batchSize: 10 })).toBe(
-      0
-    );
-  });
-
-  it('returns 0 when batchSize is 0', () => {
-    expect(getCustomizationTrainingSteps({ epochs: 3, trainingRecords: 100, batchSize: 0 })).toBe(
-      0
-    );
-  });
-
-  it('returns 0 when trainingRecords is 0', () => {
-    expect(getCustomizationTrainingSteps({ epochs: 3, trainingRecords: 0, batchSize: 10 })).toBe(0);
-  });
-
-  it('calculates steps with validation dataset', () => {
-    // 3 * ceil(100/10) = 30
-    expect(
-      getCustomizationTrainingSteps({
-        epochs: 3,
-        trainingRecords: 100,
-        batchSize: 10,
-        hasValidationDataset: true,
-      })
-    ).toBe(30);
-  });
-
-  it('calculates steps without validation dataset (90% split)', () => {
-    // 3 * ceil(ceil(100 * 0.9) / 10) = 3 * ceil(90/10) = 3 * 9 = 27
-    expect(getCustomizationTrainingSteps({ epochs: 3, trainingRecords: 100, batchSize: 10 })).toBe(
-      27
-    );
-  });
-
-  it('handles non-even batch divisions', () => {
-    // 2 * ceil(ceil(95 * 0.9) / 8) = 2 * ceil(86/8) = 2 * ceil(10.75) = 2 * 11 = 22
-    expect(getCustomizationTrainingSteps({ epochs: 2, trainingRecords: 95, batchSize: 8 })).toBe(
-      22
-    );
   });
 });
 

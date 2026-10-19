@@ -99,7 +99,7 @@ paths:
         required: false
         explode: true
         schema:
-          $ref: '#/components/schemas/AutomodelJobsJobsListFilter'
+          $ref: '#/components/schemas/AutomodelJobsListFilter'
         description: Filter jobs on various criteria.
       responses:
         '200':
@@ -145,7 +145,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -246,6 +246,10 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '404':
+          description: Job not Found
+        '409':
+          description: Job is not in a terminal state
         '422':
           description: Validation Error
           content:
@@ -315,13 +319,21 @@ paths:
         schema:
           title: Page Cursor
           type: string
+      - name: tail
+        in: query
+        required: false
+        schema:
+          title: Tail
+          type: integer
+          maximum: 10000
+          exclusiveMinimum: 0
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -353,7 +365,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -385,7 +397,189 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/job-templates:
+    post:
+      tags:
+      - Customization Job Templates
+      summary: Create Job Template
+      description: Save a job input for reuse.
+      operationId: create_job_template_apis_customization_v2_workspaces__workspace__job_templates_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCustomizationJobTemplateRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomizationJobTemplate'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - Customization Job Templates
+      summary: List Job Templates
+      description: List saved job templates in the workspace.
+      operationId: list_job_templates_apis_customization_v2_workspaces__workspace__job_templates_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 20
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+          default: -created_at
+          title: Sort
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NemoListResponse_CustomizationJobTemplate_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/job-templates/{name}:
+    get:
+      tags:
+      - Customization Job Templates
+      summary: Get Job Template
+      description: Get a single job template.
+      operationId: get_job_template_apis_customization_v2_workspaces__workspace__job_templates__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomizationJobTemplate'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Customization Job Templates
+      summary: Update Job Template
+      description: Edit a job template's config, target backend or description.
+      operationId: update_job_template_apis_customization_v2_workspaces__workspace__job_templates__name__patch
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCustomizationJobTemplateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomizationJobTemplate'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Customization Job Templates
+      summary: Delete Job Template
+      description: Delete a job template.
+      operationId: delete_job_template_apis_customization_v2_workspaces__workspace__job_templates__name__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '204':
+          description: Successful Response
         '422':
           description: Validation Error
           content:
@@ -473,7 +667,7 @@ paths:
         required: false
         explode: true
         schema:
-          $ref: '#/components/schemas/RlJobsJobsListFilter'
+          $ref: '#/components/schemas/RlJobsListFilter'
         description: Filter jobs on various criteria.
       responses:
         '200':
@@ -519,7 +713,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -620,6 +814,10 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '404':
+          description: Job not Found
+        '409':
+          description: Job is not in a terminal state
         '422':
           description: Validation Error
           content:
@@ -689,13 +887,21 @@ paths:
         schema:
           title: Page Cursor
           type: string
+      - name: tail
+        in: query
+        required: false
+        schema:
+          title: Tail
+          type: integer
+          maximum: 10000
+          exclusiveMinimum: 0
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -727,7 +933,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -759,7 +965,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -847,7 +1053,7 @@ paths:
         required: false
         explode: true
         schema:
-          $ref: '#/components/schemas/UnslothJobsJobsListFilter'
+          $ref: '#/components/schemas/UnslothJobsListFilter'
         description: Filter jobs on various criteria.
       responses:
         '200':
@@ -893,7 +1099,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -994,6 +1200,10 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '404':
+          description: Job not Found
+        '409':
+          description: Job is not in a terminal state
         '422':
           description: Validation Error
           content:
@@ -1063,13 +1273,21 @@ paths:
         schema:
           title: Page Cursor
           type: string
+      - name: tail
+        in: query
+        required: false
+        schema:
+          title: Tail
+          type: integer
+          maximum: 10000
+          exclusiveMinimum: 0
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -1101,7 +1319,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -1133,7 +1351,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -1142,6 +1360,96 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
+    AutomodelBackendSpec:
+      properties:
+        attn:
+          title: Attn
+          description: Attention kernel. 'te' uses Transformer Engine (Hopper or newer);
+            'sdpa' is the portable PyTorch implementation.
+          type: string
+          enum:
+          - te
+          - sdpa
+          - flex
+          - eager
+          - tilelang
+        linear:
+          title: Linear
+          description: Linear-layer kernel.
+          type: string
+          enum:
+          - torch
+          - te
+          - quack
+        rms_norm:
+          title: Rms Norm
+          description: RMSNorm kernel. 'torch_fp32' normalises in fp32 for numerical
+            stability.
+          type: string
+          enum:
+          - torch
+          - torch_fp32
+          - te
+          - quack
+        rope:
+          title: Rope
+          description: Rotary position embedding kernel.
+          type: string
+          enum:
+          - torch
+          - quack
+        rope_fusion:
+          title: Rope Fusion
+          description: Fuse the rotary embedding into the attention kernel.
+          type: boolean
+        experts:
+          title: Experts
+          description: MoE expert compute kernel. 'gmm' is the grouped-matmul path
+            used by the large MoE recipes.
+          type: string
+          enum:
+          - torch
+          - te
+          - gmm
+          - torch_mm
+          - torch_mm_mxfp8
+        dispatcher:
+          title: Dispatcher
+          description: How MoE tokens are routed between expert-parallel ranks. 'deepep'
+            is the high-throughput path and requires the DeepEP library on the node.
+          type: string
+          enum:
+          - torch
+          - deepep
+          - hybridep
+          - uccl_ep
+        fake_balanced_gate:
+          title: Fake Balanced Gate
+          description: Route tokens evenly across experts instead of using the trained
+            router. Benchmarking aid.
+          type: boolean
+        enable_hf_state_dict_adapter:
+          title: Enable Hf State Dict Adapter
+          description: Save and load checkpoints in HuggingFace layout. Needed when
+            the trained model is consumed by HuggingFace tooling.
+          type: boolean
+        enable_fsdp_optimizations:
+          title: Enable Fsdp Optimizations
+          description: Enable Automodel's additional FSDP2 sharding optimizations.
+          type: boolean
+      additionalProperties: false
+      type: object
+      title: AutomodelBackendSpec
+      description: 'Which implementation Automodel uses for each model component.
+
+
+        Every field defaults to ``None``, meaning "leave it to Automodel". Its own
+        defaults
+
+        depend on what the training node has available (Transformer Engine, DeepEP,
+        CUDA), so
+
+        only explicitly set values are forwarded.'
     AutomodelBatchSpec:
       properties:
         global_batch_size:
@@ -1165,6 +1473,12 @@ components:
           description: Samples analyzed to estimate the optimal pack size when packing
             is enabled.
           default: 1000
+        packed_sequence_size:
+          title: Packed Sequence Size
+          description: Pin the packed sequence length instead of estimating it. Requires
+            sequence_packing.
+          type: integer
+          exclusiveMinimum: 0.0
       additionalProperties: false
       type: object
       title: AutomodelBatchSpec
@@ -1173,18 +1487,84 @@ components:
         training:
           type: string
           title: Training
-          description: Training fileset as 'name' or 'workspace/name'.
+          description: Training fileset as 'name', 'workspace/name', or either form
+            with a '#path/' directory.
         validation:
           title: Validation
           type: string
         prompt_template:
           title: Prompt Template
           type: string
+        shuffle:
+          type: boolean
+          title: Shuffle
+          description: Reshuffle training examples each epoch. Disable only for a
+            deliberate curriculum order.
+          default: true
       additionalProperties: false
       type: object
       required:
       - training
       title: AutomodelDatasetSpec
+    AutomodelExportSpec:
+      properties:
+        primary:
+          type: string
+          enum:
+          - onnx
+          - hf
+          title: Primary
+          description: Artifact at the fileset root. Use 'hf' when the NIM loads PyTorch
+            weights.
+          default: onnx
+        opset:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Opset
+          default: 17
+        precision:
+          type: string
+          enum:
+          - fp32
+          - fp16
+          title: Precision
+          description: ONNX graph dtype. Defaults to fp16 to match typical Hugging
+            Face checkpoints.
+          default: fp16
+        attn_implementation:
+          type: string
+          enum:
+          - eager
+          - sdpa
+          - flash_attention_2
+          title: Attn Implementation
+          description: Attention backend for tracing. The exporter cannot trace SDPA/GQA.
+          default: eager
+        pooling:
+          type: string
+          enum:
+          - avg
+          - cls
+          - last
+          title: Pooling
+          description: Embedding pooling. Ignored for cross_encoder.
+          default: avg
+        normalize:
+          type: boolean
+          title: Normalize
+          description: L2-normalize embeddings. Ignored for cross_encoder.
+          default: true
+        dimensions:
+          type: boolean
+          title: Dimensions
+          description: Add a Matryoshka 'dimensions' input that truncates and renormalizes
+            embeddings.
+          default: false
+      additionalProperties: false
+      type: object
+      title: AutomodelExportSpec
+      description: ONNX export and fileset layout. ``primary`` is the artifact at
+        the root; the other is under ``alternates/``.
     AutomodelJobInput:
       properties:
         name:
@@ -1209,6 +1589,18 @@ components:
           $ref: '#/components/schemas/AutomodelOutputRequest'
         integrations:
           $ref: '#/components/schemas/IntegrationsSpec'
+        deployment_config:
+          anyOf:
+          - type: string
+            title: Reference
+            description: A reference to DeploymentParams.
+          - $ref: '#/components/schemas/DeploymentParams'
+          title: Deployment Config
+          description: Deployment configuration for auto-deploying the model after
+            training. Pass a string to reference an existing ModelDeploymentConfig
+            by name ('my-config' or 'workspace/my-config'). An object provides inline
+            deployment parameters, deployed with vLLM unless engine is 'nim'. Omit
+            to skip deployment.
       additionalProperties: false
       type: object
       required:
@@ -1222,6 +1614,11 @@ components:
         name:
           title: Name
           type: string
+        backend:
+          type: string
+          const: automodel
+          title: Backend
+          default: automodel
         model:
           type: string
           title: Model
@@ -1241,6 +1638,18 @@ components:
           $ref: '#/components/schemas/AutomodelOutputResponse'
         integrations:
           $ref: '#/components/schemas/IntegrationsSpec'
+        deployment_config:
+          anyOf:
+          - type: string
+            title: Reference
+            description: A reference to DeploymentParams.
+          - $ref: '#/components/schemas/DeploymentParams'
+          title: Deployment Config
+          description: Deployment configuration for auto-deploying the model after
+            training. Pass a string to reference an existing ModelDeploymentConfig
+            by name ('my-config' or 'workspace/my-config'). An object provides inline
+            deployment parameters, deployed with vLLM unless engine is 'nim'. Omit
+            to skip deployment.
       additionalProperties: false
       type: object
       required:
@@ -1282,7 +1691,7 @@ components:
         spec:
           $ref: '#/components/schemas/AutomodelJobOutput'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -1309,6 +1718,12 @@ components:
         name:
           title: Name
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -1339,37 +1754,6 @@ components:
       required:
       - spec
       title: AutomodelJobsJobRequest
-    AutomodelJobsJobsListFilter:
-      additionalProperties: false
-      properties:
-        created_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs created at 'gte' datetime or 'lte' datetime.
-        name:
-          anyOf:
-          - $ref: '#/components/schemas/StringFilter'
-          - type: string
-          description: Name of the job.
-          title: Name
-        workspace:
-          description: Workspace of the job.
-          title: Workspace
-          type: string
-        project:
-          description: Project containing the job.
-          title: Project
-          type: string
-        status:
-          allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
-          description: The current status.
-        updated_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs updated at 'gte' datetime or 'lte' datetime.
-      title: AutomodelJobsJobsListFilter
-      type: object
     AutomodelJobsJobsPage:
       properties:
         data:
@@ -1402,6 +1786,49 @@ components:
       - updated_at
       - -updated_at
       title: AutomodelJobsJobsSortField
+    AutomodelJobsListFilter:
+      additionalProperties: false
+      description: Automodel jobs only. ``backend`` is the literal stored on the job
+        spec.
+      properties:
+        created_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs created at 'gte' datetime or 'lte' datetime.
+        name:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Name of the job.
+          title: Name
+        workspace:
+          description: Workspace of the job.
+          title: Workspace
+          type: string
+        project:
+          description: Project containing the job.
+          title: Project
+          type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
+        updated_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs updated at 'gte' datetime or 'lte' datetime.
+        backend:
+          const: automodel
+          default: automodel
+          title: Backend
+          type: string
+      title: AutomodelJobsListFilter
+      type: object
     AutomodelLoRAParams:
       properties:
         rank:
@@ -1441,9 +1868,45 @@ components:
           title: Use Triton
           description: Use the optimized Triton LoRA kernel.
           default: true
+        use_memory_efficient_lora:
+          title: Use Memory Efficient Lora
+          description: Use Automodel's lower-memory LoRA path. Recommended for large
+            MoE checkpoints. Omit to use Automodel's default, which is on.
+          type: boolean
       additionalProperties: false
       type: object
       title: AutomodelLoRAParams
+    AutomodelMTPSpec:
+      properties:
+        num_nextn_predict_layers:
+          title: Num Nextn Predict Layers
+          description: How many tokens ahead to predict. Omit to keep the checkpoint's
+            own value.
+          type: integer
+          exclusiveMinimum: 0.0
+        use_repeated_layer:
+          title: Use Repeated Layer
+          description: Share one weight-tied layer across the prediction depths. Only
+            some Automodel models accept it (Nemotron-H in r0.6.0); omit it for others.
+          type: boolean
+        loss_scaling_factor:
+          title: Loss Scaling Factor
+          description: Weight of the MTP loss term relative to the main loss. Omit
+            to keep the model's default (0.1).
+          type: number
+          minimum: 0.0
+      additionalProperties: false
+      type: object
+      title: AutomodelMTPSpec
+      description: 'Multi-Token Prediction overrides for checkpoints trained with
+        MTP heads, e.g. Nemotron 3.5 Lightning.
+
+
+        Automodel builds MTP from the checkpoint''s own config; each field here overrides
+        one
+
+        setting, and only the fields that are set reach the model. Support differs
+        per model.'
     AutomodelOptimizerSpec:
       properties:
         learning_rate:
@@ -1489,11 +1952,14 @@ components:
         optimizer:
           type: string
           enum:
+          - auto
           - Adam
           - AdamW
+          - FusedAdam
           title: Optimizer
-          description: Optimizer algorithm.
-          default: Adam
+          description: Optimizer algorithm. 'auto' selects Transformer Engine FusedAdam
+            for retrieval recipes and torch Adam for SFT.
+          default: auto
         lr_decay_style:
           type: string
           enum:
@@ -1579,9 +2045,104 @@ components:
           title: Sequence Parallel
           description: Enable sequence parallelism.
           default: false
+        pipeline:
+          allOf:
+          - $ref: '#/components/schemas/AutomodelPipelineSpec'
+          description: Pipeline schedule settings. Only read when pipeline_parallel_size
+            is greater than 1.
       additionalProperties: false
       type: object
       title: AutomodelParallelismSpec
+    AutomodelPipelineSpec:
+      properties:
+        pp_schedule:
+          title: Pp Schedule
+          description: Pipeline schedule name, e.g. '1f1b', 'interleaved1f1b', 'gpipe'.
+            Defaults to 'interleaved1f1b'.
+          type: string
+        pp_microbatch_size:
+          title: Pp Microbatch Size
+          description: Micro-batch size flowing through each pipeline stage.
+          type: integer
+          exclusiveMinimum: 0.0
+        round_virtual_stages_to_pp_multiple:
+          title: Round Virtual Stages To Pp Multiple
+          description: Round the number of virtual stages to a multiple of the pipeline
+            size, in the given direction.
+          type: string
+          enum:
+          - up
+          - down
+        scale_grads_in_schedule:
+          title: Scale Grads In Schedule
+          description: Scale gradients inside the schedule rather than afterwards.
+          type: boolean
+        patch_inner_model:
+          title: Patch Inner Model
+          description: Apply Automodel's pipeline patch to the inner transformer module.
+          type: boolean
+        patch_causal_lm_model:
+          title: Patch Causal Lm Model
+          description: Apply Automodel's pipeline patch to the causal-LM wrapper.
+          type: boolean
+      additionalProperties: false
+      type: object
+      title: AutomodelPipelineSpec
+      description: How work is scheduled across pipeline stages. Read only when pipeline_parallel_size
+        > 1.
+    AutomodelRetrievalSpec:
+      properties:
+        train_n_passages:
+          type: integer
+          minimum: 2.0
+          title: Train N Passages
+          default: 5
+        eval_negative_size:
+          title: Eval Negative Size
+          type: integer
+          minimum: 1.0
+        do_gradient_checkpointing:
+          type: boolean
+          title: Do Gradient Checkpointing
+          default: false
+        do_distributed_inbatch_negative:
+          type: boolean
+          title: Do Distributed Inbatch Negative
+          description: Score each query against every passage in the global batch
+            rather than only its own train_n_passages. Ignored for cross_encoder.
+          default: false
+        query_max_length:
+          type: integer
+          minimum: 1.0
+          title: Query Max Length
+          default: 512
+        passage_max_length:
+          type: integer
+          minimum: 1.0
+          title: Passage Max Length
+          default: 512
+        query_prefix:
+          type: string
+          title: Query Prefix
+          description: Literal prefix prepended to each query. Empty string disables
+            prefixing.
+          default: 'query: '
+        passage_prefix:
+          type: string
+          title: Passage Prefix
+          description: Literal prefix prepended to each passage. Empty string disables
+            prefixing.
+          default: 'passage: '
+        export:
+          allOf:
+          - $ref: '#/components/schemas/AutomodelExportSpec'
+          description: Artifact layout and ONNX export settings. Defaults are applied
+            when omitted.
+      additionalProperties: false
+      type: object
+      title: AutomodelRetrievalSpec
+      description: Dataset, collator, and export knobs for bi_encoder / cross_encoder
+        recipes.
     AutomodelScheduleSpec:
       properties:
         epochs:
@@ -1596,6 +2157,24 @@ components:
         val_check_interval:
           title: Val Check Interval
           type: number
+        validation_split:
+          title: Validation Split
+          description: Validation split to use when a validation dataset is not provided.
+          default: 0.1
+          type: number
+          exclusiveMaximum: 1.0
+          exclusiveMinimum: 0.0
+        checkpoint_selection:
+          type: string
+          enum:
+          - best
+          - last
+          - both
+          title: Checkpoint Selection
+          description: 'Checkpoint(s) to publish: ''best'' selects the lowest validation
+            loss, ''last'' preserves the end of training, and ''both'' publishes best
+            at the root with last under alternates/last.'
+          default: best
         seed:
           title: Seed
           type: integer
@@ -1613,6 +2192,17 @@ components:
           - distillation
           title: Training Type
           default: sft
+        recipe:
+          type: string
+          enum:
+          - auto
+          - sft
+          - bi_encoder
+          - cross_encoder
+          title: Recipe
+          description: Training recipe. 'auto' uses the model checkpoint head; explicit
+            encoder recipes can wrap a causal-LM backbone for retrieval training.
+          default: auto
         finetuning_type:
           type: string
           enum:
@@ -1678,6 +2268,28 @@ components:
           type: boolean
           title: Offload Teacher
           default: false
+        retrieval:
+          allOf:
+          - $ref: '#/components/schemas/AutomodelRetrievalSpec'
+          description: Retrieval dataset, collator, and export knobs. Used when recipe
+            is bi_encoder or cross_encoder.
+        activation_checkpointing:
+          type: boolean
+          title: Activation Checkpointing
+          description: Recompute intermediate activations in the backward pass instead
+            of storing them. Substantially lowers memory use for a modest slowdown,
+            and is commonly enabled when training large MoE models.
+          default: false
+        mtp:
+          allOf:
+          - $ref: '#/components/schemas/AutomodelMTPSpec'
+          description: Multi-Token Prediction settings. Omit for checkpoints trained
+            without MTP heads.
+        backend:
+          allOf:
+          - $ref: '#/components/schemas/AutomodelBackendSpec'
+          description: Low-level kernel selection for the model's components. Omit
+            to let Automodel choose based on the hardware it lands on.
       additionalProperties: false
       type: object
       title: AutomodelTrainingSpec
@@ -1695,6 +2307,131 @@ components:
         in
 
         ``lm_policy`` and ``BatchedDataDict.shard_by_batch_size``.'
+    CreateCustomizationJobTemplateRequest:
+      properties:
+        name:
+          type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          title: Name
+          description: The name of the template. Name must start with a lowercase
+            letter, be 2-63 characters, and use lowercase letters, digits, hyphens,
+            and dots (no consecutive hyphens, cannot end with a hyphen).
+        backend:
+          type: string
+          title: Backend
+          description: Customization backend the config targets, e.g. 'automodel'.
+        config:
+          additionalProperties: true
+          type: object
+          title: Config
+          description: Job input to replay, in the same shape the backend's submit
+            accepts.
+        description:
+          type: string
+          title: Description
+          description: What this template is for.
+          default: ''
+      type: object
+      required:
+      - name
+      - backend
+      - config
+      title: CreateCustomizationJobTemplateRequest
+      description: Request body for ``POST /v2/workspaces/{workspace}/job-templates``.
+    CustomizationJobTemplate:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Entity name within the workspace
+          default: ''
+        workspace:
+          type: string
+          pattern: ^[\w\-\+.@:]+$
+          title: Workspace
+          description: Workspace identifier
+        project:
+          title: Project
+          description: The name of the project associated with this entity.
+          type: string
+        backend:
+          type: string
+          title: Backend
+        config:
+          additionalProperties: true
+          type: object
+          title: Config
+        description:
+          type: string
+          title: Description
+          default: ''
+        id:
+          type: string
+          title: Id
+          readOnly: true
+        created_at:
+          title: Created At
+          readOnly: true
+          type: string
+          format: date-time
+        created_by:
+          title: Created By
+          readOnly: true
+          nullable: true
+          type: string
+        updated_at:
+          title: Updated At
+          readOnly: true
+          type: string
+          format: date-time
+        updated_by:
+          title: Updated By
+          readOnly: true
+          nullable: true
+          type: string
+        entity_id:
+          type: string
+          title: Entity Id
+          description: Alias for id for backwards compatibility.
+          readOnly: true
+        parent:
+          title: Parent
+          description: Parent entity ID for nested entities.
+          readOnly: true
+          type: string
+        db_version:
+          type: integer
+          title: Db Version
+          description: Database version of the entity for optimistic locking.
+          readOnly: true
+      type: object
+      required:
+      - workspace
+      - backend
+      - config
+      - id
+      - created_at
+      - created_by
+      - updated_at
+      - updated_by
+      - entity_id
+      - parent
+      - db_version
+      title: CustomizationJobTemplate
+      description: 'A named, re-runnable customization job input.
+
+
+        ``config`` holds the same job input a submit would take, stored as given:
+        the
+
+        submitter-facing schema belongs to whichever backend plugin is installed,
+        and the
+
+        router does not import them. Submit is what checks it. ``backend`` is lifted
+        out so
+
+        callers know which customization backend/form should replay the saved config.'
     DatetimeFilter:
       additionalProperties: false
       properties:
@@ -1710,6 +2447,64 @@ components:
           type: string
       title: DatetimeFilter
       type: object
+    DeploymentParams:
+      properties:
+        engine:
+          type: string
+          enum:
+          - nim
+          - vllm
+          title: Engine
+          description: 'Inference engine for the deployment: ''vllm'' (default) or
+            ''nim''.'
+          default: vllm
+        gpu:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Gpu
+          description: Number of GPUs required for the deployment.
+          default: 1
+        additional_envs:
+          title: Additional Envs
+          description: Additional environment variables for the deployment.
+          additionalProperties:
+            type: string
+          type: object
+        disk_size:
+          title: Disk Size
+          description: Disk size for the deployment.
+          type: string
+        image_name:
+          title: Image Name
+          description: Container image name. If not specified, the platform default
+            image for the engine is used.
+          type: string
+        image_tag:
+          title: Image Tag
+          description: Container image tag. If not specified, the platform default
+            tag for the engine is used.
+          type: string
+        lora_enabled:
+          type: boolean
+          title: Lora Enabled
+          description: When auto-deploying a full-weight training, setting this true
+            allows subsequent LoRA adapters to be deployed against it.
+          default: true
+        tool_call_config:
+          allOf:
+          - $ref: '#/components/schemas/ToolCallParams'
+          description: Tool calling configuration override. Requires engine 'nim';
+            setting it without engine selects 'nim'.
+      additionalProperties: false
+      type: object
+      title: DeploymentParams
+      description: 'Inline deployment parameters for auto-deploying a trained model.
+
+
+        Used in each backend''s ``job_spec.deployment_config`` and passed through
+        to the
+
+        model_entity task at compile time. When unset, no deployment is launched.'
     FileStorageType:
       type: string
       enum:
@@ -1724,6 +2519,248 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    HelixJobListResultResponse:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobResultResponse'
+          type: array
+          title: Data
+      type: object
+      required:
+      - data
+      title: HelixJobListResultResponse
+    HelixJobLog:
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          title: Timestamp
+        job:
+          type: string
+          title: Job
+        job_step:
+          type: string
+          title: Job Step
+        job_task:
+          type: string
+          title: Job Task
+        message:
+          type: string
+          title: Message
+      type: object
+      required:
+      - timestamp
+      - job
+      - job_step
+      - job_task
+      - message
+      title: HelixJobLog
+    HelixJobLogPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobLog'
+          type: array
+          title: Data
+        total:
+          type: integer
+          title: Total
+        next_page:
+          title: Next Page
+          type: string
+        prev_page:
+          title: Prev Page
+          type: string
+      type: object
+      required:
+      - data
+      - total
+      - next_page
+      - prev_page
+      title: HelixJobLogPage
+    HelixJobResultResponse:
+      properties:
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        project:
+          title: Project
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        artifact_url:
+          type: string
+          title: Artifact Url
+        artifact_storage_type:
+          $ref: '#/components/schemas/FileStorageType'
+        download_url:
+          title: Download Url
+          type: string
+      type: object
+      required:
+      - name
+      - job
+      - workspace
+      - artifact_url
+      - artifact_storage_type
+      title: HelixJobResultResponse
+    HelixJobStatus:
+      type: string
+      enum:
+      - created
+      - pending
+      - active
+      - cancelled
+      - cancelling
+      - error
+      - completed
+      - paused
+      - pausing
+      - resuming
+      title: HelixJobStatus
+      description: 'Enumeration of possible job statuses.
+
+
+        This enum represents the various states a job can be in during its lifecycle,
+
+        from creation to a terminal state.'
+    HelixJobStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        steps:
+          items:
+            $ref: '#/components/schemas/HelixJobStepStatusResponse'
+          type: array
+          title: Steps
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - steps
+      - created_at
+      - updated_at
+      title: HelixJobStatusResponse
+    HelixJobStepStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        tasks:
+          items:
+            $ref: '#/components/schemas/HelixJobTaskStatusResponse'
+          type: array
+          title: Tasks
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - tasks
+      - created_at
+      - updated_at
+      title: HelixJobStepStatusResponse
+    HelixJobTaskStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        error_stack:
+          title: Error Stack
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - error_stack
+      - created_at
+      - updated_at
+      title: HelixJobTaskStatusResponse
     IntegrationsSpec:
       properties:
         wandb:
@@ -1779,6 +2816,29 @@ components:
 
 
         To enable MLflow, provide a non-null ``mlflow`` object on :class:`IntegrationsSpec`.'
+    NemoListResponse_CustomizationJobTemplate_:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/CustomizationJobTemplate'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: "Pagination metadata \u2014 page, page_size, total_results,\
+            \ etc."
+        sort:
+          title: Sort
+          description: Sort field applied to this result set (e.g. '-created_at').
+          type: string
+        filter:
+          title: Filter
+          description: Filter criteria echoed back from the request.
+      type: object
+      required:
+      - data
+      title: NemoListResponse_CustomizationJobTemplate_
     OptimizerType:
       type: string
       enum:
@@ -1826,248 +2886,6 @@ components:
       - total_pages
       - total_results
       title: PaginationData
-    PlatformJobListResultResponse:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/PlatformJobResultResponse'
-          type: array
-          title: Data
-      type: object
-      required:
-      - data
-      title: PlatformJobListResultResponse
-    PlatformJobLog:
-      properties:
-        timestamp:
-          type: string
-          format: date-time
-          title: Timestamp
-        job:
-          type: string
-          title: Job
-        job_step:
-          type: string
-          title: Job Step
-        job_task:
-          type: string
-          title: Job Task
-        message:
-          type: string
-          title: Message
-      type: object
-      required:
-      - timestamp
-      - job
-      - job_step
-      - job_task
-      - message
-      title: PlatformJobLog
-    PlatformJobLogPage:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/PlatformJobLog'
-          type: array
-          title: Data
-        total:
-          type: integer
-          title: Total
-        next_page:
-          title: Next Page
-          type: string
-        prev_page:
-          title: Prev Page
-          type: string
-      type: object
-      required:
-      - data
-      - total
-      - next_page
-      - prev_page
-      title: PlatformJobLogPage
-    PlatformJobResultResponse:
-      properties:
-        name:
-          type: string
-          title: Name
-        job:
-          type: string
-          title: Job
-        workspace:
-          type: string
-          title: Workspace
-        project:
-          title: Project
-          type: string
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-        artifact_url:
-          type: string
-          title: Artifact Url
-        artifact_storage_type:
-          $ref: '#/components/schemas/FileStorageType'
-        download_url:
-          title: Download Url
-          type: string
-      type: object
-      required:
-      - name
-      - job
-      - workspace
-      - artifact_url
-      - artifact_storage_type
-      title: PlatformJobResultResponse
-    PlatformJobStatus:
-      type: string
-      enum:
-      - created
-      - pending
-      - active
-      - cancelled
-      - cancelling
-      - error
-      - completed
-      - paused
-      - pausing
-      - resuming
-      title: PlatformJobStatus
-      description: 'Enumeration of possible job statuses.
-
-
-        This enum represents the various states a job can be in during its lifecycle,
-
-        from creation to a terminal state.'
-    PlatformJobStatusResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        name:
-          type: string
-          title: Name
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        steps:
-          items:
-            $ref: '#/components/schemas/PlatformJobStepStatusResponse'
-          type: array
-          title: Steps
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - name
-      - status
-      - status_details
-      - error_details
-      - steps
-      - created_at
-      - updated_at
-      title: PlatformJobStatusResponse
-    PlatformJobStepStatusResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        name:
-          type: string
-          title: Name
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        tasks:
-          items:
-            $ref: '#/components/schemas/PlatformJobTaskStatusResponse'
-          type: array
-          title: Tasks
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - name
-      - status
-      - status_details
-      - error_details
-      - tasks
-      - created_at
-      - updated_at
-      title: PlatformJobStepStatusResponse
-    PlatformJobTaskStatusResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        name:
-          type: string
-          title: Name
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        error_stack:
-          title: Error Stack
-          type: string
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - name
-      - status
-      - status_details
-      - error_details
-      - error_stack
-      - created_at
-      - updated_at
-      title: PlatformJobTaskStatusResponse
     PolicyBackend:
       type: string
       enum:
@@ -2077,13 +2895,10 @@ components:
       description: 'Which NeMo-RL policy worker trains the model.
 
 
-        Chosen explicitly, never inferred: the value picks the worker class, which
-        picks
+        The value picks the worker class, which picks the Ray actor''s venv and kernels.
 
-        the Ray actor''s venv and kernels. Asking for a capability the backend lacks
-        is a
-
-        validation error, not a silent upgrade.'
+        Asking for a capability the backend lacks is a validation error, not a silent
+        upgrade.'
     ProgressReportingConfig:
       properties:
         min_report_interval_seconds:
@@ -2131,6 +2946,23 @@ components:
           - $ref: '#/components/schemas/OptimizerType'
           description: "Optimizer + LR-scheduler combination (AdamW/Adam \xD7 cosine-annealing/flat-LR).\
             \ Defaults to AdamW with cosine annealing."
+        optimizer_name:
+          title: Optimizer Name
+          description: Import path of the optimizer class, overriding the one implied
+            by optimizer_type (e.g. 'transformer_engine.pytorch.optimizers.fused_adam.FusedAdam').
+            optimizer_type still selects the LR schedule. Unset uses torch.optim.AdamW
+            / Adam.
+          type: string
+        optimizer_kwargs:
+          title: Optimizer Kwargs
+          description: 'Additional keyword arguments for the optimizer, merged over
+            the generated ones. Use it to configure options the job schema does not
+            model directly, for example {''master_weights'': true, ''store_param_remainders'':
+            true, ''exp_avg_dtype'': ''torch.bfloat16''} to keep FusedAdam''s state
+            in half precision. Values given here take precedence over the generated
+            arguments and are forwarded to the optimizer as supplied.'
+          additionalProperties: true
+          type: object
         learning_rate:
           type: number
           exclusiveMinimum: 0.0
@@ -2190,6 +3022,7 @@ components:
           description: Validation interval. Float <= 1.0 is fraction of epoch; > 1.0
             is step count.
           type: number
+          minimum: 0.0
         val_at_end:
           type: boolean
           title: Val At End
@@ -2235,6 +3068,14 @@ components:
           title: Seed
           description: Random seed for reproducibility.
           type: integer
+        env_vars:
+          title: Env Vars
+          description: 'Environment variables for the training workers, merged over
+            the platform''s own (e.g. {''PYTORCH_CUDA_ALLOC_CONF'': ''expandable_segments:True''}
+            to cut memory fragmentation).'
+          additionalProperties:
+            type: string
+          type: object
         parallelism:
           $ref: '#/components/schemas/RlParallelismParams'
         execution_profile:
@@ -2294,6 +3135,23 @@ components:
           - $ref: '#/components/schemas/OptimizerType'
           description: "Optimizer + LR-scheduler combination (AdamW/Adam \xD7 cosine-annealing/flat-LR).\
             \ Defaults to AdamW with cosine annealing."
+        optimizer_name:
+          title: Optimizer Name
+          description: Import path of the optimizer class, overriding the one implied
+            by optimizer_type (e.g. 'transformer_engine.pytorch.optimizers.fused_adam.FusedAdam').
+            optimizer_type still selects the LR schedule. Unset uses torch.optim.AdamW
+            / Adam.
+          type: string
+        optimizer_kwargs:
+          title: Optimizer Kwargs
+          description: 'Additional keyword arguments for the optimizer, merged over
+            the generated ones. Use it to configure options the job schema does not
+            model directly, for example {''master_weights'': true, ''store_param_remainders'':
+            true, ''exp_avg_dtype'': ''torch.bfloat16''} to keep FusedAdam''s state
+            in half precision. Values given here take precedence over the generated
+            arguments and are forwarded to the optimizer as supplied.'
+          additionalProperties: true
+          type: object
         learning_rate:
           type: number
           exclusiveMinimum: 0.0
@@ -2353,6 +3211,7 @@ components:
           description: Validation interval. Float <= 1.0 is fraction of epoch; > 1.0
             is step count.
           type: number
+          minimum: 0.0
         val_at_end:
           type: boolean
           title: Val At End
@@ -2398,6 +3257,14 @@ components:
           title: Seed
           description: Random seed for reproducibility.
           type: integer
+        env_vars:
+          title: Env Vars
+          description: 'Environment variables for the training workers, merged over
+            the platform''s own (e.g. {''PYTORCH_CUDA_ALLOC_CONF'': ''expandable_segments:True''}
+            to cut memory fragmentation).'
+          additionalProperties:
+            type: string
+          type: object
         parallelism:
           $ref: '#/components/schemas/RlParallelismParams'
         execution_profile:
@@ -2427,14 +3294,19 @@ components:
         policy_backend:
           allOf:
           - $ref: '#/components/schemas/PolicyBackend'
-          description: 'NeMo-RL policy worker that trains the model. `automodel` (default)
-            builds on NeMo Automodel + Transformer Engine; it handles full-weight
-            training and is the only backend with LoRA, expert parallelism and automodel_kwargs.
-            `dtensor` uses stock HuggingFace modules on PyTorch FSDP2 -- no Transformer
-            Engine, so it is the pre-Hopper option, without those three features.
-            Never switched implicitly: asking `dtensor` for an `automodel`-only feature
-            is rejected.'
-          default: automodel
+          description: NeMo-RL policy worker that trains the model. `lora` requires
+            `automodel` (NeMo Automodel + Transformer Engine, Hopper or newer; the
+            only backend with expert parallelism and automodel_kwargs). `all_weights`
+            defaults to `dtensor` (stock HuggingFace on PyTorch FSDP2, also the pre-Hopper
+            option) and may be set to `automodel` for a consolidated HuggingFace export.
+            Omit it to get the default for the finetuning type.
+        v4_compatible:
+          type: boolean
+          title: V4 Compatible
+          description: Keep the base checkpoint's transformers-v4 config.json on the
+            trained export. The platform's vLLM cannot read the v5 config Automodel
+            otherwise writes. Set false to export that v5 config instead.
+          default: true
         val_at_start:
           type: boolean
           title: Val At Start
@@ -2623,12 +3495,12 @@ components:
           default: 10
         batch_multiplier:
           type: number
-          exclusiveMinimum: 0.0
+          minimum: 1.0
           title: Batch Multiplier
           description: Over-generate each step by this factor so dynamic sampling
-            has candidates to filter. Set it near `1 / pct_mixed`. Rejected above
-            1.0 unless `use_dynamic_sampling` is true, which is what NeMo-RL asserts
-            at startup.
+            has candidates to filter. Set it near `1 / pct_mixed`. Must be >= 1.0
+            (NeMo-RL's DAPO contract). Rejected above 1.0 unless `use_dynamic_sampling`
+            is true, which is what NeMo-RL asserts at startup.
           default: 1.0
         reward_shaping:
           allOf:
@@ -2655,7 +3527,9 @@ components:
           title: Train Mb Tokens
           description: Token budget per training micro-batch, read by `dynamic` and
             `sequence_packing`. Defaults to max_seq_length * micro_batch_size, the
-            peak `static` already provisions for. Lower it if you OOM.
+            peak `static` already provisions for. Must be at least max_seq_length
+            so a full-length rollout still fits. Lower it if you OOM, but not below
+            that floor.
           type: integer
           exclusiveMinimum: 0.0
         sequence_length_round:
@@ -2691,6 +3565,27 @@ components:
             0.0}}` for Qwen3.5.'
           additionalProperties: true
           type: object
+        logprob_chunk_size:
+          title: Logprob Chunk Size
+          description: Tokens scored at once when the trainer re-reads its own generated
+            text. Lower it to cut memory at long context. Unset uses the platform
+            default (2048).
+          type: integer
+          exclusiveMinimum: 0.0
+        vllm_kwargs:
+          title: Vllm Kwargs
+          description: 'Additional arguments for the vLLM rollout engine, for example
+            {''moe_backend'': ''triton''}. Forwarded to vLLM as supplied.'
+          additionalProperties: true
+          type: object
+        moe_parallelizer:
+          title: Moe Parallelizer
+          description: Merged over policy.dtensor_cfg.moe_parallelizer, which controls
+            how MoE experts are sharded and checkpointed. The platform already sets
+            ignore_router_for_ac when expert parallelism and activation checkpointing
+            are both on; this reaches the rest.
+          additionalProperties: true
+          type: object
         vllm_tensor_parallel_size:
           title: Vllm Tensor Parallel Size
           description: Tensor parallel size for the vLLM rollout engine, independent
@@ -2706,6 +3601,15 @@ components:
             Raise toward 0.7 for large models; the rest is left for the colocated
             policy.
           default: 0.5
+        log_nemo_gym_full_result_tables:
+          type: boolean
+          title: Log Nemo Gym Full Result Tables
+          description: "Log each rollout's full NeMo-Gym payload to your own W&B as\
+            \ a Table (`<agent>/full_result`). The only place generated text is readable\
+            \ \u2014 the per-step JSONL carries token ids and an empty `content`.\
+            \ Each row is one JSON blob, so W&B cannot sort or filter on fields inside\
+            \ it. Payloads are large; enable for short debugging runs. Requires `integrations.wandb`."
+          default: false
       additionalProperties: false
       type: object
       required:
@@ -2751,6 +3655,18 @@ components:
           $ref: '#/components/schemas/IntegrationsSpec'
         output:
           $ref: '#/components/schemas/RlOutputRequest'
+        deployment_config:
+          anyOf:
+          - type: string
+            title: Reference
+            description: A reference to DeploymentParams.
+          - $ref: '#/components/schemas/DeploymentParams'
+          title: Deployment Config
+          description: Deployment configuration for auto-deploying the model after
+            training. Pass a string to reference an existing ModelDeploymentConfig
+            by name ('my-config' or 'workspace/my-config'). An object provides inline
+            deployment parameters, deployed with vLLM unless engine is 'nim'. Omit
+            to skip deployment.
       additionalProperties: false
       type: object
       required:
@@ -2758,12 +3674,17 @@ components:
       - dataset
       - training
       title: RlJobInput
-      description: POST body / CLI JSON for ``nemo customization rl submit``.
+      description: POST body / CLI JSON for ``nemo customization rl --job-json``.
     RlJobOutput:
       properties:
         name:
           title: Name
           type: string
+        backend:
+          type: string
+          const: rl
+          title: Backend
+          default: rl
         model:
           type: string
           title: Model
@@ -2792,6 +3713,18 @@ components:
           allOf:
           - $ref: '#/components/schemas/RlOutputResponse'
           description: Output artifact created by this job.
+        deployment_config:
+          anyOf:
+          - type: string
+            title: Reference
+            description: A reference to DeploymentParams.
+          - $ref: '#/components/schemas/DeploymentParams'
+          title: Deployment Config
+          description: Deployment configuration for auto-deploying the model after
+            training. Pass a string to reference an existing ModelDeploymentConfig
+            by name ('my-config' or 'workspace/my-config'). An object provides inline
+            deployment parameters, deployed with vLLM unless engine is 'nim'. Omit
+            to skip deployment.
       additionalProperties: false
       type: object
       required:
@@ -2829,7 +3762,7 @@ components:
         spec:
           $ref: '#/components/schemas/RlJobOutput'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -2856,6 +3789,12 @@ components:
         name:
           title: Name
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -2886,37 +3825,6 @@ components:
       required:
       - spec
       title: RlJobsJobRequest
-    RlJobsJobsListFilter:
-      additionalProperties: false
-      properties:
-        created_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs created at 'gte' datetime or 'lte' datetime.
-        name:
-          anyOf:
-          - $ref: '#/components/schemas/StringFilter'
-          - type: string
-          description: Name of the job.
-          title: Name
-        workspace:
-          description: Workspace of the job.
-          title: Workspace
-          type: string
-        project:
-          description: Project containing the job.
-          title: Project
-          type: string
-        status:
-          allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
-          description: The current status.
-        updated_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs updated at 'gte' datetime or 'lte' datetime.
-      title: RlJobsJobsListFilter
-      type: object
     RlJobsJobsPage:
       properties:
         data:
@@ -2949,6 +3857,48 @@ components:
       - updated_at
       - -updated_at
       title: RlJobsJobsSortField
+    RlJobsListFilter:
+      additionalProperties: false
+      description: RL jobs only. ``backend`` is the literal stored on the job spec.
+      properties:
+        created_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs created at 'gte' datetime or 'lte' datetime.
+        name:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Name of the job.
+          title: Name
+        workspace:
+          description: Workspace of the job.
+          title: Workspace
+          type: string
+        project:
+          description: Project containing the job.
+          title: Project
+          type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
+        updated_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs updated at 'gte' datetime or 'lte' datetime.
+        backend:
+          const: rl
+          default: rl
+          title: Backend
+          type: string
+      title: RlJobsListFilter
+      type: object
     RlLoRAParams:
       properties:
         rank:
@@ -3188,6 +4138,27 @@ components:
           type: array
       title: StringFilter
       type: object
+    ToolCallParams:
+      properties:
+        tool_call_parser:
+          title: Tool Call Parser
+          description: Name of the tool call parser to use (e.g., 'openai', 'hermes',
+            'pythonic', 'llama3_json', 'mistral').
+          type: string
+        tool_call_plugin:
+          title: Tool Call Plugin
+          description: 'Reference to a fileset containing the custom tool call plugin
+            Python file. Expected format: ''{workspace}/{fileset_name}''.'
+          type: string
+          pattern: ^[\w\-.]+/[\w\-.]+$
+        auto_tool_choice:
+          title: Auto Tool Choice
+          description: Whether to enable automatic tool choice.
+          type: boolean
+      additionalProperties: false
+      type: object
+      title: ToolCallParams
+      description: Tool calling configuration for NIM deployments.
     UnslothBatchSpec:
       properties:
         per_device_train_batch_size:
@@ -3246,51 +4217,6 @@ components:
         each fileset before training; ``train_sft`` only ever sees a local
 
         filesystem path.'
-    UnslothDeploymentParams:
-      properties:
-        gpu:
-          type: integer
-          title: Gpu
-          description: Number of GPUs required for the deployment.
-          default: 1
-        additional_envs:
-          title: Additional Envs
-          description: Additional environment variables for the deployment.
-          additionalProperties:
-            type: string
-          type: object
-        disk_size:
-          title: Disk Size
-          description: Disk size for the deployment.
-          type: string
-        image_name:
-          title: Image Name
-          description: Container image name from NGC. If not specified, defaults to
-            multi-llm.
-          type: string
-        image_tag:
-          title: Image Tag
-          description: Container image tag from NGC.
-          type: string
-        lora_enabled:
-          type: boolean
-          title: Lora Enabled
-          description: When auto-deploying a full SFT training, setting this true
-            allows subsequent LoRA adapters to be deployed against it.
-          default: true
-        tool_call_config:
-          allOf:
-          - $ref: '#/components/schemas/UnslothToolCallParams'
-          description: Tool calling configuration override for the NIM deployment.
-      additionalProperties: false
-      type: object
-      title: UnslothDeploymentParams
-      description: 'Inline deployment parameters for auto-deploying a trained model.
-
-
-        Used in :class:`UnslothJobInput.deployment_config` and passed through to
-
-        the model_entity task at compile time. When unset, no deployment is launched.'
     UnslothHardwareSpec:
       properties:
         gpus:
@@ -3336,25 +4262,31 @@ components:
           anyOf:
           - type: string
             title: Reference
-            description: A reference to UnslothDeploymentParams.
-          - $ref: '#/components/schemas/UnslothDeploymentParams'
+            description: A reference to DeploymentParams.
+          - $ref: '#/components/schemas/DeploymentParams'
           title: Deployment Config
           description: Deployment configuration for auto-deploying the model after
             training. Pass a string to reference an existing ModelDeploymentConfig
             by name ('my-config' or 'workspace/my-config'). An object provides inline
-            NIM deployment parameters. Omit to skip deployment.
+            deployment parameters, deployed with vLLM unless engine is 'nim'. Omit
+            to skip deployment.
       additionalProperties: false
       type: object
       required:
       - model
       - dataset
       title: UnslothJobInput
-      description: POST body / CLI JSON for ``nemo customization unsloth run``.
+      description: POST body / CLI JSON for ``nemo customization unsloth --job-json``.
     UnslothJobOutput:
       properties:
         name:
           title: Name
           type: string
+        backend:
+          type: string
+          const: unsloth
+          title: Backend
+          default: unsloth
         model:
           $ref: '#/components/schemas/UnslothModelLoadSpec'
         dataset:
@@ -3377,13 +4309,14 @@ components:
           anyOf:
           - type: string
             title: Reference
-            description: A reference to UnslothDeploymentParams.
-          - $ref: '#/components/schemas/UnslothDeploymentParams'
+            description: A reference to DeploymentParams.
+          - $ref: '#/components/schemas/DeploymentParams'
           title: Deployment Config
           description: Deployment configuration for auto-deploying the model after
             training. Pass a string to reference an existing ModelDeploymentConfig
             by name ('my-config' or 'workspace/my-config'). An object provides inline
-            NIM deployment parameters. Omit to skip deployment.
+            deployment parameters, deployed with vLLM unless engine is 'nim'. Omit
+            to skip deployment.
       additionalProperties: false
       type: object
       required:
@@ -3430,7 +4363,7 @@ components:
         spec:
           $ref: '#/components/schemas/UnslothJobOutput'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -3457,6 +4390,12 @@ components:
         name:
           title: Name
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -3487,37 +4426,6 @@ components:
       required:
       - spec
       title: UnslothJobsJobRequest
-    UnslothJobsJobsListFilter:
-      additionalProperties: false
-      properties:
-        created_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs created at 'gte' datetime or 'lte' datetime.
-        name:
-          anyOf:
-          - $ref: '#/components/schemas/StringFilter'
-          - type: string
-          description: Name of the job.
-          title: Name
-        workspace:
-          description: Workspace of the job.
-          title: Workspace
-          type: string
-        project:
-          description: Project containing the job.
-          title: Project
-          type: string
-        status:
-          allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
-          description: The current status.
-        updated_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs updated at 'gte' datetime or 'lte' datetime.
-      title: UnslothJobsJobsListFilter
-      type: object
     UnslothJobsJobsPage:
       properties:
         data:
@@ -3550,6 +4458,49 @@ components:
       - updated_at
       - -updated_at
       title: UnslothJobsJobsSortField
+    UnslothJobsListFilter:
+      additionalProperties: false
+      description: Unsloth jobs only. ``backend`` is the literal stored on the job
+        spec.
+      properties:
+        created_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs created at 'gte' datetime or 'lte' datetime.
+        name:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Name of the job.
+          title: Name
+        workspace:
+          description: Workspace of the job.
+          title: Workspace
+          type: string
+        project:
+          description: Project containing the job.
+          title: Project
+          type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
+        updated_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs updated at 'gte' datetime or 'lte' datetime.
+        backend:
+          const: unsloth
+          default: unsloth
+          title: Backend
+          type: string
+      title: UnslothJobsListFilter
+      type: object
     UnslothLoRAParams:
       properties:
         rank:
@@ -3711,7 +4662,7 @@ components:
       description: 'Args to ``FastLanguageModel.from_pretrained``.
 
 
-        ``name`` is a NeMo Platform model entity reference (``"name"`` or
+        ``name`` is a NeMo Helix model entity reference (``"name"`` or
 
         ``"workspace/name"``). The plugin''s run orchestration resolves the
 
@@ -3911,27 +4862,6 @@ components:
       type: object
       title: UnslothScheduleSpec
       description: Training schedule, scheduler, logging cadence.
-    UnslothToolCallParams:
-      properties:
-        tool_call_parser:
-          title: Tool Call Parser
-          description: Name of the tool call parser to use (e.g., 'openai', 'hermes',
-            'pythonic', 'llama3_json', 'mistral').
-          type: string
-        tool_call_plugin:
-          title: Tool Call Plugin
-          description: 'Reference to a fileset containing the custom tool call plugin
-            Python file. Expected format: ''{workspace}/{fileset_name}''.'
-          type: string
-          pattern: ^[\w\-.]+/[\w\-.]+$
-        auto_tool_choice:
-          title: Auto Tool Choice
-          description: Whether to enable automatic tool choice.
-          type: boolean
-      additionalProperties: false
-      type: object
-      title: UnslothToolCallParams
-      description: Tool calling configuration for NIM deployments.
     UnslothTrainingSpec:
       properties:
         training_type:
@@ -3963,6 +4893,25 @@ components:
       type: object
       title: UnslothTrainingSpec
       description: Algorithm + adapter shape selectors.
+    UpdateCustomizationJobTemplateRequest:
+      properties:
+        backend:
+          title: Backend
+          description: Customization backend the config targets.
+          type: string
+        config:
+          title: Config
+          description: Job input to replay, in the same shape the backend's submit
+            accepts.
+          additionalProperties: true
+          type: object
+        description:
+          title: Description
+          description: What this template is for.
+          type: string
+      type: object
+      title: UpdateCustomizationJobTemplateRequest
+      description: Request body for ``PATCH /v2/workspaces/{workspace}/job-templates/{name}``.
     ValidationError:
       properties:
         loc:

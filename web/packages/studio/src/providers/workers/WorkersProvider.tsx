@@ -3,11 +3,20 @@
 
 import { ProgressBar } from '@nvidia/foundations-react-core';
 import { CreateWorkerOptions, WorkersContextValue } from '@studio/providers/workers/types';
-import { WorkersContext } from '@studio/providers/workers/useWorkers';
+import { WorkersContext } from '@studio/providers/workers/WorkersContext';
 import { FC, PropsWithChildren, useState } from 'react';
 
 export const WorkersProvider: FC<PropsWithChildren> = ({ children }) => {
   const [workers, setWorkers] = useState<Set<Worker>>(new Set());
+
+  const terminateWorker = (worker: Worker) => {
+    worker.terminate();
+    setWorkers((current) => {
+      const newWorkers = new Set(current);
+      newWorkers.delete(worker);
+      return newWorkers;
+    });
+  };
 
   const contextValue: WorkersContextValue = {
     workers,
@@ -15,25 +24,15 @@ export const WorkersProvider: FC<PropsWithChildren> = ({ children }) => {
     createWorker: (worker: Worker, options?: CreateWorkerOptions) => {
       worker.onmessage = (e) => {
         options?.onMessage?.(e);
-        const { done } = e.data;
-        if (done) {
-          const newWorkers = new Set(workers);
-          newWorkers.delete(worker);
-          setWorkers(newWorkers);
-          worker.terminate();
-        }
+        if (e.data.done) terminateWorker(worker);
       };
       worker.onerror = (e) => {
         options?.onError?.(e);
-        const newWorkers = new Set(workers);
-        newWorkers.delete(worker);
-        setWorkers(newWorkers);
-        worker.terminate();
+        terminateWorker(worker);
       };
-      const newWorkers = new Set(workers);
-      newWorkers.add(worker);
-      setWorkers(newWorkers);
+      setWorkers((current) => new Set(current).add(worker));
     },
+    terminateWorker,
   };
 
   return (

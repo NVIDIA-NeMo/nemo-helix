@@ -6,7 +6,7 @@ import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfi
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import {
-  Button,
+  Badge,
   Flex,
   PageHeader,
   Stack,
@@ -16,19 +16,48 @@ import {
   TabsTrigger,
   Text,
 } from '@nvidia/foundations-react-core';
+import { hasAgentConfig } from '@studio/api/agents/hasAgentConfig';
+import { FABRIC_CONFIG_FORMAT } from '@studio/api/agents/packageAgent';
+import { agentSpecSource, useAgentSpecFileset } from '@studio/api/agents/useAgentSpecFileset';
 import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
-import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
-import { AGENT_OVERVIEW_ENABLED, INTAKE_ENABLED } from '@studio/constants/environment';
+import { ImportTracesModal } from '@studio/components/ImportTracesModal';
+import {
+  AGENT_CONTAINER_DEPLOYMENTS_ENABLED,
+  AGENT_OPTIMIZATION_FORM_ENABLED,
+  AGENT_OPTIMIZATIONS_ENABLED,
+  AGENT_OVERVIEW_ENABLED,
+  OPTIMIZER_ENABLED,
+} from '@studio/constants/environment';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { CreateDeploymentModal } from '@studio/routes/agents/AgentDeploymentsListRoute/CreateDeploymentModal';
+import { AgentDetailCTAs } from '@studio/routes/agents/AgentDetailRoute/AgentDetailCTAs';
+import {
+  BuildThenDeploy,
+  type PendingImageBuild,
+} from '@studio/routes/agents/AgentDetailRoute/BuildThenDeploy';
 import { ChatPlaygroundContent } from '@studio/routes/agents/AgentDetailRoute/ChatPlaygroundContent';
 import { DeploymentLogsView } from '@studio/routes/agents/AgentDetailRoute/DeploymentLogsView';
 import { DeploymentsTab } from '@studio/routes/agents/AgentDetailRoute/DeploymentsTab';
 import { DetailsTab } from '@studio/routes/agents/AgentDetailRoute/DetailsTab';
 import { EvaluationsTab } from '@studio/routes/agents/AgentDetailRoute/EvaluationsTab';
+import { shortRevision } from '@studio/routes/agents/AgentDetailRoute/helpers';
+import { InsightsTab } from '@studio/routes/agents/AgentDetailRoute/InsightsTab';
+import { LaunchOptimizeModal } from '@studio/routes/agents/AgentDetailRoute/optimizations/LaunchOptimizeModal';
+import { OptimizationsTab } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationsTab';
 import { OverviewTab } from '@studio/routes/agents/AgentDetailRoute/OverviewTab';
+import { SOURCE_PANEL_ID } from '@studio/routes/agents/AgentDetailRoute/SourcePanel';
+import {
+  ACTION_SEARCH_PARAM,
+  type AgentDetailTab,
+  DEFAULT_TAB,
+  isAgentDetailTab,
+  isOptimizationView,
+  OptimizationView,
+  TAB_SEARCH_PARAM,
+  VIEW_SEARCH_PARAM,
+} from '@studio/routes/agents/AgentDetailRoute/tabs';
 import { useAgentDetails } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
 import { deriveWalkthroughStep } from '@studio/routes/agents/AgentDetailRoute/walkthrough';
 import { WalkthroughCoachmarks } from '@studio/routes/agents/AgentDetailRoute/WalkthroughCoachmarks';
@@ -36,31 +65,22 @@ import {
   clearAgentWalkthroughPending,
   isAgentWalkthroughPending,
 } from '@studio/routes/agents/AgentDetailRoute/walkthroughStorage';
-import { getAgentsListRoute, getIntakeTracesRoute } from '@studio/routes/utils';
-import { ClipboardCheck, Dot, ListTree, Rocket } from 'lucide-react';
-import { type FC, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router';
-
-const TAB_SEARCH_PARAM = 'tab';
-const DETAIL_TABS = ['overview', 'deployments', 'logs', 'chat', 'evaluations', 'details'] as const;
-const DEFAULT_TAB = AGENT_OVERVIEW_ENABLED ? 'overview' : 'deployments';
-
-type AgentDetailTab = (typeof DETAIL_TABS)[number];
-
-const isAgentDetailTab = (value: string | null): value is AgentDetailTab =>
-  !!value &&
-  DETAIL_TABS.includes(value as AgentDetailTab) &&
-  (value !== 'overview' || AGENT_OVERVIEW_ENABLED);
+import { NewAgentModal } from '@studio/routes/agents/AgentsListRoute/NewAgentModal';
+import { getAgentRunEvaluationRoute, getAgentsListRoute } from '@studio/routes/utils';
+import { GitCommitHorizontal } from 'lucide-react';
+import { type FC, useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 
 export const AgentDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
-  const navigate = useNavigate();
   const { [ROUTE_PARAMS.agentName]: agentName } = useParams<{ agentName: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedDeploymentName, setSelectedDeploymentName] = useState<string | undefined>();
   const [logsDeploymentName, setLogsDeploymentName] = useState<string | undefined>();
   const [createDeploymentOpen, setCreateDeploymentOpen] = useState(false);
-  const [submitEvalOpen, setSubmitEvalOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [importTracesOpen, setImportTracesOpen] = useState(false);
+  const [launchOptimizeOpen, setLaunchOptimizeOpen] = useState(false);
   const [deleteDeploymentTarget, setDeleteDeploymentTarget] = useState<AgentDeployment | null>(
     null
   );
@@ -71,9 +91,19 @@ export const AgentDetailRoute: FC = () => {
   const [walkthroughDismissed, setWalkthroughDismissed] = useState(false);
   const tabFromUrl = searchParams.get(TAB_SEARCH_PARAM);
   const selectedTab: AgentDetailTab = isAgentDetailTab(tabFromUrl) ? tabFromUrl : DEFAULT_TAB;
+  const viewFromUrl = searchParams.get(VIEW_SEARCH_PARAM);
+  // Without the form flag there is nothing to create in the tab, so it only ever shows the table.
+  const optimizationView: OptimizationView =
+    AGENT_OPTIMIZATION_FORM_ENABLED && isOptimizationView(viewFromUrl)
+      ? viewFromUrl
+      : OptimizationView.Table;
+  const isCreatingOptimization =
+    selectedTab === 'optimizations' && optimizationView !== OptimizationView.Table;
 
   const {
     agent,
+    isAgentLoading,
+    isAgentPending,
     agentDeployments,
     agentEvals,
     isAgentEvalsPending,
@@ -84,6 +114,8 @@ export const AgentDetailRoute: FC = () => {
     isDeploying,
     isDeploymentsLoading,
   } = useAgentDetails({ workspace, agentName, selectedDeploymentName });
+  const { data: specFileset } = useAgentSpecFileset(workspace, agentName);
+  const specSource = agentSpecSource(specFileset);
 
   useBreadcrumbs({
     items: [
@@ -115,6 +147,18 @@ export const AgentDetailRoute: FC = () => {
     setSearchParams({ [TAB_SEARCH_PARAM]: tab }, { replace: true });
   };
 
+  const setOptimizationView = (view: OptimizationView) => {
+    const params = new URLSearchParams({ [TAB_SEARCH_PARAM]: 'optimizations' });
+    if (view !== OptimizationView.Table) params.set(VIEW_SEARCH_PARAM, view);
+    setSearchParams(params);
+  };
+
+  // The in-tab flow is still behind its own flag; until it ships, Optimize opens the launch modal.
+  const openOptimize = () =>
+    AGENT_OPTIMIZATION_FORM_ENABLED
+      ? setOptimizationView(OptimizationView.Strategy)
+      : setLaunchOptimizeOpen(true);
+
   const switchToChat = (deployment: AgentDeployment) => {
     setSelectedDeploymentName(deployment.name);
     setSelectedTab('chat');
@@ -126,9 +170,82 @@ export const AgentDetailRoute: FC = () => {
   };
 
   const modelNames = getAgentModelNames(agent?.config);
-  const canDeploy = !!agent?.config;
+  const canDeploy = hasAgentConfig(agent?.config);
+  // An agent with no config has nothing to deploy; the same buttons upload one instead.
+  const onDeploy = () => (canDeploy ? setCreateDeploymentOpen(true) : setUploadOpen(true));
+  // Narrower than canDeploy: NAT workflows package from a source checkout.
+  const canPackage = agent?.config_format === FABRIC_CONFIG_FORMAT;
+  // Survives closing the deploy modal, but not a change of agent: the route is
+  // reused across agentName, so an unscoped tag would deploy one agent's image
+  // under another's name.
+  const [builtImage, setBuiltImage] = useState<{ agent: string; image: string } | undefined>();
+  const builtImageForAgent = builtImage?.agent === agentName ? builtImage?.image : undefined;
+  // Stable identity, and a no-op when nothing changed: the panel reports the tag
+  // from an effect keyed on this callback, so a new closure or a new object here
+  // re-runs it forever.
+  const rememberBuiltImage = useCallback(
+    (image: string) => {
+      setBuiltImage((current) =>
+        current?.agent === agentName && current?.image === image
+          ? current
+          : { agent: agentName ?? '', image }
+      );
+    },
+    [agentName]
+  );
+
+  // Scoped like builtImage: the route is reused across agents.
+  const [pendingBuild, setPendingBuild] = useState<
+    { agent: string; build: PendingImageBuild } | undefined
+  >();
+  const pendingBuildForAgent = pendingBuild?.agent === agentName ? pendingBuild?.build : undefined;
+  const reportPendingBuild = useCallback(
+    (build: PendingImageBuild | null) =>
+      setPendingBuild(build && agentName ? { agent: agentName, build } : undefined),
+    [agentName]
+  );
 
   const canRunEvaluation = !!agentName && canDeploy;
+  const navigate = useNavigate();
+  const runEvaluation = () => {
+    if (agentName) navigate(getAgentRunEvaluationRoute(workspace, agentName));
+  };
+
+  const actionFromUrl = searchParams.get(ACTION_SEARCH_PARAM);
+  // Waits for the agent query to settle so the modal is gated on a real agent, then strips the
+  // param either way: a link that cannot open its modal still lands on its tab. `isPending`, not
+  // `isLoading`: a paused retry (hidden tab, offline) is not loading, but has not settled either.
+  useEffect(() => {
+    if (!actionFromUrl || isAgentPending) return;
+    if (actionFromUrl === 'run-evaluation' && canRunEvaluation && agentName) {
+      navigate(getAgentRunEvaluationRoute(workspace, agentName), { replace: true });
+      return;
+    }
+    const optimizeRequested =
+      actionFromUrl === 'optimize' && AGENT_OPTIMIZATIONS_ENABLED && !!agent;
+    if (optimizeRequested && !AGENT_OPTIMIZATION_FORM_ENABLED) setLaunchOptimizeOpen(true);
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete(ACTION_SEARCH_PARAM);
+        if (optimizeRequested && AGENT_OPTIMIZATION_FORM_ENABLED) {
+          next.set(TAB_SEARCH_PARAM, 'optimizations');
+          next.set(VIEW_SEARCH_PARAM, 'strategy');
+        }
+        return next;
+      },
+      { replace: true }
+    );
+  }, [
+    actionFromUrl,
+    isAgentPending,
+    agent,
+    setSearchParams,
+    canRunEvaluation,
+    agentName,
+    workspace,
+    navigate,
+  ]);
 
   const status = healthyDeployments.length > 0 ? 'running' : agentDeployments[0]?.status;
   const statusPillLabel =
@@ -150,53 +267,38 @@ export const AgentDetailRoute: FC = () => {
         <PageHeader
           className="shrink-0 p-0"
           slotHeading={
-            <Stack gap="1">
-              <Flex align="baseline" gap="3">
-                <Text kind="title/md">{agent?.name ?? agentName ?? 'Agent details'}</Text>
-                <StatusBadge status={status} label={statusPillLabel} />
-              </Flex>
-              <Flex align="center" gap="1">
-                <Text kind="body/regular/sm" className="text-secondary">
-                  {modelNames.join(', ')}
-                </Text>
-                {agent?.description && (
-                  <>
-                    <Dot className="size-2" aria-hidden />
-                    <Text kind="body/regular/sm" className="text-secondary">
-                      {agent.description}
-                    </Text>
-                  </>
-                )}
-              </Flex>
-            </Stack>
+            <Flex align="baseline" gap="3">
+              <Text kind="title/md">{agent?.name ?? agentName ?? 'Agent details'}</Text>
+              <StatusBadge status={status} label={statusPillLabel} />
+              {specSource ? (
+                <Link
+                  to={{ search: `?${TAB_SEARCH_PARAM}=details`, hash: `#${SOURCE_PANEL_ID}` }}
+                  className="contents"
+                  aria-label={`Source: ${specSource.repository} at ${specSource.revision}`}
+                >
+                  <Badge kind="solid" color="gray" className="cursor-pointer">
+                    <GitCommitHorizontal size={12} aria-hidden />
+                    {shortRevision(specSource.revision)}
+                  </Badge>
+                </Link>
+              ) : null}
+            </Flex>
           }
           slotActions={
-            <Flex gap="2" wrap="wrap" justify="end">
-              {INTAKE_ENABLED && (
-                <Button kind="secondary" onClick={() => navigate(getIntakeTracesRoute(workspace))}>
-                  <ListTree className="size-4" aria-hidden />
-                  Open traces
-                </Button>
-              )}
-              <Button
-                kind="secondary"
-                onClick={() => setSubmitEvalOpen(true)}
-                disabled={!canRunEvaluation}
-              >
-                <ClipboardCheck className="size-4" aria-hidden />
-                Run evaluation
-              </Button>
-              <div ref={deployButtonRef}>
-                <Button
-                  color="brand"
-                  onClick={() => setCreateDeploymentOpen(true)}
-                  disabled={!agentName || !canDeploy || isDeploying}
-                >
-                  <Rocket className="size-4" aria-hidden />
-                  {isDeploying ? 'Deploying...' : 'Deploy'}
-                </Button>
-              </div>
-            </Flex>
+            <AgentDetailCTAs
+              tab={selectedTab}
+              agentName={agentName}
+              canDeploy={canDeploy}
+              isAgentPending={isAgentPending}
+              canRunEvaluation={canRunEvaluation}
+              isDeploying={isDeploying}
+              canOptimize={!isCreatingOptimization}
+              deployButtonRef={deployButtonRef}
+              onDeploy={onDeploy}
+              onRunEvaluation={runEvaluation}
+              onOptimize={openOptimize}
+              onImportTraces={() => setImportTracesOpen(true)}
+            />
           }
         ></PageHeader>
 
@@ -213,6 +315,10 @@ export const AgentDetailRoute: FC = () => {
             <TabsTrigger value="logs">Logs</TabsTrigger>
             <TabsTrigger value="chat">Chat</TabsTrigger>
             <TabsTrigger value="evaluations">Evaluations</TabsTrigger>
+            {AGENT_OPTIMIZATIONS_ENABLED && (
+              <TabsTrigger value="optimizations">Optimizations</TabsTrigger>
+            )}
+            {OPTIMIZER_ENABLED && <TabsTrigger value="insights">Insights</TabsTrigger>}
             <TabsTrigger value="details">Details</TabsTrigger>
           </TabsList>
 
@@ -225,7 +331,7 @@ export const AgentDetailRoute: FC = () => {
                 evals={agentEvals}
                 isEvalsPending={isAgentEvalsPending}
                 onRunAgent={() => setSelectedTab('chat')}
-                onRunEvaluation={canRunEvaluation ? () => setSubmitEvalOpen(true) : undefined}
+                onRunEvaluation={canRunEvaluation ? runEvaluation : undefined}
               />
             </TabsContent>
           )}
@@ -239,17 +345,48 @@ export const AgentDetailRoute: FC = () => {
             />
           </TabsContent>
 
+          {AGENT_OPTIMIZATIONS_ENABLED && (
+            <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="optimizations">
+              <OptimizationsTab
+                agentName={agentName}
+                evals={agentEvals}
+                isEvalsPending={isAgentEvalsPending}
+                view={optimizationView}
+                onOptimize={openOptimize}
+                onViewChange={setOptimizationView}
+                onUploadConfig={() => setLaunchOptimizeOpen(true)}
+              />
+            </TabsContent>
+          )}
+
+          {OPTIMIZER_ENABLED && (
+            <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="insights">
+              <InsightsTab workspace={workspace} agentName={agentName} agent={agent} />
+            </TabsContent>
+          )}
+
           <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="deployments">
             <DeploymentsTab
               agentName={agentName}
               deployments={agentDeployments}
               isDeploymentsLoading={isDeploymentsLoading}
               isDeploying={isDeploying}
-              onDeploy={() => setCreateDeploymentOpen(true)}
+              onDeploy={onDeploy}
               onChat={switchToChat}
               onDelete={setDeleteDeploymentTarget}
               onViewLogs={viewLogs}
               canDeploy={canDeploy}
+              isAgentPending={isAgentPending}
+              specSource={specSource}
+              workspace={workspace}
+              canPackage={canPackage}
+              isAgentLoading={isAgentLoading}
+              onImageBuilt={(image) => {
+                rememberBuiltImage(image);
+                setCreateDeploymentOpen(true);
+              }}
+              onImageAvailable={rememberBuiltImage}
+              pendingBuild={pendingBuildForAgent}
             />
           </TabsContent>
 
@@ -273,8 +410,9 @@ export const AgentDetailRoute: FC = () => {
                 isDeploying={isDeploying}
                 chatAreaRef={chatAreaRef}
                 onSelectDeployment={setSelectedDeploymentName}
-                onDeploy={() => setCreateDeploymentOpen(true)}
+                onDeploy={onDeploy}
                 canDeploy={canDeploy}
+                isAgentPending={isAgentPending}
               />
             </div>
           </TabsContent>
@@ -284,18 +422,46 @@ export const AgentDetailRoute: FC = () => {
           </TabsContent>
         </TabsRoot>
       </Stack>
-      <SubmitEvaluationModal
-        open={submitEvalOpen}
-        onClose={() => setSubmitEvalOpen(false)}
-        workspace={workspace}
-        agent={agentName}
-      />
+      {agentName && importTracesOpen && (
+        <ImportTracesModal
+          open
+          onClose={() => setImportTracesOpen(false)}
+          workspace={workspace}
+          agent={agentName}
+        />
+      )}
+      {agentName && launchOptimizeOpen && (
+        <LaunchOptimizeModal
+          open
+          onClose={() => setLaunchOptimizeOpen(false)}
+          workspace={workspace}
+          agentName={agentName}
+        />
+      )}
+      {agentName && AGENT_CONTAINER_DEPLOYMENTS_ENABLED ? (
+        <BuildThenDeploy
+          key={agentName}
+          workspace={workspace}
+          agentName={agentName}
+          onPendingChange={reportPendingBuild}
+        />
+      ) : null}
       {createDeploymentOpen && (
         <CreateDeploymentModal
           open
           agent={agentName}
           workspace={workspace}
+          initialImage={builtImageForAgent}
           onClose={() => setCreateDeploymentOpen(false)}
+        />
+      )}
+      {uploadOpen && agentName && (
+        <NewAgentModal
+          open
+          workspace={workspace}
+          // Names are unique and an agent cannot be replaced, so the upload needs a fresh one.
+          initialName={`${agentName}-v2`}
+          onClose={() => setUploadOpen(false)}
         />
       )}
       <WalkthroughCoachmarks

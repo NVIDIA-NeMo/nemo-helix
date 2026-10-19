@@ -14,8 +14,6 @@
  * we do not import React.
  *
  * Usage in MDX:
- *   import { Button } from "@/components/Button";
- *
  *   <Button href="/foo">Open the foo guide</Button>
  *   <Button href="/foo" variant="primary">Primary CTA</Button>
  *

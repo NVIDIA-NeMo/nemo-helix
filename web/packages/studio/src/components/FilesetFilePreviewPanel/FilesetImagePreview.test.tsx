@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import * as platformApi from '@nemo/sdk/generated/platform/api';
+import * as platformApi from '@nemo/sdk/generated/platform/files';
 import { FilesetImagePreview } from '@studio/components/FilesetFilePreviewPanel/FilesetImagePreview';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { fireEvent, render, screen } from '@testing-library/react';
 
-vi.mock('@nemo/sdk/generated/platform/api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@nemo/sdk/generated/platform/api')>();
+vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@nemo/sdk/generated/platform/files')>();
   return { ...actual, useFilesDownloadFile: vi.fn() };
 });
 

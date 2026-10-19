@@ -10,7 +10,7 @@ import { FilesetFileUploadError } from '@nemo/common/src/datasets/constants';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
-import { useFilesUpdateFilesetMetadata } from '@nemo/sdk/generated/platform/api';
+import { useFilesUpdateFilesetMetadata } from '@nemo/sdk/generated/platform/files';
 import { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Select, Stack } from '@nvidia/foundations-react-core';
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';

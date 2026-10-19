@@ -4,7 +4,7 @@
 """
 Integration smoke test for NeMo MCP server.
 
-Creates and tests an MCP server instance that is connected to a running NeMo Platform instance.
+Creates and tests an MCP server instance that is connected to a running NeMo Helix instance.
 """
 
 from __future__ import annotations
@@ -15,30 +15,27 @@ from typing import Any, Generator
 import pytest
 from fastmcp import FastMCP
 from mcp.types import TextContent
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nmp.common.sdk_factory import get_platform_sdk
-from nmp.core.mcp.server import create_server
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nhx.core.mcp.server import create_server
 
 
 @pytest.fixture(scope="module")
-def nmp_base_url() -> str:
-    """Get NeMo Platform base URL from environment or use default."""
-    return os.environ.get("NMP_BASE_URL", "http://localhost:8080")
+def nhx_base_url() -> str:
+    """Get NeMo Helix base URL from environment or use default."""
+    return os.environ.get("NHX_BASE_URL", "http://localhost:8080")
 
 
 @pytest.fixture(scope="module")
-def nemo_sdk(nmp_base_url: str) -> Generator[NeMoPlatform, None, None]:
-    """Create NeMo SDK client for direct API validation."""
-    client = get_platform_sdk(base_url=nmp_base_url)
-    yield client
+def workspaces_client(nhx_base_url: str) -> Generator[WorkspacesClient, None, None]:
+    """Typed workspaces client for direct API validation."""
+    with WorkspacesClient(base_url=nhx_base_url) as client:
+        yield client
 
 
 @pytest.fixture(scope="module")
-def mcp_server(nmp_base_url: str) -> Generator[FastMCP, None, None]:
+def mcp_server(nhx_base_url: str) -> Generator[FastMCP, None, None]:
     """Create MCP server instance."""
-    server = create_server(nmp_base_url)
+    server = create_server(nhx_base_url)
     yield server
 
 
@@ -51,10 +48,10 @@ def _text_content(tool_result: Any) -> str:
 class TestMCPServerSmoke:
     """Smoke tests for MCP server basic functionality."""
 
-    def test_nmp_connection(self, nemo_sdk: NeMoPlatform) -> None:
-        """Verify we can connect to NeMo Platform instance."""
-        # This will raise if NeMo Platform is not accessible
-        response = client_from_platform(nemo_sdk, WorkspacesClient).list_workspaces()
+    def test_nhx_connection(self, workspaces_client: WorkspacesClient) -> None:
+        """Verify we can connect to NeMo Helix instance."""
+        # This will raise if NeMo Helix is not accessible
+        response = workspaces_client.list_workspaces()
         assert response is not None
         assert response.page().items is not None
 
@@ -70,18 +67,18 @@ class TestMCPServerSmoke:
         assert "list_workspaces" in tool_names
 
     @pytest.mark.asyncio
-    async def test_list_workspaces_matches_sdk(self, mcp_server: FastMCP, nemo_sdk: NeMoPlatform) -> None:
+    async def test_list_workspaces_matches_api(self, mcp_server: FastMCP, workspaces_client: WorkspacesClient) -> None:
         """
-        Verify MCP tool returns consistent data with SDK.
+        Verify MCP tool returns consistent data with the API.
 
-        This ensures the MCP server is properly connected to NeMo Platform
+        This ensures the MCP server is properly connected to NeMo Helix
         and returning real data.
         """
         import json
 
         # Get workspaces via SDK
-        sdk_response = client_from_platform(nemo_sdk, WorkspacesClient).list_workspaces()
-        sdk_workspace_ids = {ws.id for ws in sdk_response.items()}
+        api_response = workspaces_client.list_workspaces()
+        api_workspace_ids = {ws.id for ws in api_response.items()}
 
         # Get workspaces via MCP tool
         tool_result = await mcp_server.call_tool("list_workspaces", {})
@@ -92,13 +89,13 @@ class TestMCPServerSmoke:
         # Verify MCP returns same workspace IDs
         mcp_workspace_ids = {ws["id"] for ws in mcp_result["workspaces"]}
 
-        assert sdk_workspace_ids == mcp_workspace_ids, (
-            f"MCP workspaces {mcp_workspace_ids} should match SDK workspaces {sdk_workspace_ids}"
+        assert api_workspace_ids == mcp_workspace_ids, (
+            f"MCP workspaces {mcp_workspace_ids} should match API workspaces {api_workspace_ids}"
         )
 
         # Verify counts match
-        assert mcp_result["total"] == sdk_response.page().metadata["total_results"], (
-            f"MCP total {mcp_result['total']} should match SDK count {sdk_response.page().metadata['total_results']}"
+        assert mcp_result["total"] == api_response.page().metadata["total_results"], (
+            f"MCP total {mcp_result['total']} should match API count {api_response.page().metadata['total_results']}"
         )
 
     @pytest.mark.asyncio
@@ -110,13 +107,13 @@ class TestMCPServerSmoke:
         """
         import json
 
-        import nmp.core.mcp.server as mcp_server_module
-        from nmp.common.mcp import format_error_response
+        import nhx.core.mcp.server as mcp_server_module
+        from nhx.common.mcp import format_error_response
 
         def create_failing_entities_mcp(_base_url: str | None = None) -> FastMCP:
             server = FastMCP("Failing Entities Service")
 
-            @server.tool(description="List workspaces in the NeMo platform")
+            @server.tool(description="List workspaces in the NeMo Helix")
             async def list_workspaces() -> dict[str, object]:
                 try:
                     raise RuntimeError("platform unavailable")

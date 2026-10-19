@@ -4,8 +4,8 @@
 """Auth-proxy sidecar compilation.
 
 A DeploymentConfig with ``auth_proxy_sidecar=True`` gets a loopback auth-proxy
-sidecar injected: the nmp-api image running ``nemo services run --sidecars
-auth-proxy``, which stamps ``X-NMP-Principal-Id: service:<identity>`` on the
+sidecar injected: the nhx-api image running ``nemo services run --sidecars
+auth-proxy``, which stamps ``X-NHX-Principal-Id: service:<identity>`` on the
 workload's platform calls. The workload targets the proxy on localhost.
 
 Injection is a no-op when platform auth is disabled — the workload's calls are
@@ -26,18 +26,21 @@ from nemo_deployments_plugin.entities import (
     Probe,
     RestartPolicy,
 )
-from nemo_platform_plugin.auth import platform_auth_enabled
-from nemo_platform_plugin.config import LOOPBACK_ADDRESSES, get_nemo_config
-from nemo_platform_plugin.jobs.image import get_qualified_image
+from nemo_helix_plugin.auth import platform_auth_enabled
+from nemo_helix_plugin.config import LOOPBACK_ADDRESSES, get_nemo_config
+from nemo_helix_plugin.jobs.image import get_qualified_image
 
 logger = logging.getLogger(__name__)
 
 AUTH_PROXY_CONTAINER_NAME = "auth-proxy"
 _NATIVE_SIDECAR_RESTART_POLICY: RestartPolicy = "Always"
-_AUTH_PROXY_PRINCIPAL_ENVVAR = "NMP_AUTH_PROXY_PRINCIPAL"
-_AUTH_PROXY_ON_BEHALF_OF_ENVVAR = "NMP_AUTH_PROXY_ON_BEHALF_OF"
-_AUTH_PROXY_HOST_ENVVAR = "NMP_AUTH_PROXY_HOST"
-_AUTH_PROXY_PORT_ENVVAR = "NMP_AUTH_PROXY_PORT"
+_AUTH_PROXY_PRINCIPAL_ENVVAR = "NHX_AUTH_PROXY_PRINCIPAL"
+_AUTH_PROXY_ON_BEHALF_OF_ENVVAR = "NHX_AUTH_PROXY_ON_BEHALF_OF"
+_AUTH_PROXY_HOST_ENVVAR = "NHX_AUTH_PROXY_HOST"
+_AUTH_PROXY_PORT_ENVVAR = "NHX_AUTH_PROXY_PORT"
+_AUTH_PROXY_STATE_HOME_ENVVAR = "XDG_STATE_HOME"
+_AUTH_PROXY_DATA_DIR_ENVVAR = "NHX_DATA_DIR"
+_AUTH_PROXY_COMMAND = ["nemo", "services", "run", "--sidecars", "auth-proxy"]
 
 
 def auth_proxy_port() -> int:
@@ -53,7 +56,7 @@ def _upstream_base_url(*, docker: bool) -> str:
     the same way jobs do. In k8s the base URL is the in-cluster Service DNS and is
     used verbatim.
     """
-    from nemo_platform_plugin.config import determine_loopback_override, get_platform_config
+    from nemo_helix_plugin.config import determine_loopback_override, get_platform_config
 
     base_url = get_platform_config().base_url.rstrip("/")
     if not docker:
@@ -90,10 +93,17 @@ def build_auth_proxy_container(config: DeploymentConfig, *, docker: bool = False
     image = deployments_config.auth_proxy_image or get_qualified_image(deployments_config.auth_proxy_image_name)
 
     env = [
-        EnvVar(name="NMP_BASE_URL", value=_upstream_base_url(docker=docker)),
+        EnvVar(name="NHX_BASE_URL", value=_upstream_base_url(docker=docker)),
         EnvVar(name=_AUTH_PROXY_PRINCIPAL_ENVVAR, value=identity),
         EnvVar(name=_AUTH_PROXY_HOST_ENVVAR, value="127.0.0.1"),
         EnvVar(name=_AUTH_PROXY_PORT_ENVVAR, value=str(port)),
+        # OpenShift runs workloads with an arbitrary UID that cannot write the
+        # image-owned /home/nvs directory. ``nemo services run`` persists its
+        # process lock and descriptor under XDG_STATE_HOME, so keep that
+        # ephemeral state in the universally writable container /tmp instead.
+        EnvVar(name=_AUTH_PROXY_STATE_HOME_ENVVAR, value="/tmp"),
+        # Same reason: keep the default data dir off the image-owned home.
+        EnvVar(name=_AUTH_PROXY_DATA_DIR_ENVVAR, value="/tmp/nhx-data"),
     ]
     if on_behalf_of:
         env.append(EnvVar(name=_AUTH_PROXY_ON_BEHALF_OF_ENVVAR, value=on_behalf_of))
@@ -101,7 +111,7 @@ def build_auth_proxy_container(config: DeploymentConfig, *, docker: bool = False
     return Container(
         name=AUTH_PROXY_CONTAINER_NAME,
         image=image,
-        command=["nemo", "services", "run", "--sidecars", "auth-proxy"],
+        command=list(_AUTH_PROXY_COMMAND),
         env=env,
     ).model_copy(
         update={
@@ -115,4 +125,14 @@ def build_auth_proxy_container(config: DeploymentConfig, *, docker: bool = False
                 failureThreshold=12,
             ),
         }
+    )
+
+
+def is_auth_proxy_container(container: Container) -> bool:
+    """Return whether a compiled container is the platform auth-proxy sidecar."""
+    env_names = {env.name for env in container.env}
+    return (
+        container.name == AUTH_PROXY_CONTAINER_NAME
+        and container.command == _AUTH_PROXY_COMMAND
+        and _AUTH_PROXY_PRINCIPAL_ENVVAR in env_names
     )

@@ -1,21 +1,24 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { StatTile, type StatTileProps } from '@nemo/common/src/components/StatTile';
+import { StatTile, type StatTileDiagnosticProps } from '@nemo/common/src/components/StatTile';
+import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Flex, Grid, Panel, Stack, Text } from '@nvidia/foundations-react-core';
 import { TrainValidationLossLineChart } from '@studio/components/charts/TrainValidationLossLineChart';
 import type { CustomizationMetricValue } from '@studio/types/customization';
 import type { FC } from 'react';
 
 interface Props {
+  jobStatus?: HelixJobStatus;
   trainLoss?: CustomizationMetricValue[];
   valLoss?: CustomizationMetricValue[];
   maxSteps: number;
-  metrics: StatTileProps[];
-  progress: StatTileProps[];
+  metrics: StatTileDiagnosticProps[];
+  progress: StatTileDiagnosticProps[];
 }
 
 export const TrainingLossPanel: FC<Props> = ({
+  jobStatus,
   trainLoss,
   valLoss,
   maxSteps,
@@ -49,6 +52,7 @@ export const TrainingLossPanel: FC<Props> = ({
             )}
           </Flex>
           <TrainValidationLossLineChart
+            jobStatus={jobStatus}
             trainLoss={trainLoss}
             valLoss={valLoss}
             attributes={{ XAxis: { domain: ['dataMin', maxSteps] } }}

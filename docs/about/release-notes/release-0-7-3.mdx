@@ -1,0 +1,42 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "v0.7.3 - 2026-10-16"
+description: ""
+---
+NeMo Helix v0.7.3 is a patch release for the 0.7 release line that helps existing
+Helm installations preserve embedded PostgreSQL storage metadata during
+upgrades. It also includes the deployment readiness fixes in
+[v0.7.2](/documentation/reference/release-notes/release-0-7-2).
+
+## What's fixed
+
+- **Preserve PostgreSQL claim-template labels.** The Helm chart adds
+  `postgresql.persistence.claimTemplateLabels` so older installations can
+  retain the exact labels on the embedded PostgreSQL StatefulSet's `data`
+  volume claim template. This avoids upgrade failures caused by changes to
+  immutable claim-template labels. The default `{}` preserves existing chart
+  behavior; operators must supply their existing labels when needed.
+
+## Upgrade from v0.7.2
+
+If you use embedded PostgreSQL, copy the complete label map from the existing
+StatefulSet's `data` claim template into
+`postgresql.persistence.claimTemplateLabels` before upgrading. Keep those exact
+values on subsequent upgrades, including old chart and application version
+labels. This setting only addresses claim-template labels; preserve existing
+release and resource names, storage configuration, and the secrets encryption
+key and its Secret reference as well. See
+[Database Setup](/documentation/kubernetes-deployment/setup/helm/database-setup#preserve-embedded-postgresql-claim-template-labels-on-upgrade).
+
+## Known issues
+
+- **DPO jobs fail before the first training step with `KeyError: 'checkpoint'`.**
+  The generated DPO configuration still omits the
+  `policy.dtensor_cfg.checkpoint` section required by the pinned NeMo-RL
+  version. There is no workaround in the 0.7 release line. DPO jobs run on
+  v0.6.0; GRPO jobs are not affected. See
+  [Customizer troubleshooting](/documentation/reference/troubleshooting/customizer).
+- **Hermes trials can omit the `relay_atif` evidence descriptor.** Use the
+  `trace:atif` descriptor instead; it points at the same ATIF file.

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for nmp-automodel training error handling.
+"""Tests for nhx-automodel training error handling.
 
 Maps Automodel runtime exceptions to user-facing error types via error_rules.yaml.
 See services/automodel/docs/automodel_errors.md for the full error catalog.
@@ -9,7 +9,7 @@ See services/automodel/docs/automodel_errors.md for the full error catalog.
 
 import subprocess
 
-from nmp.automodel.tasks.training.errors.converter import create_error_details, get_error_converter
+from nhx.automodel.tasks.training.errors.converter import create_error_details, get_error_converter
 
 
 class TestGetErrorConverter:

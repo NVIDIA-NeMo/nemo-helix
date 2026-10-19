@@ -18,9 +18,9 @@ const NewCustomizationRoute = lazy(() =>
     default: module.NewCustomizationRoute,
   }))
 );
-const PromptTuningFormRoute = lazy(() =>
-  import('@studio/routes/PromptTuningFormRoute/index').then((module) => ({
-    default: module.PromptTuningFormRoute,
+const NewCustomizationFormRoute = lazy(() =>
+  import('@studio/routes/NewCustomizationFormRoute/index').then((module) => ({
+    default: module.NewCustomizationFormRoute,
   }))
 );
 const CustomizationJobListRoute = lazy(() =>
@@ -38,22 +38,22 @@ export const customizationRoutes: RouteObject[] = gateCustomizationRoutes([
   {
     path: ROUTES.workspace.newCustomizationJob,
     element: <NewCustomizationRoute />,
-    errorElement: <RouteErrorPanel title="Customizer" />,
+    errorElement: <RouteErrorPanel title="Fine-tuning" />,
   },
   {
-    path: ROUTES.workspace.promptTuningForm,
-    element: <PromptTuningFormRoute />,
-    errorElement: <RouteErrorPanel title="Customizer" />,
+    path: ROUTES.workspace.newCustomizationJobScratch,
+    element: <NewCustomizationFormRoute />,
+    errorElement: <RouteErrorPanel title="Fine-tuning" />,
   },
   {
     path: ROUTES.workspace.customizationJobList,
     element: <CustomizationJobListRoute />,
-    errorElement: <RouteErrorPanel title="Customizer" />,
+    errorElement: <RouteErrorPanel title="Fine-tuning" />,
   },
   {
     path: ROUTES.workspace.customizationJobDetails,
     element: <CustomizationJobDetailsRoute />,
-    errorElement: <RouteErrorPanel title="Customizer" />,
+    errorElement: <RouteErrorPanel title="Fine-tuning" />,
   },
 ]);
 
@@ -65,7 +65,7 @@ export const getCustomizationSideNavItems = (workspace: string) =>
         {
           id: 'custom-models',
           slotIcon: <NavIcon className={iconColorClass} />,
-          slotLabel: 'Fine-tune',
+          slotLabel: 'Fine-tuning',
           href: getWorkspaceCustomizationJobListRoute(workspace),
         },
       ]

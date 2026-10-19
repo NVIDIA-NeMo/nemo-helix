@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [project]
-name = "nmp-guardrails"
+name = "nhx-guardrails"
 description = "NeMo Guardrails Microservice - programmable guardrails for LLM endpoints"
 readme = "README.md"
 authors = [{ name = "NVIDIA", email = "nemoguardrails@nvidia.com" }]
@@ -23,7 +23,7 @@ classifiers = [
 ]
 
 dependencies = [
-  # API server dependencies (for nmp-api/nmp-core containers)
+  # API server dependencies (for nhx-api/nhx-core containers)
   # Guardrails has no separate task containers - all deps are API deps
   "fastapi>=0.109.0",
   "fsspec>=2024.10.0",
@@ -40,7 +40,7 @@ dependencies = [
   "gunicorn>=23.0.0",
   "langchain-openai>=1.3.5,<2.0.0",
   "langchain-nvidia-ai-endpoints>=1.4.3,<2.0.0",
-  "nmp-common",
+  "nhx-common",
   "yara-python==4.5.1",
   "alembic>=1.10.4,<2.0.0",
   "opentelemetry-sdk>=1.27.0,<2.0.0",
@@ -50,7 +50,7 @@ dependencies = [
 version = "0.0.0"
 
 [project.scripts]
-guardrails-server = "nmp.guardrails.main:run_standalone"
+guardrails-server = "nhx.guardrails.main:run_standalone"
 
 [tool.pytest.ini_options]
 # testpaths = ["tests"]  # Commented to prevent namespace collision with root pytest
@@ -59,7 +59,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 
 [tool.uv.sources]
-nmp-common = { workspace = true }
+nhx-common = { workspace = true }
 
 
 [dependency-groups]
@@ -73,8 +73,8 @@ dev = [
   "pytest>=8.3.3",
   "pytest-mock>=3.14.1",
   "pytest-httpserver>=1.0.0",
-  "nmp-testing",
-  "nmp-platform-seed",
+  "nhx-testing",
+  "nhx-platform-seed",
 ]
 
 [build-system]
@@ -82,4 +82,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nmp"]
+packages = ["src/nhx"]

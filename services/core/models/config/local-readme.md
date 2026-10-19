@@ -6,18 +6,18 @@ In this instance, running locally means running models + IGW via `uv run`, rathe
 
 ## Setup deps
 ```bash
-cd nmp
+cd nhx
 docker compose --env-file services/core/infrastructure/models/config/local.env \
   -f deploy/quickstart/external/docker-compose.yaml \
   -f services/core/infrastructure/models/config/local-compose.yaml \
-  up nmp-core
+  up nhx-core
 ```
-This will spin up all the deps of `nmp-core`, but then will make the actual `nmp-core` docker container exit.
+This will spin up all the deps of `nhx-core`, but then will make the actual `nhx-core` docker container exit.
 This is done purposefully so we can then run the server ourselves.
 
 ## Run the server
 
 ```bash
 export ENVFILE="services/core/models/config/local.env" && \
-  uv run --frozen --env-file "$ENVFILE" nemo-platform run --services entities models inference-gateway --controllers models
+  uv run --frozen --env-file "$ENVFILE" nemo-helix run --services entities models inference-gateway --controllers models
 ```

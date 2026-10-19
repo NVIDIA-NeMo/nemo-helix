@@ -1,26 +1,28 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { EvalJobRow } from '@studio/api/evaluation/utils';
 import { EvaluationsTable } from '@studio/routes/agents/AgentDetailRoute/evaluations/EvaluationsTable';
 import type { AgentEvaluationRow } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
 import { LG_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 
 const makeEval = (overrides: Partial<AgentEvaluationRow> & { name: string }): AgentEvaluationRow =>
   ({
-    experimentName: null,
+    experiments: [],
     created_at: '2024-12-17T16:08:56.880768',
     metadata: {},
     ...overrides,
   }) as AgentEvaluationRow;
 
-const renderTable = (evaluations: AgentEvaluationRow[]) =>
+const renderTable = (evaluations: AgentEvaluationRow[], jobs: EvalJobRow[] = []) =>
   render(
     <TestProviders>
       <MemoryRouter>
-        <EvaluationsTable workspace="default" evaluations={evaluations} jobs={[]} />
+        <EvaluationsTable workspace="default" evaluations={evaluations} jobs={jobs} />
       </MemoryRouter>
     </TestProviders>
   );
@@ -48,5 +50,81 @@ describe('EvaluationsTable Duration column', () => {
     expect(
       (await screen.findAllByText('10m 12s', undefined, { timeout: LG_SELECTOR_TIMEOUT })).length
     ).toBeGreaterThan(0);
+  });
+});
+
+describe('EvaluationsTable Job column', () => {
+  it('links to the generic job detail route, not the evaluation result route', async () => {
+    const job: EvalJobRow = {
+      id: 'job-1',
+      name: 'my-eval-job',
+      status: 'completed',
+      created_at: '2024-12-17T16:08:56.880768',
+      kind: 'dataset',
+      agentName: 'my-agent',
+      configLabel: null,
+      evaluationName: null,
+      outcome: null,
+    };
+    renderTable([], [job]);
+
+    const links = await screen.findAllByRole(
+      'link',
+      { name: 'my-eval-job' },
+      {
+        timeout: LG_SELECTOR_TIMEOUT,
+      }
+    );
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) {
+      expect(link).toHaveAttribute('href', '/workspaces/default/jobs/my-eval-job');
+    }
+  });
+});
+
+describe('EvaluationsTable Scores column', () => {
+  it('shows how many attempts failed to score beside the mean they are counted in', async () => {
+    renderTable([
+      makeEval({
+        name: 'eval-with-failures',
+        aggregate_scores: {
+          'judge.accuracy': { mean: 0.5, count: 4, failed_count: 2 },
+          'exact.match': { mean: 1, count: 4, failed_count: 0 },
+        },
+      }),
+    ]);
+
+    expect(
+      (await screen.findAllByText('(2 failed)', undefined, { timeout: LG_SELECTOR_TIMEOUT })).length
+    ).toBeGreaterThan(0);
+    // A clean evaluator gets no failure note.
+    expect(screen.queryByText('(0 failed)')).not.toBeInTheDocument();
+  });
+
+  it('folds evaluators past the first into a "+N more" chip that lists them on hover', async () => {
+    renderTable([
+      makeEval({
+        name: 'eval-with-many',
+        aggregate_scores: {
+          'judge.accuracy': { mean: 0.5, count: 4, failed_count: 0 },
+          'judge.tone': { mean: 0.7, count: 4, failed_count: 0 },
+          'judge.safety': { mean: 0.9, count: 4, failed_count: 1 },
+          'judge.empathy': { mean: 0.6, count: 4, failed_count: 0 },
+        },
+      }),
+    ]);
+
+    const more = (
+      await screen.findAllByTestId('more-scores', undefined, { timeout: LG_SELECTOR_TIMEOUT })
+    )[0];
+    expect(more).toHaveTextContent('+3 more');
+    expect(more).toHaveTextContent('(1 failed)');
+    expect(screen.queryByText('tone')).not.toBeInTheDocument();
+    expect(screen.queryByText('empathy')).not.toBeInTheDocument();
+
+    await userEvent.hover(more);
+    expect(await screen.findByText(/safety 0\.90 \(1 failed\)/)).toBeInTheDocument();
+    expect(screen.getByText(/tone 0\.70/)).toBeInTheDocument();
+    expect(screen.getByText(/empathy 0\.60/)).toBeInTheDocument();
   });
 });

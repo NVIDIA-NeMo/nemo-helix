@@ -10,7 +10,7 @@ from typing import Any, cast
 
 import pytest
 from fastapi import HTTPException, Request
-from nmp.intake.spans.ingest.otlp import _read_limited_body, _span_to_domain
+from nhx.intake.spans.ingest.otlp import _read_limited_body, _span_to_domain
 
 DEFAULT_TRACE_ID = bytes.fromhex("0" * 31 + "1")
 DEFAULT_SPAN_ID = bytes.fromhex("0000000000000001")

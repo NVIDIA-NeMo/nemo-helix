@@ -6,14 +6,13 @@ import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { KVPair } from '@nemo/common/src/components/KVPair';
 import { formatFileSize } from '@nemo/common/src/components/UploadModal/utils';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import { useFilesRetrieveFileset as useGetDataset } from '@nemo/sdk/generated/platform/api';
+import { useFilesRetrieveFileset as useGetDataset } from '@nemo/sdk/generated/platform/files';
 import {
   Button,
   CodeSnippet,
   Grid,
   Panel,
   SidePanel,
-  Skeleton,
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
@@ -29,7 +28,6 @@ type Row = {
   path: string;
   size: number;
   type: CustomizationFileType;
-  records: number;
   content: string;
 };
 
@@ -46,10 +44,11 @@ export const CustomizationFilesetDetailsPanel = ({ filesetUri }: Props) => {
   });
   const {
     rows,
-    totalRecords,
     isPending: isFilesLoading,
     isFetchingRows,
-  } = useCustomizationFilesAsRows({ fileset: filesetUri });
+  } = useCustomizationFilesAsRows({
+    fileset: filesetUri,
+  });
 
   const loading = isLoading || isFilesLoading;
   const makeColumns: ComponentProps<typeof DataView.Root<Row>>['makeColumns'] = (
@@ -67,21 +66,6 @@ export const CustomizationFilesetDetailsPanel = ({ filesetUri }: Props) => {
       header: 'Files',
       size: 200,
       cell: ({ row }) => <Text>{row.original?.path}</Text>,
-    },
-    {
-      id: 'records',
-      header: 'Records',
-      size: 200,
-      cell: ({ row }) => {
-        const percentage = totalRecords !== 0 ? (row.original?.records / totalRecords) * 100 : 0;
-        return isFetchingRows ? (
-          <Skeleton />
-        ) : (
-          <Text>
-            {row.original?.records} ({Math.round(percentage)}%)
-          </Text>
-        );
-      },
     },
     {
       id: 'size',

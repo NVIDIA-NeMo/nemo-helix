@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useGetSession, useListSpans, useListTraces } from '@nemo/sdk/generated/platform/api';
 import { type Span, SpanStatus, type Trace } from '@nemo/sdk/generated/platform/schema';
+import { useGetSession } from '@nemo/sdk/generated/platform/sessions';
+import { useListSpans } from '@nemo/sdk/generated/platform/spans';
+import { useListTraces } from '@nemo/sdk/generated/platform/traces';
 import { type SessionExplorerData } from '@studio/components/IntakeDetail/TraceSpanAccordions';
 import {
   buildSpanTree,
@@ -95,8 +97,6 @@ export function useSessionTrajectories(workspace: string, sessionId: string) {
       spansLoaded: sessionSpansResponse !== undefined,
       spansError: sessionSpansError,
       isSpansFetching: isSessionSpansFetching,
-      spanPageSize: SESSION_TRACES_PAGE_SIZE,
-      spanTotal: sessionSpansResponse?.pagination?.total_results ?? 0,
     }),
     [isSessionSpansFetching, sessionSpansError, sessionSpansResponse, trajectories]
   );

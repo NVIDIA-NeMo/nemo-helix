@@ -6,7 +6,7 @@ from typing import Any, Literal
 from urllib.parse import quote
 
 from cryptography.fernet import Fernet
-from pydantic import Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Development default when SCALED_EVALS_DATABASE_URL is unset. Matches upstream.
@@ -18,7 +18,6 @@ _STANDALONE_DATABASE_URL = "postgresql://scaled_evals:scaled_evals@localhost:543
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    dispatch_worker_health_url: str = ""
     # scaled-evals owns its own Postgres, so this names it. Deliberately not
     # `DATABASE_URL`: the platform injects that into the same process, and reusing
     # it would run these migrations and claim queues inside the platform database.
@@ -46,33 +45,23 @@ class Settings(BaseSettings):
     api_sse_max_connections: int = 20
     api_sse_max_duration_seconds: float = 3600.0
     api_sse_poll_interval_seconds: float = 1.0
-    s3_endpoint: str = "http://localhost:9000"
-    # Endpoint baked into presigned URLs handed to clients. In the cluster the
-    # API reaches RustFS at an internal address (s3_endpoint), but clients hit a
-    # different hostname; SigV4 binds Host, so the signed URL must use the host
-    # the client actually calls. Falls back to s3_endpoint when unset (prod:
-    # same value).
-    s3_public_endpoint: str | None = None
-    s3_access_key: str = "scaledevals"
-    s3_secret_key: str = "scaledevals-dev-secret"
-    s3_bucket: str = "scaled-evals"
-    # Object-store backend. "s3" covers RustFS, MinIO, AWS S3, and GCS XML API
-    # when HMAC credentials are available. "gcs" uses Google Cloud Storage's
-    # JSON API with Application Default Credentials / Workload Identity.
+    # Platform workspace that owns scaled-evals' Files filesets (artifacts + task packs). All
+    # filesets live here today; scaled-evals keeps owning its own owner_id tenancy + upload
+    # quotas on top of Files. The future entity-owned-workspace model resolves this per-request
+    # in the _files_backend workspace seam instead.
+    files_workspace: str = "default"
+    # Object-store backend selector, retained ONLY for the Cloud Build task-image path, which
+    # reads the uploaded pack from GCS as a build storageSource and requires "gcs". Artifact +
+    # task-pack storage itself now goes through the Files service, not this backend.
     object_store_backend: Literal["s3", "gcs"] = "s3"
-    gcs_bucket: str = ""
-    gcs_api_base_url: str = "https://storage.googleapis.com"
-    # GCS signed URLs use XML API endpoints. They do not require HMAC, but they
-    # do require a service account that the Workload Identity principal can sign
-    # as through IAM Credentials signBlob. When unset, GCS upload falls back to
-    # resumable session URIs.
-    gcs_upload_mode: Literal["auto", "signed_url", "resumable_session"] = "auto"
-    gcs_signing_service_account: str = ""
-    gcs_signed_url_region: str = "auto"
-    gcs_iam_credentials_base_url: str = "https://iamcredentials.googleapis.com"
+    # GCS Workload-Identity token settings, retained for the Cloud Build path's metadata-server
+    # token fetch (see api/build/cloud_build.py).
     gcs_token_url: str = "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token"
     gcs_access_token: str = ""
     gcs_request_timeout_seconds: float = 30.0
+    # GCS bucket the Cloud Build task-image path reads the uploaded pack from (as a build
+    # storageSource). Retained only for that path; artifact/task-pack storage is on Files now.
+    gcs_bucket: str = ""
     # Task-pack upload guardrails. Direct-to-object-store uploads are validated
     # server-side before a revision can enter the ready/building path; oversized
     # objects are deleted as a quarantine/cleanup policy so they cannot be
@@ -83,6 +72,9 @@ class Settings(BaseSettings):
     task_pack_max_members: int = 100_000
     # Guardrails for server-side results.tar.gz creation. These are source
     # object limits; TODO: add tenant/account quotas and compressed-size caps.
+    benchmark_archive_cleanup_interval_seconds: float = Field(default=300.0, gt=0)
+    benchmark_archive_max_files: int = 100_000
+    benchmark_archive_max_source_bytes: int = 10_000_000_000
     evaluation_archive_max_files: int = 10_000
     evaluation_archive_max_source_bytes: int = 1_000_000_000
     # Optional best-effort publication of completed Harbor job directories to
@@ -93,6 +85,14 @@ class Settings(BaseSettings):
     harbor_viewer_upload_token: str = ""
     harbor_viewer_upload_timeout_seconds: float = 30.0
     harbor_viewer_upload_overwrite: bool = True
+    harbor_dataset_image_prepare_timeout_seconds: float = 7200.0
+    harbor_dataset_image_poll_interval_seconds: float = 5.0
+    # Public registries from which dataset-only Harbor tasks may import base
+    # images. This is independent of the destination task-image allowlist.
+    harbor_dataset_upstream_allowed_registries: str = Field(
+        default="docker.io,ghcr.io",
+        validation_alias="HARBOR_DATASET_UPSTREAM_ALLOWED_REGISTRIES",
+    )
     # Disable when the deployment target cannot run the BuildKit daemon. This
     # makes readiness honest and prevents finalize from wedging revisions.
     buildkit_enabled: bool = True
@@ -130,11 +130,12 @@ class Settings(BaseSettings):
     cloud_build_service_account: str = ""
     cloud_build_timeout_seconds: float = 2100.0
     cloud_build_poll_interval_seconds: float = 5.0
-    # A separate durable worker executes queued build jobs. Hosted
-    # deployments set this from buildWorker.enabled so readyz catches a chart
-    # that deploys the API without the worker.
-    build_worker_required: bool = True
-    build_worker_stale_seconds: float = 60.0
+    # Staleness bound for the Platform Jobs controller heartbeat in readyz.
+    # Hosted charts still set the old BUILD_WORKER_STALE_SECONDS name.
+    platform_jobs_controller_stale_seconds: float = Field(
+        default=60.0,
+        validation_alias=AliasChoices("PLATFORM_JOBS_CONTROLLER_STALE_SECONDS", "BUILD_WORKER_STALE_SECONDS"),
+    )
     # Target platform for finalize image builds. Pinned to the runtime cluster's
     # arch (hosted nodes are amd64) so an arm64 build host (Apple Silicon under
     # Colima) does not produce images that `exec format error` on amd64 nodes.
@@ -157,10 +158,91 @@ class Settings(BaseSettings):
     dispatch_run_poll_interval_seconds: float = 10.0
     resource_usage_sample_interval_seconds: float = 30.0
     dispatch_run_max_polls: int = 360
-    # Hosted Kubernetes can move each evaluation into a standalone Job so
-    # control-plane Deployment rollouts do not terminate active orchestration.
-    dispatch_kubernetes_jobs_enabled: bool = False
     dispatch_job_reconcile_stale_seconds: float = 60.0
+    platform_jobs_workspace: str = Field(
+        default="default",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_WORKSPACE",
+    )
+    platform_jobs_profile: str = Field(
+        default="default",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_PROFILE",
+    )
+    platform_jobs_provider: Literal["cpu", "subprocess"] = Field(
+        default="cpu",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_PROVIDER",
+    )
+    # The image must contain this plugin plus its Harbor/sandbox runtime.
+    # Deployments set an immutable image reference before enabling either flag.
+    platform_jobs_image: str = Field(
+        default="",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_IMAGE",
+    )
+    platform_jobs_postgres_password_secret: str = Field(
+        default="",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_POSTGRES_PASSWORD_SECRET",
+    )
+    platform_jobs_credentials_encryption_key_secret: str = Field(
+        default="",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_CREDENTIALS_ENCRYPTION_KEY_SECRET",
+    )
+    platform_jobs_registry_auth_secret: str = Field(
+        default="",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_REGISTRY_AUTH_SECRET",
+    )
+    # A controller pass handles at most this many rows per queue phase. One row
+    # per pass caps a benchmark at ~6 submissions/minute, so fan-out spends
+    # longer submitting than running.
+    platform_jobs_phase_batch_size: int = Field(
+        default=20,
+        ge=1,
+        le=200,
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_PHASE_BATCH_SIZE",
+    )
+    # Bounds how many further rows a phase starts, not how long one row takes:
+    # the deadline is checked between rows. The heartbeat runs only after every
+    # phase and a stale heartbeat marks this controller unhealthy, so a busy
+    # queue must not hold the pass open. A single slow row can still overrun
+    # this, exactly as it could before phases were batched.
+    # Infinity satisfies gt=0 and would disable the deadline entirely.
+    platform_jobs_phase_budget_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        allow_inf_nan=False,
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_PHASE_BUDGET_SECONDS",
+    )
+    # Platform Secret holding the OpenSandbox API key, exposed as OPENSANDBOX_API_KEY
+    # only to harbor_opensandbox evaluation Jobs (never other runtimes or task-image builds).
+    platform_jobs_opensandbox_api_key_secret: str = Field(
+        default="",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_OPENSANDBOX_API_KEY_SECRET",
+    )
+    # Entity Store migration flags. Projection writes a derived read model while
+    # Postgres stays authoritative; reads only flip once parity is established,
+    # so the two are deliberately separate switches.
+    entity_store_projection_enabled: bool = Field(
+        default=False,
+        validation_alias="SCALED_EVALS_ENTITY_STORE_PROJECTION_ENABLED",
+    )
+    entity_store_reads_enabled: bool = Field(
+        default=False,
+        validation_alias="SCALED_EVALS_ENTITY_STORE_READS_ENABLED",
+    )
+    entity_store_workspace: str = Field(
+        default="default",
+        validation_alias="SCALED_EVALS_ENTITY_STORE_WORKSPACE",
+    )
+    # Holds execution inputs (prompts, private snapshots). The service creates it,
+    # so with auth on no user can read it without an explicit role binding.
+    entity_store_private_workspace: str = Field(
+        default="scaled-evals-internal",
+        validation_alias="SCALED_EVALS_ENTITY_STORE_PRIVATE_WORKSPACE",
+    )
+    entity_store_projection_batch_size: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        validation_alias="SCALED_EVALS_ENTITY_STORE_PROJECTION_BATCH_SIZE",
+    )
     # Registry the finalized sandbox images are pushed to and pulled from.
     # Local compose: the in-stack `registry:2` service. Remote: NGC. Everything
     # that differs local-vs-remote lives here — the build logic has no hardcoded
@@ -184,6 +266,7 @@ class Settings(BaseSettings):
     task_image_allowed_repositories: str = ""
     task_image_registry_insecure: bool = False
     task_image_registry_auth_file: str = ""
+    task_image_registry_auth_json: str = ""
     task_image_registry_timeout_seconds: float = 10.0
     task_image_hosted_mode: bool = False
     # Primary Fernet key for BYOK credential payloads. There is deliberately no
@@ -398,6 +481,57 @@ class Settings(BaseSettings):
     # Named Docker volume shared by api and gym-runner containers (compose).
     gym_sandbox_opensandbox_docker_volume: str = "scaled-evals-gym-opensandbox-work"
 
+    # --- harbor_opensandbox (Harbor + NemoOpenSandboxEnvironment) -----------
+    # Off by default. Harbor runs as a child process of the dispatcher and
+    # creates one OpenSandbox sandbox per trial. OPENSANDBOX_DOMAIN and
+    # OPENSANDBOX_API_KEY (or OPEN_SANDBOX_*) come from the process environment,
+    # overridden by the optional env file; they are handed to the Harbor child's
+    # environment only and never reach the rendered config or the trial sandbox.
+    harbor_opensandbox_enabled: bool = False
+    # Optional env file with OpenSandbox connection settings; overrides the process environment.
+    harbor_opensandbox_env_file: str | None = None
+    # Harbor config template (agents, retries, timeouts). The backend owns its
+    # environment block, so the template's environment section is replaced.
+    harbor_opensandbox_config_path: str | None = None
+    # Per-evaluation staging directory for the task, rendered config, env file and Harbor log.
+    harbor_opensandbox_work_dir: str = "/tmp/harbor-opensandbox"
+    # Harbor's jobs_dir relative to the selected Harbor runner directory.
+    harbor_opensandbox_jobs_dir: str = "jobs/harbor-opensandbox"
+    # Absolute directory holding the per-evaluation job directories Harbor writes
+    # to <runner>/<harbor_opensandbox_jobs_dir>, after any symlinks or mounts.
+    # The status reader, terminator and artifact upload read from here.
+    # In the shipped image every runner's jobs/ is a symlink to the mounted
+    # /var/lib/scaled-evals/harbor-jobs, so this is
+    # /var/lib/scaled-evals/harbor-jobs/harbor-opensandbox. When unset, they read
+    # <harbor_dir>/<harbor_opensandbox_jobs_dir>, which matches only when harbor_dir
+    # is the evaluation's runner.
+    harbor_opensandbox_artifact_root: str | None = None
+    # Protocol for OpenSandbox API calls, used by both Harbor and the cleanup module.
+    harbor_opensandbox_protocol: Literal["http", "https"] = "https"
+    # Comma-separated. The model endpoint trial agents call (inference gateway or
+    # Switchyard host), always added to the trusted egress allowlist.
+    harbor_opensandbox_model_endpoint_hosts: str = ""
+    # Comma-separated operator allowlist: hostnames, *.wildcard hostnames, IPs,
+    # or CIDRs every trial may reach in addition to the model endpoint.
+    harbor_opensandbox_allowed_hosts: str = ""
+    # How strictly each sandbox's applied egress policy is checked; "off" is deliberately not allowed.
+    harbor_opensandbox_egress_verification: Literal["default_action", "strict"] = "default_action"
+    # Cap each sandbox's ephemeral storage at its task's storage_mb. Kubernetes evicts a pod that
+    # exceeds it. Turn off only where the sandbox runtime doesn't enforce the limit.
+    harbor_opensandbox_enforce_disk_limit: bool = True
+    # Ceiling on that limit, in MB, so a task asking for more than any node holds can't leave its
+    # pod unschedulable. Unset applies each task's value as given.
+    harbor_opensandbox_max_disk_mb: int | None = Field(default=131072, gt=0)
+    # Identifies this deployment in sandbox ownership metadata so cleanup never
+    # matches another deployment's sandboxes on a shared control plane.
+    harbor_opensandbox_deployment_id: str = "scaled-evals"
+    # Longest a sandbox may live before OpenSandbox stops it, as a backstop if cleanup never runs.
+    # It must outlast the longest trial (agent setup, agent and verifier), or OpenSandbox kills the
+    # sandbox mid-trial. The default matches Harbor's OpenSandbox adapter.
+    harbor_opensandbox_sandbox_timeout_seconds: int = 86400
+    # How long cleanup waits for an evaluation's sandboxes to die before reporting them as remaining.
+    harbor_opensandbox_cleanup_timeout_seconds: int = 120
+
     # When set, gym dispatch uses the interim compose submitter: one-shot gym-runner
     # containers via the Docker socket. Production should use the same image ref
     # but launch K8s Jobs per evaluation (submitter swap at the RuntimeBackend seam).
@@ -422,33 +556,8 @@ class Settings(BaseSettings):
     gym_runner_shm_size: str = "2g"
     # Grace period for SIGTERM traps to close remote Daytona/OpenSandbox sandboxes.
     gym_runner_teardown_timeout_seconds: int = 60
-    # Runtime-specific evaluation Job sizing. Queue workers keep their small
-    # control-plane footprint; only Gym Jobs receive these resources.
-    gym_job_cpu_request: str = "1"
-    gym_job_cpu_limit: str = "4"
-    gym_job_memory_request: str = "2Gi"
-    gym_job_memory_limit: str = "8Gi"
-    gym_job_shm_size: str = "2Gi"
 
-    # --- Per-evaluation Switchyard dispatch --------------------------------
-    # When an evaluation sets switchyard_profile_id, dispatch provisions one
-    # Switchyard Deployment/Service/Secret/ConfigMap before launching the runner.
-    # The profile should normally supply the image and namespace; these settings
-    # are service defaults/fallbacks for local compose and cluster deployments.
-    switchyard_image: str | None = None
-    # Comma-separated imagePullSecret names automatically applied to every
-    # ephemeral Switchyard Deployment. Hosted deployments point this at a
-    # platform-provided pull secret so end users never need registry credentials.
-    switchyard_image_pull_secrets: str = ""
-    switchyard_namespace: str | None = None
-    switchyard_kube_context: str | None = None
-    switchyard_kube_insecure_skip_tls_verify: bool = False
-    switchyard_drain_seconds: float = 300.0
-    # Comma-separated exact hosts or leading-wildcard DNS suffixes approved for
-    # external Switchyard profiles. Empty disables external endpoints.
-    switchyard_external_allowed_hosts: str = ""
-
-    # --- NMP Intake (post-run ATIF upload) ---------------------------------
+    # --- NHX Intake (post-run ATIF upload) ---------------------------------
     # Platform root; the client appends ``/apis/intake/v2/...``. No default: an
     # upload target is deployment-specific, and a wrong one would silently ship
     # trajectories off-site. Uploads are opt-in per evaluation via
@@ -461,11 +570,8 @@ class Settings(BaseSettings):
     # When false (default), Intake upload failures are warnings only.
     intake_fail_on_error: bool = False
 
-    def resolved_s3_public_endpoint(self) -> str:
-        return self.s3_public_endpoint or self.s3_endpoint
-
     def resolved_object_store_bucket(self) -> str:
-        return self.gcs_bucket or self.s3_bucket
+        return self.gcs_bucket
 
     def resolved_database_url(self) -> str:
         base = self.database_url or _STANDALONE_DATABASE_URL

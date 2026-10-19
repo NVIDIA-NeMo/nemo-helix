@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# OpenTelemetry overrides for the platform-glue install in Dockerfile.nhx-rl-training.
+#
+# nhx-common asks for opentelemetry-instrumentation-*>=0.64b0 and opentelemetry-sdk>=1.38.0. Left
+# alone, that resolves instrumentation 0.66b0, whose semantic-conventions==0.66b0 pin requires
+# opentelemetry-api==1.45.0, while the SDK stays on the RL lock's 1.44.0. SDK 1.44 imports
+# _ExtendedAttributes, which API 1.45 removed, so `import wandb` dies in the driver.
+#
+# Keep this on one release line: 1.44.0 for api/sdk/proto/exporters, 0.65b0 for the contrib
+# packages. Move it only together with NeMo-RL's uv.lock.
+opentelemetry-api==1.44.0
+opentelemetry-sdk==1.44.0
+opentelemetry-semantic-conventions==0.65b0
+opentelemetry-proto==1.44.0
+opentelemetry-exporter-otlp-proto-common==1.44.0
+opentelemetry-exporter-otlp-proto-grpc==1.44.0
+opentelemetry-exporter-otlp-proto-http==1.44.0
+opentelemetry-exporter-prometheus==0.65b0
+opentelemetry-instrumentation==0.65b0
+opentelemetry-instrumentation-aiohttp-client==0.65b0
+opentelemetry-instrumentation-asgi==0.65b0
+opentelemetry-instrumentation-fastapi==0.65b0
+opentelemetry-instrumentation-httpx==0.65b0
+opentelemetry-instrumentation-requests==0.65b0
+opentelemetry-instrumentation-sqlalchemy==0.65b0
+opentelemetry-instrumentation-system-metrics==0.65b0
+opentelemetry-processor-baggage==0.65b0
+opentelemetry-util-http==0.65b0

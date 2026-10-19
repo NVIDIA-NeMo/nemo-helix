@@ -29,7 +29,7 @@ This tutorial focuses on understanding and discovery—no actual training jobs a
 
 ### What is a Model Entity?
 
-A **Model Entity** represents a model registered in the NeMo Platform. It contains:
+A **Model Entity** represents a model registered in NeMo Helix. It contains:
 
 1. **FileSet Reference**: Points to the model checkpoint files (weights, config, tokenizer)
 2. **Model Spec**: Auto-populated metadata about the model architecture (layers, parameters, etc.)
@@ -67,7 +67,7 @@ flowchart LR
  C --> D{Training Type?}
  D -->|LoRA| E[Adapter created and<br/>attached to Model Entity]
  D -->|Full SFT| F[New Model Entity<br/>with customized weights]
- E --> G[Auto-deploy to NIM<br/>if enabled]
+ E --> G[Auto-deploy<br/>if configured]
 
 ```
 
@@ -78,45 +78,53 @@ flowchart LR
 Upload your model checkpoint files (from Hugging Face, NGC, or local storage) to a FileSet:
 
 ```python
-import os
-from nemo_platform import NeMoPlatform
-from nemo_platform.types.files import HuggingfaceStorageConfigParam
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_customizer.sdk import Customization
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.schema import SecretRef
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
+customization = Customization.from_client(client)
 
 # Create a FileSet from Hugging Face
-fileset = client.files.filesets.create(
-    workspace="default",
-    name="llama-3-2-1b",
-    description="Llama 3.2 1B base model",
-    storage=HuggingfaceStorageConfigParam(
-        type="huggingface",
-        repo_id="meta-llama/Llama-3.2-1B-Instruct",
-        repo_type="model",
-        token_secret="my-hf-token",  # Secret containing Hugging Face token
+fileset = client.files.create_fileset(
+    body=CreateFilesetRequest(
+        name="nemotron-3-5-lightning-30b-a3b",
+        description="Nemotron 3.5 Lightning 30B A3B base model",
+        storage=HuggingfaceStorageConfig(
+            repo_id="nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+            repo_type="model",
+            # Gated repositories also need token_secret=SecretRef("my-hf-token")
+        ),
     ),
-)
+).data()
 ```
 
 **2. Create a Model Entity pointing to the FileSet**
 
 ```python
-model = client.models.create(
-    workspace="default",
-    name="llama-3-2-1b",
-    fileset="default/llama-3-2-1b",  # Reference to the FileSet
-    description="Llama 3.2 1B base model",
+from nemo_helix_plugin.models.types import (
+    CreateModelAdapterRequest,
+    CreateModelEntityRequest,
+    FinetuningType,
+    UpdateAdapterRequest,
 )
+
+model = client.models.create_model(
+    body=CreateModelEntityRequest(
+        name="nemotron-3-5-lightning-30b-a3b",
+        fileset="default/nemotron-3-5-lightning-30b-a3b",  # Reference to the FileSet
+        description="Nemotron 3.5 Lightning 30B A3B base model",
+    ),
+).data()
 
 # Wait for model spec to be auto-populated
 import time
 
 while not model.spec:
     time.sleep(5)
-    model = client.models.retrieve(workspace="default", name="llama-3-2-1b")
+    model = client.models.get_model(name="nemotron-3-5-lightning-30b-a3b").data()
 
 print(f"Model architecture: {model.spec.family}")
 print(f"Parameters: {model.spec.base_num_parameters:,}")
@@ -128,14 +136,19 @@ print(f"Parameters: {model.spec.base_num_parameters:,}")
 from nemo_automodel_plugin.schema import AutomodelJobInput
 
 spec = AutomodelJobInput(
-    model="default/llama-3-2-1b",
+    model="default/nemotron-3-5-lightning-30b-a3b",
     dataset={"training": "default/email-training-data"},
-    training={"training_type": "sft", "finetuning_type": "lora", "lora": {"rank": 8, "alpha": 32}},
+    training={
+        "training_type": "sft",
+        "finetuning_type": "lora",
+        "lora": {"rank": 16, "alpha": 32, "exclude_modules": ["*.out_proj"]},
+    },
     schedule={"epochs": 3},
-    batch={"global_batch_size": 32, "micro_batch_size": 1},
+    batch={"global_batch_size": 8, "micro_batch_size": 1},
+    parallelism={"num_gpus_per_node": 4, "expert_parallel_size": 4},
 )
 
-job = client.customization.automodel.jobs.create(
+job = customization.automodel.jobs.create(
     workspace="default",
     name="my-email-assistant-lora",
     spec=spec,
@@ -148,7 +161,7 @@ After training completes:
 
 ```python
 # For LoRA jobs - adapter is attached to the model
-model = client.models.retrieve(workspace="default", name="llama-3-2-1b")
+model = client.models.get_model(name="nemotron-3-5-lightning-30b-a3b").data()
 
 for adapter in model.adapters:
     print(f"Adapter: {adapter.name}")
@@ -173,7 +186,7 @@ When you run a LoRA customization job:
 ### Viewing Adapters on a Model
 
 ```python
-model = client.models.retrieve(workspace="default", name="llama-3-2-1b")
+model = client.models.get_model(name="nemotron-3-5-lightning-30b-a3b").data()
 
 print(f"Model: {model.name}")
 print(f"Adapters:")
@@ -189,22 +202,20 @@ for adapter in model.adapters or []:
 Adapters are enabled by default, but you can disable an adapter to remove it from inference without deleting it. When you set `enabled=False`, the sidecar running alongside the NIM automatically removes the adapter's files on its next reconciliation pass (every few seconds). Re-enabling the adapter causes the sidecar to re-download and serve it again.
 
 ```python
-client.models.adapters.update(
+client.models.update_model_adapter(
+    model_name="nemotron-3-5-lightning-30b-a3b",
     adapter="my-custom-lora",
-    model_name="llama-3-2-1b",
-    workspace="default",
-    enabled=False,
+    body=UpdateAdapterRequest(enabled=False),
 )
 ```
 
 To re-enable:
 
 ```python
-client.models.adapters.update(
+client.models.update_model_adapter(
+    model_name="nemotron-3-5-lightning-30b-a3b",
     adapter="my-custom-lora",
-    model_name="llama-3-2-1b",
-    workspace="default",
-    enabled=True,
+    body=UpdateAdapterRequest(enabled=True),
 )
 ```
 
@@ -213,13 +224,14 @@ client.models.adapters.update(
 You can also create adapters manually (e.g., from externally trained weights):
 
 ```python
-model = client.models.adapters.create(
-    model_name="llama-3-2-1b",
-    workspace="default",
-    name="my-custom-lora",
-    fileset="default/my-lora-weights",
-    finetuning_type="lora",
-)
+model = client.models.create_model_adapter(
+    model_name="nemotron-3-5-lightning-30b-a3b",
+    body=CreateModelAdapterRequest(
+        name="my-custom-lora",
+        fileset="default/my-lora-weights",
+        finetuning_type=FinetuningType.LORA,
+    ),
+).data()
 ```
 
 ---
@@ -240,6 +252,7 @@ model = client.models.adapters.create(
 | 1B parameters | 1x 80GB GPU | 1x 80GB GPU |
 | 8B parameters | 1x 80GB GPU | 4x 80GB GPUs |
 | 70B parameters | 2x 80GB GPUs | 8x 80GB GPUs |
+| 30B MoE, 3B active (Nemotron 3.5 Lightning) | 4x 80GB GPUs, expert parallel size 4 | 8x 80GB GPUs, expert parallel size 8 |
 
 ### Storage Requirements
 
@@ -325,14 +338,14 @@ flowchart TD
  A[What's your goal?] --> B{Need maximum<br/>performance?}
  B -->|Yes| C{Have 4+ GPUs?}
  B -->|No| D[Choose LoRA]
- 
+
  C -->|Yes| E[Choose Full SFT]
  C -->|No| D
- 
+
  D --> F{Multiple<br/>use cases?}
  F -->|Yes| G[Train multiple<br/>LoRA adapters]
  F -->|No| H[Single LoRA<br/>adapter]
- 
+
  E --> I[New Model Entity<br/>with full weights]
  G --> J[Multiple adapters<br/>on same Model Entity]
  H --> J
@@ -345,7 +358,7 @@ flowchart TD
 - You have limited GPU resources (1-2 GPUs)
 - You want fast training iterations
 - You need multiple specialized versions of the same base model
-- You want to auto-deploy adapters to existing NIM deployments
+- You want to auto-deploy adapters to existing deployments
 
 ### When to Use Full Fine-Tuning
 
@@ -363,8 +376,8 @@ flowchart TD
 
 | Model Family | Description | Examples |
 | --- | --- | --- |
+| **Nemotron Models** | NVIDIA models with configurable reasoning, including hybrid Mamba-Transformer MoE variants | Nemotron 3.5 Lightning, Nemotron 3 Nano and Super, Llama Nemotron Nano |
 | **Llama Models** | General-purpose language models excellent for instruction following, conversation, and text generation tasks | `llama-3.1-8b-instruct`, `llama-3.2-1b-instruct` |
-| **Llama Nemotron Models** | NVIDIA's specialized variants optimized for specific use cases with enhanced reasoning capabilities | Various Nano and Super variants |
 | **Phi Models** | Microsoft's efficient models designed for strong reasoning with optimized deployment characteristics | Phi model family configurations |
 | **GPT-OSS Models** | Open-weight reasoning models with tested Full SFT and LoRA configurations | `openai/gpt-oss-20b` |
 
@@ -372,32 +385,35 @@ flowchart TD
 
 | Model Type | Status | Details |
 | --- | --- | --- |
-| **Embedding Models** | ✅ Supported | **Model**: Llama 3.2 NV EmbedQA 1B for question-answering and retrieval tasks **Use Cases**: Semantic search, document retrieval, question-answering systems, RAG pipelines **Note**: Typically disabled by default—contact your administrator for access |
-| **Reranking Models** | ❌ Not Supported | **Alternative**: Use embedding models for retrieval tasks, or implement reranking in your application layer |
+| **Embedding Models** | ✅ Supported | **Defaults**: Nemotron 3 Embed 1B (`nvidia/Nemotron-3-Embed-1B-BF16`, `training.recipe: bi_encoder`, Retriever NIM `nemotron-3-embed-1b:2.2.0`) and Llama Nemotron Embed 1B v2. Use cases: semantic search, RAG first-stage retrieval. |
+| **Reranking Models** | ✅ Supported | **Model**: Llama Nemotron Rerank 1B v2 with `training.recipe: cross_encoder`. Automodel merges to a Hugging Face sequence-classification checkpoint, then exports ONNX (`logits`) with HF weights under `alternates/hf/` for Ranking NIM `llama-nemotron-rerank-1b-v2:1.10.0`. |
 
 ### Importing Custom Models
 
 You can import a Hugging Face checkpoint into a FileSet and register it as a Model Entity:
 
 ```python
-from nemo_platform.types.files import HuggingfaceStorageConfigParam
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.models.types import CreateModelEntityRequest
+from nemo_helix_plugin.schema import SecretRef
 
 # Create FileSet from Hugging Face
-fileset = client.files.filesets.create(
-    workspace="default",
-    name="my-custom-model",
-    storage=HuggingfaceStorageConfigParam(
-        type="huggingface",
-        repo_id="organization/model-name",
-        repo_type="model",
-        token_secret="my-hf-token",
+fileset = client.files.create_fileset(
+    body=CreateFilesetRequest(
+        name="my-custom-model",
+        storage=HuggingfaceStorageConfig(
+            repo_id="organization/model-name",
+            repo_type="model",
+            token_secret=SecretRef("my-hf-token"),
+        ),
     ),
-)
+).data()
 
 # Create Model Entity
-model = client.models.create(
-    workspace="default", name="my-custom-model", fileset="default/my-custom-model"
-)
+model = client.models.create_model(
+    body=CreateModelEntityRequest(name="my-custom-model", fileset="default/my-custom-model"),
+).data()
 ```
 
 For detailed guidance, see [Import Hugging Face Model](/documentation/customizer-reference/tutorials/import-hugging-face-models).
@@ -443,46 +459,48 @@ Import and fine-tune private Hugging Face models.
 
 ## Key Takeaways
 
-✅ **Model Entities** contain model metadata and point to FileSet with checkpoint files 
-✅ **Adapters** (LoRA) are attached to Model Entities, not stored separately 
-✅ **FileSet** is where actual model/adapter files are stored 
-✅ **LoRA training** creates an adapter on the parent Model Entity 
-✅ **Full SFT training** creates a new Model Entity with full weights 
-✅ **Adapters are enabled by default** and automatically loaded by NIMs serving the base model 
-✅ **GPU requirements** vary significantly between LoRA and full fine-tuning 
-✅ **Custom Hugging Face models** can be imported via FileSet + Model Entity
+✅ **Model Entities** contain model metadata and point to FileSet with checkpoint files.
+✅ **Adapters** (LoRA) are attached to Model Entities, not stored separately.
+✅ **FileSet** is where actual model/adapter files are stored.
+✅ **LoRA training** creates an adapter on the parent Model Entity.
+✅ **Full SFT training** creates a new Model Entity with full weights.
+✅ **Adapters are enabled by default** and automatically loaded by NIMs serving the base model.
+✅ **GPU requirements** vary significantly between LoRA and full fine-tuning.
+✅ **Custom Hugging Face models** can be imported via FileSet + Model Entity.
 
 ### Quick Reference Commands
 
 ```python
 # List all Model Entities
-models = client.models.list(workspace="default")
+models = client.models.list_models()
 
 # Get a specific Model Entity with adapters
-model = client.models.retrieve(workspace="default", name="llama-3-2-1b")
+model = client.models.get_model(name="nemotron-3-5-lightning-30b-a3b").data()
 
 # Create an Automodel training job
 from nemo_automodel_plugin.schema import AutomodelJobInput
 
 spec = AutomodelJobInput(
-    model="default/llama-3-2-1b",
+    model="default/nemotron-3-5-lightning-30b-a3b",
     dataset={"training": "default/my-dataset"},
-    training={"training_type": "sft", "finetuning_type": "lora"},
+    training={"training_type": "sft", "finetuning_type": "lora", "lora": {"exclude_modules": ["*.out_proj"]}},
+    parallelism={"num_gpus_per_node": 4, "expert_parallel_size": 4},
 )
 
-job = client.customization.automodel.jobs.create(
+job = customization.automodel.jobs.create(
     workspace="default",
     name="my-job",
     spec=spec,
 )
 
 # Add an adapter to a model
-client.models.adapters.create(
-    model_name="llama-3-2-1b",
-    workspace="default",
-    name="my-adapter",
-    fileset="default/adapter-weights",
-    finetuning_type="lora",
+client.models.create_model_adapter(
+    model_name="nemotron-3-5-lightning-30b-a3b",
+    body=CreateModelAdapterRequest(
+        name="my-adapter",
+        fileset="default/adapter-weights",
+        finetuning_type=FinetuningType.LORA,
+    ),
 )
 ```
 

@@ -18,24 +18,6 @@ const makeModel = (overrides: Partial<ModelEntity> = {}): ModelEntity =>
   }) as ModelEntity;
 
 describe('BaseModelCard', () => {
-  it('renders the Prompt tunable badge when canPromptTune and isChatAvailable are both true', () => {
-    render(<BaseModelCard model={makeModel()} isChatAvailable canPromptTune />);
-
-    expect(screen.getByText('Prompt tunable')).toBeInTheDocument();
-  });
-
-  it('does not render the Prompt tunable badge when canPromptTune is false', () => {
-    render(<BaseModelCard model={makeModel()} isChatAvailable canPromptTune={false} />);
-
-    expect(screen.queryByText('Prompt tunable')).not.toBeInTheDocument();
-  });
-
-  it('does not render the Prompt tunable badge when isChatAvailable is false', () => {
-    render(<BaseModelCard model={makeModel()} isChatAvailable={false} canPromptTune />);
-
-    expect(screen.queryByText('Prompt tunable')).not.toBeInTheDocument();
-  });
-
   it('renders the Fine-Tunable badge iff model.fileset is set', () => {
     const { rerender } = render(
       <BaseModelCard
@@ -54,13 +36,11 @@ describe('BaseModelCard', () => {
       <BaseModelCard
         model={makeModel({ fileset: 'meta/llama-checkpoint' })}
         isChatAvailable
-        canPromptTune
         showCustomizationBadges={false}
       />
     );
 
     expect(screen.queryByText('Fine-tunable')).not.toBeInTheDocument();
-    expect(screen.queryByText('Prompt tunable')).not.toBeInTheDocument();
   });
 
   it('renders the Chat indicator iff isChatAvailable is true', () => {

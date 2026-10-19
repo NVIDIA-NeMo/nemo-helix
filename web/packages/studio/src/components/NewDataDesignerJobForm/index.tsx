@@ -4,13 +4,14 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
-import { useDataDesignerCreateJob } from '@nemo/sdk/generated/data-designer/api';
+import { useDataDesignerCreateJob } from '@nemo/sdk/generated/data-designer/data-designer';
 import type { CreateJobRequest as DataDesignerJobRequest } from '@nemo/sdk/generated/data-designer/schema';
-import { useModelsListProviders } from '@nemo/sdk/generated/platform/api';
+import { useModelsListProviders } from '@nemo/sdk/generated/platform/model-providers';
 import { Button, CodeSnippet, Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
 import { JobBasics } from '@studio/components/NewDataDesignerJobForm/JobBasics';
 import { JobRequestGenerator } from '@studio/components/NewDataDesignerJobForm/JobRequestGenerator';
 import { formatPreviewLogsForDisplay } from '@studio/components/NewDataDesignerJobForm/previewApi';
+import { PreviewResults } from '@studio/components/NewDataDesignerJobForm/PreviewResults';
 import { usePreview } from '@studio/components/NewDataDesignerJobForm/usePreview';
 import {
   type DataDesignerModelOption,
@@ -21,6 +22,7 @@ import {
 } from '@studio/components/NewDataDesignerJobForm/utils';
 import { DEFAULT_BUILD_MODEL_NAME, DEFAULT_LARGE_PAGE_SIZE } from '@studio/constants/constants';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
+import { useOidcBearerToken } from '@studio/providers/auth/useOidcBearerToken';
 import {
   getDataDesignerJobDetailsRoute,
   getDataDesignerJobListRoute,
@@ -28,7 +30,6 @@ import {
 } from '@studio/routes/utils';
 import { type FC, useCallback, useEffect, useMemo } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
-import { useAuth } from 'react-oidc-context';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { z } from 'zod';
 
@@ -78,7 +79,7 @@ export const NewDataDesignerJobForm: FC = () => {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();
   const { state } = useLocation();
-  const { user } = useAuth();
+  const bearerToken = useOidcBearerToken();
 
   const modelRef = `${workspace}/${DEFAULT_BUILD_MODEL_NAME}`;
 
@@ -137,9 +138,19 @@ export const NewDataDesignerJobForm: FC = () => {
     () => parseJsonContentToJobRequest(getValues('jsonContent')).jobRequest?.spec?.config,
     [getValues]
   );
-  const { previewLogs, isPreviewing, runPreview } = usePreview({
+  const {
+    previewLogs,
+    previewStatus,
+    previewRecords,
+    previewColumnOrder,
+    previewError,
+    hasPreviewRun,
+    isPreviewing,
+    runPreview,
+    stopPreview,
+  } = usePreview({
     workspace,
-    accessToken: user?.access_token ?? undefined,
+    accessToken: bearerToken,
     getCurrentConfig,
   });
 
@@ -284,6 +295,17 @@ export const NewDataDesignerJobForm: FC = () => {
             {submitError}
           </Text>
         )}
+
+        {hasPreviewRun ? (
+          <PreviewResults
+            records={previewRecords}
+            columnOrder={previewColumnOrder}
+            isPreviewing={isPreviewing}
+            status={previewStatus}
+            error={previewError}
+            onStop={stopPreview}
+          />
+        ) : null}
 
         <CodeSnippet
           value={

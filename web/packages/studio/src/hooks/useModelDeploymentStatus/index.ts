@@ -2,10 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
-import {
-  useModelsGetLatestDeployment,
-  useModelsGetProvider,
-} from '@nemo/sdk/generated/platform/api';
+import { useModelsGetLatestDeployment } from '@nemo/sdk/generated/platform/model-deployments';
+import { useModelsGetProvider } from '@nemo/sdk/generated/platform/model-providers';
 import type { ModelDeploymentStatus, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 
 /**

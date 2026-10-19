@@ -133,6 +133,7 @@ class TaskRepository:
         build_credentials: dict[str, str] | None = None,
         tarball_sha256: str | None = None,
         expected_revision: int | None = None,
+        exact_revision: bool = False,
         tarball_size_bytes: int | None = None,
         tenant_storage_quota_bytes: int | None = None,
     ) -> FinalizeRevision | None:
@@ -149,16 +150,21 @@ class TaskRepository:
             previous_storage_bytes = 0
             uploaded_bytes = tarball_size_bytes or 0
             if task_row is not None:
+                revision_filter = "AND revision = %s" if exact_revision and expected_revision is not None else ""
+                params: tuple[object, ...] = (
+                    (task_id, expected_revision) if exact_revision and expected_revision is not None else (task_id,)
+                )
                 cur.execute(
-                    """
+                    f"""
                     SELECT revision, status, tarball_object_key
                     FROM task_revisions
                     WHERE task_id = %s
+                    {revision_filter}
                     ORDER BY revision DESC
                     LIMIT 1
                     FOR UPDATE
                     """,
-                    (task_id,),
+                    params,
                 )
                 rev_row = cur.fetchone()
                 if rev_row is not None:
@@ -234,23 +240,26 @@ class TaskRepository:
             uploaded_bytes=uploaded_bytes,
         )
 
-    def latest_revision_for_finalize(self, task_id: str) -> UploadingRevision | None:
-        """Return latest revision metadata for object-store finalize guards."""
+    def revision_for_finalize(self, task_id: str, *, expected_revision: int | None = None) -> UploadingRevision | None:
+        """Return exact or latest revision metadata for object-store finalize guards."""
         with self.conn.cursor() as cur:
+            revision_filter = "AND revision = %s" if expected_revision is not None else ""
+            params: tuple[object, ...] = (expected_revision, task_id) if expected_revision is not None else (task_id,)
             cur.execute(
-                """
+                f"""
                 SELECT r.revision, r.status, r.tarball_object_key
                 FROM tasks t
                 JOIN LATERAL (
                     SELECT revision, status, tarball_object_key
                     FROM task_revisions
                     WHERE task_id = t.id
+                    {revision_filter}
                     ORDER BY revision DESC
                     LIMIT 1
                 ) r ON TRUE
                 WHERE t.id = %s AND t.deleted_at IS NULL
                 """,
-                (task_id,),
+                params,
             )
             row = cur.fetchone()
         if row is None:
@@ -261,6 +270,10 @@ class TaskRepository:
             object_key=row["tarball_object_key"],
         )
 
+    def latest_revision_for_finalize(self, task_id: str) -> UploadingRevision | None:
+        """Backward-compatible latest revision lookup."""
+        return self.revision_for_finalize(task_id)
+
     def finalize_latest_revision_prebuilt(
         self,
         task_id: str,
@@ -269,10 +282,17 @@ class TaskRepository:
         image_digest: str,
         tarball_sha256: str | None,
         expected_revision: int | None = None,
+        exact_revision: bool = False,
         tarball_size_bytes: int | None = None,
         tenant_storage_quota_bytes: int | None = None,
+        verifier_image_ref: str | None = None,
+        verifier_image_digest: str | None = None,
     ) -> PrebuiltFinalizeResult | None:
-        """Atomically finalize the latest uploading revision with a prebuilt image."""
+        """Atomically finalize the latest uploading revision with a prebuilt image.
+
+        ``verifier_image_ref``/``verifier_image_digest`` name the separate verifier image, for tasks
+        whose verifier runs in its own sandbox; leave them unset otherwise.
+        """
         result: PrebuiltFinalizeResult | None = None
         with self.conn.transaction(), self.conn.cursor() as cur:
             cur.execute(
@@ -282,23 +302,25 @@ class TaskRepository:
             task_row = cur.fetchone()
             if task_row is None:
                 return None
+            revision_filter = "AND revision = %s" if exact_revision and expected_revision is not None else ""
+            params: tuple[object, ...] = (
+                (task_id, expected_revision) if exact_revision and expected_revision is not None else (task_id,)
+            )
             cur.execute(
-                """
+                f"""
                 SELECT revision, status, tarball_object_key
                 FROM task_revisions
                 WHERE task_id = %s
+                {revision_filter}
                 ORDER BY revision DESC
                 LIMIT 1
                 FOR UPDATE
                 """,
-                (task_id,),
+                params,
             )
             row = cur.fetchone()
             if row is None:
                 return None
-            finalized = row["status"] == "uploading"
-            previous_storage_bytes = 0
-            uploaded_bytes = tarball_size_bytes or 0
             if expected_revision is not None and row["revision"] != expected_revision:
                 return PrebuiltFinalizeResult(
                     revision=row["revision"],
@@ -306,6 +328,9 @@ class TaskRepository:
                     object_key=row["tarball_object_key"],
                     finalized=False,
                 )
+            finalized = row["status"] == "uploading"
+            previous_storage_bytes = 0
+            uploaded_bytes = tarball_size_bytes or 0
             if finalized:
                 if tarball_size_bytes is not None and tenant_storage_quota_bytes is not None:
                     owner_id = task_row.get("owner_id")
@@ -335,6 +360,7 @@ class TaskRepository:
                     """
                     UPDATE task_revisions
                     SET status = 'ready', image_ref = %s, image_digest = %s,
+                        verifier_image_ref = %s, verifier_image_digest = %s,
                         tarball_sha256 = COALESCE(%s, tarball_sha256), build_backend = NULL,
                         build_payload = '{}'::jsonb, build_credentials = '{}'::jsonb,
                         build_error = NULL, build_completed_at = NOW(),
@@ -342,13 +368,25 @@ class TaskRepository:
                         build_next_attempt_at = NULL
                     WHERE task_id = %s AND revision = %s AND status = 'uploading'
                     """,
-                    (image_ref, image_digest, tarball_sha256, task_id, row["revision"]),
+                    (
+                        image_ref,
+                        image_digest,
+                        verifier_image_ref,
+                        verifier_image_digest,
+                        tarball_sha256,
+                        task_id,
+                        row["revision"],
+                    ),
                 )
                 finalized = cur.rowcount == 1
                 if finalized:
                     cur.execute(
-                        "UPDATE tasks SET current_revision = %s, updated_at = NOW() WHERE id = %s",
-                        (row["revision"], task_id),
+                        """
+                        UPDATE tasks SET current_revision = %s, updated_at = NOW()
+                        WHERE id = %s
+                          AND (current_revision IS NULL OR current_revision <= %s)
+                        """,
+                        (row["revision"], task_id, row["revision"]),
                     )
             result = PrebuiltFinalizeResult(
                 revision=row["revision"],
@@ -501,6 +539,7 @@ class TaskRepository:
                     WHERE t.id = %s
                       AND t.owner_id = %s
                       AND t.current_revision = %s
+                      AND latest.revision IS NOT NULL
                     """,
                     (task_id, owner_id, revision),
                 )
@@ -576,12 +615,14 @@ class TaskRepository:
             cur.execute(
                 f"""
                 SELECT {", ".join(f"b.{c}" for c in TASK_COLUMNS.split(", "))},
-                       r.revision, r.status, r.image_ref, r.image_digest, r.build_error,
+                       r.revision, r.status, r.image_ref, r.image_digest,
+                       r.verifier_image_ref, r.verifier_image_digest, r.build_error,
                        r.tarball_size_bytes, r.tarball_sha256, r.tarball_object_key,
                        r.created_at AS revision_created_at
                 FROM tasks b
                 LEFT JOIN LATERAL (
-                    SELECT revision, status, image_ref, image_digest, build_error,
+                    SELECT revision, status, image_ref, image_digest,
+                           verifier_image_ref, verifier_image_digest, build_error,
                            tarball_size_bytes, tarball_sha256, tarball_object_key, created_at
                     FROM task_revisions
                     WHERE task_id = b.id

@@ -6,7 +6,7 @@ import { ControlledTextInput } from '@nemo/common/src/components/form/Controlled
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { logger } from '@nemo/common/src/utils/logger';
-import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/api';
+import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import {
   Button,
   Flex,
@@ -14,6 +14,7 @@ import {
   Modal,
   SelectContent,
   SelectItem,
+  SelectListbox,
   SelectRoot,
   SelectTrigger,
   Spinner,
@@ -289,33 +290,35 @@ export const AddToFolderModal: FC<AddToFolderModalProps> = ({
                     aria-label="destination-folder-select"
                   />
                   <SelectContent>
-                    {/* Parent folder option (if not at root) */}
-                    {canGoUp && (
-                      <SelectItem value={PARENT_FOLDER_VALUE}>{PARENT_FOLDER_DISPLAY}</SelectItem>
-                    )}
+                    <SelectListbox>
+                      {/* Parent folder option (if not at root) */}
+                      {canGoUp && (
+                        <SelectItem value={PARENT_FOLDER_VALUE}>{PARENT_FOLDER_DISPLAY}</SelectItem>
+                      )}
 
-                    {/* Sibling folders */}
-                    {siblingFolders.map((folder) => (
-                      <SelectItem key={folder} value={folder}>
-                        {folder}
+                      {/* Sibling folders */}
+                      {siblingFolders.map((folder) => (
+                        <SelectItem key={folder} value={folder}>
+                          {folder}
+                        </SelectItem>
+                      ))}
+
+                      {/* Empty state message when no existing folders */}
+                      {!hasExistingFolders && (
+                        <div className="px-3 py-2">
+                          <Text className="text-secondary" fontSize="12">
+                            No existing folders
+                          </Text>
+                        </div>
+                      )}
+
+                      {/* New folder option with separator */}
+                      <SelectItem className="border-t border-base" value={NEW_FOLDER_VALUE}>
+                        <Flex gap="density-md" align="center">
+                          New Folder
+                        </Flex>
                       </SelectItem>
-                    ))}
-
-                    {/* Empty state message when no existing folders */}
-                    {!hasExistingFolders && (
-                      <div className="px-3 py-2">
-                        <Text className="text-secondary" fontSize="12">
-                          No existing folders
-                        </Text>
-                      </div>
-                    )}
-
-                    {/* New folder option with separator */}
-                    <SelectItem className="border-t border-base" value={NEW_FOLDER_VALUE}>
-                      <Flex gap="density-md" align="center">
-                        New Folder
-                      </Flex>
-                    </SelectItem>
+                    </SelectListbox>
                   </SelectContent>
                 </SelectRoot>
               )}

@@ -9,14 +9,14 @@ import {
   type UploadModalState,
 } from '@nemo/common/src/components/UploadModal/Context/useUploadModalReducer';
 import { DatasetSelect } from '@nemo/common/src/components/UploadModal/DatasetUploader/Select';
-import { filesListFilesetFiles, filesListFilesets } from '@nemo/sdk/generated/platform/api';
+import { filesListFilesetFiles, filesListFilesets } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 // Mock the SDK hooks
-vi.mock('@nemo/sdk/generated/platform/api', () => ({
+vi.mock('@nemo/sdk/generated/platform/files', () => ({
   filesListFilesets: vi.fn(),
   getFilesListFilesetsQueryKey: vi.fn((workspace: string) => ['filesets', workspace]),
   filesListFilesetFiles: vi.fn(),

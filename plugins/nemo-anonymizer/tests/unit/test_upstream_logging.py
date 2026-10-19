@@ -64,7 +64,15 @@ def test_make_anonymizer_preserves_root_logging_when_upstream_clobbers_it(monkey
     try:
         root.handlers = [sentinel_handler]
         root.setLevel(logging.INFO)
-        monkeypatch.setattr(worker_module, "Anonymizer", ClobberingAnonymizer)
+        # ``_make_anonymizer`` builds via ``build_gliner_anonymizer``; stand in for it
+        # with a factory that clobbers root logging, to prove the wrapper restores it.
+        monkeypatch.setattr(
+            worker_module,
+            "build_gliner_anonymizer",
+            lambda *, model_configs_yaml, dd_providers: ClobberingAnonymizer(
+                model_configs=model_configs_yaml, model_providers=dd_providers
+            ),
+        )
 
         anonymizer = worker_module._make_anonymizer(model_configs_yaml="model_configs: []", dd_providers=None)
 

@@ -13,7 +13,7 @@ import {
   getEntitiesListWorkspaceMembersQueryKey,
   useEntitiesAddWorkspaceMember,
   useEntitiesUpdateWorkspaceMember,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/entity-store';
 import type { WorkspaceMember } from '@nemo/sdk/generated/platform/schema';
 import { FormField, RadioGroupRoot, Stack } from '@nvidia/foundations-react-core';
 import { queryClient } from '@studio/api/queryClient';

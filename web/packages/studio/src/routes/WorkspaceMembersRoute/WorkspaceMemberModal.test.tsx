@@ -45,8 +45,8 @@ vi.mock('@nemo/common/src/components/FormModal', () => ({
     ) : null,
 }));
 
-vi.mock('@nemo/sdk/generated/platform/api', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('@nemo/sdk/generated/platform/api')>();
+vi.mock('@nemo/sdk/generated/platform/entity-store', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('@nemo/sdk/generated/platform/entity-store')>();
   return {
     ...mod,
     useEntitiesAddWorkspaceMember: () => ({ mutateAsync: mockAddMember }),

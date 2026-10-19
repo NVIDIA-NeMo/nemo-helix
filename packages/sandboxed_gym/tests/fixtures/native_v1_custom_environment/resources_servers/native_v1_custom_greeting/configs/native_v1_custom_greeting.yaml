@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+native_v1_custom_greeting:
+  resources_servers:
+    native_v1_custom_greeting:
+      entrypoint: app.py
+      domain: instruction_following
+      verified: false
+      description: Customer-supplied greeting verifier used by the native-v1 delivery tests
+      value: Verify that an assistant response contains an expected greeting

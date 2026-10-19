@@ -28,12 +28,15 @@ from nemo_agents_plugin.entities import (
     NEMO_AGENTS_SPEC_CONFIG_FORMAT,
     AgentDeployment,
     AgentSession,
+    Endpoint,
     SessionStatus,
 )
 from nemo_agents_plugin.runner.backend import DeploymentInfo
 from nemo_agents_plugin.runner.controller import AgentDeploymentController
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.entity_client import NemoEntityConflictError
+from nemo_agents_plugin.spec_revision import SpecRevision
+from nemo_deployments_plugin.endpoint_transport import DIRECT, EndpointTransport
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.entity_client import NemoEntityConflictError
 
 EXPIRATION_NOW = datetime(2026, 8, 26, 12, 0, tzinfo=UTC)
 
@@ -43,8 +46,8 @@ def test_agent_deployment_controller_declares_entities_dependency() -> None:
 
 
 @pytest.mark.asyncio
-async def test_controller_startup_adapts_sdk_to_typed_entities_client() -> None:
-    sdk = MagicMock()
+async def test_controller_startup_builds_typed_entities_client() -> None:
+    client = MagicMock()
     typed_client = MagicMock()
     entity_client = MagicMock()
     empty_page = MagicMock(data=[], pagination=None)
@@ -52,17 +55,17 @@ async def test_controller_startup_adapts_sdk_to_typed_entities_client() -> None:
 
     with (
         patch("nemo_agents_plugin.config.AgentsConfig.get", return_value=AgentsConfig()),
-        patch("nemo_platform_plugin.sdk_provider.get_async_platform_sdk", return_value=sdk),
+        patch("nemo_helix_plugin.client_provider.get_async_nemo_client", return_value=client),
         patch(
-            "nemo_platform_plugin.client.adapter.client_from_platform",
+            "nemo_helix_plugin.entities.client.AsyncEntitiesClient.from_client",
             return_value=typed_client,
         ) as mock_adapter,
-        patch("nemo_platform_plugin.entities.EntityClient", return_value=entity_client) as mock_entity_client,
+        patch("nemo_helix_plugin.entities.EntityClient", return_value=entity_client) as mock_entity_client,
     ):
         controller = AgentDeploymentController()
         await controller.on_startup()
 
-    mock_adapter.assert_called_once_with(sdk, AsyncEntitiesClient)
+    mock_adapter.assert_called_once_with(client)
     mock_entity_client.assert_called_once_with(typed_client)
     assert controller._entities is entity_client
     assert controller._startup_sessions_reconciled is True
@@ -294,7 +297,7 @@ async def test_activity_from_current_runtime_wins_restart_reconciliation() -> No
 
     assert result is None
     assert current_generation.status is SessionStatus.ACTIVE
-    ctrl.entities.update.assert_not_called()
+    cast(Any, ctrl.entities.update).assert_not_called()
     cleanup.assert_not_called()
 
 
@@ -316,7 +319,7 @@ async def test_activity_between_runtime_start_and_controller_observation_stays_a
     assert first_activity_at < controller_observed_at
     assert result is None
     assert current_generation.status is SessionStatus.ACTIVE
-    ctrl.entities.update.assert_not_called()
+    cast(Any, ctrl.entities.update).assert_not_called()
     cleanup.assert_not_called()
 
 
@@ -465,11 +468,45 @@ async def test_read_runtime_instance_validates_health_response(
     response.json.return_value = payload
     client = MagicMock()
     client.get = AsyncMock(return_value=response)
-    ctrl._runtime_health_client = client
+    ctrl._runtime_health_clients[DIRECT] = client
 
     assert await ctrl._read_runtime_instance(deployment) == expected
-    client.get.assert_awaited_once_with("http://localhost:9001/health")
+    client.get.assert_awaited_once_with("http://localhost:9001/health", headers={})
     response.raise_for_status.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_read_runtime_instance_dials_a_gateway_routed_endpoint_through_its_gateway() -> None:
+    """An openshell-style transport gets its own TLS-bearing client and the minted host as Host."""
+    ctrl, _ = _make_controller()
+    deployment = _make_fabric_deployment()
+    deployment.deployment_mode = "openshell"
+    deployment.endpoint = ""
+    deployment.endpoints = [Endpoint(name="http", url="https://default--dep--http.openshell.localhost:8080/")]
+    transport = EndpointTransport(
+        connect_base="https://openshell.openshell.svc.cluster.local:8080",
+        ca_cert="/tls/ca.crt",
+        client_cert=("/tls/tls.crt", "/tls/tls.key"),
+    )
+    tls_context = object()
+    response = MagicMock()
+    response.json.return_value = {"runtime_instance_id": "runtime-1", "runtime_started_at": EXPIRATION_NOW.isoformat()}
+    client = MagicMock()
+    client.get = AsyncMock(return_value=response)
+
+    with (
+        patch("nemo_agents_plugin.deployment_routing.get_deployment_transport", return_value=transport),
+        patch.object(EndpointTransport, "client_kwargs", return_value={"verify": tls_context}),
+        patch("httpx.AsyncClient", return_value=client) as client_cls,
+    ):
+        assert await ctrl._read_runtime_instance(deployment) == ("runtime-1", EXPIRATION_NOW)
+
+    assert client_cls.call_args.kwargs["verify"] is tls_context
+    client.get.assert_awaited_once_with(
+        "https://openshell.openshell.svc.cluster.local:8080/health",
+        headers={"Host": "default--dep--http.openshell.localhost:8080"},
+    )
+    assert ctrl._runtime_health_clients == {transport: client}
 
 
 @pytest.mark.asyncio
@@ -573,6 +610,52 @@ async def test_start_deployment_writes_runtime_fields_to_entity() -> None:
 
 
 @pytest.mark.asyncio
+async def test_start_deployment_records_the_spec_revision_the_backend_staged() -> None:
+    ctrl, backend = _make_controller()
+    backend.allocate_port = MagicMock(return_value=0)
+    backend.create_deployment = AsyncMock(
+        return_value=DeploymentInfo(
+            name="dep-1",
+            status="starting",
+            staged_spec=SpecRevision(revision="2" * 40, tracked_revision="main"),
+        )
+    )
+    dep = AgentDeployment(
+        name="dep-1",
+        workspace="default",
+        agent="calc",
+        status="pending",
+        spec_revision="1" * 40,
+        spec_tracked_revision="main",
+    )
+
+    await ctrl._start_deployment(dep)
+
+    assert dep.spec_revision == "2" * 40
+    assert dep.spec_tracked_revision == "main"
+
+
+@pytest.mark.asyncio
+async def test_start_deployment_keeps_the_spec_revision_when_nothing_was_staged() -> None:
+    ctrl, backend = _make_controller()
+    backend.allocate_port = MagicMock(return_value=0)
+    backend.create_deployment = AsyncMock(return_value=DeploymentInfo(name="dep-1", status="starting"))
+    dep = AgentDeployment(
+        name="dep-1",
+        workspace="default",
+        agent="calc",
+        status="pending",
+        spec_revision="1" * 40,
+        spec_tracked_revision="main",
+    )
+
+    await ctrl._start_deployment(dep)
+
+    assert dep.spec_revision == "1" * 40
+    assert dep.spec_tracked_revision == "main"
+
+
+@pytest.mark.asyncio
 async def test_start_deployment_forwards_image_entrypoint_mode() -> None:
     ctrl, backend = _make_controller()
     backend.allocate_port = MagicMock(return_value=0)
@@ -589,12 +672,35 @@ async def test_start_deployment_forwards_image_entrypoint_mode() -> None:
 
     await ctrl._start_deployment(dep)
 
-    kwargs = backend.create_deployment.await_args.kwargs
+    await_args = backend.create_deployment.await_args
+    assert await_args is not None
+    kwargs = await_args.kwargs
     assert kwargs["image"] == "hand-built-agent:latest"
     assert kwargs["deployment_mode"] == "docker"
     assert kwargs["use_image_entrypoint"] is True
     assert dep.endpoint == ""
     assert dep.plugin_deployment == "dep-1"
+
+
+@pytest.mark.asyncio
+async def test_start_deployment_forwards_auth_context_to_backend() -> None:
+    ctrl, backend = _make_controller()
+    backend.allocate_port = MagicMock(return_value=0)
+    backend.create_deployment = AsyncMock(return_value=DeploymentInfo(name="dep-1", status="starting"))
+    auth_context = AuthContext(principal_id="user:alice", principal_groups=["research"])
+    dep = AgentDeployment(
+        name="dep-1",
+        workspace="default",
+        agent="calc",
+        status="pending",
+        deployment_mode="docker",
+    ).with_auth_context(auth_context)
+
+    await ctrl._start_deployment(dep)
+
+    await_args = backend.create_deployment.await_args
+    assert await_args is not None
+    assert await_args.kwargs["auth_context"] == auth_context
 
 
 # ---------------------------------------------------------------------------
@@ -699,7 +805,7 @@ async def test_expire_session_leaves_session_before_deadline_active(expires_at: 
 
     assert result is None
     assert session.status is SessionStatus.ACTIVE
-    ctrl.entities.update.assert_not_called()
+    cast(Any, ctrl.entities.update).assert_not_called()
     cleanup.assert_not_called()
 
 
@@ -774,3 +880,129 @@ async def test_active_session_listing_follows_pagination() -> None:
             page_size=100,
         ),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Container recovery: running -> starting while the deployments plugin recovers
+# ---------------------------------------------------------------------------
+
+
+def _running_container_deployment() -> AgentDeployment:
+    return AgentDeployment(
+        name="dep-1",
+        workspace="default",
+        agent="calc",
+        status="running",
+        deployment_mode="openshell",
+    )
+
+
+@pytest.mark.asyncio
+async def test_recovering_container_deployment_reports_starting() -> None:
+    ctrl, backend = _make_controller()
+    backend.get_deployment_status = AsyncMock(return_value=DeploymentInfo(name="dep-1", status="starting"))
+    ctrl._reconcile_deployment_sessions_after_restart = AsyncMock()  # type: ignore[method-assign]
+    dep = _running_container_deployment()
+
+    await ctrl._verify_running(dep)
+
+    assert dep.status == "starting"
+    assert "recovering" in dep.error
+    ctrl._reconcile_deployment_sessions_after_restart.assert_awaited_once_with(dep)
+    ctrl._save.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recovery_is_not_cut_short_by_the_startup_health_timeout() -> None:
+    # The deployments plugin owns the recovery deadline; the agents-side first-start timeout
+    # would otherwise delete a sandbox an operator stopped for more than two minutes.
+    ctrl, backend = _make_controller()
+    backend.get_deployment_status = AsyncMock(return_value=DeploymentInfo(name="dep-1", status="starting"))
+    ctrl._reconcile_deployment_sessions_after_restart = AsyncMock()  # type: ignore[method-assign]
+    dep = _running_container_deployment()
+    await ctrl._verify_running(dep)
+    ctrl._starting_since[("default", "dep-1")] = time.monotonic() - 10_000
+
+    await ctrl._check_health(dep)
+
+    assert dep.status == "starting"
+    backend.delete_deployment.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_first_start_still_times_out() -> None:
+    ctrl, backend = _make_controller()
+    backend.get_deployment_status = AsyncMock(return_value=DeploymentInfo(name="dep-1", status="starting"))
+    dep = _running_container_deployment()
+    dep.status = "starting"
+    ctrl._starting_since[("default", "dep-1")] = time.monotonic() - 10_000
+
+    await ctrl._check_health(dep)
+
+    assert dep.status == "failed"
+    backend.delete_deployment.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_recovered_container_deployment_returns_to_running_and_clears_the_error() -> None:
+    ctrl, backend = _make_controller()
+    backend.get_deployment_status = AsyncMock(return_value=DeploymentInfo(name="dep-1", status="starting"))
+    ctrl._reconcile_deployment_sessions_after_restart = AsyncMock()  # type: ignore[method-assign]
+    ctrl._observe_runtime_instance = AsyncMock()  # type: ignore[method-assign]
+    dep = _running_container_deployment()
+    await ctrl._verify_running(dep)
+
+    backend.get_deployment_status = AsyncMock(return_value=DeploymentInfo(name="dep-1", status="running"))
+    await ctrl._check_health(dep)
+
+    assert dep.status == "running"
+    assert dep.error == ""
+    assert ("default", "dep-1") not in ctrl._recovering
+
+
+@pytest.mark.asyncio
+async def test_recovery_that_gives_up_reports_failed() -> None:
+    ctrl, backend = _make_controller()
+    backend.get_deployment_status = AsyncMock(return_value=DeploymentInfo(name="dep-1", status="starting"))
+    ctrl._reconcile_deployment_sessions_after_restart = AsyncMock()  # type: ignore[method-assign]
+    dep = _running_container_deployment()
+    await ctrl._verify_running(dep)
+
+    backend.get_deployment_status = AsyncMock(
+        return_value=DeploymentInfo(name="dep-1", status="failed", error="Drift recovery failed after 5 attempts.")
+    )
+    await ctrl._check_health(dep)
+
+    assert dep.status == "failed"
+    assert "Drift recovery failed" in dep.error
+    assert ("default", "dep-1") not in ctrl._recovering
+
+
+@pytest.mark.asyncio
+async def test_recovery_finished_after_a_controller_restart_clears_the_error() -> None:
+    # A restarted controller has no in-memory recovery marker, but the persisted recovery
+    # error must still not outlive the return to running.
+    ctrl, backend = _make_controller()
+    ctrl._observe_runtime_instance = AsyncMock()  # type: ignore[method-assign]
+    dep = _running_container_deployment()
+    dep.status = "starting"
+    dep.error = "Runtime went offline; the deployments plugin is recovering it."
+    backend.get_deployment_status = AsyncMock(return_value=DeploymentInfo(name="dep-1", status="running"))
+
+    await ctrl._check_health(dep)
+
+    assert dep.status == "running"
+    assert dep.error == ""
+
+
+@pytest.mark.asyncio
+async def test_read_runtime_instance_tolerates_transport_resolution_failure() -> None:
+    ctrl, _ = _make_controller()
+    deployment = _make_fabric_deployment()
+    with patch(
+        "nemo_agents_plugin.deployment_routing.get_deployment_transport",
+        side_effect=ValueError("invalid executor configuration"),
+    ):
+        assert await ctrl._read_runtime_instance(deployment) is None
+
+    assert ctrl._runtime_health_clients == {}

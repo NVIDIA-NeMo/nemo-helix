@@ -16,7 +16,7 @@ async def test_no_model_configs_returns_none() -> None:
     """
     with u.make_mock_client_context() as client_context:
         registry = await make_model_provider_registry(
-            [], sdk=client_context.async_sdk, default_workspace=u.WORKSPACE_NAME
+            [], client=client_context.async_client, default_workspace=u.WORKSPACE_NAME
         )
     assert registry is None
 

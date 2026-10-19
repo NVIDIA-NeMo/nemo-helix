@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,9 +16,14 @@ from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.fabric.environment import ensure_local_workspace_dir
 from nemo_agents_plugin.fabric.runtime import (
     FabricInvocationRequest,
+    FabricOneShotRequest,
     FabricRuntimeResult,
+    FabricRuntimeStartError,
     FabricRuntimeStream,
+    fabric_streaming_options,
     invoke_fabric_runtime,
+    run_fabric_agent_once,
+    stream_fabric_agent_once,
     stream_fabric_runtime,
 )
 from nemo_agents_plugin.fabric.session_registry import (
@@ -39,7 +44,7 @@ DEFAULT_IDLE_SESSION_TIMEOUT_SECONDS = 30 * 60
 DEFAULT_SESSION_CLEANUP_INTERVAL_SECONDS = 5 * 60
 
 
-class FabricSessionStartError(RuntimeError):
+class FabricSessionStartError(FabricRuntimeStartError):
     """Raised when a Fabric runtime cannot be started for a Platform session."""
 
 
@@ -83,19 +88,18 @@ class FabricSessionManager:
     async def open_session(self, *, session_id: str | None = None) -> FabricRuntimeSession:
         """Materialize a Fabric config, start its runtime, and register the session."""
         try:
-            fabric_config = translate_agent_config(self._agent_config)
-        except FabricTranslationError as error:
-            raise FabricSessionStartError(f"Fabric config translation failed: {error}") from error
-
-        await asyncio.to_thread(ensure_local_workspace_dir, self._agent_config, self._base_dir)
+            fabric_config = await self._materialize_fabric_config(streaming=True)
+        except FabricRuntimeStartError as error:
+            raise FabricSessionStartError(str(error)) from error
         fabric = self._fabric or Fabric()
         try:
             runtime = await fabric.start_runtime(
-                _prepare_serving_fabric_config(fabric_config),
+                fabric_config,
                 base_dir=self._base_dir,
                 streaming=True,
+                **fabric_streaming_options(fabric_config),
             )
-        except FabricError as error:
+        except (FabricError, FabricRuntimeStartError) as error:
             raise FabricSessionStartError(f"Fabric runtime startup failed: {error}") from error
 
         try:
@@ -108,10 +112,8 @@ class FabricSessionManager:
                 logger.exception("Failed to stop Fabric runtime after session registration failed.")
             raise
 
-    async def resolve_session(self, session_id: str | None) -> FabricRuntimeSession:
+    async def resolve_session(self, session_id: str) -> FabricRuntimeSession:
         """Resolve a session, lazily starting a runtime under a supplied Platform ID."""
-        if session_id is None:
-            return await self.open_session()
         if session_id in self._closed_session_ids:
             raise FabricSessionNotFoundError(f"Fabric session '{session_id}' was not found.")
 
@@ -135,6 +137,20 @@ class FabricSessionManager:
         finally:
             self._release_session_creation_gate(session_id, creation_gate)
 
+    async def invoke_once(self, request: FabricInvocationRequest) -> FabricRuntimeResult:
+        """Run one request on an ephemeral runtime without registering a session."""
+        async with self._invocation_slot():
+            one_shot_request = await self._to_one_shot_request(request, streaming=False)
+            return await run_fabric_agent_once(one_shot_request, fabric=self._fabric)
+
+    @asynccontextmanager
+    async def stream_once(self, request: FabricInvocationRequest) -> AsyncGenerator[FabricRuntimeStream, None]:
+        """Stream one request from an ephemeral, unregistered runtime."""
+        async with self._invocation_slot():
+            one_shot_request = await self._to_one_shot_request(request, streaming=True)
+            async with stream_fabric_agent_once(one_shot_request, fabric=self._fabric) as stream:
+                yield stream
+
     async def invoke_session(
         self,
         session: FabricRuntimeSession,
@@ -145,9 +161,7 @@ class FabricSessionManager:
             if session.closing:
                 raise FabricSessionNotFoundError(f"Fabric session '{session.session_id}' was not found.")
             try:
-                if self._invocation_semaphore is None:
-                    return await invoke_fabric_runtime(session.runtime, request)
-                async with self._invocation_semaphore:
+                async with self._invocation_slot():
                     return await invoke_fabric_runtime(session.runtime, request)
             finally:
                 await self._session_registry.refresh_activity(session)
@@ -157,17 +171,14 @@ class FabricSessionManager:
         self,
         session: FabricRuntimeSession,
         request: FabricInvocationRequest,
-    ) -> AsyncIterator[FabricRuntimeStream]:
+    ) -> AsyncGenerator[FabricRuntimeStream, None]:
         """Serialize and stream one turn on a session's active runtime."""
         async with session.invocation_lock:
             if session.closing:
                 raise FabricSessionNotFoundError(f"Fabric session '{session.session_id}' was not found.")
             try:
-                if self._invocation_semaphore is None:
+                async with self._invocation_slot():
                     yield stream_fabric_runtime(session.runtime, request)
-                else:
-                    async with self._invocation_semaphore:
-                        yield stream_fabric_runtime(session.runtime, request)
             finally:
                 await self._session_registry.refresh_activity(session)
 
@@ -242,6 +253,38 @@ class FabricSessionManager:
                 await session.runtime.stop()
             except FabricError as error:
                 raise FabricSessionStopError(f"Fabric runtime shutdown failed: {error}") from error
+
+    async def _materialize_fabric_config(self, *, streaming: bool) -> FabricConfig:
+        try:
+            fabric_config = translate_agent_config(self._agent_config)
+        except FabricTranslationError as error:
+            raise FabricRuntimeStartError(f"Fabric config translation failed: {error}") from error
+
+        await asyncio.to_thread(ensure_local_workspace_dir, self._agent_config, self._base_dir)
+        return _prepare_serving_fabric_config(fabric_config) if streaming else fabric_config
+
+    async def _to_one_shot_request(
+        self,
+        request: FabricInvocationRequest,
+        *,
+        streaming: bool,
+    ) -> FabricOneShotRequest:
+        return FabricOneShotRequest(
+            fabric_config=await self._materialize_fabric_config(streaming=streaming),
+            base_dir=self._base_dir,
+            input=request.input,
+            request_id=request.request_id,
+            caller_context=request.caller_context,
+            timeout_seconds=request.timeout_seconds,
+        )
+
+    @asynccontextmanager
+    async def _invocation_slot(self) -> AsyncGenerator[None, None]:
+        if self._invocation_semaphore is None:
+            yield
+            return
+        async with self._invocation_semaphore:
+            yield
 
 
 def _prepare_serving_fabric_config(fabric_config: FabricConfig) -> FabricConfig:

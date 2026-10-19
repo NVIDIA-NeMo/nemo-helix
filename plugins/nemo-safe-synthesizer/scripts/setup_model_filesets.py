@@ -12,7 +12,7 @@ Usage:
     python setup_model_filesets.py --files-api-url http://localhost:8080
 
 Environment Variables:
-    NMP_FILES_URL: Files API base URL (alternative to --files-api-url)
+    NHX_FILES_URL: Files API base URL (alternative to --files-api-url)
     HF_TOKEN: HuggingFace token for private models (optional)
 """
 
@@ -20,18 +20,26 @@ import argparse
 import logging
 import os
 import sys
+from typing import TypedDict
 
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import ConflictError, NemoHTTPError, NotFoundError
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.storage_config import HuggingfaceStorageConfig
-from nemo_platform_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.client.errors import ConflictError, NemoHTTPError, NotFoundError
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-MODEL_FILESETS = [
+
+class ModelFileset(TypedDict):
+    """A model fileset to register: its name, description, and Hugging Face storage config."""
+
+    name: str
+    description: str
+    storage: dict[str, str]
+
+
+MODEL_FILESETS: list[ModelFileset] = [
     {
         "name": "smollm3-3b",
         "description": "SmolLM3 3B model for synthesis",
@@ -78,22 +86,21 @@ DEFAULT_WORKSPACE = "default"
 
 
 def create_filesets(
-    sdk: NeMoPlatform,
+    files: FilesClient,
     workspace: str,
     dry_run: bool = False,
 ) -> list[str]:
     """Create model filesets in the Files API.
 
     Args:
-        sdk: NeMo Platform SDK client
+        files: Typed Files client
         workspace: Workspace to create filesets in
         dry_run: If True, only print what would be created
 
     Returns:
         List of created fileset names
     """
-    files = client_from_platform(sdk, FilesClient)
-    created = []
+    created: list[str] = []
     for fileset_config in MODEL_FILESETS:
         name = fileset_config["name"]
         full_name = f"{workspace}/{name}"
@@ -118,7 +125,7 @@ def create_filesets(
                 workspace=workspace,
                 body=CreateFilesetRequest(
                     name=name,
-                    description=fileset_config.get("description", ""),
+                    description=fileset_config["description"],
                     purpose="generic",
                     storage=storage,
                 ),
@@ -140,7 +147,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Create model weight filesets in the Files API")
     parser.add_argument(
         "--files-api-url",
-        default=os.environ.get("NMP_FILES_URL", "http://localhost:8080"),
+        default=os.environ.get("NHX_FILES_URL", "http://localhost:8080"),
         help="Files API base URL",
     )
     parser.add_argument(
@@ -156,8 +163,8 @@ def main() -> int:
     if args.dry_run:
         logger.info("DRY RUN - no filesets will be created")
 
-    sdk = NeMoPlatform(base_url=args.files_api_url)
-    created = create_filesets(sdk, args.workspace, dry_run=args.dry_run)
+    files = FilesClient(base_url=args.files_api_url)
+    created = create_filesets(files, args.workspace, dry_run=args.dry_run)
 
     if created:
         logger.info("\nCreated %d filesets:", len(created))

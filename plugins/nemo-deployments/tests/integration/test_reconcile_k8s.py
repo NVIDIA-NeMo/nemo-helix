@@ -3,36 +3,52 @@
 
 """Integration test for deployment reconciliation against a real k8s backend.
 
-Requires AIRCORE-757 K8sDeploymentBackend to be registered in BACKEND_CLASSES.
+Requires the K8sDeploymentBackend to be registered in BACKEND_CLASSES.
 
-No volume/PVC mount here (unlike ``test_reconcile_docker.py``'s puller/server chain):
-kind's default ``local-path`` StorageClass uses ``WaitForFirstConsumer`` binding, so an
-unconsumed PVC never reaches BOUND, and ``DeploymentReconciler`` gates deployment create
-on the mounted volume already being BOUND (see ``volume_mounts_ready``) — a chicken-and-egg
-that only resolves on storage classes with ``Immediate`` binding (the common case outside
-kind, e.g. most cloud block-storage classes). Prerequisite gating alone is exercised here.
+The puller/server scenario has no PVC mount (unlike ``test_reconcile_docker.py``): kind's
+default ``local-path`` StorageClass uses ``WaitForFirstConsumer`` binding, so an unconsumed
+PVC never reaches BOUND, and ``DeploymentReconciler`` gates deployment create on the mounted
+volume already being BOUND (see ``volume_mounts_ready``). A standalone VolumeReconciler test
+still exercises real PVC creation and deletion because it accepts either PENDING or BOUND.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from kubeconfig_availability import skip_without_kubeconfig
+from kubernetes.client.rest import ApiException
+from kubernetes.stream import stream
 from nemo_deployments_plugin.backends.k8s.backend import K8sDeploymentBackend
+from nemo_deployments_plugin.backends.labels import k8s_deployment_resource_name, k8s_volume_resource_name
 from nemo_deployments_plugin.backends.registry import BACKEND_CLASSES, ExecutorRegistry
 from nemo_deployments_plugin.config import ControllerConfig
-from nemo_deployments_plugin.entities import Container, ContainerPort, Deployment, DeploymentConfig, Prerequisite
+from nemo_deployments_plugin.entities import (
+    Container,
+    ContainerPort,
+    Deployment,
+    DeploymentConfig,
+    Prerequisite,
+    Probe,
+    StatusEvent,
+    Volume,
+)
 from nemo_deployments_plugin.reconciler.deployment_reconciler import DeploymentReconciler
+from nemo_deployments_plugin.reconciler.volume_reconciler import VolumeReconciler
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 
 pytestmark = [
-    pytest.mark.skipif("k8s" not in BACKEND_CLASSES, reason="Requires K8sDeploymentBackend (AIRCORE-757)"),
+    pytest.mark.skipif("k8s" not in BACKEND_CLASSES, reason="Requires K8sDeploymentBackend"),
     skip_without_kubeconfig,
 ]
 
-NAMESPACE = os.environ.get("NMP_K8S_ITEST_NAMESPACE", "default")
+NAMESPACE = os.environ.get("NHX_K8S_ITEST_NAMESPACE", "default")
 POLL_ATTEMPTS = 60
 POLL_INTERVAL_SECONDS = 1
 ALPINE_IMAGE = "docker.io/library/alpine:3.20"
@@ -41,12 +57,12 @@ NGINX_IMAGE = "docker.io/library/nginx:alpine"
 
 @pytest.fixture
 def k8s_registry() -> ExecutorRegistry:
-    mock_sdk = MagicMock()
+    mock_client = MagicMock()
     with (
-        patch("nemo_deployments_plugin.backends.k8s.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.k8s.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.k8s.backend.NemoEntitiesClient"),
     ):
-        backend = K8sDeploymentBackend(mock_sdk, {"default_namespace": NAMESPACE, "request_timeout": 30})
+        backend = K8sDeploymentBackend(mock_client, {"default_namespace": NAMESPACE, "request_timeout": 30})
     return ExecutorRegistry({"k8s": backend}, default_executor="k8s")
 
 
@@ -54,6 +70,173 @@ def _backend(k8s_registry: ExecutorRegistry) -> K8sDeploymentBackend:
     backend = k8s_registry.resolve("k8s")
     assert isinstance(backend, K8sDeploymentBackend)
     return backend
+
+
+class _InMemoryVolumeStore:
+    """Minimal persistent store for the volume lifecycle exercised in this module."""
+
+    def __init__(self, volume: Volume) -> None:
+        self._volumes = {(volume.workspace, volume.name): volume}
+
+    async def get(self, entity_type: type[Volume], *, name: str, workspace: str) -> Volume:
+        assert entity_type is Volume
+        try:
+            return self._volumes[(workspace, name)]
+        except KeyError as exc:
+            raise NemoEntityNotFoundError(f"{workspace}/{name}") from exc
+
+    async def update(self, volume: Volume, *, original_name: str | None = None) -> Volume:
+        assert original_name is None
+        self._volumes[(volume.workspace, volume.name)] = volume
+        return volume
+
+    async def delete(
+        self,
+        entity_type: type[Volume],
+        name: str,
+        *,
+        workspace: str,
+        expected_db_version: int | None = None,
+    ) -> None:
+        assert entity_type is Volume
+        volume = await self.get(entity_type, name=name, workspace=workspace)
+        assert expected_db_version == volume.db_version
+        del self._volumes[(workspace, name)]
+
+
+@pytest.mark.asyncio
+async def test_ready_deployment_recovers_after_readiness_loss(k8s_registry: ExecutorRegistry) -> None:
+    """An old deployment gets a fresh timeout when a running pod loses readiness."""
+    name = f"readiness-{uuid.uuid4().hex[:8]}"
+    workspace = "itest-readiness"
+    dep = Deployment(name=name, workspace=workspace, deployment_config=name)
+    cfg = DeploymentConfig(
+        name=name,
+        workspace=workspace,
+        containers=[
+            Container(
+                name="agent",
+                image=ALPINE_IMAGE,
+                command=["sh", "-c"],
+                args=["touch /tmp/ready; exec sleep 3600"],
+                readinessProbe=Probe.model_validate(
+                    {
+                        "exec": {"command": ["test", "-f", "/tmp/ready"]},
+                        "periodSeconds": 1,
+                        "timeoutSeconds": 2,
+                        "failureThreshold": 2,
+                    }
+                ),
+            )
+        ],
+    )
+    entities = AsyncMock()
+    entities.update.side_effect = lambda entity: entity
+    entities.get.side_effect = lambda entity_type, name, workspace: cfg if entity_type is DeploymentConfig else dep
+    backend = _backend(k8s_registry)
+    backend._entities = entities
+    reconciler = DeploymentReconciler(entities, k8s_registry, ControllerConfig())
+    reconciler.set_config_cache({(workspace, name): cfg})
+    resource_name = k8s_deployment_resource_name(workspace, name)
+
+    async def wait_for_status(expected: str) -> None:
+        for _ in range(POLL_ATTEMPTS):
+            await reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name={})
+            assert dep.status != "FAILED", dep.status_message
+            if dep.status == expected:
+                return
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+        pytest.fail(f"Expected {expected}, got {dep.status}: {dep.status_message}")
+
+    async def set_readiness(pod_name: str, ready: bool) -> None:
+        await asyncio.to_thread(
+            stream,
+            backend.clients.core_v1.connect_get_namespaced_pod_exec,
+            pod_name,
+            NAMESPACE,
+            command=["touch", "/tmp/ready"] if ready else ["rm", "/tmp/ready"],
+            container="agent",
+            stderr=True,
+            stdout=True,
+        )
+
+    try:
+        await wait_for_status("READY")
+        pods = await asyncio.to_thread(backend.clients.core_v1.list_namespaced_pod, NAMESPACE)
+        pod = next(p for p in pods.items if p.metadata.name.startswith(f"{resource_name}-"))
+        now = datetime.now(timezone.utc)
+        dep.status_history = [
+            StatusEvent(status="STARTING", timestamp=(now - timedelta(hours=20)).isoformat()),
+            StatusEvent(status="READY", timestamp=(now - timedelta(hours=19)).isoformat()),
+        ]
+
+        await set_readiness(pod.metadata.name, False)
+        await wait_for_status("STARTING")
+        assert datetime.fromisoformat(dep.status_history[-1].timestamp) >= now
+        assert dep.error_details is None
+        unready_pod = await asyncio.to_thread(backend.clients.core_v1.read_namespaced_pod, pod.metadata.name, NAMESPACE)
+        assert unready_pod.status.phase == "Running"
+        assert any(c.type == "Ready" and c.status == "False" for c in unready_pod.status.conditions)
+
+        await set_readiness(pod.metadata.name, True)
+        await wait_for_status("READY")
+        recovered_pod = await asyncio.to_thread(
+            backend.clients.core_v1.read_namespaced_pod, pod.metadata.name, NAMESPACE
+        )
+        assert recovered_pod.metadata.uid == pod.metadata.uid
+        assert recovered_pod.status.container_statuses[0].restart_count == 0
+        assert dep.error_details is None
+    finally:
+        await backend.delete_deployment(workspace, name)
+
+
+@pytest.mark.asyncio
+async def test_volume_delete_reconciliation_removes_pvc(k8s_registry: ExecutorRegistry) -> None:
+    """A DELETING Volume is retained until its real Kubernetes PVC delete succeeds."""
+    volume_name = f"delete-{uuid.uuid4().hex[:8]}"
+    volume = Volume(name=volume_name, workspace="itest-pvc", size="1Gi", status="PENDING")
+    entities = _InMemoryVolumeStore(volume)
+    reconciler = VolumeReconciler(cast(NemoEntitiesClient, entities), k8s_registry)
+    backend = _backend(k8s_registry)
+    pvc_name = k8s_volume_resource_name(volume.workspace, volume.name)
+    core_v1 = backend.clients.core_v1
+
+    try:
+        await reconciler.reconcile_one(volume)
+        assert volume.status in {"PENDING", "BOUND"}
+
+        volume.status = "DELETING"
+        await reconciler.reconcile_one(volume)
+
+        with pytest.raises(NemoEntityNotFoundError):
+            await entities.get(Volume, name=volume.name, workspace=volume.workspace)
+
+        for _ in range(POLL_ATTEMPTS):
+            try:
+                pvc = await asyncio.to_thread(
+                    core_v1.read_namespaced_persistent_volume_claim,
+                    name=pvc_name,
+                    namespace=NAMESPACE,
+                )
+            except ApiException as exc:
+                if exc.status == 404:
+                    break
+                raise
+            if getattr(getattr(pvc, "metadata", None), "deletion_timestamp", None) is not None:
+                break
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+        else:
+            pytest.fail(f"PVC {NAMESPACE}/{pvc_name} remained present without a deletion timestamp")
+    finally:
+        try:
+            await asyncio.to_thread(
+                core_v1.delete_namespaced_persistent_volume_claim,
+                name=pvc_name,
+                namespace=NAMESPACE,
+            )
+        except ApiException as exc:
+            if exc.status != 404:
+                raise
 
 
 @pytest.mark.asyncio
@@ -74,13 +257,13 @@ async def test_puller_server_prerequisite_chain(k8s_registry: ExecutorRegistry) 
     puller_cfg = DeploymentConfig(
         name="puller-cfg",
         workspace="itest",
-        restart_policy="Never",  # ty: ignore[unknown-argument]  # pyright: ignore[reportCallIssue]
+        restart_policy="Never",  # pyright: ignore[reportCallIssue]
         containers=[Container(name="puller", image=ALPINE_IMAGE, command=["sh", "-c"], args=["echo pulled"])],
     )
     server_cfg = DeploymentConfig(
         name="server-cfg",
         workspace="itest",
-        restart_policy="Always",  # ty: ignore[unknown-argument]  # pyright: ignore[reportCallIssue]
+        restart_policy="Always",  # pyright: ignore[reportCallIssue]
         containers=[Container(name="server", image=NGINX_IMAGE, ports=[ContainerPort(name="http", containerPort=80)])],
     )
 

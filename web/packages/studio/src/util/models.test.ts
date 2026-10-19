@@ -4,7 +4,7 @@
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { buildModelConfig, getModelInferenceGatewayUrl, getModelTools } from '@studio/util/models';
 
-vi.mock('@nemo/sdk/generated/platform/api', () => ({
+vi.mock('@nemo/sdk/generated/platform/inference-gateway', () => ({
   getGatewayProxyGetQueryKey: (workspace: string, modelName: string, trailingUri: string) => [
     `/v2/nemo/workspaces/${workspace}/gateway/${modelName}/${trailingUri}`,
   ],

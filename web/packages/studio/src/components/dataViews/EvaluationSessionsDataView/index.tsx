@@ -8,21 +8,23 @@ import {
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { formatDurationMs } from '@nemo/common/src/utils/date';
 import { formatEvaluatorScore, snakeCaseToTitleCase } from '@nemo/common/src/utils/formatters';
+import { useGetEvaluation } from '@nemo/sdk/generated/platform/evaluations';
+import { useListEvaluatorResults } from '@nemo/sdk/generated/platform/evaluator-results';
 import {
   listEvaluationSessions,
-  useGetEvaluation,
   useListEvaluationSessions,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/experiments';
 import type {
   EvaluationSessionResponsesPage,
   EvaluationSessionFilter,
   EvaluationSessionResponse,
   ListEvaluationSessionsParams,
 } from '@nemo/sdk/generated/platform/schema';
-import { Text, Tooltip } from '@nvidia/foundations-react-core';
+import { Badge, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { IntakePayloadPreviewCell } from '@studio/components/IntakeLists/IntakePayloadPreviewCell';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getEvaluationSessionTraceDetailRoute } from '@studio/routes/utils';
@@ -31,8 +33,7 @@ import { formatInteger } from '@studio/util/intakeTelemetry';
 import { keepPreviousData } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import { Columns3 } from 'lucide-react';
-import { type ComponentProps, type FC, useMemo } from 'react';
-import { useNavigate } from 'react-router';
+import { type ComponentProps, type FC, useMemo, useState } from 'react';
 
 type SessionRow = EvaluationSessionResponse & { _rowId: string };
 
@@ -91,12 +92,64 @@ const getSessionSortParam = (sortingState: { id: string; desc: boolean }[]): str
   return fields.length > 0 ? fields.join(',') : undefined;
 };
 
+interface FailedEvaluatorBadgeProps {
+  workspace: string;
+  sessionId: string;
+  evaluator: string;
+}
+
+/**
+ * The "Failed" marker for an evaluator that ran on this session but produced no score, with the
+ * reason the evaluator recorded (its diagnostic, stored as the result's `comment`) on hover. The
+ * session row only says *which* evaluators failed; the reason lives on the evaluator result, so it
+ * is fetched when the tooltip opens rather than for every cell on the page.
+ */
+const FailedEvaluatorBadge: FC<FailedEvaluatorBadgeProps> = ({
+  workspace,
+  sessionId,
+  evaluator,
+}) => {
+  const [opened, setOpened] = useState(false);
+  const { data, isPending } = useListEvaluatorResults(
+    workspace,
+    { filter: { session_id: sessionId, name: evaluator, status: 'FAILED' }, page_size: 10 },
+    { query: { enabled: opened } }
+  );
+  const reasons = [...new Set((data?.data ?? []).map((result) => result.comment).filter(Boolean))];
+  return (
+    <Tooltip
+      side="bottom"
+      onOpenChange={(open) => open && setOpened(true)}
+      slotContent={
+        <Stack gap="density-xs">
+          <Text kind="body/semibold/sm">The evaluator ran but produced no score.</Text>
+          {!opened || isPending ? (
+            <Text kind="body/regular/sm">Loading the reason…</Text>
+          ) : reasons.length > 0 ? (
+            reasons.map((reason) => (
+              <Text key={reason} kind="body/regular/sm">
+                {reason}
+              </Text>
+            ))
+          ) : (
+            <Text kind="body/regular/sm">No reason was recorded.</Text>
+          )}
+        </Stack>
+      }
+    >
+      <Badge kind="outline" color="red" className="cursor-default">
+        Failed
+      </Badge>
+    </Tooltip>
+  );
+};
+
 export const EvaluationSessionsDataView: FC<EvaluationSessionsDataViewProps> = ({
   evaluationName,
   experimentName,
 }) => {
   const workspace = useWorkspaceFromPath();
-  const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const dataViewState = useStudioDataViewState<EvaluationSessionFilter>({
     columnVisibility: {},
     multiSort: true,
@@ -173,6 +226,9 @@ export const EvaluationSessionsDataView: FC<EvaluationSessionsDataViewProps> = (
       for (const name of Object.keys(session.evaluator_scores ?? {})) {
         names.add(name);
       }
+      for (const name of session.failed_evaluators ?? []) {
+        names.add(name);
+      }
     }
     return Array.from(names).sort();
   }, [experiment?.evaluator_names, sessionsData]);
@@ -194,6 +250,28 @@ export const EvaluationSessionsDataView: FC<EvaluationSessionsDataViewProps> = (
         );
       },
     }),
+    ...evaluatorNames.map((name, index) =>
+      accessor((original) => original.evaluator_scores?.[name], {
+        id: `score-${index}`,
+        header: snakeCaseToTitleCase(name),
+        enableSorting: false,
+        size: 210,
+        meta: { alignment: 'right' },
+        cell: ({ row }) => {
+          const value = row.original.evaluator_scores?.[name];
+          if (value == null && row.original.failed_evaluators?.includes(name)) {
+            return (
+              <FailedEvaluatorBadge
+                workspace={workspace}
+                sessionId={row.original.session_id}
+                evaluator={name}
+              />
+            );
+          }
+          return <Text>{formatEvaluatorScore(value)}</Text>;
+        },
+      })
+    ),
     accessor('status', {
       header: 'Status',
       enableSorting: true,
@@ -249,19 +327,6 @@ export const EvaluationSessionsDataView: FC<EvaluationSessionsDataViewProps> = (
         },
       }
     ),
-    ...evaluatorNames.map((name, index) =>
-      accessor((original) => original.evaluator_scores?.[name], {
-        id: `score-${index}`,
-        header: snakeCaseToTitleCase(name),
-        enableSorting: false,
-        size: 130,
-        meta: { alignment: 'right' },
-        cell: ({ row }) => {
-          const value = row.original.evaluator_scores?.[name];
-          return <Text>{formatEvaluatorScore(value)}</Text>;
-        },
-      })
-    ),
   ];
 
   return (
@@ -269,9 +334,10 @@ export const EvaluationSessionsDataView: FC<EvaluationSessionsDataViewProps> = (
       dataViewState={dataViewState}
       makeColumns={makeColumns}
       searchField="test_case_name"
-      onRowClick={(row) => {
+      onRowClick={(row, _index, event) => {
         if (row.trace_id) {
-          navigate(
+          openRow(
+            event,
             getEvaluationSessionTraceDetailRoute(
               workspace,
               experimentName,

@@ -12,12 +12,12 @@ help:
 .PHONY: quickstart-up
 up: quickstart-up
 
-quickstart-up: ## Start the NeMo Platform with core services for local development
+quickstart-up: ## Start the NeMo Helix with core services for local development
 	cd $(CI_PROJECT_DIR) && \
-	NMP_CONFIG_FILE_PATH=$(CI_PROJECT_DIR)/packages/nmp_platform/config/local.yaml \
-	EXTRA_LOG_CONFIG='{loggers: {nmp.core.models.controllers.backends.docker: {level: DEBUG}}}' \
+	NHX_CONFIG_FILE_PATH=$(CI_PROJECT_DIR)/packages/nhx_platform/config/local.yaml \
+	EXTRA_LOG_CONFIG='{loggers: {nhx.core.models.controllers.backends.docker: {level: DEBUG}}}' \
 	DATABASE_DIALECT=sqlite \
-	DATABASE_PATH=/tmp/nmp-platform.db \
+	DATABASE_PATH=/tmp/nhx-platform.db \
 	UVICORN_RELOAD=true \
 	$(UV) run nemo services run \
 	--services models,entities,jobs,secrets,files,auth,safe-synthesizer,inference-gateway \
@@ -25,14 +25,14 @@ quickstart-up: ## Start the NeMo Platform with core services for local developme
 	--host=0.0.0.0 \
 	--port=8080
 
-quickstart-clean: ## Clean the NeMo Platform DB
-	rm -rf /tmp/nmp-platform.db
+quickstart-clean: ## Clean the NeMo Helix DB
+	rm -rf /tmp/nhx-platform.db
 
-up-image: ## Start the NeMo Platform with core services for local development
-	cd $(CI_PROJECT_DIR) && make docker/nmp-api && \
-	uv run nemo quickstart up --image my-registry/nmp-api:local && \
+up-image: ## Start the NeMo Helix with core services for local development
+	cd $(CI_PROJECT_DIR) && make docker/nhx-api && \
+	uv run nemo quickstart up --image my-registry/nhx-api:local && \
 	uv run nemo quickstart logs -f
 
-create-hf-secret: ## Create the HF secret in the NeMo Platform
+create-hf-secret: ## Create the HF secret in the NeMo Helix
 	cd $(CI_PROJECT_DIR) && \
 	nemo secrets create --name "hf-token-secret" --data "env=HF_TOKEN"

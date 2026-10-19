@@ -61,15 +61,7 @@ vi.mock('@nemo/common/src/api/entity-store/useBaseModels', () => ({
   }),
 }));
 
-const mockUsePromptTunableBaseModelIds = vi.fn(() => ({
-  promptTunableIds: new Set<string>(),
-  isLoading: false,
-}));
-vi.mock('@nemo/common/src/api/entity-store/usePromptTunableBaseModelIds', () => ({
-  usePromptTunableBaseModelIds: () => mockUsePromptTunableBaseModelIds(),
-}));
-
-vi.mock('@nemo/sdk/generated/platform/api', () => ({
+vi.mock('@nemo/sdk/generated/platform/models', () => ({
   useModelsGetModel: () => ({
     data: undefined,
     isLoading: false,
@@ -138,12 +130,10 @@ vi.mock('@studio/components/BaseModelCard', () => ({
   BaseModelCard: ({
     model,
     isChatAvailable,
-    canPromptTune,
     onClick,
   }: {
     model: ModelEntity;
     isChatAvailable?: boolean;
-    canPromptTune?: boolean;
     onClick?: () => void;
   }) => (
     <button
@@ -151,7 +141,6 @@ vi.mock('@studio/components/BaseModelCard', () => ({
       data-testid="base-model-card"
       data-model-id={model.id ?? ''}
       data-is-chat-available={String(isChatAvailable ?? false)}
-      data-can-prompt-tune={String(canPromptTune ?? false)}
       onClick={onClick}
     >
       {model.name}
@@ -367,17 +356,17 @@ describe('WorkspaceBaseModelsRoute customizable filter gating', () => {
     suppressConsoleError('was not wrapped in act');
   });
 
-  it('hides the Customizable checkbox when customizer is disabled', () => {
+  it('hides the Fine-tunable checkbox when customizer is disabled', () => {
     render(
       <TestWrapper initialEntry="/workspaces/ws1/base-models">
         <WorkspaceBaseModelsRoute />
       </TestWrapper>
     );
 
-    expect(screen.queryByRole('checkbox', { name: 'Customizable' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Fine-tunable' })).not.toBeInTheDocument();
   });
 
-  it('shows the Customizable checkbox when customizer is enabled', async () => {
+  it('shows the Fine-tunable checkbox when customizer is enabled', async () => {
     mockEnvironment.customizerEnabled = true;
 
     render(
@@ -386,7 +375,7 @@ describe('WorkspaceBaseModelsRoute customizable filter gating', () => {
       </TestWrapper>
     );
 
-    expect(await screen.findByRole('checkbox', { name: 'Customizable' })).toBeInTheDocument();
+    expect(await screen.findByRole('checkbox', { name: 'Fine-tunable' })).toBeInTheDocument();
   });
 });
 
@@ -401,67 +390,6 @@ describe('WorkspaceBaseModelsRoute card prop wiring', () => {
     mockEnvironment.customizerEnabled = false;
     mockRows = [{ original: mockModel }];
     suppressConsoleError('was not wrapped in act');
-  });
-
-  it('passes canPromptTune=true only for ids in the prompt-tunable set', async () => {
-    mockUsePromptTunableBaseModelIds.mockReturnValue({
-      promptTunableIds: new Set<string>(['model-id-1']),
-      isLoading: false,
-    });
-
-    render(
-      <TestWrapper initialEntry="/workspaces/ws1/base-models">
-        <WorkspaceBaseModelsRoute />
-      </TestWrapper>
-    );
-
-    const card = await screen.findByTestId('base-model-card');
-    expect(card).toHaveAttribute('data-model-id', 'model-id-1');
-    expect(card).toHaveAttribute('data-can-prompt-tune', 'true');
-  });
-
-  it('passes canPromptTune=false when the model id is not in the prompt-tunable set', async () => {
-    mockUsePromptTunableBaseModelIds.mockReturnValue({
-      promptTunableIds: new Set<string>(['some-other-id']),
-      isLoading: false,
-    });
-
-    render(
-      <TestWrapper initialEntry="/workspaces/ws1/base-models">
-        <WorkspaceBaseModelsRoute />
-      </TestWrapper>
-    );
-
-    const card = await screen.findByTestId('base-model-card');
-    expect(card).toHaveAttribute('data-can-prompt-tune', 'false');
-  });
-
-  it('discriminates canPromptTune per row by model id', async () => {
-    const tunableModel = { ...mockModel, id: 'tunable-id', name: 'tunable' } as ModelEntity;
-    const nonTunableModel = {
-      ...mockModel,
-      id: 'non-tunable-id',
-      name: 'non-tunable',
-    } as ModelEntity;
-    mockRows = [{ original: tunableModel }, { original: nonTunableModel }];
-
-    mockUsePromptTunableBaseModelIds.mockReturnValue({
-      promptTunableIds: new Set<string>(['tunable-id']),
-      isLoading: false,
-    });
-
-    render(
-      <TestWrapper initialEntry="/workspaces/ws1/base-models">
-        <WorkspaceBaseModelsRoute />
-      </TestWrapper>
-    );
-
-    const cards = await screen.findAllByTestId('base-model-card');
-    expect(cards).toHaveLength(2);
-
-    const byId = new Map(cards.map((c) => [c.getAttribute('data-model-id'), c]));
-    expect(byId.get('tunable-id')).toHaveAttribute('data-can-prompt-tune', 'true');
-    expect(byId.get('non-tunable-id')).toHaveAttribute('data-can-prompt-tune', 'false');
   });
 
   it('forwards isChatAvailable derived from getModelEntityChatStatus per row', async () => {

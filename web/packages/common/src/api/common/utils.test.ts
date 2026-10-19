@@ -1,7 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getErrorMessage, isValidationErrorArray } from '@nemo/common/src/api/common/utils';
+import {
+  getErrorMessage,
+  isForbiddenError,
+  isValidationErrorArray,
+  swallowConflict,
+} from '@nemo/common/src/api/common/utils';
 import { AxiosError, AxiosHeaders, InternalAxiosRequestConfig } from 'axios';
 
 describe('isValidationErrorArray', () => {
@@ -299,5 +304,72 @@ describe('getErrorMessage', () => {
 
       expect(getErrorMessage(error, 'fallback')).toBe('fallback');
     });
+  });
+});
+
+describe('swallowConflict', () => {
+  const axiosErrorWithStatus = (status: number): AxiosError => {
+    const config: InternalAxiosRequestConfig = { headers: new AxiosHeaders() };
+    return new AxiosError('Request failed', undefined, config, undefined, {
+      status,
+      statusText: '',
+      data: {},
+      headers: {},
+      config,
+    });
+  };
+
+  it('resolves to the value when the promise succeeds', async () => {
+    await expect(swallowConflict(Promise.resolve('created'))).resolves.toBe('created');
+  });
+
+  it('resolves to undefined when the promise rejects with a 409', async () => {
+    await expect(
+      swallowConflict(Promise.reject(axiosErrorWithStatus(409)))
+    ).resolves.toBeUndefined();
+  });
+
+  it('rethrows AxiosErrors that are not 409', async () => {
+    const error = axiosErrorWithStatus(500);
+    await expect(swallowConflict(Promise.reject(error))).rejects.toBe(error);
+  });
+
+  it('rethrows non-Axios errors', async () => {
+    const error = new Error('network down');
+    await expect(swallowConflict(Promise.reject(error))).rejects.toBe(error);
+  });
+});
+
+describe('isForbiddenError', () => {
+  /** What axios raises for a response status; `isForbiddenError` tests `instanceof AxiosError`. */
+  const axiosStatus = (status: number) => {
+    const config: InternalAxiosRequestConfig = { headers: new AxiosHeaders() };
+    return new AxiosError('Request failed', String(status), config, undefined, {
+      status,
+      statusText: '',
+      data: {},
+      headers: {},
+      config,
+    });
+  };
+
+  it('returns true for an axios 403', () => {
+    expect(isForbiddenError(axiosStatus(403))).toBe(true);
+  });
+
+  it('returns false for other statuses', () => {
+    expect(isForbiddenError(axiosStatus(401))).toBe(false);
+    expect(isForbiddenError(axiosStatus(500))).toBe(false);
+  });
+
+  it('returns false for an axios error with no response', () => {
+    expect(isForbiddenError(new AxiosError('Network Error', 'ERR_NETWORK'))).toBe(false);
+  });
+
+  it('returns false for non-axios errors', () => {
+    expect(isForbiddenError({ response: { status: 403 } })).toBe(false);
+    expect(isForbiddenError(new Error('network down'))).toBe(false);
+    expect(isForbiddenError(undefined)).toBe(false);
+    expect(isForbiddenError(null)).toBe(false);
   });
 });

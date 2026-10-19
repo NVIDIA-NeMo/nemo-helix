@@ -3,161 +3,54 @@
 # SPDX-License-Identifier: Apache-2.0
 
 title: "NeMo Studio Experiments"
-description: ""
+description: "Group evaluations into experiments, drill into results, and compare runs side by side."
 ---
 
-{/* OUTLINE ONLY — headings and the sample config are in place; copy is not written yet.
-    Keep this page thin. It covers what the Studio UI does and nothing else; concepts,
-    the data model, and every CLI/SDK workflow belong to
-    /documentation/evaluate-models/experiments. Delete a heading rather than pad it. */}
+Use **Evaluations > Experiments** in the NeMo Studio workspace sidebar to group evaluations for comparison, and to drill into evaluation results and individual runs.
 
 <Note>
 
-Experiments is still in early development. Many features are missing or should be expected to change.
+Experiments is enabled by default. An administrator can disable it by setting `studio.feature_flags.experiment: false` in the platform configuration and restarting Studio.
 
 </Note>
 
-Use NeMo Studio Experiments is a comprehensive evaluation comparison solution that helps users compare the results of evaluations produced by NeMo Evaluator and other runners such as Harbor or Gym. 
-For concepts, the data model, and the CLI and SDK workflows, see [Experiments](/documentation/evaluate-models/experiments). This page covers only what you can do from the Agents evaluation tab. 
+## Create an Experiment
 
----
+Select **New experiment** from the Experiments list. In the **Create experiment** dialog, provide a name, an optional description, and a default sort order for the experiment's evaluations, then select **Create**.
 
-## Run an Evaluation from an Agent page
+The dialog also has two optional switches:
 
-Navigate to the Agent you wish evaluation and Select Run Evaluation in the top right. Choose to create a new experiment to group evaluations and an evaluation and supply a configuration and dataset, or select an existing evaluation and use it's configurate to re-run the test. 
+- **Evaluate over time** shows the experiment's **Over time** chart by default. Turn it on only when every evaluation in the experiment runs against the same dataset and evaluators, so the points are comparable.
+- **Favorite** pins the experiment above the rest of the Experiments list and features it in other areas of Studio, such as the agent page.
 
-### Dataset and format
+## Experiment Detail
 
-Experiments expects a .jsonl format of multiple test cases. 
+Select an experiment to open its detail page, which shows aggregate metrics across its evaluations and a table of the evaluations in the group. The chart toggles described below open their views above the table, which stays in place.
 
-```json
-{"subject": "Action Required: Review Updated Vendor Agreement", "sender": "procurement@lawvendor-support.com", "body": "Hi team,\n\nOur vendor, LawVendor Solutions, has updated the terms of our annual service agreement. Please review the attached document and confirm acceptance by Friday, May 10. If you have any questions, you can access the secure portal here: https://portal.lawvendor-support.com/login . Let me know once you've signed.\n\nThanks,\nJordan Lee\nProcurement Coordinator\nLawVendor Solutions", "label": "phishing"}
-{"subject": "Action Required: LabTech Solutions Contract Renewal \u2013 Review by Oct 15", "sender": "renewals@university-support.com", "body": "Hi Dr. Ellis,\n\nPlease review the updated contract for LabTech Solutions' spectroscopy equipment, set to renew on November 1. The revised terms are available in the attached PDF and can also be viewed via our secure portal: https://university-support.com/procurement/contract/LabTech. Log in with your university username and password to approve the renewal by October 15. If you have any questions, contact procurement@university-support.com.\n\nThank you,\nUniversity Procurement Team", "label": "phishing"}
-```
+Toggle **Over time** to plot one metric per evaluation by run date. The chart is on by default for experiments with **Evaluate over time** turned on.
 
-The dataset's format should be paired with a prompt_template that references the keys in your test cases as so:
+Toggle **Pareto view** to plot evaluations on a chart, by default cost against latency. Change either axis to cost, latency, tokens, or any evaluator's score (`cost_usd`, `latency_ms`, `tokens`, or `evaluators.<name>`), then select the save button next to the axis selectors to store the selection as the experiment's default, which everyone who opens the experiment sees. When the saved axes have no data to plot together, such as cost for a self-hosted model, the chart falls back to an evaluator's score against cost or tokens.
 
-```yaml
-prompt_template: |
-  From: {{ item.sender }}
-  Subject: {{ item.subject }}
+Toggle **Scorecard** to see every evaluation in the experiment side by side in one table: each evaluator's score and its change against a baseline evaluation, average latency, average tokens, and run duration. The baseline defaults to the oldest evaluation in the experiment; pick another from **Baseline**. The best value in each column is highlighted in green and the worst in red. For scores, higher is better; for latency, tokens, and duration, lower is better. Values an evaluation did not record show as a dash.
 
-  {{ item.body }}
-```
+Select **Edit** to update the experiment's description, default sort order, and the **Evaluate over time** and **Favorite** switches. An experiment's name can't be changed after creation.
 
+If the experiment was created from an Optimizer insight, an **Insight description** card appears with a link back to that insight. See [NeMo Studio Insights](/documentation/studio/insights).
 
-### Upload an Evaluation Config
+## Evaluation Drill-Down
 
-Example configuration. For more configuration options, review [NeMo evaluator documentation](https://docs.nvidia.com/nemo/evaluator/tutorials/walkthrough). 
+Select an evaluation from an experiment's table to open its detail page, which shows aggregate metrics for that evaluation and a table of its test-case runs (sessions).
 
-```yaml
-prompt_template: '{{ item.question }}'
+Select a session to open its detail page — the same trace and span view used by **Traces**, scoped to that test case. See [NeMo Studio Traces](/documentation/studio/traces).
 
-metrics:
-  # 1. Did the report end with a Sources section at all? Deterministic and free:
-  #    a missing Sources section means the citation contract was dropped
-  #    entirely, which is worth separating from citations being merely sloppy.
-  - metric_type: string-check
-    outputs:
-      - name: string-check
-        value_json_schema:
-          title: ContinuousScore
-          description: Continuous numeric metric value.
-          type: number
-    payload:
-      kind: inline
-      metric:
-        type: string-check
-        operation: contains
-        left_template: "{{ (sample.output_text or '') | lower }}"
-        right_template: "### sources"
+## Compare Runs Side by Side
 
-  # 2. One judge, three independent scores. Three separate llm-judge metrics
-  #    would union their output names across rows and read NaN for each other,
-  #    so a multi-output metric is the right shape for several rubric criteria.
-  - metric_type: llm-judge
-    outputs:
-      - name: answers_question
-        value_json_schema:
-          title: ContinuousScore
-          description: Continuous numeric metric value.
-          type: number
-      - name: citation_integrity
-        value_json_schema:
-          title: ContinuousScore
-          description: Continuous numeric metric value.
-          type: number
-      - name: report_style
-        value_json_schema:
-          title: ContinuousScore
-          description: Continuous numeric metric value.
-          type: number
-    payload:
-      kind: inline
-      metric:
-        type: llm-judge
-        model: default/nvidia-nemotron-3-super-120b-a12b
-        prompt_template:
-          messages:
-            - role: user
-              content: |-
-                You are grading a deep research agent's report against three independent criteria. Judge only what is in the report; do not research the topic yourself, and do not reward length.
-
-                The research question was:
-                {{ item.question }}
-
-                A strong report was expected to cover:
-                {{ item.expectation }}
-
-                The agent's report:
-                {{ sample.output_text }}
-
-                Score each criterion independently — a report can be well cited but off topic, or on topic with broken citations.
-
-                1. answers_question: 1 if the report substantively covers the expectation above, 0 if it is off topic, hedges without committing, or leaves most of the expected ground uncovered. Different wording or extra material is fine; missing the substance is not.
-
-                2. citation_integrity: 1 if every inline [n] marker resolves to an entry in the Sources section, the Sources list is numbered sequentially from [1] with no gaps or duplicates, and each entry carries a URL. 0 if there are no inline markers, if any marker has no matching source, or if the numbering skips or repeats.
-
-                3. report_style: 1 if the report reads as a professional document — prose organised under `##` headings, no self-referential narration such as "I searched" or "I found", and no meta-commentary about the research process. 0 if it is mostly bullet fragments, narrates the agent's own process, or has no headings.
-
-                Return only a JSON object:
-                {"answers_question": <0 or 1>, "citation_integrity": <0 or 1>, "report_style": <0 or 1>}
-        scores:
-          # Judges narrate around the JSON, so each score is pulled out by name
-          # rather than by parsing the whole reply as a document.
-          - name: answers_question
-            minimum: 0.0
-            maximum: 1.0
-            parser:
-              type: regex
-              method: search
-              pattern: 'answers_question"?\s*:\s*([01])'
-          - name: citation_integrity
-            minimum: 0.0
-            maximum: 1.0
-            parser:
-              type: regex
-              method: search
-              pattern: 'citation_integrity"?\s*:\s*([01])'
-          - name: report_style
-            minimum: 0.0
-            maximum: 1.0
-            parser:
-              type: regex
-              method: search
-              pattern: 'report_style"?\s*:\s*([01])'
-        inference:
-          # Reports run long, so the judge needs more room than a verdict check.
-          max_tokens: 2048
-          extra_body:
-            nvext:
-              max_thinking_tokens: 512
-        reasoning:
-          end_token: "</think>"
-```
+From a session's detail page, select **Compare against evaluation run** and choose another run of the same test case. Studio splits the view into two columns — the current run on the left, the selected run on the right — so you can compare trace output side by side. Select **Clear** to return to the single-run view.
 
 ## Related Topics
 
 - [Experiments](/documentation/evaluate-models/experiments)
+- [NeMo Studio Insights](/documentation/studio/insights)
+- [NeMo Studio Traces](/documentation/studio/traces)
 - [NeMo Studio Agents](/documentation/studio/agents)
 - [About NVIDIA NeMo Studio](/documentation/studio)

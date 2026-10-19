@@ -6,7 +6,7 @@ import {
   type QuickActionItem,
   QuickActionsMenuRoot,
 } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
-import { useGuardrailsDeleteConfig } from '@nemo/sdk/generated/platform/api';
+import { useGuardrailsDeleteConfig } from '@nemo/sdk/generated/platform/guardrails';
 import type { GuardrailConfig } from '@nemo/sdk/generated/platform/schema';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { CreateGuardrailModal } from '@studio/routes/guardrails/CreateGuardrailModal';

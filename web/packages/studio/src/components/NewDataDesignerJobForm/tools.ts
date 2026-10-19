@@ -5,10 +5,155 @@ import type { ChatCompletionTool } from 'openai/resources/index.mjs';
 
 const COLUMN_TYPE_DESCRIPTION = `Each column must have "name" (string) and "column_type" (string, one of: "expression", "sampler", "llm-text", "llm-code", "llm-judge", "llm-structured", "seed-dataset", "validation", "embedding", "custom").
 - expression: requires "expr" (Jinja2 only; not Python). Reference other columns only as {{ column_name }}, never bare identifiers. Do not use Python ternary forms like "1 if cond else 0" without proper Jinja wrapping and {{ }} output. Optional "dtype" ("int"|"float"|"str"|"bool"). Order columns so expr only references earlier columns. Avoid keyword substring rules for sentiment—use sampler or LLM columns instead.
-- sampler: requires "sampler_type" (e.g. "uuid", "category", "uniform", "datetime", "gaussian", "poisson", "bernoulli"), and "params" (object). For "category", params: { "values": string[] }. For "uniform", params: { "low": number, "high": number }. For "uuid", params: {} or { "prefix" }. For "datetime", params: { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD", "unit"?: "D" }.
+- sampler: requires "sampler_type" and "params" (object), both set on the column itself. "params" is never empty except for "uuid". Examples: "category" -> { "values": ["a", "b"], "weights"?: number[] }; "subcategory" -> { "category": "<parent column name>", "values": { "<parent value>": ["x", "y"] } } (parent column must come earlier, and "values" needs a key for every parent value); "uniform" -> { "low", "high" }; "gaussian" -> { "mean", "stddev" }; "datetime" -> { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD", "unit"?: "D" }; "uuid" -> {} or { "prefix" }. Use "subcategory" for values that depend on another column instead of an expression.
 - llm-text: requires "prompt" (string), "model_alias" (string). Optional "system_prompt". Prompt may only reference columns listed earlier in "columns" (exact {{ name }} match).
-- llm-code, llm-judge, llm-structured: require "prompt", "model_alias"; may have type-specific fields.
+- llm-code additionally requires "code_lang"; llm-judge requires "scores"; llm-structured requires "output_format". All three also require "prompt" and "model_alias".
 - seed-dataset, validation, embedding, custom: require type-specific fields; prefer expression/sampler/llm-text for simple specs.`;
+
+const SCALAR_VALUE = { anyOf: [{ type: 'string' }, { type: 'number' }] };
+
+/** Mirrors the sampler `params` variants of the Data Designer OpenAPI schema. */
+const SAMPLER_PARAMS_SCHEMA = {
+  description:
+    'Sampler parameters. Must match sampler_type; required fields are listed per variant.',
+  anyOf: [
+    {
+      description: 'sampler_type "category"',
+      type: 'object',
+      required: ['values'],
+      properties: {
+        values: { type: 'array', minItems: 1, items: SCALAR_VALUE },
+        weights: { type: 'array', items: { type: 'number' } },
+      },
+      additionalProperties: false,
+    },
+    {
+      description: 'sampler_type "subcategory"',
+      type: 'object',
+      required: ['category', 'values'],
+      properties: {
+        category: { type: 'string', description: 'Name of the parent category column.' },
+        values: {
+          type: 'object',
+          description: 'Maps each parent category value to its list of subcategory values.',
+          additionalProperties: { type: 'array', items: SCALAR_VALUE },
+        },
+      },
+      additionalProperties: false,
+    },
+    {
+      description: 'sampler_type "uniform"',
+      type: 'object',
+      required: ['low', 'high'],
+      properties: {
+        low: { type: 'number' },
+        high: { type: 'number' },
+        decimal_places: { type: 'integer' },
+      },
+      additionalProperties: false,
+    },
+    {
+      description: 'sampler_type "gaussian"',
+      type: 'object',
+      required: ['mean', 'stddev'],
+      properties: {
+        mean: { type: 'number' },
+        stddev: { type: 'number' },
+        decimal_places: { type: 'integer' },
+      },
+      additionalProperties: false,
+    },
+    {
+      description: 'sampler_type "poisson"',
+      type: 'object',
+      required: ['mean'],
+      properties: { mean: { type: 'number' } },
+      additionalProperties: false,
+    },
+    {
+      description: 'sampler_type "bernoulli"',
+      type: 'object',
+      required: ['p'],
+      properties: { p: { type: 'number' } },
+      additionalProperties: false,
+    },
+    {
+      description: 'sampler_type "binomial"',
+      type: 'object',
+      required: ['n', 'p'],
+      properties: { n: { type: 'integer' }, p: { type: 'number' } },
+      additionalProperties: false,
+    },
+    {
+      description: 'sampler_type "bernoulli_mixture"',
+      type: 'object',
+      required: ['p', 'dist_name', 'dist_params'],
+      properties: {
+        p: { type: 'number' },
+        dist_name: { type: 'string' },
+        dist_params: { type: 'object', additionalProperties: true },
+      },
+      additionalProperties: false,
+    },
+    {
+      description: 'sampler_type "scipy"',
+      type: 'object',
+      required: ['dist_name', 'dist_params'],
+      properties: {
+        dist_name: { type: 'string' },
+        dist_params: { type: 'object', additionalProperties: true },
+        decimal_places: { type: 'integer' },
+      },
+      additionalProperties: false,
+    },
+    {
+      description: 'sampler_type "timedelta"',
+      type: 'object',
+      required: ['dt_min', 'dt_max', 'reference_column_name'],
+      properties: {
+        dt_min: { type: 'integer' },
+        dt_max: { type: 'integer' },
+        reference_column_name: { type: 'string' },
+        unit: { type: 'string', enum: ['D', 'h', 'm', 's'] },
+      },
+      additionalProperties: false,
+    },
+    {
+      description: 'sampler_type "datetime"',
+      type: 'object',
+      required: ['start', 'end'],
+      properties: {
+        start: { type: 'string', description: 'Inclusive start, e.g. YYYY-MM-DD.' },
+        end: { type: 'string', description: 'Exclusive end, e.g. YYYY-MM-DD.' },
+        unit: { type: 'string', enum: ['Y', 'M', 'D', 'h', 'm', 's'] },
+      },
+      additionalProperties: false,
+    },
+    {
+      description: 'sampler_type "uuid"; all fields optional',
+      type: 'object',
+      properties: {
+        prefix: { type: 'string' },
+        short_form: { type: 'boolean' },
+        uppercase: { type: 'boolean' },
+      },
+      additionalProperties: false,
+    },
+    {
+      description: 'sampler_type "person" or "person_from_faker"; all fields optional',
+      type: 'object',
+      properties: {
+        locale: { type: 'string' },
+        sex: { type: 'string', enum: ['Male', 'Female'] },
+        age_range: { type: 'array', items: { type: 'integer' } },
+        city: { anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
+        select_field_values: { type: 'object', additionalProperties: true },
+        with_synthetic_personas: { type: 'boolean' },
+      },
+      additionalProperties: false,
+    },
+  ],
+};
 
 /**
  * Tool definition for the model to call when generating a Data Designer job request.
@@ -113,10 +258,20 @@ export const generateDataDesignerJobRequestTool: ChatCompletionTool = {
                             ],
                             description: 'For column_type sampler: sampler type.',
                           },
-                          params: {
+                          params: SAMPLER_PARAMS_SCHEMA,
+                          code_lang: {
+                            type: 'string',
+                            description: 'Required for llm-code: target language, e.g. "python".',
+                          },
+                          scores: {
+                            type: 'array',
+                            description: 'Required for llm-judge: scoring rubrics.',
+                            items: { type: 'object' },
+                          },
+                          output_format: {
                             type: 'object',
-                            description:
-                              'For sampler: type-specific params. E.g. category: { values: string[] }; uniform: { low, high }; uuid: {} or { prefix }; datetime: { start, end, unit }.',
+                            description: 'Required for llm-structured: JSON schema of the output.',
+                            additionalProperties: true,
                           },
                           prompt: {
                             type: 'string',
@@ -150,6 +305,7 @@ export const generateDataDesignerJobRequestTool: ChatCompletionTool = {
                         required: ['alias', 'model', 'provider'],
                         properties: {
                           alias: { type: 'string' },
+                          skip_health_check: { type: 'boolean' },
                           model: {
                             type: 'string',
                             description: 'Model identifier (e.g. workspace/model-name).',
@@ -164,6 +320,8 @@ export const generateDataDesignerJobRequestTool: ChatCompletionTool = {
                             properties: {
                               generation_type: { type: 'string', enum: ['chat-completion'] },
                               max_tokens: { type: 'number' },
+                              temperature: { type: 'number' },
+                              top_p: { type: 'number' },
                               max_parallel_requests: { type: 'number' },
                               extra_body: {
                                 type: 'object',
@@ -187,8 +345,10 @@ export const generateDataDesignerJobRequestTool: ChatCompletionTool = {
                       },
                       additionalProperties: true,
                     },
+                    constraints: { type: 'array', items: { type: 'object' } },
+                    processors: { type: 'array', items: { type: 'object' } },
                   },
-                  additionalProperties: true,
+                  additionalProperties: false,
                 },
               },
               additionalProperties: false,

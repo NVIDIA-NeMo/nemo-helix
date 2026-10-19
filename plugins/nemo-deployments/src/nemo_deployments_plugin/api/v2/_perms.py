@@ -11,7 +11,7 @@ status routes mint a ``status.update`` permission under the collection they proj
 
 from __future__ import annotations
 
-from nemo_platform_plugin.authz import PermissionSet, perm
+from nemo_helix_plugin.authz import PermissionSet, perm
 
 
 class DeploymentConfigPerms(PermissionSet, namespace="deployments.deployment-configs"):

@@ -5,6 +5,9 @@
 title: "Preview a Config"
 description: ""
 ---
+{/* @nemo-nb: process */}
+{/* @nemo-nb: skip-test */}
+
 <a id="anonymizer-tutorials-preview"></a>
 
 This tutorial walks through the `anonymizer.preview` flow: defining a request, streaming a small anonymized sample, and inspecting the resulting frames.
@@ -15,7 +18,7 @@ For detection and replacement strategy details, see the [open-source library doc
 
 Complete the [tutorials prerequisites](/documentation/anonymize-data/tutorials#prerequisites), which cover:
 
-- A running NeMo Platform cluster with the `nemo anonymizer` CLI available (see [Setup](/documentation/get-started)).
+- A running NeMo Helix cluster with the `nemo anonymizer` CLI available (see [Setup](/documentation/get-started)).
 - An inference provider configured (default examples use `nvidia-build`).
 - A fileset named `anonymizer-inputs` with `anonymizer-input.csv` uploaded.
 
@@ -23,11 +26,12 @@ Complete the [tutorials prerequisites](/documentation/anonymize-data/tutorials#p
 
 `preview` runs the Anonymizer pipeline on a small number of records and streams results back from the plugin service. The Python SDK collects the stream into a `pandas` DataFrame; the basic CLI streams NDJSON frames to stdout.
 
-The plugin emits four frame kinds:
+The plugin emits these frame kinds:
 
 | Frame              | Purpose                                                                              |
 |--------------------|--------------------------------------------------------------------------------------|
 | `log`              | Pipeline log lines forwarded from the library.                                       |
+| `model_download`   | First-run only: emitted while the PII detector model downloads (`started`/`complete`). |
 | `preview_dataset`  | User-facing anonymized records. The final dataset you usually care about.            |
 | `trace_dataset`    | Internal trace records used by `display_record` in notebooks.                        |
 | `failed_records`   | Per-record failures with reasons. Emitted only when at least one record failed.      |
@@ -37,7 +41,7 @@ Available preview surfaces:
 
 | Surface                          | Where it runs                       | Local paths | `model_configs` required |
 |----------------------------------|--------------------------------------|-------------|--------------------------|
-| `sdk.anonymizer.preview(...)`    | Anonymizer plugin service (remote)  | Rejected    | Required                 |
+| `anonymizer.preview(...)` | Anonymizer plugin service (remote)  | Rejected    | Required                 |
 | `nemo anonymizer preview`        | Anonymizer plugin service (remote)  | Rejected    | Required                 |
 
 ## Step 1: Build a `PreviewRequest`
@@ -51,18 +55,24 @@ from anonymizer.config.replace_strategies import Redact
 from data_designer.config import ModelConfig
 from nemo_anonymizer_plugin.app.input import AnonymizerInputSpec
 from nemo_anonymizer_plugin.app.task_config import PreviewRequest
+from nemo_anonymizer_plugin.sdk.resources import AnonymizerResource
+from nemo_helix_plugin.client.client import NemoClient
 
-WORKSPACE = os.environ.get("NMP_WORKSPACE", "default")
-MODEL_PROVIDER = os.environ.get("NMP_ANON_PROVIDER", "nvidia-build")
+client = NemoClient.from_config()
+anonymizer = AnonymizerResource(client)
+WORKSPACE = client.resolve_workspace()
+MODEL_PROVIDER = os.environ.get("NHX_ANON_PROVIDER", "nvidia-build")
 
 config = AnonymizerConfig(
     replace=Redact(format_template="[REDACTED_{label}]"),
 )
 
 model_configs = [
-    ModelConfig(alias="gliner-pii-detector", provider=MODEL_PROVIDER, model="nvidia/gliner-pii"),
+    # The Anonymizer plugin manages a default PII entity detector, so it is not
+    # configured here (you may override it with a ModelConfig, but that is
+    # optional). These entries cover the remaining LLM roles.
     ModelConfig(alias="gpt-oss-120b", provider=MODEL_PROVIDER, model="openai/gpt-oss-120b"),
-    ModelConfig(alias="nemotron-30b-thinking", provider=MODEL_PROVIDER, model="nvidia/nemotron-3-nano-30b-a3b"),
+    ModelConfig(alias="nemotron-30b-thinking", provider=MODEL_PROVIDER, model="nvidia/nemotron-3.5-lightning-30b-a3b"),
 ]
 
 request = PreviewRequest(
@@ -93,14 +103,7 @@ Field reference:
 ## Step 2: Run with the Python SDK
 
 ```python
-import os
-from nemo_platform import NeMoPlatform
-
-sdk = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
-    workspace=WORKSPACE,
-)
-preview = sdk.anonymizer.preview(request)
+preview = anonymizer.preview(request)
 
 preview.dataset            # pandas DataFrame of anonymized records
 preview.trace_dataset      # detection trace
@@ -114,9 +117,7 @@ The CLI accepts the same request as a YAML or JSON spec file and streams NDJSON 
 
 ```bash
 nemo anonymizer preview \
-  --spec-file /tmp/anonymizer-preview.yaml \
-  --workspace "${NMP_WORKSPACE:-default}" \
-  --base-url "${NMP_BASE_URL:-http://localhost:8080}"
+  --spec-file /tmp/anonymizer-preview.yaml
 ```
 
 <Accordion title="Async client">
@@ -124,14 +125,19 @@ nemo anonymizer preview \
 `AsyncAnonymizerResource.preview` has the same signature and return type:
 
 ```python
-import os
-from nemo_platform import AsyncNeMoPlatform
+import asyncio
+from nemo_anonymizer_plugin.sdk.resources import AsyncAnonymizerResource
+from nemo_helix_plugin.client.client import AsyncNemoClient
 
-async_sdk = AsyncNeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
-    workspace=WORKSPACE,
-)
-preview = await async_sdk.anonymizer.preview(request)
+async def run_preview():
+    async_client = AsyncNemoClient.from_config()
+    anonymizer = AsyncAnonymizerResource(async_client)
+    try:
+        return await anonymizer.preview(request)
+    finally:
+        await async_client.close()
+
+preview = asyncio.run(run_preview())
 ```
 
 </Accordion>
@@ -153,14 +159,7 @@ preview.dataset.to_parquet("anonymized-preview.parquet", index=False)
 
 ## Input Source Forms
 
-The plugin accepts two forms for `data.source`:
-
-| Form                                  | `sdk.anonymizer.preview` | `nemo anonymizer preview` |
-|---------------------------------------|--------------------------|---------------------------|
-| HTTP(S) URL (`https://.../input.csv`) | Yes                      | Yes                       |
-| Fileset reference                     | Yes                      | Yes                       |
-
-Fileset references take any of these forms; the workspace and fileset must already exist:
+The plugin accepts HTTP(S) URLs or Fileset references for `data.source`. Fileset references take any of the forms below; the workspace and fileset must already exist:
 
 ```text
 fileset://<workspace>/<fileset>#<path>

@@ -73,7 +73,7 @@ Guardrails are activated by adding `nemo-guardrails` middleware entries to a Vir
 
 ```bash
 nemo inference virtual-models create my-guarded-model \
-  --default-model-entity default/nvidia-nemotron-3-nano-30b-a3b \
+  --default-model-entity default/nvidia-nemotron-3.5-lightning-30b-a3b \
   --request-middleware '[{"name":"nemo-guardrails","config_type":"guardrail_config","config_id":"default/my-config"}]' \
   --response-middleware '[{"name":"nemo-guardrails","config_type":"guardrail_config","config_id":"default/my-config"}]'
 ```

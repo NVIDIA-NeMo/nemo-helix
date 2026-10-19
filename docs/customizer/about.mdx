@@ -8,7 +8,7 @@ description: ""
 
 <a id="nemo-ms-about-concepts-customization"></a>
 
-This page provides an overview of the customization concepts for the NeMo Platform.
+This page provides an overview of the customization concepts for NeMo Helix.
 
 ## Supervised Fine-Tuning
 
@@ -16,22 +16,22 @@ Supervised fine-tuning (SFT) is a traditional technique for customizing a pre-tr
 
 ### Deploying Full SFT Models
 
-Full SFT models require a NIM deployment to serve inference. The Deployment Management Service supports two deployment modes:
+Full SFT models need a deployment to serve inference. We recommend the vLLM engine (`engine: vllm`), which is also the default when a Customizer job deploys with inline parameters; see [Deploy with vLLM](/documentation/models-and-inference/deploy-models#deploy-with-vllm). Deploy with NIM only if you know that the NIM image you use supports the model, or that the model works with the default multi-LLM NIM. The Deployment Management Service supports two NIM deployment modes:
 
-| Deployment Mode         | Image Type              | Weight Loading                        | Best For                                                                    |
-| ----------------------- | ----------------------- | ------------------------------------- | --------------------------------------------------------------------------- |
-| **Multi-LLM** (Default) | Generic multi-model NIM | On-the-fly download via Files service | Supported Hugging Face architectures, custom fine-tuned models, development |
-| **Model-Specific NIM**  | Dedicated model image   | Pre-download via model puller         | Production, optimized performance and latency                               |
+| Deployment Mode             | Image Type                                             | Weight Loading                        | Best For                                                                    |
+| --------------------------- | ------------------------------------------------------ | ------------------------------------- | --------------------------------------------------------------------------- |
+| **Multi-LLM NIM** (Default) | Generic multi-model NIM (`nvcr.io/nim/nvidia/llm-nim`) | On-the-fly download via Files service | Supported Hugging Face architectures, custom fine-tuned models, development |
+| **Model-Specific NIM**      | Dedicated model image                                  | Pre-download via model puller         | Production, optimized performance and latency                               |
 
-- **Multi-LLM Image**: Can deploy Hugging Face checkpoints whose architectures are supported by the image's inference engine, providing flexibility for custom fine-tuned models. Importing a checkpoint does not guarantee training or deployment compatibility; for example, Automodel LoRA does not support Conv1D-based architectures. It also does not guarantee optimized inference performance.
+- **Multi-LLM NIM Image**: The [multi-LLM NIM](https://docs.nvidia.com/nim/large-language-models/1.15.0/introduction.html) (`nvcr.io/nim/nvidia/llm-nim:latest`) can deploy Hugging Face checkpoints whose architectures are in its [supported architectures list](https://docs.nvidia.com/nim/large-language-models/1.15.0/supported-architectures.html), providing flexibility for custom fine-tuned models.
 
 - **Model-Specific NIM**: Provides optimized inference performance and latency through model-specific optimizations. Recommended for production deployments where performance is critical.
 
 ## Parameter-Efficient Fine-Tuning
 
-Parameter-Efficient Fine-Tuning (PEFT) methods enable efficient model customization by training a small number of parameters while keeping the base model frozen. For example, when customizing Llama 3.3 70B:
+Parameter-Efficient Fine-Tuning (PEFT) methods enable efficient model customization by training a small number of parameters while keeping the base model frozen. For example, when customizing Nemotron 3.5 Lightning 30B A3B:
 
-- **Traditional SFT**: Produces a full BF16 checkpoint of approximately 140 GB per task. During training, budget free disk space separately for the base checkpoint, intermediate checkpoint, and final output—approximately 3× the downloaded base checkpoint size.
+- **Traditional SFT**: Produces a full BF16 checkpoint of approximately 66 GB per task. During training, budget free disk space separately for the base checkpoint, intermediate checkpoint, and final output—approximately 3× the downloaded base checkpoint size.
 - **PEFT**: Produces an adapter that is approximately 100–500 MB per task while maintaining comparable performance. During training, budget approximately 1.5× the downloaded base checkpoint size.
 
 ```mermaid
@@ -39,9 +39,9 @@ Parameter-Efficient Fine-Tuning (PEFT) methods enable efficient model customizat
 caption: Traditional Fine-Tuning
 ---
 flowchart TD
- T1[Task 1] --> M1[Llama 3.3 - 70B]
- T2[Task 2] --> M2[Llama 3.3 - 70B]
- T3[Task 3] --> M3[Llama 3.3 - 70B]
+ T1[Task 1] --> M1[Nemotron 3.5 Lightning - 30B]
+ T2[Task 2] --> M2[Nemotron 3.5 Lightning - 30B]
+ T3[Task 3] --> M3[Nemotron 3.5 Lightning - 30B]
 
  style M1 fill:#B8D5F2
  style M2 fill:#B8D5F2
@@ -57,7 +57,7 @@ flowchart TD
  P1[Task 1] --> A1[LoRA 113M]
  P2[Task 2] --> A2[LoRA 20M]
  P3[Task 3] --> A3[LoRA 10M]
- A1 & A2 & A3 --> M[Llama 3.3 - 70B]
+ A1 & A2 & A3 --> M[Nemotron 3.5 Lightning - 30B]
 
  style A1 fill:#B8D5F2
  style A2 fill:#B8D5F2
@@ -212,7 +212,7 @@ SFT and LoRA both learn from examples of the right answer. Reinforcement learnin
 
 DPO trains on preference pairs. Each example is a prompt with a **chosen** response and a **rejected** one, and training pushes the model toward the chosen style without needing a separate reward model. Use it when you have human or model-generated preference data and want to shape tone, formatting, or helpfulness.
 
-The main control is `ref_policy_kl_penalty` (β), which sets how far the policy may drift from the model it started as.
+The main control is `ref_policy_kl_penalty` (β), which sets how far the policy may drift from the model it started as. See [DPO Customization](/documentation/customizer-reference/tutorials/dpo-customization-job).
 
 ### Group Relative Policy Optimization
 
@@ -262,7 +262,7 @@ TP can be configured via `parallelism.tensor_parallel_size` in the [training con
 
 <Note>
 
-As of release 25.10.0, AutoModel engines including Phi-4, Qwen, and Gemma support tensor parallelism greater than 1 through the multi-GPU LoRA patch. Previous releases only supported `TP=1` for these models.
+Many Automodel model families support tensor parallelism greater than 1 for LoRA. MoE models such as Nemotron 3.5 Lightning scale with `parallelism.expert_parallel_size` instead, and require `tensor_parallel_size` 1.
 
 </Note>
 

@@ -19,4 +19,4 @@ if ! command -v pnpm >/dev/null 2>&1; then
 fi
 
 pnpm_path="$(command -v pnpm)"
-exec node "${pnpm_path}" gen
+exec "${pnpm_path}" gen

@@ -14,7 +14,7 @@ import { AssistantChat } from '@nemo/common/src/components/AssistantChat';
 
 export const ChatPanel = () => (
   <AssistantChat
-    model="nvidia/nemotron-3-nano-30b-a3b"
+    model="nvidia/nemotron-3.5-lightning-30b-a3b"
     workspace="default"
     assistantName="Inference Gateway"
   />
@@ -25,7 +25,7 @@ Use `baseURL` instead of `workspace` when the caller already has an OpenAI-compa
 
 ```tsx
 <AssistantChat
-  model="nvidia/nemotron-3-nano-30b-a3b"
+  model="nvidia/nemotron-3.5-lightning-30b-a3b"
   baseURL="https://example.test/v1"
   promptData={{
     system_prompt: 'Answer concisely.',

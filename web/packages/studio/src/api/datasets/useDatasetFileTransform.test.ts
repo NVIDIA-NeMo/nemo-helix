@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { filesUploadFile } from '@nemo/sdk/generated/platform/api';
+import { filesUploadFile } from '@nemo/sdk/generated/platform/files';
 import { useDatasetFileTransform } from '@studio/api/datasets/useDatasetFileTransform';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { renderHook } from '@testing-library/react';
 
-vi.mock('@nemo/sdk/generated/platform/api', () => ({
+vi.mock('@nemo/sdk/generated/platform/files', () => ({
   filesUploadFile: vi.fn().mockResolvedValue({ path: 'data.jsonl' }),
 }));
 

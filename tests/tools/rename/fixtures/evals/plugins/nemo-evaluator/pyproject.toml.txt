@@ -1,0 +1,73 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[project]
+name = "nemo-evaluator-plugin"
+description = "Evaluator plugin scaffold for NeMo Helix."
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "cloudpickle>=3.1.1",
+    "filesets",
+    "nemo-agents-plugin",
+    "nemo-evaluator-sdk[harbor]",
+    "nemo-helix-plugin",
+    "pydantic>=2.12.0",
+    "typer>=0.20.0",
+]
+version = "0.0.0"
+
+[project.entry-points."nemo.services"]
+evaluator = "nemo_evaluator.service:EvaluatorPluginService"
+
+[project.entry-points."nemo.cli"]
+evaluator = "nemo_evaluator.cli:EvaluatorPluginCLI"
+
+[project.entry-points."nemo.sdk"]
+evaluator = "nemo_evaluator.sdk.resources:evaluator_sdk_resources"
+
+[project.entry-points."nemo.jobs"]
+"evaluator.evaluate" = "nemo_evaluator.jobs.evaluate:EvaluateJob"
+"evaluator.agent-evaluate" = "nemo_evaluator.jobs.agent_evaluate:AgentEvalJob"
+"evaluator.retrieve-eval" = "nemo_evaluator.jobs.retrieve_eval:RetrieveEvalJob"
+
+[project.entry-points."nemo.skills"]
+evaluator = "nemo_evaluator.skills:get_skills_path"
+
+[project.optional-dependencies]
+harbor = [
+    "nemo-evaluator-sdk[harbor]",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nemo_evaluator"]
+
+
+[tool.uv.sources]
+filesets = { workspace = true }
+nemo-agents-plugin = { workspace = true }
+nemo-evaluator-sdk = { workspace = true }
+nemo-helix-plugin = { workspace = true }
+nhx-testing = { workspace = true }
+
+
+[dependency-groups]
+dev = ["pytest>=8.3.4", "pytest-asyncio>=0.25.3", "ruff>=0.11.8", "nhx-testing"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["src"]
+testpaths = ["tests"]
+markers = [
+    "integration: live service integration tests (opt-in; spin up a real platform — subprocess/docker backends — or gated by e.g. RUN_INTAKE_INTEGRATION=1); deselect with -m 'not integration'",
+]
+
+# Opt this plugin into OpenAPI spec generation
+[tool.nemo.openapi]
+
+[tool.pyright]
+extraPaths = ["src"]

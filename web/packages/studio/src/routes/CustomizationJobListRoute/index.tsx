@@ -8,6 +8,7 @@ import { CustomModelsDataView } from '@studio/components/dataViews/CustomModelsD
 import { CustomizeModelButton } from '@studio/components/dataViews/CustomModelsDataView/CustomizeModelButton';
 import { ModelPanel, ModelPanelTab } from '@studio/components/sidePanels/ModelPanels/ModelPanel';
 import { INTAKE_ENABLED } from '@studio/constants/environment';
+import { useCustomizationJobForModel } from '@studio/hooks/useCustomizationJobForModel';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getEvaluationResultsRoute, getIntakeTracesRoute } from '@studio/routes/utils';
@@ -24,20 +25,21 @@ export const CustomizationJobListRoute: FC = () => {
   );
 
   useBreadcrumbs({
-    items: [
-      {
-        slotLabel: 'Custom Models',
-      },
-    ],
+    items: [{ slotLabel: 'Fine-tuning' }],
   });
 
+  // Resolved from each entity in its own right: an adapter's run is not its base model's
+  // run, and the two may even live in different workspaces.
+  const { jobName: modelJobName } = useCustomizationJobForModel(selectedModel);
+  const { jobName: adapterJobName } = useCustomizationJobForModel(selectedAdapter);
+
   return (
-    <AccessibleTitle title={`Custom Models for ${workspace}`}>
+    <AccessibleTitle title={`Fine-tuning for ${workspace}`}>
       <Stack className="h-full" gap="density-2xl" padding="density-2xl">
         <PageHeader
           className="p-0"
-          slotHeading="Custom Models"
-          slotDescription="Create, manage, and deploy custom AI models with fine-tuning and prompt tuning."
+          slotHeading="Fine-tuning"
+          slotDescription="Create, manage, and deploy fine-tuned models."
           slotActions={<CustomizeModelButton workspace={workspace} />}
         />
         <CustomModelsDataView
@@ -49,10 +51,16 @@ export const CustomizationJobListRoute: FC = () => {
           }}
         />
       </Stack>
+
       <ModelPanel
         open={!!selectedModel}
         model={selectedModel ?? undefined}
+        // An adapter row shows that adapter's run and nothing else: the user asked about
+        // the adapter, and offering the base's run alongside invites attributing one to
+        // the other. The panel itself stays agnostic -- this is the caller's choice.
+        customizationJobId={selectedAdapter ? undefined : modelJobName}
         adapter={selectedAdapter}
+        adapterJobId={adapterJobName}
         onOpenChange={(open) => {
           if (!open) {
             setSelectedModel(null);
@@ -71,9 +79,7 @@ export const CustomizationJobListRoute: FC = () => {
                   className="flex-1"
                   kind="secondary"
                   size="small"
-                  onClick={() => {
-                    navigate(getIntakeTracesRoute(workspace));
-                  }}
+                  onClick={() => navigate(getIntakeTracesRoute(workspace))}
                 >
                   View Intake Traces
                 </Button>
@@ -82,11 +88,7 @@ export const CustomizationJobListRoute: FC = () => {
                 className="flex-1"
                 kind="secondary"
                 size="small"
-                onClick={() => {
-                  // EvaluationModelSelect treats `URN::adapter` as a single
-                  // form-field value, so when an adapter is selected we append
-                  navigate(getEvaluationResultsRoute(workspace));
-                }}
+                onClick={() => navigate(getEvaluationResultsRoute(workspace))}
               >
                 Evaluate this Model
               </Button>

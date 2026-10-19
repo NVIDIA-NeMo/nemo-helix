@@ -1,0 +1,41 @@
+[
+  {
+    "span_id": "6cca327e801f7240",
+    "trace_id": "59dce43c08b51255ea6eecc7df276b44",
+    "session_id": "3f2a1c00-0017-4a00-8000-000000000017",
+    "name": "email-security-triage.run",
+    "kind": "AGENT",
+    "status": "success",
+    "started_at": "2026-08-18T22:18:55Z",
+    "ended_at": "2026-08-18T22:19:07Z",
+    "input": "{\"user_message\": \"is this phishing?\", \"emails\": [{\"from\": \"alerts@github.com\", \"subject\": \"A new SSH key was added to your account\", \"body\": \"If you did not add this key, review your account security settings at https://github.com/settings/keys.\"}]}",
+    "output": "benign\nThe notification comes from the genuine GitHub domain, links to that same domain's settings page, and asks for no credentials.",
+    "attributes": {
+      "gen_ai.agent.name": "email-security-triage",
+      "gen_ai.agent.version": "0.7.0",
+      "gen_ai.request.model": "nvidia-nemotron-3-nano-30b-a3b",
+      "gen_ai.usage.input_tokens": 3644,
+      "gen_ai.usage.output_tokens": 71
+    }
+  },
+  {
+    "span_id": "a24b68770353d612",
+    "trace_id": "59dce43c08b51255ea6eecc7df276b44",
+    "session_id": "3f2a1c00-0017-4a00-8000-000000000017",
+    "parent_span_id": "6cca327e801f7240",
+    "name": "chat.completions",
+    "kind": "LLM",
+    "status": "success",
+    "started_at": "2026-08-18T22:19:01Z",
+    "ended_at": "2026-08-18T22:19:07Z",
+    "input": "{\"user_message\": \"is this phishing?\", \"emails\": [{\"from\": \"alerts@github.com\", \"subject\": \"A new SSH key was added to your account\", \"body\": \"If you did not add this key, review your account security settings at https://github.com/settings/keys.\"}]}",
+    "output": "benign\nThe notification comes from the genuine GitHub domain, links to that same domain's settings page, and asks for no credentials.",
+    "attributes": {
+      "gen_ai.agent.name": "email-security-triage",
+      "gen_ai.request.model": "default/nvidia-nemotron-3-nano-30b-a3b",
+      "gen_ai.usage.input_tokens": 3644,
+      "gen_ai.usage.output_tokens": 71,
+      "llm.cost.total": 0.0005892
+    }
+  }
+]

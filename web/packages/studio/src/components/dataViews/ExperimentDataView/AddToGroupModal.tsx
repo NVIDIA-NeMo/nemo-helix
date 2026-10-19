@@ -6,11 +6,13 @@ import { FormModal, type FormModalProps } from '@nemo/common/src/components/Form
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import {
   getListEvaluationsQueryKey,
+  usePatchEvaluation,
+} from '@nemo/sdk/generated/platform/evaluations';
+import {
   getListExperimentsQueryKey,
   useCreateExperiment,
   useListExperiments,
-  usePatchEvaluation,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/experiments';
 import {
   Flex,
   FormField,

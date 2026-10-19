@@ -9,8 +9,8 @@ from unittest.mock import patch
 
 import anyio
 import pytest
-from nmp.common.files.storage_config import LocalStorageConfig
-from nmp.core.files.app.backends.local import LocalStorageImpl
+from nhx.common.files.storage_config import LocalStorageConfig
+from nhx.core.files.app.backends.local import LocalStorageImpl
 
 
 async def async_iter_from_list(items: list[bytes]):

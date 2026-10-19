@@ -92,12 +92,12 @@ def test_static_authentik_blueprint_declares_workload_provider_defaults() -> Non
 
     workload_provider = _entry_by_id(blueprint, "nemo-workload-provider")
     assert workload_provider["model"] == "authentik_providers_oauth2.oauth2provider"
-    assert workload_provider["identifiers"] == {"name": "nemo-platform-workload"}
+    assert workload_provider["identifiers"] == {"name": "nemo-helix-workload"}
     workload_provider_attrs = _attrs(workload_provider)
 
-    assert workload_provider_attrs["name"] == "nemo-platform-workload"
+    assert workload_provider_attrs["name"] == "nemo-helix-workload"
     assert workload_provider_attrs["client_type"] == "public"
-    assert workload_provider_attrs["client_id"] == "nemo-platform-workload"
+    assert workload_provider_attrs["client_id"] == "nemo-helix-workload"
     assert workload_provider_attrs["access_token_validity"] == "minutes=5"
 
     cli_provider = _entry_by_id(blueprint, "nemo-cli-provider")
@@ -107,7 +107,7 @@ def test_static_authentik_blueprint_declares_workload_provider_defaults() -> Non
     workload_application = _entry_by_identifier(blueprint, "authentik_core.application", "slug", "nemo-workload")
     assert workload_application["identifiers"] == {"slug": "nemo-workload"}
     workload_application_attrs = _attrs(workload_application)
-    assert workload_application_attrs["name"] == "NeMo Platform Workload Identity"
+    assert workload_application_attrs["name"] == "NeMo Helix Workload Identity"
     assert workload_application_attrs["slug"] == "nemo-workload"
     assert workload_application_attrs["provider"] == TaggedYamlValue("!KeyOf", "nemo-workload-provider")
 
@@ -150,6 +150,18 @@ def test_authentik_blueprint_reads_workload_identity_password_from_env() -> None
     assert legacy_secret not in token_keys
 
 
+def test_authentik_blueprint_reads_confidential_callback_from_deployment_environment() -> None:
+    blueprint = _load_blueprint()
+    user_provider = _entry_by_id(blueprint, "nemo-user-provider")
+
+    assert _attrs(user_provider)["redirect_uris"] == [
+        {
+            "url": TaggedYamlValue("!Env", "NHX_OIDC_LOGIN_REDIRECT_URI"),
+            "matching_mode": "strict",
+        }
+    ]
+
+
 def test_authentik_blueprint_declares_e2e_setup_identity_as_test_only() -> None:
     blueprint_text = BLUEPRINT.read_text(encoding="utf-8")
     blueprint = _load_blueprint()
@@ -166,9 +178,85 @@ def test_authentik_blueprint_declares_e2e_setup_identity_as_test_only() -> None:
     setup_token_attrs = _attrs(setup_token)
     assert setup_token_attrs["intent"] == "app_password"
     assert setup_token_attrs["user"] == TaggedYamlValue("!KeyOf", "nemo-setup")
-    assert setup_token_attrs["key"] == "nemo-setup-token-secret-dev"
+    assert setup_token_attrs["key"] == TaggedYamlValue("!Env", "AUTHENTIK_SETUP_PASSWORD")
 
 
 def test_authentik_blueprint_has_single_canonical_source() -> None:
     assert BLUEPRINT.exists()
     assert not LEGACY_BLUEPRINT.exists()
+
+
+# The authentik default blueprint that creates each object nemo.yaml looks up with !Find.
+_DEFAULT_BLUEPRINT_PROVIDING = {
+    ("authentik_flows.flow", "default-authentication-flow"): "Default - Authentication flow",
+    (
+        "authentik_flows.flow",
+        "default-provider-authorization-implicit-consent",
+    ): "Default - Provider authorization flow (implicit consent)",
+    ("authentik_flows.flow", "default-provider-invalidation-flow"): "Default - Provider invalidation flow",
+    ("authentik_providers_oauth2.scopemapping", "openid"): "System - OAuth2 Provider - Scopes",
+    ("authentik_providers_oauth2.scopemapping", "email"): "System - OAuth2 Provider - Scopes",
+    ("authentik_providers_oauth2.scopemapping", "offline_access"): "System - OAuth2 Provider - Scopes",
+}
+
+
+# Objects authentik creates on server startup rather than from a blueprint, so nemo.yaml cannot
+# apply them first. A `created` entry for each fails the apply until the server has created it.
+_CREATED_ON_SERVER_STARTUP = {
+    ("authentik_crypto.certificatekeypair", "authentik Self-signed Certificate"),
+}
+
+
+def _found_defaults(value: object) -> set[tuple[str, str]]:
+    if isinstance(value, TaggedYamlValue):
+        if value.tag != "!Find":
+            return set()
+        model, (_, key) = value.value
+        return {(model, key)}
+    if isinstance(value, Mapping):
+        return set().union(*(_found_defaults(item) for item in value.values()))
+    if isinstance(value, list):
+        return set().union(*(_found_defaults(item) for item in value))
+    return set()
+
+
+def test_authentik_blueprint_applies_the_defaults_it_finds_before_using_them() -> None:
+    """A !Find that runs before the worker applies a default blueprint resolves to nothing.
+
+    Required fields then fail the apply, but an optional one such as the brand's
+    flow_device_code is left empty and /device answers 404. Applying the default blueprint
+    first, as a required meta entry, makes the lookup independent of worker timing.
+    """
+    entries = _entries(_load_blueprint())
+    required_meta_positions = {
+        _attrs(entry)["identifiers"]["name"]: position
+        for position, entry in enumerate(entries)
+        if entry.get("model") == "authentik_blueprints.metaapplyblueprint" and _attrs(entry).get("required") is True
+    }
+
+    for position, entry in enumerate(entries):
+        for found in _found_defaults(entry.get("attrs")) - _CREATED_ON_SERVER_STARTUP:
+            assert found in _DEFAULT_BLUEPRINT_PROVIDING, f"map {found} to the default blueprint that creates it"
+            providing = _DEFAULT_BLUEPRINT_PROVIDING[found]
+            assert providing in required_meta_positions, f"apply {providing!r} as a required meta entry"
+            assert required_meta_positions[providing] < position, f"apply {providing!r} before entry {position}"
+
+
+def test_authentik_blueprint_waits_for_the_startup_objects_it_finds_before_using_them() -> None:
+    """The server creates its self-signed keypair on startup, after it already reports healthy.
+
+    A signing_key !Find that runs first leaves the providers signing HS256 tokens with no kid and
+    an empty JWKS, so NeMo rejects every token. A `created` entry for the keypair, before its
+    first use, fails the apply until the server has created it.
+    """
+    entries = _entries(_load_blueprint())
+    guard_positions = {
+        (entry["model"], entry["identifiers"]["name"]): position
+        for position, entry in enumerate(entries)
+        if entry.get("state") == "created" and set(entry.get("identifiers", {})) == {"name"} and "attrs" not in entry
+    }
+
+    for position, entry in enumerate(entries):
+        for found in _found_defaults(entry.get("attrs")) & _CREATED_ON_SERVER_STARTUP:
+            assert found in guard_positions, f"guard {found} with a `created` entry that has only a name"
+            assert guard_positions[found] < position, f"guard {found} before entry {position}"

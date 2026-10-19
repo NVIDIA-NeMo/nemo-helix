@@ -16,7 +16,6 @@ from data_designer.config.dataset_metadata import DatasetMetadata
 from data_designer.config.preview_results import PreviewResults
 from data_designer.config.utils.info import InterfaceInfo
 from data_designer.logging import RandomEmoji
-from models.resources import AsyncModelsResource, ModelsResource
 from nemo_data_designer_plugin.functions._types import (
     AnalysisFrame,
     DatasetFrame,
@@ -32,7 +31,11 @@ from nemo_data_designer_plugin.jobs.retrieval_spec import (
     RetrievalRunJobConfig,
 )
 from nemo_data_designer_plugin.jobs.spec import DataDesignerJobConfig
-from nemo_data_designer_plugin.sdk import http
+from nemo_data_designer_plugin.sdk.check_models import (
+    CheckModelsReport,
+    check_models_config,
+    check_models_config_sync,
+)
 from nemo_data_designer_plugin.sdk.errors import (
     DataDesignerClientError,
     DataDesignerConfigValidationError,
@@ -46,16 +49,20 @@ from nemo_data_designer_plugin.sdk.validation import (
     validate_config,
     validate_config_sync,
 )
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform.types.inference import ModelProvider as NMPModelProvider
-from nemo_platform_plugin.functions.frames import Done, Error, Heartbeat
-from nemo_platform_plugin.sdk import NemoPluginSDKResources
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.errors import NemoHTTPError
+from nemo_helix_plugin.data_designer.client import AsyncDataDesignerClient, DataDesignerClient
+from nemo_helix_plugin.data_designer.types import DataDesignerJobCollection, DataDesignerJobRequest, PreviewRequest
+from nemo_helix_plugin.functions.frames import Done, Error, Heartbeat
+from nemo_helix_plugin.models.client import AsyncModelsClient, ModelsClient
+from nemo_helix_plugin.models.types import ModelProvider as NHXModelProvider
+from nemo_helix_plugin.sdk import NemoPluginSDKResources
 from pydantic import BaseModel, TypeAdapter
 
 logger = logging.getLogger(__name__)
 
-PlatformResourceClient = NeMoPlatform | AsyncNeMoPlatform
-PlatformResourceClientT = TypeVar("PlatformResourceClientT", NeMoPlatform, AsyncNeMoPlatform)
+HelixResourceClient = NemoClient | AsyncNemoClient
+HelixResourceClientT = TypeVar("HelixResourceClientT", NemoClient, AsyncNemoClient)
 
 _PREVIEW_FRAME_ADAPTER = TypeAdapter(PreviewFrame)
 _KNOWN_PREVIEW_FRAME_KINDS = {
@@ -207,25 +214,21 @@ class _PreviewFrameCollector:
             logger.info(f"{RandomEmoji.success()} Preview complete!")
 
 
-class _BaseDataDesignerResource(Generic[PlatformResourceClientT]):
-    """Shared HTTP helpers for the sync and async plugin SDK resources."""
+class _BaseDataDesignerResource(Generic[HelixResourceClientT]):
+    """Shared platform handle for sync and async plugin SDK resources."""
 
-    def __init__(self, platform: PlatformResourceClientT) -> None:
+    def __init__(self, platform: HelixResourceClientT) -> None:
         self._platform = platform
-
-    def _headers(self) -> dict[str, str]:
-        return http.headers(self._platform)
-
-    def _url(self, path: str, workspace: str | None) -> str:
-        return http.url(self._platform, workspace, path)
-
-    def _client(self):
-        return self._platform._client
 
 
 @with_logging
-class DataDesignerResource(_BaseDataDesignerResource[NeMoPlatform]):
+class DataDesignerResource(_BaseDataDesignerResource[NemoClient]):
     """High-level sync client for the Data Designer plugin service."""
+
+    def __init__(self, platform: NemoClient) -> None:
+        super().__init__(platform)
+        self._data_designer_client = DataDesignerClient.from_client(platform)
+        self._models_client = ModelsClient.from_client(platform)
 
     def preview(
         self,
@@ -243,7 +246,7 @@ class DataDesignerResource(_BaseDataDesignerResource[NeMoPlatform]):
             num_records: The number of records to generate. Must be less than or equal to the
                 service-side configured max number of preview records.
             workspace: The workspace to run the request in. If not supplied, uses the workspace
-                of the base NeMoPlatform object.
+                of the base platform client.
             timeout: The timeout for the preview call in seconds.
 
         Returns:
@@ -269,22 +272,12 @@ class DataDesignerResource(_BaseDataDesignerResource[NeMoPlatform]):
         request: PreviewSpec,
         workspace: str | None,
     ) -> Iterator[PreviewFrame]:
-        with self._client().stream(
-            "POST",
-            self._url("/preview", workspace),
-            headers=self._headers(),
-            json=request.model_dump(mode="json", exclude_none=True),
-        ) as resp:
-            try:
-                resp.raise_for_status()
-            except httpx.HTTPStatusError:
-                resp.read()
-                raise
-            for line in resp.iter_lines():
-                if line:
-                    frame = _decode_preview_frame(line)
-                    if frame is not None:
-                        yield frame
+        body = PreviewRequest.model_validate(request.model_dump(mode="json", exclude_none=True))
+        with self._data_designer_client.preview(workspace=workspace, body=body).stream() as frames:
+            for frame in frames:
+                preview_frame = _parse_preview_frame(frame)
+                if preview_frame is not None:
+                    yield preview_frame
 
     def create(
         self,
@@ -300,7 +293,7 @@ class DataDesignerResource(_BaseDataDesignerResource[NeMoPlatform]):
             config_builder: Data Designer configuration builder.
             num_records: The number of records to generate.
             workspace: The workspace in which to run the job. If not supplied, uses
-                the workspace of the base NeMoPlatform object.
+                the workspace of the base platform client.
             wait_until_done: Set to True to poll the job status and block until the
                 job reaches a terminal state.
 
@@ -325,12 +318,14 @@ class DataDesignerResource(_BaseDataDesignerResource[NeMoPlatform]):
         Raises:
             ValueError: If the job ID provided is empty.
         """
-        resp = self._client().get(self._url(f"/jobs/create/{job_name}", workspace), headers=self._headers())
-        resp.raise_for_status()
-        return DataDesignerJobResource(job_name=job_name, platform=self._platform, workspace=workspace)
+        try:
+            self._data_designer_client.get_job(workspace=workspace, name=job_name).data()
+        except Exception as e:
+            raise _get_error(e) from e
+        return DataDesignerJobResource(job_name=job_name, client=self._data_designer_client, workspace=workspace)
 
     def get_default_model_configs(self) -> list[dd.ModelConfig]:
-        """Default model configs are not supported in the NeMo Platform Data Designer service."""
+        """Default model configs are not supported in the NeMo Helix Data Designer service."""
 
         return []
 
@@ -340,8 +335,8 @@ class DataDesignerResource(_BaseDataDesignerResource[NeMoPlatform]):
         Returns:
             A list of ModelProvider objects available for inference.
         """
-        nmp_providers = self._platform.inference.providers.list(workspace="-")
-        return [_nmp_provider_to_ndd_provider(self._platform.models, provider) for provider in nmp_providers]
+        nhx_providers = self._models_client.list_providers(workspace="-")
+        return [_nhx_provider_to_ndd_provider(self._models_client, provider) for provider in nhx_providers.items()]
 
     def get_info(self) -> InterfaceInfo:
         return InterfaceInfo(model_providers=self.get_default_model_providers())
@@ -371,7 +366,43 @@ class DataDesignerResource(_BaseDataDesignerResource[NeMoPlatform]):
         resolved_workspace = workspace or self._platform.workspace or "default"
         return validate_config_sync(
             config_builder,
-            sdk=self._platform,
+            client=self._platform,
+            workspace=resolved_workspace,
+        )
+
+    def check_models(
+        self,
+        config_builder: dd.DataDesignerConfigBuilder,
+        *,
+        workspace: str | None = None,
+    ) -> CheckModelsReport:
+        """Check that every model referenced by a config is reachable.
+
+        Sends a tiny generation request to each referenced model alias, routed
+        through the Inference Gateway, without submitting a workload. Models
+        with ``skip_health_check=True`` are skipped.
+
+        This complements :meth:`validate`, which checks that the configuration
+        is well-formed and that the resources it names resolve. A provider can
+        resolve while still refusing to serve the model named alongside it, so
+        a green ``ValidationReport`` is not a promise that a preview will run.
+
+        Unlike :meth:`validate`, the probe stops at the first model that fails
+        rather than reporting every problem at once.
+
+        Args:
+            config_builder: Data Designer configuration builder.
+            workspace: Workspace used to resolve provider references and seed
+                sources. Falls back to the platform client's default workspace,
+                then to ``"default"``.
+
+        Returns:
+            A :class:``CheckModelsReport``
+        """
+        resolved_workspace = workspace or self._platform.workspace or "default"
+        return check_models_config_sync(
+            config_builder,
+            client=self._platform,
             workspace=resolved_workspace,
         )
 
@@ -407,24 +438,19 @@ class DataDesignerResource(_BaseDataDesignerResource[NeMoPlatform]):
 
     def _submit_named_job(
         self,
-        job_name: str,
+        job_name: DataDesignerJobCollection,
         spec: BaseModel,
         *,
         workspace: str | None,
         wait_until_done: bool,
     ) -> DataDesignerJobResource:
         try:
-            resp = self._client().post(
-                self._url(f"/jobs/{job_name}", workspace),
-                headers=self._headers(),
-                json={"spec": spec.model_dump(mode="json")},
-            )
-            resp.raise_for_status()
-            job = resp.json()
-            logger.info(f"  |-- job name: {job['name']}")
+            body = DataDesignerJobRequest.model_validate({"spec": spec.model_dump(mode="json")})
+            job = self._data_designer_client.create_job(workspace=workspace, job_collection=job_name, body=body).data()
+            logger.info(f"  |-- job name: {job.name}")
             job_client = DataDesignerJobResource(
-                job_name=job["name"],
-                platform=self._platform,
+                job_name=job.name,
+                client=self._data_designer_client,
                 workspace=workspace,
                 job_collection=job_name,
             )
@@ -436,8 +462,13 @@ class DataDesignerResource(_BaseDataDesignerResource[NeMoPlatform]):
 
 
 @with_logging
-class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNeMoPlatform]):
+class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNemoClient]):
     """High-level async client for the Data Designer plugin service."""
+
+    def __init__(self, platform: AsyncNemoClient) -> None:
+        super().__init__(platform)
+        self._data_designer_client = AsyncDataDesignerClient.from_client(platform)
+        self._models_client = AsyncModelsClient.from_client(platform)
 
     async def preview(
         self,
@@ -455,7 +486,7 @@ class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNeMoPlatform]):
             num_records: The number of records to generate. Must be less than or equal to the
                 service-side configured max number of preview records.
             workspace: The workspace to run the request in. If not supplied, uses the workspace
-                of the base NeMoPlatform object.
+                of the base platform client.
             timeout: The timeout for the preview call in seconds.
 
         Returns:
@@ -481,22 +512,13 @@ class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNeMoPlatform]):
         request: PreviewSpec,
         workspace: str | None,
     ) -> AsyncIterator[PreviewFrame]:
-        async with self._client().stream(
-            "POST",
-            self._url("/preview", workspace),
-            headers=self._headers(),
-            json=request.model_dump(mode="json", exclude_none=True),
-        ) as resp:
-            try:
-                resp.raise_for_status()
-            except httpx.HTTPStatusError:
-                await resp.aread()
-                raise
-            async for line in resp.aiter_lines():
-                if line:
-                    frame = _decode_preview_frame(line)
-                    if frame is not None:
-                        yield frame
+        body = PreviewRequest.model_validate(request.model_dump(mode="json", exclude_none=True))
+        response = await self._data_designer_client.preview(workspace=workspace, body=body)
+        async with response.stream() as frames:
+            async for frame in frames:
+                preview_frame = _parse_preview_frame(frame)
+                if preview_frame is not None:
+                    yield preview_frame
 
     async def create(
         self,
@@ -512,7 +534,7 @@ class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNeMoPlatform]):
             config_builder: Data Designer configuration builder.
             num_records: The number of records to generate.
             workspace: The workspace in which to run the job. If not supplied, uses
-                the workspace of the base NeMoPlatform object.
+                the workspace of the base platform client.
             wait_until_done: Set to True to poll the job status and block until the
                 job reaches a terminal state.
 
@@ -537,12 +559,15 @@ class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNeMoPlatform]):
         Raises:
             ValueError: If the job ID provided is empty.
         """
-        resp = await self._client().get(self._url(f"/jobs/create/{job_name}", workspace), headers=self._headers())
-        resp.raise_for_status()
-        return AsyncDataDesignerJobResource(job_name=job_name, platform=self._platform, workspace=workspace)
+        try:
+            response = await self._data_designer_client.get_job(workspace=workspace, name=job_name)
+            response.data()
+        except Exception as e:
+            raise _get_error(e) from e
+        return AsyncDataDesignerJobResource(job_name=job_name, client=self._data_designer_client, workspace=workspace)
 
     async def get_default_model_configs(self) -> list[dd.ModelConfig]:
-        """Default model configs are not supported in the NeMo Platform Data Designer service."""
+        """Default model configs are not supported in the NeMo Helix Data Designer service."""
 
         return []
 
@@ -552,8 +577,10 @@ class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNeMoPlatform]):
         Returns:
             A list of ModelProvider objects available for inference.
         """
-        nmp_providers = await self._platform.inference.providers.list(workspace="-")
-        return [_nmp_provider_to_ndd_provider(self._platform.models, provider) async for provider in nmp_providers]
+        nhx_providers = await self._models_client.list_providers(workspace="-")
+        return [
+            _nhx_provider_to_ndd_provider(self._models_client, provider) async for provider in nhx_providers.items()
+        ]
 
     async def get_info(self) -> InterfaceInfo:
         return InterfaceInfo(model_providers=await self.get_default_model_providers())
@@ -568,7 +595,21 @@ class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNeMoPlatform]):
         resolved_workspace = workspace or self._platform.workspace or "default"
         return await validate_config(
             config_builder,
-            async_sdk=self._platform,
+            async_client=self._platform,
+            workspace=resolved_workspace,
+        )
+
+    async def check_models(
+        self,
+        config_builder: dd.DataDesignerConfigBuilder,
+        *,
+        workspace: str | None = None,
+    ) -> CheckModelsReport:
+        """Async equivalent of :meth:`DataDesignerResource.check_models`."""
+        resolved_workspace = workspace or self._platform.workspace or "default"
+        return await check_models_config(
+            config_builder,
+            async_client=self._platform,
             workspace=resolved_workspace,
         )
 
@@ -605,24 +646,22 @@ class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNeMoPlatform]):
 
     async def _submit_named_job(
         self,
-        job_name: str,
+        job_name: DataDesignerJobCollection,
         spec: BaseModel,
         *,
         workspace: str | None,
         wait_until_done: bool,
     ) -> AsyncDataDesignerJobResource:
         try:
-            resp = await self._client().post(
-                self._url(f"/jobs/{job_name}", workspace),
-                headers=self._headers(),
-                json={"spec": spec.model_dump(mode="json")},
+            body = DataDesignerJobRequest.model_validate({"spec": spec.model_dump(mode="json")})
+            response = await self._data_designer_client.create_job(
+                workspace=workspace, job_collection=job_name, body=body
             )
-            resp.raise_for_status()
-            job = resp.json()
-            logger.info(f"  |-- job name: {job['name']}")
+            job = response.data()
+            logger.info(f"  |-- job name: {job.name}")
             job_client = AsyncDataDesignerJobResource(
-                job_name=job["name"],
-                platform=self._platform,
+                job_name=job.name,
+                client=self._data_designer_client,
                 workspace=workspace,
                 job_collection=job_name,
             )
@@ -634,6 +673,12 @@ class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNeMoPlatform]):
 
 
 def _get_error(e: BaseException) -> DataDesignerClientError:
+    if isinstance(e, NemoHTTPError):
+        status_code = e.status_code
+        detail = e.detail
+        if status_code == 422:
+            return DataDesignerConfigValidationError(f"‼️ Config validation failed!\n{detail}", status_code=status_code)
+        return DataDesignerClientError(f"‼️ Something went wrong!\n{detail}", status_code=status_code)
     if isinstance(e, httpx.HTTPStatusError):
         status_code, detail = extract_http_error_info(e)
         if status_code == 422:
@@ -642,13 +687,13 @@ def _get_error(e: BaseException) -> DataDesignerClientError:
     return DataDesignerClientError(f"‼️ Something went wrong!\n{e}")
 
 
-def _nmp_provider_to_ndd_provider(
-    models: ModelsResource | AsyncModelsResource,
-    nmp_provider: NMPModelProvider,
+def _nhx_provider_to_ndd_provider(
+    models: ModelsClient | AsyncModelsClient,
+    nhx_provider: NHXModelProvider,
 ) -> dd.ModelProvider:
     return dd.ModelProvider(
-        name=f"{nmp_provider.workspace}/{nmp_provider.name}",
-        endpoint=models.get_provider_route_openai_url(nmp_provider),
+        name=f"{nhx_provider.workspace}/{nhx_provider.name}",
+        endpoint=models.get_provider_route_openai_url(nhx_provider),
     )
 
 

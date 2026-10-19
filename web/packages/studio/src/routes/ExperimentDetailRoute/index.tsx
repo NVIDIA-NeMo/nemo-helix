@@ -3,9 +3,9 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
-import { useGetExperiment } from '@nemo/sdk/generated/platform/api';
+import { useInsightsGetInsight } from '@nemo/sdk/generated/insights/insights-insights';
+import { useGetExperiment } from '@nemo/sdk/generated/platform/experiments';
 import { Button, Card, Flex, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
-import { useOptimizerGetInsight } from '@studio/api/optimizer';
 import {
   isTrendChoiceCurrent,
   resolveTrendVisible,
@@ -23,7 +23,7 @@ import { ExperimentMetrics } from '@studio/routes/ExperimentDetailRoute/Experime
 import { getExperimentRoute } from '@studio/routes/utils';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
-import { ChartLine, ChartScatter, Pencil, Star } from 'lucide-react';
+import { ChartLine, ChartScatter, Pencil, Star, Table2 } from 'lucide-react';
 import { type FC, useEffect, useState } from 'react';
 
 export const ExperimentDetailRoute: FC = () => {
@@ -31,7 +31,7 @@ export const ExperimentDetailRoute: FC = () => {
   const { experimentName } = useRequiredPathParams([ROUTE_PARAMS.experimentName]);
   const { data: group, error } = useGetExperiment(workspace, experimentName);
   // The insight is a group-level concept, reached via the group's insight_id.
-  const { data: insight } = useOptimizerGetInsight(workspace, group?.insight_id ?? '', {
+  const { data: insight } = useInsightsGetInsight(workspace, group?.insight_id ?? '', {
     query: { enabled: OPTIMIZER_ENABLED && Boolean(group?.insight_id) },
   });
   const [editOpen, setEditOpen] = useState(false);
@@ -42,6 +42,12 @@ export const ExperimentDetailRoute: FC = () => {
     false
   );
   const paretoVisible = storedParetoVisible ?? false;
+
+  const [storedCompareVisible, setCompareVisible] = useLocalStorage<boolean>(
+    `nemo-studio:experiment-compare:${group?.id ?? ''}`,
+    false
+  );
+  const compareVisible = storedCompareVisible ?? false;
 
   // Over-time trend visibility. The default is the experiment's own `show_evaluations_over_time`
   // flag — a flagged experiment is one whose owner has said its evaluations are comparable, so the
@@ -153,14 +159,25 @@ export const ExperimentDetailRoute: FC = () => {
                       <ChartScatter width={12} height={12} className="text-brand" />
                       {paretoVisible ? 'Hide Pareto' : 'Pareto view'}
                     </Button>
+                    <Button
+                      kind="tertiary"
+                      aria-pressed={compareVisible}
+                      onClick={() => setCompareVisible(!compareVisible)}
+                    >
+                      <Table2 width={12} height={12} className="text-brand" />
+                      {compareVisible ? 'Hide scorecard' : 'Scorecard'}
+                    </Button>
                   </>
                 )}
               </div>
               {group && (
                 <ExperimentDataView
+                  // The route does not remount between experiments; without this the next inherits this one's columns.
+                  key={group.id}
                   group={group}
                   paretoVisible={paretoVisible}
                   trendVisible={trendVisible}
+                  compareVisible={compareVisible}
                 />
               )}
             </div>

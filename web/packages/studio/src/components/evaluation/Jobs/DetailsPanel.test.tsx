@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { DetailsPanel } from '@studio/components/evaluation/Jobs/DetailsPanel';
 import { ROUTE_PARAMS, ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
@@ -50,7 +50,7 @@ describe('DetailsPanel', () => {
   it('shows an error banner when the job has failed', async () => {
     const failedJob = {
       ...metricEvaluationJob1,
-      status: PlatformJobStatus.error,
+      status: HelixJobStatus.error,
       error_details: { message: 'The evaluation job failed. Please try again.' },
     };
 
@@ -67,6 +67,70 @@ describe('DetailsPanel', () => {
     expect(
       await screen.findByText('The evaluation job failed. Please try again.')
     ).toBeInTheDocument();
+  });
+
+  it('explains a failed run with the evaluator rollup instead of the exit code', async () => {
+    const failedRun = {
+      ...metricEvaluationJob1,
+      status: HelixJobStatus.error,
+      error_details: { message: 'Job exited with code 1' },
+      status_details: {
+        message: 'Job exited with code 1',
+        evaluation: {
+          unit: 'rows',
+          total: 2,
+          errored: 2,
+          scored: 0,
+          failed: true,
+          message: 'No usable scores across 2 rows (2 reported errors).',
+        },
+      },
+    };
+
+    renderRoute(<DetailsPanel evaluationJob={failedRun} />, {
+      history: testPath,
+      routes: [
+        {
+          path: ROUTES.workspace.evaluationMetricDetails!,
+          element: <DetailsPanel evaluationJob={failedRun} />,
+        },
+      ],
+    });
+
+    expect(
+      await screen.findByText('No usable scores across 2 rows (2 reported errors).')
+    ).toBeInTheDocument();
+    // The exit-code text survives only in the Status Details row, not as a second banner.
+    expect(screen.getAllByText('Job exited with code 1')).toHaveLength(1);
+  });
+
+  it('warns about a completed run whose rows only partly scored', async () => {
+    const partialRun = {
+      ...metricEvaluationJob1,
+      status_details: {
+        evaluation: {
+          unit: 'rows',
+          total: 28,
+          errored: 3,
+          scored: 25,
+          failed: false,
+          message: '25 of 28 rows scored; 3 reported errors.',
+        },
+      },
+    };
+
+    renderRoute(<DetailsPanel evaluationJob={partialRun} />, {
+      history: testPath,
+      routes: [
+        {
+          path: ROUTES.workspace.evaluationMetricDetails!,
+          element: <DetailsPanel evaluationJob={partialRun} />,
+        },
+      ],
+    });
+
+    expect(await screen.findByText('25 of 28 rows scored; 3 reported errors.')).toBeInTheDocument();
+    expect(screen.queryByText('Job exited with code 1')).not.toBeInTheDocument();
   });
 
   it('renders reload state when evaluationJob is undefined', async () => {

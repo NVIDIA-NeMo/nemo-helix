@@ -13,7 +13,7 @@ EMPTY_PATH_FRAGMENT = "Path fragment cannot be empty"
 
 
 class FilesetFileSeedSource(SeedSource):
-    seed_type: Literal["nmp"] = "nmp"
+    seed_type: Literal["nhx"] = "nhx"
 
     path: str
 

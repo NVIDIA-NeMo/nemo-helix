@@ -16,10 +16,6 @@ import { z } from 'zod';
 // INVARIANT: a sample can depend on something being installed in the deploy
 // venv/image, or it fails at startup:
 //
-// - NAT (`nat-workflow-v1`) entries whose agent.yml uses a custom `_type` need
-//   that tool's Python package:
-//     _type: calculator              -> plugins/nemo-agents/examples/calculator-agent
-//     _type: email_phishing_analyzer -> plugins/nemo-agents/examples/email-phishing-analyzer
 // - Fabric (`nemo-agents-spec-v1`) entries need each `mcp.servers.<n>.url`
 //   console script on PATH, since Fabric spawns it as a stdio MCP child. No
 //   shipped sample declares `mcp:` today, so nothing currently relies on this.
@@ -31,7 +27,7 @@ export interface SampleAgent {
   displayName: string;
   /** Prefix for generated agent names; drives onboarding detection. */
   namePrefix: string;
-  /** Public path to the NAT workflow config (parsed + model-injected at create). */
+  /** Public path to the agent config (parsed + model-injected at create). */
   agentConfigPath: string;
   /** Config format identifier sent to the create API. Defaults to
    *  `nat-workflow-v1` server-side when omitted; set to `nemo-agents-spec-v1`

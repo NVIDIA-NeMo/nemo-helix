@@ -11,14 +11,25 @@
 # plane and the code under evaluation — acceptable for a Phase-1 lab namespace,
 # not for anything multi-tenant.
 #
-# The sandbox verbs themselves come from the cluster-wide `agent-sandbox-edit`
-# ClusterRoles installed with the agent-sandbox controller, which this file only
-# binds. It does not install the CRDs or the controller; see README.md.
+# This file does not install the CRDs or the controller; see README.md.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: scaled-evals-sandbox-access
 rules:
+  # The Platform Jobs controller creates the outer task-build and evaluation
+  # Jobs. The task pods use the remaining rules for their sandbox children.
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  # The plugin creates and observes Sandbox CRs directly. Keep this baseline
+  # grant deployment-owned instead of depending on optional installation roles.
+  - apiGroups: ["agents.x-k8s.io"]
+    resources: ["sandboxes"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  - apiGroups: ["extensions.agents.x-k8s.io"]
+    resources: ["sandboxclaims"]
+    verbs: ["create", "delete", "get", "list", "watch"]
   # The pods the controller creates from each Sandbox.
   - apiGroups: [""]
     resources: ["pods"]
@@ -51,32 +62,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: scaled-evals-sandbox-access
-subjects:
-  - kind: ServiceAccount
-    name: scaled-evals-control-plane
----
-# sandboxes.agents.x-k8s.io
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: scaled-evals-agent-sandbox-edit
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: agent-sandbox-edit
-subjects:
-  - kind: ServiceAccount
-    name: scaled-evals-control-plane
----
-# sandboxclaims / sandboxtemplates / sandboxwarmpools
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: scaled-evals-agent-sandbox-extensions-edit
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: agent-sandbox-extensions-edit
 subjects:
   - kind: ServiceAccount
     name: scaled-evals-control-plane

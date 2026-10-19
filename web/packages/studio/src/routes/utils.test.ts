@@ -12,7 +12,7 @@ import {
   getFilesetRoute,
   getIntakeSessionRoute,
   getIntakeSessionTraceRoute,
-  getPromptTuningFormRoute,
+  getIntakeTracesRoute,
   getWorkspaceBaseModelsRoute,
   getWorkspaceInferenceProvidersRoute,
 } from '@studio/routes/utils';
@@ -154,22 +154,6 @@ describe('getWorkspaceBaseModelsRoute (deep linking)', () => {
   });
 });
 
-describe('getPromptTuningFormRoute', () => {
-  const workspace = 'my-workspace';
-
-  it('returns the bare prompt tuning form path when no model is given', () => {
-    expect(getPromptTuningFormRoute(workspace)).toBe(
-      '/workspaces/my-workspace/customizations/prompt-tuned/new'
-    );
-  });
-
-  it('appends an encoded ?model= query param when a model URN is provided', () => {
-    expect(getPromptTuningFormRoute(workspace, { model: 'my-workspace/my-model' })).toBe(
-      '/workspaces/my-workspace/customizations/prompt-tuned/new?model=my-workspace%2Fmy-model'
-    );
-  });
-});
-
 describe('intake session detail routes', () => {
   it('builds session, trace, and span links', () => {
     expect(getIntakeSessionRoute('my-workspace', 'session-1')).toBe(
@@ -221,5 +205,22 @@ describe('getFilesetDetailsRoute', () => {
     expect(getFilesetDetailsRoute('my-workspace', 'default/set', 'nested/folder 1')).toBe(
       '/workspaces/my-workspace/filesets/default%2Fset?filesetFolder=nested%2Ffolder+1'
     );
+  });
+});
+
+describe('getIntakeTracesRoute', () => {
+  it('links to the unfiltered traces list by default', () => {
+    expect(getIntakeTracesRoute('default')).toBe('/workspaces/default/intake/traces');
+  });
+
+  it('encodes an agent filter the traces table reads back', () => {
+    const url = new URL(
+      getIntakeTracesRoute('ws-a', { agentName: 'email-security-triage' }),
+      'http://x'
+    );
+    expect(url.pathname).toBe('/workspaces/ws-a/intake/traces');
+    expect(JSON.parse(decodeURIComponent(url.searchParams.get('filters') ?? ''))).toEqual([
+      { id: 'agent_name', value: 'email-security-triage' },
+    ]);
   });
 });

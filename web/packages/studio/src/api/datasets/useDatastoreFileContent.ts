@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { filesDownloadFile } from '@nemo/sdk/generated/platform/api';
+import { filesDownloadFile } from '@nemo/sdk/generated/platform/files';
 import { queryOptions, useQuery, UseQueryOptions, useSuspenseQuery } from '@tanstack/react-query';
 
 interface UseDatastoreFileContentParams {

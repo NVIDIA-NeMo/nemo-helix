@@ -19,7 +19,7 @@ spec:
               apiVersion: networking.k8s.io/v1
               kind: NetworkPolicy
               metadata:
-                name: nemo-platform-api-ingress
+                name: nemo-helix-api-ingress
               spec:
                 policyTypes:
                   - Ingress
@@ -28,7 +28,7 @@ spec:
               apiVersion: networking.k8s.io/v1
               kind: NetworkPolicy
               metadata:
-                name: nemo-platform-core-controller-ingress
+                name: nemo-helix-core-controller-ingress
               spec:
                 policyTypes:
                   - Ingress
@@ -37,7 +37,7 @@ spec:
               apiVersion: networking.k8s.io/v1
               kind: NetworkPolicy
               metadata:
-                name: nemo-platform-jobs-egress
+                name: nemo-helix-jobs-egress
               spec:
                 policyTypes:
                   - Egress
@@ -49,10 +49,10 @@ spec:
               apiVersion: v1
               kind: Service
               metadata:
-                name: nmp-np-open-http
+                name: nhx-np-open-http
               spec:
                 selector:
-                  app: nmp-network-policy-open-target
+                  app: nhx-network-policy-open-target
                 ports:
                   - name: http
                     port: 8080
@@ -62,9 +62,9 @@ spec:
               apiVersion: v1
               kind: Pod
               metadata:
-                name: nmp-np-open-http
+                name: nhx-np-open-http
                 labels:
-                  app: nmp-network-policy-open-target
+                  app: nhx-network-policy-open-target
               spec:
                 restartPolicy: Never
                 containers:
@@ -81,7 +81,7 @@ spec:
         - wait:
             apiVersion: v1
             kind: Pod
-            name: nmp-np-open-http
+            name: nhx-np-open-http
             for:
               condition:
                 name: Ready
@@ -95,10 +95,10 @@ spec:
               apiVersion: v1
               kind: Pod
               metadata:
-                name: nmp-np-release-api
+                name: nhx-np-release-api
                 labels:
-                  app.kubernetes.io/name: nemo-platform
-                  app.kubernetes.io/instance: nemo-platform
+                  app.kubernetes.io/name: nemo-helix
+                  app.kubernetes.io/instance: nemo-helix
               spec:
                 restartPolicy: Never
                 containers:
@@ -111,11 +111,11 @@ spec:
                       - "8"
                       - --max-time
                       - "8"
-                      - http://nemo-platform-api:8080/health/ready
+                      - http://nemo-helix-api:8080/health/ready
         - wait:
             apiVersion: v1
             kind: Pod
-            name: nmp-np-release-api
+            name: nhx-np-release-api
             for:
               jsonPath:
                 path: "{.status.phase}"
@@ -126,10 +126,10 @@ spec:
               apiVersion: v1
               kind: Pod
               metadata:
-                name: nmp-np-managed-job-api
+                name: nhx-np-managed-job-api
                 labels:
                   app: nemo-job
-                  nmp.nvidia.com/managed_by: jobs-controller
+                  nhx.nvidia.com/managed_by: jobs-controller
               spec:
                 restartPolicy: Never
                 containers:
@@ -142,11 +142,11 @@ spec:
                       - "8"
                       - --max-time
                       - "8"
-                      - http://nemo-platform-api:8080/health/ready
+                      - http://nemo-helix-api:8080/health/ready
         - wait:
             apiVersion: v1
             kind: Pod
-            name: nmp-np-managed-job-api
+            name: nhx-np-managed-job-api
             for:
               jsonPath:
                 path: "{.status.phase}"
@@ -157,10 +157,10 @@ spec:
               apiVersion: v1
               kind: Pod
               metadata:
-                name: nmp-np-release-controller
+                name: nhx-np-release-controller
                 labels:
-                  app.kubernetes.io/name: nemo-platform
-                  app.kubernetes.io/instance: nemo-platform
+                  app.kubernetes.io/name: nemo-helix
+                  app.kubernetes.io/instance: nemo-helix
               spec:
                 restartPolicy: Never
                 containers:
@@ -173,11 +173,11 @@ spec:
                       - "8"
                       - --max-time
                       - "8"
-                      - http://nemo-platform-core-controller:8080/health/ready
+                      - http://nemo-helix-core-controller:8080/health/ready
         - wait:
             apiVersion: v1
             kind: Pod
-            name: nmp-np-release-controller
+            name: nhx-np-release-controller
             for:
               jsonPath:
                 path: "{.status.phase}"
@@ -188,10 +188,10 @@ spec:
               apiVersion: v1
               kind: Pod
               metadata:
-                name: nmp-np-release-open-http
+                name: nhx-np-release-open-http
                 labels:
-                  app.kubernetes.io/name: nemo-platform
-                  app.kubernetes.io/instance: nemo-platform
+                  app.kubernetes.io/name: nemo-helix
+                  app.kubernetes.io/instance: nemo-helix
               spec:
                 restartPolicy: Never
                 containers:
@@ -204,11 +204,11 @@ spec:
                       - "8"
                       - --max-time
                       - "8"
-                      - http://nmp-np-open-http:8080/
+                      - http://nhx-np-open-http:8080/
         - wait:
             apiVersion: v1
             kind: Pod
-            name: nmp-np-release-open-http
+            name: nhx-np-release-open-http
             for:
               jsonPath:
                 path: "{.status.phase}"
@@ -222,10 +222,10 @@ spec:
               apiVersion: v1
               kind: Pod
               metadata:
-                name: nmp-np-managed-job-open-http
+                name: nhx-np-managed-job-open-http
                 labels:
                   app: nemo-job
-                  nmp.nvidia.com/managed_by: jobs-controller
+                  nhx.nvidia.com/managed_by: jobs-controller
               spec:
                 restartPolicy: Never
                 containers:
@@ -238,11 +238,11 @@ spec:
                       - "8"
                       - --max-time
                       - "8"
-                      - http://nmp-np-open-http:8080/
+                      - http://nhx-np-open-http:8080/
         - wait:
             apiVersion: v1
             kind: Pod
-            name: nmp-np-managed-job-open-http
+            name: nhx-np-managed-job-open-http
             for:
               jsonPath:
                 path: "{.status.phase}"
@@ -253,9 +253,9 @@ spec:
               apiVersion: v1
               kind: Pod
               metadata:
-                name: nmp-np-denied-api
+                name: nhx-np-denied-api
                 labels:
-                  app: nmp-network-policy-probe
+                  app: nhx-network-policy-probe
               spec:
                 restartPolicy: Never
                 containers:
@@ -268,11 +268,11 @@ spec:
                       - "8"
                       - --max-time
                       - "8"
-                      - http://nemo-platform-api:8080/health/ready
+                      - http://nemo-helix-api:8080/health/ready
         - wait:
             apiVersion: v1
             kind: Pod
-            name: nmp-np-denied-api
+            name: nhx-np-denied-api
             for:
               jsonPath:
                 path: "{.status.phase}"
@@ -283,9 +283,9 @@ spec:
               apiVersion: v1
               kind: Pod
               metadata:
-                name: nmp-np-denied-controller
+                name: nhx-np-denied-controller
                 labels:
-                  app: nmp-network-policy-probe
+                  app: nhx-network-policy-probe
               spec:
                 restartPolicy: Never
                 containers:
@@ -298,11 +298,11 @@ spec:
                       - "8"
                       - --max-time
                       - "8"
-                      - http://nemo-platform-core-controller:8080/health/ready
+                      - http://nemo-helix-core-controller:8080/health/ready
         - wait:
             apiVersion: v1
             kind: Pod
-            name: nmp-np-denied-controller
+            name: nhx-np-denied-controller
             for:
               jsonPath:
                 path: "{.status.phase}"

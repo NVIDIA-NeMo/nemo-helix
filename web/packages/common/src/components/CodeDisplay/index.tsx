@@ -11,7 +11,7 @@ export interface CodeDisplayProps {
   children?: string;
 }
 
-const CODE_BLOCK_SURFACE_CLASS = '[&&]:bg-gray-050 [&&]:py-density-xs dark:[&&]:bg-gray-900';
+const CODE_BLOCK_SURFACE_CLASS = '!bg-gray-050 !py-density-xs dark:!bg-gray-900';
 
 export const CodeDisplay: FC<CodeDisplayProps> = ({ children, containerClassName }) => {
   const detectedLang = languageInCode(children || '');

@@ -1,8 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
+import { getGetExperimentQueryKey } from '@nemo/sdk/generated/platform/experiments';
 import type { ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { ExperimentEditModal } from '@studio/components/ExperimentEditModal';
+import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { render, screen } from '@studio/tests/util/render';
 import { waitFor } from '@testing-library/react';
@@ -27,7 +30,7 @@ describe('ExperimentEditModal', () => {
   it('resends the fields it does not edit, which a full-replace update would otherwise clear', async () => {
     let body: Record<string, unknown> | undefined;
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/evaluations', () =>
+      http.get(mockApiUrl(getListEvaluationsQueryKey, ':workspace'), () =>
         HttpResponse.json({
           data: [],
           pagination: {
@@ -39,7 +42,7 @@ describe('ExperimentEditModal', () => {
           },
         })
       ),
-      http.put('*/apis/intake/v2/workspaces/:workspace/experiments/:name', async ({ request }) => {
+      http.put(mockApiUrl(getGetExperimentQueryKey, ':workspace', ':name'), async ({ request }) => {
         body = (await request.json()) as Record<string, unknown>;
         return HttpResponse.json(group);
       })
@@ -66,7 +69,7 @@ describe('ExperimentEditModal', () => {
     const mockRequests = () => {
       let saved = false;
       server.use(
-        http.get('*/apis/intake/v2/workspaces/:workspace/evaluations', () =>
+        http.get(mockApiUrl(getListEvaluationsQueryKey, ':workspace'), () =>
           HttpResponse.json({
             data: [],
             pagination: {
@@ -78,7 +81,7 @@ describe('ExperimentEditModal', () => {
             },
           })
         ),
-        http.put('*/apis/intake/v2/workspaces/:workspace/experiments/:name', () => {
+        http.put(mockApiUrl(getGetExperimentQueryKey, ':workspace', ':name'), () => {
           saved = true;
           return HttpResponse.json(group);
         })

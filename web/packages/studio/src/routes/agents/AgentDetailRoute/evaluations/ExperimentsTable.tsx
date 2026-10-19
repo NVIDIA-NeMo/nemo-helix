@@ -7,20 +7,20 @@ import {
 } from '@nemo/common/src/components/DataView/StudioDataView';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
+import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
 import {
   deleteExperiment,
-  getListEvaluationsQueryKey,
   getListExperimentsQueryKey,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/experiments';
 import { Button, Text } from '@nvidia/foundations-react-core';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import type { AgentExperimentRow } from '@studio/routes/agents/AgentDetailRoute/evaluations/groupByExperiment';
 import { getExperimentDetailRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
 import { FolderTree, Trash } from 'lucide-react';
-import { type ComponentProps, type FC, useCallback, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 
 interface ExperimentsTableProps {
   workspace: string;
@@ -38,9 +38,15 @@ const deleteTitle = (rows: AgentExperimentRow[]): string => {
 /** The agent's evaluations rolled up by the experiment they belong to. Selecting one opens the
  *  experiment's own route, which already lists the evaluations under it. */
 export const ExperimentsTable: FC<ExperimentsTableProps> = ({ workspace, experiments }) => {
-  const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const queryClient = useQueryClient();
   const dataViewState = useStudioDataViewState();
+  // StudioDataView renders exactly the rows it is given and never slices, so apply the page here.
+  const { pageIndex, pageSize } = dataViewState.pagination.state;
+  const pageRows = useMemo(
+    () => experiments.slice(pageIndex * pageSize, pageIndex * pageSize + pageSize),
+    [experiments, pageIndex, pageSize]
+  );
   const [deleteRows, setDeleteRows] = useState<AgentExperimentRow[]>([]);
 
   const handleDelete = useCallback(
@@ -109,7 +115,9 @@ export const ExperimentsTable: FC<ExperimentsTableProps> = ({ workspace, experim
       <StudioDataView<AgentExperimentRow>
         dataViewState={dataViewState}
         makeColumns={makeColumns}
-        onRowClick={(row) => row.name && navigate(getExperimentDetailRoute(workspace, row.name))}
+        onRowClick={(row, _index, event) =>
+          row.name && openRow(event, getExperimentDetailRoute(workspace, row.name))
+        }
         renderBulkActions={({ selectedRows }) => (
           <Button
             kind="tertiary"
@@ -120,7 +128,7 @@ export const ExperimentsTable: FC<ExperimentsTableProps> = ({ workspace, experim
           </Button>
         )}
         attributes={{
-          DataViewRoot: { data: experiments },
+          DataViewRoot: { data: pageRows, totalCount: experiments.length },
           DataViewTableContent: {
             renderEmptyState: () => (
               <TableEmptyState

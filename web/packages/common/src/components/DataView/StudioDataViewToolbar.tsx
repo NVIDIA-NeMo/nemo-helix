@@ -16,6 +16,8 @@ export interface StudioDataViewToolbarProps<DataType = unknown> {
     table: DataView.TanstackTable.Table<DataType>;
   }) => ReactNode;
   searchBarProps?: ComponentProps<typeof DataView.SearchBar>;
+  /** Rendered before the search bar, at the toolbar's leading edge. */
+  slotStart?: ReactNode;
   /**
    * Additional content rendered inside the toolbar row, after the filter toggle button.
    * Use this to inject view-specific controls such as a sort dropdown.
@@ -36,6 +38,7 @@ export function StudioDataViewToolbar<DataType = unknown>({
   onToggleFilters,
   renderBulkActions,
   searchBarProps,
+  slotStart,
   slotEnd,
 }: StudioDataViewToolbarProps<DataType>) {
   const { table } = useInnerDataViewContext();
@@ -43,7 +46,8 @@ export function StudioDataViewToolbar<DataType = unknown>({
   const hasSelectedRows = table.getSelectedRowModel().flatRows.length > 0;
   const hostsBulkActions = Boolean(renderBulkActions) && hasSelectedRows;
 
-  if (!searchField && !hasFilterableColumns && !hostsBulkActions) return null;
+  if (!searchField && !hasFilterableColumns && !hostsBulkActions && !slotStart && !slotEnd)
+    return null;
 
   return (
     <>
@@ -61,6 +65,7 @@ export function StudioDataViewToolbar<DataType = unknown>({
           ) : undefined
         }
       >
+        {slotStart}
         {searchField && (
           <DataView.SearchBar
             placeholder={searchBarProps?.placeholder ?? 'Search...'}

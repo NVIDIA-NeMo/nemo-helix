@@ -50,6 +50,7 @@ from typing import TYPE_CHECKING, Any
 
 from sandbox_k8s.exceptions import SandboxConfigError
 from sandbox_k8s.sandbox import K8sSandbox
+from sandbox_k8s.sidecars import sanitize_k8s_name
 from sandbox_k8s.types import (
     CommandResult,
     EmptyDirVolume,
@@ -79,12 +80,40 @@ _HARBOR_PATH_ALLOW_PATTERNS = (
     r"^/installed-agent(/|$)",
     r"^/installed-tools(/|$)",
     r"^/git(/|$)",
+    # Harbor's conventional task working directory. Separate verifier mode moves
+    # declared artifacts out of the agent container and back into the verifier's,
+    # and benchmarks overwhelmingly declare them under /app.
+    r"^/app(/|$)",
+    # A task's working tree under the container HOME. Reverse-engineering and
+    # exploit tasks conventionally root their subject binary at /root/<name>
+    # and declare artifacts there, which the base deny list refuses wholesale.
+    r"^/root/",
+    # Cross-service evidence directories. Multi-service tasks put the record a
+    # verifier grades -- an append-only action log, a decision journal -- on a
+    # volume shared with the service that writes it, and declare it as a
+    # per-service artifact. The base list already allows /shared, but only with
+    # a trailing slash, so a task declaring the directory itself is refused.
+    r"^/audit(/|$)",
+    r"^/shared(/|$)",
 )
+
+# The base deny list groups /root with /etc, /proc and /sys as a system path,
+# but in this runtime /root is the task container's HOME: it holds task-owned
+# files, not host state. What actually needs protecting there is agent state --
+# credentials and caches, which live in dotfiles. So the blanket prefix deny is
+# replaced by two narrower ones: the home directory itself stays unreadable, so
+# no task can declare it as one bulk artifact, and every dotfile child stays
+# denied in both directions. A nested dotdir (/root/<task>/.git) is not covered
+# and does not need to be; it belongs to the task's own tree.
+_HARBOR_PATH_DENY_REPLACEMENTS = {
+    r"^/root": (r"^/root/?$", r"^/root/\."),
+}
 
 _SANDBOX_LOG_POLL_INTERVAL_SECONDS = 5.0
 _SANDBOX_LOG_POLL_TIMEOUT_SECONDS = 15.0
 _SANDBOX_LOG_MAX_BYTES_PER_FILE = 64 * 1024
 _SANDBOX_LOG_MAX_BYTES_PER_POLL = 256 * 1024
+_PIP_ZIPAPP = Path("/opt/harbor/pip.pyz")
 _SANDBOX_LOG_MAX_LINE_CHARS = 16 * 1024
 _AUTOSCALER_SAFE_TO_EVICT_ANNOTATION = "cluster-autoscaler.kubernetes.io/safe-to-evict"
 _SANDBOX_LOG_POLL_SCRIPT = r"""
@@ -222,6 +251,14 @@ def _ensure_harbor() -> None:
         raise ImportError(
             "Harbor framework is required for the Harbor adapter. Install with: pip install sandbox-k8s[harbor]"
         )
+
+
+def _service_operations_unsupported(message: str) -> RuntimeError:
+    try:
+        from harbor.environments.base import ServiceOperationsUnsupportedError
+    except ImportError:
+        return RuntimeError(message)
+    return ServiceOperationsUnsupportedError(message)
 
 
 def _add_harbor_crd_mounts(
@@ -431,14 +468,20 @@ def _task_config_docker_image(task_env_config: Any) -> str | None:
     return value or None
 
 
-def _is_verifier_environment(environment_name: str) -> bool:
-    """Detect Harbor's separate verifier sandbox from its environment name."""
-    return "__verifier__" in environment_name
+def _is_verifier_sandbox(session_id: str) -> bool:
+    """Detect Harbor's separate verifier sandbox.
+
+    The phase is in the session id (``task__aBcDeF__verifier__trial``) and only
+    there. ``environment_name`` is the task's environment directory, so it reads
+    the same for the agent sandbox and the verifier sandbox and can never tell
+    them apart -- checking it silently classifies every verifier as an agent.
+    """
+    return "__verifier__" in session_id
 
 
 def _effective_sandbox_image(
     *,
-    environment_name: str,
+    session_id: str,
     task_env_config: Any,
     profile_image: str | None,
 ) -> str | None:
@@ -452,7 +495,7 @@ def _effective_sandbox_image(
     verifier sandboxes so separate verifier images keep their hidden tests.
     """
     task_image = _task_config_docker_image(task_env_config)
-    if task_image and _is_verifier_environment(environment_name):
+    if task_image and _is_verifier_sandbox(session_id):
         return task_image
     return profile_image or task_image
 
@@ -550,6 +593,7 @@ class K8sSandboxEnvironment(_HarborBaseEnvironment):
         sidecar_log_containers: list[str] | None = None,
         setup_command: str | None = None,
         rootless_overlay: bool = False,
+        enable_ipv6_loopback: bool = False,
         read_only_root_filesystem: bool = True,
         rootless_start_timeout: int = 600,
         _scaled_evals_root_authorized: bool = False,
@@ -557,6 +601,44 @@ class K8sSandboxEnvironment(_HarborBaseEnvironment):
         **kwargs: Any,
     ) -> None:
         _ensure_harbor()
+
+        # Sidecar containers get the same name sanitization the SDK applies when
+        # it builds the pod, so a task's compose service name resolves to the
+        # container that service operations must target. Computed before
+        # ``super().__init__`` because Harbor's capability validators read
+        # ``capabilities`` during base initialization, and this set is what the
+        # ``docker_compose`` capability is derived from.
+        self._sidecar_containers = {
+            sanitize_k8s_name(name)
+            for name in (
+                sidecar.get("name") if isinstance(sidecar, Mapping) else getattr(sidecar, "name", None)
+                for sidecar in kwargs.get("sidecars") or []
+            )
+            if name
+        }
+
+        # The separate verifier sandbox gets no copy of the services. Under
+        # Docker a verifier joins the running compose project, so the services
+        # exist once; giving the verifier pod its own set is not that, it is a
+        # second empty instance. And because every container in a pod shares one
+        # network namespace, that copy takes the ports the verifier's own stack
+        # needs: a task that boots postgres on 5432 and its app on 8069 to grade
+        # a restored snapshot finds both already bound, silently grades the
+        # empty copy instead, and reports a plausible wrong score. Dropping them
+        # also halves what the verifier phase requests, which matters where the
+        # agent and verifier pods are alive together under one namespace quota.
+        #
+        # ``_sidecar_containers`` is deliberately left intact: it is what the
+        # ``docker_compose`` capability is derived from, and a verifier that
+        # reported no compose support would fail Harbor's validation for any
+        # task that declares services.
+        dropped_verifier_sidecars = 0
+        self._withheld_sidecar_containers: set[str] = set()
+        if _is_verifier_sandbox(session_id) and kwargs.get("sidecars"):
+            dropped_verifier_sidecars = len(kwargs.pop("sidecars"))
+            self._withheld_sidecar_containers = set(self._sidecar_containers)
+            sidecar_wait_ports = None
+            sidecar_log_containers = None
 
         # Let Harbor initialize its internal execution context. Reimplementing
         # this constructor left newer fields such as `_exec_env_overlays`
@@ -578,6 +660,22 @@ class K8sSandboxEnvironment(_HarborBaseEnvironment):
             network_policy=network_policy,
         )
         self.logger = self.logger.getChild("k8s")
+        # Which services a sandbox ended up with, said out loud. A pod shares one
+        # network namespace, so an unexpected copy of a service silently takes the
+        # port the sandbox's own stack wants and the run reports a low score
+        # rather than an error -- indistinguishable, from the outside, from an
+        # agent that did the work badly.
+        if self._sidecar_containers or dropped_verifier_sidecars:
+            self.logger.info(
+                "Sandbox %s: task declares %d service(s); %s",
+                environment_name,
+                len(self._sidecar_containers),
+                (
+                    f"{dropped_verifier_sidecars} withheld so the verifier boots its own"
+                    if dropped_verifier_sidecars
+                    else "running them alongside the task container"
+                ),
+            )
         self._working_dir = working_dir
         self._harbor_agent_dirs = tuple(_DEFAULT_HARBOR_AGENT_DIRS if harbor_agent_dirs is None else harbor_agent_dirs)
         if (
@@ -598,6 +696,8 @@ class K8sSandboxEnvironment(_HarborBaseEnvironment):
         self._command_timeout = _resolve_command_timeout(command_timeout, timeout)
         if not isinstance(rootless_overlay, bool):
             raise SandboxConfigError("rootless_overlay must be a boolean")
+        if not isinstance(enable_ipv6_loopback, bool):
+            raise SandboxConfigError("enable_ipv6_loopback must be a boolean")
         if not isinstance(read_only_root_filesystem, bool):
             raise SandboxConfigError("read_only_root_filesystem must be a boolean")
         if (
@@ -640,8 +740,13 @@ class K8sSandboxEnvironment(_HarborBaseEnvironment):
         # that scaled-evals overwrites after profile merging may unlock root.
         os.environ.pop("SANDBOX_K8S_INTERNAL_ROOT_AUTHORIZED", None)
         os.environ.pop("SANDBOX_K8S_INTERNAL_ROOTLESS_LOW_PORTS", None)
+        os.environ.pop("SANDBOX_K8S_INTERNAL_IPV6_LOOPBACK", None)
         if rootless_overlay:
             os.environ["SANDBOX_K8S_INTERNAL_ROOTLESS_LOW_PORTS"] = "true"
+        # Tasks that bind [::1] -- GKE disables IPv6 in every pod sandbox on an
+        # IPv4-only cluster, so the sandbox has no usable loopback without this.
+        if enable_ipv6_loopback:
+            os.environ["SANDBOX_K8S_INTERNAL_IPV6_LOOPBACK"] = "true"
         requested_uid = kwargs.get("run_as_user")
         if requested_uid == 0:
             if _scaled_evals_root_authorized is not True:
@@ -685,14 +790,13 @@ class K8sSandboxEnvironment(_HarborBaseEnvironment):
         # That overwrites a raw Kubernetes policy placed under the same key in
         # environment.kwargs.  Keep a deliberately Kubernetes-specific escape
         # hatch for open-book runs that need concrete DNS/port rules.
-        # Closed-book runs omit this and rely on namespace default-deny plus
-        # the evaluation-scoped Switchyard policy.
+        # Other runs omit this and rely on namespace default-deny.
         if k8s_network_policy is not None:
             sandbox_kwargs["network_policy"] = k8s_network_policy
         if template_name:
             sandbox_kwargs["template_name"] = template_name
         effective_image = _effective_sandbox_image(
-            environment_name=environment_name,
+            session_id=session_id,
             task_env_config=task_env_config,
             profile_image=image,
         )
@@ -800,6 +904,13 @@ class K8sSandboxEnvironment(_HarborBaseEnvironment):
             gpus=self.supports_gpus,
             disable_internet=self.can_disable_internet,
             mounted=self.is_mounted,
+            # Derived from the profile rather than fixed, because this runtime has
+            # no compose builder: it can only serve a compose task when the
+            # operator has supplied that task's services as sidecars. Declaring
+            # the capability unconditionally would make Harbor accept a compose
+            # task whose services nothing ever schedules, trading its clear
+            # up-front rejection for an obscure failure mid-trial.
+            docker_compose=bool(self._sidecar_containers),
         )
 
     @property
@@ -1092,6 +1203,8 @@ done
         setup_script += "true\n"
         try:
             await self._sandbox.run_command(["bash", "-c", setup_script])
+            if _PIP_ZIPAPP.is_file():
+                await self._sandbox.upload_file(_PIP_ZIPAPP.read_bytes(), "/tmp/pip.pyz")
             self.logger.debug("Pre-created Harbor directories in sandbox")
         except Exception as exc:
             self.logger.warning("Could not pre-create Harbor dirs: %s", exc)
@@ -1537,7 +1650,9 @@ done
             f"REMOTE_TAR={_shell_quote(remote_tar)} "
             f"TARGET={_shell_quote(target_dir)} "
             "python3 -c 'import os,tarfile; "
-            'tarfile.open(os.environ["REMOTE_TAR"], "r").extractall(os.environ["TARGET"])\' '
+            'archive=tarfile.open(os.environ["REMOTE_TAR"], "r"); '
+            'data_filter=getattr(tarfile, "data_filter", None); '
+            'archive.extractall(os.environ["TARGET"], **({"filter": data_filter} if data_filter else {}))\' '
             "&& status=0 || status=$?\n"
             f"rm -f {_shell_quote(remote_tar)}\n"
             "exit ${status:-0}"
@@ -1598,6 +1713,180 @@ done
             # 3.12/3.13 still default to the fully-trusted filter, which honours absolute
             # paths, `..` and symlinks; "data" is the default only from 3.14.
             shutil.unpack_archive(tmp.name, target, "tar", filter="data")
+
+    # -- Harbor abstract: compose service operations -------------------------
+    #
+    # A compose sidecar becomes another container in the same pod, so a service
+    # operation is an ordinary sandbox call with ``container=`` set. The base
+    # class routes ``service=None``/"main" to the main container itself, so only
+    # the sidecar branch needs implementing; ``service_download_dir`` and
+    # ``service_download_dir_with_exclusions`` are generic in Harbor and build on
+    # these two.
+
+    @staticmethod
+    def is_main_service(service: str | None) -> bool:
+        """Return whether a compose service refers to the agent container."""
+        return service is None or service == "main"
+
+    def _sidecar_container(self, service: str) -> str:
+        """Resolve a compose service name to its container name in this pod."""
+        container = sanitize_k8s_name(service)
+
+        if container in getattr(self, "_withheld_sidecar_containers", set()):
+            raise _service_operations_unsupported(
+                f"compose service {service!r} was withheld from the separate verifier pod",
+            )
+        if container in self._sidecar_containers:
+            return container
+        declared = ", ".join(sorted(self._sidecar_containers)) or "none"
+        raise _service_operations_unsupported(
+            f"compose service {service!r} has no sidecar container in this pod "
+            f"(declared sidecars: {declared}). Add it to the Harbor profile's "
+            "environment.kwargs.sidecars list.",
+        )
+
+    async def service_exec(
+        self,
+        command: str,
+        *,
+        service: str | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        timeout_sec: int | None = None,
+        user: str | int | None = None,
+    ) -> Any:
+        """Execute a command in a compose service (default: the main container)."""
+        if self.is_main_service(service):
+            return await self.exec(command, cwd=cwd, env=env, timeout_sec=timeout_sec, user=user)
+        _ensure_harbor()
+        container = self._sidecar_container(service)  # ty: ignore[invalid-argument-type]
+        # Sidecar execs deliberately do not inherit the main container's workdir,
+        # user or persistent env -- those are main-specific. `sh` rather than
+        # `bash` because sidecars are arbitrary third-party images and minimal
+        # ones (alpine variants) ship no bash; this matches Harbor's own Docker
+        # provider. A `user` switch has no equivalent here: the pod's security
+        # context owns the uid, so it is ignored rather than silently faked.
+        script = command
+        if env:
+            exports = " ".join(f"{key}={_shell_quote(value)}" for key, value in env.items())
+            script = f"export {exports}\n{script}"
+        result = await self._sandbox.run_command(
+            ["sh", "-c", script],
+            timeout=float(timeout_sec) if timeout_sec else self._command_timeout,
+            container=container,
+            # An explicit workdir, because every layer below coalesces a missing
+            # one to the *main* container's working directory -- so a sidecar exec
+            # would open with `cd /app` and die in any image that has no /app,
+            # which is most of them. A stock postgres or redis image fails every
+            # collect hook this way before the command runs. Root always exists,
+            # and a caller with a real directory in mind passes cwd.
+            workdir=cwd or "/",
+        )
+        exec_result = _to_exec_result(result)
+        # A broken sidecar exec is logged here because nothing else prints it:
+        # Harbor reports a failed collect hook as an exit code alone, so a hook
+        # that cannot reach its database looks exactly like one that wrote an
+        # empty dump, and the run grades whatever the verifier finds and reports
+        # a low score instead of an error.
+        #
+        # Only a command that wrote to stderr is reported. Harbor also probes
+        # sidecars with predicates (`test -d` on an artifact path), where a
+        # non-zero exit is the answer and not a fault; those are silent, so
+        # stderr is what separates a question from a failure. The exit code
+        # stays the caller's to interpret either way.
+        stderr = getattr(exec_result, "stderr", "") or ""
+        if getattr(exec_result, "return_code", 0) != 0 and stderr.strip():
+            self.logger.warning(
+                "Service exec in %r (container %s) exited %s: %s\n%s",
+                service,
+                container,
+                getattr(exec_result, "return_code", "?"),
+                command,
+                stderr[-2000:].strip(),
+            )
+        return exec_result
+
+    async def service_download_file(
+        self,
+        source_path: str,
+        target_path: Path | str,
+        *,
+        service: str | None = None,
+    ) -> None:
+        """Download a file from a compose service (default: the main container)."""
+        if self.is_main_service(service):
+            await self.download_file(source_path, target_path)
+            return
+        container = self._sidecar_container(service)  # ty: ignore[invalid-argument-type]
+        target = Path(target_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(await self._sandbox.download_file(source_path, container=container))
+
+    async def service_download_dir(
+        self,
+        *,
+        source_dir: str,
+        target_dir: Path | str,
+        service: str | None = None,
+    ) -> None:
+        """Download a directory from a compose service (default: the main container).
+
+        Harbor's base class raises for the sidecar case, but its exclusion-aware
+        sibling does not: that one is written against ``service_exec`` plus
+        ``service_download_file``, both of which work on sidecars here. An empty
+        exclude list produces ``tar czf ... -C <src> .``, which is a plain
+        directory download, so delegating is the same operation rather than an
+        approximation of it.
+
+        Without this, a task that collects a directory from a service -- an
+        emptyDir shared between sidecars, say -- fails the whole trial at
+        collection time.
+        """
+        await self.service_download_dir_with_exclusions(
+            source_dir=source_dir,
+            target_dir=target_dir,
+            exclude=[],
+            service=service,
+        )
+
+    async def service_download_dir_with_exclusions(
+        self,
+        *,
+        source_dir: str,
+        target_dir: Path | str,
+        exclude: list[str],
+        service: str | None = None,
+    ) -> None:
+        """Download a compose-service directory while excluding matching paths."""
+        remote_tar = f"/tmp/harbor-transfer-{secrets.token_hex(8)}.tar.gz"
+        exclude_flags = " ".join(f"--exclude={_shell_quote(pattern)}" for pattern in exclude)
+        try:
+            result = await self.service_exec(
+                f"tar czf {_shell_quote(remote_tar)} {exclude_flags} -C {_shell_quote(source_dir)} .",
+                service=service,
+                timeout_sec=120,
+                user="root",
+            )
+            if result.return_code != 0:
+                output = result.stderr or result.stdout or "no output"
+                raise RuntimeError(f"Failed to create transfer archive for {source_dir!r}: {output}")
+
+            target = Path(target_dir)
+            target.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(suffix=".tar.gz") as host_tar:
+                await self.service_download_file(remote_tar, host_tar.name, service=service)
+                with tarfile.open(host_tar.name, "r:gz") as archive:
+                    archive.extractall(path=target, filter="data")
+        finally:
+            try:
+                await self.service_exec(
+                    f"rm -f {_shell_quote(remote_tar)}",
+                    service=service,
+                    timeout_sec=120,
+                    user="root",
+                )
+            except Exception as exc:
+                self.logger.warning("Could not remove transfer archive %s: %s", remote_tar, exc)
 
     # -- Harbor optional: is_dir / is_file ----------------------------------
 
@@ -1679,10 +1968,13 @@ def _harbor_path_validator() -> Any:
     settings = get_settings()
     allow_patterns = list(settings.path_allow_patterns)
     allow_patterns.extend(pattern for pattern in _HARBOR_PATH_ALLOW_PATTERNS if pattern not in allow_patterns)
+    deny_patterns: list[str] = []
+    for pattern in settings.path_deny_patterns:
+        deny_patterns.extend(_HARBOR_PATH_DENY_REPLACEMENTS.get(pattern, (pattern,)))
     return SandboxPathValidator(
         max_path_length=settings.max_path_length,
         allow_patterns=allow_patterns,
-        deny_patterns=settings.path_deny_patterns,
+        deny_patterns=deny_patterns,
     )
 
 

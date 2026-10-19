@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getAgentsListAgentsQueryKey } from '@nemo/sdk/generated/agents/api';
-import { getModelsListModelsQueryKey } from '@nemo/sdk/generated/platform/api';
+import { getAgentsListAgentsQueryKey } from '@nemo/sdk/generated/agents/agents';
+import { getModelsListModelsQueryKey } from '@nemo/sdk/generated/platform/models';
 import type { AgentTableRow } from '@studio/components/dataViews/AgentsDataView';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';

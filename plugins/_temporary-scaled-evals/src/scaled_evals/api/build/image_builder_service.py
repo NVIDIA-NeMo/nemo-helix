@@ -16,17 +16,18 @@ import re
 import tempfile
 from pathlib import Path
 from typing import BinaryIO
+from urllib.parse import urlsplit
 
 import httpx
 
-from scaled_evals.api import s3
+from scaled_evals.api import artifacts
+from scaled_evals.api.build.errors import BuildError
 from scaled_evals.api.build.uploaded_context import (
     UploadedArchiveMetadata,
     archive_context_directory,
     compute_context_hash,
     inspect_uploaded_archive_file,
 )
-from scaled_evals.api.build.errors import BuildError
 from scaled_evals.api.settings import settings
 
 _RESOLVE_PATH = "/v1/eval-images/resolve"
@@ -58,7 +59,7 @@ def resolve_uploaded_revision_image(
 
     with tempfile.TemporaryDirectory(prefix="se-upload-") as tmp:
         archive_path = Path(tmp) / "context.tar.gz"
-        s3.download_object(tarball_object_key, str(archive_path))
+        artifacts.download_object(tarball_object_key, str(archive_path))
         data = resolve_uploaded_archive_file_details(
             archive_path,
             context_path=context_path,
@@ -211,6 +212,15 @@ def _post_resolve(
     bearer = oc_token or settings.image_builder_service_token
     if not bearer:
         raise BuildError("no image builder service auth: configure IMAGE_BUILDER_SERVICE_TOKEN")
+
+    parsed_service_url = urlsplit(resolved_service_url)
+    if (
+        parsed_service_url.scheme.lower() != "https"
+        or not parsed_service_url.hostname
+        or parsed_service_url.username is not None
+        or parsed_service_url.password is not None
+    ):
+        raise BuildError("image builder service URL must use HTTPS and contain no userinfo")
 
     url = resolved_service_url.rstrip("/") + _RESOLVE_PATH
     headers = {"Authorization": f"Bearer {bearer}"}

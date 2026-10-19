@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from nemo_deployments_plugin.api.v2._perms import DeploymentPerms
 from nemo_deployments_plugin.api.v2.dependencies import get_entity_client
 from nemo_deployments_plugin.authz import scope
@@ -22,11 +22,17 @@ from nemo_deployments_plugin.validation import (
     detect_prerequisite_cycle,
     prerequisite_names,
 )
-from nemo_platform_plugin.api.filters import make_filter_obj_dep
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
-from nemo_platform_plugin.filter_ops import ComparisonOperation, FilterOperator
-from nemo_platform_plugin.schema import PaginationData
+from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.auth import current_auth_context
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.entity_client import (
+    NemoEntitiesClient,
+    NemoEntityConflictError,
+    NemoEntityNotFoundError,
+    NemoEntityValidationError,
+)
+from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperator
+from nemo_helix_plugin.schema import PaginationData
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +73,11 @@ def _parse_deployment_config_ref(ref: str, default_workspace: str) -> tuple[str,
 
 @router.post("/deployments", response_model=Deployment, status_code=201, tags=["Deployments"])
 @scope.write
-@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[DeploymentPerms.CREATE])
+@path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[DeploymentPerms.CREATE])
 async def create_deployment(
     workspace: str,
     body: CreateDeploymentRequest,
+    request: Request,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> Deployment:
     config_workspace, config_name = _parse_deployment_config_ref(body.deployment_config, workspace)
@@ -102,7 +109,7 @@ async def create_deployment(
         executor=body.executor,
         prerequisites=body.prerequisites,
         status="PENDING",
-    )
+    ).with_auth_context(current_auth_context())
     try:
         return await entity_client.create(deployment)
     except NemoEntityConflictError as exc:
@@ -110,11 +117,13 @@ async def create_deployment(
             status_code=409,
             detail=f"Deployment '{body.name}' already exists in workspace '{workspace}'.",
         ) from exc
+    except NemoEntityValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/deployments", response_model=DeploymentPage, tags=["Deployments"])
 @scope.read
-@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[DeploymentPerms.LIST])
+@path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[DeploymentPerms.LIST])
 async def list_deployments(
     workspace: str,
     page: int = Query(default=1, ge=1),
@@ -151,7 +160,7 @@ async def list_deployments(
 
 @router.get("/deployments/{name}", response_model=Deployment, tags=["Deployments"])
 @scope.read
-@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[DeploymentPerms.READ])
+@path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[DeploymentPerms.READ])
 async def get_deployment(
     workspace: str,
     name: str,
@@ -168,7 +177,7 @@ async def get_deployment(
 
 @router.delete("/deployments/{name}", status_code=204, tags=["Deployments"])
 @scope.write
-@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[DeploymentPerms.DELETE])
+@path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[DeploymentPerms.DELETE])
 async def delete_deployment(
     workspace: str,
     name: str,

@@ -6,20 +6,22 @@ import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { KVPair } from '@nemo/common/src/components/KVPair';
 import { formatAbsoluteTimestamp } from '@nemo/common/src/components/RelativeTime/util';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
-import { PlatformJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { useLiveSeconds } from '@nemo/common/src/hooks/useLiveSeconds';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { formatDurationMs, formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
 import { logger } from '@nemo/common/src/utils/logger';
 import {
-  getEvaluatorGetEvaluateJobQueryKey,
-  useEvaluatorCancelEvaluateJob,
-} from '@nemo/sdk/generated/evaluator/api';
-import type { EvaluateJob } from '@nemo/sdk/generated/evaluator/schema';
-import { useGetEvaluation } from '@nemo/sdk/generated/platform/api';
+  getEvalsGetEvaluateJobQueryKey,
+  useEvalsCancelEvaluateJob,
+} from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
+import type { EvaluateJob } from '@nemo/sdk/generated/evals/schema';
+import { useGetEvaluation } from '@nemo/sdk/generated/platform/evaluations';
 import { Banner, Button, Flex, Modal, Panel, Stack, Text } from '@nvidia/foundations-react-core';
+import { evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
 import { evalDurationMs } from '@studio/api/evaluation/utils';
 import { ButtonLaunchEvaluation } from '@studio/components/evaluation/ButtonLaunchEvaluation';
+import { EvalRunOutcomeBanner } from '@studio/components/evaluation/EvalRunOutcomeBanner';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getFilesetRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
@@ -38,7 +40,7 @@ export const DetailsPanel = ({ evaluationJob, error }: DetailsPanelProps) => {
   const toast = useToast();
   const queryClient = useQueryClient();
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
-  const { mutateAsync: cancelJob, isPending: isCancelling } = useEvaluatorCancelEvaluateJob();
+  const { mutateAsync: cancelJob, isPending: isCancelling } = useEvalsCancelEvaluateJob();
 
   const handleRefreshClick = () => {
     navigate(0);
@@ -52,7 +54,7 @@ export const DetailsPanel = ({ evaluationJob, error }: DetailsPanelProps) => {
       toast.success('Job cancellation requested');
 
       await queryClient.invalidateQueries({
-        queryKey: getEvaluatorGetEvaluateJobQueryKey(workspace, evaluationJob.name),
+        queryKey: getEvalsGetEvaluateJobQueryKey(workspace, evaluationJob.name),
       });
 
       setCancelModalOpen(false);
@@ -63,7 +65,7 @@ export const DetailsPanel = ({ evaluationJob, error }: DetailsPanelProps) => {
   };
 
   const isTerminalStatus =
-    evaluationJob?.status && PlatformJobTerminalStatuses.includes(evaluationJob.status);
+    evaluationJob?.status && HelixJobTerminalStatuses.includes(evaluationJob.status);
   const canCancelJob = evaluationJob?.status && !isTerminalStatus;
   const liveSeconds = useLiveSeconds({
     startDate: !isTerminalStatus ? utcToLocalDate(evaluationJob?.created_at) : undefined,
@@ -106,6 +108,16 @@ export const DetailsPanel = ({ evaluationJob, error }: DetailsPanelProps) => {
     | { message?: string; stage?: string; progress?: number }
     | undefined;
 
+  const runOutcome = evalRunOutcomeOf(evaluationJob.status_details);
+  const downloadLogs = (
+    <DownloadEvaluationLogsButton
+      workspace={workspace}
+      jobName={jobName ?? ''}
+      size="small"
+      kind="secondary"
+    />
+  );
+
   const model = evaluationJob.spec.target?.name;
   const targetIsAgent = evaluationJob.spec.target?.format !== undefined;
   const datasetRef =
@@ -136,19 +148,12 @@ export const DetailsPanel = ({ evaluationJob, error }: DetailsPanelProps) => {
         }
       >
         <Stack gap="4">
-          {status === 'error' && (
-            <Banner
-              kind="inline"
-              status="error"
-              slotActions={
-                <DownloadEvaluationLogsButton
-                  workspace={workspace}
-                  jobName={jobName ?? ''}
-                  size="small"
-                  kind="secondary"
-                />
-              }
-            >
+          <EvalRunOutcomeBanner
+            statusDetails={evaluationJob.status_details}
+            slotActions={downloadLogs}
+          />
+          {status === 'error' && !runOutcome?.failed && (
+            <Banner kind="inline" status="error" slotActions={downloadLogs}>
               {typeof error_details?.message === 'string'
                 ? error_details.message
                 : error_details?.message != null
@@ -164,7 +169,7 @@ export const DetailsPanel = ({ evaluationJob, error }: DetailsPanelProps) => {
               status ? (
                 <Flex align="center" gap="2">
                   <StatusBadge status={status} />
-                  {PlatformJobTerminalStatuses.includes(status)
+                  {HelixJobTerminalStatuses.includes(status)
                     ? durationMs !== undefined && formatDurationMs(durationMs)
                     : formatTimeInSeconds(liveSeconds)}
                 </Flex>

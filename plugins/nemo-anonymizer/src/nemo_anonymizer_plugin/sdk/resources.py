@@ -18,6 +18,7 @@ from nemo_anonymizer_plugin.app.task_config import AnonymizerRequest, PreviewReq
 from nemo_anonymizer_plugin.functions.preview import (
     FailedRecordsFrame,
     LogFrame,
+    ModelDownloadFrame,
     PreviewDatasetFrame,
     PreviewFrame,
     TraceDatasetFrame,
@@ -31,19 +32,19 @@ from nemo_anonymizer_plugin.sdk.errors import (
 )
 from nemo_anonymizer_plugin.sdk.job_resources import AnonymizerJobResource, AsyncAnonymizerJobResource
 from nemo_anonymizer_plugin.sdk.logging import with_logging
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.functions.frames import Done, Error, Heartbeat
-from nemo_platform_plugin.sdk import NemoPluginSDKResources
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.functions.frames import Done, Error, Heartbeat
+from nemo_helix_plugin.sdk import NemoPluginSDKResources
 from pydantic import BaseModel, TypeAdapter
 
 logger = logging.getLogger(__name__)
 
-PlatformResourceClient = NeMoPlatform | AsyncNeMoPlatform
-PlatformResourceClientT = TypeVar("PlatformResourceClientT", NeMoPlatform, AsyncNeMoPlatform)
+HelixResourceClientT = TypeVar("HelixResourceClientT", NemoClient, AsyncNemoClient)
 
 _PREVIEW_FRAME_ADAPTER = TypeAdapter(PreviewFrame)
 _KNOWN_PREVIEW_FRAME_KINDS = {
     "log",
+    "model_download",
     "preview_dataset",
     "trace_dataset",
     "failed_records",
@@ -129,6 +130,10 @@ class _PreviewFrameCollector:
         match preview_frame:
             case LogFrame():
                 self._accept_log(preview_frame)
+            case ModelDownloadFrame():
+                # Surface the download progress message to SDK/CLI callers (Studio
+                # consumes the structured model_download frame directly).
+                logger.info(preview_frame.message)
             case PreviewDatasetFrame():
                 self.dataset = pd.DataFrame(preview_frame.records).convert_dtypes(dtype_backend="pyarrow")
             case TraceDatasetFrame():
@@ -153,8 +158,8 @@ class _PreviewFrameCollector:
             logger.error(frame.message)
 
 
-class _BaseAnonymizerResource(Generic[PlatformResourceClientT]):
-    def __init__(self, platform: PlatformResourceClientT) -> None:
+class _BaseAnonymizerResource(Generic[HelixResourceClientT]):
+    def __init__(self, platform: HelixResourceClientT) -> None:
         self._platform = platform
 
     def _headers(self) -> dict[str, str]:
@@ -168,7 +173,7 @@ class _BaseAnonymizerResource(Generic[PlatformResourceClientT]):
 
 
 @with_logging
-class AnonymizerResource(_BaseAnonymizerResource[NeMoPlatform]):
+class AnonymizerResource(_BaseAnonymizerResource[NemoClient]):
     """Sync client for the Anonymizer plugin service."""
 
     def preview(
@@ -246,7 +251,7 @@ class AnonymizerResource(_BaseAnonymizerResource[NeMoPlatform]):
 
 
 @with_logging
-class AsyncAnonymizerResource(_BaseAnonymizerResource[AsyncNeMoPlatform]):
+class AsyncAnonymizerResource(_BaseAnonymizerResource[AsyncNemoClient]):
     """Async client for the Anonymizer plugin service."""
 
     async def preview(

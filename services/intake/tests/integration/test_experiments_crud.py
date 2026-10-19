@@ -9,7 +9,7 @@ from typing import Any, cast
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nmp.intake.api.v2.experiments.dependencies import get_evaluation_rollup_repository
+from nhx.intake.api.v2.experiments.dependencies import get_evaluation_rollup_repository
 
 EXPERIMENTS = "/apis/intake/v2/workspaces/default/experiments"
 # The deprecated pre-rename path; kept as a hidden alias for backwards compatibility.
@@ -178,7 +178,7 @@ def test_experiment_group_pareto_defaults_and_round_trips(client: TestClient) ->
 
 
 def test_experiment_group_pareto_rejects_unknown_metric(client: TestClient) -> None:
-    # Studio can only plot cost_usd, latency_ms, or evaluators.<name>; anything else is rejected so it
+    # Studio can only plot cost_usd, latency_ms, tokens, or evaluators.<name>; anything else is rejected so it
     # can't be persisted as an unusable chart default.
     rejected = client.post(
         EXPERIMENTS, json={"name": "bad-pareto", "pareto": {"x_metric": "made_up", "y_metric": "latency_ms"}}
@@ -189,6 +189,10 @@ def test_experiment_group_pareto_rejects_unknown_metric(client: TestClient) -> N
         EXPERIMENTS, json={"name": "ok-pareto", "pareto": {"x_metric": "evaluators.safety", "y_metric": "cost_usd"}}
     )
     assert ok.status_code == 201, ok.text
+    tokens = client.post(
+        EXPERIMENTS, json={"name": "tokens-pareto", "pareto": {"x_metric": "evaluators.safety", "y_metric": "tokens"}}
+    )
+    assert tokens.status_code == 201, tokens.text
 
 
 def test_evaluation_update_moves_between_groups_and_edits(client: TestClient) -> None:
@@ -847,3 +851,68 @@ def test_patch_evaluation_dedupes_experiment_ids(client: TestClient) -> None:
     listed = client.get(EXPERIMENTS)
     grp = next(g for g in listed.json()["data"] if g["id"] == group["id"])
     assert grp["evaluation_count"] == 1
+
+
+def test_experiment_group_column_layout_defaults_and_round_trips(client: TestClient) -> None:
+    created = client.post(EXPERIMENTS, json={"name": "columns-cfg"})
+    assert created.status_code == 201, created.text
+    assert created.json()["column_layout"] is None
+    assert client.get(f"{EXPERIMENTS}/columns-cfg").json()["column_layout"] is None
+
+    layout = {
+        "order": ["name", "evaluator-llm-judge.answers_question", "created_at"],
+        "hidden": ["created_by", "metadata-run_id"],
+    }
+    updated = client.put(f"{EXPERIMENTS}/columns-cfg", json={"name": "columns-cfg", "column_layout": layout})
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["column_layout"] == layout
+
+    # An update that omits column_layout preserves the saved layout rather than clearing it.
+    preserved = client.put(f"{EXPERIMENTS}/columns-cfg", json={"name": "columns-cfg", "summary": "unrelated edit"})
+    assert preserved.status_code == 200, preserved.text
+    assert preserved.json()["column_layout"] == layout
+
+    # An empty layout is a saved layout, not an absent one, so the client keeps its defaults off.
+    reset = client.put(
+        f"{EXPERIMENTS}/columns-cfg",
+        json={"name": "columns-cfg", "column_layout": {"order": [], "hidden": []}},
+    )
+    assert reset.status_code == 200, reset.text
+    assert reset.json()["column_layout"] == {"order": [], "hidden": []}
+
+
+def test_experiment_group_partial_update_preserves_unsent_fields(client: TestClient) -> None:
+    # A layout-only save must not blank unsent fields, nor echo back stale copies to avoid it.
+    created = client.post(
+        EXPERIMENTS,
+        json={
+            "name": "partial-update",
+            "description": "why this experiment exists",
+            "summary": "what it found",
+            "insight_id": "insight-1",
+            "metadata": {"owner": "team-a"},
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    layout = {"order": ["name", "created_at"], "hidden": ["created_by"]}
+    updated = client.put(
+        f"{EXPERIMENTS}/partial-update",
+        json={"name": "partial-update", "column_layout": layout},
+    )
+    assert updated.status_code == 200, updated.text
+    body = updated.json()
+    assert body["column_layout"] == layout
+    assert body["description"] == "why this experiment exists"
+    assert body["summary"] == "what it found"
+    assert body["insight_id"] == "insight-1"
+    assert body["metadata"] == {"owner": "team-a"}
+
+    # An explicit null still clears, so nothing loses the ability to unset a field.
+    cleared = client.put(
+        f"{EXPERIMENTS}/partial-update",
+        json={"name": "partial-update", "summary": None},
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["summary"] is None
+    assert cleared.json()["description"] == "why this experiment exists"

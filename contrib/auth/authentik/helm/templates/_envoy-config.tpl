@@ -3,17 +3,17 @@ SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES.
 SPDX-License-Identifier: Apache-2.0
 */}}
 
-{{- define "nemo-platform-authentik.envoyConfig" -}}
-{{- $authentik := required "nemo-platform.authentikEnvoy is required" .Values.authentikEnvoy -}}
+{{- define "nemo-helix-authentik.envoyConfig" -}}
+{{- $authentik := required "nemo-helix.authentikEnvoy is required" .Values.authentikEnvoy -}}
 {{- $tlsMountPath := "" -}}
 {{- range .Values.envoyProxy.extraVolumeMounts -}}
 {{- if eq (index . "name") "workload-token-tls" -}}
 {{- $tlsMountPath = index . "mountPath" -}}
 {{- end -}}
 {{- end -}}
-{{- $tlsMountPath = required "nemo-platform.envoyProxy.extraVolumeMounts must include workload-token-tls" $tlsMountPath -}}
-{{- $apiServiceName := include "nmp-api.api-servicename" . -}}
-{{- $spoofHeaders := concat .Values.envoyProxy.trustedHeaders (list "x-nmp-authorized" "x-nmp-scopes") | uniq -}}
+{{- $tlsMountPath = required "nemo-helix.envoyProxy.extraVolumeMounts must include workload-token-tls" $tlsMountPath -}}
+{{- $apiServiceName := include "nhx-api.api-servicename" . -}}
+{{- $spoofHeaders := concat .Values.envoyProxy.trustedHeaders (list "x-nhx-authorized" "x-nhx-scopes") | uniq -}}
 admin:
   address:
     socket_address:
@@ -49,7 +49,7 @@ static_resources:
                       domains: ["*"]
                       routes:
                         - match:
-                            prefix: "/.well-known/nemo-platform/"
+                            prefix: "/.well-known/nemo-helix/"
                           route:
                             cluster: nemo
                           typed_per_filter_config:
@@ -63,6 +63,20 @@ static_resources:
                               append_action: OVERWRITE_IF_EXISTS_OR_ADD
                         - match:
                             path: "/apis/auth/discovery"
+                          route:
+                            cluster: nemo
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_authz:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                              disabled: true
+                          request_headers_to_add:
+                            - header:
+                                key: x-forwarded-proto
+                                value: https
+                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                        - match:
+                            safe_regex:
+                              regex: "^/apis/auth/v2/(login(/callback)?|authorize(/[^/]+)?|token|logout|session)$"
                           route:
                             cluster: nemo
                           typed_per_filter_config:
@@ -89,17 +103,12 @@ static_resources:
                               append_action: OVERWRITE_IF_EXISTS_OR_ADD
                         - match:
                             prefix: "/apis/auth/ext-authz"
-                          route:
-                            cluster: nemo
+                          direct_response:
+                            status: 404
                           typed_per_filter_config:
                             envoy.filters.http.ext_authz:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
                               disabled: true
-                          request_headers_to_add:
-                            - header:
-                                key: x-forwarded-proto
-                                value: https
-                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
                         - match:
                             path: "/apis/auth/jwks"
                           route:
@@ -257,16 +266,26 @@ static_resources:
                           cluster: nemo
                           timeout: 5s
                         path_prefix: "/apis/auth/ext-authz"
+                        authorization_request:
+                          allowed_headers:
+                            patterns:
+                              - exact: cookie
+                              - exact: x-source
                         authorization_response:
                           allowed_upstream_headers:
                             patterns:
-                              - exact: x-nmp-principal-id
-                              - exact: x-nmp-principal-email
-                              - exact: x-nmp-principal-groups
-                              - exact: x-nmp-principal-on-behalf-of
-                              - exact: x-nmp-principal-on-behalf-of-email
-                              - exact: x-nmp-principal-on-behalf-of-groups
-                              - exact: x-nmp-scopes
+                              - exact: authorization
+                              - exact: x-nhx-principal-id
+                              - exact: x-nhx-actor-account-id
+                              - exact: x-nhx-principal-email
+                              - exact: x-nhx-principal-groups
+                              - exact: x-nhx-actor-aliases
+                              - exact: x-nhx-principal-on-behalf-of
+                              - exact: x-nhx-subject-account-id
+                              - exact: x-nhx-subject-aliases
+                              - exact: x-nhx-principal-on-behalf-of-email
+                              - exact: x-nhx-principal-on-behalf-of-groups
+                              - exact: x-nhx-scopes
                           allowed_client_headers:
                             patterns:
                               - exact: content-type

@@ -2,20 +2,32 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { LogViewer } from '@nemo/common/src/components/LogViewer';
-import type { PlatformJobLog } from '@nemo/sdk/generated/platform/schema';
+import type { LogLoadProgress } from '@nemo/common/src/utils/logs';
+import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import { Panel } from '@nvidia/foundations-react-core';
 import { FC } from 'react';
 
 interface ProgressSectionProps {
   jobId: string;
   isLoading: boolean;
-  logs: PlatformJobLog[];
+  logs: HelixJobLog[];
+  loadProgress?: LogLoadProgress | null;
 }
 
-export const ProgressSection: FC<ProgressSectionProps> = ({ jobId, isLoading, logs }) => {
+export const ProgressSection: FC<ProgressSectionProps> = ({
+  jobId,
+  isLoading,
+  logs,
+  loadProgress,
+}) => {
   return (
     <Panel slotHeading="Progress" elevation="high" density="compact">
-      <LogViewer logs={logs} isLoading={isLoading} downloadFilename={`job-${jobId}-logs.txt`} />
+      <LogViewer
+        logs={logs}
+        isLoading={isLoading}
+        loadProgress={loadProgress}
+        downloadFilename={`job-${jobId}-logs.txt`}
+      />
     </Panel>
   );
 };

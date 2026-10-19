@@ -9,8 +9,8 @@ import {
   entitiesGetEntityByName,
   entitiesListEntities,
   entitiesUpdateEntityByName,
-  guardrailsCheck,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/entity-store';
+import { guardrailsCheck } from '@nemo/sdk/generated/platform/guardrails';
 import type {
   EntitiesListEntitiesParams,
   GuardrailCheckRequest,

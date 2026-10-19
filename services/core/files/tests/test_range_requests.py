@@ -4,12 +4,12 @@
 """Tests for range request parsing and header generation."""
 
 import pytest
-from nmp.core.files.app.backends.base import ByteRange
-from nmp.core.files.app.range_requests import (
+from nhx.core.files.app.backends.base import ByteRange
+from nhx.core.files.app.range_requests import (
     download_response_status_and_headers,
     parse_range_header,
 )
-from nmp.core.files.exceptions import InvalidRangeError
+from nhx.core.files.exceptions import InvalidRangeError
 
 
 @pytest.mark.parametrize(

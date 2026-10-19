@@ -9,7 +9,7 @@ from typing import Any, cast
 import pytest
 from clickhouse_connect.driver.exceptions import ClickHouseError
 from clickhouse_connect.driver.external import ExternalData
-from nmp.intake.repository.clickhouse.executor import (
+from nhx.intake.repository.clickhouse.executor import (
     ClickHouseExecutor,
     ClickHouseExternalData,
     ClickHouseInsert,
@@ -17,8 +17,8 @@ from nmp.intake.repository.clickhouse.executor import (
     ClickHouseQuery,
     ClickHouseQueryError,
 )
-from nmp.intake.repository.clickhouse.tables import ClickHouseTable, qualified_table
-from nmp.intake.spans.clickhouse_client import ClickHouseSpanClient
+from nhx.intake.repository.clickhouse.tables import ClickHouseTable, qualified_table
+from nhx.intake.spans.clickhouse_client import ClickHouseSpanClient
 
 
 class _Client:

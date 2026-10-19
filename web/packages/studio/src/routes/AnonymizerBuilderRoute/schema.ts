@@ -17,13 +17,16 @@ import type {
 import {
   activeRolesForStrategy,
   ANNOTATE_DEFAULT_TEMPLATE,
+  BUILTIN_DETECTOR_VALUE,
   DETECTION_ROLES,
+  DETECTOR_ROLE,
   DEFAULT_MODEL_MAX_TOKENS,
   DEFAULT_MODEL_TEMPERATURE,
   DEFAULT_MODEL_TIMEOUT_SECONDS,
   DEFAULT_MODEL_TOP_P,
   DEFAULT_PREVIEW_ROWS,
   MAX_PREVIEW_ROWS,
+  ENTITY_MODE_AUTO,
   ENTITY_MODE_CUSTOM,
   HASH_ALGORITHM_DEFAULT,
   HASH_ALGORITHM_VALUES,
@@ -49,7 +52,7 @@ import {
 import { trimToUndefined } from '@studio/util/strings';
 import { z } from 'zod';
 
-const roleModelSchema = z.object({
+export const roleModelSchema = z.object({
   modelId: z.string(),
   model: z.string(),
   provider: z.string(),
@@ -85,6 +88,9 @@ export const anonymizerFormSchema = z
   })
   .superRefine((data, ctx) => {
     for (const role of activeRolesForStrategy(data.strategy)) {
+      // The entity detector may be the UI-only built-in sentinel, which needs no model/provider
+      // (the request simply omits entity_detector so the service runs its in-process GLiNER2).
+      if (role === DETECTOR_ROLE && usesBuiltinDetector(data)) continue;
       const roleModel = data.roleModels[role];
       if (!roleModel?.model || !roleModel?.provider) {
         ctx.addIssue({
@@ -105,12 +111,20 @@ export const anonymizerFormSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['entityLabels'],
-        message: 'Select at least one entity label, or include the default entities',
+        message: 'Select at least one entity label, or include the available entities',
       });
     }
   });
 
 export type AnonymizerFormData = z.infer<typeof anonymizerFormSchema>;
+
+/**
+ * True when the entity-detector role holds the built-in-GLiNER2 sentinel. In that case the role
+ * takes no workspace model: validation skips it and the request builder omits entity_detector so
+ * the service falls back to its in-process detector.
+ */
+export const usesBuiltinDetector = (form: AnonymizerFormData): boolean =>
+  form.roleModels[DETECTOR_ROLE]?.modelId === BUILTIN_DETECTOR_VALUE;
 
 export const getAnonymizerFormDefaults = (): AnonymizerFormData => ({
   name: generateDefaultName(),
@@ -120,7 +134,7 @@ export const getAnonymizerFormDefaults = (): AnonymizerFormData => ({
   previewRows: DEFAULT_PREVIEW_ROWS,
   textColumn: '',
   dataSummary: '',
-  entityMode: ENTITY_MODE_CUSTOM,
+  entityMode: ENTITY_MODE_AUTO,
   includeDefaultEntities: true,
   entityLabels: [],
   redactTemplate: REDACT_DEFAULT_TEMPLATE,
@@ -256,7 +270,12 @@ export const buildAnonymizerJobRequest = (
   const modelConfigs: ModelConfig[] = [];
   const aliasForRole: Record<string, string> = {};
 
+  const builtinDetector = usesBuiltinDetector(form);
+
   for (const role of activeRolesForStrategy(form.strategy)) {
+    // The built-in detector carries no model: skip it so no ModelConfig/alias is emitted and
+    // entity_detector is omitted from selected_models (how the service picks its in-process path).
+    if (role === DETECTOR_ROLE && builtinDetector) continue;
     const roleModel = form.roleModels[role];
     const model = roleModel?.model.trim() ?? '';
     const provider = roleModel?.provider.trim() ?? '';
@@ -277,7 +296,9 @@ export const buildAnonymizerJobRequest = (
   }
 
   const toRoleMap = (roles: string[]) =>
-    Object.fromEntries(roles.map((role) => [role, aliasForRole[role]]));
+    Object.fromEntries(
+      roles.filter((role) => role in aliasForRole).map((role) => [role, aliasForRole[role]])
+    );
 
   const selectedModels: SelectedModelsOverrides = { detection: toRoleMap(DETECTION_ROLES) };
   if (form.strategy === REWRITE_STRATEGY) {

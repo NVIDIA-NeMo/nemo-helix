@@ -4,7 +4,9 @@
 
 name: guardrails-plugin
 description: Use when working on guardrailing chat completions through the Inference Gateway API — creating guardrail configs, validating them with the `/checks` endpoint, attaching `nemo-guardrails` middleware to a VirtualModel, or proving guarded behavior.
+allowed-tools: Bash
 metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
   owner: guardrails
   maturity: active
 ---
@@ -15,7 +17,7 @@ Use this skill for API-driven input and output rails on chat-completions traffic
 
 ## API surfaces
 
-All paths below are relative to the NeMo Platform base URL (locally, `http://localhost:8080`):
+All paths below are relative to the NeMo Helix base URL (locally, `http://localhost:8080`):
 
 | Purpose | Method and path |
 |---|---|
@@ -226,15 +228,18 @@ See [Rails Config Reference](resources/rails-config.md) for full input/output ex
 - A task LLM or main LLM that is not reachable through IGW makes the workflow invalid. Stop and surface that dependency instead of substituting an arbitrary model.
 - When a rail blocks on the inference path, the expected response content is exactly `I'm sorry, I can't respond to that.`
 
-## Python SDK
+## Python client
 
-When the assistant has the Python platform SDK rather than a generic HTTP tool, use the same API resources:
+When the assistant has the typed Python client rather than a generic HTTP tool, use the same API resources:
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.guardrail.client import GuardrailClient
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
 
-client = NeMoPlatform(base_url="http://localhost:8080", workspace="default")
-configs = client.guardrail.configs.list()
+client = NemoClient(base_url="http://localhost:8080", workspace="default")
+guardrails = GuardrailClient.from_client(client)
+configs = guardrails.list_guardrail_configs().data()
 ```
 
-Create configs through `client.guardrail.configs` and VirtualModels through `client.inference.virtual_models`. Preserve the same validation gates and read-back verification described above.
+Create configs through `GuardrailClient` and VirtualModels through `VirtualModelsClient`. Preserve the same validation gates and read-back verification described above.

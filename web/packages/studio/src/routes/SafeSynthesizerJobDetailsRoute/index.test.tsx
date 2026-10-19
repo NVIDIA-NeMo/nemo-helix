@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
-import { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
-import * as safeSynthesizerApi from '@nemo/sdk/generated/safe-synthesizer/api';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import * as safeSynthesizerApi from '@nemo/sdk/generated/safe-synthesizer/safe-synthesizer';
 import {
   type GenerateJob,
   type SafeSynthesizerSummary,
@@ -106,7 +106,7 @@ const createMockJob = (overrides?: Partial<GenerateJob>): GenerateJob =>
   ({
     id: 'test-job-123',
     name: 'Test Job',
-    status: PlatformJobStatus.completed,
+    status: HelixJobStatus.completed,
     created_at: '2025-01-01T00:00:00Z',
     updated_at: '2025-01-01T01:00:00Z',
     spec: {
@@ -170,6 +170,7 @@ describe('GenerateJobDetailsRoute - Rendering', () => {
       isLoading: false,
       error: null,
       total: 0,
+      loadProgress: null,
       refetch: vi.fn(),
     });
     mockUseBreadcrumbs.mockReturnValue({
@@ -217,7 +218,7 @@ describe('GenerateJobDetailsRoute - Rendering', () => {
       return;
     }
 
-    const mockJob = createMockJob({ status: PlatformJobStatus.active });
+    const mockJob = createMockJob({ status: HelixJobStatus.active });
     mockApiHooks(mockJob);
 
     render(<GenerateJobDetailsRoute />, { wrapper: createWrapper() });
@@ -232,7 +233,7 @@ describe('GenerateJobDetailsRoute - Rendering', () => {
       return;
     }
 
-    const mockJob = createMockJob({ status: PlatformJobStatus.completed });
+    const mockJob = createMockJob({ status: HelixJobStatus.completed });
     const mockSummary = {
       synthetic_data_quality_score: 8.5,
       data_privacy_score: 7.3,
@@ -254,7 +255,7 @@ describe('GenerateJobDetailsRoute - Rendering', () => {
       return;
     }
 
-    const mockJob = createMockJob({ status: PlatformJobStatus.error });
+    const mockJob = createMockJob({ status: HelixJobStatus.error });
     mockApiHooks(mockJob);
 
     render(<GenerateJobDetailsRoute />, { wrapper: createWrapper() });
@@ -295,7 +296,7 @@ describe('GenerateJobDetailsRoute - Rendering', () => {
       return;
     }
 
-    const mockJob = createMockJob({ status: PlatformJobStatus.error });
+    const mockJob = createMockJob({ status: HelixJobStatus.error });
     mockApiHooks(mockJob);
 
     // Mock logs with JSON error message
@@ -329,6 +330,7 @@ describe('GenerateJobDetailsRoute - Rendering', () => {
       isLoading: false,
       error: null,
       total: 3,
+      loadProgress: null,
       refetch: vi.fn(),
     });
 
@@ -345,7 +347,7 @@ describe('GenerateJobDetailsRoute - Rendering', () => {
       return;
     }
 
-    const mockJob = createMockJob({ status: PlatformJobStatus.completed });
+    const mockJob = createMockJob({ status: HelixJobStatus.completed });
     mockApiHooks(mockJob);
 
     // Mock logs with JSON error message (should be ignored)
@@ -365,6 +367,7 @@ describe('GenerateJobDetailsRoute - Rendering', () => {
       isLoading: false,
       error: null,
       total: 1,
+      loadProgress: null,
       refetch: vi.fn(),
     });
 
@@ -380,7 +383,7 @@ describe('GenerateJobDetailsRoute - Rendering', () => {
       return;
     }
 
-    const mockJob = createMockJob({ status: PlatformJobStatus.error });
+    const mockJob = createMockJob({ status: HelixJobStatus.error });
     mockApiHooks(mockJob);
 
     // Mock logs without ERROR level
@@ -404,6 +407,7 @@ describe('GenerateJobDetailsRoute - Rendering', () => {
       isLoading: false,
       error: null,
       total: 2,
+      loadProgress: null,
       refetch: vi.fn(),
     });
 

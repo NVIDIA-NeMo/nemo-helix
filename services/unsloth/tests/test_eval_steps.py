@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from nmp.unsloth.tasks.training.backends.unsloth_sft import compute_default_eval_steps
+from nhx.unsloth.tasks.training.backends.unsloth_sft import compute_default_eval_steps
 
 
 def test_default_eval_steps_once_per_epoch() -> None:

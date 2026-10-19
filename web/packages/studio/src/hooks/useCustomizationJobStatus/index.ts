@@ -4,17 +4,21 @@
 import { getJobRefetchInterval } from '@nemo/common/src/utils/query';
 import {
   customizationGetAutomodelJobStatus,
-  customizationGetRlJobStatus,
-  customizationGetUnslothJobStatus,
   getCustomizationGetAutomodelJobStatusQueryKey,
+} from '@nemo/sdk/generated/customizer/automodel-jobs';
+import {
+  customizationGetRlJobStatus,
   getCustomizationGetRlJobStatusQueryKey,
-  getCustomizationGetUnslothJobStatusQueryKey,
-} from '@nemo/sdk/generated/customizer/api';
+} from '@nemo/sdk/generated/customizer/rl-jobs';
 import type {
-  PlatformJobStatusResponse,
-  PlatformJobStepStatusResponse,
+  HelixJobStatusResponse,
+  HelixJobStepStatusResponse,
 } from '@nemo/sdk/generated/customizer/schema';
-import type { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import {
+  customizationGetUnslothJobStatus,
+  getCustomizationGetUnslothJobStatusQueryKey,
+} from '@nemo/sdk/generated/customizer/unsloth-jobs';
+import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import type { CustomizationBackend } from '@studio/util/customizationBackend';
 import { skipToken, useQuery } from '@tanstack/react-query';
 
@@ -23,7 +27,7 @@ interface StatusEndpoint {
     workspace: string,
     name: string,
     signal?: AbortSignal
-  ) => Promise<PlatformJobStatusResponse>;
+  ) => Promise<HelixJobStatusResponse>;
   getQueryKey: (workspace: string, name: string) => readonly string[];
 }
 
@@ -52,7 +56,7 @@ export const getCustomizationJobStatusQueryKey = (
 ): readonly string[] => STATUS_ENDPOINTS[backend].getQueryKey(workspace, name);
 
 export interface UseCustomizationJobStatusResult {
-  steps: PlatformJobStepStatusResponse[];
+  steps: HelixJobStepStatusResponse[];
   isLoading: boolean;
   isError: boolean;
 }
@@ -66,7 +70,7 @@ export const useCustomizationJobStatus = (
   workspace: string,
   name: string,
   backend: CustomizationBackend | undefined,
-  jobStatus?: PlatformJobStatus,
+  jobStatus?: HelixJobStatus,
   { enabled = true }: UseCustomizationJobStatusOptions = {}
 ): UseCustomizationJobStatusResult => {
   const endpoint = backend ? STATUS_ENDPOINTS[backend] : undefined;

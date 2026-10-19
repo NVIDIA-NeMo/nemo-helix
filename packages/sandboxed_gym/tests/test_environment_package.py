@@ -5,6 +5,11 @@ from pathlib import Path
 
 import pytest
 from sandboxed_gym.environment_package import (
+    IMAGE_ADAPTER_ALLOWLIST,
+    AdapterRef,
+    AdapterWheelsV1Manifest,
+    AdapterWheelsV1Package,
+    ComponentNamespaces,
     EnvironmentFormat,
     EnvironmentMetadata,
     EnvironmentPackageError,
@@ -13,15 +18,18 @@ from sandboxed_gym.environment_package import (
     WheelsV1Manifest,
     WheelsV1Package,
     duplicate_wheel_distributions,
+    inspect_environment_components,
+    inspect_environment_namespaces,
     load_environment_manifest,
     load_environment_package,
     parse_environment_manifest,
-    require_supported_runtime_format,
     validate_environment_manifest_against_listing,
+    validate_environment_namespaces,
 )
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 WHEELS_V1_ENVIRONMENT = FIXTURES_DIR / "wheels_v1_environment"
+NATIVE_V1_CUSTOM_ENVIRONMENT = FIXTURES_DIR / "native_v1_custom_environment"
 
 
 def _write_manifest(root: Path, text: str) -> None:
@@ -37,6 +45,10 @@ def _write_config(root: Path, relative_path: str) -> Path:
     config = root / relative_path
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text("test: {}\n", encoding="utf-8")
+    # Gym only discovers a server directory that carries an install marker.
+    server_dir = config.parent.parent
+    if server_dir.parent.name in ("resources_servers", "responses_api_agents"):
+        (server_dir / "requirements.txt").write_text("", encoding="utf-8")
     return config
 
 
@@ -56,25 +68,109 @@ def test_loads_complete_wheels_v1_fixture() -> None:
     assert package.wheel_files == (
         (WHEELS_V1_ENVIRONMENT / "wheels/example_dependency-1.0-py3-none-any.whl").resolve(),
     )
-    require_supported_runtime_format(package)
 
 
-def test_native_v1_is_validated_then_rejected_as_unsupported(tmp_path: Path) -> None:
-    config_path = "resources_servers/custom/configs/custom.yaml"
-    _write_config(tmp_path, config_path)
-    _write_manifest(tmp_path, _complete_manifest("native-v1", config_path))
+def test_loads_adapter_wheels_v1_package(tmp_path: Path) -> None:
+    """The format the platform writes for a hub environment. The host must accept it."""
+    config = "configs/verifiers_agent.yaml"
+    _write_config(tmp_path, config)
+    wheel = tmp_path / "wheels" / "example_dependency-1.0.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"PK\x03\x04")
+    _write_manifest(
+        tmp_path,
+        "format: adapter-wheels-v1\n"
+        "adapter:\n"
+        "  agent: verifiers_agent\n"
+        "  agent_type: responses_api_agents\n"
+        "  image_config_root: responses_api_agents/verifiers_agent\n"
+        "config_paths:\n"
+        "  - configs/verifiers_agent.yaml\n"
+        "metadata:\n"
+        "  name: ascii-tree\n"
+        "  hub_id: primeintellect/ascii-tree\n"
+        "  vf_env_id: ascii-tree\n"
+        "  adapter_agent: verifiers_agent\n",
+    )
 
     package = load_environment_package(tmp_path)
 
+    assert isinstance(package, AdapterWheelsV1Package)
+    assert package.manifest == AdapterWheelsV1Manifest(
+        format=EnvironmentFormat.ADAPTER_WHEELS_V1,
+        adapter=AdapterRef(
+            agent="verifiers_agent",
+            image_config_root=IMAGE_ADAPTER_ALLOWLIST["verifiers_agent"],
+        ),
+        config_paths=(config,),
+        metadata=EnvironmentMetadata(
+            name="ascii-tree",
+            hub_id="primeintellect/ascii-tree",
+            vf_env_id="ascii-tree",
+            adapter_agent="verifiers_agent",
+        ),
+    )
+    assert package.wheel_files == (wheel.resolve(),)
+
+
+def test_adapter_wheels_rejects_an_agent_the_image_does_not_ship(tmp_path: Path) -> None:
+    _write_manifest(
+        tmp_path,
+        "format: adapter-wheels-v1\n"
+        "adapter:\n"
+        "  agent: not_in_the_image\n"
+        "config_paths:\n"
+        "  - configs/verifiers_agent.yaml\n"
+        "metadata:\n"
+        "  name: ascii-tree\n",
+    )
+
+    with pytest.raises(EnvironmentPackageError, match="not built into the training image"):
+        load_environment_manifest(tmp_path)
+
+
+def test_adapter_wheels_requires_a_config_path(tmp_path: Path) -> None:
+    """Only wheels-v1 may ship configs-free; an adapter package is nothing without the config
+    that selects its image agent."""
+    _write_manifest(
+        tmp_path,
+        "format: adapter-wheels-v1\n"
+        "adapter:\n"
+        "  agent: verifiers_agent\n"
+        "config_paths: []\n"
+        "metadata:\n"
+        "  name: ascii-tree\n",
+    )
+
+    with pytest.raises(EnvironmentPackageError, match="at least one config"):
+        load_environment_manifest(tmp_path)
+
+
+def test_loads_native_v1_fixture() -> None:
+    package = load_environment_package(NATIVE_V1_CUSTOM_ENVIRONMENT)
+
     assert isinstance(package, NativeV1Package)
-    with pytest.raises(EnvironmentPackageError, match="native-v1 environment packages are not supported"):
-        require_supported_runtime_format(package)
+    assert package.manifest == NativeV1Manifest(
+        format=EnvironmentFormat.NATIVE_V1,
+        config_paths=("resources_servers/native_v1_custom_greeting/configs/native_v1_custom_greeting.yaml",),
+        metadata=EnvironmentMetadata(name="native-v1-custom-greeting"),
+    )
+    assert package.config_paths == (
+        (
+            NATIVE_V1_CUSTOM_ENVIRONMENT
+            / "resources_servers/native_v1_custom_greeting/configs/native_v1_custom_greeting.yaml"
+        ).resolve(),
+    )
+    components = inspect_environment_components(package)
+    assert components.agents == frozenset()
+    assert components.resources_servers == frozenset({"native_v1_custom_greeting"})
 
 
 def test_native_validation_does_not_import_customer_code(tmp_path: Path) -> None:
     marker = tmp_path / "customer-code-ran"
     config = tmp_path / "resources_servers/custom/configs/custom.yaml"
     config.parent.mkdir(parents=True)
+    (config.parent.parent / "requirements.txt").write_text("", encoding="utf-8")
     config.write_text("custom: {}\n", encoding="utf-8")
     app = config.parent.parent / "app.py"
     app.write_text(f"from pathlib import Path\nPath({str(marker)!r}).touch()\n", encoding="utf-8")
@@ -156,6 +252,7 @@ def test_rejects_native_config_symlink_escape(tmp_path: Path) -> None:
     config_path = "resources_servers/test/configs/escape.yaml"
     config = tmp_path / config_path
     config.parent.mkdir(parents=True)
+    (config.parent.parent / "requirements.txt").write_text("", encoding="utf-8")
     config.symlink_to(outside)
     _write_manifest(tmp_path, _complete_manifest("native-v1", config_path))
 
@@ -254,7 +351,69 @@ def test_listing_rejects_invalid_wheelhouse_entries(wheel_entries: list[str], er
     manifest = parse_environment_manifest(_complete_manifest("wheels-v1", config_path))
 
     with pytest.raises(EnvironmentPackageError, match=error):
-        validate_environment_manifest_against_listing(manifest, [config_path, *wheel_entries])
+        validate_environment_manifest_against_listing(
+            manifest, [config_path, "resources_servers/test/requirements.txt", *wheel_entries]
+        )
+
+
+@pytest.mark.parametrize("format_name", ["native-v1", "wheels-v1"])
+@pytest.mark.parametrize(
+    ("markers", "detail"),
+    [
+        ([], "no marker"),
+        (["requirements.txt", "pyproject.toml"], "both markers"),
+    ],
+)
+def test_listing_requires_exactly_one_install_marker_per_server(
+    format_name: str, markers: list[str], detail: str
+) -> None:
+    """Gym discovers a server only by requirements.txt or pyproject.toml, and refuses a directory with both."""
+    config_path = "resources_servers/test/configs/test.yaml"
+    manifest = parse_environment_manifest(_complete_manifest(format_name, config_path))
+    listing = [
+        config_path,
+        "resources_servers/test/app.py",
+        *(f"resources_servers/test/{m}" for m in markers),
+        "wheels/dep-1.0-py3-none-any.whl",
+    ]
+
+    with pytest.raises(
+        EnvironmentPackageError, match="exactly one of requirements.txt or pyproject.toml.*resources_servers/test"
+    ):
+        validate_environment_manifest_against_listing(manifest, listing)
+
+
+@pytest.mark.parametrize("format_name", ["native-v1", "wheels-v1"])
+def test_a_config_only_server_directory_references_the_images_server(format_name: str) -> None:
+    """Shipping `responses_api_agents/simple_agent/configs/*.yaml` alone is the documented way to
+    run the image's own `simple_agent`: Gym falls back to the built-in when the package directory
+    has no install marker, so demanding one here would force users to vendor code they do not own."""
+    manifest = parse_environment_manifest(
+        f"format: {format_name}\n"
+        "config_paths:\n"
+        "  - resources_servers/weather_verifier/configs/weather_verifier.yaml\n"
+        "  - responses_api_agents/simple_agent/configs/simple_agent.yaml\n"
+        "metadata:\n  name: weather\n"
+    )
+    listing = [
+        "nemo-environment.yaml",
+        "resources_servers/weather_verifier/app.py",
+        "resources_servers/weather_verifier/requirements.txt",
+        "resources_servers/weather_verifier/configs/weather_verifier.yaml",
+        "responses_api_agents/simple_agent/configs/simple_agent.yaml",
+        "wheels/dep-1.0-py3-none-any.whl",
+    ]
+
+    validate_environment_manifest_against_listing(manifest, listing)
+
+
+def test_listing_accepts_a_pyproject_marker() -> None:
+    config_path = "responses_api_agents/my_agent/configs/my_agent.yaml"
+    manifest = parse_environment_manifest(_complete_manifest("wheels-v1", config_path))
+
+    validate_environment_manifest_against_listing(
+        manifest, [config_path, "responses_api_agents/my_agent/pyproject.toml", "wheels/dep-1.0-py3-none-any.whl"]
+    )
 
 
 def test_duplicate_wheel_distributions_are_rejected(tmp_path: Path) -> None:
@@ -271,6 +430,34 @@ def test_duplicate_wheel_distributions_are_rejected(tmp_path: Path) -> None:
         load_environment_package(tmp_path)
 
 
+def test_native_v1_accepts_a_declared_model_config(tmp_path: Path) -> None:
+    config_path = "responses_api_models/vllm_model/configs/policy_model.yaml"
+    _write_config(tmp_path, config_path)
+    _write_manifest(tmp_path, _complete_manifest("native-v1", config_path))
+
+    package = load_environment_package(tmp_path)
+
+    assert package.manifest.config_paths == (config_path,)
+
+
+def test_rejects_native_config_outside_gym_server_dirs(tmp_path: Path) -> None:
+    _write_manifest(tmp_path, _complete_manifest("native-v1", "configs/policy_model.yaml"))
+
+    with pytest.raises(EnvironmentPackageError, match="responses_api_models/"):
+        load_environment_manifest(tmp_path)
+
+
+def test_listing_rejects_undeclared_model_files() -> None:
+    config_path = "responses_api_models/vllm_model/configs/policy_model.yaml"
+    manifest = parse_environment_manifest(_complete_manifest("native-v1", config_path))
+
+    with pytest.raises(EnvironmentPackageError, match="model configuration is operator-owned"):
+        validate_environment_manifest_against_listing(
+            manifest,
+            [config_path, "responses_api_models/vllm_model/app.py"],
+        )
+
+
 def test_listing_rejects_customer_model_configuration() -> None:
     config_path = "resources_servers/custom/configs/custom.yaml"
     manifest = parse_environment_manifest(_complete_manifest("wheels-v1", config_path))
@@ -284,3 +471,120 @@ def test_listing_rejects_customer_model_configuration() -> None:
                 "wheels/dependency-1.0-py3-none-any.whl",
             ],
         )
+
+
+def test_inspects_top_level_agent_and_resources_server_instance_names(tmp_path: Path) -> None:
+    config_path = "responses_api_agents/custom/configs/custom.yaml"
+    config = tmp_path / config_path
+    config.parent.mkdir(parents=True)
+    (config.parent.parent / "requirements.txt").write_text("", encoding="utf-8")
+    config.write_text(
+        "custom_agent_instance:\n"
+        "  responses_api_agents:\n"
+        "    custom_implementation: {entrypoint: app.py}\n"
+        "custom_resources_instance:\n"
+        "  resources_servers:\n"
+        "    custom_resources: {entrypoint: app.py}\n",
+        encoding="utf-8",
+    )
+    _write_manifest(tmp_path, _complete_manifest("native-v1", config_path))
+
+    components = inspect_environment_components(load_environment_package(tmp_path))
+
+    assert components.agents == frozenset({"custom_agent_instance"})
+    assert components.resources_servers == frozenset({"custom_resources_instance"})
+
+
+def test_rejects_duplicate_component_instances_across_configs(tmp_path: Path) -> None:
+    config_paths = (
+        "responses_api_agents/first/configs/first.yaml",
+        "responses_api_agents/second/configs/second.yaml",
+    )
+    for config_path in config_paths:
+        config = tmp_path / config_path
+        config.parent.mkdir(parents=True)
+        (config.parent.parent / "requirements.txt").write_text("", encoding="utf-8")
+        config.write_text(
+            "duplicate_instance:\n  responses_api_agents:\n    implementation: {entrypoint: app.py}\n",
+            encoding="utf-8",
+        )
+    _write_manifest(
+        tmp_path,
+        "format: native-v1\n"
+        "config_paths:\n"
+        f"  - {config_paths[0]}\n"
+        f"  - {config_paths[1]}\n"
+        "metadata:\n"
+        "  name: duplicate-components\n",
+    )
+
+    with pytest.raises(EnvironmentPackageError, match="Duplicate responses_api_agents instance"):
+        inspect_environment_components(load_environment_package(tmp_path))
+
+
+def test_package_namespace_inventory_includes_source_directory_names(tmp_path: Path) -> None:
+    config_path = "responses_api_agents/directory_name/configs/variant.yaml"
+    config = tmp_path / config_path
+    config.parent.mkdir(parents=True)
+    (config.parent.parent / "requirements.txt").write_text("", encoding="utf-8")
+    config.write_text(
+        "declared_instance:\n  responses_api_agents:\n    implementation: {entrypoint: app.py}\n",
+        encoding="utf-8",
+    )
+    _write_manifest(tmp_path, _complete_manifest("native-v1", config_path))
+    package = load_environment_package(tmp_path)
+
+    namespaces = inspect_environment_namespaces(package)
+
+    assert namespaces.agents == frozenset({"directory_name", "declared_instance"})
+
+
+def test_rejects_cross_type_namespace_collisions() -> None:
+    package_namespaces = ComponentNamespaces(
+        agents=frozenset({"shared_name"}),
+        resources_servers=frozenset({"shared_name"}),
+    )
+
+    with pytest.raises(EnvironmentPackageError, match="both agents and resources servers"):
+        validate_environment_namespaces(package_namespaces)
+
+
+def test_wheels_v1_may_declare_no_config_paths(tmp_path: Path) -> None:
+    """An extras-only package: wheels for the image's built-in servers, no component of its own."""
+    _write_manifest(tmp_path, "format: wheels-v1\nconfig_paths: []\nmetadata:\n  name: extras\n")
+    (tmp_path / "wheels").mkdir()
+    (tmp_path / "wheels" / "extra-1.0-py3-none-any.whl").write_bytes(b"")
+
+    package = load_environment_package(tmp_path)
+
+    assert isinstance(package, WheelsV1Package)
+    assert package.config_paths == ()
+    assert inspect_environment_components(package) == inspect_environment_components(package)
+
+
+@pytest.mark.parametrize("config_paths_line", ["config_paths: []\n", ""], ids=["empty", "omitted"])
+def test_native_v1_still_needs_a_config_path(config_paths_line: str) -> None:
+    """native-v1 ships source, so a package with nothing to run is a mistake, not an extras bundle.
+
+    Omitted counts too: pydantic skips field validators for an omitted field unless the default is
+    validated, which is what let a config-less native-v1 manifest through.
+    """
+    with pytest.raises(EnvironmentPackageError, match="at least one config"):
+        parse_environment_manifest(f"format: native-v1\n{config_paths_line}metadata:\n  name: x\n")
+
+
+def test_listing_checks_shipped_server_directories_even_when_the_config_lives_elsewhere() -> None:
+    """Gym runs the directory the YAML names, not the directory the YAML sits in.
+
+    A wheels-v1 package may keep its config under `configs/`; the server it ships under
+    `resources_servers/` still needs its install marker or Gym never sees it.
+    """
+    manifest = parse_environment_manifest(_complete_manifest("wheels-v1", "configs/custom.yaml"))
+    listing = ["configs/custom.yaml", "resources_servers/custom/app.py", "wheels/dep-1.0-py3-none-any.whl"]
+
+    with pytest.raises(
+        EnvironmentPackageError, match="exactly one of requirements.txt or pyproject.toml.*resources_servers/custom"
+    ):
+        validate_environment_manifest_against_listing(manifest, listing)
+
+    validate_environment_manifest_against_listing(manifest, [*listing, "resources_servers/custom/requirements.txt"])

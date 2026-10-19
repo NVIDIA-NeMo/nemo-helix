@@ -3,10 +3,10 @@
   "default_version": "0.13.2",
   "aliases": {"default": "0.13.2", "stable": "0.13.2"},
   "validation": {
-    "performed_at": "2026-07-07T20:50:00Z",
+    "performed_at": "2026-08-18T04:00:00Z",
     "platform": "linux/amd64",
-    "python_version": "3.12.13",
-    "checks": ["exact-package-install", "adapter-imports", "harbor-run-help"],
+    "python_version": "3.12.14",
+    "checks": ["exact-package-install", "adapter-imports", "opensandbox-import", "harbor-run-help"],
     "e2e_status": "pending"
   },
   "sandbox_k8s": {
@@ -17,31 +17,12 @@
     "wheel_sha256": "f6d89d7e331221fac61679b0ede90de5d04225e972ca15bbcad905847045491a"
   },
   "adapter": {
-    "version": "scaled-evals-overlay-v29",
-    "bundle_sha256": "29a40f2f4ee9106e6900498dd0be87a9da7f0db0d80b65af33d2a5407c07d666",
+    "version": "nemo-helix-plugin-overlay-v1",
     "files": [
-      "compose/harbor-runner/patches/patch_claude_code_initial_turns.py",
-      "compose/harbor-runner/patches/patch_codex_custom_provider.py",
-      "compose/harbor-runner/patches/patch_codex_model_path.py",
-      "compose/harbor-runner/patches/patch_hermes_extra_env.py",
-      "compose/harbor-runner/patches/patch_langgraph_inference_headers.py",
-      "compose/harbor-runner/patches/patch_langgraph_writable_venv.py",
-      "compose/harbor-runner/patches/patch_opencode_extra_env.py",
-      "compose/harbor-runner/patches/patch_openclaw_upload.py",
-      "compose/harbor-runner/patches/patch_openhands_inference_headers.py",
-      "compose/harbor-runner/patches/patch_pi_extra_env.py",
-      "compose/harbor-runner/patches/patch_sandbox_k8s_root.py",
-      "compose/harbor-runner/patches/patch_terminus2_tmux_env.py",
-      "compose/harbor-runner/patches/matrix_command_agent.py",
-      "compose/harbor-runner/patches/preinstalled_claude_code.py",
-      "compose/harbor-runner/patches/preinstalled_codex.py",
-      "compose/harbor-runner/patches/preinstalled_hermes.py",
-      "compose/harbor-runner/patches/preinstalled_openhands.py",
-      "compose/harbor-runner/patches/preinstalled_openclaw.py",
-      "compose/harbor-runner/patches/preinstalled_opencode.py",
-      "compose/harbor-runner/patches/preinstalled_pi.py",
-      "compose/harbor-runner/patches/preinstalled_utils.py",
-      "compose/harbor-runner/patches/sandbox_k8s_harbor.py"
+      "harbor-patches/patch_langgraph_writable_venv.py",
+      "harbor-patches/patch_pi_extra_env.py",
+      "harbor-patches/patch_sandbox_k8s_root.py",
+      "harbor-patches/sandbox_k8s_harbor.py"
     ]
   },
   "releases": {
@@ -109,6 +90,7 @@
       "selectable": true,
       "qualification": "supported",
       "patches": ["claude-code-initial-turns", "terminus2-tmux-env-fallback"],
+      "packages": ["opensandbox"],
       "git_tag": "v0.13.2",
       "git_tag_object_sha": "8146f0bdc96fdace618fee74989708f395aff3f0",
       "git_commit_sha": "96eaf6b2316b8a5a64ef78defe4df5ce0c51216a",
@@ -165,6 +147,17 @@
       "wheel_filename": "harbor-0.18.0-py3-none-any.whl",
       "wheel_sha256": "e436f04fca35bb3705be603b8c123d0472418d10120cfd7e5ba8dc902e56bc32",
       "released_at": "2026-07-07T20:29:45.064139Z"
+    },
+    "0.20.0": {
+      "selectable": true,
+      "qualification": "supported",
+      "extras": ["opensandbox"],
+      "git_tag": "v0.20.0",
+      "git_tag_object_sha": "f75477f2ad0b04fad199b0cb80689cc23a06c72d",
+      "git_commit_sha": "459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc",
+      "wheel_filename": "harbor-0.20.0-py3-none-any.whl",
+      "wheel_sha256": "4b7e48223aea2384cdb8c9eff35eaebd482fc9b1ec09f8193a121c47356ff19a",
+      "released_at": "2026-07-18T21:25:19.206383Z"
     }
   }
 }

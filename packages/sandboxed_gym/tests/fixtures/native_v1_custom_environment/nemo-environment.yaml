@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+format: native-v1
+config_paths:
+  - resources_servers/native_v1_custom_greeting/configs/native_v1_custom_greeting.yaml
+metadata:
+  name: native-v1-custom-greeting

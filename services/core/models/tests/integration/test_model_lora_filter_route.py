@@ -14,7 +14,7 @@ guard for the parse/translate pipeline.
 
 import uuid
 
-from nmp.testing import ClientContext
+from nhx.testing import ClientContext
 
 DEFAULT_WORKSPACE = "default"
 MODELS_PATH = f"/apis/models/v2/workspaces/{DEFAULT_WORKSPACE}/models"

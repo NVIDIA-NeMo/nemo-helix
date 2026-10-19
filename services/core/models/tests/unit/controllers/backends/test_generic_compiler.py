@@ -4,8 +4,8 @@
 """Unit tests for the backend-agnostic generic-engine compiler."""
 
 import pytest
-from nmp.core.models.controllers.backends import generic_compiler
-from nmp.core.models.controllers.backends.common import DeploymentConfigView
+from nhx.core.models.controllers.backends import generic_compiler
+from nhx.core.models.controllers.backends.common import DeploymentConfigView
 
 
 def _view(**kwargs) -> DeploymentConfigView:

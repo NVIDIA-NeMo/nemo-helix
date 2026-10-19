@@ -144,7 +144,9 @@ export const ModelDropdownList: FC<ModelDropdownListProps> = ({
   if (rows.length === 0) {
     return (
       <Flex align="center" justify="center" className="w-full px-density-md py-density-lg">
-        <Text className="text-secondary">{loading ? 'Loading models...' : emptyMessage}</Text>
+        <Text className="text-secondary">
+          {loading || loadingMore ? 'Loading models...' : emptyMessage}
+        </Text>
       </Flex>
     );
   }

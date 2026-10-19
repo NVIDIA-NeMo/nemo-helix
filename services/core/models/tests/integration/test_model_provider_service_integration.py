@@ -4,18 +4,21 @@
 """Integration tests for ModelProvider service with in-memory EntityClient."""
 
 import pytest
-from nmp.common.api.common import Page
-from nmp.core.models.api.service.model_provider_service import ModelProviderService
-from nmp.core.models.schemas import (
+from nhx.common.api.common import Page
+from nhx.common.entities.client import EntityNotFoundError
+from nhx.core.models.api.service.model_provider_service import ModelProviderService
+from nhx.core.models.entities import Model
+from nhx.core.models.schemas import (
     CreateModelProviderRequest,
     DeleteModelProviderRequest,
     GetModelProviderRequest,
     ModelProviderStatus,
+    ServedModelMapping,
     UpdateModelProviderStatusRequest,
     UpsertModelProviderRequest,
 )
-from nmp.core.secrets.service import SecretsService
-from nmp.testing import ClientContext, create_test_client
+from nhx.core.secrets.service import SecretsService
+from nhx.testing import ClientContext, create_test_client
 
 
 @pytest.fixture
@@ -264,6 +267,42 @@ async def test_delete_model_provider_integration(
     get_request = GetModelProviderRequest(workspace="default", name=sample_create_request.name)
     retrieved_provider = await model_provider_service.get_model_provider(get_request)
     assert retrieved_provider is None
+
+
+@pytest.mark.asyncio
+async def test_delete_model_provider_deletes_exclusively_served_model_integration(
+    model_provider_service, sample_create_request, client_context, create_secret
+):
+    """Deleting a provider also deletes model entities that only it serves."""
+    create_secret(client_context, "test-api-key-secret")
+    provider = await model_provider_service.create_model_provider(sample_create_request, "default")
+    model = await client_context.entity_client.create(
+        Model(
+            name="provider-model",
+            workspace="default",
+            model_providers=[f"default/{provider.name}"],
+        )
+    )
+    await model_provider_service.update_model_provider_status(
+        "default",
+        provider.name,
+        UpdateModelProviderStatusRequest(
+            served_models=[
+                ServedModelMapping(
+                    model_entity_id=f"default/{model.name}",
+                    served_model_name=model.name,
+                )
+            ]
+        ),
+    )
+
+    deleted = await model_provider_service.delete_model_provider(
+        DeleteModelProviderRequest(workspace="default", name=provider.name)
+    )
+
+    assert deleted is True
+    with pytest.raises(EntityNotFoundError):
+        await client_context.entity_client.get(Model, workspace="default", name=model.name)
 
 
 @pytest.mark.asyncio

@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { PaginationQueryState } from '@nemo/common/src/utils/useQueryFromSearchParams';
-import type { DatetimeFilter, PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import type { DatetimeFilter, HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 
 export interface EvaluationResultsFilterFields {
   name?: string;
-  status?: PlatformJobStatus[];
+  status?: HelixJobStatus[];
   created_at?: DatetimeFilter;
   updated_at?: DatetimeFilter;
 }

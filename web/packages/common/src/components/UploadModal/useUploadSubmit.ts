@@ -4,7 +4,7 @@
 import { useUploadModalContext } from '@nemo/common/src/components/UploadModal/Context/useUploadModalContext';
 import type { SubmitUploadType } from '@nemo/common/src/components/UploadModal/types';
 import { validateUploadForm } from '@nemo/common/src/components/UploadModal/validation';
-import { filesCreateFileset, filesUploadFile } from '@nemo/sdk/generated/platform/api';
+import { filesCreateFileset, filesUploadFile } from '@nemo/sdk/generated/platform/files';
 import type { FilesetFileOutput, FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { useCallback, useRef } from 'react';
 

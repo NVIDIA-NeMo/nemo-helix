@@ -42,11 +42,19 @@ export const SpanTriggerLabel: FC<{ span: SpanTableRow; showHierarchy?: boolean 
           <span className="absolute left-0 top-0 h-1/2 border-l border-base" />
         </span>
       )}
-      <Text kind="body/semibold/sm" className="shrink-0 truncate font-mono">
+      <Text
+        kind="body/semibold/sm"
+        className="min-w-0 shrink truncate font-mono"
+        title={getSpanTemplate(span.kind).headerTitle?.(span) ?? getSpanDisplayName(span)}
+      >
         {getSpanTemplate(span.kind).headerTitle?.(span) ?? getSpanDisplayName(span)}
       </Text>
       <SpanKindBadge kind={span.kind} />
-      <Text kind="body/regular/sm" className="min-w-0 flex-1 truncate text-secondary">
+      <Text
+        kind="body/regular/sm"
+        className="min-w-8 flex-1 truncate text-secondary"
+        title={getSpanSubject(span)}
+      >
         {getSpanSubject(span)}
       </Text>
       {hierarchyLabel && (

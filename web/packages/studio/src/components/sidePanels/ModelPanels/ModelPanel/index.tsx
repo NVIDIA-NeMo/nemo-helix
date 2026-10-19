@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
+import { toInferenceModelName } from '@nemo/common/src/utils/models';
 import {
   getModelsListModelsQueryKey,
-  getProviderProxyGetQueryKey,
   useModelsDeleteModel,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/models';
 import {
   type Adapter,
   type ModelDeployment,
@@ -23,13 +23,13 @@ import {
 import { Empty } from '@studio/components/Empty';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { ModelChat } from '@studio/components/ModelChat';
+import { DeployModelCta } from '@studio/components/ModelChat/DeployModelCta';
 import {
   ModelArtifactData,
   ModelDetailOverview,
   ModelDetailOverviewProps,
   ModelParametersAccordion,
 } from '@studio/components/sidePanels/ModelPanels/ModelPanel/components';
-import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { useModelChatAvailability } from '@studio/hooks/useModelChatAvailability';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -61,6 +61,11 @@ export interface ModelPanelProps {
   showCustomizationDetails?: boolean;
   /** When available, customization job ID for this model (enables "View Job Details" in Customization section) */
   customizationJobId?: string | null;
+  /**
+   * When available, ID of the customization job that produced `adapter` (enables "View Job
+   * Details" in the Adapter section). Resolve it from the adapter, never from `model`.
+   */
+  adapterJobId?: string | null;
   /** Controlled open state; when provided with onOpenChange, panel can be closed by the user */
   open?: boolean;
   /** Called when the panel open state changes (e.g. user closes the panel) */
@@ -96,6 +101,7 @@ export const ModelPanel: FC<ModelPanelProps> = ({
   artifactData,
   showCustomizationDetails = true,
   customizationJobId,
+  adapterJobId,
   open = true,
   onOpenChange,
   defaultTab,
@@ -107,9 +113,11 @@ export const ModelPanel: FC<ModelPanelProps> = ({
   const queryClient = useQueryClient();
   const { mutateAsync: deleteModel } = useModelsDeleteModel();
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const { modelChatStatus, isLoading: isChatStatusLoading } = useModelChatAvailability(model, {
-    adapter,
-  });
+  const {
+    modelChatStatus,
+    isLoading: isLoadingChat,
+    isAdapterUnserved,
+  } = useModelChatAvailability(model, { adapter });
 
   const [selectedTab, setSelectedTab] = useState<ModelPanelTab>(defaultTab ?? 'model-details');
   const tabItems = useMemo(
@@ -186,38 +194,48 @@ export const ModelPanel: FC<ModelPanelProps> = ({
           artifactData={artifactData}
           showCustomizationDetails={showCustomizationDetails}
           customizationJobId={customizationJobId}
+          adapterJobId={adapterJobId}
         />
       </Stack>
     );
   } else {
-    const usedModelName = adapter?.name ?? model.name;
     const workspace = model.workspace;
 
-    // When chatting with an adapter, route through the provider proxy which
-    // forwards the request body as-is (preserving the adapter name in the
-    // `model` field). The model-entity proxy would overwrite it with the
-    // base model's served_model_name.
-    let adapterBaseURL: string | undefined;
-    if (adapter && model.model_providers?.length) {
-      const providerRef = model.model_providers[0];
-      const providerName = providerRef.includes('/') ? providerRef.split('/').pop()! : providerRef;
-      adapterBaseURL =
-        PLATFORM_BASE_URL + getProviderProxyGetQueryKey(workspace, providerName, 'v1/')[0];
+    let chatContent: ReactNode;
+    if (isLoadingChat) {
+      chatContent = <Loading />;
+    } else if (isAdapterUnserved) {
+      chatContent = (
+        <Empty
+          title="Adapter is not currently served"
+          description="No provider lists this adapter among its served models, so it cannot be chatted with yet. It becomes available once the deployment serving its base model has loaded the adapter."
+          slotAction={
+            <DeployModelCta modelRef={`${workspace}/${model.name}`} label="Deploy base model" />
+          }
+        />
+      );
+    } else {
+      chatContent = (
+        <ModelChat
+          // An adapter goes on the wire as `base&adapters/{ws}/{name}`, which the
+          // gateway resolves through the base model's VirtualModel — so it needs no
+          // special base URL and inherits that VM's middleware.
+          model={toInferenceModelName(model, adapter)}
+          workspace={workspace}
+          promptData={model.prompt}
+          modelChatStatus={modelChatStatus}
+          // `model` is the base model in both branches. Deploying it is what makes
+          // an adapter servable, so the adapter case links to the same wizard —
+          // only the copy changes, since "this model" would name the wrong entity.
+          deployModelRef={`${workspace}/${model.name}`}
+          deployModelLabel={adapter ? 'Deploy base model' : undefined}
+        />
+      );
     }
 
     content = (
       <Block className="h-full min-h-0" padding="4">
-        {isChatStatusLoading ? (
-          <Loading />
-        ) : (
-          <ModelChat
-            model={usedModelName}
-            workspace={workspace}
-            baseURL={adapterBaseURL}
-            promptData={model.prompt}
-            modelChatStatus={modelChatStatus}
-          />
-        )}
+        {chatContent}
       </Block>
     );
   }

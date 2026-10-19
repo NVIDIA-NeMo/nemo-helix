@@ -2,96 +2,48 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
-import { useModelChatAvailability } from '@studio/hooks/useModelChatAvailability';
-import { useModelCustomizationEligibility } from '@studio/hooks/useModelCustomizationEligibility';
-import { useModelLoraEnabled } from '@studio/hooks/useModelLoraEnabled';
+import {
+  canFineTuneModel,
+  useModelCustomizationEligibility,
+} from '@studio/hooks/useModelCustomizationEligibility';
 import { renderHook } from '@testing-library/react';
 
-vi.mock('@studio/hooks/useModelChatAvailability', () => ({
-  useModelChatAvailability: vi.fn(),
-}));
-vi.mock('@studio/hooks/useModelLoraEnabled', () => ({
-  useModelLoraEnabled: vi.fn(),
-}));
-
-const mockedUseChatAvailability = vi.mocked(useModelChatAvailability);
-const mockedUseLoraEnabled = vi.mocked(useModelLoraEnabled);
-
-const setup = (
-  overrides: {
-    isChatAvailable?: boolean;
-    isLoraEnabled?: boolean;
-    isChatLoading?: boolean;
-    isLoraLoading?: boolean;
-  } = {}
-) => {
-  const isChatAvailable = overrides.isChatAvailable ?? true;
-  mockedUseChatAvailability.mockReturnValue({
-    isChatAvailable,
-    modelChatStatus: isChatAvailable ? 'enabled' : 'disabled',
-    isLoading: overrides.isChatLoading ?? false,
-  });
-  mockedUseLoraEnabled.mockReturnValue({
-    isLoraEnabled: overrides.isLoraEnabled ?? false,
-    isLoading: overrides.isLoraLoading ?? false,
-  });
-};
-
-const buildModel = (overrides: Partial<ModelEntity> = {}): ModelEntity =>
-  ({
-    id: 'model-1',
-    name: 'my-model',
-    workspace: 'ws',
-    created_at: '2025-01-01T00:00:00Z',
-    updated_at: '2025-01-01T00:00:00Z',
-    ...overrides,
-  }) as ModelEntity;
+const buildModel = (overrides: Partial<ModelEntity> = {}) =>
+  ({ id: 'model-1', name: 'my-model', workspace: 'ws', ...overrides }) as ModelEntity;
 
 describe('useModelCustomizationEligibility', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    setup();
-  });
-
   it('canFineTune=true when model has a fileset', () => {
     const { result } = renderHook(() =>
       useModelCustomizationEligibility(buildModel({ fileset: 'ws/my-fs' }))
     );
     expect(result.current.canFineTune).toBe(true);
+    expect(result.current.canCustomize).toBe(true);
   });
 
   it('canFineTune=false when model has no fileset', () => {
     const { result } = renderHook(() => useModelCustomizationEligibility(buildModel()));
     expect(result.current.canFineTune).toBe(false);
+    expect(result.current.canCustomize).toBe(false);
   });
 
-  it('canPromptTune=true when chat-available and lora is enabled', () => {
-    setup({ isChatAvailable: true, isLoraEnabled: true });
-    const { result } = renderHook(() => useModelCustomizationEligibility(buildModel()));
-    expect(result.current.canPromptTune).toBe(true);
+  it('canFineTune=false when no model is given', () => {
+    const { result } = renderHook(() => useModelCustomizationEligibility(undefined));
+    expect(result.current.canFineTune).toBe(false);
   });
 
-  it('canPromptTune=false when lora is not enabled', () => {
-    setup({ isChatAvailable: true, isLoraEnabled: false });
-    const { result } = renderHook(() => useModelCustomizationEligibility(buildModel()));
-    expect(result.current.canPromptTune).toBe(false);
+  it('never reports loading — eligibility is derived synchronously from the model', () => {
+    const { result } = renderHook(() =>
+      useModelCustomizationEligibility(buildModel({ fileset: 'ws/my-fs' }))
+    );
+    expect(result.current.isLoading).toBe(false);
   });
 
-  it('canPromptTune=false when not chat-available, even with lora enabled', () => {
-    setup({ isChatAvailable: false, isLoraEnabled: true });
-    const { result } = renderHook(() => useModelCustomizationEligibility(buildModel()));
-    expect(result.current.canPromptTune).toBe(false);
-  });
-
-  it('isLoading is true while chat availability is loading', () => {
-    setup({ isChatLoading: true });
-    const { result } = renderHook(() => useModelCustomizationEligibility(buildModel()));
-    expect(result.current.isLoading).toBe(true);
-  });
-
-  it('isLoading is true while lora-enabled is loading', () => {
-    setup({ isLoraLoading: true });
-    const { result } = renderHook(() => useModelCustomizationEligibility(buildModel()));
-    expect(result.current.isLoading).toBe(true);
+  describe('canFineTuneModel', () => {
+    it('requires a fileset', () => {
+      expect(canFineTuneModel(buildModel({ fileset: 'ws/my-fs' }))).toBe(true);
+      expect(canFineTuneModel(buildModel())).toBe(false);
+      expect(canFineTuneModel(null)).toBe(false);
+      expect(canFineTuneModel(undefined)).toBe(false);
+    });
   });
 });

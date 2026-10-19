@@ -5,10 +5,12 @@ import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { EditColumnsMenu } from '@nemo/common/src/components/DataView/internal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
+import { JOB_POLLING_INTERVAL_LONG } from '@nemo/common/src/constants';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
-import { useListTraces } from '@nemo/sdk/generated/platform/api';
 import type { Trace, TraceFilter, TraceSortField } from '@nemo/sdk/generated/platform/schema';
+import { useListTraces } from '@nemo/sdk/generated/platform/traces';
 import {
   isDefaultStartedAtFilter,
   makeDefaultStartedAtFilter,
@@ -22,7 +24,17 @@ import { getIntakeSessionTraceRoute } from '@studio/routes/utils';
 import { keepPreviousData } from '@tanstack/react-query';
 import { Columns3 } from 'lucide-react';
 import { type FC, useState } from 'react';
-import { useNavigate } from 'react-router';
+
+// Module-level so its identity is stable: DataView rebuilds columns, and remounts every cell,
+// whenever makeColumns changes.
+const makeTraceColumns = makeIntakeTraceColumns({
+  traceIdFilter: true,
+  sessionIdFilter: true,
+  statusFilter: true,
+  agentNameFilter: true,
+  startedAtSort: true,
+  startedAtFilter: true,
+});
 
 export interface IntakeTracesTableProps {
   workspace?: string;
@@ -43,7 +55,7 @@ export const IntakeTracesTable: FC<IntakeTracesTableProps> = (props) => {
 const SeededIntakeTracesTable: FC<
   IntakeTracesTableProps & { defaultStartedAtFilter: StartedAtFilterEntry }
 > = ({ workspace: workspaceProp, slotEndPortalTargetId, defaultStartedAtFilter }) => {
-  const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const routeWorkspace = useWorkspaceFromPathIfExists();
   const workspace = workspaceProp ?? routeWorkspace;
   const hasWorkspace = Boolean(workspace);
@@ -61,7 +73,8 @@ const SeededIntakeTracesTable: FC<
 
   const {
     data: tracesResponse,
-    isFetching,
+    isLoading,
+    isPlaceholderData,
     error,
   } = useListTraces(
     requestWorkspace,
@@ -80,11 +93,12 @@ const SeededIntakeTracesTable: FC<
       query: {
         enabled: hasWorkspace,
         placeholderData: keepPreviousData,
+        refetchInterval: JOB_POLLING_INTERVAL_LONG,
       },
     }
   );
 
-  if (error) {
+  if (error && !tracesResponse) {
     return <ErrorMessage message={getErrorMessage(error)} />;
   }
 
@@ -95,11 +109,7 @@ const SeededIntakeTracesTable: FC<
   return (
     <IntakeTelemetryDataView<Trace>
       dataViewState={dataViewState}
-      makeColumns={makeIntakeTraceColumns({
-        traceIdFilter: true,
-        startedAtSort: true,
-        startedAtFilter: true,
-      })}
+      makeColumns={makeTraceColumns}
       slotEndPortalTargetId={slotEndPortalTargetId}
       toolbarSlotEnd={
         <EditColumnsMenu
@@ -113,14 +123,14 @@ const SeededIntakeTracesTable: FC<
           </>
         </EditColumnsMenu>
       }
-      onRowClick={(trace) =>
-        navigate(getIntakeSessionTraceRoute(requestWorkspace, trace.session_id, trace.id))
+      onRowClick={(trace, _index, event) =>
+        openRow(event, getIntakeSessionTraceRoute(requestWorkspace, trace.session_id, trace.id))
       }
       attributes={{
         DataViewRoot: {
           data: tracesResponse?.data ?? [],
           totalCount: tracesResponse?.pagination?.total_results,
-          requestStatus: isFetching ? 'loading' : undefined,
+          requestStatus: isLoading || isPlaceholderData ? 'loading' : undefined,
         },
         DataViewTableContent: {
           renderEmptyState: () =>

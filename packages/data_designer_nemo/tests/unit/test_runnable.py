@@ -45,9 +45,9 @@ def _make_dd_ctx(
     providers: list[dd.ModelProvider] | None = None,
     providers_exc: BaseException | None = None,
 ) -> AsyncMock:
-    """Stub ``DataDesignerContext`` whose validate / get_model_providers we control.
+    """Stub validation context whose validate / get_model_providers we control.
 
-    Returns the bare :class:`AsyncMock` (not ``spec=DataDesignerContext``) so
+    Returns the bare :class:`AsyncMock` so
     the test bodies can access the mock-only ``assert_not_called`` /
     ``assert_called_once`` introspection methods directly.
     """

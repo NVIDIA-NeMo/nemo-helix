@@ -12,7 +12,7 @@ import {
   getEntitiesListWorkspacesQueryKey,
   useEntitiesGetWorkspace,
   useEntitiesUpdateWorkspace,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/entity-store';
 import { EntitiesUpdateWorkspaceBody } from '@nemo/sdk/generated/platform/zod/entity-store';
 import { Stack, Text } from '@nvidia/foundations-react-core';
 import { queryClient } from '@studio/api/queryClient';

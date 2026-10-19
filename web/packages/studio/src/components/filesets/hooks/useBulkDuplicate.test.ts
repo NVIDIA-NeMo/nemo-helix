@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import { filesListFilesetFiles } from '@nemo/sdk/generated/platform/api';
+import { filesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import { useDatasetFilesUpload } from '@studio/api/datasets/useDatasetFilesUpload';
 import { useBulkDuplicate } from '@studio/components/filesets/hooks/useBulkDuplicate';
 import { useDownloadFileAsArrayBuffer } from '@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer';
@@ -10,7 +10,7 @@ import type { FileSystemFile } from '@studio/components/FilesTable/utils';
 import { act, renderHook, waitFor } from '@testing-library/react';
 
 vi.mock('@nemo/common/src/providers/toast/useToast');
-vi.mock('@nemo/sdk/generated/platform/api');
+vi.mock('@nemo/sdk/generated/platform/files');
 vi.mock('@studio/api/datasets/useDatasetFilesUpload');
 vi.mock('@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer');
 

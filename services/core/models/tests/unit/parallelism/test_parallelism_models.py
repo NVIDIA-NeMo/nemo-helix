@@ -12,11 +12,11 @@ import pytest
 
 pytest.importorskip("torch", reason="torch required for parallelism API tests")
 
-from nmp.core.models.parallelism.models import (
+from nhx.core.models.parallelism.models import (
     ParallelizationConfig,
     ParallelizationRecommendation,
 )
-from nmp.core.models.schemas import (
+from nhx.core.models.schemas import (
     ModelSpec,
     MoEConfig,
 )
@@ -442,7 +442,7 @@ _MINIMAL_SPEC_KWARGS = dict(
 @pytest.fixture(autouse=False)
 def _clear_model_spec_cache():
     """Reset the module-level cache before and after each cache test."""
-    from nmp.core.models.parallelism.api import _model_spec_cache
+    from nhx.core.models.parallelism.api import _model_spec_cache
 
     _model_spec_cache.clear()
     yield
@@ -453,7 +453,7 @@ class TestModelSpecCache:
     """Tests for _model_spec_cache eviction and ordering."""
 
     def test_cache_respects_max_size(self, _clear_model_spec_cache):
-        from nmp.core.models.parallelism.api import (
+        from nhx.core.models.parallelism.api import (
             _MODEL_SPEC_CACHE_MAX,
             _cache_put,
             _model_spec_cache,
@@ -466,7 +466,7 @@ class TestModelSpecCache:
         assert len(_model_spec_cache) == _MODEL_SPEC_CACHE_MAX
 
     def test_cache_evicts_oldest_first(self, _clear_model_spec_cache):
-        from nmp.core.models.parallelism.api import (
+        from nhx.core.models.parallelism.api import (
             _MODEL_SPEC_CACHE_MAX,
             _cache_put,
             _model_spec_cache,
@@ -485,7 +485,7 @@ class TestModelSpecCache:
             assert (f"model-{i}", False) in _model_spec_cache
 
     def test_cache_put_overwrites_existing_key(self, _clear_model_spec_cache):
-        from nmp.core.models.parallelism.api import _cache_put, _model_spec_cache
+        from nhx.core.models.parallelism.api import _cache_put, _model_spec_cache
 
         spec_v1 = ModelSpec(**{**_MINIMAL_SPEC_KWARGS, "num_layers": 12})
         spec_v2 = ModelSpec(**{**_MINIMAL_SPEC_KWARGS, "num_layers": 24})

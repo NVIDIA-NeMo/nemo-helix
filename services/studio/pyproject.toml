@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [project]
-name = "nmp-studio"
+name = "nhx-studio"
 description = "Studio service for serving NeMo Studio UI"
 requires-python = ">=3.11,<3.15"
 
@@ -10,24 +10,24 @@ dependencies = [
   # API server dependencies
   "fastapi[standard]>=0.115.4",
   "uvicorn[standard]>=0.12.0",
-  "nmp-common",
+  "nhx-common",
 ]
 version = "0.0.0"
 
 [project.scripts]
-studio-server = "nmp.studio.main:run_standalone"
+studio-server = "nhx.studio.main:run_standalone"
 
 [tool.uv.sources]
-nmp-common = { workspace = true }
-nmp-testing = { workspace = true }
+nhx-common = { workspace = true }
+nhx-testing = { workspace = true }
 
 
 [dependency-groups]
-dev = ["pytest>=8.3.3", "nmp-testing"]
+dev = ["pytest>=8.3.3", "nhx-testing"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nmp"]
+packages = ["src/nhx"]

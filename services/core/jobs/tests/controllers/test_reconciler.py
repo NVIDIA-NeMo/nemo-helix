@@ -4,24 +4,69 @@
 from unittest.mock import patch
 
 import httpx
-from nemo_platform_plugin.client.errors import NemoTransportError
-from nmp.common.jobs.schemas import PlatformJobStatus
-from nmp.core.jobs.api.v2.jobs.schemas import PlatformJobStepWithContext
-from nmp.core.jobs.controllers.backends import JobUpdate
-from nmp.core.jobs.controllers.backends.registry import BackendRegistry
-from nmp.core.jobs.controllers.backends.test import MockDockerCPUJobBackend
-from nmp.core.jobs.controllers.reconciler import JobReconciler
+import pytest
+from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
+from nhx.common.jobs.schemas import HelixJobStatus
+from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
+from nhx.core.jobs.controllers.backends import JobUpdate
+from nhx.core.jobs.controllers.backends.registry import BackendRegistry
+from nhx.core.jobs.controllers.backends.test import MockDockerCPUJobBackend
+from nhx.core.jobs.controllers.reconciler import JobReconciler
 
 from services.core.jobs.tests.controllers.client_mocks import paginated_response
 
 
+@pytest.mark.parametrize("status", [HelixJobStatus.CANCELLED, HelixJobStatus.ERROR])
+def test_job_reconciler_retries_terminal_child_cleanup_without_backend_sync(
+    backend_registry, mock_nemo_client, mock_jobs_client, test_step_active, status
+):
+    step = test_step_active.model_copy(update={"status": status, "status_details": {"task_cleanup_pending": True}})
+    mock_jobs_client.list_steps.side_effect = [paginated_response([]), paginated_response([step])]
+    reconciler = JobReconciler(backend_registry, mock_nemo_client)
+    backend = backend_registry.get_backend(provider="cpu", profile="default")
+
+    reconciler.step()
+
+    assert backend.mock.sync_calls == []
+    mock_jobs_client.update_job_step_status.assert_called_once()
+    request = mock_jobs_client.update_job_step_status.call_args.kwargs
+    assert request["body"].status == status
+    assert request["body"].expected_step_id == step.id
+    assert request["job"] == step.job
+    assert request["workspace"] == step.workspace
+    assert request["name"] == step.name
+
+
+@pytest.mark.parametrize("status_code", [0, 422, 503])
+def test_terminal_cleanup_query_failure_does_not_block_active_reconciliation(
+    backend_registry, mock_nemo_client, mock_jobs_client, test_step_active, caplog, status_code
+):
+    """A failed ancillary cleanup fetch must not discard already-fetched active steps."""
+    request = httpx.Request("GET", "http://localhost/apis/jobs/v2/workspaces/-/jobs/-/steps")
+    if status_code:
+        error = NemoHTTPError(httpx.Response(status_code, request=request))
+    else:
+        error = NemoTransportError(httpx.ConnectError("cleanup query unavailable", request=request))
+    mock_jobs_client.list_steps.side_effect = [paginated_response([test_step_active]), error]
+    reconciler = JobReconciler(backend_registry, mock_nemo_client)
+    backend = backend_registry.get_backend(provider="cpu", profile="default")
+
+    reconciler.step()
+
+    assert reconciler.is_healthy
+    assert len(backend.mock.sync_calls) == 1
+    mock_jobs_client.update_job_step_status.assert_called_once()
+    assert mock_jobs_client.update_job_step_status.call_args.kwargs["body"].status == HelixJobStatus.COMPLETED
+    assert "Could not fetch terminal steps pending task cleanup" in caplog.text
+
+
 def test_job_reconciler_syncs_active_job(
     backend_registry: BackendRegistry,
-    mock_nmp_client,
+    mock_nemo_client,
     mock_jobs_client,
-    test_step_active: PlatformJobStepWithContext,
+    test_step_active: HelixJobStepWithContext,
 ):
-    job_reconciler = JobReconciler(backend_registry, mock_nmp_client)
+    job_reconciler = JobReconciler(backend_registry, mock_nemo_client)
 
     # Mock the jobs list response
     mock_jobs_client.list_steps.return_value = paginated_response([test_step_active])
@@ -35,11 +80,21 @@ def test_job_reconciler_syncs_active_job(
 
     # Verify the typed Jobs client was called with the correct deepObject filter for
     # active/pending steps. The status list is encoded as a comma-joined filter value.
-    mock_jobs_client.list_steps.assert_called_once_with(
+    mock_jobs_client.list_steps.assert_any_call(
         workspace="-",
         name="-",
         query_params={
             "filter[status]": "pending,active,cancelling,pausing",
+            "sort": "updated_at",
+        },
+    )
+    assert mock_jobs_client.list_steps.call_count == 2
+    mock_jobs_client.list_steps.assert_any_call(
+        workspace="-",
+        name="-",
+        query_params={
+            "filter[status]": "cancelled,error",
+            "filter[task_cleanup_pending]": "true",
             "sort": "updated_at",
         },
     )
@@ -54,29 +109,29 @@ def test_job_reconciler_syncs_active_job(
     assert update_call.kwargs["name"] == "test-step"
     assert update_call.kwargs["workspace"] == "default"
     assert update_call.kwargs["job"] == "test-job-id"
-    assert update_call.kwargs["body"].status == PlatformJobStatus.COMPLETED
+    assert update_call.kwargs["body"].status == HelixJobStatus.COMPLETED
 
 
 def test_job_reconciler_logs_diagnostics_for_error_transition_in_debug_mode(
     backend_registry: BackendRegistry,
-    mock_nmp_client,
+    mock_nemo_client,
     mock_jobs_client,
-    test_step_active: PlatformJobStepWithContext,
+    test_step_active: HelixJobStepWithContext,
 ):
     mock_jobs_client.list_steps.return_value = paginated_response([test_step_active])
 
-    job_reconciler = JobReconciler(backend_registry, mock_nmp_client)
+    job_reconciler = JobReconciler(backend_registry, mock_nemo_client)
     test_backend = job_reconciler._backend_registry.get_backend(provider="cpu", profile="default")
     assert isinstance(test_backend, MockDockerCPUJobBackend)
 
     with (
-        patch.object(test_backend, "sync", return_value=JobUpdate(status=PlatformJobStatus.ERROR)),
-        patch("nmp.core.jobs.controllers.reconciler.log_job_diagnostics_if_debug") as log_diagnostics,
+        patch.object(test_backend, "sync", return_value=JobUpdate(status=HelixJobStatus.ERROR)),
+        patch("nhx.core.jobs.controllers.reconciler.log_job_diagnostics_if_debug") as log_diagnostics,
     ):
         job_reconciler.step()
 
     log_diagnostics.assert_called_once_with(
-        mock_nmp_client,
+        mock_nemo_client,
         test_step_active,
         logger=job_reconciler._logger,
         context="step transitioned to error during reconciliation",
@@ -85,10 +140,10 @@ def test_job_reconciler_logs_diagnostics_for_error_transition_in_debug_mode(
 
 def test_job_reconciler_marks_itself_unhealthy_after_transport_failure(
     backend_registry: BackendRegistry,
-    mock_nmp_client,
+    mock_nemo_client,
     mock_jobs_client,
 ):
-    job_reconciler = JobReconciler(backend_registry, mock_nmp_client)
+    job_reconciler = JobReconciler(backend_registry, mock_nemo_client)
     mock_jobs_client.list_steps.return_value = paginated_response([])
     job_reconciler.step()
     assert job_reconciler.is_healthy

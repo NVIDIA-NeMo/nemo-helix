@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { BadgeProps as KuiBadgeProps } from '@nvidia/foundations-react-core';
 import {
   CircleCheck,
@@ -26,7 +26,7 @@ export interface StatusConfigEntry {
   icon?: ComponentType<SVGProps<SVGSVGElement>>;
 }
 
-export type BadgeStatus<T = PlatformJobStatus> =
+export type BadgeStatus<T = HelixJobStatus> =
   | Exclude<T, undefined>
   | 'error'
   | 'active'

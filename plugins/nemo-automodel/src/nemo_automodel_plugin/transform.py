@@ -5,10 +5,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Literal
 
-from nmp.customization_common.contributor.transform import generated_output_name
-from nmp.customization_common.service.platform_client import check_dataset_access, fetch_model_entity
+from nhx.customization_common.contributor.transform import generated_output_name
+from nhx.customization_common.service.platform_client import (
+    AsyncCustomizationHelixClients,
+    check_dataset_access,
+    fetch_model_entity,
+)
 
 from nemo_automodel_plugin.schema import (
     AutomodelJobInput,
@@ -16,15 +20,13 @@ from nemo_automodel_plugin.schema import (
     OutputResponse,
 )
 
-if TYPE_CHECKING:
-    from nemo_platform import AsyncNeMoPlatform
 
-
-def _infer_output_type(input_spec: AutomodelJobInput, is_embedding_model: bool) -> str:
-    if is_embedding_model:
+def _infer_output_type(input_spec: AutomodelJobInput, checkpoint_head_type: str) -> Literal["model", "adapter"]:
+    recipe = input_spec.training.recipe
+    is_bi_encoder = recipe == "bi_encoder" or (recipe == "auto" and checkpoint_head_type == "embedding")
+    if is_bi_encoder:
         return "model"
-    lora = input_spec.training.lora
-    if input_spec.training.finetuning_type == "lora" and lora is not None and not lora.merge:
+    if input_spec.trains_standalone_lora_adapter():
         return "adapter"
     return "model"
 
@@ -32,17 +34,23 @@ def _infer_output_type(input_spec: AutomodelJobInput, is_embedding_model: bool) 
 async def transform_input_to_output(
     input_spec: AutomodelJobInput,
     workspace: str,
-    sdk: AsyncNeMoPlatform,
+    platform: AsyncCustomizationHelixClients,
 ) -> AutomodelJobOutput:
     """Enrich submitter input into canonical AutomodelJobOutput."""
-    model_entity = await fetch_model_entity(input_spec.model, workspace, sdk)
-    await check_dataset_access(sdk, input_spec.dataset.training, workspace)
+    model_entity = await fetch_model_entity(input_spec.model, workspace, platform)
+    await check_dataset_access(platform, input_spec.dataset.training, workspace)
     if input_spec.dataset.validation:
-        await check_dataset_access(sdk, input_spec.dataset.validation, workspace)
+        await check_dataset_access(platform, input_spec.dataset.validation, workspace)
 
-    is_embedding = bool(model_entity.spec and getattr(model_entity.spec, "is_embedding_model", False))
+    checkpoint_head_type = "unknown"
+    if model_entity.spec:
+        checkpoint_head_type = getattr(model_entity.spec, "head_type", None) or "unknown"
+        if checkpoint_head_type == "unknown" and getattr(model_entity.spec, "is_embedding_model", False):
+            checkpoint_head_type = "embedding"
 
-    output_type = _infer_output_type(input_spec, is_embedding)
+    input_spec = input_spec.with_resolved_recipe(checkpoint_head_type)
+
+    output_type = _infer_output_type(input_spec, checkpoint_head_type)
 
     if input_spec.output is None:
         out_name = generated_output_name(input_spec.model, input_spec.dataset.training, workspace)
@@ -69,4 +77,5 @@ async def transform_input_to_output(
         parallelism=input_spec.parallelism,
         output=output,
         integrations=input_spec.integrations,
+        deployment_config=input_spec.deployment_config,
     )

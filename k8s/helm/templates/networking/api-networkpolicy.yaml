@@ -8,24 +8,24 @@ SPDX-License-Identifier: Apache-2.0
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ printf "%s-api-ingress" (include "nemo-platform.fullname" .) | trunc 63 | trimSuffix "-" }}
+  name: {{ printf "%s-api-ingress" (include "nemo-helix.fullname" .) | trunc 63 | trimSuffix "-" }}
   labels:
-    app.kubernetes.io/component: nmp-api
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: {{ .Values.api.componentLabel | quote }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/component: nmp-api
-      {{- include "nemo-platform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: {{ .Values.api.componentLabel | quote }}
+      {{- include "nemo-helix.selectorLabels" . | nindent 6 }}
   policyTypes:
     - Ingress
-  {{- if or $api.sameReleasePods.enabled $api.managedJobs.enabled $api.extraIngress }}
+  {{- if or $api.sameReleasePods.enabled $api.managedJobs.enabled $api.extraIngress .Values.builder.enabled }}
   ingress:
     {{- if $api.sameReleasePods.enabled }}
     - from:
         - podSelector:
             matchLabels:
-              {{- include "nemo-platform.selectorLabels" . | nindent 14 }}
+              {{- include "nemo-helix.selectorLabels" . | nindent 14 }}
       ports:
         - protocol: TCP
           port: {{ default .Values.api.service.port $api.port }}
@@ -33,6 +33,18 @@ spec:
     {{- if $api.managedJobs.enabled }}
     - from:
         - podSelector:
+            {{- toYaml $api.managedJobs.podSelector | nindent 12 }}
+      ports:
+        - protocol: TCP
+          port: {{ default .Values.api.service.port $api.port }}
+    {{- end }}
+    {{- if .Values.builder.enabled }}
+    # The build steps, which run in the build namespace.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ include "nemo-helix.builder.namespace" . }}
+          podSelector:
             {{- toYaml $api.managedJobs.podSelector | nindent 12 }}
       ports:
         - protocol: TCP

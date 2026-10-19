@@ -11,19 +11,21 @@ evaluation. Auth and endpoint resolve as flag > env var > default.
 from __future__ import annotations
 
 import json
-import re
 import shlex
-import subprocess
 import tempfile
 import time
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 
 import click
 
-from scaled_evals.api.build.errors import BuildError
-from scaled_evals.api.build.uploaded_context import archive_context_directory
 from scaled_evals.api.failure_diagnostics import failure_category_for_code, is_retryable_failure
+from scaled_evals.benchmark_import import (
+    import_id_from_legacy_state,
+    load_benchmark_manifest,
+    validate_benchmark_import,
+    write_legacy_import_state,
+)
 
 from .client import (
     DEFAULT_BASE_URL,
@@ -42,8 +44,8 @@ from .client import (
 )
 
 VISIBILITY = ["private", "team", "org", "public"]
-CREDENTIAL_PROVIDER = ["openai", "anthropic", "nvidia", "nmp", "openshift", "switchyard"]
-CONFIG_PROFILE_TYPE = ["harbor", "gym", "switchyard", "intake"]
+CREDENTIAL_PROVIDER = ["openai", "anthropic", "nvidia", "nhx", "openshift"]
+CONFIG_PROFILE_TYPE = ["harbor", "gym", "intake"]
 FRAMEWORK = ["harbor", "nemo_gym"]
 ORDER = ["asc", "desc"]
 KNOWN_RUNTIME_HINT = (
@@ -117,6 +119,9 @@ def cli(ctx: click.Context, base_url: str, token: str | None) -> None:
     """Client for the scaled-evals control-plane API."""
     ctx.ensure_object(dict)
     ctx.obj.setdefault("json", False)
+    if ctx.invoked_subcommand == "benchmark-import":
+        ctx.obj.update({"client": None, "base_url": base_url, "token": token})
+        return
     # An explicit token is the only credential source. Interactive login used to
     # mint one here against a fixed internal identity provider and cache it in
     # the OS keyring; under the platform, the deployment supplies the token.
@@ -140,6 +145,470 @@ def whoami(ctx: click.Context) -> None:
             f"Auth source: {(data.get('principal') or {}).get('source')}",
         ],
     )
+
+
+# ---------- benchmark import ---------------------------------------------
+
+
+@cli.group("benchmark-import")
+@click.pass_context
+def benchmark_import_group(ctx: click.Context) -> None:
+    """Validate and import materialized Harbor benchmark catalogs."""
+    if ctx.invoked_subcommand == "validate":
+        return
+    base_url = ctx.obj["base_url"]
+    token = ctx.obj.get("token")
+    client = make_client(base_url, token)
+    ctx.call_on_close(client.close)
+    ctx.obj["client"] = client
+
+
+def _import_summary(data: dict[str, Any]) -> list[str]:
+    raw_tasks = data.get("tasks")
+    tasks = [task for task in raw_tasks if isinstance(task, dict)] if isinstance(raw_tasks, list) else []
+    counts: dict[str, int] = {}
+    for task in tasks:
+        status = str(task.get("status") or "unknown")
+        counts[status] = counts.get(status, 0) + 1
+    task_status = ", ".join(f"{key}={counts[key]}" for key in sorted(counts)) or "none"
+    return [
+        f"benchmark import {data.get('id')}",
+        f"  status:     {data.get('status')}",
+        f"  visibility: {data.get('visibility')}",
+        f"  manifest:   {data.get('manifest_sha256')}",
+        f"  tasks:      {task_status}",
+        f"  benchmarks: {len(data.get('benchmarks') or [])}",
+    ]
+
+
+def _load_import_images(raw: str | None) -> dict[str, dict[str, Any]]:
+    if raw is None:
+        return {}
+    text = load_arg(raw)
+    stripped = text.lstrip()
+    payload: Any
+    if stripped.startswith("{") or stripped.startswith("["):
+        payload = json.loads(text)
+    else:
+        payload = [json.loads(line) for line in text.splitlines() if line.strip()]
+    if isinstance(payload, dict) and payload.get("slug"):
+        records = [payload]
+    elif (
+        isinstance(payload, dict)
+        and "images" not in payload
+        and all(isinstance(value, dict) for value in payload.values())
+    ):
+        records = [{"slug": slug, **value} for slug, value in payload.items()]
+    elif isinstance(payload, dict):
+        records = payload.get("images") or payload.get("results") or []
+    else:
+        records = payload
+    images: dict[str, dict[str, Any]] = {}
+    for record in records:
+        if not isinstance(record, dict) or record.get("status") == "failed":
+            continue
+        slug = str(record.get("slug") or "")
+        image_ref = str(record.get("image_ref") or "")
+        image_digest = str(record.get("image_digest") or "")
+        if slug and image_ref and image_digest:
+            image = dict(record)
+            image.pop("slug", None)
+            image.pop("error", None)
+            image["image_ref"] = image_ref
+            image["image_digest"] = image_digest
+            images[slug] = image
+    return images
+
+
+def _merge_import_images(values: tuple[str, ...]) -> dict[str, dict[str, Any]]:
+    images: dict[str, dict[str, Any]] = {}
+    for value in values:
+        images.update(_load_import_images(value))
+    return images
+
+
+def _upload_import_packs(ctx: click.Context, data: dict[str, Any], output_root: Path) -> int:
+    uploaded = 0
+    for task in data.get("tasks") or []:
+        upload = task.get("upload")
+        if not upload:
+            continue
+        pack = (output_root / str(task["pack_path"])).resolve()
+        try:
+            pack.relative_to(output_root.resolve())
+        except ValueError as exc:
+            raise click.ClickException(f"unsafe pack path for {task['slug']}: {pack}") from exc
+        upload_file(ctx.obj["client"], upload, pack)
+        uploaded += 1
+    return uploaded
+
+
+def _wait_for_import(
+    ctx: click.Context,
+    import_id: str,
+    *,
+    timeout: float,
+    poll_interval: float,
+) -> dict[str, Any]:
+    started = time.monotonic()
+    data = request(ctx.obj["client"], "GET", f"/benchmark-imports/{import_id}")
+    while data.get("status") in {"uploading", "preparing"}:
+        if time.monotonic() - started >= timeout:
+            raise click.ClickException(f"timed out waiting for benchmark import {import_id}; it remains resumable")
+        time.sleep(poll_interval)
+        data = request(ctx.obj["client"], "GET", f"/benchmark-imports/{import_id}")
+    return data
+
+
+def _run_benchmark_import(
+    ctx: click.Context,
+    *,
+    manifest: Path,
+    output_root: Path,
+    visibility: str,
+    description: str,
+    images: dict[str, dict[str, Any]],
+    reserve_only: bool,
+    retry_failed: bool,
+    wait: bool,
+    timeout: float,
+    poll_interval: float,
+    publish: bool,
+    smoke_size: int | None = None,
+) -> dict[str, Any]:
+    validation = validate_benchmark_import(manifest, output_root=output_root)
+    if not validation.valid:
+        raise click.ClickException("manifest is not conformant; run benchmark-import validate")
+    data = request(
+        ctx.obj["client"],
+        "POST",
+        "/benchmark-imports",
+        json={
+            "manifest_sha256": validation.manifest_sha256,
+            "manifest": load_benchmark_manifest(manifest),
+            "visibility": visibility,
+            "description": description,
+            "images": images,
+        },
+    )
+    if reserve_only:
+        return data
+    if retry_failed and data.get("status") == "failed":
+        data = request(ctx.obj["client"], "POST", f"/benchmark-imports/{data['id']}/retry")
+    _upload_import_packs(ctx, data, output_root)
+    request(ctx.obj["client"], "POST", f"/benchmark-imports/{data['id']}/prepare")
+    data = request(ctx.obj["client"], "GET", f"/benchmark-imports/{data['id']}")
+    if wait or publish:
+        data = _wait_for_import(ctx, data["id"], timeout=timeout, poll_interval=poll_interval)
+    if publish:
+        if data.get("status") == "failed":
+            raise click.ClickException(f"benchmark import {data['id']} failed; inspect status")
+        data = request(
+            ctx.obj["client"],
+            "POST",
+            f"/benchmark-imports/{data['id']}/publish",
+            json={"smoke_size": smoke_size},
+        )
+    return data
+
+
+@benchmark_import_group.command("validate")
+@click.argument("manifest", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--output-root", type=click.Path(file_okay=False, path_type=Path), default=None)
+@click.option("--max-pack-bytes", type=click.IntRange(min=1), default=None, hidden=True)
+@click.pass_context
+def benchmark_import_validate(
+    ctx: click.Context, manifest: Path, output_root: Path | None, max_pack_bytes: int | None
+) -> None:
+    """Validate one materialized catalog without server access or state mutation."""
+    kwargs: dict[str, Any] = {"output_root": output_root}
+    if max_pack_bytes is not None:
+        kwargs["max_pack_bytes"] = max_pack_bytes
+    result = validate_benchmark_import(manifest, **kwargs)
+    payload = result.model_dump(mode="json", exclude_none=True)
+    if ctx.obj["json"]:
+        click.echo(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        click.echo(f"benchmark import manifest: {'valid' if result.valid else 'invalid'}")
+        for check in result.checks:
+            subject = f" [{check.subject}]" if check.subject else ""
+            click.echo(f"  {check.status:26} {check.code}{subject}: {check.message}")
+    if not result.valid:
+        ctx.exit(1)
+
+
+@benchmark_import_group.command("start")
+@click.argument("manifest", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--output-root", type=click.Path(exists=True, file_okay=False, path_type=Path), required=True)
+@click.option(
+    "--visibility",
+    type=click.Choice(["private", "team", "org", "public"]),
+    default="public",
+    show_default=True,
+)
+@click.option("--description", required=True)
+@click.option("--images", default=None, help="Optional prebuilt image result JSON/JSONL or @file.")
+@click.option("--reserve-only", is_flag=True, help="Reserve exact revisions without uploading.")
+@click.option("--wait", is_flag=True, help="Wait for all task revisions to finish preparing.")
+@click.option("--publish", is_flag=True, help="Wait and publish immutable benchmark revisions.")
+@click.option("--timeout", type=float, default=3600.0, show_default=True)
+@click.option("--poll-interval", type=float, default=5.0, show_default=True)
+@click.pass_context
+def benchmark_import_start(
+    ctx: click.Context,
+    manifest: Path,
+    output_root: Path,
+    visibility: str,
+    description: str,
+    images: str | None,
+    reserve_only: bool,
+    wait: bool,
+    publish: bool,
+    timeout: float,
+    poll_interval: float,
+) -> None:
+    """Create or resume an import, upload missing packs, and begin preparation."""
+    if reserve_only and (wait or publish):
+        raise click.ClickException("--reserve-only cannot be combined with --wait or --publish")
+    data = _run_benchmark_import(
+        ctx,
+        manifest=manifest,
+        output_root=output_root,
+        visibility=visibility,
+        description=description,
+        images=_load_import_images(images),
+        reserve_only=reserve_only,
+        retry_failed=False,
+        wait=wait,
+        timeout=timeout,
+        poll_interval=poll_interval,
+        publish=publish,
+    )
+    emit(data, ctx.obj["json"], _import_summary(data))
+
+
+@benchmark_import_group.command("status")
+@click.argument("import_id")
+@click.pass_context
+def benchmark_import_status(ctx: click.Context, import_id: str) -> None:
+    """Inspect durable upload, build, image, and benchmark progress."""
+    data = request(ctx.obj["client"], "GET", f"/benchmark-imports/{import_id}")
+    emit(data, ctx.obj["json"], _import_summary(data))
+
+
+@benchmark_import_group.command("retry")
+@click.argument("import_id")
+@click.option("--output-root", type=click.Path(exists=True, file_okay=False, path_type=Path), required=True)
+@click.pass_context
+def benchmark_import_retry(ctx: click.Context, import_id: str, output_root: Path) -> None:
+    """Create replacement revisions only for failed imported task packs."""
+    data = request(ctx.obj["client"], "POST", f"/benchmark-imports/{import_id}/retry")
+    _upload_import_packs(ctx, data, output_root)
+    request(ctx.obj["client"], "POST", f"/benchmark-imports/{import_id}/prepare")
+    data = request(ctx.obj["client"], "GET", f"/benchmark-imports/{import_id}")
+    emit(data, ctx.obj["json"], _import_summary(data))
+
+
+@benchmark_import_group.command("publish")
+@click.argument("import_id")
+@click.option("--smoke-size", type=click.IntRange(min=1), default=None)
+@click.pass_context
+def benchmark_import_publish(ctx: click.Context, import_id: str, smoke_size: int | None) -> None:
+    """Publish prepared exact task pins as immutable benchmark revisions."""
+    data = request(
+        ctx.obj["client"],
+        "POST",
+        f"/benchmark-imports/{import_id}/publish",
+        json={"smoke_size": smoke_size},
+    )
+    emit(data, ctx.obj["json"], _import_summary(data))
+
+
+@benchmark_import_group.command("compat-sync", hidden=True)
+@click.option("--manifest", type=click.Path(exists=True, dir_okay=False, path_type=Path), required=True)
+@click.option("--state", type=click.Path(dir_okay=False, path_type=Path), required=True)
+@click.option("--description", default=None)
+@click.option("--visibility", type=click.Choice(["private", "team", "org", "public"]), default=None)
+@click.option("--attempts", type=int, default=6, hidden=True)
+@click.pass_context
+def benchmark_import_compat_sync(
+    ctx: click.Context,
+    manifest: Path,
+    state: Path,
+    description: str | None,
+    visibility: str | None,
+    attempts: int,
+) -> None:
+    """Compatibility projection for sync-standard-benchmark-tasks."""
+    del attempts
+    payload = load_benchmark_manifest(manifest)
+    output_root = manifest.resolve().parent.parent
+    data = _run_benchmark_import(
+        ctx,
+        manifest=manifest,
+        output_root=output_root,
+        visibility=visibility or "public",
+        description=description or str(payload.get("catalog_id") or manifest.stem),
+        images={},
+        reserve_only=True,
+        retry_failed=False,
+        wait=False,
+        timeout=0,
+        poll_interval=0,
+        publish=False,
+    )
+    write_legacy_import_state(state, data, phase="upload")
+    emit(data, ctx.obj["json"], _import_summary(data))
+
+
+@benchmark_import_group.command("compat-finalize", hidden=True)
+@click.option("--manifest", type=click.Path(exists=True, dir_okay=False, path_type=Path), required=True)
+@click.option("--upload-state", type=click.Path(dir_okay=False, path_type=Path), required=True)
+@click.option("--output-root", type=click.Path(exists=True, file_okay=False, path_type=Path), required=True)
+@click.option("--state", type=click.Path(dir_okay=False, path_type=Path), required=True)
+@click.option(
+    "--prebuilt-image-results",
+    multiple=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option("--prebuilt-results-only", is_flag=True)
+@click.option("--only-failed", is_flag=True)
+@click.option("--resolve-only", is_flag=True)
+@click.option("--finalize-resolved-only", is_flag=True)
+@click.option("--skip-error-substring", multiple=True)
+@click.option("--skip-slug-substring", multiple=True)
+@click.option("--limit", type=int, default=None)
+@click.option("--finalize-timeout", type=float, default=2100.0)
+@click.option("--finalize-poll-seconds", type=float, default=5.0)
+@click.option("--image-builder-url", default=None, hidden=True)
+@click.option("--builder-source-commit", default=None, hidden=True)
+@click.option("--context-path", default=None, hidden=True)
+@click.option("--token", default=None, hidden=True)
+@click.option("--token-command", default=None, hidden=True)
+@click.option("--auth-login-command", default=None, hidden=True)
+@click.option("--auth-refresh-seconds", type=int, default=900, hidden=True)
+@click.option("--workers", type=int, default=4, hidden=True)
+@click.option("--attempts", type=int, default=6, hidden=True)
+@click.option("--retry-sleep", type=float, default=5.0, hidden=True)
+@click.pass_context
+def benchmark_import_compat_finalize(
+    ctx: click.Context,
+    manifest: Path,
+    upload_state: Path,
+    output_root: Path,
+    state: Path,
+    prebuilt_image_results: tuple[Path, ...],
+    prebuilt_results_only: bool,
+    only_failed: bool,
+    resolve_only: bool,
+    finalize_resolved_only: bool,
+    skip_error_substring: tuple[str, ...],
+    skip_slug_substring: tuple[str, ...],
+    limit: int | None,
+    finalize_timeout: float,
+    finalize_poll_seconds: float,
+    image_builder_url: str | None,
+    builder_source_commit: str | None,
+    context_path: str | None,
+    token: str | None,
+    token_command: str | None,
+    auth_login_command: str | None,
+    auth_refresh_seconds: int,
+    workers: int,
+    attempts: int,
+    retry_sleep: float,
+) -> None:
+    """Compatibility projection for finalize-standard-benchmark-catalog."""
+    del (
+        image_builder_url,
+        builder_source_commit,
+        context_path,
+        token,
+        token_command,
+        auth_login_command,
+        auth_refresh_seconds,
+        workers,
+        attempts,
+        retry_sleep,
+    )
+    unsupported = bool(
+        resolve_only or finalize_resolved_only or skip_error_substring or skip_slug_substring or limit is not None
+    )
+    if unsupported:
+        raise click.ClickException(
+            "selection and direct image-resolution modes are no longer implemented by this "
+            "helper; supply prebuilt image results or use the server-managed finalize path"
+        )
+    images = _merge_import_images(tuple(f"@{path}" for path in prebuilt_image_results))
+    payload = load_benchmark_manifest(manifest)
+    if prebuilt_results_only:
+        tasks = payload.get("tasks")
+        if not isinstance(tasks, list):
+            raise click.ClickException("benchmark import manifest must contain a tasks list")
+        missing = sorted({str(task["slug"]) for task in tasks} - set(images))
+        if missing:
+            raise click.ClickException(f"--prebuilt-results-only is missing image results for {len(missing)} tasks")
+    try:
+        import_id = import_id_from_legacy_state(upload_state)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if images:
+        request(
+            ctx.obj["client"],
+            "POST",
+            f"/benchmark-imports/{import_id}/images",
+            json={"images": images},
+        )
+    data = request(ctx.obj["client"], "GET", f"/benchmark-imports/{import_id}")
+    if only_failed and data.get("status") == "failed":
+        data = request(ctx.obj["client"], "POST", f"/benchmark-imports/{import_id}/retry")
+    _upload_import_packs(ctx, data, output_root)
+    request(ctx.obj["client"], "POST", f"/benchmark-imports/{import_id}/prepare")
+    data = _wait_for_import(
+        ctx,
+        import_id,
+        timeout=finalize_timeout,
+        poll_interval=finalize_poll_seconds,
+    )
+    write_legacy_import_state(state, data, phase="finalize")
+    emit(data, ctx.obj["json"], _import_summary(data))
+    if data.get("status") == "failed":
+        ctx.exit(1)
+
+
+@benchmark_import_group.command("compat-publish", hidden=True)
+@click.option("--manifest", type=click.Path(exists=True, dir_okay=False, path_type=Path), required=True)
+@click.option("--finalize-state", type=click.Path(exists=True, dir_okay=False, path_type=Path), required=True)
+@click.option("--description", required=True)
+@click.option("--visibility", type=click.Choice(["private", "team", "org", "public"]), default=None)
+@click.option("--smoke-size", type=click.IntRange(min=1), default=None)
+@click.option("--attempts", type=int, default=6, hidden=True)
+@click.pass_context
+def benchmark_import_compat_publish(
+    ctx: click.Context,
+    manifest: Path,
+    finalize_state: Path,
+    description: str,
+    visibility: str | None,
+    smoke_size: int | None,
+    attempts: int,
+) -> None:
+    """Compatibility projection for publish-standard-benchmark-catalog."""
+    del manifest, description, attempts
+    try:
+        import_id = import_id_from_legacy_state(finalize_state)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    current = request(ctx.obj["client"], "GET", f"/benchmark-imports/{import_id}")
+    if visibility is not None and current.get("visibility") != visibility:
+        raise click.ClickException(f"import {import_id} visibility is {current.get('visibility')}, not {visibility}")
+    data = request(
+        ctx.obj["client"],
+        "POST",
+        f"/benchmark-imports/{import_id}/publish",
+        json={"smoke_size": smoke_size},
+    )
+    emit(data, ctx.obj["json"], _import_summary(data))
 
 
 def _parse_json_object(raw: str, *, label: str) -> dict[str, Any]:
@@ -245,208 +714,6 @@ def _emit_wait_result(ctx: click.Context, data: dict[str, Any]) -> None:
                 click.echo(f"  {label}: {links[label]}")
 
 
-# ---------- Switchyard ----------------------------------------------------
-
-
-@cli.group()
-def switchyard() -> None:
-    """Publish and manage Switchyard runtime images."""
-
-
-def _git_head(path: Path) -> str:
-    try:
-        proc = subprocess.run(
-            ["git", "-C", str(path), "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise click.ClickException("--source-ref is required when --context-dir is not inside a git checkout") from exc
-    return proc.stdout.strip()
-
-
-def _git_dirty(path: Path) -> bool:
-    try:
-        proc = subprocess.run(
-            ["git", "-C", str(path), "status", "--porcelain", "--untracked-files=all"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise click.ClickException("--context-dir must be inside a git checkout") from exc
-    return bool(proc.stdout.strip())
-
-
-def _clean_relative_path(value: str, *, label: str) -> str:
-    normalized = value.strip() or "."
-    path = PurePosixPath(normalized)
-    if path.is_absolute() or ".." in path.parts:
-        raise click.ClickException(f"{label} must stay within --context-dir")
-    return path.as_posix()
-
-
-def _default_switchyard_dockerfile_path(
-    context_dir: Path,
-    *,
-    context_path: str,
-    requested: str | None,
-) -> str:
-    if requested:
-        return _clean_relative_path(requested, label="--dockerfile-path")
-    context_dockerfile = "Dockerfile" if context_path == "." else f"{context_path.rstrip('/')}/Dockerfile"
-    official_dockerfile = "benchmark/switchyard-server.Dockerfile"
-    if (
-        context_path == "."
-        and not (context_dir / context_dockerfile).is_file()
-        and (context_dir / official_dockerfile).is_file()
-    ):
-        return official_dockerfile
-    return context_dockerfile
-
-
-@switchyard.command("publish")
-@click.option(
-    "--source-project",
-    default="NVIDIA-NeMo/Switchyard",
-    show_default=True,
-    help="GitHub Switchyard project path to publish from.",
-)
-@click.option(
-    "--source-ref",
-    default=None,
-    help="Full 40-character GitHub Switchyard commit SHA; defaults to --context-dir HEAD.",
-)
-@click.option(
-    "--context-path",
-    default=".",
-    show_default=True,
-    help="Build context path inside --context-dir.",
-)
-@click.option(
-    "--dockerfile-path",
-    default=None,
-    help=(
-        "Dockerfile path inside --context-dir. Defaults to Dockerfile, or "
-        "benchmark/switchyard-server.Dockerfile for the GitHub Switchyard repo."
-    ),
-)
-@click.option(
-    "--context-dir",
-    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
-    required=True,
-    help="Local Switchyard build-context directory checked out at --source-ref.",
-)
-@click.option(
-    "--profile-name",
-    default=None,
-    help="Optional name for the reusable Switchyard config profile.",
-)
-@click.option("--wait/--no-wait", default=True, help="Wait for the publication to finish.")
-@click.option(
-    "--poll-interval",
-    type=click.FloatRange(min=1.0),
-    default=5.0,
-    show_default=True,
-    help="Seconds between asynchronous publication status checks.",
-)
-@click.option(
-    "--timeout",
-    type=click.FloatRange(min=1.0),
-    default=2400.0,
-    show_default=True,
-    help="Maximum seconds to wait for an asynchronous publication.",
-)
-@click.pass_context
-def switchyard_publish(
-    ctx: click.Context,
-    source_project: str,
-    source_ref: str | None,
-    context_path: str,
-    dockerfile_path: str | None,
-    context_dir: Path,
-    profile_name: str | None,
-    wait: bool,
-    poll_interval: float,
-    timeout: float,
-) -> None:
-    """Build/sign a Switchyard commit and create or reuse a run profile."""
-    context_path = _clean_relative_path(context_path, label="--context-path")
-    context_head = _git_head(context_dir).lower()
-    source_ref = source_ref.lower() if source_ref else context_head
-    if not re.fullmatch(r"[0-9a-fA-F]{40}", source_ref):
-        raise click.ClickException("--source-ref must be a full 40-character commit SHA")
-    if source_ref != context_head:
-        raise click.ClickException("--source-ref must match --context-dir HEAD")
-    if _git_dirty(context_dir):
-        raise click.ClickException("--context-dir must be clean to publish a committed source ref")
-    dockerfile_path = _default_switchyard_dockerfile_path(
-        context_dir,
-        context_path=context_path,
-        requested=dockerfile_path,
-    )
-    try:
-        archive = archive_context_directory(context_dir, dockerfile_path=dockerfile_path)
-    except BuildError as exc:
-        raise click.ClickException(str(exc)) from exc
-    form: dict[str, str] = {
-        "source_project": source_project,
-        "source_ref": source_ref.lower(),
-        "context_path": context_path,
-        "dockerfile_path": dockerfile_path,
-    }
-    if profile_name:
-        form["profile_name"] = profile_name
-    started = time.monotonic()
-    data = request(
-        ctx.obj["client"],
-        "POST",
-        "/switchyard/publish",
-        data=form,
-        files={"context": ("context.tar.gz", archive, "application/gzip")},
-    )
-    build_id = str(data.get("build_id") or "")
-    if build_id and not wait:
-        emit(
-            data,
-            ctx.obj["json"],
-            [f"switchyard publication {build_id}", f"  status: {data.get('status')}"],
-        )
-        return
-    while build_id:
-        status = str(data.get("status") or "")
-        if status == "succeeded":
-            result = data.get("result")
-            if not isinstance(result, dict):
-                raise click.ClickException("completed Switchyard publication has no profile")
-            data = result
-            break
-        if status == "failed":
-            raise click.ClickException(str(data.get("build_error") or "Switchyard publication failed"))
-        if time.monotonic() - started >= timeout:
-            raise click.ClickException(
-                f"timed out waiting for Switchyard publication {build_id}; the Cloud Build "
-                f"continues and remains available at /v1/switchyard/publishes/{build_id}"
-            )
-        time.sleep(poll_interval)
-        data = request(ctx.obj["client"], "GET", f"/switchyard/publishes/{build_id}")
-    emit(
-        data,
-        ctx.obj["json"],
-        [
-            f"switchyard profile {data.get('profile_id')}",
-            f"  name:       {data.get('profile_name')}",
-            f"  source:     {data.get('source_project')}@{data.get('source_ref')}",
-            f"  context:    {data.get('context_path')} ({data.get('context_hash')})",
-            f"  dockerfile: {data.get('dockerfile_path')}",
-            f"  image:      {data.get('image_ref')}",
-            f"  digest:     {data.get('image_digest')}",
-            f"  reused:     {data.get('reused_profile')}",
-        ],
-    )
-
-
 # ---------- tasks ----------------------------------------------------
 
 
@@ -475,7 +742,7 @@ def task_create(
     visibility: str | None,
     tarball: Path | None,
 ) -> None:
-    """Create a task; prints the presigned upload URL for its tarball."""
+    """Create a task; prints its Files upload target for the tarball."""
     body: dict[str, object] = {"name": name}
     if slug:
         body["slug"] = slug
@@ -493,7 +760,7 @@ def task_create(
             f"task {data['id']}",
             f"  revision:   {data.get('revision')}",
             f"  status:     {data.get('status')}",
-            f"  upload url: {upload.get('url')}",
+            f"  upload target: {upload.get('remote_path')}",
         ],
     )
     if tarball:
@@ -575,9 +842,9 @@ def task_delete(ctx: click.Context, task_id: str) -> None:
 def task_upload(ctx: click.Context, task_id: str, tarball_path: Path) -> None:
     """Upload a tarball as a new revision of an existing task.
 
-    The presigned URL only comes from a POST: a new tarball means a new
-    revision, so this mints one via POST /tasks/{id}/revisions and PUTs
-    to the upload block it returns.
+    A new tarball means a new revision, so this mints one via
+    POST /tasks/{id}/revisions and streams the file to the Files upload
+    target that response returns.
     """
     data = request(ctx.obj["client"], "POST", f"/tasks/{task_id}/revisions")
     upload = data.get("upload")
@@ -612,12 +879,24 @@ def task_upload(ctx: click.Context, task_id: str, tarball_path: Path) -> None:
     default=None,
     help="Immutable digest for --image-ref. Required by hosted policy.",
 )
+@click.option(
+    "--verifier-image-ref",
+    default=None,
+    help="Prebuilt image, from the task's tests/, for a verifier that runs in its own sandbox. Requires --image-ref.",
+)
+@click.option(
+    "--verifier-image-digest",
+    default=None,
+    help="Immutable digest for --verifier-image-ref.",
+)
 @click.pass_context
 def task_finalize(
     ctx: click.Context,
     task_id: str,
     image_ref: str | None,
     image_digest: str | None,
+    verifier_image_ref: str | None,
+    verifier_image_digest: str | None,
 ) -> None:
     """Finalize the latest revision so it can be evaluated.
 
@@ -625,15 +904,22 @@ def task_finalize(
     Hosted deployments use their managed builder (the image-builder service,
     Cloud Build + GAR on GKE); local deployments without one keep the
     BuildKit fallback. Pass `--image-ref` with `--image-digest` to reuse an
-    already signed or otherwise approved image.
+    already signed or otherwise approved image. Tasks whose verifier runs in its
+    own sandbox also pass `--verifier-image-ref` with `--verifier-image-digest`.
     """
     if image_digest and not image_ref:
         raise click.ClickException("--image-digest requires --image-ref")
+    if verifier_image_digest and not verifier_image_ref:
+        raise click.ClickException("--verifier-image-digest requires --verifier-image-ref")
+    if verifier_image_ref and not image_ref:
+        raise click.ClickException("--verifier-image-ref requires --image-ref")
     body: dict[str, object] = {
         k: v
         for k, v in (
             ("image_ref", image_ref),
             ("image_digest", image_digest),
+            ("verifier_image_ref", verifier_image_ref),
+            ("verifier_image_digest", verifier_image_digest),
         )
         if v
     }
@@ -677,7 +963,13 @@ def _task_summary(data: dict[str, object]) -> list[str]:
         f"  revision:   {data.get('revision', data.get('current_revision'))}",
         f"  status:     {data.get('status')}",
     ]
-    extra = (("image", "image_ref"), ("digest", "image_digest"), ("error", "build_error"))
+    extra = (
+        ("image", "image_ref"),
+        ("digest", "image_digest"),
+        ("verifier", "verifier_image_ref"),
+        ("verifier digest", "verifier_image_digest"),
+        ("error", "build_error"),
+    )
     for label, key in extra:
         if data.get(key):
             summary.append(f"  {label + ':':11} {data[key]}")
@@ -708,7 +1000,7 @@ def _parse_task_refs(specs: tuple[str, ...]) -> list[dict[str, object]]:
     return refs
 
 
-def _benchmark_summary(data: dict[str, object]) -> list[str]:
+def _benchmark_summary(data: dict[str, Any]) -> list[str]:
     summary = [
         f"benchmark {data['id']}",
         f"  name:       {data.get('name')}",
@@ -990,7 +1282,7 @@ def credential() -> None:
     "--provider",
     type=click.Choice(CREDENTIAL_PROVIDER),
     required=True,
-    help="Secret category; model providers carry a key, nmp/openshift carry yaml or key payloads.",
+    help="Secret category; model providers carry a key, nhx/openshift carry yaml or key payloads.",
 )
 @click.option("--key", default=None, help="Single-string secret (model API key).")
 @click.option("--yaml", "yaml_", default=None, help="Structured secret blob, inline or @file.")
@@ -1004,7 +1296,8 @@ def credential_create(ctx: click.Context, name: str, provider: str, key: str | N
     if key:
         body["key"] = key
     else:
-        body["yaml"] = load_arg(yaml_)  # type: ignore[arg-type]
+        assert yaml_ is not None  # The exclusive key/yaml check above guarantees this.
+        body["yaml"] = load_arg(yaml_)
 
     data = request(ctx.obj["client"], "POST", "/credentials", json=body)
     emit(
@@ -1106,7 +1399,8 @@ def credential_rotate(ctx: click.Context, credential_id: str, key: str | None, y
     if key:
         body["key"] = key
     else:
-        body["yaml"] = load_arg(yaml_)  # type: ignore[arg-type]
+        assert yaml_ is not None  # The exclusive key/yaml check above guarantees this.
+        body["yaml"] = load_arg(yaml_)
     data = request(ctx.obj["client"], "POST", f"/credentials/{credential_id}/rotate", json=body)
     emit(data, ctx.obj["json"], _credential_summary(data))
 
@@ -1485,7 +1779,6 @@ def evaluation_preflight(ctx: click.Context, request_body: str) -> None:
     default=None,
     help="Compatibility alias for --framework-profile-id on harbor requests.",
 )
-@click.option("--switchyard-profile-id", default=None, help="Optional Switchyard profile id.")
 @click.option("--intake-profile-id", default=None, help="Optional Intake profile id.")
 @click.option(
     "--credential",
@@ -1553,7 +1846,6 @@ def evaluation_create(
     framework_version: str | None,
     framework_profile_id: str | None,
     harbor_profile_id: str | None,
-    switchyard_profile_id: str | None,
     intake_profile_id: str | None,
     credentials: tuple[str, ...],
     agent_bundle: str | None,
@@ -1594,7 +1886,6 @@ def evaluation_create(
         ("framework_profile_id", framework_profile_id),
         ("framework_version", framework_version),
         ("harbor_profile_id", harbor_profile_id),
-        ("switchyard_profile_id", switchyard_profile_id),
         ("intake_profile_id", intake_profile_id),
         ("runtime", runtime),
         ("network_policy", network_policy),
@@ -1812,7 +2103,9 @@ def evaluation_wait(
 def evaluation_provenance(ctx: click.Context, evaluation_id: str, output: Path | None) -> None:
     """Print or download the run provenance manifest."""
     data = request(ctx.obj["client"], "GET", f"/evaluations/{evaluation_id}")
-    links = data.get("links") if isinstance(data.get("links"), dict) else {}
+    links = data.get("links")
+    if not isinstance(links, dict):
+        links = {}
     api_path = links.get("provenance") or (f"/evaluations/{evaluation_id}/artifacts/scaled-evals-provenance.json")
     try:
         content = fetch_artifact(ctx.obj["client"], api_path)
@@ -1849,7 +2142,9 @@ def evaluation_provenance(ctx: click.Context, evaluation_id: str, output: Path |
 def evaluation_sbom(ctx: click.Context, evaluation_id: str, output: Path | None) -> None:
     """Print or download the run-composition CycloneDX BOM."""
     data = request(ctx.obj["client"], "GET", f"/evaluations/{evaluation_id}")
-    links = data.get("links") if isinstance(data.get("links"), dict) else {}
+    links = data.get("links")
+    if not isinstance(links, dict):
+        links = {}
     api_path = links.get("sbom") or (f"/evaluations/{evaluation_id}/artifacts/scaled-evals-sbom.cdx.json")
     try:
         content = fetch_artifact(ctx.obj["client"], api_path)
@@ -1968,7 +2263,6 @@ def _reproduce_command(body: dict[str, object]) -> list[str]:
         command.extend(["--network-policy-config", json.dumps(network_policy_config, separators=(",", ":"))])
     for option, key in (
         ("--framework-profile-id", "framework_profile_id"),
-        ("--switchyard-profile-id", "switchyard_profile_id"),
         ("--intake-profile-id", "intake_profile_id"),
     ):
         if value := body.get(key):
@@ -2127,7 +2421,9 @@ def evaluation_harbor_viewer(
 ) -> None:
     """Show, download, or manually upload a Harbor Viewer-compatible archive."""
     data = request(ctx.obj["client"], "GET", f"/evaluations/{evaluation_id}")
-    links = data.get("links") if isinstance(data.get("links"), dict) else {}
+    links = data.get("links")
+    if not isinstance(links, dict):
+        links = {}
     archive_url = links.get("harbor_viewer_archive")
     upload_url = links.get("harbor_viewer_upload")
     viewer_url = links.get("harbor_viewer")
@@ -2136,7 +2432,7 @@ def evaluation_harbor_viewer(
     if upload_ and not upload_url:
         raise click.ClickException("evaluation has no Harbor Viewer upload endpoint")
 
-    result = {
+    result: dict[str, Any] = {
         "evaluation_id": evaluation_id,
         "archive_url": archive_url,
         "upload_url": upload_url,
@@ -2193,7 +2489,7 @@ def evaluation_harbor_viewer(
 # ---------- benchmark runs --------------------------------------------------
 
 
-def _benchmark_member_failure_codes(member: dict[str, object]) -> list[str]:
+def _benchmark_member_failure_codes(member: dict[str, Any]) -> list[str]:
     codes: list[str] = []
     direct = member.get("failure_code") or member.get("last_failure_code")
     if direct:
@@ -2245,7 +2541,7 @@ def _filter_benchmark_members(
     return filtered
 
 
-def _benchmark_member_evaluation_summary(member: dict[str, object]) -> str:
+def _benchmark_member_evaluation_summary(member: dict[str, Any]) -> str:
     codes = _benchmark_member_failure_codes(member)
     category = _benchmark_member_failure_category(member)
     failure = f"  failure={category or 'unknown'}/{','.join(codes)}" if codes else ""
@@ -2264,7 +2560,7 @@ def _benchmark_member_evaluation_summary(member: dict[str, object]) -> str:
     )
 
 
-def _benchmark_run_summary(data: dict[str, object], *, member_total: int | None = None) -> list[str]:
+def _benchmark_run_summary(data: dict[str, Any], *, member_total: int | None = None) -> list[str]:
     detail = f" ({data['status_detail']})" if data.get("status_detail") else ""
     lines = [
         f"benchmark run {data['id']}",
@@ -2336,6 +2632,99 @@ def benchmark_run() -> None:
     """Run a benchmark by aggregating member task evaluations."""
 
 
+@benchmark_run.command("archive")
+@click.argument("run_id")
+@click.option("--build", is_flag=True, help="Queue archive generation.")
+@click.option("--force", is_flag=True, help="Build a fresh snapshot of member executions.")
+@click.pass_context
+def benchmark_run_archive(ctx: click.Context, run_id: str, build: bool, force: bool) -> None:
+    """Show or build a combined Harbor experiment archive."""
+    method = "POST" if build or force else "GET"
+    kwargs = {"json": {"force": force}} if method == "POST" else {}
+    data = request(ctx.obj["client"], method, f"/benchmark-runs/{run_id}/archive", **kwargs)
+    emit(data, ctx.obj["json"], [f"{run_id}: {data['status']}", data.get("error") or ""])
+
+
+@benchmark_run.command("download")
+@click.argument("run_id")
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Destination directory (or tar.gz file with --archive-only). Must not exist.",
+)
+@click.option("--archive-only", is_flag=True, help="Save the tarball without extracting it.")
+@click.option("--wait", is_flag=True, help="Wait for archive generation, then download.")
+@click.option(
+    "--timeout",
+    type=click.FloatRange(min=0.1),
+    default=600.0,
+    show_default=True,
+    help="Maximum seconds to wait for archive generation.",
+)
+@click.pass_context
+def benchmark_run_download(
+    ctx: click.Context,
+    run_id: str,
+    output: Path | None,
+    archive_only: bool,
+    wait: bool,
+    timeout: float,
+) -> None:
+    """Download all member trials into one Harbor experiment directory.
+
+    Queues a missing archive. Use --wait to download when the build completes,
+    or rerun this command once the archive is ready.
+    """
+    from scaled_evals.cli.benchmark_archive import save_benchmark_archive
+
+    dest = output or Path(f"{run_id}-results.tar.gz" if archive_only else run_id)
+    if dest.exists():
+        raise click.ClickException(f"destination already exists: {dest}")
+    path = f"/benchmark-runs/{run_id}/archive"
+    data = request(ctx.obj["client"], "GET", path)
+    if data["status"] == "missing":
+        data = request(ctx.obj["client"], "POST", path, json={"force": False})
+    deadline = time.monotonic() + timeout
+    while data["status"] in {"queued", "building"}:
+        if not wait:
+            emit(
+                data,
+                ctx.obj["json"],
+                [f"{run_id}: archive {data['status']}; rerun download when ready, or use --wait."],
+            )
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise click.ClickException("timed out waiting for archive; the server build continues")
+        time.sleep(min(5.0, remaining))
+        data = request(ctx.obj["client"], "GET", path)
+    if data["status"] != "ready":
+        raise click.ClickException(
+            f"archive {data['status']}: {data.get('error') or 'not ready'}; "
+            f"retry with benchmark-run archive {run_id} --build"
+        )
+    save_benchmark_archive(
+        ctx.obj["client"],
+        data["download"],
+        dest,
+        archive_only=archive_only,
+        expected_sha256=data.get("sha256"),
+        expected_size_bytes=data.get("size_bytes"),
+    )
+    summary = [f"downloaded Harbor experiment -> {dest}"]
+    if data.get("sha256"):
+        summary.append(f"verified archive sha256: {data['sha256']}")
+    else:
+        summary.append(
+            "Legacy archive has no server checksum; rebuild it with benchmark-run archive --force to verify downloads."
+        )
+    if data.get("partial"):
+        summary.append("Some member trial data is missing; see scaled-evals-benchmark-archive.json.")
+    emit({**data, "path": str(dest)}, ctx.obj["json"], summary)
+
+
 @benchmark_run.command("preflight")
 @click.option(
     "--request",
@@ -2367,8 +2756,14 @@ def benchmark_run_preflight(ctx: click.Context, request_body: str) -> None:
     help=("Exact supported framework version or alias (for Harbor, use a catalog version or stable)."),
 )
 @click.option("--framework-profile-id", default=None)
+@click.option(
+    "--member-framework-profile",
+    "member_framework_profiles",
+    multiple=True,
+    metavar="TASK_ID=PROFILE_ID",
+    help="Per-member framework profile override, repeatable.",
+)
 @click.option("--harbor-profile-id", default=None)
-@click.option("--switchyard-profile-id", default=None)
 @click.option("--intake-profile-id", default=None)
 @click.option(
     "--credential",
@@ -2411,10 +2806,7 @@ def benchmark_run_preflight(ctx: click.Context, request_body: str) -> None:
     "--max-concurrent-members",
     type=int,
     default=None,
-    help=(
-        "Maximum active benchmark member evaluations. Also caps members sharing "
-        "one managed Switchyard gateway when a Switchyard profile is set."
-    ),
+    help="Maximum active benchmark member evaluations.",
 )
 @click.option("--visibility", type=click.Choice(VISIBILITY), default=None)
 @click.option("--framework", type=click.Choice(FRAMEWORK), default=None)
@@ -2434,8 +2826,8 @@ def benchmark_run_create(
     benchmark_revision: int | None,
     framework_version: str | None,
     framework_profile_id: str | None,
+    member_framework_profiles: tuple[str, ...],
     harbor_profile_id: str | None,
-    switchyard_profile_id: str | None,
     intake_profile_id: str | None,
     credentials: tuple[str, ...],
     agent_bundle: str | None,
@@ -2468,6 +2860,14 @@ def benchmark_run_create(
         cred_map[k] = v
     if cred_map:
         body["credentials"] = cred_map
+    member_profile_map: dict[str, str] = {}
+    for item in member_framework_profiles:
+        if "=" not in item:
+            raise click.ClickException(f"--member-framework-profile must be TASK_ID=PROFILE_ID, got {item!r}")
+        task_id, profile_id = item.split("=", 1)
+        member_profile_map[task_id] = profile_id
+    if member_profile_map:
+        body["member_framework_profile_ids"] = member_profile_map
     if agent_bundle is not None:
         body["agent_bundle_id"] = agent_bundle
     if extra_skill_object_key:
@@ -2478,7 +2878,6 @@ def benchmark_run_create(
         ("framework_profile_id", framework_profile_id),
         ("framework_version", framework_version),
         ("harbor_profile_id", harbor_profile_id),
-        ("switchyard_profile_id", switchyard_profile_id),
         ("intake_profile_id", intake_profile_id),
         ("runtime", runtime),
         ("network_policy", network_policy),
@@ -2711,7 +3110,6 @@ def _benchmark_reproduce_command(body: dict[str, object]) -> list[str]:
     for option, key in (
         ("--framework-version", "framework_version"),
         ("--framework-profile-id", "framework_profile_id"),
-        ("--switchyard-profile-id", "switchyard_profile_id"),
         ("--intake-profile-id", "intake_profile_id"),
         ("--agent-bundle", "agent_bundle_id"),
         ("--instruction-prefix", "instruction_prefix"),
@@ -2748,7 +3146,7 @@ def benchmark_run_cancel(ctx: click.Context, run_id: str) -> None:
     emit(data, ctx.obj["json"], _benchmark_run_summary(data))
 
 
-def _evaluation_summary(data: dict[str, object]) -> list[str]:
+def _evaluation_summary(data: dict[str, Any]) -> list[str]:
     """Human-readable lines shared by evaluation create/get."""
     detail = f" ({data['status_detail']})" if data.get("status_detail") else ""
     lines = [

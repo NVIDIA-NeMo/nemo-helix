@@ -16,15 +16,24 @@ const { mockMutateAsync, mockCreateMutateAsync, mockUseListExperiments } = vi.ho
   mockUseListExperiments: vi.fn<() => { data: unknown; isLoading: boolean }>(),
 }));
 
-vi.mock('@nemo/sdk/generated/platform/api', async () => {
-  const actual = await vi.importActual<typeof import('@nemo/sdk/generated/platform/api')>(
-    '@nemo/sdk/generated/platform/api'
+vi.mock('@nemo/sdk/generated/platform/experiments', async () => {
+  const actual = await vi.importActual<typeof import('@nemo/sdk/generated/platform/experiments')>(
+    '@nemo/sdk/generated/platform/experiments'
   );
   return {
     ...actual,
     useListExperiments: () => mockUseListExperiments(),
-    usePatchEvaluation: () => ({ mutateAsync: mockMutateAsync, isPending: false }),
     useCreateExperiment: () => ({ mutateAsync: mockCreateMutateAsync, isPending: false }),
+  };
+});
+
+vi.mock('@nemo/sdk/generated/platform/evaluations', async () => {
+  const actual = await vi.importActual<typeof import('@nemo/sdk/generated/platform/evaluations')>(
+    '@nemo/sdk/generated/platform/evaluations'
+  );
+  return {
+    ...actual,
+    usePatchEvaluation: () => ({ mutateAsync: mockMutateAsync, isPending: false }),
   };
 });
 

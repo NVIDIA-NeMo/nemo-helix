@@ -25,8 +25,8 @@ const makeFileset = (purpose: FilesetPurpose): FilesetOutput =>
 
 // Override only the two data hooks the route reads; keep every other SDK
 // export intact so the file explorer's own hooks still resolve.
-vi.mock('@nemo/sdk/generated/platform/api', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@nemo/sdk/generated/platform/api')>()),
+vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@nemo/sdk/generated/platform/files')>()),
   useFilesRetrieveFileset: () => ({ data: mockFileset, isPending: false, isError: false }),
   useFilesListFilesetFiles: () => ({
     data: { data: [] },

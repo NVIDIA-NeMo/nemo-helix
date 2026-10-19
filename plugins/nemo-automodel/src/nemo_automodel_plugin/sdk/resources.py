@@ -3,12 +3,12 @@
 
 """Automodel contributor SDK resources (composed by ``nemo-customizer-plugin``).
 
-Thin shim over the shared :func:`nmp.customization_common.sdk.client.make_customization_sdk`
+Thin shim over the shared :func:`nhx.customization_common.sdk.client.make_customization_sdk`
 factory. The ``AutomodelCustomization`` / ``AsyncAutomodelCustomization`` symbols below
 are imported by string by the ``nemo-customizer`` SDK hub and must not move.
 """
 
-from nmp.customization_common.sdk.client import make_customization_sdk
+from nhx.customization_common.sdk.client import make_customization_sdk
 
 AutomodelCustomization, AsyncAutomodelCustomization = make_customization_sdk("automodel")
 

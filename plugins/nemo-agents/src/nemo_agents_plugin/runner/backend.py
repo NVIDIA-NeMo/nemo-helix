@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from nemo_agents_plugin.entities import ComputeResources, DeploymentMode, DeploymentStatus, Endpoint
+from nemo_agents_plugin.spec_revision import SpecRevision
+from nemo_helix_plugin.auth import AuthContext
 
 
 @dataclass(frozen=True)
@@ -67,6 +69,8 @@ class DeploymentInfo:
     """Absolute path to the subprocess log file (empty if not applicable)."""
     extra: dict[str, Any] = field(default_factory=dict)
     """Backend-specific metadata (e.g. container ID for Docker)."""
+    staged_spec: SpecRevision | None = None
+    """What the spec fileset resolved to when staged; None when the backend staged nothing."""
 
 
 class RunnerBackend(ABC):
@@ -97,17 +101,24 @@ class RunnerBackend(ABC):
         image: str | None = None,
         deployment_mode: DeploymentMode = "subprocess",
         created_by: str | None = None,
+        auth_context: AuthContext | None = None,
         resources: ComputeResources | None = None,
         secrets: dict[str, str] | None = None,
         use_image_entrypoint: bool = False,
     ) -> DeploymentInfo:
         """Start the agent process; returns status="starting".
 
+        ``port=0`` delegates allocation to the backend. The returned info
+        contains the actual port. Fabric subprocesses always reserve their
+        own socket; an explicit port applies only to NAT subprocesses.
+
         ``created_by`` is the principal id that created the deployment. When
-        platform auth is enabled, container-mode backends delegate the deployed
-        agent's platform calls to this principal (on-behalf-of) so its access is
-        scoped to what the creator can reach rather than the agents service
-        principal's full reach.
+        platform auth is enabled, container-mode backends delegate inference calls
+        through the auth-proxy sidecar with this principal as on-behalf-of.
+
+        ``auth_context`` is the full creator identity snapshot used by container
+        backends that request workload token exchange for direct platform SDK
+        calls from inside the deployed agent.
 
         ``resources`` is the snapshotted compute spec's k8s-style
         requests/limits. Container backends compile it into the execute

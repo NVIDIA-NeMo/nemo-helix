@@ -3,7 +3,7 @@
 
 import { useQueryParams } from '@nemo/common/src/hooks/useQueryParams';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
-import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/api';
+import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import { DatasetFileManagementSidePanel } from '@studio/components/DatasetFileManagementSidePanel';
 import { FilesetFilePreviewPanel } from '@studio/components/FilesetFilePreviewPanel';
 import { ROUTE_PARAMS, ROUTES } from '@studio/constants/routes';
@@ -82,7 +82,7 @@ export const PanelManagement: FC<PanelManagementProps> = ({ workspace }) => {
   // Dataset panel handlers
   const handleDatasetPanelClose = () => {
     setIsDatasetPanelOpen(false);
-    navigate(generatePath(ROUTES.workspace.filesets, { workspace }));
+    navigate(generatePath(ROUTES.workspace.filesets, { workspace }), { flushSync: true });
   };
 
   const handleFileSelect = (filePath: string) => {
@@ -102,11 +102,13 @@ export const PanelManagement: FC<PanelManagementProps> = ({ workspace }) => {
 
   const handleFilePanelClose = () => {
     const folderPathFromFile = decodedFilePath.split('/').slice(0, -1).join('/');
-    navigate(getFilesetDetailsRoute(workspace, datasetFullName, folderPathFromFile));
+    navigate(getFilesetDetailsRoute(workspace, datasetFullName, folderPathFromFile), {
+      flushSync: true,
+    });
   };
 
   const handleFilePanelOutsideClick = () => {
-    navigate(generatePath(ROUTES.workspace.filesets, { workspace }));
+    navigate(generatePath(ROUTES.workspace.filesets, { workspace }), { flushSync: true });
   };
 
   const handleDatasetClick = () => {

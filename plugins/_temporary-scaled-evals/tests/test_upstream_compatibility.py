@@ -1,0 +1,136 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Cover portable upstream compatibility behavior."""
+
+from __future__ import annotations
+
+import json
+import runpy
+from pathlib import Path
+
+import pytest
+
+try:
+    from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_HARBOR_VERSIONS
+    from scaled_evals.harbor_runners import resolve_harbor_runner, supported_harbor_versions
+except ImportError as exc:
+    pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
+
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_harbor_catalog_and_compose_image_advertise_the_same_runners() -> None:
+    catalog = json.loads((PLUGIN_ROOT / "src/scaled_evals/data/harbor_runner_qualifications.json").read_text())
+    assert catalog["default_version"] == "0.13.2"
+    assert catalog["aliases"]["default"] == "0.13.2"
+    assert "0.20.0" in supported_harbor_versions()
+    assert resolve_harbor_runner("0.20.0").harbor_dir == "/opt/harbor/0.20.0"
+    assert catalog["adapter"] == {
+        "version": "nemo-helix-plugin-overlay-v1",
+        "files": [
+            "harbor-patches/patch_langgraph_writable_venv.py",
+            "harbor-patches/patch_pi_extra_env.py",
+            "harbor-patches/patch_sandbox_k8s_root.py",
+            "harbor-patches/sandbox_k8s_harbor.py",
+        ],
+    }
+
+    dockerfile = (PLUGIN_ROOT / "deploy/compose/Dockerfile").read_text()
+    assert "selectable-versions.txt" in dockerfile
+    assert "for version in $(cat /opt/harbor/selectable-versions.txt)" in dockerfile
+    assert 'test -x "${runner}/.venv/bin/harbor"' in dockerfile
+    harbor_target = dockerfile.split("AS harbor\n", 1)[1].split("\nFROM ", 1)[0]
+    assert 'uv pip install -r "/opt/harbor/requirements/${version}.txt"' in harbor_target
+    assert "ARG SANDBOX_K8S=true" in harbor_target
+    assert "-c 'import opensandbox'" in harbor_target
+    assert "harbor.environments.opensandbox" not in harbor_target
+    assert "0.20.0" not in harbor_target
+    assert "COPY packages/nhx_sandbox /tmp/nhx_sandbox" in harbor_target
+    assert "uv pip install /tmp/nhx_sandbox" in harbor_target
+    assert "sandboxed_gym" not in harbor_target
+    assert "src/scaled_evals/harbor_opensandbox_environment.py" in harbor_target
+    assert "src/scaled_evals/harbor_opensandbox_driver.py" in harbor_target
+    assert "src/scaled_evals/harbor_opensandbox_cleanup.py" in harbor_target
+    assert "src/scaled_evals/harbor_opensandbox_services.py" in harbor_target
+    assert 'nemo-extensions" > "${site}/nemo-extensions.pth"' in harbor_target
+    assert "from scaled_evals.harbor_opensandbox_environment import NemoOpenSandboxEnvironment" in harbor_target
+
+
+def test_harbor_runner_requirements_match_the_catalog() -> None:
+    catalog = json.loads((PLUGIN_ROOT / "src/scaled_evals/data/harbor_runner_qualifications.json").read_text())
+    selectable = {version for version, release in catalog["releases"].items() if release["selectable"]}
+    requirements_dir = PLUGIN_ROOT / "harbor-runners"
+
+    assert {path.stem for path in requirements_dir.glob("*.txt")} == selectable
+    for version in selectable:
+        extras = catalog["releases"][version].get("extras", [])
+        lines = [
+            line
+            for line in (requirements_dir / f"{version}.txt").read_text().splitlines()
+            if line and not line.startswith("#")
+        ]
+        # Packages pinned beside Harbor: each Harbor extra's package, then plain additions.
+        packages = catalog["releases"][version].get("packages", [])
+        harbor = f"harbor[{','.join(extras)}]" if extras else "harbor"
+        assert lines[0] == f"{harbor}=={version}"
+        assert [line.split("==", 1)[0] for line in lines[1:]] == [*extras, *packages]
+
+
+def test_harbor_opensandbox_runners_carry_the_sdk() -> None:
+    """Every runner harbor_opensandbox accepts gets the SDK, so the Dockerfile installs its environment there."""
+    for version in HARBOR_OPENSANDBOX_HARBOR_VERSIONS:
+        assert version in supported_harbor_versions()
+        lines = (PLUGIN_ROOT / "harbor-runners" / f"{version}.txt").read_text().splitlines()
+        assert "opensandbox==0.1.16" in lines, version
+
+
+def test_generic_harbor_020_patches_cover_langgraph_and_pi(tmp_path: Path) -> None:
+    langgraph_patch = runpy.run_path(str(PLUGIN_ROOT / "harbor-patches/patch_langgraph_writable_venv.py"))["patch"]
+    langgraph = tmp_path / "langgraph.py"
+    langgraph.write_text(
+        '_REMOTE_VENV_DIR = PurePosixPath("/opt/harbor-langgraph-venv")\n'
+        'command = f"uv venv {venv_dir} --python {python_version} --clear; "\n'
+    )
+    langgraph_patch(langgraph)
+    assert "/tmp/harbor-langgraph-venv" in langgraph.read_text()
+    assert "uv venv {venv_dir} --python {python_version} --clear" in langgraph.read_text()
+    assert "/opt/harbor/pip.pyz" in (PLUGIN_ROOT / "deploy/compose/Dockerfile").read_text()
+
+    legacy = tmp_path / "legacy_langgraph.py"
+    legacy.write_text(
+        '_REMOTE_VENV_DIR = PurePosixPath("/opt/harbor-langgraph-venv")\n'
+        'command = f"python3 -m venv {venv_dir}; " "python -m pip install uv; "\n'
+    )
+    langgraph_patch(legacy)
+    assert "/tmp/harbor-langgraph-venv" in legacy.read_text()
+    assert "python /tmp/pip.pyz install uv" in legacy.read_text()
+    assert "bootstrap.pypa.io" not in legacy.read_text()
+
+    unknown = tmp_path / "unknown_langgraph.py"
+    unknown.write_text("class LangGraph:\n    pass\n")
+    with pytest.raises(RuntimeError, match="source anchor"):
+        langgraph_patch(unknown)
+
+    pi_patch = runpy.run_path(str(PLUGIN_ROOT / "harbor-patches/patch_pi_extra_env.py"))["patch"]
+    pi = tmp_path / "pi.py"
+    pi.write_text(
+        "import json\nimport os\nimport shlex\n"
+        "val = os.environ.get(key)\n"
+        "    @with_prompt_template\n"
+        "    async def run(\n"
+        '                f". ~/.nvm/nvm.sh; "\n'
+        '                f"pi --print --mode json --session-dir /logs/agent/pi/sessions "\n'
+        '                f"{escaped_instruction} "\n'
+        '                f"2>&1 </dev/null |"\n'
+        "        skills_command = self._build_register_skills_command()\n"
+    )
+    pi_patch(pi)
+    patched = pi.read_text()
+    assert 'f"printf %s {escaped_instruction} | "' in patched
+    assert "val = self._get_env(key)" in patched
+    assert "_write_inference_headers_config" in patched
+    assert "</dev/null" not in patched
+
+    pi_patch(pi)
+    assert pi.read_text() == patched

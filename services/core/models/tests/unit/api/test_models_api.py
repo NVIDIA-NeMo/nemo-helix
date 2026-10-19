@@ -10,14 +10,14 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nemo_platform_plugin.client.errors import NemoTransportError
-from nmp.common.api.common import Page, PaginationData
-from nmp.common.auth import AuthClient, Principal, get_auth_client
-from nmp.common.entities.client import EntityConflictError, EntityValidationError
-from nmp.core.models.api.service.adapter_entity_service import AdapterEntityService
-from nmp.core.models.api.service.model_entity_service import ModelEntityService
-from nmp.core.models.api.v2.models import router, start_update_model_spec_job
-from nmp.core.models.schemas import ModelEntity
+from nemo_helix_plugin.client.errors import NemoTransportError
+from nhx.common.api.common import Page, PaginationData
+from nhx.common.auth import AuthClient, Principal, get_auth_client
+from nhx.common.entities.client import EntityConflictError, EntityValidationError
+from nhx.core.models.api.service.adapter_entity_service import AdapterEntityService
+from nhx.core.models.api.service.model_entity_service import ModelEntityService
+from nhx.core.models.api.v2.models import router, start_update_model_spec_job
+from nhx.core.models.schemas import ModelEntity
 
 
 @pytest.fixture
@@ -54,20 +54,21 @@ def mock_auth_client():
 
 
 @pytest.fixture
-def mock_sdk():
-    """Create a mock SDK for create/update endpoints that depend on get_sdk_client."""
-    sdk = AsyncMock()
-    sdk._custom_headers = {"authorization": "Bearer test"}
-    sdk.base_url = "http://localhost:8080"
-    sdk.workspace = "default"
-    return sdk
+def mock_files_client():
+    """Create a mock Files client for create/update endpoints that depend on get_files_client."""
+    files = AsyncMock()
+    files.get_fileset.return_value = MagicMock()
+    return files
 
 
 @pytest.fixture
-def test_app(mock_model_entity_service, mock_adapter_entity_service, mock_auth_client, mock_sdk):
+def test_app(mock_model_entity_service, mock_adapter_entity_service, mock_auth_client, mock_files_client):
     """Create a FastAPI test app with mocked dependencies."""
-    from nmp.common.service.dependencies import get_sdk_client
-    from nmp.core.models.api.dependencies import get_adapter_entity_service, get_model_entity_service
+    from nhx.core.models.api.dependencies import (
+        get_adapter_entity_service,
+        get_files_client,
+        get_model_entity_service,
+    )
 
     app = FastAPI()
 
@@ -80,7 +81,7 @@ def test_app(mock_model_entity_service, mock_adapter_entity_service, mock_auth_c
     app.dependency_overrides[get_model_entity_service] = override_model_entity_service
     app.dependency_overrides[get_adapter_entity_service] = override_adapter_entity_service
     app.dependency_overrides[get_auth_client] = lambda: mock_auth_client
-    app.dependency_overrides[get_sdk_client] = lambda: mock_sdk
+    app.dependency_overrides[get_files_client] = lambda: mock_files_client
     app.include_router(router, prefix="/apis/models")
 
     return app
@@ -252,6 +253,46 @@ def test_list_models_with_base_model_filter_name(client, mock_model_entity_servi
     assert parsed_filter.extract("data.base_model") == "llama-3"
 
 
+def test_list_models_with_fileset_filter_ref(client, mock_model_entity_service, sample_page):
+    """Test listing models filtered by fileset reference using $eq."""
+    mock_model_entity_service.list_model_entities.return_value = sample_page
+
+    response = client.get("/apis/models/v2/workspaces/nvidia/models?filter[fileset]=nvidia/my-fileset")
+
+    assert response.status_code == 200
+    call_args = mock_model_entity_service.list_model_entities.call_args
+    parsed_filter = call_args.kwargs["parsed_filter"]
+    assert parsed_filter.extract("data.fileset") == "nvidia/my-fileset"
+
+
+def test_list_models_with_fileset_filter_true(client, mock_model_entity_service, sample_page):
+    """Test listing models filtered by fileset=true → $not { data.fileset $eq null }."""
+    mock_model_entity_service.list_model_entities.return_value = sample_page
+
+    response = client.get("/apis/models/v2/workspaces/nvidia/models?filter[fileset]=true")
+
+    assert response.status_code == 200
+    call_args = mock_model_entity_service.list_model_entities.call_args
+    parsed_filter = call_args.kwargs["parsed_filter"]
+    assert parsed_filter.operation is not None
+    # Bool "true" is coerced to a not-null check
+    assert parsed_filter.operation.to_dict() == {"$not": {"data.fileset": {"$eq": None}}}
+
+
+def test_list_models_with_fileset_filter_false(client, mock_model_entity_service, sample_page):
+    """Test listing models filtered by fileset=false → data.fileset $eq null."""
+    mock_model_entity_service.list_model_entities.return_value = sample_page
+
+    response = client.get("/apis/models/v2/workspaces/nvidia/models?filter[fileset]=false")
+
+    assert response.status_code == 200
+    call_args = mock_model_entity_service.list_model_entities.call_args
+    parsed_filter = call_args.kwargs["parsed_filter"]
+    assert parsed_filter.operation is not None
+    # Bool "false" is coerced to a null check
+    assert parsed_filter.operation.to_dict() == {"data.fileset": {"$eq": None}}
+
+
 def test_list_models_with_name_filter(client, mock_model_entity_service, sample_page):
     """Test listing models with name filter using $like operator."""
     mock_model_entity_service.list_model_entities.return_value = sample_page
@@ -420,8 +461,8 @@ async def test_model_spec_job_transport_failure_does_not_fail_persisted_model(sa
     )
 
     with (
-        patch("nmp.core.models.api.v2.models.get_async_platform_sdk"),
-        patch("nmp.core.models.api.v2.models.client_from_platform", return_value=jobs),
+        patch("nhx.core.models.api.v2.models.get_async_nemo_client", return_value=AsyncMock()),
+        patch("nhx.core.models.api.v2.models.AsyncJobsClient.from_client", return_value=jobs),
     ):
         await start_update_model_spec_job(sample_model_entity)
 
@@ -497,19 +538,14 @@ def test_create_model_adapter_entity_validation_error_returns_422(client, mock_a
     """Test that entity store validation errors during adapter creation return 422."""
     mock_adapter_entity_service.create_adapter.side_effect = EntityValidationError("adapter name invalid")
 
-    with patch("nmp.core.models.api.permissions.client_from_platform") as mock_cfp:
-        mock_files = AsyncMock()
-        mock_files.get_fileset.return_value = MagicMock()
-        mock_cfp.return_value = mock_files
-
-        response = client.post(
-            "/apis/models/v2/workspaces/nvidia/models/my-model/adapters",
-            json={
-                "name": "my-adapter",
-                "fileset": "nvidia/my-fileset",
-                "finetuning_type": "lora",
-            },
-        )
+    response = client.post(
+        "/apis/models/v2/workspaces/nvidia/models/my-model/adapters",
+        json={
+            "name": "my-adapter",
+            "fileset": "nvidia/my-fileset",
+            "finetuning_type": "lora",
+        },
+    )
 
     assert response.status_code == 422
     assert "adapter name invalid" in response.json()["detail"]

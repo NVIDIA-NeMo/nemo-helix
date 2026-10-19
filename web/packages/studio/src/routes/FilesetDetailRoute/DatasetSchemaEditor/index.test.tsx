@@ -17,9 +17,9 @@ const { mutateAsync, invalidateQueries } = vi.hoisted(() => ({
   invalidateQueries: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('@nemo/sdk/generated/platform/api', async () => {
-  const actual = await vi.importActual<typeof import('@nemo/sdk/generated/platform/api')>(
-    '@nemo/sdk/generated/platform/api'
+vi.mock('@nemo/sdk/generated/platform/files', async () => {
+  const actual = await vi.importActual<typeof import('@nemo/sdk/generated/platform/files')>(
+    '@nemo/sdk/generated/platform/files'
   );
   return {
     ...actual,

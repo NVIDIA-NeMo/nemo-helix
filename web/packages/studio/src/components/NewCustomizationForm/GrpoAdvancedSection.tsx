@@ -13,6 +13,7 @@ import { Divider, FormField, Stack, TextInput } from '@nvidia/foundations-react-
 import { ControlledJsonInput } from '@studio/components/NewCustomizationForm/ControlledJsonInput';
 import { FormSection } from '@studio/components/NewCustomizationForm/FormSection';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';
+import { GRPO_SPEC_DEFAULTS, specSliderProps } from '@studio/util/forms/specDefaults';
 import { useFormContext } from 'react-hook-form';
 
 const POLICY_BACKEND_ITEMS = [
@@ -58,7 +59,7 @@ export const GrpoAdvancedSection = () => {
               slotInfo:
                 'KL penalty coefficient against the reference policy. Higher values keep the model closer to the reference.',
             }}
-            defaultValue={0.0}
+            {...specSliderProps(GRPO_SPEC_DEFAULTS, 'ref_policy_kl_penalty')}
             min={0}
             max={1}
             step={0.01}
@@ -70,7 +71,7 @@ export const GrpoAdvancedSection = () => {
               slotLabel: 'Clip Min',
               slotInfo: 'Lower bound for PPO-style importance ratio clipping.',
             }}
-            defaultValue={0.2}
+            {...specSliderProps(GRPO_SPEC_DEFAULTS, 'ratio_clip_min')}
             min={0}
             max={1}
             step={0.01}
@@ -82,7 +83,7 @@ export const GrpoAdvancedSection = () => {
               slotLabel: 'Clip Max',
               slotInfo: 'Upper bound for PPO-style importance ratio clipping.',
             }}
-            defaultValue={0.28}
+            {...specSliderProps(GRPO_SPEC_DEFAULTS, 'ratio_clip_max')}
             min={0}
             max={2}
             step={0.01}
@@ -235,10 +236,10 @@ export const GrpoAdvancedSection = () => {
           <ControlledSliderWithTextInput
             useControllerProps={{ name: 'grpo.sequence_length_round', control }}
             formFieldProps={{
-              slotLabel: 'Sequence Length Round',
+              slotLabel: 'Length Rounding',
               slotInfo: 'Round bucketed micro-batch sequence lengths up to a multiple of this.',
             }}
-            defaultValue={64}
+            {...specSliderProps(GRPO_SPEC_DEFAULTS, 'sequence_length_round')}
             min={1}
             max={1024}
             step={1}
@@ -247,7 +248,7 @@ export const GrpoAdvancedSection = () => {
           <ControlledSliderWithTextInput
             useControllerProps={{ name: 'grpo.train_mb_tokens', control }}
             formFieldProps={{
-              slotLabel: 'Train Micro-Batch Tokens',
+              slotLabel: 'Micro-Batch Tokens',
               slotInfo:
                 'Token budget per training micro-batch, read by the dynamic and sequence_packing strategies.',
             }}
@@ -260,7 +261,7 @@ export const GrpoAdvancedSection = () => {
           <ControlledSliderWithTextInput
             useControllerProps={{ name: 'grpo.vllm_tensor_parallel_size', control }}
             formFieldProps={{
-              slotLabel: 'vLLM Tensor Parallel Size',
+              slotLabel: 'vLLM Tensor Parallel',
               slotInfo:
                 "Tensor parallel size for the vLLM rollout engine, independent of the policy's.",
             }}
@@ -273,10 +274,10 @@ export const GrpoAdvancedSection = () => {
           <ControlledSliderWithTextInput
             useControllerProps={{ name: 'grpo.vllm_gpu_memory_utilization', control }}
             formFieldProps={{
-              slotLabel: 'vLLM GPU Memory Utilization',
+              slotLabel: 'vLLM GPU Memory',
               slotInfo: 'Fraction of each GPU vLLM reserves for weights plus KV cache.',
             }}
-            defaultValue={0.5}
+            {...specSliderProps(GRPO_SPEC_DEFAULTS, 'vllm_gpu_memory_utilization')}
             min={0.05}
             max={1}
             step={0.05}
@@ -285,7 +286,7 @@ export const GrpoAdvancedSection = () => {
           <ControlledSliderWithTextInput
             useControllerProps={{ name: 'grpo.router_aux_loss_coef', control }}
             formFieldProps={{
-              slotLabel: 'Router Aux Loss Coefficient',
+              slotLabel: 'Router Aux Loss',
               slotInfo:
                 'MoE router auxiliary-loss coefficient, applied as a top-level HuggingFace config override.',
             }}
@@ -310,9 +311,9 @@ export const GrpoAdvancedSection = () => {
             formFieldProps={{
               slotLabel: 'Automodel Kwargs (JSON)',
               slotInfo:
-                'Selects the low-level compute kernels for mixture-of-experts models. Requires the automodel policy backend.',
+                'Requires the automodel policy backend. force_hf loads the stock HuggingFace modules; a backend block picks the Transformer-Engine or DeepEP MoE implementation. Unset lets Automodel auto-detect.',
             }}
-            placeholder="{}"
+            placeholder='{"force_hf": true}'
             disabled={disabled}
           />
         </Stack>

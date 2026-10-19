@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useFilesDownloadFile } from '@nemo/sdk/generated/platform/api';
+import { useFilesDownloadFile } from '@nemo/sdk/generated/platform/files';
 import { Flex, Spinner, Text } from '@nvidia/foundations-react-core';
 import { useEffect, useState, type FC } from 'react';
 

@@ -6,7 +6,7 @@ import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import {
   getEntitiesListWorkspacesQueryKey,
   useEntitiesDeleteWorkspace,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/entity-store';
 import { WorkspacesPage } from '@nemo/sdk/generated/platform/schema';
 import { queryClient } from '@studio/api/queryClient';
 import { useRecentWorkspaces } from '@studio/components/WorkspaceDropdown/useRecentWorkspaces';

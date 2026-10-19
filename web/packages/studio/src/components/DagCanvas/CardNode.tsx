@@ -14,6 +14,8 @@ export interface CardNodeData extends DagNodeData {
   hasIncoming?: boolean;
   /** Whether an outgoing edge starts here; controls the source handle. Defaults to true. */
   hasOutgoing?: boolean;
+  /** Prevent card clicks from selecting the React Flow wrapper. */
+  stopPropagation?: boolean;
   [key: string]: unknown;
 }
 
@@ -24,7 +26,10 @@ const STATUS_ICON_CLASS: Record<DagNodeStatus, string> = {
   idle: 'text-[color:var(--text-color-accent-blue)]',
   running: 'text-[color:var(--text-color-feedback-info)]',
   success: 'text-[color:var(--text-color-feedback-success)]',
+  warning: 'text-[color:var(--text-color-feedback-warning)]',
   error: 'text-[color:var(--text-color-feedback-danger)]',
+  cancelled: 'text-[color:var(--text-color-feedback-warning)]',
+  unknown: 'text-secondary',
 };
 
 /**
@@ -46,12 +51,19 @@ export const CardNode: FC<NodeProps<CardNodeType>> = ({
     icon: Icon = Box,
     status = 'idle',
     colorClassName,
+    highlighted = false,
     onActivate,
     hasIncoming = true,
     hasOutgoing = true,
+    stopPropagation = false,
   } = data;
-  const iconClassName =
-    status === 'idle' && colorClassName ? colorClassName : STATUS_ICON_CLASS[status];
+  const iconClassName = colorClassName ?? STATUS_ICON_CLASS[status];
+  const subtitle = [type, status === 'idle' ? null : status].filter(Boolean).join(' · ');
+  const emphasisClassName = selected
+    ? 'border-brand ring-1 ring-(--color-brand,#76b900)'
+    : highlighted
+      ? '!border-2 !border-dashed !border-brand'
+      : undefined;
   return (
     <>
       {hasIncoming && (
@@ -59,15 +71,25 @@ export const CardNode: FC<NodeProps<CardNodeType>> = ({
       )}
       <SelectableCard
         title={title}
-        subtitle={type}
-        subtitleClassName={`uppercase tracking-wide ${colorClassName ?? 'text-[color:var(--text-color-accent-blue)]'}`}
+        ariaLabel={[
+          title,
+          type,
+          status === 'idle' ? null : status,
+          highlighted ? 'longest path' : null,
+        ]
+          .filter(Boolean)
+          .join(', ')}
+        subtitle={subtitle}
+        subtitleClassName={colorClassName ?? 'text-[color:var(--text-color-accent-blue)]'}
         description={description}
         tags={tags}
         selected={selected}
+        className={emphasisClassName}
         onActivate={onActivate}
+        stopPropagation={stopPropagation}
         leading={
           <CardIconBadge>
-            <Icon size={16} className={iconClassName} aria-hidden />
+            <Icon size={16} className={iconClassName} role="img" aria-hidden />
           </CardIconBadge>
         }
       />

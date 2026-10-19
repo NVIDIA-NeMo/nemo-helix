@@ -32,7 +32,7 @@ import os
 import sys
 
 import httpx
-from nmp.common.entities import DEFAULT_WORKSPACE
+from nhx.common.entities import DEFAULT_WORKSPACE
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ def test_ngc_integration(base_url: str, api_key: str | None = None):
         "type": "ngc",
         "org": "nvidian",
         "team": "nemo-llm",
-        "resource": "nemo-platform-quickstart",
+        "resource": "nemo-helix-quickstart",
         "api_key_secret": SECRET_NAME,
     }
 

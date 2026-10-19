@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { InsightStatus } from '@nemo/sdk/generated/insights/schema';
 import type { Button, Tag } from '@nvidia/foundations-react-core';
-import type { InsightStatus } from '@studio/api/optimizer';
 import type { ComponentProps } from 'react';
 
 type TagColor = ComponentProps<typeof Tag>['color'];
@@ -27,9 +27,9 @@ export interface InsightAction {
   color?: ComponentProps<typeof Button>['color'];
 }
 
-// Canonical order: secondary actions first, Run experiment (green brand CTA) on the right.
+// Canonical order: secondary actions first.
 const OPEN: InsightAction = {
-  label: 'Run experiment',
+  label: 'Reopen',
   target: 'open',
   kind: 'primary',
   color: 'brand',

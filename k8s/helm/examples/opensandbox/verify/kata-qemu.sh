@@ -6,7 +6,7 @@
 #
 # Checks: RuntimeClass + kata nodes, server Ready + Secret, /health,
 # create sandbox, Running, runtimeClassName=kata-qemu, kata node placement,
-# guest kernel differs from host (uname -r), cleanup.
+# guest kernel differs from host (uname -r), Harbor mounts, cleanup.
 #
 # Usage:
 #   ./kata-qemu.sh

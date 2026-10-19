@@ -12,7 +12,7 @@ Use customization jobs to fine-tune a [model](/documentation/customizer-referenc
 
 A customization job references a **Model Entity** that contains the base model checkpoint, and is submitted to one of two backends — **automodel** (default, multi-GPU) or **unsloth** (single-GPU, with optional quantized loading for LoRA). The job then runs on the platform's GPU cluster. When training completes:
 
--   **LoRA jobs**: Create an **Adapter** attached to the original Model Entity. Adapters can be auto-deployed to NIMs.
+-   **LoRA jobs**: Create an **Adapter** attached to the original Model Entity. Adapters can be auto-deployed to existing deployments.
 -   **Full fine-tuning jobs**: Create a **new Model Entity** with the customized weights, linked to the base model.
 
 This design keeps adapters organized with their parent models and simplifies deployment workflows.
@@ -31,7 +31,7 @@ Perform common customization job tasks.
 
 <Tip>
 
-The value for `NMP_BASE_URL` will depend on your deployment. After the standard [Setup](/documentation/get-started) flow, the default local URL is `http://localhost:8080`. Otherwise, consult with your cluster administrator.
+The task guides connect to the deployment in your current CLI context. After the standard [Setup](/documentation/get-started) flow, that is the local platform at `http://localhost:8080`. To connect to another deployment, refer to [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
 </Tip>
 <Cards>

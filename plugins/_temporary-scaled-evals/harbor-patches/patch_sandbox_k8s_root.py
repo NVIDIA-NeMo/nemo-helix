@@ -88,15 +88,82 @@ def _patch_root_validators(path: Path, replacement: str) -> None:
     _write_text_breaking_links(path, "".join(lines))
 
 
+_SYSCTLS_LOW_PORTS_ONLY = """        if os.environ.get(
+            "SANDBOX_K8S_INTERNAL_ROOTLESS_LOW_PORTS", ""
+        ).lower() == "true":
+            ctx["sysctls"] = [
+                {
+                    "name": "net.ipv4.ip_unprivileged_port_start",
+                    "value": "0",
+                }
+            ]
+"""
+
+_SYSCTLS_LO_ONLY = """        sysctls = []
+        if os.environ.get(
+            "SANDBOX_K8S_INTERNAL_ROOTLESS_LOW_PORTS", ""
+        ).lower() == "true":
+            sysctls.append(
+                {
+                    "name": "net.ipv4.ip_unprivileged_port_start",
+                    "value": "0",
+                }
+            )
+        if os.environ.get(
+            "SANDBOX_K8S_INTERNAL_IPV6_LOOPBACK", ""
+        ).lower() == "true":
+            sysctls.append(
+                {
+                    "name": "net.ipv6.conf.lo.disable_ipv6",
+                    "value": "0",
+                }
+            )
+        if sysctls:
+            ctx["sysctls"] = sysctls
+"""
+
+_SYSCTLS_GRANT = """        sysctls = []
+        if os.environ.get(
+            "SANDBOX_K8S_INTERNAL_ROOTLESS_LOW_PORTS", ""
+        ).lower() == "true":
+            sysctls.append(
+                {
+                    "name": "net.ipv4.ip_unprivileged_port_start",
+                    "value": "0",
+                }
+            )
+        if os.environ.get(
+            "SANDBOX_K8S_INTERNAL_IPV6_LOOPBACK", ""
+        ).lower() == "true":
+            sysctls.extend(
+                [
+                    {"name": "net.ipv6.conf.all.disable_ipv6", "value": "0"},
+                    {"name": "net.ipv6.conf.default.disable_ipv6", "value": "0"},
+                    {"name": "net.ipv6.conf.lo.disable_ipv6", "value": "0"},
+                ]
+            )
+        if sysctls:
+            ctx["sysctls"] = sysctls
+"""
+
+
 def patch_capabilities(package_dir: Path) -> None:
     """Upgrade an inherited root-enabled runner with the narrow capability grant."""
     client_path = package_dir / "client.py"
     old = '"capabilities": {"drop": ["ALL"]},\n'
-    marker = '                                "DAC_OVERRIDE",\n'
+    # Keyed on KILL so a runner carrying an older grant fails loudly here rather
+    # than inheriting a list that is missing a capability.
+    marker = '                                "KILL",\n'
+    # A base image built before KILL joined the grant already carries the rest of
+    # the list, so splice KILL into it instead of rewriting the whole manifest.
+    preceding = '                                "FOWNER",\n'
     text = client_path.read_text()
     old_count = text.count(old)
     marker_count = text.count(marker)
     if old_count == 0 and marker_count == 1:
+        return
+    if old_count == 0 and marker_count == 0 and text.count(preceding) == 1:
+        _write_text_breaking_links(client_path, text.replace(preceding, preceding + marker, 1))
         return
     if old_count != 1 or marker_count != 0:
         raise RuntimeError("unexpected sandbox-k8s capability manifest while upgrading inherited runner")
@@ -108,6 +175,7 @@ def patch_capabilities(package_dir: Path) -> None:
                                 "CHOWN",
                                 "DAC_OVERRIDE",
                                 "FOWNER",
+                                "KILL",
                                 "SETGID",
                                 "SETUID",
                             ]
@@ -125,6 +193,99 @@ def patch_capabilities(package_dir: Path) -> None:
                 },
 """
     _write_text_breaking_links(client_path, text.replace(old, new, 1))
+
+
+def patch_sysctls(package_dir: Path) -> None:
+    """Upgrade an inherited runner to the deterministic IPv6 loopback sysctls.
+
+    ``net.ipv6.conf.all.disable_ipv6`` is a broadcast write: the kernel stamps it
+    onto ``default`` and onto every interface that already exists, ``lo``
+    included. GKE injects ``all=1`` into every pod sandbox on an IPv4-only
+    cluster, and runc applies the sysctl map with ``for k, v := range``, whose
+    order Go randomises per execution. Requesting ``lo=0`` alone therefore
+    restores ``::1`` only sometimes. Overriding ``all`` and ``default`` to 0
+    leaves no key in the map that writes a 1 to ``lo``, which removes the race
+    by construction rather than by luck.
+
+    Two inherited shapes are handled: a base image predating the IPv6 gate
+    entirely, and one carrying an earlier ``lo``-only grant. Missing the second
+    would silently leave a runner emitting the racy single sysctl.
+    """
+    client_path = package_dir / "client.py"
+    text = client_path.read_text()
+    if "net.ipv6.conf.all.disable_ipv6" in text:
+        return
+    for old in (_SYSCTLS_LOW_PORTS_ONLY, _SYSCTLS_LO_ONLY):
+        if text.count(old) == 1:
+            _write_text_breaking_links(client_path, text.replace(old, _SYSCTLS_GRANT, 1))
+            return
+    raise RuntimeError("unexpected inherited sandbox-k8s sysctl manifest")
+
+
+def patch_sidecar_capabilities(package_dir: Path) -> None:
+    """Let a writable-root sidecar carry the same narrow grant the task container has.
+
+    ``patch_capabilities`` keys the grant on the container being named
+    ``sandbox``, which withholds it from every sidecar. That breaks the ordinary
+    database images these multi-service tasks depend on: ``postgres`` and
+    ``mysql`` start as root and hand off to their service account with ``gosu``
+    or ``su-exec``, which needs ``SETUID``/``SETGID``. With ``drop: ["ALL"]`` the
+    entrypoint cannot drop privilege and the container dies before it is ready.
+
+    The name was never the security boundary -- the other two conditions are, and
+    they still hold: the container must be explicitly configured with a writable
+    root, and the deployment must be operator-authorized. This also matches
+    upstream's own intent, since ``build_sidecar_pod_spec`` gives sidecars the
+    main container's security context.
+    """
+    client_path = package_dir / "client.py"
+    old = """                            container.name == "sandbox"
+                            and not container.read_only_root_filesystem
+"""
+    new = """                            not container.read_only_root_filesystem
+"""
+    text = client_path.read_text()
+    # A runner that already carries the widened grant is left alone, so this
+    # stays safe to re-run against an inherited image.
+    if old not in text:
+        return
+    if text.count(old) != 1:
+        raise RuntimeError("unexpected sandbox-k8s capability gate while widening to sidecars")
+    _write_text_breaking_links(client_path, text.replace(old, new, 1))
+
+
+def patch_sidecar_host_aliases(package_dir: Path) -> None:
+    """Resolve each sidecar's own name to loopback inside the pod.
+
+    A multi-service task addresses its services by the names its compose file
+    gives them -- ``http://legacy-app:8000``, ``postgres``, ``customer`` -- and
+    every container in a pod shares one network namespace, so loopback is where
+    those names have to point. ``sandbox_k8s`` already does this in
+    ``build_sidecar_pod_spec``, the Compose-shaped helper, but nothing calls it:
+    the ``sidecars`` list this adapter uses goes through the high-level pod
+    builder, which emits no ``hostAliases`` at all. Without them a service that
+    waits on a sibling by name never resolves it and simply never becomes ready.
+    """
+    client_path = package_dir / "client.py"
+    anchor = """            "securityContext": self._build_security_context(spec),
+        }
+"""
+    addition = """        if spec.sidecars:
+            pod_spec["hostAliases"] = [
+                {
+                    "ip": "127.0.0.1",
+                    "hostnames": [sidecar.name for sidecar in spec.sidecars],
+                }
+            ]
+"""
+    text = client_path.read_text()
+    # A base image that already carries the grant is left alone, so this stays
+    # safe to re-run against an inherited runner.
+    if "hostAliases" in text:
+        return
+    if text.count(anchor) != 1:
+        raise RuntimeError("unexpected sandbox-k8s pod builder while adding sidecar host aliases")
+    _write_text_breaking_links(client_path, text.replace(anchor, anchor + addition, 1))
 
 
 def patch(package_dir: Path) -> None:
@@ -175,6 +336,8 @@ def patch(package_dir: Path) -> None:
         '"readOnlyRootFilesystem": container.read_only_root_filesystem,\n',
     )
     patch_capabilities(package_dir)
+    patch_sidecar_capabilities(package_dir)
+    patch_sidecar_host_aliases(package_dir)
 
     _replace_once(
         client_path,
@@ -261,7 +424,7 @@ def patch(package_dir: Path) -> None:
 
     _insert_after_once(
         client_path,
-        """        self._astra_chamber: str | None = normalize_astra_chamber(astra_chamber)
+        """        self._api_client = self._load_config(kubeconfig_path, context, in_cluster, verify_ssl)
 """,
         """        self._kubeconfig_path = kubeconfig_path
         self._context = context
@@ -275,16 +438,7 @@ def patch(package_dir: Path) -> None:
             "seccompProfile": {"type": "RuntimeDefault"},
         }
 """,
-        """        if os.environ.get(
-            "SANDBOX_K8S_INTERNAL_ROOTLESS_LOW_PORTS", ""
-        ).lower() == "true":
-            ctx["sysctls"] = [
-                {
-                    "name": "net.ipv4.ip_unprivileged_port_start",
-                    "value": "0",
-                }
-            ]
-""",
+        _SYSCTLS_GRANT,
     )
 
     _insert_after_once(
@@ -537,7 +691,7 @@ def verify() -> None:
     from pydantic import ValidationError
     from sandbox_k8s.client import K8sSandboxClient
     from sandbox_k8s.sandbox import K8sSandbox
-    from sandbox_k8s.types import SandboxSpec
+    from sandbox_k8s.types import ContainerSpec, SandboxSpec
 
     constructor_parameters = inspect.signature(K8sSandbox).parameters
     assert "read_only_root_filesystem" in constructor_parameters
@@ -564,6 +718,22 @@ def verify() -> None:
                 "value": "0",
             }
         ]
+        os.environ["SANDBOX_K8S_INTERNAL_IPV6_LOOPBACK"] = "true"
+        security_context = K8sSandboxClient._build_security_context(non_root_spec)
+        assert security_context["sysctls"] == [
+            {"name": "net.ipv4.ip_unprivileged_port_start", "value": "0"},
+            {"name": "net.ipv6.conf.all.disable_ipv6", "value": "0"},
+            {"name": "net.ipv6.conf.default.disable_ipv6", "value": "0"},
+            {"name": "net.ipv6.conf.lo.disable_ipv6", "value": "0"},
+        ]
+        os.environ.pop("SANDBOX_K8S_INTERNAL_ROOTLESS_LOW_PORTS", None)
+        security_context = K8sSandboxClient._build_security_context(non_root_spec)
+        assert security_context["sysctls"] == [
+            {"name": "net.ipv6.conf.all.disable_ipv6", "value": "0"},
+            {"name": "net.ipv6.conf.default.disable_ipv6", "value": "0"},
+            {"name": "net.ipv6.conf.lo.disable_ipv6", "value": "0"},
+        ]
+        os.environ["SANDBOX_K8S_INTERNAL_ROOTLESS_LOW_PORTS"] = "true"
         assert K8sSandboxClient._prefer_kubectl_exec() is False
         # Unset match env var means a context name alone never enables the fallback.
         assert K8sSandboxClient._prefer_kubectl_exec("ns/api-openshift-example-invalid") is False
@@ -588,14 +758,39 @@ def verify() -> None:
         manifest = K8sSandboxClient._build_container_manifest(container)
         assert manifest["securityContext"]["capabilities"] == {
             "drop": ["ALL"],
-            "add": ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"],
+            "add": ["CHOWN", "DAC_OVERRIDE", "FOWNER", "KILL", "SETGID", "SETUID"],
         }
-        container.name = "verifier-bootstrap"
-        sidecar_manifest = K8sSandboxClient._build_container_manifest(container)
-        assert sidecar_manifest["securityContext"]["capabilities"] == {"drop": ["ALL"]}
+        # A sidecar carries the same grant, because the database images these
+        # multi-service tasks run start as root and hand off with gosu. Writable
+        # root is what gates the grant, not the container's name.
+        container.name = "postgres"
+        assert K8sSandboxClient._build_container_manifest(container)["securityContext"]["capabilities"] == {
+            "drop": ["ALL"],
+            "add": ["CHOWN", "DAC_OVERRIDE", "FOWNER", "KILL", "SETGID", "SETUID"],
+        }
+        container.read_only_root_filesystem = True
+        assert K8sSandboxClient._build_container_manifest(container)["securityContext"]["capabilities"] == {
+            "drop": ["ALL"]
+        }
+        container.read_only_root_filesystem = False
+
+        # A sidecar's own compose service name has to resolve, or a service that
+        # waits on a sibling by name hangs until the readiness gate times out.
+        aliased = SandboxSpec(
+            name="aliased",
+            namespace="default",
+            run_as_user=0,
+            sidecars=[ContainerSpec(name="legacy-app", image="example.invalid/app:v1")],
+        )
+        pod_spec = K8sSandboxClient._build_pod_spec_from_high_level(K8sSandboxClient, aliased)
+        assert pod_spec["hostAliases"] == [{"ip": "127.0.0.1", "hostnames": ["legacy-app"]}]
+        # A single-container sandbox must not grow the field at all.
+        plain = SandboxSpec(name="plain", namespace="default", run_as_user=0)
+        assert "hostAliases" not in K8sSandboxClient._build_pod_spec_from_high_level(K8sSandboxClient, plain)
     finally:
         os.environ.pop("SANDBOX_K8S_INTERNAL_ROOT_AUTHORIZED", None)
         os.environ.pop("SANDBOX_K8S_INTERNAL_ROOTLESS_LOW_PORTS", None)
+        os.environ.pop("SANDBOX_K8S_INTERNAL_IPV6_LOOPBACK", None)
         os.environ.pop("SANDBOX_CONTEXT", None)
 
 
@@ -603,7 +798,13 @@ if __name__ == "__main__":
     if len(sys.argv) == 2:
         patch(Path(sys.argv[1]))
     elif len(sys.argv) == 3 and sys.argv[1] == "--capabilities-only":
+        # This mode upgrades a runner that inherited an already-patched
+        # sandbox_k8s from the base image, so every step that a base image may
+        # predate has to run here too -- each one no-ops when already present.
         patch_capabilities(Path(sys.argv[2]))
+        patch_sidecar_capabilities(Path(sys.argv[2]))
+        patch_sidecar_host_aliases(Path(sys.argv[2]))
+        patch_sysctls(Path(sys.argv[2]))
     else:
         raise SystemExit("usage: patch_sandbox_k8s_root.py [--capabilities-only] PACKAGE_DIR")
     verify()

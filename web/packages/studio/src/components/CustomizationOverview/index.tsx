@@ -7,26 +7,23 @@ import { Stack } from '@nvidia/foundations-react-core';
 import { GrpoRewardPanel } from '@studio/components/CustomizationOverview/GrpoRewardPanel';
 import { GrpoTrainingHealthPanel } from '@studio/components/CustomizationOverview/GrpoTrainingHealthPanel';
 import { RunConfigurationPanel } from '@studio/components/CustomizationOverview/RunConfigurationPanel';
+import { TrainingHealthPanel } from '@studio/components/CustomizationOverview/TrainingHealthPanel';
 import { TrainingLossPanel } from '@studio/components/CustomizationOverview/TrainingLossPanel';
 import { ErrorMessageWithRetry } from '@studio/components/ErrorMessageWithRetry';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { CustomizationConfigSidePanel } from '@studio/components/sidePanels/CustomizationConfigSidePanel';
-import { useCustomizationFilesAsRows } from '@studio/hooks/useCustomizationFiles';
 import { useCustomizationJob } from '@studio/hooks/useCustomizationJob';
 import { useCustomizationJobStatus } from '@studio/hooks/useCustomizationJobStatus';
 import { hasMetrics } from '@studio/types/customization';
-import { isGrpoJob, isRlJob } from '@studio/util/customizationBackend';
+import { isGrpoJob } from '@studio/util/customizationBackend';
 import { resolveCustomizationFailure } from '@studio/util/customizationFailure';
 import {
-  getCustomizationTrainingSteps,
-  getDatasetUri,
   getGrpoProgressTiles,
   getGrpoSummaryTiles,
   getJobDuration,
   getJobStartDate,
   getLossTiles,
   getTrainingProgressTiles,
-  getTrainingBatchSize,
   getTrainingDiagnosticsTiles,
   getTrainingTelemetry,
 } from '@studio/util/customizations';
@@ -66,30 +63,12 @@ export const CustomizationOverview: FC<Props> = ({ customizationJobName, workspa
     startDate: isTerminalStatus ? undefined : getJobStartDate(steps),
   });
 
-  // Reading record counts costs a fileset listing plus a download per file, and only the loss
-  // chart's x-axis uses them — the GRPO panel scales off the reported steps instead.
-  const isGrpo = Boolean(customization && isGrpoJob(customization));
-  const {
-    trainingRecords,
-    validationRecords,
-    isPending: isFilesLoading,
-  } = useCustomizationFilesAsRows({
-    fileset: isGrpo ? undefined : getDatasetUri(customization) || undefined,
-  });
-
-  const epochs = customization
-    ? isRlJob(customization)
-      ? customization.spec?.training?.epochs
-      : customization.spec?.schedule?.epochs
-    : undefined;
-  const batchSize = getTrainingBatchSize(customization);
-  const maxXAxisValue = getCustomizationTrainingSteps({
-    epochs: epochs ?? 0,
-    batchSize,
-    trainingRecords,
-    hasValidationDataset: validationRecords > 0,
-  });
-  const isLoading = isLoadingCustomization || isFilesLoading;
+  // The backend reports max_steps once at training start, and it is the same number the
+  // Steps Completed tile shows. Estimating it from record counts instead meant downloading
+  // every dataset file to scale one axis, and the count was capped at a preview of the
+  // file, so the estimate came out low on any dataset past that cap.
+  const maxXAxisValue = telemetry.maxSteps ?? 0;
+  const isLoading = isLoadingCustomization;
 
   if (isLoading) {
     return <Loading />;
@@ -115,6 +94,7 @@ export const CustomizationOverview: FC<Props> = ({ customizationJobName, workspa
       {isGrpoJob(customization) ? (
         <>
           <GrpoRewardPanel
+            jobStatus={customization.status}
             reward={buildRewardChartData(metrics)}
             metrics={getGrpoSummaryTiles(metrics, isTerminalStatus)}
             progress={getGrpoProgressTiles(telemetry, runState)}
@@ -122,16 +102,20 @@ export const CustomizationOverview: FC<Props> = ({ customizationJobName, workspa
           <GrpoTrainingHealthPanel statusDetails={metrics} />
         </>
       ) : (
-        <TrainingLossPanel
-          trainLoss={metrics?.metrics?.train_loss}
-          valLoss={metrics?.metrics?.val_loss}
-          maxSteps={maxXAxisValue}
-          metrics={[
-            ...getLossTiles(metrics, isTerminalStatus),
-            ...getTrainingDiagnosticsTiles(telemetry, metrics, runState),
-          ]}
-          progress={getTrainingProgressTiles(telemetry)}
-        />
+        <>
+          <TrainingLossPanel
+            jobStatus={customization.status}
+            trainLoss={metrics?.metrics?.train_loss}
+            valLoss={metrics?.metrics?.val_loss}
+            maxSteps={maxXAxisValue}
+            metrics={[
+              ...getLossTiles(metrics, isTerminalStatus),
+              ...getTrainingDiagnosticsTiles(telemetry, metrics, runState),
+            ]}
+            progress={getTrainingProgressTiles(telemetry)}
+          />
+          <TrainingHealthPanel statusDetails={metrics} />
+        </>
       )}
 
       <RunConfigurationPanel

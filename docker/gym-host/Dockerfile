@@ -1,57 +1,114 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Sandboxed Gym host, for local execution against the Docker host provider.
+# Sandboxed Gym host runtime for Evaluator agent-evaluation jobs.
 #
-# This is the development counterpart of the runtime image a cluster would run. It exists so the
-# sandboxed path can be *executed* without OpenSandbox or Kubernetes: same runtime module, same
-# bootstrap environment, same HTTP contract. It is NOT an isolation boundary -- a Docker container
-# is not kata-qemu and enforces no egress policy -- so it validates the code path, not the security
-# posture the sandboxed-GRPO RFC requires of a shared cluster.
-#
-# NeMo-Gym floors at CPython 3.13.14, which is why it cannot be a workspace dependency; an image has
-# its own interpreter, so here it installs normally.
+ARG NHX_PYTHON_BASE=nhx-python-base
+ARG NHX_PYTHON_IMAGE=python:3.13.15-slim-trixie
 
-FROM python:3.13-slim
+FROM ${NHX_PYTHON_BASE} AS builder
 
-ENV PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    NMP_RUNTIME_HTTP_PORT=8080
+# Copy the host's standalone dependency manifest and lockfile.
+COPY docker/locks/nhx-gym-host /app/docker/locks/nhx-gym-host
+
+# Copy local sources used by the standalone lock, including build-system requirements.
+COPY packages/nhx_build_tools /app/packages/nhx_build_tools
+
+# Copy the complete package inputs at the path used by the lock's local source.
+COPY packages/sandboxed_gym/pyproject.toml /app/packages/sandboxed_gym/pyproject.toml
+COPY packages/sandboxed_gym/README.md /app/packages/sandboxed_gym/README.md
+COPY packages/sandboxed_gym/src /app/packages/sandboxed_gym/src
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    UV_CACHE_DIR=/root/.cache/uv \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/opt/gym-host-venv \
+    uv sync \
+        --project /app/docker/locks/nhx-gym-host \
+        --locked \
+        --no-dev \
+        --no-install-project \
+        --no-editable
+
+# CVE remediation for the gym-host base venv.
+# cryptography 50.x is not lockable yet because nemo-gym pulls mlflow>=3.15.1,
+# whose current metadata caps cryptography at <50. Pin the post-sync override so
+# the scanner-visible artifact is deterministic until that upstream cap moves.
+# Same pattern as docker/Dockerfile.nhx-gym-tasks (GHSA-g6cj-pr64-35w5).
+RUN --mount=type=cache,target=/root/.cache/uv \
+    UV_CACHE_DIR=/root/.cache/uv UV_LINK_MODE=copy \
+    uv pip install --python /opt/gym-host-venv/bin/python --no-deps "cryptography==50.0.0"
+
+# Build the per-server venvs now rather than on first run. Gym creates one venv per agent, model and
+# resources server the config selects, which is ~3 GB and several minutes -- paid once here instead
+# of on every container start.
+ENV PATH="/opt/gym-host-venv/bin:$PATH" \
+    NEMO_GYM_VENV_DIR=/opt/gym_venvs \
+    UV_CACHE_DIR=/home/ubuntu/.cache/uv
+RUN mkdir -p "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}"
+RUN if UV_LINK_MODE=copy gym env prefetch "+config_paths=[responses_api_agents/simple_agent/configs/simple_agent.yaml,responses_api_models/inference_provider/configs/inference_provider.yaml,resources_servers/mcqa/configs/mcqa.yaml]" \
+      "++policy_base_url=http://127.0.0.1:9/v1" "++policy_api_key=unused" "++policy_model_name=unused" \
+      "++simple_agent.responses_api_agents.simple_agent.resources_server.name=mcqa" \
+      "++uv_venv_dir=${NEMO_GYM_VENV_DIR}" "++uv_cache_dir=${UV_CACHE_DIR}"; then \
+      uv cache clean mlflow ray; \
+    else \
+      echo "prefetch failed; venvs will be built at run time"; \
+    fi
+
+# Full MLflow carries gateway server CVEs, while this image only needs Gym's client-side imports.
+# Prefetched Gym venvs live at ${NEMO_GYM_VENV_DIR}/<kind>/<server>/.venv, not one directory deep.
+RUN find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" \
+      \( -type f -o -type l \) -path '*/bin/python' \
+    | while IFS= read -r py; do \
+        uv pip uninstall --python "${py}" mlflow || true; \
+      done \
+    && find "${UV_CACHE_DIR}" -path '*/archive-v0/*/mlflow-*.dist-info' -prune \
+      -exec sh -c 'for path; do rm -rf "$(dirname "${path}")"; done' sh {} + \
+    && test -z "$(find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}" \
+      -path '*/mlflow-*.dist-info/METADATA' -print -quit)"
+
+# Ray's bundled Java jars carry httpcore5 CVEs and are only needed for JVM workers.
+RUN find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}" \
+      -path '*/ray/jars' -prune -exec rm -rf {} + \
+    && test -z "$(find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}" \
+      -path '*/ray/jars/*' -print -quit)"
+
+FROM ${NHX_PYTHON_IMAGE} AS runtime
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git curl \
     && rm -rf /var/lib/apt/lists/*
 
-# NeMo-Gym spawns each agent/model/resources server as its own process through `uv`, so the image
-# needs it on PATH: without it every server dies at spin-up with "Process ... finished unexpectedly".
-RUN pip install --no-cache-dir uv
+# Copy uv because Gym uses it to launch component environments.
+COPY --from=builder /bin/uv /bin/uv
+# Copy the locked host Python environment; this supplies Gym and sandboxed_gym.
+COPY --from=builder /opt/gym-host-venv /opt/gym-host-venv
+# Copy Gym's prebuilt per-component environments to avoid runtime installation.
+COPY --from=builder /opt/gym_venvs /opt/gym_venvs
+# Copy the matching uv cache used by those component environments.
+COPY --from=builder /home/ubuntu/.cache/uv /home/ubuntu/.cache/uv
 
-# NeMo-Gym first: it is the slow layer and changes far less often than the package below it.
-RUN pip install --no-cache-dir "nemo-gym==0.5.0"
+ENV PATH="/opt/gym-host-venv/bin:$PATH" \
+    VIRTUAL_ENV=/opt/gym-host-venv \
+    PYTHONUNBUFFERED=1 \
+    NEMO_GYM_VENV_DIR=/opt/gym_venvs \
+    UV_CACHE_DIR=/home/ubuntu/.cache/uv \
+    NHX_RUNTIME_HTTP_PORT=8080
 
-# The host runtime. Copied as source rather than installed from an index so the image tracks the
-# working tree -- the whole point is executing the code we are writing.
-COPY packages/sandboxed_gym/pyproject.toml /opt/sandboxed_gym/pyproject.toml
-COPY packages/sandboxed_gym/README.md /opt/sandboxed_gym/README.md
-COPY packages/sandboxed_gym/src /opt/sandboxed_gym/src
-RUN pip install --no-cache-dir "/opt/sandboxed_gym[runtime]"
-
-# Build the per-server venvs now rather than on first run. Gym creates one venv per agent, model and
-# resources server the config selects, which is ~3 GB and several minutes -- paid once here instead
-# of on every container start.
-RUN gym env prefetch "+config_paths=[responses_api_agents/simple_agent/configs/simple_agent.yaml,responses_api_models/inference_provider/configs/inference_provider.yaml,resources_servers/mcqa/configs/mcqa.yaml]" \
-      "++policy_base_url=http://127.0.0.1:9/v1" "++policy_api_key=unused" "++policy_model_name=unused" \
-      "++simple_agent.responses_api_agents.simple_agent.resources_server.name=mcqa" \
-      "++uv_venv_dir=/opt/gym_venvs" "++uv_cache_dir=/opt/uv-cache" \
-    || echo "prefetch failed; venvs will be built at run time"
-
-# The offline model endpoint, for local runs with no provider. Not used unless a caller points
-# `policy_base_url` at it.
-COPY docker/gym-host/model_stub.py /opt/model_stub.py
-
-# Where the provider mounts the environment and the writable workspace.
+# Create the mount points used by the OpenSandbox provider.
 RUN mkdir -p /job/environment /job/work
 WORKDIR /job/work
 
 EXPOSE 8080
 CMD ["python", "-m", "sandboxed_gym.runtime.gym_host_runtime"]
+
+FROM runtime AS smoke-test
+RUN gym --help >/dev/null \
+    && test -z "$(find /opt/gym-host-venv /opt/gym_venvs /home/ubuntu/.cache/uv \
+        -path '*/mlflow-*.dist-info/METADATA' -print -quit)" \
+    && test -z "$(find /opt/gym-host-venv /opt/gym_venvs /home/ubuntu/.cache/uv \
+        -path '*/ray/jars/*' -print -quit)" \
+    && python -c \
+        'import importlib.metadata as m; import nemo_gym, pydantic, yaml; from sandboxed_gym.runtime import gym_host_runtime; print({"nemo-gym": m.version("nemo-gym"), "nemo-sandboxed-gym": m.version("nemo-sandboxed-gym"), "pydantic": pydantic.__version__, "pyyaml": yaml.__version__, "runtime": gym_host_runtime.__name__})'
+
+FROM runtime

@@ -1,16 +1,16 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { jobsPageJobLogs } from '@nemo/sdk/generated/platform/api';
-import type { PlatformJobLog, PlatformJobLogPage } from '@nemo/sdk/generated/platform/schema';
+import { jobsPageJobLogs } from '@nemo/sdk/generated/platform/jobs';
+import type { HelixJobLog, HelixJobLogPage } from '@nemo/sdk/generated/platform/schema';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
 import { useJobLogs } from './index';
 
-vi.mock('@nemo/sdk/generated/platform/api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@nemo/sdk/generated/platform/api')>();
+vi.mock('@nemo/sdk/generated/platform/jobs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@nemo/sdk/generated/platform/jobs')>();
   return {
     ...actual,
     jobsPageJobLogs: vi.fn(),
@@ -22,7 +22,7 @@ const mockJobsPageJobLogs = vi.mocked(jobsPageJobLogs);
 const WORKSPACE = 'test-workspace';
 const JOB_NAME = 'test-job';
 
-function makeLog(index: number): PlatformJobLog {
+function makeLog(index: number): HelixJobLog {
   return {
     timestamp: `2026-01-01T00:00:${String(index).padStart(2, '0')}Z`,
     job: JOB_NAME,
@@ -33,16 +33,27 @@ function makeLog(index: number): PlatformJobLog {
 }
 
 function makePage(
-  logs: PlatformJobLog[],
+  logs: HelixJobLog[],
   total: number,
   nextPage: string | null = null
-): PlatformJobLogPage {
+): HelixJobLogPage {
   return {
     data: logs,
     total,
     next_page: nextPage ?? '',
     prev_page: '',
   };
+}
+
+/** Drains every pending microtask, so a queryFn's page walk runs to completion. */
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }
 
 function createWrapper() {
@@ -206,7 +217,7 @@ describe('useJobLogs', () => {
     mockJobsPageJobLogs.mockClear();
     mockJobsPageJobLogs.mockResolvedValueOnce(makePage(lastPageUpdated, 5));
 
-    const { data: refetchData } = await result.current.refetch();
+    const { data: refetchData } = await act(() => result.current.refetch());
 
     // Only 1 API call (last page). Full page resolved from cache.
     expect(mockJobsPageJobLogs).toHaveBeenCalledTimes(1);
@@ -224,9 +235,151 @@ describe('useJobLogs', () => {
 
     expect(mockJobsPageJobLogs).not.toHaveBeenCalled();
 
-    const { data } = await result.current.refetch();
+    const { data } = await act(() => result.current.refetch());
 
     expect(mockJobsPageJobLogs).toHaveBeenCalledTimes(1);
     expect(data?.logs).toEqual(logs);
+  });
+  describe('loadProgress', () => {
+    // The page walk reports progress via setState from inside the queryFn, so each
+    // step has to be flushed inside act() rather than awaited with waitFor.
+    it('advances as the walk pages through the log', async () => {
+      const page1 = deferred<HelixJobLogPage>();
+      const page2 = deferred<HelixJobLogPage>();
+      mockJobsPageJobLogs.mockReturnValueOnce(page1.promise).mockReturnValueOnce(page2.promise);
+
+      const { result } = renderHook(
+        () => useJobLogs({ workspace: WORKSPACE, name: JOB_NAME, pageSize: 2 }),
+        { wrapper: createWrapper() }
+      );
+
+      // Nothing to report until the first page tells us the total.
+      expect(result.current.loadProgress).toBeNull();
+
+      await act(async () => {
+        page1.resolve(makePage([makeLog(0), makeLog(1)], 4, 'c1'));
+        await tick();
+      });
+
+      expect(result.current.loadProgress).toEqual({ loaded: 2, total: 4 });
+      // The walk is still mid-flight, which is exactly when this matters.
+      expect(result.current.isLoading).toBe(true);
+
+      await act(async () => {
+        page2.resolve(makePage([makeLog(2), makeLog(3)], 4));
+        await tick();
+      });
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.loadProgress).toEqual({ loaded: 4, total: 4 });
+    });
+
+    it('counts fetched lines rather than the trimmed retained set', async () => {
+      // maxPages=5, pageSize=2 retains 10 lines, but the walk still fetches all 12.
+      const pageSize = 2;
+      const maxPages = 5;
+      const pages = Array.from({ length: 6 }, (_, p) =>
+        Array.from({ length: 2 }, (_, i) => makeLog(p * 2 + i))
+      );
+      pages.forEach((page, i) =>
+        mockJobsPageJobLogs.mockResolvedValueOnce(
+          makePage(page, 12, i === pages.length - 1 ? null : `c${i + 1}`)
+        )
+      );
+
+      const { result } = renderHook(
+        () => useJobLogs({ workspace: WORKSPACE, name: JOB_NAME, pageSize, maxPages }),
+        { wrapper: createWrapper() }
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      expect(result.current.data).toHaveLength(10);
+      expect(result.current.loadProgress).toEqual({ loaded: 12, total: 12 });
+    });
+
+    it('clears between walks so a refetch never shows a stale count', async () => {
+      mockJobsPageJobLogs.mockResolvedValueOnce(makePage([makeLog(0), makeLog(1)], 2));
+
+      const { result } = renderHook(
+        () => useJobLogs({ workspace: WORKSPACE, name: JOB_NAME, pageSize: 2 }),
+        { wrapper: createWrapper() }
+      );
+
+      await waitFor(() => expect(result.current.loadProgress).toEqual({ loaded: 2, total: 2 }));
+
+      const nextWalk = deferred<HelixJobLogPage>();
+      mockJobsPageJobLogs.mockReturnValueOnce(nextWalk.promise);
+
+      act(() => {
+        void result.current.refetch();
+      });
+      await waitFor(() => expect(result.current.loadProgress).toBeNull());
+
+      act(() => {
+        nextWalk.resolve(makePage([makeLog(0), makeLog(1), makeLog(2)], 3));
+      });
+      await waitFor(() => expect(result.current.loadProgress).toEqual({ loaded: 3, total: 3 }));
+    });
+
+    it("never carries a finished job's count into the next job", async () => {
+      mockJobsPageJobLogs.mockResolvedValueOnce(makePage([makeLog(0), makeLog(1)], 2));
+
+      // The route element is reused across :jobName changes, so the hook re-runs
+      // without remounting. Record every rendered value, not just the settled one —
+      // the regression this guards is a single frame of the old job's count.
+      const seen: ({ loaded: number; total: number } | null)[] = [];
+      const { result, rerender } = renderHook(
+        ({ name }) => {
+          const jobLogs = useJobLogs({ workspace: WORKSPACE, name, pageSize: 2 });
+          seen.push(jobLogs.loadProgress);
+          return jobLogs;
+        },
+        { wrapper: createWrapper(), initialProps: { name: JOB_NAME } }
+      );
+
+      await waitFor(() => expect(result.current.loadProgress).toEqual({ loaded: 2, total: 2 }));
+
+      const nextJob = deferred<HelixJobLogPage>();
+      mockJobsPageJobLogs.mockReturnValueOnce(nextJob.promise);
+
+      seen.length = 0;
+      rerender({ name: 'other-job' });
+
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen).toEqual(seen.map(() => null));
+
+      act(() => {
+        nextJob.resolve(makePage([makeLog(0)], 1));
+      });
+      await waitFor(() => expect(result.current.loadProgress).toEqual({ loaded: 1, total: 1 }));
+    });
+
+    it('reports the same progress to every observer of the job', async () => {
+      mockJobsPageJobLogs
+        .mockResolvedValueOnce(makePage([makeLog(0), makeLog(1)], 4, 'c1'))
+        .mockResolvedValueOnce(makePage([makeLog(2), makeLog(3)], 4));
+
+      // A log panel and a download button on the same route observe one shared query
+      // key, and only one of them owns the queryFn that walks the pages. Both have to
+      // see the walk.
+      const { result } = renderHook(
+        () => ({
+          viewer: useJobLogs({ workspace: WORKSPACE, name: JOB_NAME, pageSize: 2 }),
+          downloader: useJobLogs({
+            workspace: WORKSPACE,
+            name: JOB_NAME,
+            pageSize: 2,
+            maxPages: Infinity,
+          }),
+        }),
+        { wrapper: createWrapper() }
+      );
+
+      await waitFor(() => {
+        expect(result.current.viewer.loadProgress).toEqual({ loaded: 4, total: 4 });
+        expect(result.current.downloader.loadProgress).toEqual({ loaded: 4, total: 4 });
+      });
+    });
   });
 });

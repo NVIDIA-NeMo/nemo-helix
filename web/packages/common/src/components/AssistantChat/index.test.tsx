@@ -80,6 +80,22 @@ const createImageCompletionChunk = (imageUrl: string): ChatCompletionChunk =>
     ],
   }) as unknown as ChatCompletionChunk;
 
+const createReasoningCompletionChunk = (reasoning: string): ChatCompletionChunk =>
+  ({
+    id: 'completion-id',
+    object: 'chat.completion.chunk',
+    created: 1740419165,
+    model: 'test-model',
+    choices: [
+      {
+        index: 0,
+        delta: { reasoning_content: reasoning },
+        finish_reason: null,
+        logprobs: null,
+      },
+    ],
+  }) as unknown as ChatCompletionChunk;
+
 const createHangingStream = (content: string): Stream<ChatCompletionChunk> => {
   const controller = new AbortController();
   const waitForAbort = () =>
@@ -237,6 +253,31 @@ describe('AssistantChat', () => {
       'src',
       imageUrl
     );
+  });
+
+  it('counts reasoning-only chunks when the server reports no usage', async () => {
+    const stream = {
+      controller: new AbortController(),
+      async *[Symbol.asyncIterator]() {
+        yield createReasoningCompletionChunk('a');
+      },
+    } as unknown as Stream<ChatCompletionChunk>;
+    mocks.createChatCompletion.mockResolvedValueOnce(stream);
+    const onMessageComplete = vi.fn();
+
+    renderAssistantChat(
+      <AssistantChat model="test-model" workspace="default" onMessageComplete={onMessageComplete} />
+    );
+
+    await userEvent.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'Think');
+    await userEvent.click(screen.getByRole('button', { name: /Submit/i }));
+
+    await waitFor(() =>
+      expect(onMessageComplete).toHaveBeenCalledWith(
+        expect.objectContaining({ chunkCount: 0, completionTokens: 1 })
+      )
+    );
+    expect(onMessageComplete.mock.calls[0][0].tokensPerSec).toBeGreaterThan(0);
   });
 
   it(

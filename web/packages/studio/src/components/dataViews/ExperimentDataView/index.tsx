@@ -16,19 +16,30 @@ import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { formatDurationMs } from '@nemo/common/src/utils/date';
 import { formatEvaluatorScore, snakeCaseToTitleCase } from '@nemo/common/src/utils/formatters';
 import type { EvaluationFilter, ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
-import { Button, Text, Tooltip } from '@nvidia/foundations-react-core';
+import { Button, Modal, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { EVAL_DURATION_METADATA_KEY, evalDurationMs } from '@studio/api/evaluation/utils';
 import { ChangesetBadge } from '@studio/components/ChangesetBadge';
+import { EvaluationCompareChart } from '@studio/components/charts/EvaluationCompareChart';
+import {
+  MAX_COMPARED_EVALUATIONS,
+  MIN_COMPARED_EVALUATIONS,
+} from '@studio/components/charts/EvaluationCompareChart/utils';
 import { ExperimentParetoChart } from '@studio/components/charts/ExperimentParetoChart';
 import { ExperimentTrendChart } from '@studio/components/charts/ExperimentTrendChart';
+import { ExperimentComparisonDataView } from '@studio/components/dataViews/ExperimentComparisonDataView';
 import { AddToGroupModal } from '@studio/components/dataViews/ExperimentDataView/AddToGroupModal';
 import '@studio/components/dataViews/ExperimentDataView/ExperimentDataView.css';
 import { MeanValueTooltipCell } from '@studio/components/dataViews/ExperimentDataView/MeanValueTooltipCell';
+import {
+  seedColumnState,
+  useColumnLayout,
+} from '@studio/components/dataViews/ExperimentDataView/useColumnLayout';
 import {
   type EvaluationRow,
   type ListEvaluationsSortParam,
@@ -37,13 +48,11 @@ import {
 import { useSortErrorRecovery } from '@studio/components/dataViews/ExperimentDataView/useSortErrorRecovery';
 import { deriveEvaluatorNames } from '@studio/components/dataViews/ExperimentDataView/util';
 import { evaluationFilesetName } from '@studio/components/evaluation/experimentEvalConfig';
-import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { getEvaluationDetailRoute } from '@studio/routes/utils';
+import { getAgentRunEvaluationRoute, getEvaluationDetailRoute } from '@studio/routes/utils';
 import { tooltipClassName } from '@studio/styles/common';
-import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
-import { Columns3, FolderMinus, FolderPlus, Pin, Repeat2 } from 'lucide-react';
-import { type ComponentProps, type FC, useCallback, useEffect, useMemo, useState } from 'react';
+import { ChartColumn, Columns3, FolderMinus, FolderPlus, Pin, Repeat2 } from 'lucide-react';
+import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 export type { EvaluationRow };
@@ -153,6 +162,8 @@ interface ExperimentDataViewProps {
   /** Whether the over-time trend chart is shown. Same arrangement as `paretoVisible`: the parent
    * owns the toggle, which starts on for experiments flagged `show_evaluations_over_time`. */
   trendVisible: boolean;
+  /** Whether the evaluation comparison table is shown. Same arrangement as `paretoVisible`. */
+  compareVisible: boolean;
 }
 
 /** Lists the experiments that belong to a single experiment group. */
@@ -160,9 +171,10 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
   group,
   paretoVisible,
   trendVisible,
+  compareVisible,
 }) => {
   const workspace = useWorkspaceFromPath();
-  const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const toast = useToast();
   const experimentName = group.name;
   const experimentId = group.id;
@@ -174,38 +186,46 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
     clearSelection: () => void;
   } | null>(null);
 
-  // The evaluation a "New evaluation from this configuration" click is re-running, or null when
-  // the form is closed. Re-running is reachable from here as well as from the agent page, because
-  // this leaderboard is where you notice a run worth varying.
-  const [rerunSource, setRerunSource] = useState<EvaluationRow | null>(null);
-
-  // Persist column order to localStorage, keyed by experiment group ID.
-  const [savedColumnOrder, saveColumnOrder] = useLocalStorage<string[]>(
-    `nemo-studio:experiment-columns:${experimentId}`,
-    []
+  // "New evaluation from this configuration". Re-running is reachable from here as well as from
+  // the agent page, because this leaderboard is where you notice a run worth varying.
+  const navigate = useNavigate();
+  const rerun = useCallback(
+    (evaluation: EvaluationRow) => {
+      const agent = evaluation.agent_names?.[0];
+      if (agent) navigate(getAgentRunEvaluationRoute(workspace, agent, evaluation.name));
+    },
+    [navigate, workspace]
   );
+
+  const [comparison, setComparison] = useState<{
+    evaluations: EvaluationRow[];
+    clearSelection: () => void;
+  } | null>(null);
 
   // Seed the sort from default_sort so its column header reflects the order on load. Memoized so the
   // reference is stable across renders (until default_sort changes).
   const defaultSort = useMemo(() => seedSortFromDefault(group.default_sort), [group.default_sort]);
 
+  const seededColumns = useMemo(() => seedColumnState(group.column_layout), [group.column_layout]);
+
   const dataViewState = useStudioDataViewState<EvaluationFilter>({
     defaultSort,
     // The evaluations leaderboard supports multi-column sort (shift-click) — score vs. cost etc.
     multiSort: true,
-    columnVisibility: { created_by: false, updated_at: false },
+    columnVisibility: seededColumns.columnVisibility,
     // Keep the pin toggle, row selection, and the row actions menu reachable while horizontally
     // scrolling this wide table.
     columnPinning: { left: ['pin', 'row-selection'], right: ['row-actions'] },
     filterFieldMap: getEvaluationFilterField,
-    columnOrder: savedColumnOrder ?? [],
+    columnOrder: seededColumns.columnOrder,
   });
 
-  // Write column order to localStorage whenever it changes after the first reorder.
-  const { columnOrder } = dataViewState;
-  useEffect(() => {
-    if (columnOrder.state.length > 0) saveColumnOrder(columnOrder.state);
-  }, [columnOrder.state, saveColumnOrder]);
+  const columnLayout = useColumnLayout({
+    workspace,
+    group,
+    columnOrder: dataViewState.columnOrder.state,
+    columnVisibility: dataViewState.columnVisibility.state,
+  });
 
   const page = dataViewState.pagination.state.pageIndex + 1;
   const pageSize = dataViewState.pagination.state.pageSize;
@@ -438,6 +458,7 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
                 count={score?.count}
                 runCount={row.original.run_count}
                 countsMissingAsZero
+                failedCount={score?.failed_count ?? 0}
               >
                 {formatEvaluatorScore(score?.mean)}
               </MeanValueTooltipCell>
@@ -560,7 +581,7 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
                     {
                       label: 'New evaluation from this configuration',
                       icon: <Repeat2 className="fill-none" size={16} />,
-                      onSelect: () => setRerunSource(row.original),
+                      onSelect: () => rerun(row.original),
                     },
                   ]
                 : []),
@@ -582,7 +603,7 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
         ),
       }),
     ],
-    [evaluatorNames, togglePin, removeFromGroup, metadataKeys]
+    [evaluatorNames, togglePin, removeFromGroup, metadataKeys, rerun]
   );
 
   // A recoverable sort error is handled by useSortErrorRecovery (toast + revert), and the table keeps
@@ -631,29 +652,73 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
           />
         </div>
       )}
+      {compareVisible && (
+        <div className="mb-4">
+          <ExperimentComparisonDataView
+            key={group.id}
+            workspace={workspace}
+            group={group}
+            preloadedEvaluations={completeEvaluationSet}
+            preloadPending={preloadPending}
+          />
+        </div>
+      )}
       <StudioDataView
         dataViewState={dataViewState}
         makeColumns={makeColumns}
         searchField="name"
-        onRowClick={(row) =>
-          navigate(getEvaluationDetailRoute(workspace, experimentName, row.name))
+        onRowClick={(row, _index, event) =>
+          openRow(event, getEvaluationDetailRoute(workspace, experimentName, row.name))
         }
         renderBulkActions={({ selectedRows, table }) => (
-          <Button
-            kind="tertiary"
-            color="neutral"
-            size="small"
-            onClick={() =>
-              setAddToGroupState({
-                evaluations: selectedRows,
-                clearSelection: () => table.resetRowSelection(),
-              })
-            }
-          >
-            <FolderPlus />
-            Add to experiment
-          </Button>
+          <>
+            <Button
+              kind="tertiary"
+              color="neutral"
+              size="small"
+              disabled={
+                selectedRows.length < MIN_COMPARED_EVALUATIONS ||
+                selectedRows.length > MAX_COMPARED_EVALUATIONS
+              }
+              title={`Select ${MIN_COMPARED_EVALUATIONS} to ${MAX_COMPARED_EVALUATIONS} evaluations to compare`}
+              onClick={() =>
+                setComparison({
+                  evaluations: selectedRows,
+                  clearSelection: () => table.resetRowSelection(),
+                })
+              }
+            >
+              <ChartColumn />
+              Compare selected
+            </Button>
+            <Button
+              kind="tertiary"
+              color="neutral"
+              size="small"
+              onClick={() =>
+                setAddToGroupState({
+                  evaluations: selectedRows,
+                  clearSelection: () => table.resetRowSelection(),
+                })
+              }
+            >
+              <FolderPlus />
+              Add to experiment
+            </Button>
+          </>
         )}
+        toolbarSlotStart={
+          columnLayout.hasUnsavedLayout ? (
+            <Button
+              className="shrink-0"
+              kind="primary"
+              disabled={columnLayout.isSaving}
+              onClick={columnLayout.save}
+            >
+              {columnLayout.isSaving ? 'Saving…' : 'Save columns'}
+            </Button>
+          ) : undefined
+        }
         toolbarSlotEnd={
           <EditColumnsMenu
             kind="secondary"
@@ -699,17 +764,20 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
           evaluations={addToGroupState.evaluations}
         />
       )}
-      {rerunSource && (
-        <SubmitEvaluationModal
-          open
-          onClose={() => setRerunSource(null)}
-          workspace={workspace}
-          // Agents are discovered from the run's own telemetry; the form still lets the user pick
-          // when the row was never tagged with one.
-          agent={rerunSource.agent_names?.[0]}
-          sourceEvaluation={rerunSource.name}
-        />
-      )}
+      <Modal
+        open={comparison !== null}
+        onOpenChange={(open) => {
+          if (open) return;
+          comparison?.clearSelection();
+          setComparison(null);
+        }}
+        slotHeading={`Comparing ${comparison?.evaluations.length ?? 0} evaluations`}
+        className="w-[95vw] max-w-[1600px]"
+      >
+        {comparison && (
+          <EvaluationCompareChart workspace={workspace} evaluations={comparison.evaluations} />
+        )}
+      </Modal>
     </>
   );
 };

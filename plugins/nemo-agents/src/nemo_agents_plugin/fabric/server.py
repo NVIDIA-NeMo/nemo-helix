@@ -14,6 +14,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -25,6 +26,7 @@ from nemo_agents_plugin.fabric.runtime import (
     FabricInvocationRequest,
     FabricRuntimeExecutionError,
     FabricRuntimeResult,
+    FabricRuntimeStartError,
     FabricRuntimeStream,
     FabricRuntimeTimeoutError,
 )
@@ -54,8 +56,11 @@ from nemo_agents_plugin.mcp_status import (
     probe_mcp_servers,
 )
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
+from starlette.types import Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
+
+_FABRIC_STREAM_CLEANUP_TIMEOUT_SECONDS = 5.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +83,7 @@ class FabricServingSettings:
 def _to_fabric_invocation_request(
     request: ChatCompletionRequest,
     *,
-    session_id: str,
+    session_id: str | None,
 ) -> FabricInvocationRequest:
     """Translate the chat transcript into a Platform-owned Fabric request."""
     messages = request.messages
@@ -88,9 +93,10 @@ def _to_fabric_invocation_request(
         if len(messages) == 1
         else "\n\n".join(f"{message.role}: {message.content}" for message in messages)
     )
+    caller_context = {"session_id": session_id} if session_id is not None else {}
     return FabricInvocationRequest(
         input=input_text,
-        caller_context={"session_id": session_id},
+        caller_context=caller_context,
     )
 
 
@@ -143,7 +149,7 @@ def _iter_streaming_chat_completion(
     *,
     completion_id: str,
     model: str,
-) -> AsyncIterator[str]:
+) -> _StreamingChatCompletionIterator:
     return _StreamingChatCompletionIterator(
         stream_context,
         fabric_stream,
@@ -169,13 +175,16 @@ class _StreamingChatCompletionIterator:
         self._model = model
         self._events: AsyncGenerator[str, None] | None = None
         self._close_fabric_stream_on_exit = True
+        self._close_task: asyncio.Task[None] | None = None
+        self._close_deadline: float | None = None
+        self._close_observer_added = False
         self._closed = False
 
     def __aiter__(self) -> AsyncIterator[str]:
         return self
 
     async def __anext__(self) -> str:
-        if self._closed:
+        if self._closed or self._close_task is not None:
             raise StopAsyncIteration
         if self._events is None:
             self._events = self._iter_events()
@@ -184,6 +193,9 @@ class _StreamingChatCompletionIterator:
         except StopAsyncIteration:
             await self.aclose()
             raise
+        except asyncio.CancelledError:
+            self._start_cleanup()
+            raise
         except BaseException:
             await self.aclose()
             raise
@@ -191,12 +203,60 @@ class _StreamingChatCompletionIterator:
     async def aclose(self) -> None:
         if self._closed:
             return
-        self._closed = True
+        close_task = self._start_cleanup()
+        assert self._close_deadline is not None
+        remaining = max(0.0, self._close_deadline - asyncio.get_running_loop().time())
+        try:
+            await asyncio.wait_for(asyncio.shield(close_task), timeout=remaining)
+        except TimeoutError:
+            self._observe_background_cleanup(close_task)
+        except Exception:
+            self._closed = True
+            logger.exception(
+                "Fabric stream cleanup failed for completion %s.",
+                self._completion_id,
+            )
+
+    def _start_cleanup(self) -> asyncio.Task[None]:
+        if self._close_task is None:
+            self._close_task = asyncio.create_task(self._cleanup())
+            self._close_deadline = asyncio.get_running_loop().time() + _FABRIC_STREAM_CLEANUP_TIMEOUT_SECONDS
+        return self._close_task
+
+    def _observe_background_cleanup(self, close_task: asyncio.Task[None]) -> None:
+        if self._close_observer_added:
+            return
+        self._close_observer_added = True
+        close_task.add_done_callback(self._log_background_cleanup_result)
+        logger.warning(
+            "Timed out waiting for Fabric stream cleanup after %gs; cleanup will continue in the background.",
+            _FABRIC_STREAM_CLEANUP_TIMEOUT_SECONDS,
+        )
+
+    def _log_background_cleanup_result(self, close_task: asyncio.Task[None]) -> None:
+        if close_task.cancelled():
+            self._closed = True
+            logger.warning(
+                "Background Fabric stream cleanup was cancelled for completion %s.",
+                self._completion_id,
+            )
+            return
+        error = close_task.exception()
+        if error is not None:
+            self._closed = True
+            logger.error(
+                "Background Fabric stream cleanup failed for completion %s.",
+                self._completion_id,
+                exc_info=(type(error), error, error.__traceback__),
+            )
+
+    async def _cleanup(self) -> None:
         if self._events is not None:
             await self._events.aclose()
         if self._close_fabric_stream_on_exit:
             await _close_interrupted_stream(self._fabric_stream)
         await self._stream_context.__aexit__(None, None, None)
+        self._closed = True
 
     async def _iter_events(self) -> AsyncGenerator[str, None]:
         try:
@@ -213,6 +273,20 @@ class _StreamingChatCompletionIterator:
         except Exception as error:
             logger.exception("Fabric streaming chat completion failed.")
             yield openai_chat_completion_error_sse(error)
+
+
+class _FabricStreamingResponse(StreamingResponse):
+    """Close the Fabric stream when response delivery ends or disconnects."""
+
+    def __init__(self, iterator: _StreamingChatCompletionIterator, **kwargs: Any) -> None:
+        super().__init__(iterator, **kwargs)
+        self._iterator = iterator
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            await asyncio.shield(self._iterator.aclose())
 
 
 async def _close_interrupted_stream(fabric_stream: FabricRuntimeStream) -> None:
@@ -250,7 +324,7 @@ def create_fabric_serving_app(
     config_path = Path(agent_config_path).resolve()
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         agent_config = load_agent_config(config_path)
         runtime_base_dir = await asyncio.to_thread(resolve_runtime_base_dir, config_path)
         base_dir = runtime_base_dir.path
@@ -321,67 +395,81 @@ def create_fabric_serving_app(
         response: Response,
         session_id: Annotated[str | None, Header(alias=SESSION_ID_HEADER)] = None,
     ) -> ChatCompletionResponse | StreamingResponse:
-        try:
-            session = await app.state.session_manager.resolve_session(session_id)
-        except FabricSessionNotFoundError as error:
-            raise HTTPException(status_code=404, detail=str(error)) from error
-        except FabricSessionStartError as error:
-            raise HTTPException(status_code=503, detail=str(error)) from error
+        response_headers: dict[str, str] | None = None
+        if session_id is None:
+            invocation_request = _to_fabric_invocation_request(request, session_id=None)
+            invoke = app.state.session_manager.invoke_once
+            stream = app.state.session_manager.stream_once
+        else:
+            try:
+                session = await app.state.session_manager.resolve_session(session_id)
+            except FabricSessionNotFoundError as error:
+                raise HTTPException(status_code=404, detail=str(error)) from error
+            except FabricSessionStartError as error:
+                raise HTTPException(status_code=503, detail=str(error)) from error
+            invocation_request = _to_fabric_invocation_request(request, session_id=session.session_id)
+            response_headers = _session_headers(session.session_id)
+            invoke = partial(app.state.session_manager.invoke_session, session)
+            stream = partial(app.state.session_manager.stream_session, session)
 
-        invocation_request = _to_fabric_invocation_request(request, session_id=session.session_id)
         if request.stream:
-            stream_context = app.state.session_manager.stream_session(session, invocation_request)
+            stream_context = stream(invocation_request)
             try:
                 fabric_stream = await stream_context.__aenter__()
+            except FabricRuntimeStartError as error:
+                raise HTTPException(status_code=503, detail=str(error), headers=response_headers) from error
             except FabricSessionNotFoundError as error:
                 raise HTTPException(
                     status_code=404,
                     detail=str(error),
-                    headers=_session_headers(session.session_id),
+                    headers=response_headers,
                 ) from error
             except FabricRuntimeExecutionError as error:
                 raise HTTPException(
                     status_code=502,
                     detail=str(error),
-                    headers=_session_headers(session.session_id),
+                    headers=response_headers,
                 ) from error
-            return StreamingResponse(
-                _iter_streaming_chat_completion(
-                    stream_context,
-                    fabric_stream,
-                    completion_id=f"chatcmpl-{uuid.uuid4().hex}",
-                    model=_request_model_name(request),
-                ),
+            iterator = _iter_streaming_chat_completion(
+                stream_context,
+                fabric_stream,
+                completion_id=f"chatcmpl-{uuid.uuid4().hex}",
+                model=_request_model_name(request),
+            )
+            return _FabricStreamingResponse(
+                iterator,
                 media_type="text/event-stream",
-                headers=_session_headers(session.session_id),
+                headers=response_headers,
             )
 
         try:
-            result = await app.state.session_manager.invoke_session(session, invocation_request)
+            result = await invoke(invocation_request)
+        except FabricRuntimeStartError as error:
+            raise HTTPException(status_code=503, detail=str(error), headers=response_headers) from error
         except FabricSessionNotFoundError as error:
             raise HTTPException(
                 status_code=404,
                 detail=str(error),
-                headers=_session_headers(session.session_id),
+                headers=response_headers,
             ) from error
         except FabricRuntimeTimeoutError as error:
             raise HTTPException(
                 status_code=504,
                 detail=str(error),
-                headers=_session_headers(session.session_id),
+                headers=response_headers,
             ) from error
         except FabricRuntimeExecutionError as error:
             raise HTTPException(
                 status_code=502,
                 detail=str(error),
-                headers=_session_headers(session.session_id),
+                headers=response_headers,
             ) from error
 
         if result.status != "succeeded":
             raise HTTPException(
                 status_code=502,
                 detail=_failed_result_detail(result),
-                headers=_session_headers(session.session_id),
+                headers=response_headers,
             )
 
         try:
@@ -390,10 +478,11 @@ def create_fabric_serving_app(
             raise HTTPException(
                 status_code=502,
                 detail=str(error),
-                headers=_session_headers(session.session_id),
+                headers=response_headers,
             ) from error
 
-        response.headers[SESSION_ID_HEADER] = session.session_id
+        if response_headers is not None:
+            response.headers.update(response_headers)
         return completion
 
     @app.delete("/v1/sessions/{session_id}", status_code=204)
@@ -415,6 +504,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--agent-config", required=True, type=Path, help="Path to an agent YAML config file.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--socket-fd", type=int, help="Inherited loopback socket descriptor.")
     parser.add_argument(
         "--max-concurrent-invocations",
         type=int,
@@ -451,6 +541,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
         host=args.host,
         port=args.port,
+        fd=args.socket_fd,
         log_config=None,
     )
     return 0

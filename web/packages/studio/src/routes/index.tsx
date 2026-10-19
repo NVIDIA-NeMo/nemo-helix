@@ -3,7 +3,7 @@
 
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
-import { Loading } from '@studio/components/Layouts/Loading';
+import { SuspenseOutlet } from '@studio/components/Layouts/SuspenseOutlet';
 import { ROUTES } from '@studio/constants/routes';
 import { PluginProvider } from '@studio/plugins/PluginProvider';
 import { PluginRenderer } from '@studio/plugins/PluginRenderer';
@@ -34,8 +34,8 @@ import { PageLayout } from '@studio/routes/PageLayout';
 import { RootLayout } from '@studio/routes/RootLayout';
 import { RootRedirect } from '@studio/routes/RootRedirect';
 import { gatePluginRoutes } from '@studio/routes/utils';
-import { lazy, Suspense } from 'react';
-import { Outlet, type RouteObject } from 'react-router';
+import { lazy } from 'react';
+import { type RouteObject } from 'react-router';
 
 const NoMatchRoute = lazy(() =>
   import('@studio/routes/NoMatchRoute').then((module) => ({ default: module.NoMatchRoute }))
@@ -99,12 +99,7 @@ export const routes: RouteObject[] = [
             element: <WorkspaceIndexRoute />,
           },
           {
-            element: (
-              // Suspense queries will show loader in panel area
-              <Suspense fallback={<Loading description="Loading..." />}>
-                <Outlet />
-              </Suspense>
-            ),
+            element: <SuspenseOutlet />,
             errorElement: <RouteErrorPanel title="Entity Store" />,
             children: [
               ...dashboardRoutes,

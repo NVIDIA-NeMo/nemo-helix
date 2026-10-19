@@ -162,12 +162,13 @@ function findFunctionBody(
 }
 
 /**
- * Prefix unused parameters with underscore to suppress TypeScript warnings
- * Specifically handles api.ts file with Orval-generated function patterns
+ * Prefix unused parameters with underscore to suppress TypeScript warnings.
+ * Handles the react-query client's per-tag files, which live directly under
+ * the service root (as opposed to the zod client's `zod/` and `schema/`
+ * subdirectories, which this must not touch).
  */
 function prefixUnusedParameters(filePath: string): boolean {
-  // Only process api.ts file
-  if (!filePath.includes('api.ts')) {
+  if (path.dirname(filePath) !== generatedPath) {
     return false;
   }
 
@@ -460,6 +461,38 @@ function splitZodTagFilesIn(zodDir: string): void {
   }
 }
 
+/**
+ * Write a barrel re-exporting every react-query tag file at the service root.
+ *
+ * Most call sites import a handful of named hooks from a specific tag file
+ * directly, which is the point of `mode: 'tags'`. A few call sites (the
+ * plugin SDK bridge) need the entire service surface as one module — this
+ * barrel serves that without reintroducing a single all-in-one file that
+ * every narrow import pays for.
+ */
+function writeReactQueryBarrel(): void {
+  const entries = readdirSync(generatedPath, { withFileTypes: true });
+  const tagFiles = entries
+    .filter((e) => e.isFile() && e.name.endsWith('.ts') && e.name !== 'index.ts')
+    .map((e) => path.basename(e.name, '.ts'))
+    .sort();
+
+  const lines = [
+    '/**',
+    ' * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.',
+    ' * SPDX-License-Identifier: Apache-2.0',
+    ' *',
+    ' * Auto-generated barrel re-exporting every per-tag module in this service.',
+    ' * Only import this when you need the entire service surface (e.g. the',
+    ' * plugin SDK bridge) — everywhere else, import the specific tag file.',
+    ' * Do not edit manually.',
+    ' */',
+    ...tagFiles.map((tag) => `export * from './${tag}';`),
+    '',
+  ];
+  writeFileSync(path.join(generatedPath, 'index.ts'), lines.join('\n'), 'utf-8');
+}
+
 async function formatWithPrettier(dir: string): Promise<void> {
   const entries = readdirSync(dir, { withFileTypes: true });
   for (const entry of entries) {
@@ -494,6 +527,9 @@ async function run(): Promise<void> {
   const zodDir = path.join(generatedPath, 'zod');
   console.log('Splitting zod tag files by operation...');
   splitZodTagFilesIn(zodDir);
+
+  console.log('Writing react-query barrel...');
+  writeReactQueryBarrel();
 
   console.log('Running prettier...');
   await formatWithPrettier(generatedPath);

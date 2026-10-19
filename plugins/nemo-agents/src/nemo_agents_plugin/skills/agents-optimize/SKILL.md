@@ -5,21 +5,23 @@
 name: agents-optimize
 description: >-
   Optimizes and accelerates a deployed NeMo agent by suggesting switchyard
-  routing splits, skill optimization, prompt/hyperparameter tuning, and
+  routing splits, prompt/hyperparameter tuning, and
   evaluations against newly available models. Persists snapshots and structured
   suggestions to the NeMo files service for diffing and UI rendering. Use when
   the user asks to optimize, accelerate, tune, route, or reduce the cost of an
   agent or its underlying model. Trigger keywords - agent optimization,
   optimize agent, accelerate agent, smaller model, switchyard router,
-  routing split, agents optimize-skills, agents optimize, agents evaluate,
+  routing split, agents optimize, agents evaluate,
   new model scan, nemotron, frontier model.
+allowed-tools: Bash
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # NeMo Agent Optimization
 
-Optimize and accelerate a deployed agent by suggesting routing splits, skill
-optimization, prompt/hyperparameter tuning, and evaluations against newly
-available models. Always anchor proposed changes against an evaluation baseline
+Optimize and accelerate a deployed agent by suggesting routing splits,
+prompt/hyperparameter tuning, and evaluations against newly available models. Always anchor proposed changes against an evaluation baseline
 so quality regressions are caught before promotion.
 
 ## Workflow
@@ -72,41 +74,25 @@ model is in use, suggest creating a `random_routing` virtual model with an
   probabilities, wrong entity IDs in middleware config, and other middleware-
   silently-bypassed failure modes.
 - Set `model` on the suggestion to the current source model. Suggested
-  follow-up actions: `nemo agents evaluate run --agent <agent> --eval-config <yaml>`
+  follow-up actions: `nemo agents evaluate --agent <agent> --eval-config <yaml>`
   against the routed VM before promoting.
 
 This is pure config inspection — no telemetry download required.
 
-### 2. Skill optimization
+### 2. Prompt + hyperparameter tuning
 
-If the agent uses skills (its repo has a `--skills-path`, or
-`.agent-improver.yml` is present, or its config references skill files) **and**
-`nemo agents optimize-skills` has not been run since the last optimizer
-snapshot, suggest running it.
-
-Suggested actions:
-
-- `nemo agents optimize-skills run --spec-file .agent-improver.yml`
-  (or pass an inline JSON spec via `--spec '{...}'` if no config file exists)
-- After it returns, apply the resulting skill diff to the agent and redeploy.
-
-See **the `nemo-agent-skills-optimization` skill** for the full optimize-skills loop
-(variance, repeats, branch handling, `--open-pr`).
-
-### 3. Prompt + hyperparameter tuning
-
-If `nemo agents optimize` has not been run for this agent since the last
+If `nemo agents optimize run-strategy` has not been run for this agent since the last
 snapshot, suggest running it. The job sweeps prompts and hyperparameters via
 `nat optimize` against the agent's eval dataset.
 
 Suggested actions:
 
-- `nemo agents optimize run --agent <name> --optimize-config <yaml>`
-  (or submit as a platform job with `nemo agents optimize submit …`)
+- `nemo agents optimize prepare-fileset --source <bundle-dir> --optimize-config <bundle-relative-yaml> --fileset <name>`
+- `nemo agents optimize run-strategy --strategy config-tuning --agent <name> --optimize-config-fileset <workspace/name> --optimize-config <config-path-in-fileset>`
 - After it completes, apply the new prompt + hyperparameters to a sibling
-  agent, deploy it, and run `nemo agents evaluate run` to compare.
+  agent, deploy it, and run `nemo agents evaluate` to compare.
 
-### 4. New model scan
+### 3. New model scan
 
 Diff `nemo models list --all-pages` against `prevSnapshot.modelNames`. **Never
 emit on first run** — there is no prior snapshot to diff against. Emit one
@@ -116,12 +102,12 @@ profile (skip guardrails / safety / GLiNER models).
 Each suggestion sets `model` to the new model name and includes:
 
 - Create a sibling agent pointing at `<new-model>`, then run
-  `nemo agents evaluate run --agent <sibling> --eval-config <yaml>` to
+  `nemo agents evaluate --agent <sibling> --eval-config <yaml>` to
   compare against the current model on the baseline dataset. There is no
   `--model` override flag on `evaluate`; the model swap goes through the
   sibling agent, or by editing the eval-config YAML.
-- `nemo auditor targets create <target> -d '{"model": "<new-model>", "type": "<type>"}'` then
-  `nemo auditor audit run --spec '{"config": "default/<config>", "target": "default/<target>"}'`
+- `nemo garak targets create <target> -d '{"model": "<new-model>", "type": "<type>"}'` then
+  `nemo garak audit --spec '{"config": "default/<config>", "target": "default/<target>"}'`
   to verify the new model is robust against jailbreaks before promotion.
 
 Pure set subtraction — no downloads required.
@@ -211,8 +197,7 @@ survives across reads.
 | `type` value | Meaning |
 |--------------|---------|
 | `model_optimization` | Switchyard routing split or smaller-model fit |
-| `skill_optimization` | `nemo agents optimize-skills` is recommended |
-| `prompt_optimization` | `nemo agents optimize` is recommended |
+| `prompt_optimization` | `nemo agents optimize run-strategy` is recommended |
 | `new_model_scan` | New model appeared since last snapshot |
 
 `model_optimization` is reused for both "use a smaller model" and "add a
@@ -222,8 +207,8 @@ routing split" so existing UI tiles render without a frontend change. The
 ### Optional `apply` block (one-click action)
 
 When set, the `apply` block defines a single-action mutation that a downstream
-consumer can execute against the Platform API on the user's behalf. The
-contract is **strictly same-origin** to the Platform API host — consumers
+consumer can execute against the NeMo Helix API on the user's behalf. The
+contract is **strictly same-origin** to the NeMo Helix API host — consumers
 re-validate this at request time and reject anything else.
 
 Shape — single step (most common):
@@ -251,7 +236,7 @@ Rules — these MUST be followed when emitting an `apply` block:
 - `path` MUST start with `/`. It MUST NOT contain `://`, MUST NOT start with
   `//` (protocol-relative), MUST NOT contain query/fragment, and MUST NOT
   contain control characters.
-- The path is resolved against the configured Platform API URL; the frontend
+- The path is resolved against the configured NeMo Helix API URL; the frontend
   rejects any spec that resolves to a different origin.
 - The path's `workspaces/<ws>/` segment MUST equal the workspace the
   suggestion was emitted for. Cross-workspace mutations are rejected.
@@ -314,11 +299,11 @@ nemo agents list
 nemo models list --all-pages              # always --all-pages; default paginates
 nemo models list --filter.name nemotron   # find Nemotron candidates
 
-# Optimization commands (see also: nemo-agent-skills-optimization skill)
-nemo agents evaluate run --agent <name> --eval-config <yaml>
-nemo agents optimize run --agent <name> --optimize-config <yaml>
-nemo agents optimize-skills run --spec-file .agent-improver.yml
-nemo agents evaluate-suite run --spec '{"evals": "<dir>", "agent": "<name>"}'
+# Optimization commands.
+# The optimize command's --optimize-config value must be relative to the staged fileset root.
+nemo agents evaluate --agent <name> --eval-config <yaml>
+nemo agents optimize prepare-fileset --source <bundle-dir> --optimize-config <bundle-relative-yaml> --fileset <name>
+nemo agents optimize run-strategy --strategy config-tuning --agent <name> --optimize-config-fileset <workspace/name> --optimize-config <config-path-in-fileset>
 
 # Files service
 nemo files list <fileset>
@@ -327,9 +312,9 @@ nemo files upload <local> <fileset> --remote-path <remote>
 nemo files filesets create <name>
 nemo files filesets list
 
-# Auditor (jailbreak robustness check on a candidate model)
-nemo auditor targets create <target> -d '{"model": "<new-model>", "type": "<type>"}'
-nemo auditor audit run --spec '{"config": "default/<config>", "target": "default/<target>"}'
+# garak (jailbreak robustness check on a candidate model)
+nemo garak targets create <target> -d '{"model": "<new-model>", "type": "<type>"}'
+nemo garak audit --spec '{"config": "default/<config>", "target": "default/<target>"}'
 ```
 
 ## What requires execution vs. what can be reasoned
@@ -341,9 +326,9 @@ nemo auditor audit run --spec '{"config": "default/<config>", "target": "default
   (`8b` < `30b` < `70b`). Prefer Nemotron candidates.
 - **New model diff**: set subtraction between current model list and prior
   snapshot model list. Pure computation.
-- **Skill / prompt optimization gating**: check whether
-  `iterations[].timestamp` from a prior `nemo agents optimize-skills` /
-  `nemo agents optimize` run is newer than the last snapshot.
+- **Prompt optimization gating**: check whether `iterations[].timestamp`
+  from a prior `nemo agents optimize run-strategy` run is newer than the last
+  snapshot.
 
 **Requires execution:**
 
@@ -360,12 +345,12 @@ nemo auditor audit run --spec '{"config": "default/<config>", "target": "default
   `new_model_scan` suggestions. Other agents' entries in the file are
   preserved on save.
 - Look up the latest evaluation result for the selected agent. Run
-  `nemo agents evaluate run` if no baseline exists and a dataset+config is
+  `nemo agents evaluate` if no baseline exists and a dataset+config is
   available; otherwise suggest the user create one.
 - Fetch agents and models in parallel
   (`nemo agents list`, `nemo models list --all-pages`).
-- Reason about routing/smaller-model fit, skill-optimization, prompt-
-  optimization, and new-model candidates from this data — no telemetry
+- Reason about routing/smaller-model fit, prompt optimization, and
+  new-model candidates from this data — no telemetry
   download required.
 - Create `nemo-agent-optimizer` fileset if it doesn't exist
   (`nemo files filesets create nemo-agent-optimizer`).
@@ -384,7 +369,5 @@ nemo auditor audit run --spec '{"config": "default/<config>", "target": "default
   alongside this skill when the user wants both a perf-and-safety pass.
 - `inference` — exact `nemo virtual-models create … --request-middleware …`
   syntax for switchyard routing/passthrough/translate.
-- `nemo-agent-skills-optimization` — full reference for `nemo agents
-  optimize-skills` / `evaluate-suite` / `analyze`.
 - `nemo-agents-optimize-sync-web` — keeps the web-side optimizer hook in
   parity with this skill's JSONL/apply spec.

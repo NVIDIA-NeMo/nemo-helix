@@ -3,7 +3,7 @@
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { isDefined } from '@nemo/common/src/utils/isDefined';
-import { filesUploadFile } from '@nemo/sdk/generated/platform/api';
+import { filesUploadFile } from '@nemo/sdk/generated/platform/files';
 import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
 import { getFileExtension, parseFileContent } from '@studio/util/files';

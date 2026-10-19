@@ -525,6 +525,61 @@ components:
           type: object
       type: object
       title: Affinity
+    AuthContext:
+      properties:
+        principal_id:
+          type: string
+          title: Principal Id
+          description: The principal's unique identifier
+        principal_account_id:
+          title: Principal Account Id
+          description: Stable NeMo account identifier for the principal
+          type: string
+        principal_email:
+          title: Principal Email
+          description: The principal's email address
+          type: string
+        principal_groups:
+          items:
+            type: string
+          type: array
+          title: Principal Groups
+          description: Groups the principal belongs to
+        principal_authz_aliases:
+          items:
+            type: string
+          type: array
+          title: Principal Authz Aliases
+          description: Alternate trusted identifiers for the principal
+        principal_on_behalf_of:
+          title: Principal On Behalf Of
+          description: If acting on behalf of another principal, their principal ID
+          type: string
+        principal_on_behalf_of_groups:
+          title: Principal On Behalf Of Groups
+          description: Groups the on-behalf-of principal belongs to
+          items:
+            type: string
+          type: array
+        principal_on_behalf_of_email:
+          title: Principal On Behalf Of Email
+          description: The on-behalf-of principal's email address
+          type: string
+        principal_on_behalf_of_account_id:
+          title: Principal On Behalf Of Account Id
+          description: Stable NeMo account identifier for the on-behalf-of principal
+          type: string
+        principal_on_behalf_of_authz_aliases:
+          items:
+            type: string
+          type: array
+          title: Principal On Behalf Of Authz Aliases
+          description: Alternate trusted identifiers for the on-behalf-of principal
+      type: object
+      required:
+      - principal_id
+      title: AuthContext
+      description: Auth context captured at resource creation for delegated access.
     ConfigFile:
       properties:
         path:
@@ -624,45 +679,47 @@ components:
             $ref: '#/components/schemas/RequestContainer'
           type: array
           title: Containers
-        init_containers:
+        initContainers:
           items:
             $ref: '#/components/schemas/RequestContainer'
           type: array
-          title: Init Containers
-        volume_mounts:
+          title: Initcontainers
+        volumeMounts:
           items:
             $ref: '#/components/schemas/VolumeMount'
           type: array
-          title: Volume Mounts
-        config_files:
+          title: Volumemounts
+        configFiles:
           items:
             $ref: '#/components/schemas/ConfigFile'
           type: array
-          title: Config Files
-        restart_policy:
+          title: Configfiles
+        restartPolicy:
           type: string
           enum:
           - Always
           - OnFailure
           - Never
-          title: Restart Policy
+          title: Restartpolicy
           default: Always
-        backoff_limit:
+        backoffLimit:
           type: integer
           minimum: 1.0
-          title: Backoff Limit
+          title: Backofflimit
           description: Retry limit for OnFailure deployments; must be positive. Never
             deployments disable retries internally.
           default: 6
-        drift_recovery:
+        driftRecovery:
           $ref: '#/components/schemas/DriftRecoveryPolicy'
         labels:
           additionalProperties:
             type: string
           type: object
           title: Labels
-        backend_config:
+        backendConfig:
           $ref: '#/components/schemas/DeploymentBackendConfig'
+        workloadIdentity:
+          $ref: '#/components/schemas/WorkloadIdentitySpec'
       type: object
       required:
       - name
@@ -830,6 +887,11 @@ components:
           title: Db Version
           description: Database version of the entity for optimistic locking.
           readOnly: true
+        auth_context:
+          allOf:
+          - $ref: '#/components/schemas/AuthContext'
+          readOnly: true
+          nullable: true
       type: object
       required:
       - workspace
@@ -842,6 +904,7 @@ components:
       - entity_id
       - parent
       - db_version
+      - auth_context
       title: Deployment
       description: Desired and observed deployment state.
     DeploymentBackendConfig:
@@ -925,18 +988,20 @@ components:
         authProxySidecarIdentity:
           title: Authproxysidecaridentity
           description: 'Service-principal name the auth-proxy sidecar stamps (interpolated
-            into ''X-NMP-Principal-Id: service:<identity>''). Required when auth_proxy_sidecar
+            into ''X-NHX-Principal-Id: service:<identity>''). Required when auth_proxy_sidecar
             is True.'
           type: string
         authProxySidecarOnBehalfOf:
           title: Authproxysidecaronbehalfof
           description: Optional principal id the auth-proxy sidecar delegates to via
-            'X-NMP-Principal-On-Behalf-Of'. When set, the service principal acts on
+            'X-NHX-Principal-On-Behalf-Of'. When set, the service principal acts on
             behalf of this identity so the platform scopes the workload's access to
             what that principal can reach (e.g. the deployment's creator) rather than
             the service principal's full reach. Only meaningful when auth_proxy_sidecar
             is True.
           type: string
+        workloadIdentity:
+          $ref: '#/components/schemas/WorkloadIdentitySpec'
         id:
           type: string
           title: Id
@@ -1132,6 +1197,11 @@ components:
         serviceAccount:
           title: Serviceaccount
           type: string
+        nodeSelector:
+          additionalProperties:
+            type: string
+          type: object
+          title: Nodeselector
         tolerations:
           items:
             $ref: '#/components/schemas/Toleration'
@@ -1139,8 +1209,37 @@ components:
           title: Tolerations
         affinity:
           $ref: '#/components/schemas/Affinity'
+        topologySpreadConstraints:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Topologyspreadconstraints
+          description: Pod topology spread constraints applied to every Job/Deployment
+            pod rendered from this config. Each entry is a raw Kubernetes topologySpreadConstraint
+            object (maxSkew, topologyKey, whenUnsatisfiable, labelSelector, ...).
+            k8s-only.
         securityContext:
           $ref: '#/components/schemas/PodSecurityContext'
+        podAnnotations:
+          additionalProperties:
+            type: string
+          type: object
+          title: Podannotations
+          description: Annotations stamped onto the pod-template metadata for every
+            Job/Deployment pod rendered from this config (e.g. an Istio native-sidecar
+            annotation so a mesh-injected proxy terminates when a puller Job's main
+            container exits). k8s-only; ignored on docker/openshell backends.
+        jobTtlSecondsAfterFinished:
+          title: Jobttlsecondsafterfinished
+          description: Per-deployment override for ttlSecondsAfterFinished on a finite
+            (Never/OnFailure) Job, such as the weight-puller. When set, wins over
+            the executor default; when unset, the executor default applies. Controls
+            how quickly a completed Job's pod (and its ReadWriteOnce volume attachment)
+            is reaped. A set value must be at least 10s so the reconciler can observe
+            Job completion before the pod is reaped. k8s-only.
+          type: integer
+          minimum: 10.0
       type: object
       title: K8sDeploymentConfig
     K8sVolumeConfig:
@@ -1704,3 +1803,31 @@ components:
       - name
       - mountPath
       title: VolumeMount
+    WorkloadIdentitySpec:
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        workloadKind:
+          title: Workloadkind
+          type: string
+        workloadId:
+          title: Workloadid
+          type: string
+        tokenAudience:
+          title: Tokenaudience
+          type: string
+        serviceAccountName:
+          title: Serviceaccountname
+          type: string
+        tokenExpirationSeconds:
+          type: integer
+          maximum: 86400.0
+          minimum: 600.0
+          title: Tokenexpirationseconds
+          description: Requested subject-token lifetime in seconds, capped at 24 hours.
+          default: 3600
+      type: object
+      title: WorkloadIdentitySpec
+      description: Workload token-exchange settings for deployment backends.

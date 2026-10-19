@@ -1,0 +1,136 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "NeMo Studio Fine-tuning"
+description: "Fine-tune models from NeMo Studio, and track customization jobs."
+---
+
+Use **Models > Fine-tuning** in the NeMo Studio workspace sidebar to open the fine-tuned models list, start fine-tuning jobs, and track their progress for the selected workspace.
+
+<Note>
+
+Fine-tuning is enabled by default. An administrator can disable it by setting `studio.feature_flags.customizer_enabled: false` in the platform configuration and restarting Studio, which removes the **Fine-tuning** navigation entry and hides fine-tuning jobs from the general **Jobs** list.
+
+</Note>
+
+For customization concepts, supported models, and the underlying CLI and API workflow, see [Customization Concepts](/documentation/customizer-reference/customization-concepts).
+
+## Start a Fine-tuning Job
+
+Select **Customize a Model** from the fine-tuned models list to open **Fine-tune a Model**, which first asks how you want to start:
+
+| Option | What it does |
+| ------ | ------------ |
+| Describe with AI | Pick a model and dataset and describe your goal. AI drafts the training settings; once the draft passes validation, select **Continue** to open the form filled in for you to review. |
+| Start from a template | Provisions a ready-made NVIDIA recipe — registering its base model and loading its dataset into the workspace — then opens the form filled in. Also lists templates you saved from earlier jobs, which need no provisioning. See [Start from a Template](#start-from-a-template) and [Save a Job as a Template](#save-a-job-as-a-template). |
+| Build from scratch | Opens the form with default values, for you to choose your own base model and dataset. |
+
+To start from a model or job you already have, use one of these instead. Both open the form directly, with your choice applied:
+
+- **Customize this Model**, on a base model's details panel, starts a job against that model.
+- **Clone**, on a job's actions menu (**⋯**), reuses that job's settings. See [Clone an Existing Job](#clone-an-existing-job).
+
+The form has the following sections, shown as they apply to your selections:
+
+| Section | What you configure |
+| ------- | ------------------- |
+| Training Backend | **Automodel** (multi-GPU), **Unsloth** (single-GPU, 4-bit quantized), or **RL**. |
+| Model | Base model, output model name, and description. |
+| Training Method | For Automodel: fine-tuning type (**LoRA**, **LoRA (Merged)**, or **Full Weights**) and training type (**SFT** or **Distillation**, with a teacher model field for distillation). For Unsloth: fine-tuning type (**LoRA** or **Full Weights**). For RL: **DPO** or **GRPO**. |
+| Reward Environment | Shown for GRPO jobs. Selects the reward environment used during training. |
+| Training Data | The training **Dataset**, selected from filesets available in the workspace. Titled **Training Prompts** for GRPO jobs. |
+| Training Parameters | General hyperparameters such as epochs, learning rate, and batch size. Not shown for GRPO jobs, which use the GRPO sections below instead. |
+| LoRA Parameters | Shown when the training method uses a LoRA or LoRA-merged finetuning type. |
+| DPO Parameters | Shown for RL jobs using DPO. |
+| Experiment Tracking | Optional and collapsed by default. Streams metrics to Weights & Biases or MLflow while the job runs. |
+| Compute Resources | GPU and node allocation for the job. |
+| Deployment | Shown when deployments are enabled. For a LoRA adapter run, checks whether the base model is already deployed with LoRA enabled and, if not, offers to deploy it when training finishes. For merged and full-weight runs, offers to deploy the output model when training finishes. |
+
+GRPO jobs replace **Training Parameters** with these sections:
+
+| Section | What you configure |
+| ------- | ------------------- |
+| Rollout & Sampling | Rollouts per prompt, prompts per step, max sequence length, temperature, and other generation and sampling settings. |
+| Reward | Reward normalization, plus collapsible reward scaling and shaping settings. |
+| Training Parameters | Epochs, learning rate, KL penalty, max steps, and global batch size, plus advanced optimizer and validation settings. |
+| Parameter Efficiency | Fine-tuning type (**Full Weights** or **LoRA**), and LoRA settings when LoRA is selected. |
+| Policy Update | Collapsed by default. How the policy update is computed and bounded. |
+| Execution & Overrides | Collapsed by default. Which trainer and rollout engine run the job, and model-specific configuration. |
+
+Several sections include an advanced JSON field for power-user overrides — for example raw parallelism or backend-specific keyword arguments — alongside the structured form fields. Use these only when a setting isn't exposed elsewhere in the form.
+
+Select **Start Fine-Tuning** to create the job. Studio confirms with a toast and navigates to the new job's detail page.
+
+Model eligibility for fine-tuning depends on the selected base model; **Customize this Model** is disabled for models that have no fileset to fine-tune from.
+
+### Start from a Template
+
+A template is a complete recipe: a base model, a dataset, and a tuned set of training parameters that are known to work together. Choosing one lets you run a fine-tuning job without first sourcing a model or preparing data.
+
+Studio ships these templates, all LoRA fine-tunes of Nemotron models on a text-to-SQL dataset:
+
+| Template | Total / active parameters | GPUs |
+| -------- | ------------------------- | ---- |
+| Fine-tune Nemotron 3.5 Lightning | 30B / 3B | 8 |
+| Fine-tune Nemotron 3 Super | 120B / 12B | 8 |
+| Fine-tune Nemotron 3 Ultra | 550B / 55B | 32 |
+
+Lightning is the smallest and the quickest way to see the whole flow end to end. Ultra needs a multi-node allocation.
+
+Select a template, then select **Continue**. Before the form opens, Studio prepares the workspace:
+
+1. Registers the template's base model — a fileset backed by the Hugging Face repository, and a model entity pointing at it.
+2. Downloads the template's Hugging Face dataset, converts each row to the shape the training backend expects, and uploads it as a dataset fileset with both a training and a validation split.
+
+The button reports progress while this runs, and the form opens pre-filled once it finishes.
+
+A template fills the form in — it does not submit anything. Review the settings, change whatever you want, and select **Start Fine-Tuning** when you're ready.
+
+<Note>
+
+Provisioning downloads a model and a dataset from Hugging Face into your workspace, so it needs network access to Hugging Face and enough storage for the checkpoint. If either step fails, Studio reports the error and keeps you on the selection screen so you can retry or pick a different template.
+
+</Note>
+
+### Clone an Existing Job
+
+From a job's detail page, open the actions menu (**⋯**) and select **Clone** to open **Fine-tune a Model** pre-filled with that job's settings. Adjust any fields before submitting to start a new job.
+
+### Save a Job as a Template
+
+To reuse a job's settings later, open the actions menu (**⋯**) on its detail page and select **Save as template**, then give the template a name and optional description. Saved templates appear under **Saved templates** when you choose **Start from a template**. Select one, then select **Continue** to open the form filled in with its settings; no provisioning runs, because the template names a model and dataset already in the workspace. To remove the selected saved template, select **Delete** and confirm.
+
+## Fine-tuned Models List
+
+The list shows fine-tuned models created in the current workspace. Select a row to open the model details side panel, which includes **Model Details** and **Chat Playground** tabs, a **Customize this Model** action, an **Evaluate this Model** action that opens the **Evaluations** page (see [NeMo Studio Model Evaluations](/documentation/studio/model-evaluations)), and a **View Intake Traces** link when intake is enabled.
+
+## Customization Job Details
+
+Select a job to open its detail page, which shows the job name, status badge, and metadata such as training type, base model, and creation date.
+
+| Tab | Shows |
+| --- | ----- |
+| Overview | Training progress, run configuration, and the source dataset's fileset details. |
+| Logs | Job execution logs. |
+| Chat with your Model | A chat playground against the resulting model, shown once the job completes. |
+
+The Overview tab's training progress panel differs by training method:
+
+| Training method | Panel | Shows |
+| ---------------- | ----- | ----- |
+| SFT, distillation, DPO | Training Loss | Train and validation loss per step, plus loss and progress stat tiles. |
+| SFT, distillation, DPO | Training Health | Collapsed by default, and shown only when the run records additional series, such as learning rate, gradient norm, or, for DPO, preference accuracy and chosen and rejected rewards. |
+| GRPO | Reward | Training and validation reward per step (loss isn't meaningful for GRPO's policy-gradient objective), plus reward and progress stat tiles. |
+| GRPO | Training Health | Collapsed by default. Diagnostic charts from NeMo RL, such as KL divergence and clip fraction, that can flag a run diverging before reward does. |
+
+Below the training panel, **Run Configuration** summarizes the customization ID, output model, base model, and other run metadata, with a **View Job Configuration** action that opens the full job spec.
+
+From the detail page header, open the actions menu (**⋯**) for **Clone**, **Save as template**, and, while the job is active or pending, **Cancel Job**.
+
+## Related Topics
+
+- [Customization Concepts](/documentation/customizer-reference/customization-concepts)
+- [Create a Customization Job](/documentation/customizer-reference/manage-customization-jobs/create-a-customization-job)
+- [Customization Job Reference](/documentation/customizer-reference/manage-customization-jobs/customization-job-reference)
+- [Experiments](/documentation/evaluate-models/experiments)

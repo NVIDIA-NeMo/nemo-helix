@@ -8,9 +8,13 @@ import {
   TreeNavLeaf,
   TreeNavList,
   TreeNavRoot,
+  Tooltip,
 } from '@nvidia/foundations-react-core';
 import { getSpanTemplate } from '@studio/components/IntakeDetail/SpanTemplates/registry';
-import { getSpanKindConfig } from '@studio/components/SpanKindBadge/spanKindConfig';
+import {
+  getSpanKindColorClass,
+  getSpanKindConfig,
+} from '@studio/components/SpanKindBadge/spanKindConfig';
 import {
   formatDurationMs,
   getTraceDisplayName,
@@ -20,7 +24,7 @@ import {
   type SpanTreeNode,
 } from '@studio/util/intakeTelemetry';
 import { MessagesSquare, TriangleAlert, Workflow } from 'lucide-react';
-import { type FC, type ReactNode } from 'react';
+import { type FC, type ReactNode, useState } from 'react';
 
 interface TraceSpanTreeProps {
   /** Session traces and their summary span trajectories. */
@@ -43,18 +47,6 @@ interface TraceSpanTreeProps {
   sessionActive?: boolean;
 }
 
-// Match the kind badge's accent color on the tree icon. KUI sets the icon color
-// via `.nv-tree-nav-root svg` in Tailwind's `base` layer, so a utility class
-// (the later `utilities` layer) wins without !important. Gray kinds (chain,
-// unknown) have no accent and inherit KUI's default icon color.
-const KIND_ICON_COLOR_CLASS: Record<string, string> = {
-  teal: 'text-[color:var(--text-color-accent-teal)]',
-  purple: 'text-[color:var(--text-color-accent-purple)]',
-  blue: 'text-[color:var(--text-color-accent-blue)]',
-  green: 'text-[color:var(--text-color-accent-green)]',
-  yellow: 'text-[color:var(--text-color-accent-yellow)]',
-};
-
 // Tree rows: round the row highlight and add the vertical padding KUI omits.
 const ROW_CLASS = 'rounded-[var(--radius-md)] py-[2px]';
 
@@ -70,20 +62,35 @@ interface SpanTreeLabelProps {
   errored?: boolean;
 }
 
+const SpanTreeName: FC<{ name: string }> = ({ name }) => {
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+  return (
+    <Tooltip
+      side="right"
+      align="start"
+      className="max-w-[32rem] break-words"
+      slotContent={tooltipOpen ? name : null}
+      onOpenChange={setTooltipOpen}
+    >
+      <span className="flex-1 min-w-0 truncate">{name}</span>
+    </Tooltip>
+  );
+};
+
 /** Shared label layout: name (truncates) + optional error badge + duration. */
 const SpanTreeLabel: FC<SpanTreeLabelProps> = ({ name, durationMs, errored }) => (
   <span className="flex flex-1 items-center gap-2 min-w-0">
-    <span className="flex-1 min-w-0 truncate">{name}</span>
+    <SpanTreeName name={name} />
     {errored && (
       <TriangleAlert
         role="img"
         aria-label="Error"
         fill="currentColor"
         // size-3.5 (14px) + accent-red as utilities, which win over KUI's base-layer svg rule.
-        className="size-3.5 text-[color:var(--text-color-accent-red)]"
+        className="size-3.5 text-(--text-color-accent-red)"
       />
     )}
-    <span className="shrink-0 font-mono text-[length:var(--text-12)] tabular-nums text-[color:var(--text-color-secondary)]">
+    <span className="shrink-0 font-mono text-(length:--text-12) tabular-nums text-(--text-color-secondary)">
       {formatDurationMs(durationMs)}
     </span>
   </span>
@@ -99,9 +106,7 @@ const renderSpanNodes = (
     const { span, children } = node;
     const kindConfig = getSpanKindConfig(span.kind);
     const Icon = kindConfig.icon;
-    const icon = (
-      <Icon role="img" aria-hidden className={KIND_ICON_COLOR_CLASS[kindConfig.color]} />
-    );
+    const icon = <Icon role="img" aria-hidden className={getSpanKindColorClass(span.kind)} />;
     const active = activeSpanId === span.span_id;
     const title = hierarchyTitle(node);
     // Mirror the accordion/row header: a template may elevate a kind-specific
@@ -117,16 +122,13 @@ const renderSpanNodes = (
 
     if (children.length > 0) {
       return (
-        <TreeNavBranch key={span.span_id} defaultOpen collapsible={false}>
-          {/* Non-collapsible triggers suppress `onClick` in the KUI handler, so
-              bind selection on the capture phase to keep branches always-open
-              yet clickable. */}
+        <TreeNavBranch key={span.span_id} defaultOpen>
           <TreeNavBranchTrigger
             className={ROW_CLASS}
             slotIcon={icon}
             active={active}
             title={title}
-            onClickCapture={() => onSelectSpan(span.span_id, traceId)}
+            onClick={() => onSelectSpan(span.span_id, traceId)}
           >
             {label}
           </TreeNavBranchTrigger>
@@ -170,16 +172,16 @@ const renderTraceNodes = ({
     const nodes = spanTree;
     if (nodes.length > 0) {
       return (
-        <TreeNavBranch key={trace.id} defaultOpen collapsible={false}>
+        <TreeNavBranch key={trace.id} defaultOpen>
           <TreeNavBranchTrigger
             className={ROW_CLASS}
             slotIcon={<Workflow role="img" aria-hidden />}
             active={trace.id === activeTraceId && !sessionActive && activeSpanId === null}
             title="View trace"
-            onClickCapture={() => onSelectTrace?.(trace.id)}
+            onClick={() => onSelectTrace?.(trace.id)}
           >
             <SpanTreeLabel
-              name={getTraceDisplayName(trace)}
+              name={`Trace: ${getTraceDisplayName(trace)}`}
               durationMs={trace.duration_ms}
               errored={trace.status === SpanStatus.error}
             />
@@ -206,7 +208,7 @@ const renderTraceNodes = ({
         onSelect={() => onSelectTrace?.(trace.id)}
       >
         <SpanTreeLabel
-          name={getTraceDisplayName(trace)}
+          name={`Trace: ${getTraceDisplayName(trace)}`}
           durationMs={trace.duration_ms}
           errored={trace.status === SpanStatus.error}
         />

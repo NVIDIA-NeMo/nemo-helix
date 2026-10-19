@@ -25,7 +25,7 @@ import httpx
 
 DEFAULT_ENDPOINT = "http://127.0.0.1:8000/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces"
 DEFAULT_BASE_URL = "https://inference-api.nvidia.com/v1"
-DEFAULT_MODEL = "nvidia/nvidia/nemotron-3-nano-30b-a3b"
+DEFAULT_MODEL = "nvidia/nvidia/nemotron-3.5-lightning"
 SESSION_ID = "nemo-flow-openinference-smoke"
 USER_ID = "local-user"
 QUESTION = "What is 6 times 7? Use the multiply tool, then summarize."

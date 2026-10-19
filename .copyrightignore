@@ -13,16 +13,15 @@ skills/
 docs/fern/openapi/
 plugins/*/openapi/
 web/packages/studio/src/generated/
+k8s/helm/files/opensandbox-ext/configmap.yaml
 web/vendor/
-plugins/nemo-experimentalist/examples/smoke-agent/dataset/_shared/records.json
-plugins/nemo-experimentalist/examples/smoke-agent/dataset/task-template/instruction.md
-plugins/nemo-experimentalist/examples/smoke-agent/dataset/task-template/records.json
-plugins/nemo-experimentalist/examples/smoke-agent/dataset/task-template/tests/expected.txt
-plugins/nemo-experimentalist/tests/experimentalist/fixtures/harbor_evaluator_parity/dataset/validation/*/instruction.md
 packages/garak_api/garakapi/_config.py
 packages/garak_api/garakapi/_plugins.py
 packages/garak_api/garakapi/exception.py
+packages/garak_api/garakapi/_selection.py
+packages/garak_api/garakapi/_spec.py
 services/guardrails/callouts/internal/server/callout_server.go
 services/guardrails/callouts/internal/server/callout_server_test.go
 # needs a README ignore instead
 k8s/helm/helm-docs-template/nemo-helm-readme.md.gotmpl
+plugins/prompt-master/src/prompt_master_plugin/vendor/

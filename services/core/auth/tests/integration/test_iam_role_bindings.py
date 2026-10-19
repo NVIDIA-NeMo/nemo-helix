@@ -17,13 +17,17 @@ SERVICE_PRINCIPAL = "service:integration-test"
 IAM_ROLE_BINDINGS_PATH = "/apis/auth/v2/iam/role-bindings"
 WORKSPACES_PATH = "/apis/entities/v2/workspaces"
 
+# test_client is module-scoped (expensive to boot): keep these tests on one xdist worker so
+# they share it instead of each worker re-provisioning it from scratch.
+pytestmark = pytest.mark.xdist_group("auth_iam_role_bindings")
+
 
 class TestIAMRoleBindings:
     """Tests for IAM role binding CRUD operations."""
 
     def test_list_role_bindings(self, http_client: TestClient):
         """Test listing role bindings."""
-        headers = {"X-NMP-Principal-Id": SERVICE_PRINCIPAL}
+        headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
         response = http_client.get(IAM_ROLE_BINDINGS_PATH, headers=headers)
         assert response.status_code == 200
 
@@ -34,7 +38,7 @@ class TestIAMRoleBindings:
 
     def test_role_binding_crud_lifecycle(self, http_client: TestClient):
         """Test full CRUD lifecycle for role bindings."""
-        headers = {"X-NMP-Principal-Id": SERVICE_PRINCIPAL}
+        headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
         test_principal = f"test-user-{uuid.uuid4().hex[:8]}@example.com"
         test_workspace = DEFAULT_WORKSPACE
         test_role = "Viewer"
@@ -102,7 +106,7 @@ class TestIAMRoleBindings:
         create_workspace: bool,
     ):
         """Test role binding CRUD by name outside the default workspace."""
-        headers = {"X-NMP-Principal-Id": SERVICE_PRINCIPAL}
+        headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
         test_principal = f"{workspace_name}-user-{uuid.uuid4().hex[:8]}@example.com"
         test_workspace = workspace_name
         test_role = "Viewer"
@@ -162,7 +166,7 @@ class TestIAMRoleBindings:
 
     def test_create_duplicate_role_binding_fails(self, http_client: TestClient):
         """Test that creating a duplicate active role binding returns 409."""
-        headers = {"X-NMP-Principal-Id": SERVICE_PRINCIPAL}
+        headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
         test_principal = f"dup-user-{uuid.uuid4().hex[:8]}@example.com"
         test_workspace = DEFAULT_WORKSPACE
         test_role = "Editor"
@@ -198,7 +202,7 @@ class TestIAMRoleBindings:
 
     def test_get_nonexistent_role_binding_returns_404(self, http_client: TestClient):
         """Test that getting a non-existent role binding returns 404."""
-        headers = {"X-NMP-Principal-Id": SERVICE_PRINCIPAL}
+        headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
         # Use a fake name that looks like a hash-based binding name
         fake_name = f"rb-{uuid.uuid4().hex[:24]}"
         response = http_client.get(f"/apis/auth/v2/iam/role-bindings/{fake_name}", headers=headers)
@@ -206,7 +210,7 @@ class TestIAMRoleBindings:
 
     def test_revoke_already_revoked_binding_returns_409(self, http_client: TestClient):
         """Test that revoking an already revoked binding returns 409."""
-        headers = {"X-NMP-Principal-Id": SERVICE_PRINCIPAL}
+        headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
         test_principal = f"revoke-user-{uuid.uuid4().hex[:8]}@example.com"
         test_workspace = DEFAULT_WORKSPACE
         test_role = "Viewer"
@@ -241,7 +245,7 @@ class TestIAMRoleBindings:
 
     def test_list_role_bindings_with_pagination(self, http_client: TestClient):
         """Test listing role bindings with pagination."""
-        headers = {"X-NMP-Principal-Id": SERVICE_PRINCIPAL}
+        headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
         response = http_client.get("/apis/auth/v2/iam/role-bindings?page=1&page_size=5", headers=headers)
         assert response.status_code == 200
 

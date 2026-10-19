@@ -3,12 +3,12 @@
   "tests": [
     {
       "type": "explicit",
-      "prompt": "Use the nemo-customizer skill to fine-tune Qwen with automodel.",
+      "prompt": "Use the nemo-customizer skill to fine-tune Nemotron with automodel.",
       "expected_skill": "nemo-customizer"
     },
     {
       "type": "explicit",
-      "prompt": "Run nemo-customizer. I need to submit an automodel SFT LoRA job on NeMo Platform.",
+      "prompt": "Run nemo-customizer. I need to submit an automodel SFT LoRA job on NeMo Helix.",
       "expected_skill": "nemo-customizer"
     },
     {
@@ -18,7 +18,7 @@
     },
     {
       "type": "implicit",
-      "prompt": "Fine-tune a model with LoRA SFT via nemo customization and a qwen3 Hugging Face weights fileset.",
+      "prompt": "Fine-tune a model with LoRA SFT via nemo customization and a Nemotron Hugging Face weights fileset.",
       "expected_skill": "nemo-customizer"
     },
     {
@@ -28,12 +28,17 @@
     },
     {
       "type": "implicit",
+      "prompt": "I want to train Nemotron 3.5 Lightning with LoRA using customizer. Which hyperparameters and how many GPUs should the job use?",
+      "expected_skill": "nemo-customizer"
+    },
+    {
+      "type": "implicit",
       "prompt": "Train a small chat model on a dataset I have locally and register the output on the platform.",
       "expected_skill": "nemo-customizer"
     },
     {
       "type": "explicit",
-      "prompt": "Use nemo customization unsloth submit to do a LoRA SFT as a Docker GPU job on the platform.",
+      "prompt": "Use nemo customization unsloth --job-json to do a LoRA SFT as a Docker GPU job on the platform.",
       "expected_skill": "nemo-customizer"
     },
     {
@@ -43,7 +48,7 @@
     },
     {
       "type": "implicit",
-      "prompt": "Fine-tune Qwen3-1.7B with Unsloth on NeMo Platform \u2014 I want the Unsloth training driver and bitsandbytes 4-bit loading.",
+      "prompt": "Fine-tune Qwen3-1.7B with Unsloth on NeMo Helix \u2014 I want the Unsloth training driver and bitsandbytes 4-bit loading.",
       "expected_skill": "nemo-customizer"
     },
     {
@@ -53,7 +58,7 @@
     },
     {
       "type": "explicit",
-      "prompt": "Use nemo customization rl submit to run a DPO job on NeMo Platform.",
+      "prompt": "Use nemo customization rl --job-json to run a DPO job on NeMo Helix.",
       "expected_skill": "nemo-customizer"
     },
     {
@@ -68,7 +73,7 @@
     },
     {
       "type": "explicit",
-      "prompt": "Use nemo customization rl submit to run a GRPO job against a NeMo Gym environment.",
+      "prompt": "Use nemo customization rl --job-json to run a GRPO job against a NeMo Gym environment.",
       "expected_skill": "nemo-customizer"
     },
     {
@@ -108,7 +113,7 @@
     },
     {
       "type": "contextual",
-      "prompt": "NeMo Platform is running. Before any customization training, help me explore what my support agent should do.",
+      "prompt": "NeMo Helix is running. Before any customization training, help me explore what my support agent should do.",
       "expected_skill_not": "nemo-customizer"
     },
     {

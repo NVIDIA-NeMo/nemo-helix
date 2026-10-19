@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
-import { jobsGetJob } from '@nemo/sdk/generated/platform/api';
+import { jobsGetJob } from '@nemo/sdk/generated/platform/jobs';
 import { Banner, Button, Card, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import type { AssistantToolArgs } from '@studio/routes/agents/AssistantChatRoute/toolParts';
@@ -73,7 +73,7 @@ export const JobProgressToolCall: FC<JobProgressToolCallProps> = ({ args }) => {
               <Text kind="label/bold/md" className="truncate">
                 {displayName}
               </Text>
-              <Text kind="body/regular/sm" color="secondary" className="truncate">
+              <Text kind="body/regular/sm" className="truncate text-secondary">
                 {description ?? 'Job progress'}
               </Text>
             </Stack>
@@ -84,7 +84,7 @@ export const JobProgressToolCall: FC<JobProgressToolCallProps> = ({ args }) => {
         {isLoading ? (
           <Flex align="center" gap="density-sm">
             <Spinner size="small" aria-label="Loading job..." />
-            <Text kind="body/regular/sm" color="secondary">
+            <Text className="text-secondary" kind="body/regular/sm">
               Loading job...
             </Text>
           </Flex>

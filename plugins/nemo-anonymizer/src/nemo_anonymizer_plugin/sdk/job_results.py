@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+from anonymizer.engine.rewrite.rewrite_generation import restore_empty_skipped_span_label_counts
 from nemo_anonymizer_plugin.sdk.display import DisplayRecordMixin, set_original_text_column
 from nemo_anonymizer_plugin.sdk.errors import AnonymizerClientError
 
@@ -38,6 +39,10 @@ class AnonymizerJobResults(DisplayRecordMixin):
         if not path.exists():
             raise AnonymizerClientError(f"Trace artifact not found: {path}")
         trace = pd.read_parquet(path, dtype_backend="pyarrow")
+        # The run task JSON-encodes the nested ``skipped_span_label_counts`` mapping so
+        # an all-empty one stays writable as Parquet. Decode it with the upstream helper
+        # so callers always see the dict that ``ReplacementApplication`` documents.
+        restore_empty_skipped_span_label_counts(trace)
         set_original_text_column(trace, self._load_metadata().get("original_text_column"))
         return trace
 

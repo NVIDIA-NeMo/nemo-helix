@@ -6,14 +6,16 @@ This file was primarily authored with the assistance of an AI coding assistant (
 """
 
 import json
+import os
+import tempfile
 from copy import deepcopy
 from pathlib import Path
 from typing import Optional, Tuple
 
 import typer
 import yaml
-from nmp.common.api.utils import tweak_spec
-from nmp.common.version import OPENAPI_SPEC_VERSION
+from nhx.common.api.utils import tweak_spec
+from nhx.common.version import OPENAPI_SPEC_VERSION
 from rich.console import Console
 from rich.table import Table
 
@@ -53,12 +55,25 @@ def load_openapi_spec(file_path: str) -> dict:
 
 def save_openapi_spec(spec: dict, output_path: str) -> None:
     """Save OpenAPI specification to a YAML or JSON file."""
-    if output_path.endswith(".json"):
-        with open(output_path, "w") as f:
-            f.write(json.dumps(spec, indent=2))
-    else:
-        with open(output_path, "w") as f:
-            yaml.dump(spec, f, default_flow_style=False, sort_keys=False)
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    suffix = output.suffix or ".tmp"
+    existing_mode = output.stat().st_mode & 0o7777 if output.exists() else None
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile("w", delete=False, dir=output.parent, suffix=suffix, encoding="utf-8") as f:
+            temp_path = Path(f.name)
+            if output_path.endswith(".json"):
+                f.write(json.dumps(spec, indent=2))
+            else:
+                yaml.dump(spec, f, default_flow_style=False, sort_keys=False)
+        if existing_mode is not None:
+            os.chmod(temp_path, existing_mode)
+        os.replace(temp_path, output)
+    except Exception:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+        raise
 
     print_verbose(f"Saved specification to {output_path}", style="bold green")
 
@@ -803,10 +818,8 @@ def update_object_type(spec: dict) -> dict:
     The `additionalProperties: true` is default (based on OpenAPI 3.1.0) for object types
     (see https://swagger.io/docs/specification/v3_0/data-models/data-types/#objects).
 
-    However, some tools (e.g. Stainless, which we use for generating client SDKs) uses a different default.
-    This leads to issues, where a field with type `dict[str, Any]` in Python code generates as `object` in client SDKs,
-
-    See https://www.stainless.com/docs/reference/diagnostics#Schema/ObjectHasNoProperties
+    However, some client generators use a different default, so a field typed `dict[str, Any]` in Python
+    would generate as a property-less `object` in client SDKs. Making it explicit keeps generated clients open.
     """
     if "components" not in spec or "schemas" not in spec["components"]:
         return spec
@@ -854,18 +867,6 @@ def update_object_type(spec: dict) -> dict:
     return spec
 
 
-def mark_direct_span_json_value_for_stainless(spec: dict) -> dict:
-    """Mark the direct-span API's intentionally unconstrained JsonValue for Stainless."""
-
-    schemas = spec.get("components", {}).get("schemas", {})
-    if "DirectSpanInput" not in schemas:
-        return spec
-    json_value = schemas.get("JsonValue")
-    if isinstance(json_value, dict):
-        json_value["x-stainless-any"] = True
-    return spec
-
-
 @app.command(name="fix-schema")
 def fix_schema(
     spec_file: str = typer.Argument(..., help="Path to OpenAPI specification file (YAML or JSON)"),
@@ -881,7 +882,6 @@ def fix_schema(
         spec = remove_invalid_components(spec)
         spec = fix_recursive_schemas(spec)
         spec = update_object_type(spec)
-        spec = mark_direct_span_json_value_for_stainless(spec)
 
         # Make sure the version is set to 3.1.0
         spec["openapi"] = "3.1.0"
@@ -1034,7 +1034,7 @@ def remove_schema_command(
         raise typer.Exit(1)
 
 
-def remove_endpoint(spec: dict, path: str, method: Optional[str] = None) -> None:
+def remove_endpoint(spec: dict, path: str, method: Optional[str] = None, prune_unused: bool = True) -> None:
     """Remove an endpoint and its associated schemas from the specification.
     If method is None, removes all methods for the given path."""
     if "paths" not in spec:
@@ -1061,8 +1061,8 @@ def remove_endpoint(spec: dict, path: str, method: Optional[str] = None) -> None
         # Remove all methods for the path
         del spec["paths"][path]
 
-    # Remove any unused schemas
-    remove_unused_schemas(spec)
+    if prune_unused:
+        remove_unused_schemas(spec)
 
 
 @app.command(name="remove-endpoint")

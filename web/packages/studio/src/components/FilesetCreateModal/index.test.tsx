@@ -25,9 +25,9 @@ const { mockMutate, mockUseRemoteRepoMetadata } = vi.hoisted(() => ({
   >(),
 }));
 
-vi.mock('@nemo/sdk/generated/platform/api', async () => {
-  const actual = await vi.importActual<typeof import('@nemo/sdk/generated/platform/api')>(
-    '@nemo/sdk/generated/platform/api'
+vi.mock('@nemo/sdk/generated/platform/files', async () => {
+  const actual = await vi.importActual<typeof import('@nemo/sdk/generated/platform/files')>(
+    '@nemo/sdk/generated/platform/files'
   );
   return {
     ...actual,

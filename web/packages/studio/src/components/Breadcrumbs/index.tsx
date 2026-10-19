@@ -20,8 +20,8 @@ export const Breadcrumbs: FC = () => {
       allItems.push(WORKSPACE_BREADCRUMB_ITEM);
     }
     return allItems.concat(
-      breadcrumbs.map(({ href = '#', slotLabel }) => ({
-        children: <Link to={pathnameOnly(href)}>{slotLabel}</Link>,
+      breadcrumbs.map(({ href = '#', slotLabel, preserveQuery }) => ({
+        children: <Link to={preserveQuery ? href : pathnameOnly(href)}>{slotLabel}</Link>,
       }))
     );
   }, [breadcrumbs, workspace]);

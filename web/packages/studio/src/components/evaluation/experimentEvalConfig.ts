@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createEvaluation, filesListFilesetFiles } from '@nemo/sdk/generated/platform/api';
+import { createEvaluation } from '@nemo/sdk/generated/platform/evaluations';
+import { filesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import type { EvaluationResponse } from '@nemo/sdk/generated/platform/schema';
 import {
   buildEvalJobName,

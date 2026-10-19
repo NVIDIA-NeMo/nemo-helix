@@ -10,10 +10,10 @@ from typing import Any, AsyncIterator
 import anthropic.types as anthropic_types
 import openai.types.chat as openai_chat_types
 import pytest
-from nemo_platform_plugin.inference_middleware import (
+from nemo_helix_plugin.inference_middleware import (
     BackendFormat,
 )
-from nmp.core.inference_gateway.api.typed_response import (
+from nhx.core.inference_gateway.api.typed_response import (
     AnthropicPingEvent,
     parse_typed_response,
     parse_typed_stream,
@@ -189,7 +189,7 @@ async def test_parse_anthropic_stream_includes_ping_events_as_typed_chunks():
 async def test_parse_stream_raw_chunks_unaffected_by_typed_skips():
     """``raw_chunks()`` always delivers every chunk in order — wire-level
     serialization must not be filtered by the typed Union's coverage."""
-    from nmp.core.inference_gateway.api.typed_response import TypedResponseStream
+    from nhx.core.inference_gateway.api.typed_response import TypedResponseStream
 
     async def raw_stream() -> AsyncIterator[dict[str, Any]]:
         yield {"type": "message_start", "message": _anthropic_message()}

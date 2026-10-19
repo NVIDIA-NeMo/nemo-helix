@@ -12,7 +12,8 @@ from nemo_deployments_plugin.config import ControllerConfig
 from nemo_deployments_plugin.entities import Deployment, Prerequisite, StatusEvent, Volume
 from nemo_deployments_plugin.reconciler.deployment_reconciler import DeploymentReconciler
 from nemo_deployments_plugin.reconciler.orphan_cleanup import reconcile_orphans
-from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_deployments_plugin.types import DeploymentStatus
+from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from reconciler.conftest import MockDeploymentBackend
 
 NO_VOLUMES: dict[tuple[str, str], Volume] = {}
@@ -29,7 +30,7 @@ def patch_reconciler_now():
         wraps=datetime,
     ) as mock_dt:
         mock_dt.now.return_value = NOW
-        yield
+        yield mock_dt
 
 
 def _starting_timeout_reconciler(
@@ -292,6 +293,92 @@ async def test_starting_timeout_uses_latest_starting_episode(
 
     await _reconcile_stuck_starting(reconciler, mock_backend, dep)
 
+    assert dep.status == "STARTING"
+    assert dep.error_details is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("previous_status", ["READY", "LOST", "UNKNOWN"])
+async def test_starting_transition_gets_fresh_timeout(
+    mock_entities: AsyncMock,
+    mock_backend: MockDeploymentBackend,
+    patch_reconciler_now,
+    previous_status: DeploymentStatus,
+) -> None:
+    reconciler = _starting_timeout_reconciler(mock_entities, mock_backend)
+    dep = _deployment_stuck_starting(elapsed_seconds=20 * 3600)
+    dep.status = previous_status
+    dep.status_history.append(
+        StatusEvent(status=previous_status, timestamp=(NOW - timedelta(hours=19)).isoformat()),
+    )
+
+    await _reconcile_stuck_starting(reconciler, mock_backend, dep)
+
+    assert dep.status == "STARTING"
+    assert dep.status_history[-1].timestamp == NOW.isoformat()
+    assert dep.error_details is None
+    mock_entities.update.assert_awaited_once()
+
+    patch_reconciler_now.now.return_value = NOW + timedelta(seconds=STARTING_TIMEOUT_SECONDS)
+    await _reconcile_stuck_starting(reconciler, mock_backend, dep)
+
+    assert dep.status == "FAILED"
+    assert dep.error_details is not None
+    assert dep.error_details["elapsed_seconds"] == STARTING_TIMEOUT_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_starting_timeout_ignores_message_updates(
+    mock_entities: AsyncMock,
+    mock_backend: MockDeploymentBackend,
+    patch_reconciler_now,
+) -> None:
+    reconciler = _starting_timeout_reconciler(mock_entities, mock_backend)
+    dep = _deployment_stuck_starting(elapsed_seconds=STARTING_TIMEOUT_SECONDS - 1)
+    dep.status_history.append(
+        StatusEvent(status="STARTING", message="pulling image", timestamp=(NOW - timedelta(seconds=10)).isoformat()),
+    )
+
+    await _reconcile_stuck_starting(reconciler, mock_backend, dep)
+    assert dep.status == "STARTING"
+    assert dep.status_history[-1].message == "waiting"
+
+    patch_reconciler_now.now.return_value = NOW + timedelta(seconds=1)
+    await _reconcile_stuck_starting(reconciler, mock_backend, dep)
+
+    assert dep.status == "FAILED"
+    assert dep.error_details is not None
+    assert dep.error_details["elapsed_seconds"] == STARTING_TIMEOUT_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_readiness_recovery_ends_starting_episode(
+    mock_entities: AsyncMock,
+    mock_backend: MockDeploymentBackend,
+    patch_reconciler_now,
+) -> None:
+    reconciler = _starting_timeout_reconciler(mock_entities, mock_backend)
+    dep = _deployment_stuck_starting(elapsed_seconds=20 * 3600)
+    dep.status = "READY"
+    dep.status_history.append(
+        StatusEvent(status="READY", timestamp=(NOW - timedelta(hours=19)).isoformat()),
+    )
+    await _reconcile_stuck_starting(reconciler, mock_backend, dep)
+
+    patch_reconciler_now.now.return_value = NOW + timedelta(seconds=30)
+    mock_backend.read_status_result = BackendStatusUpdate(status="READY", status_message="healthy")
+    await reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
+    assert dep.status == "READY"
+    assert dep.error_details is None
+
+    next_outage = NOW + timedelta(hours=2)
+    patch_reconciler_now.now.return_value = next_outage
+    await _reconcile_stuck_starting(reconciler, mock_backend, dep)
+    assert dep.status == "STARTING"
+    assert dep.status_history[-1].timestamp == next_outage.isoformat()
+
+    patch_reconciler_now.now.return_value = next_outage + timedelta(seconds=STARTING_TIMEOUT_SECONDS - 1)
+    await _reconcile_stuck_starting(reconciler, mock_backend, dep)
     assert dep.status == "STARTING"
     assert dep.error_details is None
 

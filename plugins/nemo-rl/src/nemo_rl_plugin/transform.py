@@ -3,43 +3,38 @@
 
 """Validate the platform refs (model entity + dataset/environment filesets)
 against the live SDK, resolve output naming, and return the
-canonical :class:`~nmp.rl.schemas.RlJobOutput`. Only platform refs are
+canonical :class:`~nhx.rl.schemas.RlJobOutput`. Only platform refs are
 accepted — the container pipeline expects a real fileset to download from.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from nmp.customization_common.contributor.transform import generated_output_name
-from nmp.customization_common.schemas.values import OutputNameType
-from nmp.customization_common.service.platform_client import (
+from nhx.customization_common.contributor.transform import generated_output_name
+from nhx.customization_common.schemas.values import OutputNameType
+from nhx.customization_common.service.platform_client import (
+    AsyncCustomizationHelixClients,
     check_dataset_access,
     check_environment_access,
     check_gym_dataset_layout,
     fetch_model_entity,
 )
-from nmp.rl.entities.values import TrainingType
-from nmp.rl.schemas import GRPOTraining, OutputResponse, RlJobOutput
+from nhx.rl.entities.values import TrainingType
+from nhx.rl.schemas import OutputResponse, RlJobOutput
 
 from nemo_rl_plugin.environment import check_environment_package
 from nemo_rl_plugin.schema import OutputRequest, RlJobInput
 
-if TYPE_CHECKING:
-    from nemo_platform import AsyncNeMoPlatform
-
 
 def _infer_output_type(input_spec: RlJobInput) -> OutputNameType:
-    if input_spec.training.type == "grpo" and isinstance(input_spec.training, GRPOTraining):
-        if input_spec.training.finetuning_type == "lora":
-            return OutputNameType.ADAPTER
+    if input_spec.trains_lora_adapter:
+        return OutputNameType.ADAPTER
     return OutputNameType.MODEL
 
 
 async def transform_input_to_output(
     input_spec: RlJobInput,
     workspace: str,
-    sdk: "AsyncNeMoPlatform",
+    platform: AsyncCustomizationHelixClients,
 ) -> RlJobOutput:
     """Enrich submitter input into a canonical :class:`RlJobOutput`.
 
@@ -49,21 +44,24 @@ async def transform_input_to_output(
     """
     training_type = TrainingType(input_spec.training.type)
 
-    model_entity = await fetch_model_entity(input_spec.model, workspace, sdk)
-    await check_dataset_access(sdk, input_spec.dataset, workspace)
+    model_entity = await fetch_model_entity(input_spec.model, workspace, platform)
+    await check_dataset_access(platform, input_spec.dataset, workspace)
 
     if training_type == TrainingType.GRPO:
         if not input_spec.environment:
             raise ValueError("GRPO jobs require an environment fileset reference.")
-        await check_environment_access(sdk, input_spec.environment, workspace)
-        await check_environment_package(sdk, input_spec.environment, workspace)
-        await check_gym_dataset_layout(sdk, input_spec.dataset, workspace)
+        await check_environment_access(platform, input_spec.environment, workspace)
+        await check_environment_package(platform, input_spec.environment, workspace)
+        await check_gym_dataset_layout(platform, input_spec.dataset, workspace)
 
-    is_embedding = bool(model_entity.spec and getattr(model_entity.spec, "is_embedding_model", False))
-    if is_embedding:
+    model_spec = model_entity.spec
+    head_type = getattr(model_spec, "head_type", None) if model_spec else None
+    is_encoder = head_type in {"embedding", "cross_encoder"} or bool(
+        model_spec and getattr(model_spec, "is_embedding_model", False)
+    )
+    if is_encoder:
         raise ValueError(
-            f"{training_type.value.upper()} is not supported for embedding models. "
-            "Use a causal LM model entity instead.",
+            f"{training_type.value.upper()} is not supported for encoder models. Use a causal LM model entity instead.",
         )
 
     output_request = input_spec.output or OutputRequest()
@@ -83,4 +81,5 @@ async def transform_input_to_output(
         training=input_spec.training,
         integrations=input_spec.integrations,
         output=output,
+        deployment_config=input_spec.deployment_config,
     )

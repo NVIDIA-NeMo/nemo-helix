@@ -9,12 +9,12 @@ description: ""
 **Job fails during model download:**
 
 - Verify the Hugging Face token secret is configured correctly
-- Accept the model's license on the [Hugging Face model page](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct)
-- Check job status: `client.jobs.get_status(name=job.name, workspace="default")`
+- For gated Hugging Face repositories, accept the model's license on its Hugging Face model page
+- Check job status: `client.jobs.get_job_status(name=job.name, workspace="default").data()`
 
 **Job fails with disk full or 500 error when retrieving logs:**
 
-- The platform's shared persistent volume is likely full. Budget against the downloaded base checkpoint size: approximately 3× for Full SFT and 1.5× for LoRA. For example, a 70B BF16 checkpoint is approximately 140 GB, so a Full SFT job can require approximately 420 GB of free disk at peak.
+- The platform's shared persistent volume is likely full. Budget against the downloaded base checkpoint size: approximately 3× for Full SFT and 1.5× for LoRA. For example, the Nemotron 3.5 Lightning 30B A3B BF16 checkpoint is approximately 66 GB, so a Full SFT job can require approximately 200 GB of free disk at peak.
 - These peak estimates include the base checkpoint and job artifacts; the final Full SFT output itself is one full checkpoint. If you also retain a deployment copy, include it separately in capacity planning.
 - Clean up completed job artifacts or increase the PVC size (default: 200Gi at `/var/run/scratch/job`).
 - DPO/GRPO jobs also consume ephemeral node storage under `/tmp` via Ray workers — check node disk in addition to the PVC.
@@ -44,10 +44,11 @@ Batch and sequence-length fields differ by backend. Use the fully qualified path
 - Increase training data size (sample more from the filtered dataset)
 - Increase `schedule.epochs` to a higher value. If you are running for 1-2 epochs, increase it to 3-4.
 - Check that the evaluation dataset format matches what the model expects
-- Verify the base model supports tool calling (Llama 3.2 Instruct does)
+- Verify the base model supports tool calling (check its chat template for tool definitions)
 
 **Deployment fails:**
 
-- Verify the base model and adapter exist: `client.models.retrieve(name=MODEL_NAME, workspace="default")` -- the LoRA adapter appears in the base model's `adapters` list, not as a separate model entity
-- Check deployment logs: `client.inference.deployments.get_logs(name=deployment.name, workspace="default")`
+- Verify the base model and adapter exist: `client.models.get_model(name=MODEL_NAME, workspace="default").data()` -- the LoRA adapter appears in the base model's `adapters` list, not as a separate model entity
+- Check job logs: `client.jobs.list_job_logs(name=job.name, workspace="default").items()`
+- Check deployment status: `client.models.get_deployment(name=DEPLOYMENT_NAME, workspace="default").data()`
 - Ensure sufficient GPU resources for the model size

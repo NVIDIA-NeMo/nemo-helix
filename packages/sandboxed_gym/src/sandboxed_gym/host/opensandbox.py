@@ -18,15 +18,51 @@ if TYPE_CHECKING:
 from sandboxed_gym.config import JOB_ID_METADATA_KEY
 from sandboxed_gym.egress import build_egress_policy
 from sandboxed_gym.host.models import (
+    GymHostBootstrapFailed,
     GymHostHandle,
     GymHostSpec,
     GymHostVolumeMount,
+    render_host_error,
 )
 from sandboxed_gym.opensandbox_policy import create_options_with_policy
 
 LOGGER = logging.getLogger(__name__)
 
 _HEALTH_POLL_S = 2.0
+_DEFAULT_RUNTIME_ENTRYPOINT = ("python", "-m", "sandboxed_gym.runtime.gym_host_runtime")
+
+
+def _host_resource_limits(resources: Mapping[str, str] | None) -> dict[str, str]:
+    """Turn the host size into the SDK's limit map.
+
+    ``Sandbox.create`` substitutes ``{"cpu": "1", "memory": "2Gi"}`` when ``resource`` is omitted,
+    while this host's ``resources`` are sent as requests. A request above that default is an
+    invalid pod: Kubernetes requires requests to be at most the limits, and the create call then
+    waits until it times out.
+    """
+    if not resources:
+        return {}
+    limits: dict[str, str] = {}
+    cpu = resources.get("cpu")
+    if cpu is not None and str(cpu) != "":
+        limits["cpu"] = str(cpu)
+    memory = resources.get("memory")
+    memory_mib = resources.get("memory_mib")
+    if (memory is None or str(memory) == "") and memory_mib is not None and str(memory_mib) != "":
+        memory = f"{memory_mib}Mi"
+    if memory is not None and str(memory) != "":
+        limits["memory"] = str(memory)
+    return limits
+
+
+def _create_options_for_host(create: Mapping[str, Any], resources: Mapping[str, str] | None) -> dict[str, Any]:
+    """Keep a caller-supplied cap. Otherwise the host size is the limit too."""
+    options = dict(create)
+    if "resource" not in options:
+        limits = _host_resource_limits(resources)
+        if limits:
+            options["resource"] = limits
+    return options
 
 
 class _HostRoutes(NamedTuple):
@@ -80,7 +116,10 @@ class OpenSandboxGymHostProvider:
         egress = build_egress_policy(spec.egress_allowlist)
         return self.provider_class(
             connection=self._connection,
-            create=create_options_with_policy(self._create_options, egress),
+            create=_create_options_for_host(
+                create_options_with_policy(self._create_options, egress),
+                spec.resources,
+            ),
             probe=self._probe,
             operations=self._operations,
         )
@@ -131,6 +170,10 @@ class OpenSandboxGymHostProvider:
                     resource_kwargs["memory_mib"] = int(memory_s)
             resources = SandboxResources.from_mapping(resource_kwargs)
 
+        # OpenSandbox treats an omitted entrypoint as a request for its persistent-sandbox
+        # keepalive (`tail -f /dev/null`), rather than preserving the image CMD. Start the standard
+        # Gym host explicitly while still allowing runtime images to configure their own command.
+        entrypoint = spec.entrypoint or _DEFAULT_RUNTIME_ENTRYPOINT
         return SandboxSpec(
             image=spec.runtime_image,
             ttl_s=spec.ttl_s,
@@ -138,7 +181,7 @@ class OpenSandboxGymHostProvider:
             env=dict(spec.bootstrap_env),
             metadata=metadata,
             resources=resources,
-            entrypoint=list(spec.entrypoint) if spec.entrypoint is not None else None,
+            entrypoint=list(entrypoint),
             provider_options={"volumes": volumes},
         )
 
@@ -152,10 +195,11 @@ class OpenSandboxGymHostProvider:
         )
 
     def _absolute_url(self, endpoint: str) -> str:
-        """Give an endpoint a scheme.
+        """Add http or https to a bare host:port returned by the SDK.
 
-        The SDK returns a bare ``host:port/path`` authority, which ``urlopen``
-        rejects outright, so the connection protocol has to be reattached here.
+        ``urlopen`` needs a scheme. We default to https because that is what the SDK
+        assumes. In-cluster OpenSandbox is http, so the caller must set
+        ``connection.protocol`` or the health check will hang until it times out.
         """
         if "://" in endpoint:
             return endpoint
@@ -172,6 +216,14 @@ class OpenSandboxGymHostProvider:
             await provider.close(resource_handle)
             raise
         self._resource_handles[resource_handle.sandbox_id] = resource_handle
+        # The resolved URLs cannot be reconstructed from outside, and every downstream
+        # connectivity failure presents only as a timeout against them.
+        LOGGER.info(
+            "gym host %s ready to probe: health=%s rollouts=%s",
+            resource_handle.sandbox_id,
+            routes.health_url,
+            routes.rollout_url,
+        )
         return GymHostHandle(
             host_id=resource_handle.sandbox_id,
             health_url=routes.health_url,
@@ -189,12 +241,20 @@ class OpenSandboxGymHostProvider:
                 body = await asyncio.to_thread(self._get_json, handle.health_url, handle.headers)
                 if body.get("status") == "ready":
                     return
+                if body.get("status") == "failed":
+                    raise GymHostBootstrapFailed(
+                        f"job host {handle.host_id} failed to start: {render_host_error(body.get('error'))}"
+                    )
                 last_error = RuntimeError(f"host not ready: {body!r}")
+            except GymHostBootstrapFailed:
+                raise
             except Exception as exc:
                 last_error = exc
             await asyncio.sleep(_HEALTH_POLL_S)
+        # Names the URL: a scheme or port mismatch is otherwise indistinguishable from a slow
+        # sandbox, and both present here as a plain timeout.
         raise TimeoutError(
-            f"job host {handle.host_id} did not become ready within {timeout_s:g}s"
+            f"job host {handle.host_id} at {handle.health_url} did not become ready within {timeout_s:g}s"
             + (f": {last_error}" if last_error is not None else "")
         )
 
@@ -205,7 +265,11 @@ class OpenSandboxGymHostProvider:
                 payload = response.read()
         except HTTPError as exc:
             if exc.code == 503:
-                return {"status": "starting"}
+                try:
+                    body = json.loads(exc.read().decode("utf-8"))
+                except Exception:
+                    body = None
+                return body if isinstance(body, dict) else {"status": "starting"}
             raise
         except URLError:
             raise
@@ -249,3 +313,10 @@ class OpenSandboxGymHostProvider:
             await provider.close(resource_handle)
         except Exception:
             LOGGER.exception("Failed to destroy job host %s", handle.host_id)
+
+    async def destroy_job_sandboxes(self, job_id: str) -> tuple[str, ...]:
+        """Destroy every OpenSandbox resource labeled with this job id."""
+        if not job_id:
+            raise ValueError("sandbox cleanup requires a job id")
+        driver = self.provider_class(connection=self._connection)
+        return await driver.destroy_sandboxes_matching({JOB_ID_METADATA_KEY: job_id})

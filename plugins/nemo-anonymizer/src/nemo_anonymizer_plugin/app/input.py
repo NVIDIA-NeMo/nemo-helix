@@ -14,10 +14,11 @@ from urllib.parse import urlparse
 
 from anonymizer.config.anonymizer_config import AnonymizerInput
 from anyio import to_thread
-from filesets import FilesetPathError, build_fileset_ref, parse_fileset_ref
+from filesets import AsyncFilesetFileSystem, FilesetFileSystem, FilesetPathError, build_fileset_ref, parse_fileset_ref
 from nemo_anonymizer_plugin.app.errors import AnonymizerInvalidConfigError
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.jobs.file_manager import AsyncFilesetFileManager, FilesetFileManager, TmpDirPath
+from nemo_helix_plugin.client.adapter import AsyncHelixClient, SyncHelixClient, client_from_platform
+from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
+from nemo_helix_plugin.jobs.file_manager import AsyncFilesetFileManager, FilesetFileManager, TmpDirPath
 from pydantic import BaseModel, Field, ValidationError
 
 logger = logging.getLogger(__name__)
@@ -96,7 +97,7 @@ def validate_anonymizer_input_source(
 async def prepare_anonymizer_input_async(
     data: AnonymizerInputSpec,
     *,
-    sdk: AsyncNeMoPlatform | NeMoPlatform | None,
+    sdk: AsyncHelixClient | SyncHelixClient | None,
     workspace: str,
     allow_local_paths: bool,
 ) -> PreparedAnonymizerInput:
@@ -104,8 +105,8 @@ async def prepare_anonymizer_input_async(
     source_kind = classify_input_source(data.source)
     if source_kind == "fileset":
         if sdk is None:
-            raise AnonymizerInvalidConfigError("Fileset input requires a NeMo Platform SDK.")
-        if isinstance(sdk, NeMoPlatform):
+            raise AnonymizerInvalidConfigError("Fileset input requires a NeMo Helix client.")
+        if isinstance(sdk, SyncHelixClient):
             return await to_thread.run_sync(
                 partial(
                     prepare_anonymizer_input,
@@ -123,7 +124,7 @@ async def prepare_anonymizer_input_async(
 def prepare_anonymizer_input(
     data: AnonymizerInputSpec,
     *,
-    sdk: NeMoPlatform | None,
+    sdk: SyncHelixClient | None,
     workspace: str,
     allow_local_paths: bool,
 ) -> PreparedAnonymizerInput:
@@ -131,7 +132,7 @@ def prepare_anonymizer_input(
     source_kind = classify_input_source(data.source)
     if source_kind == "fileset":
         if sdk is None:
-            raise AnonymizerInvalidConfigError("Fileset input requires a NeMo Platform SDK.")
+            raise AnonymizerInvalidConfigError("Fileset input requires a NeMo Helix client.")
         tmp_dir_path = _download_fileset_input(data.source, sdk=sdk, workspace=workspace)
         return _make_prepared_fileset_input(data, tmp_dir_path)
     return PreparedAnonymizerInput(input=_make_upstream_input(data, source=data.source))
@@ -140,14 +141,14 @@ def prepare_anonymizer_input(
 async def _download_fileset_input_async(
     source: str,
     *,
-    sdk: AsyncNeMoPlatform,
+    sdk: AsyncHelixClient,
     workspace: str,
 ) -> TmpDirPath:
     workspace_name, fileset_name, file_path = _parse_fileset_input_ref(source, workspace=workspace)
     manager = AsyncFilesetFileManager(
         workspace=workspace_name,
         fileset_name=fileset_name,
-        sdk=sdk,
+        filesystem=AsyncFilesetFileSystem(client=client_from_platform(sdk, AsyncFilesClient)),
         ensure_fileset_exists=False,
     )
     return await _download_fileset_input_async_inner(manager, workspace_name, fileset_name, file_path)
@@ -175,14 +176,14 @@ async def _download_fileset_input_async_inner(
 def _download_fileset_input(
     source: str,
     *,
-    sdk: NeMoPlatform,
+    sdk: SyncHelixClient,
     workspace: str,
 ) -> TmpDirPath:
     workspace_name, fileset_name, file_path = _parse_fileset_input_ref(source, workspace=workspace)
     manager = FilesetFileManager(
         workspace=workspace_name,
         fileset_name=fileset_name,
-        sdk=sdk,
+        filesystem=FilesetFileSystem(client=client_from_platform(sdk, FilesClient)),
         ensure_fileset_exists=False,
     )
     fileset_ref = build_fileset_ref(file_path, workspace=workspace_name, fileset=fileset_name)

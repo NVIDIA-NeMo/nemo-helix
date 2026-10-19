@@ -5,7 +5,7 @@ import {
   dataDesignerDownloadCreateJobResult,
   getDataDesignerDownloadCreateJobResultQueryKey,
   useDataDesignerListCreateJobResults,
-} from '@nemo/sdk/generated/data-designer/api';
+} from '@nemo/sdk/generated/data-designer/data-designer';
 import type { DatasetProfilerResults } from '@studio/routes/DataDesignerJobDetailsRoute/datasetProfilerTypes';
 import { useQuery } from '@tanstack/react-query';
 

@@ -1,0 +1,44 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "NeMo Studio Model Evaluations"
+description: "Run model evaluations and review job results and per-row scores."
+---
+
+Use **Models > Evaluations** in the NeMo Studio workspace sidebar to run evaluations against models in the workspace and review their results. The page is titled **Model Evaluations**.
+
+<Note>
+
+Model Evaluations is enabled by default. An administrator can disable it by setting `studio.feature_flags.evals_enabled: false` in the platform configuration and restarting Studio. This removes the sidebar entry and the Model Evaluations pages. It does not remove an agent's **Evaluations** tab or **Run Evaluation** button, and a Custom Model's **Evaluate this Model** button stays visible even though the page it opens is no longer available.
+
+The **Run Evaluation** button is controlled separately by `studio.feature_flags.model_evaluation_form_enabled`, which is also enabled by default.
+
+</Note>
+
+Select **Run Evaluation** in the page header to start a model evaluation. A Custom Model's **Evaluate this Model** button opens this page. You can also run evaluations with the `nemo evals` CLI or the API. To evaluate an agent, use the agent's **Evaluations** tab instead.
+
+## Run a Model Evaluation
+
+**Run Evaluation** opens the **Run Model Evaluation** wizard. Select **Next** to validate the current step and continue, or **Back** to discard the current step's entries and return to the previous one.
+
+1. **Begin**: Choose **Create a new evaluation configuration** or **Re-run an existing evaluation**. Re-running reuses a saved configuration and skips directly to **Run Evaluation**, where you choose the saved **Evaluation Configuration** and the model, so only the model changes between runs. The re-run option is disabled until the workspace has a saved configuration.
+2. **Configuration**: Enter a **Configuration Name** and upload or select an **Input File**. This wizard accepts `.json`, `.jsonl`, and `.csv` files and shows a **File Validation** summary for the selected file. Under **Field Mapping**, choose which field holds the **Input** sent to the model and which holds the **Reference** answer. A file in OpenAI messages format is mapped automatically: the last user message is the input and the last assistant message is the reference.
+3. **Metrics**: Select at least one metric: **LLM-as-a-Judge**, **Exact Match**, **F1**, **BLEU**, **ROUGE**, **String Check**, or **Number Check**. Metrics that compare against a reference are unavailable when no **Reference** field is mapped. **LLM-as-a-Judge** requires a **Judge Model** and at least one score under **Score Definitions**; each score needs a **Name** and **Scoring Criteria**, and the **Add Score** dialog reports `Scoring criteria is required` when the criteria are empty. **LLM-as-a-Judge** is selected by default with a `correctness` score.
+4. **Run Evaluation**: Select the **Model to Evaluate**. In the optional **Live Test** panel, select **Test** to generate a response for one dataset row and score it with each selected metric. The panel shows the model response and a score for each metric, or the error from any metric that failed. Live tests don't create a job or store results. Select **Submit** to create the evaluation job.
+
+New configurations are saved so that later runs can reuse them. After you submit, Studio opens the new job's detail page.
+
+## Evaluation Results List
+
+The list shows each evaluation job's name, status, and creation time. Search by name or filter by status. Select a row to open the job's detail page.
+
+## Evaluation Result Detail
+
+The detail page shows the job's details, a **Scores** panel with aggregate metrics, per-row results for the evaluated dataset, and a collapsible **Logs** panel. Scores and row results are computed once the job reaches a terminal state; if the job failed, results aren't available.
+
+## Related Topics
+
+- [Model Configuration](/documentation/evaluate-models/metrics/model-configuration)
+- [NeMo Studio Fine-tuning](/documentation/studio/customization)
+- [NeMo Studio Agents](/documentation/studio/agents)

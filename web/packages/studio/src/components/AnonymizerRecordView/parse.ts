@@ -9,9 +9,9 @@ import type {
 } from '@studio/components/AnonymizerRecordView/types';
 import { asRecord } from '@studio/util/guards';
 
-const DETECTED_ENTITIES_COLUMN = '_detected_entities';
-const FINAL_ENTITIES_COLUMN = 'final_entities';
-const REPLACEMENT_MAP_COLUMN = '_replacement_map';
+export const DETECTED_ENTITIES_COLUMN = '_detected_entities';
+export const FINAL_ENTITIES_COLUMN = 'final_entities';
+export const REPLACEMENT_MAP_COLUMN = '_replacement_map';
 
 /** Rewrite writes `<column>_rewritten`; the replace strategies write `<column>_replaced`. */
 export const REWRITTEN_SUFFIX = '_rewritten';
@@ -28,8 +28,11 @@ const decodeCell = (value: unknown): unknown => {
   }
 };
 
+/** The job artifact persists these columns as a bare array; the live preview wraps them. */
 const wrappedList = (cell: unknown, key: string): unknown[] => {
-  const entries = asRecord(decodeCell(cell))?.[key];
+  const decoded = decodeCell(cell);
+  if (Array.isArray(decoded)) return decoded;
+  const entries = asRecord(decoded)?.[key];
   return Array.isArray(entries) ? entries : [];
 };
 

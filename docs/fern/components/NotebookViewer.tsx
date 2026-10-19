@@ -8,8 +8,11 @@ import type { ReactNode } from "react";
 import distillationCustomizationJob from "./notebooks/distillation-customization-job";
 import dpoCustomizationJob from "./notebooks/dpo-customization-job";
 import embeddingCustomizationJob from "./notebooks/embedding-customization-job";
+import embeddingTripletDataset from "./notebooks/embedding-triplet-dataset";
 import loraCustomizationJob from "./notebooks/lora-customization-job";
 import optimizeThroughput from "./notebooks/optimize-throughput";
+import retrievalGenerate from "./notebooks/retrieval-generate";
+import { NotebookActions } from "./NotebookActions";
 import sftCustomizationJob from "./notebooks/sft-customization-job";
 import toolCalling from "./notebooks/tool-calling";
 
@@ -20,8 +23,10 @@ const notebooks: Record<string, unknown> = {
   "distillation-customization-job": distillationCustomizationJob,
   "dpo-customization-job": dpoCustomizationJob,
   "embedding-customization-job": embeddingCustomizationJob,
+  "embedding-triplet-dataset": embeddingTripletDataset,
   "lora-customization-job": loraCustomizationJob,
   "optimize-throughput": optimizeThroughput,
+  "retrieval-generate": retrievalGenerate,
   "sft-customization-job": sftCustomizationJob,
   "tool-calling": toolCalling,
 };
@@ -60,11 +65,8 @@ const notebooks: Record<string, unknown> = {
  * to a sanitizer (e.g. DOMPurify) before merging.
  *
  * Usage in MDX:
- *   import { NotebookViewer } from "@/components/NotebookViewer";
- *   import notebook from "@/components/notebooks/1-the-basics";
- *
  *   <NotebookViewer
- *     notebook={notebook}
+ *     name="1-the-basics"
  *     colabUrl="https://colab.research.google.com/github/NVIDIA-NeMo/DataDesigner/blob/main/docs/colab_notebooks/1-the-basics.ipynb"
  *   />
  */
@@ -432,21 +434,7 @@ export const NotebookViewer = ({
 
   return (
     <div className="notebook-viewer">
-      {colabUrl && (
-        <div className="notebook-viewer__colab-banner">
-          <a
-            href={colabUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="fern-button success filled notebook-viewer__colab-link"
-          >
-            <span className="fern-button-content">
-              <span aria-hidden="true">&#9654;</span>
-              <span className="fern-button-text">Run in Google Colab</span>
-            </span>
-          </a>
-        </div>
-      )}
+      <NotebookActions colabUrl={colabUrl} />
 
       <div className="notebook-viewer__cells">
         {cells.map((cell, index) => renderCell(cell, index, showOutputs))}

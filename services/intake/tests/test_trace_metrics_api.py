@@ -9,18 +9,18 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.routing import APIRoute
-from nmp.intake.spans.api import trace_metrics, traces
-from nmp.intake.spans.api.trace_metrics import (
+from nhx.intake.spans.api import trace_metrics, traces
+from nhx.intake.spans.api.trace_metrics import (
     _default_started_at_window,
     _validate_query_params,
     _validate_timezone,
 )
-from nmp.intake.spans.api.trace_metrics_schemas import (
+from nhx.intake.spans.api.trace_metrics_schemas import (
     TraceMetricBucketParam,
     TraceMetricPointResponse,
     TraceMetrics,
 )
-from nmp.intake.spans.domain import (
+from nhx.intake.spans.domain import (
     CostRollup,
     LatencyRollup,
     TokenRollup,

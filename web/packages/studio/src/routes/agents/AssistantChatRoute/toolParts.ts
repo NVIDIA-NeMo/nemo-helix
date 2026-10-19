@@ -12,6 +12,7 @@ export type AssistantToolArgs = AssistantToolCallPart['args'];
 type AssistantToolArgValue = AssistantToolArgs[string];
 
 export const ASSISTANT_COLLAPSED_THINKING_TOOL_NAME = 'AssistantCollapsedThinking';
+export const ASSISTANT_THINKING_TOOL_NAME = 'AssistantThinking';
 export const ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME = 'AssistantCollapsedStudioDetails';
 export const ASSISTANT_SUBTLE_TOOL_GROUP_NAME = 'AssistantSubtleToolGroup';
 export const ASSISTANT_WORK_DETAILS_LABEL = 'Work details';
@@ -26,6 +27,7 @@ export const isAssistantJobProgressToolName = (toolName: string): boolean =>
 
 export const isAssistantSubtleToolCallName = (toolName: string): boolean =>
   toolName !== ASSISTANT_COLLAPSED_THINKING_TOOL_NAME &&
+  toolName !== ASSISTANT_THINKING_TOOL_NAME &&
   toolName !== ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME &&
   toolName !== ASSISTANT_SUBTLE_TOOL_GROUP_NAME &&
   !FILE_CHANGE_TOOL_CALL_NAMES.has(toolName) &&
@@ -79,6 +81,36 @@ export const createAssistantToolCallPart = ({
     args,
     argsText: JSON.stringify(args),
   };
+};
+
+export const createAssistantThinkingPart = (
+  text: string,
+  toolCallId: string
+): ThreadAssistantMessagePart => {
+  const args = toAssistantToolArgs({ text });
+
+  return {
+    type: 'tool-call',
+    toolCallId,
+    toolName: ASSISTANT_THINKING_TOOL_NAME,
+    args,
+    argsText: JSON.stringify(args),
+  };
+};
+
+type AssistantThinkingPart = AssistantToolCallPart & {
+  toolName: typeof ASSISTANT_THINKING_TOOL_NAME;
+};
+
+export const isAssistantThinkingPart = (
+  part: ThreadAssistantMessagePart
+): part is AssistantThinkingPart =>
+  part.type === 'tool-call' && part.toolName === ASSISTANT_THINKING_TOOL_NAME;
+
+export const getAssistantThinkingPartText = (part: ThreadAssistantMessagePart): string => {
+  if (!isAssistantThinkingPart(part)) return '';
+  const text = part.args.text;
+  return typeof text === 'string' ? text : '';
 };
 
 const createAssistantCollapsedThinkingPart = (text: string): ThreadAssistantMessagePart => {
@@ -433,6 +465,7 @@ const extractMarkdownTableParts = (
 const isFinalSummaryToolPart = (part: ThreadAssistantMessagePart): boolean =>
   part.type === 'tool-call' &&
   part.toolName !== ASSISTANT_COLLAPSED_THINKING_TOOL_NAME &&
+  part.toolName !== ASSISTANT_THINKING_TOOL_NAME &&
   part.toolName !== ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME &&
   part.toolName !== ASSISTANT_SUBTLE_TOOL_GROUP_NAME &&
   !isAssistantSubtleToolCallPart(part);
@@ -571,6 +604,12 @@ const getCollapsedTextParts = (
   const trailingTextParts: string[] = [];
 
   parts.forEach((part, index) => {
+    if (isAssistantThinkingPart(part)) {
+      const reasoning = getAssistantThinkingPartText(part).trim();
+      if (reasoning) thinkingTextParts.push(reasoning);
+      return;
+    }
+
     if (part.type !== 'text') return;
 
     const text = part.text.trim();
@@ -596,13 +635,27 @@ const getCollapsedTextParts = (
   };
 };
 
+const joinCollapsedThinking = (...texts: readonly (string | undefined)[]): string | undefined => {
+  const joined = texts
+    .map((text) => text?.trim())
+    .filter(Boolean)
+    .join('\n\n');
+  return joined || undefined;
+};
+
 export const getAssistantCompletedMessageParts = (
   parts: readonly ThreadAssistantMessagePart[],
   options: AssistantCompletedMessageOptions = {}
 ): readonly ThreadAssistantMessagePart[] => {
-  const studioSummaryBlock = getStudioSummaryBlock(parts, options);
+  const reasoningText = joinCollapsedThinking(...parts.map(getAssistantThinkingPartText));
+  const remainingParts = parts.filter((part) => !isAssistantThinkingPart(part));
+
+  const studioSummaryBlock = getStudioSummaryBlock(remainingParts, options);
   if (studioSummaryBlock) {
     const completedParts: ThreadAssistantMessagePart[] = [];
+    if (reasoningText) {
+      completedParts.push(createAssistantCollapsedThinkingPart(reasoningText));
+    }
     const collapsedDetailsPart = createAssistantCollapsedStudioDetailsPart({
       label: studioSummaryBlock.detailsLabel,
       parts: studioSummaryBlock.detailParts,
@@ -617,18 +670,22 @@ export const getAssistantCompletedMessageParts = (
   let lastToolIndex = -1;
 
   parts.forEach((part, index) => {
+    if (isAssistantThinkingPart(part)) return;
     if (part.type === 'tool-call') {
       completedParts.push(part);
       lastToolIndex = index;
     }
   });
 
-  if (lastToolIndex < 0) return parts;
+  if (lastToolIndex < 0) {
+    if (!reasoningText) return remainingParts;
+    return [createAssistantCollapsedThinkingPart(reasoningText), ...remainingParts];
+  }
 
   const { collapsedText, summaryText } = getCollapsedTextParts(parts, lastToolIndex);
   if (collapsedText) completedParts.unshift(createAssistantCollapsedThinkingPart(collapsedText));
   for (const part of parts.slice(lastToolIndex + 1)) {
-    if (part.type === 'text') continue;
+    if (part.type === 'text' || isAssistantThinkingPart(part)) continue;
     completedParts.push(part);
   }
   if (summaryText) completedParts.push({ type: 'text', text: summaryText });

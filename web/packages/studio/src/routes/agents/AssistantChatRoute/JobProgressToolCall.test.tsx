@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { jobsGetJob } from '@nemo/sdk/generated/platform/api';
-import type { PlatformJobResponse } from '@nemo/sdk/generated/platform/schema';
+import { jobsGetJob } from '@nemo/sdk/generated/platform/jobs';
+import type { HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
 import { ROUTES } from '@studio/constants/routes';
 import { JOB_PROGRESS_JOB_TYPE } from '@studio/routes/agents/AssistantChatRoute/jobProgressConsts';
 import { JobProgressToolCall } from '@studio/routes/agents/AssistantChatRoute/JobProgressToolCall';
@@ -10,15 +10,15 @@ import type { AssistantToolArgs } from '@studio/routes/agents/AssistantChatRoute
 import { getAssistantChatRoute } from '@studio/routes/utils';
 import { renderRoute, screen } from '@studio/tests/util/render';
 
-vi.mock('@nemo/sdk/generated/platform/api', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@nemo/sdk/generated/platform/api')>()),
+vi.mock('@nemo/sdk/generated/platform/jobs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@nemo/sdk/generated/platform/jobs')>()),
   jobsGetJob: vi.fn(),
 }));
 
 const jobsGetJobMock = vi.mocked(jobsGetJob);
 const workspace = 'default';
 
-const createJob = (overrides: Partial<PlatformJobResponse> = {}): PlatformJobResponse =>
+const createJob = (overrides: Partial<HelixJobResponse> = {}): HelixJobResponse =>
   ({
     attempt_id: 'attempt-1',
     description: 'Import data into the workspace',
@@ -30,7 +30,7 @@ const createJob = (overrides: Partial<PlatformJobResponse> = {}): PlatformJobRes
     status: 'completed',
     workspace,
     ...overrides,
-  }) as PlatformJobResponse;
+  }) as HelixJobResponse;
 
 const renderToolCall = (args: AssistantToolArgs) =>
   renderRoute(<JobProgressToolCall args={args} />, {

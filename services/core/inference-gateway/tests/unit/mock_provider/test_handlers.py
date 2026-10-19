@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import Request
-from nmp.core.inference_gateway.api.mock_provider.handlers import handle_mock_request
-from nmp.core.inference_gateway.api.mock_provider.responses import (
+from nhx.core.inference_gateway.api.mock_provider.handlers import handle_mock_request
+from nhx.core.inference_gateway.api.mock_provider.responses import (
     MOCK_RESPONSE_HEADER,
     MOCK_RESPONSE_MAP_HEADER,
     MOCK_STATUS_HEADER,

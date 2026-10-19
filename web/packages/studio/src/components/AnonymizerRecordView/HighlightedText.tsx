@@ -30,7 +30,7 @@ export const HighlightedText: FC<HighlightedTextProps> = memo(({ segments, empty
       })}
     </Text>
   ) : (
-    <Text color="secondary" kind="body/regular/md">
+    <Text className="text-secondary" kind="body/regular/md">
       {emptyMessage}
     </Text>
   )

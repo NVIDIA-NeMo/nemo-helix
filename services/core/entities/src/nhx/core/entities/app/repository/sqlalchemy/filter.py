@@ -1,0 +1,395 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""SQLAlchemy implementation of FilterRepository."""
+
+from datetime import datetime
+from typing import Any, List, NamedTuple, Optional, Set
+
+from nemo_helix_plugin.filter_ops import ElemMatchCondition
+from nhx.common.api.filter import FilterOperation, FilterOperator, FilterRepository
+from sqlalchemy import (
+    JSON,
+    ColumnElement,
+    DateTime,
+    Float,
+    String,
+    and_,
+    case,
+    cast,
+    false,
+    func,
+    literal,
+    literal_column,
+    not_,
+    or_,
+    select,
+    type_coerce,
+)
+from sqlalchemy.orm import aliased
+
+
+class _ElementValue(NamedTuple):
+    """An array element as decoded text, with SQL predicates for its JSON type."""
+
+    text: Any
+    is_number: Any
+    is_bool: Any
+    is_string: Any
+
+
+class SQLAlchemyFilterRepository(FilterRepository):
+    """SQLAlchemy implementation of FilterRepository.
+
+    Provides filter expression building for SQLAlchemy queries.
+    Supports both PostgreSQL (JSONB) and SQLite (JSON) backends.
+    """
+
+    def __init__(
+        self,
+        model: Any,
+        relationship_child_workspaces: Optional[Set[str]] = None,
+        dialect_name: Optional[str] = None,
+    ):
+        """Initialize repository with SQLAlchemy model class or alias.
+
+        Args:
+            model: SQLAlchemy model class (or aliased class) to build filters against
+            relationship_child_workspaces: If set, EXISTS subqueries for parent-child relations
+                only count children whose `workspace` is in this set. If None, child workspace
+                is unconstrained. An empty set makes relationship EXISTS match nothing.
+            dialect_name: Database dialect (``"sqlite"`` or ``"postgresql"``). Required only by
+                operators whose SQL differs per backend (``$elemMatch``).
+        """
+        self.model = model
+        self._relationship_child_workspaces = relationship_child_workspaces
+        self._dialect_name = dialect_name
+
+    def _get_json_element(self, column: ColumnElement, path: List[str]) -> ColumnElement:
+        """Navigate to a nested JSON element using subscript operators.
+
+        Args:
+            column: The JSON column
+            path: List of keys to navigate (e.g., ['nested', 'key'])
+
+        Returns:
+            SQLAlchemy JSON element accessor
+        """
+        result = column
+        for key in path:
+            result = result[key]
+        return result
+
+    def _get_column(self, field: str) -> tuple[ColumnElement, bool]:
+        """Get a column from the model by field name.
+
+        Args:
+            field: Field name to look up
+
+        Returns:
+            Tuple of (SQLAlchemy column/element, is_json) where is_json indicates
+            whether the column is a JSON element accessor
+
+        Raises:
+            ValueError: If field doesn't exist on the model
+        """
+        # explicit field check
+        if hasattr(self.model, field):
+            return getattr(self.model, field), False
+
+        # check for data access
+        if field.startswith("data."):
+            column = getattr(self.model, "data")
+            path = field.split(".")[1:]
+            return self._get_json_element(column, path), isinstance(column.type, JSON)
+
+        raise ValueError(f"Field '{field}' does not exist on model {self.model.__name__}")
+
+    def _coerce_value_for_column(self, column: ColumnElement, value: Any) -> Any:
+        """Coerce Python types from filter inputs based on column type.
+
+        Returns a datetime object (not a string) so that each dialect's type system
+        handles formatting: PostgreSQL's psycopg2 sends it as a native TIMESTAMP,
+        while SQLite's bind_processor formats it to a string with microseconds.
+
+        Timezone info is stripped because our columns are TIMESTAMP WITHOUT TIME ZONE;
+        a tz-aware datetime would cause type mismatches on PostgreSQL.
+        """
+        if isinstance(column.type, DateTime) and isinstance(value, str):
+            return datetime.fromisoformat(value).replace(tzinfo=None)
+
+        return value
+
+    def _cast_json_to_raw_text(self, column: Any) -> Any:
+        """Cast a JSON column element to its raw serialized text, quotes and all.
+
+        Unlike ``_cast_json_to_text``, this keeps JSON's surrounding double quotes. Use it when the
+        quotes carry meaning — e.g. comparing against the literal ``"null"``/``"true"``/``"false"``
+        tokens both backends render.
+        """
+        return cast(column, String)
+
+    def _cast_json_to_text(self, column: Any) -> Any:
+        """Cast a JSON column element to text, trimming JSON's surrounding double quotes.
+
+        SQLite's json_extract returns string values with quotes (e.g., '"value"'), and PostgreSQL's
+        JSONB subscript also returns JSON-formatted strings. Trimming yields a consistent bare value for
+        equality/substring comparison. Use ``_cast_json_to_raw_text`` when the quotes must be preserved.
+        """
+        return func.trim(self._cast_json_to_raw_text(column), '"')
+
+    def _cast_json_to_numeric(self, column: Any) -> Any:
+        """Cast a JSON column element to a float for numeric comparisons.
+
+        Uses CAST(... AS FLOAT) which works on both SQLite (REAL) and PostgreSQL.
+        """
+        from sqlalchemy import Float
+
+        return cast(self._cast_json_to_text(column), Float)
+
+    _ORDERED_OPS = {
+        FilterOperator.LT: "__lt__",
+        FilterOperator.LTE: "__le__",
+        FilterOperator.GT: "__gt__",
+        FilterOperator.GTE: "__ge__",
+    }
+
+    _STRING_OPS = frozenset({FilterOperator.STARTS_WITH, FilterOperator.ENDS_WITH})
+
+    def _compare(self, element: Any, is_json: bool, operator: FilterOperator, value: Any) -> Any:
+        """One comparison against a column, or against a JSON field when ``is_json``.
+
+        A missing or null JSON value renders as the text ``null``; it never satisfies
+        ``$startsWith``/``$endsWith``.
+        """
+        if operator == FilterOperator.EQ:
+            return self._json_eq(element, value) if is_json else element == value
+        comparison = self._non_eq_compare(element, is_json, operator, value)
+        if is_json and operator in self._STRING_OPS:
+            return and_(not_(self._json_eq(element, None)), comparison)
+        return comparison
+
+    def _non_eq_compare(self, element: Any, is_json: bool, operator: FilterOperator, value: Any) -> Any:
+        if operator in self._STRING_OPS:
+            text = self._cast_json_to_text(element) if is_json else cast(element, String)
+            if operator == FilterOperator.STARTS_WITH:
+                return func.substr(text, 1, len(value)) == value
+            return func.substr(text, func.length(text) - len(value) + 1) == value
+        text = self._cast_json_to_text(element) if is_json else element
+        if operator == FilterOperator.LIKE:
+            return text.ilike(f"%{value}%")
+        if operator in (FilterOperator.IN, FilterOperator.NIN):
+            values = [str(v) for v in value] if is_json else value
+            return text.in_(values) if operator == FilterOperator.IN else text.not_in(values)
+        op = self._ORDERED_OPS[operator]
+        if not is_json:
+            return getattr(element, op)(self._coerce_value_for_column(element, value))
+        if isinstance(value, (int, float)):
+            return getattr(self._cast_json_to_numeric(element), op)(value)
+        return getattr(text, op)(str(value))
+
+    def _field_compare(self, field: str, operator: FilterOperator, value: Any) -> Any:
+        column, is_json = self._get_column(field)
+        return self._compare(column, is_json, operator, value)
+
+    def eq(self, field: str, value: Any) -> Any:
+        """Equal comparison."""
+        return self._field_compare(field, FilterOperator.EQ, value)
+
+    def _json_eq(self, element: Any, value: Any) -> Any:
+        # Handle None/null: match both an explicit JSON null and an absent key. A present-but-null
+        # value extracts to the JSON text token "null"; a missing key extracts to SQL NULL (notably
+        # on PostgreSQL, where `data->'key'` on an absent key is SQL NULL, so casting it would never
+        # equal "null"). Test both so `field == None` catches missing and explicitly-null values.
+        if value is None:
+            return or_(self._cast_json_to_raw_text(element) == "null", element.is_(None))
+        # Handle boolean values specially:
+        # - SQLite stores JSON booleans as integers (0/1), json_extract returns "0" or "1"
+        # - PostgreSQL stores them as "false"/"true"
+        # We check both formats for cross-database compatibility
+        if isinstance(value, bool):
+            sqlite_value = "1" if value else "0"
+            pg_value = "true" if value else "false"
+            return or_(
+                self._cast_json_to_raw_text(element) == sqlite_value,
+                self._cast_json_to_raw_text(element) == pg_value,
+            )
+        # For string values, use _cast_json_to_text to handle quoted JSON output
+        return self._cast_json_to_text(element) == str(value)
+
+    def like(self, field: str, value: str) -> Any:
+        """Like/contains comparison."""
+        return self._field_compare(field, FilterOperator.LIKE, value)
+
+    def lt(self, field: str, value: Any) -> Any:
+        """Less than comparison."""
+        return self._field_compare(field, FilterOperator.LT, value)
+
+    def lte(self, field: str, value: Any) -> Any:
+        """Less than or equal comparison."""
+        return self._field_compare(field, FilterOperator.LTE, value)
+
+    def gt(self, field: str, value: Any) -> Any:
+        """Greater than comparison."""
+        return self._field_compare(field, FilterOperator.GT, value)
+
+    def gte(self, field: str, value: Any) -> Any:
+        """Greater than or equal comparison."""
+        return self._field_compare(field, FilterOperator.GTE, value)
+
+    def in_op(self, field: str, values: List[Any]) -> Any:
+        """In comparison."""
+        return self._field_compare(field, FilterOperator.IN, values)
+
+    def nin(self, field: str, values: List[Any]) -> Any:
+        """Not in comparison."""
+        return self._field_compare(field, FilterOperator.NIN, values)
+
+    def starts_with(self, field: str, prefix: str) -> Any:
+        return self._field_compare(field, FilterOperator.STARTS_WITH, prefix)
+
+    def ends_with(self, field: str, suffix: str) -> Any:
+        return self._field_compare(field, FilterOperator.ENDS_WITH, suffix)
+
+    def contains(self, field: str, value: Any) -> Any:
+        """Array membership: some scalar element of the JSON array at ``field`` is ``$eq`` to ``value``."""
+        array, is_json = self._get_column(field)
+        if not is_json:
+            raise ValueError(f"$contains requires a JSON array field, got non-JSON field '{field}'")
+        return self._any_element_matches(
+            array, FilterOperator.CONTAINS, [ElemMatchCondition(None, FilterOperator.EQ, value)]
+        )
+
+    def has_key(self, field: str, key: str) -> Any:
+        column, is_json = self._get_column(field)
+        if not is_json:
+            raise ValueError(f"$hasKey requires a JSON object field, got non-JSON field '{field}'")
+        return not_(self._json_eq(column[key], None))
+
+    def _array_elements(self, array: Any, operator: FilterOperator) -> Any:
+        """The elements of the JSON array ``array`` as a table with a ``value`` column (and ``type`` on SQLite)."""
+        # A non-array must expand to nothing: PostgreSQL raises on it, SQLite would iterate an object's members.
+        if self._dialect_name == "sqlite":
+            only_array = case((func.json_type(array) == "array", array))
+            return func.json_each(only_array).table_valued("value", "type")
+        if self._dialect_name == "postgresql":
+            only_array = case((func.json_typeof(array) == "array", array))
+            return func.json_array_elements(only_array).table_valued("value")
+        raise ValueError(f"{operator.value} is not supported for database dialect {self._dialect_name!r}")
+
+    def elem_match(self, field: str, conditions: List[ElemMatchCondition]) -> Any:
+        array, is_json = self._get_column(field)
+        if not is_json:
+            raise ValueError(f"$elemMatch requires a JSON array field, got non-JSON field '{field}'")
+        return self._any_element_matches(array, FilterOperator.ELEM_MATCH, conditions)
+
+    def _any_element_matches(self, array: Any, operator: FilterOperator, conditions: List[ElemMatchCondition]) -> Any:
+        elements = self._array_elements(array, operator)
+        element_type = elements.c.type if self._dialect_name == "sqlite" else func.json_typeof(elements.c.value)
+        if conditions[0].key is None:
+            is_target = element_type.not_in(["object", "array"])
+        else:
+            is_target = element_type == "object"
+        # SQLite may evaluate a comparison before the type check, and raises on a key lookup into a
+        # scalar; NULL out non-target elements first.
+        target = case((is_target, elements.c.value))
+        matches = [
+            self._compare_element(self._element_value(elements, target, condition.key), condition)
+            for condition in conditions
+        ]
+        return select(literal(1)).select_from(elements).where(is_target, *matches).exists()
+
+    def _element_value(self, elements: Any, target: Any, key: str | None) -> _ElementValue:
+        """An array element (or its ``key`` field) as decoded text, with its JSON type."""
+        if self._dialect_name == "sqlite":
+            if key is None:
+                text, kind = cast(target, String), elements.c.type
+            else:
+                text = cast(type_coerce(target, JSON)[key].as_string(), String)
+                kind = func.json_type(type_coerce(target, String).op("->")(key))
+            return _ElementValue(text, kind.in_(["integer", "real"]), kind.in_(["true", "false"]), kind == "text")
+        if key is None:
+            text, kind = target.op("#>>")(literal_column("'{}'::text[]")), func.json_typeof(elements.c.value)
+        else:
+            element = type_coerce(target, JSON)
+            text, kind = element[key].as_string(), func.json_typeof(element[key])
+        return _ElementValue(text, kind == "number", kind == "boolean", kind == "string")
+
+    def _compare_element(self, element: _ElementValue, condition: ElemMatchCondition) -> Any:
+        """One condition against an element, by JSON type: a string never equals a number or boolean.
+
+        Null or missing (SQL NULL) matches only ``$eq`` null.
+        """
+        operator, value, text = condition.operator, condition.value, element.text
+        if operator == FilterOperator.EQ:
+            return self._element_equals(element, value)
+        if operator in (FilterOperator.IN, FilterOperator.NIN):
+            matches = or_(false(), *(self._element_equals(element, v) for v in value if v is not None))
+            return matches if operator == FilterOperator.IN else and_(text.is_not(None), not_(matches))
+        if operator == FilterOperator.LIKE:
+            comparison = text.ilike(f"%{value}%")
+        elif operator == FilterOperator.STARTS_WITH:
+            comparison = func.substr(text, 1, len(value)) == value
+        elif operator == FilterOperator.ENDS_WITH:
+            comparison = func.substr(text, func.length(text) - len(value) + 1) == value
+        elif isinstance(value, (int, float)):
+            # Cast only numbers: PostgreSQL raises casting other text to a float.
+            numeric = cast(case((element.is_number, text)), Float)
+            return and_(element.is_number, getattr(numeric, self._ORDERED_OPS[operator])(value))
+        else:
+            comparison = getattr(text, self._ORDERED_OPS[operator])(value)
+        return and_(element.is_string, comparison)
+
+    def _element_equals(self, element: _ElementValue, value: Any) -> Any:
+        if value is None:
+            return element.text.is_(None)
+        if isinstance(value, bool):
+            return and_(element.is_bool, element.text.in_(["1", "true"] if value else ["0", "false"]))
+        if isinstance(value, (int, float)):
+            return and_(element.is_number, cast(case((element.is_number, element.text)), Float) == value)
+        return and_(element.is_string, element.text == value)
+
+    def and_op(self, operations: List[Any]) -> Any:
+        """Logical AND."""
+        return and_(*operations)
+
+    def or_op(self, operations: List[Any]) -> Any:
+        """Logical OR."""
+        return or_(*operations)
+
+    def not_op(self, operation: Any) -> Any:
+        """Logical NOT."""
+        return not_(operation)
+
+    def relationship_exists(
+        self,
+        target_entity_type: str,
+        join_field: str,
+        child_condition: Optional[FilterOperation],
+        negate: bool,
+    ) -> Any:
+        """Build an EXISTS/NOT EXISTS subquery for a parent-child relationship."""
+        child_alias = aliased(self.model)
+        child_repo = SQLAlchemyFilterRepository(
+            child_alias,
+            relationship_child_workspaces=self._relationship_child_workspaces,
+            dialect_name=self._dialect_name,
+        )
+
+        conditions = [child_alias.entity_type == target_entity_type]
+        if join_field == "parent":
+            conditions.append(child_alias.parent == self.model.id)
+        else:
+            raise NotImplementedError(f"Unsupported join_field: {join_field!r}")
+
+        if self._relationship_child_workspaces is not None:
+            if not self._relationship_child_workspaces:
+                conditions.append(false())
+            else:
+                conditions.append(child_alias.workspace.in_(list(self._relationship_child_workspaces)))
+
+        if child_condition is not None:
+            conditions.append(child_condition.apply(child_repo))
+
+        subq = select(child_alias.id).where(and_(*conditions)).correlate(self.model).exists()
+        return ~subq if negate else subq

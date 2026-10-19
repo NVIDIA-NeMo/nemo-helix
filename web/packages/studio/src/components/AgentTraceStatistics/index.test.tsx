@@ -8,6 +8,7 @@ import type {
 } from '@studio/components/AgentTraceStatistics/types';
 import { renderRoute, screen } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
+import { AxiosError, AxiosHeaders } from 'axios';
 
 const SUMMARY: TraceStatisticsSummary = {
   totalTraces: 2,
@@ -73,7 +74,7 @@ describe('AgentTraceStatistics', () => {
       />
     );
 
-    expect(screen.getByText('No traces yet')).toBeInTheDocument();
+    expect(screen.getByText('No traces')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /run the agent/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /set up tracing/i })).toBeInTheDocument();
     expect(screen.queryByText('Total traces')).not.toBeInTheDocument();
@@ -92,7 +93,7 @@ describe('AgentTraceStatistics', () => {
       />
     );
 
-    expect(screen.queryByText('No traces yet')).not.toBeInTheDocument();
+    expect(screen.queryByText('No traces')).not.toBeInTheDocument();
   });
 
   it('offers to widen a narrow empty range and reports the change', async () => {
@@ -106,15 +107,76 @@ describe('AgentTraceStatistics', () => {
       />
     );
 
-    await userEvent.click(screen.getByRole('button', { name: /look back a month/i }));
-    expect(onRangeChange).toHaveBeenCalledWith('month');
+    await userEvent.click(screen.getByRole('button', { name: /look back further/i }));
+    expect(onRangeChange).toHaveBeenCalledWith('max');
   });
 
   it('does not offer to widen when already on the longest range', () => {
     renderRoute(
-      <AgentTraceStatistics summary={null} buckets={[]} range="month" onRangeChange={noop} />
+      <AgentTraceStatistics summary={null} buckets={[]} range="max" onRangeChange={noop} />
     );
 
-    expect(screen.queryByRole('button', { name: /look back a month/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /look back further/i })).not.toBeInTheDocument();
+  });
+
+  it('forwards a network-level failure message rather than a hardcoded one', () => {
+    renderRoute(
+      <AgentTraceStatistics
+        summary={SUMMARY}
+        buckets={BUCKETS}
+        range="week"
+        onRangeChange={noop}
+        onViewTraces={noop}
+        error={new AxiosError('Network Error', 'ERR_NETWORK')}
+      />
+    );
+
+    expect(screen.getByText('Trace statistics')).toBeInTheDocument();
+    expect(screen.getByText('Trace statistics are unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/\[ERR_NETWORK\] Network Error/)).toBeInTheDocument();
+    expect(screen.queryByText('Total traces')).not.toBeInTheDocument();
+    expect(screen.queryByText('No traces')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /view traces/i })).not.toBeInTheDocument();
+  });
+
+  it('falls back to the generic ClickHouse message when the error carries nothing useful', () => {
+    renderRoute(
+      <AgentTraceStatistics
+        summary={SUMMARY}
+        buckets={BUCKETS}
+        range="week"
+        onRangeChange={noop}
+        error="not an Error instance"
+      />
+    );
+
+    expect(screen.getByText(/trace store couldn't be reached/i)).toBeInTheDocument();
+    expect(screen.getByText(/ClickHouse is down/i)).toBeInTheDocument();
+  });
+
+  it("prefers the backend's own detail message when it responded with one", () => {
+    const error = new AxiosError('Request failed', 'ERR_BAD_RESPONSE', undefined, undefined, {
+      status: 503,
+      statusText: 'Service Unavailable',
+      data: { detail: 'ClickHouse storage is inaccessible. Check that ClickHouse is running.' },
+      headers: {},
+      config: {
+        headers: new AxiosHeaders(),
+      },
+    });
+
+    renderRoute(
+      <AgentTraceStatistics
+        summary={SUMMARY}
+        buckets={BUCKETS}
+        range="week"
+        onRangeChange={noop}
+        error={error}
+      />
+    );
+
+    expect(
+      screen.getByText('ClickHouse storage is inaccessible. Check that ClickHouse is running.')
+    ).toBeInTheDocument();
   });
 });

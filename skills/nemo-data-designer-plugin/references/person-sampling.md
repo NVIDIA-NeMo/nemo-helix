@@ -2,14 +2,28 @@
 
 ## Sampler types
 
-Prefer `"person"` when the locale is downloaded — it provides census-grounded demographics and optional personality traits. Fall back to `"person_from_faker"` when the locale isn't available.
+Prefer `"person"` — it provides census-grounded demographics and optional personality traits. Fall back to `"person_from_faker"` only when the locale you need has no fileset on the platform and you cannot get one created.
 
+| `sampler_type`        | Params class                   | When to use                                                                                          |
+| --------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `"person"`            | `PersonSamplerParams`          | **Preferred.** Reads Nemotron Personas data from a fileset in the `system` workspace.                 |
+| `"person_from_faker"` | `PersonFromFakerSamplerParams` | Fallback when the locale's fileset is unavailable. Basic names/addresses via Faker, not demographically accurate. |
 
-| `sampler_type`        | Params class                   | When to use                                                                                         |
-| --------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------- |
-| `"person"`            | `PersonSamplerParams`          | **Preferred.** Locale downloaded to `~/.data-designer/managed-assets/datasets/` by default.         |
-| `"person_from_faker"` | `PersonFromFakerSamplerParams` | Fallback when locale not downloaded. Basic names/addresses via Faker, not demographically accurate. |
+## Locale availability
 
+Person sampling reads locale data from a NeMo Helix fileset named `system/nemotron-personas-dataset-<locale>` (lowercased locale). Nothing is downloaded to your machine, and the `installed` column in `nemo data-designer agent context` output describes a local library path that platform execution does not use — ignore it.
+
+Supported locales: `en_IN`, `en_SG`, `en_US`, `fr_FR`, `hi_Deva_IN`, `hi_Latn_IN`, `ja_JP`, `ko_KR`, `pt_BR`.
+
+`nemo data-designer validate <path>` checks that every locale your config samples from via `PersonSamplerParams` (`sampler_type="person"`) has a reachable fileset. If one is missing, validation fails and the fileset has to be created once, per locale, by someone with an NGC API key secret registered in the platform:
+
+```bash
+nemo data-designer personas make-fileset \
+  --locale en_US \
+  --api-key-secret <workspace>/<secret-name>
+```
+
+This is a one-time administrative step, not something to run per dataset. If the fileset is missing and you cannot create it, switch the column to `PersonFromFakerSamplerParams` (`sampler_type="person_from_faker"`) and tell the user what they lost.
 
 ## Usage
 
@@ -43,4 +57,4 @@ Fields vary by locale. Always run the following script to get the exact schema f
 python scripts/get_person_object_schema.py <locale>
 ```
 
-This prints the PII fields (always included) and synthetic persona fields (only included when `with_synthetic_personas=True`) available for that locale.
+This reads the locale's `system` fileset and prints the PII fields (always included) and synthetic persona fields (only included when `with_synthetic_personas=True`) available for that locale. Run it from an environment where the `nemo` CLI is installed, so it can reach the platform. If the locale's fileset does not exist yet, the script says so and prints the `personas make-fileset` command to create it.

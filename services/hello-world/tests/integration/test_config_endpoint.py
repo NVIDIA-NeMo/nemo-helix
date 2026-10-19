@@ -6,12 +6,12 @@
 from typing import Generator
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nmp.common.config import PlatformConfig
-from nmp.common.service.dependencies import get_platform_config
-from nmp.hello_world.config import HelloWorldConfig
-from nmp.hello_world.service import HelloWorldService
-from nmp.testing import create_test_client
+from fastapi.testclient import TestClient
+from nhx.common.config import HelixConfig
+from nhx.common.service.dependencies import get_platform_config
+from nhx.hello_world.config import HelloWorldConfig
+from nhx.hello_world.service import HelloWorldService
+from nhx.testing import create_test_client
 
 
 class TestConfigInfoEndpoint:
@@ -20,7 +20,7 @@ class TestConfigInfoEndpoint:
     @pytest.fixture
     def mock_platform_config(self):
         """Create mock platform config."""
-        return PlatformConfig(base_url="http://test-platform.example.com")
+        return HelixConfig(base_url="http://test-platform.example.com")
 
     @pytest.fixture
     def mock_service_config(self):
@@ -28,10 +28,11 @@ class TestConfigInfoEndpoint:
         return HelloWorldConfig(greeting_prefix="Howdy", max_message_length=200)
 
     @pytest.fixture
-    def sdk(self, mock_platform_config, mock_service_config) -> Generator[NeMoPlatform, None, None]:
-        """Create SDK client with mocked configs."""
+    def http_client(self, mock_platform_config, mock_service_config) -> Generator[TestClient, None, None]:
+        """Create a test client with mocked configs."""
         with create_test_client(
             HelloWorldService,
+            client_type=TestClient,
             dependency_overrides={
                 get_platform_config: lambda: mock_platform_config,
             },
@@ -39,9 +40,9 @@ class TestConfigInfoEndpoint:
         ) as client:
             yield client
 
-    def test_config_info_returns_both_configs(self, sdk: NeMoPlatform):
+    def test_config_info_returns_both_configs(self, http_client: TestClient):
         """Test GET /config-info returns both platform and service config values."""
-        response = sdk._client.get("/apis/hello-world/v2/workspaces/default/config-info")
+        response = http_client.get("/apis/hello-world/v2/workspaces/default/config-info")
 
         assert response.status_code == 200
         data = response.json()
@@ -51,17 +52,18 @@ class TestConfigInfoEndpoint:
 
     def test_config_info_with_default_values(self):
         """Test /config-info works with default config values."""
-        default_platform = PlatformConfig()
+        default_platform = HelixConfig()
         default_service = HelloWorldConfig()
 
         with create_test_client(
             HelloWorldService,
+            client_type=TestClient,
             dependency_overrides={
                 get_platform_config: lambda: default_platform,
             },
             service_configs={HelloWorldService: default_service},
-        ) as sdk:
-            response = sdk._client.get("/apis/hello-world/v2/workspaces/default/config-info")
+        ) as http_client:
+            response = http_client.get("/apis/hello-world/v2/workspaces/default/config-info")
 
             assert response.status_code == 200
             data = response.json()

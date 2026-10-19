@@ -14,7 +14,7 @@ import type {
   EmbeddingInferenceParamsExtraBody,
   ModelConfig,
 } from '@nemo/sdk/generated/data-designer/schema';
-import { modelsListModels } from '@nemo/sdk/generated/platform/api';
+import { modelsListModels } from '@nemo/sdk/generated/platform/models';
 import type {
   InferenceParams,
   ModelEntity,

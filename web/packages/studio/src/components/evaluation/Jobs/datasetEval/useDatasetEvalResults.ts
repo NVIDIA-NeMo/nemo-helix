@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  useEvaluatorGetEvalResult,
-  useEvaluatorGetEvaluateJobResult,
-} from '@nemo/sdk/generated/evaluator/api';
-import { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import { useEvalsGetEvalResult } from '@nemo/sdk/generated/evals/evals-plugin-eval-results-routes';
+import { useEvalsGetEvaluateJobResult } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { platformFetch } from '@nemo/sdk/src/utils/platformRequest';
 import type { DatasetEvalRow } from '@studio/components/evaluation/Jobs/datasetEval/DatasetEvalRowResultsPanel';
 import { useQuery } from '@tanstack/react-query';
 
@@ -25,54 +25,63 @@ const parseRowScores = (text: string): DatasetEvalRow[] =>
     });
 
 const downloadText = async (url: string, label: string): Promise<string> => {
-  const response = await fetch(url);
+  const response = await platformFetch(url);
   if (!response.ok) throw new Error(`Failed to download ${label}: ${response.statusText}`);
   return response.text();
 };
 
 export const useDatasetEvalResults = (workspace: string, jobName: string, status?: string) => {
-  const isPending = status === 'pending' || status === 'active';
   const hasFailed =
     status === 'error' ||
     status === 'cancelled' ||
     status === 'canceled' ||
     status === 'failed' ||
     status === 'cancelling';
-  const enabled = !!workspace && !!jobName && status === PlatformJobStatus.completed;
+  // Any non-terminal status (`created`, `paused`, ...) is still pending; `cancelling` is not
+  // terminal yet but counts as failed above because it will never produce results.
+  const isPending =
+    !!status &&
+    !hasFailed &&
+    !HelixJobTerminalStatuses.some((terminalStatus) => terminalStatus === status);
+  const enabled = !!workspace && !!jobName && status === HelixJobStatus.completed;
 
   const {
     data: evalResult,
-    isLoading: isLoadingScores,
+    isPending: isScoresPending,
     error: scoresError,
-  } = useEvaluatorGetEvalResult(workspace, jobName, { query: { enabled, retry: 3 } });
+  } = useEvalsGetEvalResult(workspace, jobName, { query: { enabled, retry: 3 } });
 
   const {
     data: rowsMetadata,
-    isLoading: isLoadingRowsMetadata,
+    isPending: isRowsMetadataPending,
     error: rowsMetadataError,
-  } = useEvaluatorGetEvaluateJobResult(workspace, jobName, 'row-scores', {
+  } = useEvalsGetEvaluateJobResult(workspace, jobName, 'row-scores', {
     query: { enabled, retry: 3 },
   });
 
+  const hasRowsDownloadUrl = !!rowsMetadata?.download_url;
   const {
     data: rows,
-    isLoading: isLoadingRowsDownload,
+    isPending: isRowsDownloadPending,
     error: rowsError,
   } = useQuery({
     queryKey: ['dataset-eval-row-scores', workspace, jobName, rowsMetadata?.download_url],
     queryFn: () =>
       downloadText(rowsMetadata?.download_url ?? '', 'row scores').then(parseRowScores),
-    enabled: !!rowsMetadata?.download_url,
+    enabled: hasRowsDownloadUrl,
     retry: 3,
   });
 
+  // `isPending` rather than `isLoading`: a query that hasn't started yet is still loading
+  // from the page's point of view, but `isLoading` is false until its first fetch begins.
   return {
     scores: evalResult?.scores?.scores ?? [],
     rows: rows ?? [],
     isPending,
     hasFailed,
-    isLoadingScores,
-    isLoadingRows: isLoadingRowsMetadata || isLoadingRowsDownload,
+    isLoadingScores: enabled && isScoresPending,
+    isLoadingRows:
+      enabled && (isRowsMetadataPending || (hasRowsDownloadUrl && isRowsDownloadPending)),
     scoresError,
     rowsError: rowsMetadataError || rowsError,
   };

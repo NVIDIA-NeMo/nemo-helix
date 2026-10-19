@@ -4,13 +4,14 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { DEFAULT_LARGE_PAGE_SIZE } from '@nemo/common/src/constants/api';
-import { useDataDesignerCreateJob } from '@nemo/sdk/generated/data-designer/api';
-import { useModelsListProviders } from '@nemo/sdk/generated/platform/api';
+import { useDataDesignerCreateJob } from '@nemo/sdk/generated/data-designer/data-designer';
+import { useModelsListProviders } from '@nemo/sdk/generated/platform/model-providers';
 import { Flex, Stack } from '@nvidia/foundations-react-core';
 import { findTemplate } from '@studio/components/CreateFilesetStart/templates';
 import { usePreview } from '@studio/components/NewDataDesignerJobForm/usePreview';
 import { getCloneJobRequestFromState } from '@studio/components/NewDataDesignerJobForm/utils';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
+import { useOidcBearerToken } from '@studio/providers/auth/useOidcBearerToken';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import {
   getGeneratedJobRequestFromState,
@@ -20,6 +21,7 @@ import { BuilderCanvas } from '@studio/routes/DataDesignerJobBuildRoute/BuilderC
 import { BuilderConfigPane } from '@studio/routes/DataDesignerJobBuildRoute/BuilderConfigPane';
 import { BuilderDetailsPanel } from '@studio/routes/DataDesignerJobBuildRoute/BuilderDetailsPanel';
 import { BuilderPalette } from '@studio/routes/DataDesignerJobBuildRoute/BuilderPalette';
+import { BuilderPreviewPanel } from '@studio/routes/DataDesignerJobBuildRoute/BuilderPreviewPanel';
 import {
   BuilderToolbar,
   type BuilderViewMode,
@@ -48,7 +50,6 @@ import {
 } from '@studio/routes/utils';
 import { type FC, useCallback, useMemo, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
-import { useAuth } from 'react-oidc-context';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 
 /**
@@ -58,7 +59,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router';
 export const DataDesignerJobBuildRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const bearerToken = useOidcBearerToken();
   const [searchParams] = useSearchParams();
   const { state: locationState } = useLocation();
 
@@ -114,6 +115,8 @@ export const DataDesignerJobBuildRoute: FC = () => {
   const [viewMode, setViewMode] = useState<BuilderViewMode>('list');
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [isPreviewVisible, setIsPreviewVisible] = useState(false);
+  const [isPreviewExpanded, setIsPreviewExpanded] = useState(false);
 
   const validateAndCollectErrors = useCallback(() => {
     const { columns, models, name, rows } = builder.getBuilderValues();
@@ -135,7 +138,7 @@ export const DataDesignerJobBuildRoute: FC = () => {
       errors.push('Records to generate must be a whole number of at least 1.');
     }
     setValidationErrors(errors);
-    setIsDetailsOpen(true);
+    if (errors.length > 0) setIsDetailsOpen(true);
     return errors;
   }, [builder]);
 
@@ -145,15 +148,25 @@ export const DataDesignerJobBuildRoute: FC = () => {
       ? buildDataDesignerConfig(columns, models, servedModelNames)
       : undefined;
   }, [builder, servedModelNames]);
-  const { previewLogs, isPreviewing, runPreview, stopPreview } = usePreview({
+  const {
+    previewLogs,
+    previewStatus,
+    previewRecords,
+    previewColumnOrder,
+    previewError,
+    isPreviewing,
+    runPreview,
+    stopPreview,
+  } = usePreview({
     workspace,
-    accessToken: user?.access_token ?? undefined,
+    accessToken: bearerToken,
     getCurrentConfig,
   });
 
   const handlePreview = useCallback(() => {
     if (validateAndCollectErrors().length > 0) return;
-    setIsDetailsOpen(true);
+    setIsPreviewVisible(true);
+    setIsPreviewExpanded(true);
     void runPreview();
   }, [validateAndCollectErrors, runPreview]);
 
@@ -187,6 +200,10 @@ export const DataDesignerJobBuildRoute: FC = () => {
   }, [validateAndCollectErrors, builder, createJob, workspace, servedModelNames, navigate]);
 
   const toggleDetails = useCallback(() => setIsDetailsOpen((open) => !open), []);
+  const togglePreviewExpanded = useCallback(
+    () => setIsPreviewExpanded((expanded) => !expanded),
+    []
+  );
   const onColumnRemove = useCallback(() => {
     if (builder.selectedColumnId) builder.removeColumn(builder.selectedColumnId);
   }, [builder]);
@@ -217,7 +234,6 @@ export const DataDesignerJobBuildRoute: FC = () => {
           <BuilderDetailsPanel
             validationErrors={validationErrors}
             submitError={submitError}
-            previewLogs={previewLogs}
             isOpen={isDetailsOpen}
             onToggle={toggleDetails}
           />
@@ -259,6 +275,20 @@ export const DataDesignerJobBuildRoute: FC = () => {
               onModelClose={onModelClose}
             />
           </Flex>
+
+          {isPreviewVisible ? (
+            <BuilderPreviewPanel
+              records={previewRecords}
+              columnOrder={previewColumnOrder}
+              logs={previewLogs}
+              status={previewStatus}
+              isPreviewing={isPreviewing}
+              error={previewError}
+              isExpanded={isPreviewExpanded}
+              onToggleExpanded={togglePreviewExpanded}
+              onStop={stopPreview}
+            />
+          ) : null}
         </Stack>
       </FormProvider>
     </AccessibleTitle>

@@ -20,6 +20,10 @@ describe('ScoreModal', () => {
     const { onSave } = renderScoreModal();
 
     await user.type(screen.getByPlaceholderText('e.g., quality'), 'quality');
+    await user.type(
+      screen.getByRole('textbox', { name: 'Scoring Criteria' }),
+      'How good the answer is'
+    );
 
     const rubricLabelInputs = screen.getAllByPlaceholderText('Label');
     const rubricDescriptionInputs = screen.getAllByPlaceholderText('Description');

@@ -67,7 +67,6 @@ const STUDIO_LINK_PATH_TEMPLATES: Record<string, string> = {
   customizations: '/workspaces/{workspace}/customizations',
   customization_new: '/workspaces/{workspace}/customizations/fine-tuned/new',
   customization: '/workspaces/{workspace}/customizations/{name}',
-  prompt_tuning: '/workspaces/{workspace}/customizations/prompt-tuned/new',
   model_chat: '/workspaces/{workspace}/model-compare',
   jobs: '/workspaces/{workspace}/jobs',
   job: '/workspaces/{workspace}/jobs/{name}',

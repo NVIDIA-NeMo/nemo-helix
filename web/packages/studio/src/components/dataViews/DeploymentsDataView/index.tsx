@@ -18,7 +18,7 @@ import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { useModelsListDeployments } from '@nemo/sdk/generated/platform/api';
+import { useModelsListDeployments } from '@nemo/sdk/generated/platform/model-deployments';
 import {
   ModelDeployment,
   ModelDeploymentFilter,

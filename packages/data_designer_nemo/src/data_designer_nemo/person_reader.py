@@ -7,26 +7,21 @@ from data_designer_nemo.filesystem import make_filesystem
 from data_designer_nemo.nemotron_personas import (
     get_locale_fileset_file_ref,
 )
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_helix_plugin.client.client import NemoClient
 
 
 class FilesetsPersonReader(PersonReader):
     """Provides DuckDB access to Nemotron personas datasets via filesets.
 
-    Accepts either a sync :class:`NeMoPlatform` (job-container path, sync
-    top-level) or an :class:`AsyncNeMoPlatform` (API-process path, used
-    from a worker thread under :func:`anyio.to_thread.run_sync`).
-
-    DuckDB calls into the SDK fileset filesystem synchronously, so when this
-    reader is constructed with an async SDK we rebuild a sync SDK first. Auth
-    and identity propagate; fsspec stays in sync mode.
+    DuckDB calls into the fileset filesystem synchronously, so this reader
+    only accepts a sync :class:`NemoClient`.
     """
 
-    def __init__(self, sdk: NeMoPlatform | AsyncNeMoPlatform):
-        self._sdk = sdk
+    def __init__(self, client: NemoClient):
+        self._client = client
 
     def create_duckdb_connection(self) -> duckdb.DuckDBPyConnection:
-        filesystem = make_filesystem(self._sdk)
+        filesystem = make_filesystem(self._client)
         conn = duckdb.connect()
         conn.register_filesystem(filesystem)
         return conn

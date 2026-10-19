@@ -8,6 +8,7 @@ from __future__ import annotations
 import io
 import socket
 import tarfile
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -24,12 +25,16 @@ from nemo_deployments_plugin.backends.docker import ports as ports_mod
 from nemo_deployments_plugin.backends.docker.backend import (
     _PORT_CONFLICT_ATTEMPTS,
     _PORT_CONFLICT_MARKER,
+    DOCKER_WORKLOAD_IDENTITY_TOKEN_FILE_LABEL,
+    DOCKER_WORKLOAD_IDENTITY_VOLUME_LABEL,
     DockerDeploymentBackend,
 )
+from nemo_deployments_plugin.backends.docker.config import DEFAULT_WORKLOAD_TOKEN_WRITER_IMAGE
 from nemo_deployments_plugin.backends.labels import (
     BACKOFF_LIMIT_LABEL,
     CONFIG_NAME_LABEL,
     CONTAINER_ROLE_LABEL,
+    CONTAINER_ROLE_SERVER,
     DEFAULT_RESOURCE_SCOPE,
     DEPLOYMENT_NAME_LABEL,
     DEPLOYMENT_WORKSPACE_LABEL,
@@ -41,34 +46,98 @@ from nemo_deployments_plugin.backends.labels import (
     deployment_key,
 )
 from nemo_deployments_plugin.constants import MANAGED_BY_LABEL
-from nemo_deployments_plugin.entities import Deployment
+from nemo_deployments_plugin.entities import Deployment, DeploymentConfig, WorkloadIdentitySpec
 from nemo_deployments_plugin.types import RestartPolicy
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.auth.workload_delegations import (
+    WorkloadDelegationConflictError,
+    WorkloadDelegationEntity,
+    WorkloadDelegationLookupScope,
+    WorkloadDelegationScope,
+    parse_opaque_docker_proof_token,
+    verify_opaque_docker_proof_token_hash,
+)
+from nemo_helix_plugin.auth.workload_identity import (
+    WORKLOAD_IDENTITY_TOKEN_FILE_PATH,
+    WORKLOAD_IDENTITY_VOLUME_PATH,
+    build_docker_opaque_workload_delegation,
+)
+from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import ReadTimeout
 
 
-def test_init_raises_missing_dependency_when_docker_daemon_unavailable(mock_sdk: MagicMock) -> None:
+def _workload_auth_context() -> AuthContext:
+    return AuthContext(
+        principal_id="user:alice",
+        principal_email="alice@example.com",
+        principal_groups=["research"],
+    )
+
+
+def _workload_identity_config(*, token_expiration_seconds: int = 900) -> DeploymentConfig:
+    return sample_config().model_copy(
+        update={
+            "workload_identity": WorkloadIdentitySpec(
+                enabled=True,
+                workloadKind="agent_deployment",
+                workloadId="logical-srv",
+                tokenExpirationSeconds=token_expiration_seconds,
+            )
+        }
+    )
+
+
+def _workload_store() -> MagicMock:
+    store = MagicMock()
+    store.register = AsyncMock()
+    store.revoke = AsyncMock()
+    store.revoke_by_workload = AsyncMock(return_value=[])
+    store.list_by_workload = AsyncMock(return_value=[])
+    store.update = AsyncMock()
+    return store
+
+
+def _docker_workload_delegation(*, expires_in_seconds: int) -> WorkloadDelegationEntity:
+    delegation, _ = build_docker_opaque_workload_delegation(
+        scope=WorkloadDelegationScope(
+            workload_workspace="default",
+            workload_kind="agent_deployment",
+            workload_instance_id=deployment_key("default", "srv"),
+            workload_claim_id="logical-srv",
+        ),
+        workload_audience="nemo-helix",
+        workload_generation=CONTAINER_ROLE_SERVER,
+        auth_context=_workload_auth_context(),
+        ttl_seconds_active=900,
+    )
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in_seconds)
+    return delegation.model_copy(update={"expires_at": expires_at})
+
+
+def test_init_raises_missing_dependency_when_docker_daemon_unavailable(mock_client: MagicMock) -> None:
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", side_effect=DockerException("Error while fetching server API version")),
     ):
         with pytest.raises(MissingBackendDependencyError, match="Docker daemon is unavailable"):
-            DockerDeploymentBackend(mock_sdk, {"docker_timeout": 5, "pull_images": False})
+            DockerDeploymentBackend(mock_client, {"docker_timeout": 5, "pull_images": False})
 
 
-def test_init_raises_missing_dependency_when_docker_ping_fails(mock_sdk: MagicMock) -> None:
+def test_init_raises_missing_dependency_when_docker_ping_fails(mock_client: MagicMock) -> None:
     client = MagicMock()
     client.ping.side_effect = RequestsConnectionError("Connection refused")
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=client),
     ):
         with pytest.raises(MissingBackendDependencyError, match="Docker daemon is unavailable"):
-            DockerDeploymentBackend(mock_sdk, {"docker_timeout": 5, "pull_images": False})
+            DockerDeploymentBackend(mock_client, {"docker_timeout": 5, "pull_images": False})
 
 
 @pytest.mark.asyncio
@@ -95,20 +164,576 @@ async def test_create_deployment_starts_container(
 
 
 @pytest.mark.asyncio
-async def test_create_deployment_uses_executor_default_network(
-    mock_sdk: MagicMock,
+async def test_create_deployment_mounts_executor_additional_volumes(
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
-            mock_sdk,
-            {"docker_timeout": 60, "pull_images": False, "network": "nmp-e2e-test-network"},
+            mock_client,
+            {
+                "docker_timeout": 60,
+                "pull_images": False,
+                "additional_volume_mounts": [
+                    {
+                        "volume_name": "gateway-tls",
+                        "mount_path": "/etc/nhx/gateway-tls",
+                        "read_only": True,
+                    }
+                ],
+            },
+        )
+
+    mock_entities.get.return_value = sample_config()
+    mock_docker_client.containers.get.side_effect = NotFound("missing")
+    mock_docker_client.containers.create.return_value = MagicMock(id="abc123")
+
+    update = await backend.create_deployment(
+        workspace="default",
+        name="srv",
+        config_name="cfg1",
+        labels={"managed-by": MANAGED_BY_LABEL},
+        backend_config={},
+    )
+
+    assert update.status == "STARTING"
+    _, create_kwargs = mock_docker_client.containers.create.call_args
+    assert create_kwargs["volumes"]["gateway-tls"] == {"bind": "/etc/nhx/gateway-tls", "mode": "ro"}
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_injects_workload_identity_volume_and_delegation(
+    docker_backend: DockerDeploymentBackend,
+    mock_entities: AsyncMock,
+    mock_docker_client: MagicMock,
+) -> None:
+    config = _workload_identity_config()
+    workload_store = _workload_store()
+    docker_backend._workload_delegations = workload_store
+    writer = AsyncMock()
+    mock_entities.get.return_value = config
+    mock_docker_client.containers.get.side_effect = NotFound("missing")
+    mock_docker_client.containers.create.return_value = MagicMock(id="abc123")
+    mock_docker_client.volumes.get.side_effect = NotFound("missing")
+
+    with (
+        patch(
+            "nemo_deployments_plugin.backends.workload_identity.is_workload_identity_token_exchange_enabled",
+            return_value=True,
+        ),
+        patch.object(docker_backend, "_write_workload_identity_subject_token", writer),
+    ):
+        update = await docker_backend.create_deployment(
+            workspace="default",
+            name="srv",
+            config_name="cfg1",
+            labels={"managed-by": MANAGED_BY_LABEL},
+            backend_config={},
+            auth_context=_workload_auth_context(),
+        )
+
+    assert update.status == "STARTING"
+    volume_name = docker_backend._workload_identity_volume_name(
+        workspace="default",
+        name="srv",
+        role=CONTAINER_ROLE_SERVER,
+    )
+    mock_docker_client.volumes.create.assert_called_once()
+    assert mock_docker_client.volumes.create.call_args.kwargs["name"] == volume_name
+    volume_labels = mock_docker_client.volumes.create.call_args.kwargs["labels"]
+    assert volume_labels[DOCKER_WORKLOAD_IDENTITY_TOKEN_FILE_LABEL] == WORKLOAD_IDENTITY_TOKEN_FILE_PATH
+    assert volume_labels[DOCKER_WORKLOAD_IDENTITY_VOLUME_LABEL] == volume_name
+    _, create_kwargs = mock_docker_client.containers.create.call_args
+    assert create_kwargs["environment"][WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR] == WORKLOAD_IDENTITY_TOKEN_FILE_PATH
+    assert create_kwargs["volumes"][volume_name] == {"bind": WORKLOAD_IDENTITY_VOLUME_PATH, "mode": "ro"}
+    assert create_kwargs["labels"][CONTAINER_ROLE_LABEL] == CONTAINER_ROLE_SERVER
+    writer.assert_awaited_once()
+    workload_store.register.assert_awaited_once()
+    delegation = workload_store.register.await_args.args[0]
+    assert delegation.workload_workspace == "default"
+    assert delegation.workload_kind == "agent_deployment"
+    assert delegation.workload_id == deployment_key("default", "srv")
+    assert delegation.workload_claim_id == "logical-srv"
+    assert delegation.workload_generation == CONTAINER_ROLE_SERVER
+    assert delegation.workload_subject == delegation.name
+    assert delegation.opaque_subject_token_hash
+    assert delegation.auth_context == _workload_auth_context()
+    assert workload_store.register.await_args.kwargs["require_opaque_subject_token_hash"] is True
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_uses_workload_identity_token_ttl(
+    docker_backend: DockerDeploymentBackend,
+    mock_docker_client: MagicMock,
+) -> None:
+    config = _workload_identity_config(token_expiration_seconds=1200)
+    workload_store = _workload_store()
+    docker_backend._workload_delegations = workload_store
+    mock_docker_client.volumes.get.side_effect = NotFound("missing")
+
+    with (
+        patch(
+            "nemo_deployments_plugin.backends.workload_identity.is_workload_identity_token_exchange_enabled",
+            return_value=True,
+        ),
+        patch.object(docker_backend, "_write_workload_identity_subject_token", AsyncMock()),
+    ):
+        before = datetime.now(timezone.utc) + timedelta(seconds=1500)
+        await docker_backend._prepare_workload_identity_for_container(
+            workspace="default",
+            deployment_name="srv",
+            config=config,
+            role=CONTAINER_ROLE_SERVER,
+            base_labels={MANAGED_BY_KEY: MANAGED_BY_LABEL},
+            auth_context=_workload_auth_context(),
+        )
+        after = datetime.now(timezone.utc) + timedelta(seconds=1500)
+
+    delegation = workload_store.register.await_args.args[0]
+    assert before <= delegation.expires_at <= after
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_mounts_workload_identity_on_auth_proxy_sidecar(
+    docker_backend: DockerDeploymentBackend,
+    mock_entities: AsyncMock,
+    mock_docker_client: MagicMock,
+) -> None:
+    config = _workload_identity_config().model_copy(
+        update={
+            "auth_proxy_sidecar": True,
+            "auth_proxy_sidecar_identity": "agents",
+            "auth_proxy_sidecar_on_behalf_of": "user:alice",
+        }
+    )
+    workload_store = _workload_store()
+    docker_backend._workload_delegations = workload_store
+    mock_entities.get.return_value = config
+    mock_docker_client.containers.get.side_effect = NotFound("missing")
+    mock_docker_client.containers.create.side_effect = [MagicMock(id="server123"), MagicMock(id="proxy123")]
+    mock_docker_client.volumes.get.side_effect = NotFound("missing")
+
+    with (
+        patch("nemo_deployments_plugin.auth_proxy.platform_auth_enabled", return_value=True),
+        patch(
+            "nemo_deployments_plugin.backends.workload_identity.is_workload_identity_token_exchange_enabled",
+            return_value=True,
+        ),
+        patch.object(docker_backend, "_write_workload_identity_subject_token", AsyncMock()),
+    ):
+        update = await docker_backend.create_deployment(
+            workspace="default",
+            name="srv",
+            config_name="cfg1",
+            labels={"managed-by": MANAGED_BY_LABEL},
+            backend_config={},
+            auth_context=_workload_auth_context(),
+        )
+
+    assert update.status == "STARTING"
+    assert workload_store.register.await_count == 2
+    assert mock_docker_client.volumes.create.call_count == 2
+    sidecar_kwargs = mock_docker_client.containers.create.call_args_list[1].kwargs
+    assert sidecar_kwargs["labels"][CONTAINER_ROLE_LABEL] == "auth-proxy"
+    assert sidecar_kwargs["labels"][DOCKER_WORKLOAD_IDENTITY_TOKEN_FILE_LABEL] == WORKLOAD_IDENTITY_TOKEN_FILE_PATH
+    assert DOCKER_WORKLOAD_IDENTITY_VOLUME_LABEL in sidecar_kwargs["labels"]
+    assert sidecar_kwargs["environment"][WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR] == WORKLOAD_IDENTITY_TOKEN_FILE_PATH
+    assert any(binding["bind"] == WORKLOAD_IDENTITY_VOLUME_PATH for binding in sidecar_kwargs["volumes"].values())
+
+
+@pytest.mark.asyncio
+async def test_prepare_workload_identity_scopes_shared_workload_id_by_deployment(
+    docker_backend: DockerDeploymentBackend,
+    mock_docker_client: MagicMock,
+) -> None:
+    config = _workload_identity_config()
+    workload_store = _workload_store()
+    docker_backend._workload_delegations = workload_store
+    writer = AsyncMock()
+    mock_docker_client.volumes.get.side_effect = NotFound("missing")
+
+    with (
+        patch(
+            "nemo_deployments_plugin.backends.workload_identity.is_workload_identity_token_exchange_enabled",
+            return_value=True,
+        ),
+        patch.object(docker_backend, "_write_workload_identity_subject_token", writer),
+    ):
+        await docker_backend._prepare_workload_identity_for_container(
+            workspace="default",
+            deployment_name="srv-a",
+            config=config,
+            role=CONTAINER_ROLE_SERVER,
+            base_labels={MANAGED_BY_KEY: MANAGED_BY_LABEL},
+            auth_context=_workload_auth_context(),
+        )
+        await docker_backend._prepare_workload_identity_for_container(
+            workspace="default",
+            deployment_name="srv-b",
+            config=config,
+            role=CONTAINER_ROLE_SERVER,
+            base_labels={MANAGED_BY_KEY: MANAGED_BY_LABEL},
+            auth_context=_workload_auth_context(),
+        )
+
+    delegations = [call.args[0] for call in workload_store.register.await_args_list]
+    assert [delegation.workload_id for delegation in delegations] == [
+        deployment_key("default", "srv-a"),
+        deployment_key("default", "srv-b"),
+    ]
+    assert [delegation.workload_claim_id for delegation in delegations] == ["logical-srv", "logical-srv"]
+    assert delegations[0].name != delegations[1].name
+    assert writer.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_create_one_shot_recreate_cleans_prior_workload_identity_before_register(
+    docker_backend: DockerDeploymentBackend,
+    mock_entities: AsyncMock,
+    mock_docker_client: MagicMock,
+) -> None:
+    config = _workload_identity_config().model_copy(update={"restart_policy": "Never"})
+    workload_store = _workload_store()
+    docker_backend._workload_delegations = workload_store
+    existing = MagicMock()
+    existing.status = "exited"
+    existing.labels = {
+        MANAGED_BY_KEY: MANAGED_BY_LABEL,
+        DEPLOYMENT_WORKSPACE_LABEL: "default",
+        DEPLOYMENT_NAME_LABEL: "srv",
+        CONFIG_NAME_LABEL: "cfg1",
+        RESTART_POLICY_LABEL: "Never",
+        RESOURCE_SCOPE_LABEL: DEFAULT_RESOURCE_SCOPE,
+    }
+    order: list[str] = []
+
+    async def revoke_by_workload(
+        scope: WorkloadDelegationLookupScope,
+    ) -> list[WorkloadDelegationEntity]:
+        order.append("revoke")
+        return []
+
+    def list_volumes(*, filters: dict[str, list[str]]) -> list[MagicMock]:
+        order.append("cleanup-volumes")
+        return []
+
+    async def register_delegation(
+        delegation: WorkloadDelegationEntity,
+        *,
+        require_opaque_subject_token_hash: bool,
+    ) -> None:
+        order.append("register")
+
+    workload_store.revoke_by_workload.side_effect = revoke_by_workload
+    workload_store.register.side_effect = register_delegation
+    mock_entities.get.return_value = config
+    mock_docker_client.containers.get.return_value = existing
+    mock_docker_client.containers.create.return_value = _one_shot_server_container(
+        restart_policy="Never",
+        exit_code=0,
+    )
+    mock_docker_client.volumes.get.side_effect = NotFound("missing")
+    mock_docker_client.volumes.list.side_effect = list_volumes
+
+    with (
+        patch(
+            "nemo_deployments_plugin.backends.workload_identity.is_workload_identity_token_exchange_enabled",
+            return_value=True,
+        ),
+        patch.object(docker_backend, "_write_workload_identity_subject_token", AsyncMock()),
+    ):
+        update = await docker_backend.create_deployment(
+            workspace="default",
+            name="srv",
+            config_name="cfg1",
+            labels={"managed-by": MANAGED_BY_LABEL},
+            backend_config={},
+            auth_context=_workload_auth_context(),
+        )
+
+    assert update.status == "SUCCEEDED"
+    existing.remove.assert_called_once_with(force=True)
+    assert workload_store.revoke_by_workload.await_args_list[0].args == (
+        WorkloadDelegationLookupScope(
+            workload_workspace="default",
+            workload_kind=None,
+            workload_instance_id=deployment_key("default", "srv"),
+        ),
+    )
+    assert order[:3] == ["revoke", "cleanup-volumes", "register"]
+
+
+@pytest.mark.asyncio
+async def test_write_workload_identity_subject_token_labels_token_writer_container(
+    docker_backend: DockerDeploymentBackend,
+    mock_docker_client: MagicMock,
+) -> None:
+    token_writer = MagicMock()
+    token_writer.wait.return_value = {"StatusCode": 0}
+    mock_docker_client.containers.create.return_value = token_writer
+
+    await docker_backend._write_workload_identity_subject_token(
+        "wi-volume",
+        "subject-token",
+        workspace="default",
+        deployment_name="srv",
+    )
+
+    create_kwargs = mock_docker_client.containers.create.call_args.kwargs
+    assert create_kwargs["image"] == DEFAULT_WORKLOAD_TOKEN_WRITER_IMAGE
+    assert create_kwargs["labels"][MANAGED_BY_KEY] == MANAGED_BY_LABEL
+    assert create_kwargs["labels"][DEPLOYMENT_WORKSPACE_LABEL] == "default"
+    assert create_kwargs["labels"][DEPLOYMENT_NAME_LABEL] == "srv"
+    assert create_kwargs["labels"][RESOURCE_SCOPE_LABEL] == DEFAULT_RESOURCE_SCOPE
+    token_writer.put_archive.assert_called_once()
+    token_writer.start.assert_called_once()
+    token_writer.wait.assert_called_once_with(timeout=60)
+    token_writer.remove.assert_called_once_with(force=True)
+
+
+@pytest.mark.asyncio
+async def test_workload_identity_volume_label_mismatch_recreates_volume(
+    docker_backend: DockerDeploymentBackend,
+    mock_docker_client: MagicMock,
+) -> None:
+    existing = MagicMock()
+    existing.attrs = {"Labels": {MANAGED_BY_KEY: MANAGED_BY_LABEL, DEPLOYMENT_NAME_LABEL: "other"}}
+    mock_docker_client.volumes.get.return_value = existing
+    labels = {
+        MANAGED_BY_KEY: MANAGED_BY_LABEL,
+        DEPLOYMENT_WORKSPACE_LABEL: "default",
+        DEPLOYMENT_NAME_LABEL: "srv",
+        RESOURCE_SCOPE_LABEL: DEFAULT_RESOURCE_SCOPE,
+    }
+
+    await docker_backend._ensure_workload_identity_volume(volume_name="wi-volume", labels=labels)
+
+    existing.remove.assert_called_once_with(force=True)
+    mock_docker_client.volumes.create.assert_called_once_with(name="wi-volume", labels=labels)
+
+
+@pytest.mark.asyncio
+async def test_delete_deployment_revokes_workload_identity_delegations_and_volumes(
+    docker_backend: DockerDeploymentBackend,
+    mock_entities: AsyncMock,
+    mock_docker_client: MagicMock,
+) -> None:
+    config = _workload_identity_config()
+    workload_store = _workload_store()
+    docker_backend._workload_delegations = workload_store
+    mock_entities.get.side_effect = [
+        Deployment(name="srv", workspace="default", deployment_config="cfg1"),
+        config,
+    ]
+    mock_docker_client.containers.list.return_value = []
+    mock_docker_client.containers.get.side_effect = NotFound("missing")
+    volume = MagicMock()
+    volume.name = "wi-volume"
+    volume.attrs = {
+        "Labels": {
+            MANAGED_BY_KEY: MANAGED_BY_LABEL,
+            DEPLOYMENT_WORKSPACE_LABEL: "default",
+            DEPLOYMENT_NAME_LABEL: "srv",
+            RESOURCE_SCOPE_LABEL: DEFAULT_RESOURCE_SCOPE,
+        }
+    }
+    mock_docker_client.volumes.list.return_value = [volume]
+
+    update = await docker_backend.delete_deployment("default", "srv")
+
+    assert update.status == "SUCCEEDED"
+    workload_store.revoke_by_workload.assert_awaited_once_with(
+        WorkloadDelegationLookupScope(
+            workload_workspace="default",
+            workload_kind=None,
+            workload_instance_id=deployment_key("default", "srv"),
+        )
+    )
+    volume.remove.assert_called_once_with(force=True)
+
+
+@pytest.mark.asyncio
+async def test_delete_deployment_revokes_default_workload_identity_when_config_missing(
+    docker_backend: DockerDeploymentBackend,
+    mock_entities: AsyncMock,
+    mock_docker_client: MagicMock,
+) -> None:
+    workload_store = _workload_store()
+    docker_backend._workload_delegations = workload_store
+    mock_entities.get.side_effect = NemoEntityNotFoundError("missing")
+    mock_docker_client.containers.list.return_value = []
+    mock_docker_client.containers.get.side_effect = NotFound("missing")
+    mock_docker_client.volumes.list.return_value = []
+
+    update = await docker_backend.delete_deployment("default", "srv")
+
+    assert update.status == "SUCCEEDED"
+    workload_store.revoke_by_workload.assert_awaited_once_with(
+        WorkloadDelegationLookupScope(
+            workload_workspace="default",
+            workload_kind=None,
+            workload_instance_id=deployment_key("default", "srv"),
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_revoke_workload_identity_delegations_uses_broad_scope(
+    docker_backend: DockerDeploymentBackend,
+) -> None:
+    workload_store = _workload_store()
+    docker_backend._workload_delegations = workload_store
+
+    await docker_backend._revoke_workload_delegations_for_deployment(workspace="default", name="srv")
+
+    workload_store.revoke_by_workload.assert_awaited_once_with(
+        WorkloadDelegationLookupScope(
+            workload_workspace="default",
+            workload_kind=None,
+            workload_instance_id=deployment_key("default", "srv"),
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_cleanup_missing_workload_identity_uses_broad_scope(
+    docker_backend: DockerDeploymentBackend,
+) -> None:
+    workload_store = _workload_store()
+    docker_backend._workload_delegations = workload_store
+
+    await docker_backend._cleanup_missing_workload_identity(workspace="default", name="srv")
+
+    workload_store.revoke_by_workload.assert_awaited_once_with(
+        WorkloadDelegationLookupScope(
+            workload_workspace="default",
+            workload_kind=None,
+            workload_instance_id=deployment_key("default", "srv"),
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_refresh_workload_identity_delegation_skips_distant_expiry(
+    docker_backend: DockerDeploymentBackend,
+) -> None:
+    config = _workload_identity_config()
+    workload_store = _workload_store()
+    workload_store.list_by_workload.return_value = [_docker_workload_delegation(expires_in_seconds=1000)]
+    docker_backend._workload_delegations = workload_store
+
+    await docker_backend._refresh_workload_delegations_for_config(workspace="default", name="srv", config=config)
+
+    workload_store.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_refresh_workload_identity_delegation_extends_near_expiry(
+    docker_backend: DockerDeploymentBackend,
+) -> None:
+    config = _workload_identity_config()
+    delegation = _docker_workload_delegation(expires_in_seconds=60)
+    original_expires_at = delegation.expires_at
+    original_hash = delegation.opaque_subject_token_hash
+    workload_store = _workload_store()
+    workload_store.list_by_workload.return_value = [delegation]
+    docker_backend._workload_delegations = workload_store
+    writer = AsyncMock()
+
+    with patch.object(docker_backend, "_write_workload_identity_subject_token", writer):
+        await docker_backend._refresh_workload_delegations_for_config(workspace="default", name="srv", config=config)
+
+    workload_store.update.assert_awaited_once()
+    updated = workload_store.update.await_args.args[0]
+    assert workload_store.update.await_args.kwargs == {"expected_db_version": delegation.db_version}
+    assert updated.expires_at > original_expires_at
+    assert updated.opaque_subject_token_hash != original_hash
+    writer.assert_awaited_once()
+    await_args = writer.await_args
+    assert await_args is not None
+    written_token = await_args.args[1]
+    parsed = parse_opaque_docker_proof_token(written_token)
+    assert parsed.delegation_name == delegation.name
+    assert verify_opaque_docker_proof_token_hash(parsed.secret, updated.opaque_subject_token_hash)
+
+
+@pytest.mark.asyncio
+async def test_refresh_workload_identity_delegation_handles_naive_expiry(
+    docker_backend: DockerDeploymentBackend,
+) -> None:
+    config = _workload_identity_config()
+    delegation = _docker_workload_delegation(expires_in_seconds=60).model_copy(
+        update={"expires_at": datetime.now() + timedelta(seconds=60)}
+    )
+    workload_store = _workload_store()
+    workload_store.list_by_workload.return_value = [delegation]
+    docker_backend._workload_delegations = workload_store
+
+    with patch.object(docker_backend, "_write_workload_identity_subject_token", AsyncMock()):
+        await docker_backend._refresh_workload_delegations_for_config(workspace="default", name="srv", config=config)
+
+    workload_store.update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_refresh_workload_identity_delegation_continues_after_row_failure(
+    docker_backend: DockerDeploymentBackend,
+) -> None:
+    config = _workload_identity_config()
+    first = _docker_workload_delegation(expires_in_seconds=60)
+    second = _docker_workload_delegation(expires_in_seconds=60).model_copy(update={"workload_generation": "worker"})
+    workload_store = _workload_store()
+    workload_store.list_by_workload.return_value = [first, second]
+    docker_backend._workload_delegations = workload_store
+    writer = AsyncMock(side_effect=[RuntimeError("volume unavailable"), None])
+
+    with patch.object(docker_backend, "_write_workload_identity_subject_token", writer):
+        await docker_backend._refresh_workload_delegations_for_config(workspace="default", name="srv", config=config)
+
+    assert writer.await_count == 2
+    workload_store.update.assert_awaited_once()
+    assert workload_store.update.await_args.args[0].workload_generation == "worker"
+
+
+@pytest.mark.asyncio
+async def test_refresh_workload_identity_delegation_skips_stale_conflict(
+    docker_backend: DockerDeploymentBackend,
+) -> None:
+    config = _workload_identity_config()
+    delegation = _docker_workload_delegation(expires_in_seconds=60)
+    workload_store = _workload_store()
+    workload_store.list_by_workload.return_value = [delegation]
+    workload_store.update.side_effect = WorkloadDelegationConflictError("stale")
+    docker_backend._workload_delegations = workload_store
+
+    with patch.object(docker_backend, "_write_workload_identity_subject_token", AsyncMock()):
+        await docker_backend._refresh_workload_delegations_for_config(workspace="default", name="srv", config=config)
+
+    workload_store.update.assert_awaited_once()
+    assert workload_store.update.await_args.kwargs == {"expected_db_version": delegation.db_version}
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_uses_executor_default_network(
+    mock_client: MagicMock,
+    mock_entities: AsyncMock,
+    mock_docker_client: MagicMock,
+) -> None:
+    with (
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
+        patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
+        patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
+        patch("docker.from_env", return_value=mock_docker_client),
+    ):
+        backend = DockerDeploymentBackend(
+            mock_client,
+            {"docker_timeout": 60, "pull_images": False, "network": "nhx-e2e-test-network"},
         )
         backend._client = mock_docker_client
 
@@ -126,23 +751,23 @@ async def test_create_deployment_uses_executor_default_network(
 
     assert update.status == "STARTING"
     _, create_kwargs = mock_docker_client.containers.create.call_args
-    assert create_kwargs["network"] == "nmp-e2e-test-network"
+    assert create_kwargs["network"] == "nhx-e2e-test-network"
 
 
 @pytest.mark.asyncio
 async def test_create_deployment_backend_config_network_overrides_executor_default(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
-            mock_sdk,
+            mock_client,
             {"docker_timeout": 60, "pull_images": False, "network": "executor-network"},
         )
         backend._client = mock_docker_client
@@ -166,24 +791,24 @@ async def test_create_deployment_backend_config_network_overrides_executor_defau
 
 @pytest.mark.asyncio
 async def test_create_deployment_network_endpoint_mode_reports_container_url(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
     free_host_ports: None,
 ) -> None:
     del free_host_ports
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
-            mock_sdk,
+            mock_client,
             {
                 "docker_timeout": 60,
                 "pull_images": False,
-                "network": "nmp-e2e-test-network",
+                "network": "nhx-e2e-test-network",
                 "endpoint_mode": "network",
             },
         )
@@ -260,7 +885,7 @@ async def test_create_deployment_delivers_config_files_before_start(
 
     The server command reads its config at startup, so delivery after ``start``
     would race the process. Asserting the ordering is the point: dropping the
-    delivery entirely used to be silent (AIRCORE-999), and delivering it late
+    delivery entirely used to be silent, and delivering it late
     fails the same way.
     """
     mock_entities.get.return_value = config_files_config()
@@ -546,25 +1171,25 @@ async def test_create_lora_group_fails_when_init_nonzero(
 
 @pytest.mark.asyncio
 async def test_create_falls_back_to_local_image_when_pull_fails(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
     """A pull failure is tolerated when the image is already present locally.
 
-    Local-only images (e.g. the LoRA adapters sidecar ``nmp-api:local``) are not
+    Local-only images (e.g. the LoRA adapters sidecar ``nhx-api:local``) are not
     pullable from a registry; the backend uses the local copy instead of failing.
     """
     from unittest.mock import patch
 
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         # pull_images enabled so the pull path runs
-        backend = DockerDeploymentBackend(mock_sdk, {"docker_timeout": 60, "pull_images": True})
+        backend = DockerDeploymentBackend(mock_client, {"docker_timeout": 60, "pull_images": True})
         backend._client = mock_docker_client
 
     mock_entities.get.return_value = sample_config()
@@ -588,7 +1213,7 @@ async def test_create_falls_back_to_local_image_when_pull_fails(
 
 @pytest.mark.asyncio
 async def test_create_fails_when_pull_fails_and_no_local_image(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
@@ -596,12 +1221,12 @@ async def test_create_fails_when_pull_fails_and_no_local_image(
     from unittest.mock import patch
 
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
-        backend = DockerDeploymentBackend(mock_sdk, {"docker_timeout": 60, "pull_images": True})
+        backend = DockerDeploymentBackend(mock_client, {"docker_timeout": 60, "pull_images": True})
         backend._client = mock_docker_client
 
     mock_entities.get.return_value = sample_config()
@@ -655,18 +1280,18 @@ async def test_delete_removes_whole_group(
 
 @pytest.mark.asyncio
 async def test_delete_scoped_deployment_does_not_remove_foreign_primary(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
-            mock_sdk,
+            mock_client,
             {"docker_timeout": 60, "pull_images": False, "resource_scope": "e2e-abc123"},
         )
 
@@ -713,18 +1338,18 @@ async def test_delete_default_scoped_deployment_does_not_remove_foreign_primary(
 
 @pytest.mark.asyncio
 async def test_create_lora_group_does_not_remove_foreign_stale_init_container(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
-            mock_sdk,
+            mock_client,
             {"docker_timeout": 60, "pull_images": False, "resource_scope": "e2e-abc123"},
         )
 
@@ -884,7 +1509,7 @@ async def test_read_status_ready_when_running_port_bound(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # No declared probe, published port accepting connections -> READY.
-    monkeypatch.setenv("NMP_LOOPBACK_ADDRESS", "127.0.0.1")
+    monkeypatch.setenv("NHX_LOOPBACK_ADDRESS", "127.0.0.1")
     mock_entities.get.return_value = sample_config()
     with socket.socket() as server:
         server.bind(("127.0.0.1", 0))
@@ -908,7 +1533,7 @@ async def test_read_status_starting_when_running_port_not_bound(
     # READY does not race the workload's bind(). Hold the port bound-but-not-listening
     # for the whole probe so nothing else can bind and listen on it mid-test; a
     # connect() still gets ECONNREFUSED, the not-yet-bound state under test.
-    monkeypatch.setenv("NMP_LOOPBACK_ADDRESS", "127.0.0.1")
+    monkeypatch.setenv("NHX_LOOPBACK_ADDRESS", "127.0.0.1")
     mock_entities.get.return_value = sample_config()
     with socket.socket() as probe_socket:
         probe_socket.bind(("127.0.0.1", 0))
@@ -923,22 +1548,22 @@ async def test_read_status_starting_when_running_port_not_bound(
 
 @pytest.mark.asyncio
 async def test_read_status_network_endpoint_mode_probes_container_url(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
-            mock_sdk,
+            mock_client,
             {
                 "docker_timeout": 60,
                 "pull_images": False,
-                "network": "nmp-e2e-test-network",
+                "network": "nhx-e2e-test-network",
                 "endpoint_mode": "network",
             },
         )
@@ -1257,7 +1882,7 @@ async def test_read_status_treats_zero_on_failure_backoff_as_unlimited(
     ],
 )
 async def test_read_status_treats_foreign_container_as_missing(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
     restart_policy: RestartPolicy,
@@ -1266,13 +1891,13 @@ async def test_read_status_treats_foreign_container_as_missing(
 ) -> None:
     gpu_pool = MagicMock()
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=gpu_pool),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
-            mock_sdk,
+            mock_client,
             {"docker_timeout": 60, "pull_images": False, "resource_scope": "e2e-abc123"},
         )
 
@@ -1400,18 +2025,18 @@ async def test_create_never_job_returns_succeeded_when_container_exits_immediate
 
 @pytest.mark.asyncio
 async def test_create_never_job_uses_configured_oneshot_observe_timeout(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
-            mock_sdk,
+            mock_client,
             {"docker_timeout": 600, "oneshot_observe_timeout_seconds": 7, "pull_images": False},
         )
         backend._client = mock_docker_client
@@ -1667,18 +2292,18 @@ async def test_default_list_managed_deployment_names_ignores_foreign_scoped_reso
 
 @pytest.mark.asyncio
 async def test_list_managed_deployment_names_scopes_docker_query(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
-            mock_sdk,
+            mock_client,
             {"docker_timeout": 60, "pull_images": False, "resource_scope": "e2e-abc123"},
         )
 
@@ -1707,18 +2332,18 @@ async def test_list_managed_deployment_names_scopes_docker_query(
 
 @pytest.mark.asyncio
 async def test_get_logs_treats_foreign_container_as_missing(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
-            mock_sdk,
+            mock_client,
             {"docker_timeout": 60, "pull_images": False, "resource_scope": "e2e-abc123"},
         )
 

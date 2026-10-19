@@ -12,9 +12,9 @@ new inference deployment before eval.
 entity at ``output.name``. Deploy that entity for inference before chat or eval — full
 weights are not hot-reloaded onto the base model's deployment.
 
-Run from the nemo-platform git root (reads ``$NMP_BASE_URL`` when ``--base-url`` is omitted)::
+Run from the nemo-helix git root (reads ``$NHX_BASE_URL`` when ``--base-url`` is omitted)::
 
-    export NMP_BASE_URL=http://127.0.0.1:8080
+    export NHX_BASE_URL=http://127.0.0.1:8080
     uv run python plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/references/eval_helpers.py \\
         --model-entity <model-entity> --adapter <adapter-a> --adapter <adapter-b> \\
         --provider <provider> --dataset-fileset <dataset-fileset> --split validation.jsonl
@@ -122,8 +122,8 @@ def load_chat_jsonl_from_platform(
 
 def chat_metrics():
     """Build default metrics for CHAT SFT eval (exact match + ROUGE + BLEU)."""
-    from nemo_evaluator_sdk import BLEUMetric, ROUGEMetric
-    from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
+    from nhx_evals_sdk import BLEUMetric, ROUGEMetric
+    from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 
     ref = CHAT_REFERENCE_TEMPLATE
     return [
@@ -328,7 +328,7 @@ def build_online_eval_config(
     limit_samples: int | None = None,
 ):
     """RunConfigOnlineModel defaults aligned with Qwen3 CHAT SFT eval."""
-    from nemo_evaluator_sdk.values import InferenceParams, RunConfigOnlineModel
+    from nhx_evals_sdk.values import InferenceParams, RunConfigOnlineModel
 
     extra_body = {"chat_template_kwargs": {"enable_thinking": enable_thinking}} if not enable_thinking else None
     inference_kwargs: dict[str, Any] = {"max_tokens": max_tokens, "temperature": temperature}
@@ -357,7 +357,7 @@ def build_platform_model_target(
     model-entity path always routes to the base VirtualModel and ignores adapter
     names in the request body.
     """
-    from nemo_evaluator_sdk.values.models import Model
+    from nhx_evals_sdk.values.models import Model
 
     resolved_provider = provider_name or find_ready_provider_for_model_entity(
         base_url=base_url,
@@ -449,7 +449,7 @@ def run_chat_online_eval(
     prompt_template: dict[str, Any] | None = None,
 ):
     """Run online eval on CHAT rows using shared templates."""
-    from nemo_evaluator_sdk import Evaluator
+    from nhx_evals_sdk import Evaluator
 
     for index, row in enumerate(rows):
         assert_chat_row(row, index=index)
@@ -661,7 +661,7 @@ def build_eval_payload(
 
 def default_base_url() -> str:
     """Platform URL from env or localhost default."""
-    return os.environ.get("NMP_BASE_URL") or "http://127.0.0.1:8080"
+    return os.environ.get("NHX_BASE_URL") or "http://127.0.0.1:8080"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -669,7 +669,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--base-url",
         default=default_base_url(),
-        help="Platform URL (default: $NMP_BASE_URL or http://127.0.0.1:8080)",
+        help="Platform URL (default: $NHX_BASE_URL or http://127.0.0.1:8080)",
     )
     parser.add_argument("--workspace", default="default")
     parser.add_argument("--model-entity", required=True)

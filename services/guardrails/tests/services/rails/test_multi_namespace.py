@@ -5,12 +5,12 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from nmp.guardrails.app.services.configs.registry import ConfigRegistry
-from nmp.guardrails.app.services.rails.registry import RailsRegistry
-from nmp.guardrails.app.services.rails.service import RailsService
-from nmp.guardrails.app.services.utils import normalize_config_ids
-from nmp.guardrails.app.utils.hash_utils import compute_token_headers_hash
-from nmp.guardrails.entities.values._private import Model, RailsConfig
+from nhx.guardrails.app.services.configs.registry import ConfigRegistry
+from nhx.guardrails.app.services.rails.registry import RailsRegistry
+from nhx.guardrails.app.services.rails.service import RailsService
+from nhx.guardrails.app.services.utils import normalize_config_ids
+from nhx.guardrails.app.utils.hash_utils import compute_token_headers_hash
+from nhx.guardrails.entities.values._private import Model, RailsConfig
 
 
 class TestNamespaceFunctions:
@@ -49,7 +49,7 @@ class TestRailsServiceNamespaceSupport(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self.config_cache_entry_patcher.stop()
 
-    @patch("nmp.guardrails.app.services.rails.service.LLMRails")
+    @patch("nhx.guardrails.app.services.rails.service.LLMRails")
     async def test_get_rails_with_namespaced_config(self, mock_llm_rails):
         """Test getting rails with namespaced configs"""
 

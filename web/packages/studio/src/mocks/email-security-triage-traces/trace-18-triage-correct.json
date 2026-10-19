@@ -1,0 +1,46 @@
+{
+  "schema_version": "ATIF-v1.5",
+  "session_id": "3f2a1c00-0018-4a00-8000-000000000018",
+  "trajectory_id": "3f2a1c00-0018-4a00-8000-000000000018",
+  "agent": {
+    "name": "email-security-triage",
+    "version": "0.7.0",
+    "model_name": "nvidia-nemotron-3-nano-30b-a3b"
+  },
+  "final_metrics": {
+    "total_prompt_tokens": 3644,
+    "total_completion_tokens": 71,
+    "total_cost_usd": 0.0005892,
+    "total_steps": 2
+  },
+  "extra": {
+    "task_id": "email-security-triage/triage-correct-18",
+    "verifier_result": {
+      "rewards": {
+        "correctness": 1.0,
+        "format": 1.0,
+        "routing": 1.0
+      }
+    }
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "timestamp": "2026-08-17T22:18:55Z",
+      "source": "user",
+      "message": "{\"user_message\": \"is this legit?\", \"emails\": [{\"from\": \"delivery@fedex-parcel-track.info\", \"subject\": \"Your parcel is held pending a customs fee\", \"body\": \"Pay the outstanding 2.99 customs fee at https://fedex-parcel-track.info/pay to release your parcel today.\"}]}"
+    },
+    {
+      "step_id": 2,
+      "timestamp": "2026-08-17T22:19:01Z",
+      "source": "agent",
+      "model_name": "default/nvidia-nemotron-3-nano-30b-a3b",
+      "message": "phishing\nA lookalike courier domain, a small-value payment designed to seem harmless, and same-day urgency to release a parcel the recipient may not be expecting.",
+      "metrics": {
+        "prompt_tokens": 3644,
+        "completion_tokens": 71,
+        "cost_usd": 0.0005892
+      }
+    }
+  ]
+}

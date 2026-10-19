@@ -6,7 +6,7 @@
 Platform jobs run as host subprocesses that stage nothing into their work
 dir, so a config file (and its sibling data) must either already exist on the
 host (absolute-path mode, used by the co-located CLI) or be delivered through
-a NeMo Platform fileset that the job downloads at runtime.  These helpers
+a NeMo Helix fileset that the job downloads at runtime.  These helpers
 implement the fileset path so a remote client (e.g. Studio) can submit a job
 without touching the platform host's filesystem.
 
@@ -21,18 +21,21 @@ import contextlib
 import logging
 import tempfile
 from pathlib import Path
-from typing import Iterator
+from typing import Generator
 
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.refs import (
+from filesets import FilesetFileSystem
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.errors import LocalRunError
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.file_manager import FilesetFileManager
+from nemo_helix_plugin.refs import (
     FilesetRef,
     LocalDir,
     OutputTarget,
     classify_output_target,
     parse_entity_ref,
 )
-from nemo_platform_plugin.run_dependencies import LocalRunError
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +46,21 @@ def split_fileset_ref(ref: str, default_workspace: str) -> tuple[str, str]:
     return parsed.workspace, parsed.name
 
 
+def _fileset_manager(
+    files_client: FilesClient,
+    *,
+    workspace: str,
+    fileset: str,
+    ensure_fileset_exists: bool,
+) -> FilesetFileManager:
+    return FilesetFileManager(
+        workspace=workspace,
+        fileset_name=fileset,
+        filesystem=FilesetFileSystem(client=files_client),
+        ensure_fileset_exists=ensure_fileset_exists,
+    )
+
+
 @contextlib.contextmanager
 def resolve_staged_config(
     config_rel_path: str,
@@ -50,9 +68,9 @@ def resolve_staged_config(
     *,
     workspace: str,
     ctx: JobContext,
-    sdk: NeMoPlatform | None,
+    sdk: NemoClient | None,
     kind: str,
-) -> Iterator[Path]:
+) -> Generator[Path, None, None]:
     """Yield a local path to a config file, staging it from a fileset if requested.
 
     When ``fileset_ref`` is set, download the fileset into a tempdir under
@@ -70,15 +88,16 @@ def resolve_staged_config(
 
     if sdk is None:
         raise LocalRunError(
-            f"Staging {kind} from a fileset requires a 'sdk: NeMoPlatform', but no "
-            "platform SDK was available.  Set NMP_BASE_URL or pass sdk via "
-            "NemoJobScheduler.run_local(sdk=...)."
+            f"Staging {kind} from a fileset requires a sync platform client, but none "
+            "was available. Set NHX_BASE_URL before using fileset inputs."
         )
 
     with tempfile.TemporaryDirectory(prefix=f".{kind}-{name}-", dir=str(ctx.storage.ephemeral)) as tmp:
         tmp_path = Path(tmp)
         logger.info("Downloading fileset %s/%s into %s for %s.", ws, name, tmp_path, kind)
-        sdk.files.download(local_path=str(tmp_path), fileset=name, workspace=ws)
+        files_client = FilesClient.from_client(sdk)
+        manager = _fileset_manager(files_client, workspace=ws, fileset=name, ensure_fileset_exists=False)
+        manager.download_from_url(f"{ws}/{name}", local_dir=tmp_path)
         # ``config_rel_path`` is caller-controlled — confirm it stays inside the
         # downloaded fileset so an absolute path or ``..`` segment can't make the
         # subprocess read arbitrary files from the task host.
@@ -100,9 +119,9 @@ def resolve_output(
     *,
     workspace: str,
     ctx: JobContext,
-    sdk: NeMoPlatform | None,
+    sdk: NemoClient | None,
     kind: str,
-) -> Iterator[Path]:
+) -> Generator[Path, None, None]:
     """Yield a local base directory for job outputs, uploading to a fileset on success.
 
     Branches on the union shape:
@@ -133,9 +152,8 @@ def resolve_output(
 
     if sdk is None:
         raise LocalRunError(
-            f"Uploading {kind} results to a fileset requires a 'sdk: NeMoPlatform', but no "
-            "platform SDK was available.  Set NMP_BASE_URL, pass sdk via "
-            "NemoJobScheduler.run_local(sdk=...), or use a local output directory instead."
+            f"Uploading {kind} results to a fileset requires a sync platform client, but none "
+            "was available. Set NHX_BASE_URL or use a local output directory instead."
         )
 
     with tempfile.TemporaryDirectory(prefix=f".{kind}-output-{name}-", dir=str(ctx.storage.ephemeral)) as tmp:
@@ -152,13 +170,10 @@ def resolve_output(
                 upload_to_fileset(tmp_path, fileset=name, workspace=ws, sdk=sdk)
 
 
-def upload_to_fileset(local_dir: Path, *, fileset: str, workspace: str, sdk: NeMoPlatform) -> None:
+def upload_to_fileset(local_dir: Path, *, fileset: str, workspace: str, sdk: NemoClient) -> None:
     """Upload *local_dir*'s contents recursively to the named fileset (auto-created)."""
-    # Trailing slash uploads contents, not the dir itself.
-    result = sdk.files.upload(
-        local_path=str(local_dir) + "/",
-        fileset=fileset,
-        workspace=workspace,
-        fileset_auto_create=True,
-    )
-    logger.info("Uploaded outputs from %s to fileset %s/%s.", local_dir, workspace, result.name)
+    files_client = FilesClient.from_client(sdk)
+    manager = _fileset_manager(files_client, workspace=workspace, fileset=fileset, ensure_fileset_exists=True)
+    manager.validate_storage()
+    manager.upload(local_path=local_dir, remote_path="")
+    logger.info("Uploaded outputs from %s to fileset %s/%s.", local_dir, workspace, fileset)

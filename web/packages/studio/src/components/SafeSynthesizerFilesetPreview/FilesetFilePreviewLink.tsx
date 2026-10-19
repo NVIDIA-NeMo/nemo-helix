@@ -3,7 +3,7 @@
 
 import { parseFilesetUrl } from '@nemo/common/src/components/DatasetFileSelect/utils';
 import { ScrollTable } from '@nemo/common/src/components/ScrollTable';
-import { useFilesDownloadFile } from '@nemo/sdk/generated/platform/api';
+import { useFilesDownloadFile } from '@nemo/sdk/generated/platform/files';
 import {
   Button,
   CodeSnippet,

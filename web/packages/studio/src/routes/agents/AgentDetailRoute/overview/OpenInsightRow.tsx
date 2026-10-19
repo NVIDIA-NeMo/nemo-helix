@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
+import type { InsightListItem } from '@nemo/sdk/generated/insights/schema';
 import { Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import type { InsightListItem } from '@studio/api/optimizer';
 import type { FC } from 'react';
 
 interface OpenInsightRowProps {
@@ -24,7 +24,7 @@ export const OpenInsightRow: FC<OpenInsightRowProps> = ({ insight, onOpen }) => 
       size="small"
       type="button"
       onClick={() => onOpen(insight)}
-      className="w-full cursor-pointer border-0 bg-transparent px-4 py-3.5 text-left hover:bg-surface-hover"
+      className="w-full px-4 py-3.5 text-left justify-start"
     >
       <Flex gap="4" align="start">
         <Stack align="center" className="w-14 shrink-0">

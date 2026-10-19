@@ -29,6 +29,8 @@ export interface SelectableCardProps {
   leading?: ReactNode;
   /** Primary label. */
   title: string;
+  /** Accessible name when visible card text does not convey the full state. */
+  ariaLabel?: string;
   /** Optional secondary line beneath the title, in the header row beside `leading`. */
   subtitle?: string;
   /** Extra classes for the subtitle — e.g. an accent color or uppercase type label. */
@@ -45,6 +47,8 @@ export interface SelectableCardProps {
   disabledReason?: string;
   /** Activation handler; fired on click and on keyboard Enter/Space. */
   onActivate?: () => void;
+  /** Prevent the activation click from reaching an interactive parent. */
+  stopPropagation?: boolean;
   className?: string;
 }
 
@@ -61,6 +65,7 @@ export interface SelectableCardProps {
 export const SelectableCard: FC<SelectableCardProps> = ({
   leading,
   title,
+  ariaLabel,
   subtitle,
   subtitleClassName,
   description,
@@ -69,24 +74,33 @@ export const SelectableCard: FC<SelectableCardProps> = ({
   disabled = false,
   disabledReason,
   onActivate,
+  stopPropagation = false,
   className,
 }) => (
   <button
     type="button"
-    onClick={disabled ? undefined : onActivate}
+    onClick={
+      disabled
+        ? undefined
+        : (event) => {
+            if (stopPropagation) event.stopPropagation();
+            onActivate?.();
+          }
+    }
     disabled={disabled}
     aria-pressed={selected}
-    title={disabled ? disabledReason : undefined}
-    className={`flex w-[240px] justify-between flex-col items-start gap-1.5 rounded-md border bg-surface-raised px-2 py-1.5 text-left transition-colors ${
+    aria-label={ariaLabel}
+    title={disabled ? disabledReason : title}
+    className={`flex w-[240px] justify-between flex-col items-start gap-1.5 overflow-hidden rounded-md border bg-surface-raised px-2 py-1.5 text-left transition-colors ${
       disabled
         ? 'cursor-not-allowed opacity-50 border-base'
         : `cursor-pointer hover:border-strong hover:bg-surface-hover focus-visible:border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-brand,#76b900) ${selected ? 'border-strong' : 'border-base'}`
     } ${className ?? ''}`}
   >
-    <Stack gap="1.5">
-      <Flex className="w-full items-center gap-2">
+    <Stack gap="1.5" className="w-full min-w-0">
+      <Flex className="w-full min-w-0 items-center gap-2">
         {leading}
-        <Stack gap="density-xxs" className="min-w-0">
+        <Stack gap="density-xxs" className="min-w-0 flex-1">
           <Text kind="body/semibold/sm" className="truncate text-primary">
             {title}
           </Text>

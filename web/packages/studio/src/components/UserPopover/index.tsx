@@ -17,21 +17,21 @@ import {
 import { ReportTraceModal } from '@studio/components/ReportTraceModal';
 import { TELEMETRY_ENABLED } from '@studio/constants/environment';
 import { useAuthProfile } from '@studio/providers/auth/useAuthProfile';
+import { useAuthSignOut } from '@studio/providers/auth/useWebSession';
 import { Route } from 'lucide-react';
 import { useState } from 'react';
-import { useAuth } from 'react-oidc-context';
 
 export const UserPopover = () => {
   const [openModal, setOpenModal] = useState<'trace' | undefined>(undefined);
   const profile = useAuthProfile();
-  const auth = useAuth();
+  const signOut = useAuthSignOut();
 
   if (!profile && !TELEMETRY_ENABLED) {
-    return <Avatar fallback="N" />;
+    return null;
   }
 
   return (
-    <>
+    <span data-tour="nav-user">
       <DropdownRoot defaultOpen={false}>
         <DropdownTrigger asChild>
           <Button color="neutral" kind="tertiary" className="p-0">
@@ -59,7 +59,7 @@ export const UserPopover = () => {
           {profile && (
             <>
               <Divider />
-              <DropdownItem onClick={() => auth.signoutRedirect()}>
+              <DropdownItem onClick={signOut}>
                 <Flex gap="density-lg" align="center">
                   Sign Out
                 </Flex>
@@ -71,6 +71,6 @@ export const UserPopover = () => {
       {openModal === 'trace' && (
         <ReportTraceModal open={openModal === 'trace'} onClose={() => setOpenModal(undefined)} />
       )}
-    </>
+    </span>
   );
 };

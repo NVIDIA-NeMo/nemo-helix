@@ -10,7 +10,10 @@ import {
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
+import { useInsightsListInsights } from '@nemo/sdk/generated/insights/insights-insights';
+import type { InsightListItem } from '@nemo/sdk/generated/insights/schema';
 import {
   type DropdownEntry,
   Flex,
@@ -19,7 +22,6 @@ import {
   Tag,
   Text,
 } from '@nvidia/foundations-react-core';
-import { type InsightListItem, useOptimizerListInsights } from '@studio/api/optimizer';
 import { FeatureFlagBadge } from '@studio/components/FeatureFlagBadge';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
@@ -27,7 +29,6 @@ import { insightStatusColor } from '@studio/routes/optimizer/insightStatus';
 import { getOptimizerInsightRoute, getOptimizerRoute } from '@studio/routes/utils';
 import { keepPreviousData } from '@tanstack/react-query';
 import { type ComponentProps, type FC } from 'react';
-import { useNavigate } from 'react-router';
 
 export const OptimizerRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
@@ -36,7 +37,7 @@ export const OptimizerRoute: FC = () => {
     items: [{ href: getOptimizerRoute(workspace), slotLabel: 'Insights' }],
   });
 
-  const navigate = useNavigate();
+  const openRow = useRowNavigation();
 
   const dataViewState = useStudioDataViewState({
     defaultSort: [{ id: 'created_at', desc: true }],
@@ -45,7 +46,7 @@ export const OptimizerRoute: FC = () => {
   const sortState = dataViewState.sorting.state[0];
   const sortParam = sortState ? `${sortState.desc ? '-' : ''}${sortState.id}` : '-created_at';
 
-  const { data, isFetching, error } = useOptimizerListInsights(
+  const { data, isFetching, error } = useInsightsListInsights(
     workspace,
     {
       page: dataViewState.pagination.state.pageIndex + 1,
@@ -64,7 +65,7 @@ export const OptimizerRoute: FC = () => {
       enableSorting: false,
       size: 110,
       cell({ row }) {
-        const status = row.original.status;
+        const status = row.original.status ?? 'open';
         return (
           <Tag kind="outline" color={insightStatusColor(status)} readOnly>
             {status}
@@ -152,7 +153,9 @@ export const OptimizerRoute: FC = () => {
         <StudioDataView
           dataViewState={dataViewState}
           makeColumns={makeColumns}
-          onRowClick={(row) => navigate(getOptimizerInsightRoute(workspace, row.id))}
+          onRowClick={(row, _index, event) =>
+            openRow(event, getOptimizerInsightRoute(workspace, row.id))
+          }
           attributes={{
             DataViewRoot: {
               data: data?.data ?? [],

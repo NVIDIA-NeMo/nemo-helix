@@ -4,11 +4,11 @@
 from datetime import datetime
 from typing import assert_type
 
-from nemo_platform_plugin.jobs.types import PlatformJobStepWithContext
+from nemo_helix_plugin.jobs.types import HelixJobStepWithContext
 
 
 def test_platform_job_step_with_context_parses_wire_timestamps_to_datetime() -> None:
-    step = PlatformJobStepWithContext.model_validate(
+    step = HelixJobStepWithContext.model_validate(
         {
             "id": "test-step-id",
             "attempt_id": "test-attempt-id",

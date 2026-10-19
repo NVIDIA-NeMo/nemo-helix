@@ -6,6 +6,7 @@ import importlib.util
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -13,7 +14,7 @@ from types import ModuleType
 
 import pytest
 import yaml
-from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 
 pytestmark = [pytest.mark.auth_idp]
 
@@ -22,21 +23,26 @@ HELM_DIR = AUTHENTIK_DIR / "helm"
 AUTHENTIK_SCRIPT_TIMEOUT_SECONDS = 30
 HELM_TEMPLATE_TIMEOUT_SECONDS = 60
 ENVOY_SERVICE_URL_TEMPLATE = (
-    '{{ include "nemo-platform-authentik.serviceUrl" '
-    '(dict "root" . "serviceName" "nemo-platform-envoy" '
+    '{{ include "nemo-helix-authentik.serviceUrl" '
+    '(dict "root" . "serviceName" "nemo-helix-envoy" '
     '"namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}'
 )
-ENVOY_CONTROLLER_ENV_URL = "https://nemo-platform-envoy.$(POD_NAMESPACE).svc.cluster.local:8080"
-AUTHENTIK_SERVICE_URL_TEMPLATE = '{{ include "nemo-platform-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}'
-PUBLIC_GATEWAY_URL_TEMPLATE = '{{ include "nemo-platform-authentik.publicGatewayUrl" . }}'
+AUTHENTIK_SERVICE_URL_TEMPLATE = (
+    '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}'
+)
+PUBLIC_GATEWAY_URL_TEMPLATE = '{{ include "nemo-helix-authentik.publicGatewayUrl" . }}'
 AUTH_CALLOUT_RESPONSE_PRINCIPAL_HEADERS = {
-    "x-nmp-principal-id",
-    "x-nmp-principal-email",
-    "x-nmp-principal-groups",
-    "x-nmp-principal-on-behalf-of",
-    "x-nmp-principal-on-behalf-of-email",
-    "x-nmp-principal-on-behalf-of-groups",
-    "x-nmp-scopes",
+    "x-nhx-principal-id",
+    "x-nhx-actor-account-id",
+    "x-nhx-principal-email",
+    "x-nhx-principal-groups",
+    "x-nhx-actor-aliases",
+    "x-nhx-principal-on-behalf-of",
+    "x-nhx-subject-account-id",
+    "x-nhx-subject-aliases",
+    "x-nhx-principal-on-behalf-of-email",
+    "x-nhx-principal-on-behalf-of-groups",
+    "x-nhx-scopes",
 }
 SEALED_EXTERNAL_PRINCIPAL_HEADERS = AUTH_CALLOUT_RESPONSE_PRINCIPAL_HEADERS
 
@@ -136,7 +142,7 @@ def _run_authentik_script(*args: str, env: dict[str, str] | None = None) -> str:
 
 def _gateway_port_from_script_output(output: str) -> str:
     match = re.search(
-        r"\b(?:NMP_AUTHENTIK_K8S_GATEWAY_PORT|nemo-platform\.authentikPublicGateway\.port)=(\d+)\b",
+        r"\b(?:NHX_AUTHENTIK_K8S_GATEWAY_PORT|nemo-helix\.authentikPublicGateway\.port)=(\d+)\b",
         output,
     )
     assert match is not None, output
@@ -149,10 +155,13 @@ def test_authentik_prepare_local_creates_shared_generated_inputs() -> None:
     assert "helm/files/blueprints/nemo.yaml" in output
     assert "contrib/auth/authentik/.generated/workload-token-private-key.pem" in output
     assert "contrib/auth/authentik/.generated/gateway-tls" in output
+    assert "contrib/auth/authentik/.generated/authentik.env" in output
+    assert "contrib/auth/authentik/.generated/user-oidc.env" in output
+    assert "contrib/auth/authentik/.generated/auth-idp-e2e.env" in output
     assert "docker compose up" not in output
 
 
-def test_authentik_user_startup_docs_use_manual_runtime_steps() -> None:
+def test_authentik_user_startup_docs_use_harness_runtime_steps() -> None:
     top_level_readme = (AUTHENTIK_DIR / "README.md").read_text(encoding="utf-8")
     tutorial = (AUTHENTIK_DIR / "tutorial.md").read_text(encoding="utf-8")
     compose_readme = (AUTHENTIK_DIR / "compose" / "README.md").read_text(encoding="utf-8")
@@ -166,27 +175,27 @@ def test_authentik_user_startup_docs_use_manual_runtime_steps() -> None:
     assert "(kubernetes/implementation-details.md)" in top_level_readme
     assert "### Docker Compose" in tutorial
     assert "### Kubernetes" in tutorial
-    assert "## Wait For The Gateway" in tutorial
+    assert "## Check The Gateway" in tutorial
     assert "${AUTHENTIK_BASE_URL}/health/gateway/ready" in tutorial
-    assert "NeMo Platform and Authentik Ready" in tutorial
+    assert "NeMo Helix and Authentik Ready" in tutorial
     assert "uv run nemo auth login \\" in tutorial
     assert '--context "$AUTHENTIK_CONTEXT"' in tutorial
     assert '--base-url "$AUTHENTIK_BASE_URL"' in tutorial
     assert '--principal "$AUTHENTIK_WORKLOAD_GROUP"' in tutorial
-    assert "contrib/auth/authentik/run.sh prepare-local" in tutorial
-    assert "cd contrib/auth/authentik/compose" not in tutorial
-    assert "docker compose -f contrib/auth/authentik/compose/docker-compose.yml up" in tutorial
-    assert "docker compose -f contrib/auth/authentik/compose/docker-compose.yml down -v" in tutorial
-    assert (
-        "--set-file workloadTokenSigningKey.privateKeyPem="
-        "contrib/auth/authentik/.generated/workload-token-private-key.pem"
-    ) in tutorial
-    assert "contrib/auth/authentik/run.sh compose" not in tutorial
-    assert "contrib/auth/authentik/run.sh k8s" not in tutorial
-    assert "run.sh" not in compose_readme
+    assert "contrib/auth/authentik/run.sh up compose" in tutorial
+    assert "contrib/auth/authentik/run.sh up k8s" in tutorial
+    assert "contrib/auth/authentik/run.sh down compose" in tutorial
+    assert "contrib/auth/authentik/run.sh down k8s" in tutorial
+    assert "contrib/auth/authentik/run.sh prepare-local" not in tutorial
+    assert "--env-file contrib/auth/authentik/.generated/authentik.env" not in tutorial
+    assert "create secret generic nemo-workload-token-signing-key" not in tutorial
+    assert "helm --kube-context" not in tutorial
+    assert "--set-file workloadTokenSigningKey.privateKeyPem" not in tutorial
+    assert "contrib/auth/authentik/run.sh up compose" in compose_readme
+    assert "contrib/auth/authentik/run.sh down compose" in compose_readme
     assert "run.sh" not in kubernetes_readme
-    assert "docker compose up" in compose_readme
-    assert "nemo-platform-authentik" in compose_readme
+    assert "--env-file ../.generated/authentik.env" not in compose_readme
+    assert "authentik-compose" in compose_readme
     assert "helm --kube-context" in kubernetes_readme
     assert "(implementation-details.md)" in compose_readme
     assert "(implementation-details.md)" in kubernetes_readme
@@ -225,7 +234,6 @@ def test_authentik_tutorial_tests_scoped_access_keys() -> None:
     tutorial = (AUTHENTIK_DIR / "tutorial.md").read_text(encoding="utf-8")
 
     assert "NeMo Scoped Access Keys through the Authentik gateway." in tutorial
-    assert "--set nemo-platform.platformConfig.auth.access_keys.enabled=true" in tutorial
     assert 'ACCESS_KEY="$(uv run nemo --context "$AUTHENTIK_CONTEXT" auth access-keys create \\' in tutorial
     assert '--name "authentik-reference-${AUTHENTIK_RUNTIME}" \\' in tutorial
     assert "--expires-in 600" in tutorial
@@ -254,7 +262,7 @@ def test_authentik_static_ci_prepares_envoy_validation_inputs() -> None:
     assert "helm dependency build contrib/auth/authentik/helm" in job
 
 
-def test_authentik_e2e_ci_requires_published_nmp_api_image() -> None:
+def test_authentik_e2e_ci_requires_published_nhx_api_image() -> None:
     ci_workflow = Path(".github/workflows/ci.yaml").read_text(encoding="utf-8")
     job = _workflow_job_block(ci_workflow, "python-auth-idp-e2e-test")
 
@@ -262,7 +270,7 @@ def test_authentik_e2e_ci_requires_published_nmp_api_image() -> None:
     assert "needs.build-cpu-smoke-images.result == 'success'" in job
     assert "needs.build-cpu-smoke-images.outputs.publish_images == 'true'" in job
     assert "needs.python-auth-idp-static-test.result == 'success'" in job
-    assert '--image "${IMAGE_REGISTRY}/nmp-api:${BAKE_TAG}"' in job
+    assert '--image "${IMAGE_REGISTRY}/nhx-api:${BAKE_TAG}"' in job
 
 
 def _helm_template_authentik_demo(template: str) -> str:
@@ -290,11 +298,11 @@ def _helm_template_authentik_demo(template: str) -> str:
 
 
 def _load_rendered_authentik_envoy_config() -> dict:
-    rendered = _helm_template_authentik_demo("charts/nemo-platform/templates/proxy/envoy-configmap.yaml")
+    rendered = _helm_template_authentik_demo("charts/nemo-helix/templates/proxy/envoy-configmap.yaml")
     config_map = next(
         document
         for document in yaml.safe_load_all(rendered)
-        if document and document["kind"] == "ConfigMap" and document["metadata"]["name"] == "nemo-platform-envoy"
+        if document and document["kind"] == "ConfigMap" and document["metadata"]["name"] == "nemo-helix-envoy"
     )
     return yaml.safe_load(config_map["data"]["envoy.yaml"])
 
@@ -303,7 +311,7 @@ def test_authentik_umbrella_chart_declares_expected_dependencies() -> None:
     chart = _load_yaml(HELM_DIR / "Chart.yaml")
     dependencies = {dependency["name"]: dependency for dependency in chart["dependencies"]}
 
-    assert chart["name"] == "nemo-platform-authentik"
+    assert chart["name"] == "nemo-helix-authentik"
     assert "cert-manager" not in dependencies
     assert dependencies["authentik"] == {
         "name": "authentik",
@@ -311,9 +319,9 @@ def test_authentik_umbrella_chart_declares_expected_dependencies() -> None:
         "repository": "https://charts.goauthentik.io",
     }
     assert "postgresql" not in dependencies
-    assert dependencies["nemo-platform"] == {
-        "name": "nemo-platform",
-        "version": "0.1.0",
+    assert dependencies["nemo-helix"] == {
+        "name": "nemo-helix",
+        "version": "0.0.0",
         "repository": "file://../../../../k8s/helm",
     }
 
@@ -325,27 +333,30 @@ def test_authentik_umbrella_values_use_latest_authentik_chart_without_image_tag_
     assert authentik_values["fullnameOverride"] == "authentik"
     assert authentik_values["postgresql"]["enabled"] is False
     assert authentik_values["blueprints"]["configMaps"] == ["authentik-nemo-blueprint"]
-    assert {
-        "name": "AUTHENTIK_POSTGRESQL__PASSWORD",
-        "valueFrom": {
-            "secretKeyRef": {
-                "name": "shared-postgresql",
-                "key": "authentik-password",
-            }
+    assert authentik_values["global"]["env"] == [
+        {"name": "AUTHENTIK_POSTGRESQL__HOST", "value": "shared-postgresql"},
+        {"name": "AUTHENTIK_POSTGRESQL__NAME", "value": "authentik"},
+        {"name": "AUTHENTIK_POSTGRESQL__USER", "value": "authentik"},
+        {"name": "AUTHENTIK_POSTGRESQL__PORT", "value": "5432"},
+        {
+            "name": "AUTHENTIK_POSTGRESQL__PASSWORD",
+            "valueFrom": {
+                "secretKeyRef": {
+                    "name": "shared-postgresql",
+                    "key": "AUTHENTIK_POSTGRES_PASSWORD",
+                }
+            },
         },
-    } in authentik_values["global"]["env"]
-    assert authentik_values["authentik"]["postgresql"] == {
-        "host": "shared-postgresql",
-        "name": "authentik",
-        "user": "authentik",
-        "port": 5432,
-    }
+    ]
+    assert authentik_values["global"]["envFrom"] == [{"secretRef": {"name": "nemo-auth-idp-e2e"}}]
+    assert authentik_values["authentik"]["existingSecret"] == {"secretName": "nemo-authentik-secret-key"}
+    assert "postgresql" not in authentik_values["authentik"]
     assert authentik_values.get("global", {}).get("image", {}).get("tag", "") == ""
 
 
 def test_authentik_umbrella_values_extend_local_startup_probe_budget() -> None:
     values = _load_yaml(HELM_DIR / "values.yaml")
-    nemo_values = values["nemo-platform"]
+    nemo_values = values["nemo-helix"]
 
     assert nemo_values["api"]["startupProbe"] == {"failureThreshold": 80}
     assert nemo_values["core"]["controller"]["startupProbe"] == {"failureThreshold": 80}
@@ -354,30 +365,22 @@ def test_authentik_umbrella_values_extend_local_startup_probe_budget() -> None:
 def test_authentik_umbrella_values_define_one_shared_postgresql_instance() -> None:
     values = _load_yaml(HELM_DIR / "values.yaml")
     initdb_template = (HELM_DIR / "templates" / "shared-postgres-initdb-configmap.yaml").read_text(encoding="utf-8")
-    secret_template = (HELM_DIR / "templates" / "shared-postgres-secret.yaml").read_text(encoding="utf-8")
-    nemo_secret_template = (HELM_DIR / "templates" / "shared-postgres-nemo-secret.yaml").read_text(encoding="utf-8")
+    statefulset_template = (HELM_DIR / "templates" / "shared-postgres-statefulset.yaml").read_text(encoding="utf-8")
     helpers_template = (HELM_DIR / "templates" / "_helpers.tpl").read_text(encoding="utf-8")
 
     assert values["sharedPostgresql"]["enabled"] is True
     assert values["sharedPostgresql"]["serviceName"] == "shared-postgresql"
     assert "password" not in values["sharedPostgresql"]["authentik"]
+    assert values["sharedPostgresql"]["existingSecret"] == "shared-postgresql"
     assert "cert-manager" not in values
     assert "shared-postgresql" not in values
-    assert 'define "nemo-platform-authentik.sharedPostgresql.password"' in helpers_template
-    assert 'define "nemo-platform-authentik.existingSecretData"' in helpers_template
-    assert 'include "nemo-platform-authentik.existingSecretData"' in helpers_template
-    assert 'lookup "v1" "PersistentVolumeClaim" $root.Release.Namespace $pvcName' in helpers_template
-    assert "restore the Secret or rotate the PostgreSQL role before changing it" in helpers_template
-    assert secret_template.count('include "nemo-platform-authentik.sharedPostgresql.password"') == 3
-    assert '"secretKey" "authentik-password" "value" .Values.sharedPostgresql.authentik.password "generate" true' in (
-        secret_template
-    )
-    assert "authentik-password: {{ $authentikPassword | quote }}" in secret_template
-    assert _strip_leading_helm_spdx_comments(nemo_secret_template).startswith(
-        "{{- if .Values.sharedPostgresql.enabled }}\n{{- $nemoPassword :="
-    )
-    assert nemo_secret_template.rstrip().endswith("{{- end }}")
-    assert 'include "nemo-platform-authentik.sharedPostgresql.password"' in nemo_secret_template
+    assert 'define "nemo-helix-authentik.sharedPostgresql.password"' not in helpers_template
+    assert 'define "nemo-helix-authentik.existingSecretData"' not in helpers_template
+    assert not (HELM_DIR / "templates" / "shared-postgres-secret.yaml").exists()
+    assert not (HELM_DIR / "templates" / "shared-postgres-nemo-secret.yaml").exists()
+    assert "randAlphaNum" not in helpers_template
+    assert "AUTHENTIK_POSTGRES_PASSWORD" in statefulset_template
+    assert "NEMO_POSTGRES_PASSWORD" in statefulset_template
     assert "--set=" not in initdb_template
     assert "<<'EOSQL'" in initdb_template
     assert "\\set authentik_password `printf '%s' \"$AUTHENTIK_PASSWORD\"`" in initdb_template
@@ -385,45 +388,60 @@ def test_authentik_umbrella_values_define_one_shared_postgresql_instance() -> No
     assert "CREATE USER :\"authentik_username\" WITH PASSWORD :'authentik_password';" in initdb_template
     assert "CREATE USER :\"nemo_username\" WITH PASSWORD :'nemo_password';" in initdb_template
 
-    nemo_database = values["nemo-platform"]["externalDatabase"]
-    assert values["nemo-platform"]["postgresql"]["enabled"] is False
-    assert values["nemo-platform"]["clickhouse"]["enabled"] is False
-    assert values["nemo-platform"]["externalClickhouse"] == {
+    nemo_database = values["nemo-helix"]["externalDatabase"]
+    assert values["nemo-helix"]["postgresql"]["enabled"] is False
+    assert values["nemo-helix"]["clickhouse"]["enabled"] is False
+    assert values["nemo-helix"]["externalClickhouse"] == {
         "host": "unused-clickhouse",
         "existingSecret": "shared-postgresql",
-        "existingSecretPasswordKey": "nemo-password",
+        "existingSecretPasswordKey": "NEMO_POSTGRES_PASSWORD",
     }
-    assert values["nemo-platform"]["api"]["serviceGroup"] == "core"
-    assert values["nemo-platform"]["core"]["controller"]["controllerGroup"] == "core"
-    assert "extraArgs" not in values["nemo-platform"]["api"]
+    assert values["nemo-helix"]["api"]["services"] == [
+        "auth",
+        "models",
+        "files",
+        "inference-gateway",
+        "jobs",
+        "secrets",
+        "entities",
+        "deployments",
+        "studio",
+    ]
+    assert values["nemo-helix"]["core"]["controller"]["controllers"] == [
+        "jobs",
+        "models",
+        "entities",
+        "deployments",
+    ]
+    assert "extraArgs" not in values["nemo-helix"]["api"]
     assert nemo_database == {
         "host": "shared-postgresql",
         "port": 5432,
         "user": "nemo",
-        "database": "nemoplatform",
-        "existingSecret": "shared-postgresql-nemo",
-        "existingSecretPasswordKey": "password",
+        "database": "nemohelix",
+        "existingSecret": "shared-postgresql",
+        "existingSecretPasswordKey": "NEMO_POSTGRES_PASSWORD",
     }
 
 
 def test_authentik_kubernetes_helm_args_can_reuse_precreated_ngc_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NMP_AUTHENTIK_K8S_NGC_EXISTING_SECRET", "ngc-api")
+    monkeypatch.setenv("NHX_AUTHENTIK_K8S_NGC_EXISTING_SECRET", "ngc-api")
 
     live_test = _load_authentik_k8s_live_module()
 
     args = live_test._helm_upgrade_args("kind-ci")
-    assert "nemo-platform.existingSecret=ngc-api" in args
+    assert "nemo-helix.existingSecret=ngc-api" in args
 
 
 def test_authentik_kubernetes_helm_args_can_override_public_gateway_port(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("NMP_AUTHENTIK_K8S_GATEWAY_PORT", "18082")
+    monkeypatch.setenv("NHX_AUTHENTIK_K8S_GATEWAY_PORT", "18082")
 
     live_test = _load_authentik_k8s_live_module()
 
     args = live_test._helm_upgrade_args("kind-ci")
-    assert "nemo-platform.authentikPublicGateway.port=18082" in args
+    assert "nemo-helix.authentikPublicGateway.port=18082" in args
 
 
 def test_authentik_kubernetes_live_timeouts_are_named_constants() -> None:
@@ -437,10 +455,51 @@ def test_authentik_kubernetes_live_timeouts_are_named_constants() -> None:
         live_test._duration_seconds(live_test.HELM_WAIT_TIMEOUT) + live_test.HELM_UPGRADE_COMMAND_GRACE_SECONDS
     )
     assert live_test.PORT_FORWARD_READY_TIMEOUT_SECONDS == 30
+    assert live_test.PLATFORM_API_REQUEST_TIMEOUT_SECONDS == 60.0
+
+
+def test_authentik_kubernetes_platform_client_uses_runtime_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    live_test = _load_authentik_k8s_live_module()
+
+    class FakeHttpClient:
+        def __init__(self, *, verify: str) -> None:
+            self.verify = verify
+
+    class FakeNemoClient:
+        def __init__(
+            self,
+            *,
+            base_url: str,
+            auth: str,
+            timeout: float,
+            http_client: FakeHttpClient,
+            owns_http_client: bool,
+        ) -> None:
+            self.base_url = base_url
+            self.auth = auth
+            self.timeout = timeout
+            self.http_client = http_client
+            self.owns_http_client = owns_http_client
+
+    monkeypatch.setattr(live_test.httpx, "Client", FakeHttpClient)
+    monkeypatch.setattr(live_test, "NemoClient", FakeNemoClient)
+
+    runtime = object.__new__(live_test.KubernetesAuthIdpRuntime)
+    runtime.gateway_base_url = "https://gateway.example"
+    runtime.ca_bundle = Path("/tmp/nhx-ca.crt")
+
+    client = runtime._client_for_token("access-token")
+
+    assert isinstance(client, FakeNemoClient)
+    assert client.base_url == "https://gateway.example"
+    assert client.auth == "access-token"
+    assert client.timeout == live_test.PLATFORM_API_REQUEST_TIMEOUT_SECONDS
+    assert client.http_client.verify == "/tmp/nhx-ca.crt"
+    assert client.owns_http_client is True
 
 
 def test_authentik_kubernetes_helm_command_timeout_tracks_wait_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NMP_AUTHENTIK_K8S_HELM_WAIT_TIMEOUT", "1h5m30s")
+    monkeypatch.setenv("NHX_AUTHENTIK_K8S_HELM_WAIT_TIMEOUT", "1h5m30s")
 
     live_test = _load_authentik_k8s_live_module()
 
@@ -475,9 +534,9 @@ def test_authentik_kubernetes_duration_seconds_rejects_invalid_duration() -> Non
 def test_authentik_kubernetes_invalid_wait_timeout_names_environment_variable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("NMP_AUTHENTIK_K8S_HELM_WAIT_TIMEOUT", "20min")
+    monkeypatch.setenv("NHX_AUTHENTIK_K8S_HELM_WAIT_TIMEOUT", "20min")
 
-    with pytest.raises(RuntimeError, match="NMP_AUTHENTIK_K8S_HELM_WAIT_TIMEOUT"):
+    with pytest.raises(RuntimeError, match="NHX_AUTHENTIK_K8S_HELM_WAIT_TIMEOUT"):
         _load_authentik_k8s_live_module()
 
 
@@ -493,7 +552,7 @@ def test_authentik_kubernetes_reuse_context_validates_runtime() -> None:
 
     assert live_test._reuse_context("kind", "ci") == "kind-ci"
     assert live_test._reuse_context("k3d", "ci") == "k3d-ci"
-    with pytest.raises(ValueError, match="unsupported NMP_AUTHENTIK_K8S_RUNTIME='minikube'; expected kind or k3d"):
+    with pytest.raises(ValueError, match="unsupported NHX_AUTHENTIK_K8S_RUNTIME='minikube'; expected kind or k3d"):
         live_test._reuse_context("minikube", "ci")
 
 
@@ -608,7 +667,7 @@ def test_authentik_kubernetes_k3d_create_does_not_update_default_kubeconfig(
 
 def test_authentik_kubernetes_commands_accept_isolated_kubeconfig() -> None:
     live_test = _load_authentik_k8s_live_module()
-    kubeconfig = Path("/tmp/nmp-authentik-kubeconfig.yaml")
+    kubeconfig = Path("/tmp/nhx-authentik-kubeconfig.yaml")
 
     assert live_test._kubectl_command("kind-ci", ["get", "pods"], kubeconfig) == [
         "kubectl",
@@ -649,8 +708,8 @@ def test_authentik_kubernetes_port_forward_times_out_without_readiness(monkeypat
     monotonic_values = iter([0.0, 0.0, 31.0])
     monkeypatch.setattr(live_test, "_free_port", lambda: 19001)
     monkeypatch.setattr(live_test.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
-    monkeypatch.setattr(live_test.time, "monotonic", lambda: next(monotonic_values))
-    monkeypatch.setattr(live_test.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(live_test, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(live_test, "pause", lambda seconds: None)
     requested_urls = []
 
     def fake_get(url: str, **_kwargs: object):
@@ -660,14 +719,14 @@ def test_authentik_kubernetes_port_forward_times_out_without_readiness(monkeypat
     monkeypatch.setattr(live_test.httpx, "get", fake_get)
 
     with pytest.raises(TimeoutError, match="timed out waiting for port-forward readiness"):
-        live_test._start_port_forward_service("kind-ci", "nemo-platform-envoy", Path("ca.crt"))
+        live_test._start_port_forward_service("kind-ci", "nemo-helix-envoy", Path("ca.crt"))
 
     assert requested_urls == ["https://127.0.0.1:19001/health/gateway/ready"]
 
 
 def test_authentik_kubernetes_port_forward_reports_process_log(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     live_test = _load_authentik_k8s_live_module()
-    monkeypatch.setenv("NMP_AUTHENTIK_K8S_LOG_DIR", str(tmp_path))
+    monkeypatch.setenv("NHX_AUTHENTIK_K8S_LOG_DIR", str(tmp_path))
     monkeypatch.setattr(live_test, "_free_port", lambda: 19001)
 
     class FakeProcess:
@@ -694,9 +753,9 @@ def test_authentik_kubernetes_port_forward_reports_process_log(monkeypatch: pyte
     monkeypatch.setattr(live_test.subprocess, "Popen", fake_popen)
 
     with pytest.raises(AssertionError, match="address already in use"):
-        live_test._start_port_forward_service("kind-ci", "nemo-platform-envoy", Path("ca.crt"))
+        live_test._start_port_forward_service("kind-ci", "nemo-helix-envoy", Path("ca.crt"))
 
-    log_file = tmp_path / "port-forward-nemo-platform-envoy.log"
+    log_file = tmp_path / "port-forward-nemo-helix-envoy.log"
     assert "kubectl --context kind-ci -n nemo-authentik port-forward" in log_file.read_text(encoding="utf-8")
 
 
@@ -726,8 +785,8 @@ def test_authentik_kubernetes_port_forward_waits_after_kill(monkeypatch: pytest.
     monotonic_values = iter([0.0, 0.0, 31.0])
     monkeypatch.setattr(live_test, "_free_port", lambda: 19001)
     monkeypatch.setattr(live_test.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
-    monkeypatch.setattr(live_test.time, "monotonic", lambda: next(monotonic_values))
-    monkeypatch.setattr(live_test.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(live_test, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(live_test, "pause", lambda seconds: None)
     monkeypatch.setattr(
         live_test.httpx,
         "get",
@@ -735,7 +794,7 @@ def test_authentik_kubernetes_port_forward_waits_after_kill(monkeypatch: pytest.
     )
 
     with pytest.raises(TimeoutError, match="timed out waiting for port-forward readiness"):
-        live_test._start_port_forward_service("kind-ci", "nemo-platform-envoy", Path("ca.crt"))
+        live_test._start_port_forward_service("kind-ci", "nemo-helix-envoy", Path("ca.crt"))
 
     assert events == [
         "terminate",
@@ -749,7 +808,7 @@ def test_authentik_kubernetes_diagnostics_records_pod_discovery_timeout(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     live_test = _load_authentik_k8s_live_module()
-    monkeypatch.setenv("NMP_AUTHENTIK_K8S_LOG_DIR", str(tmp_path))
+    monkeypatch.setenv("NHX_AUTHENTIK_K8S_LOG_DIR", str(tmp_path))
     monkeypatch.setattr(live_test, "_write_diagnostic_process", lambda *args, **kwargs: None)
 
     def raise_timeout(args: list[str], **kwargs: object) -> None:
@@ -788,7 +847,7 @@ def test_authentik_kubernetes_cleanup_deletes_cluster_when_diagnostics_fail(
     runtime.cluster = live_test.Cluster(name="ci", runtime="kind", context="kind-ci")
     runtime._port_forward_process = None
     runtime._ca_temp_file = None
-    runtime._previous_client_ssl_cert_file = os.environ.get(live_test.NMP_CLIENT_SSL_CERT_FILE_ENVVAR)
+    runtime._previous_client_ssl_cert_file = os.environ.get(live_test.NHX_CLIENT_SSL_CERT_FILE_ENVVAR)
     runtime._diagnostics_collected = False
     runtime._reuse_cluster = False
     runtime._keep_cluster = False
@@ -819,7 +878,7 @@ def test_authentik_kubernetes_startup_preserves_original_error_when_diagnostics_
     runtime.ca_bundle = None
     runtime._port_forward_process = None
     runtime._ca_temp_file = None
-    runtime._previous_client_ssl_cert_file = os.environ.get(live_test.NMP_CLIENT_SSL_CERT_FILE_ENVVAR)
+    runtime._previous_client_ssl_cert_file = os.environ.get(live_test.NHX_CLIENT_SSL_CERT_FILE_ENVVAR)
     runtime._diagnostics_collected = False
     runtime._reuse_cluster = False
     runtime._keep_cluster = False
@@ -836,10 +895,10 @@ def test_authentik_kubernetes_startup_preserves_original_error_when_diagnostics_
     def delete_cluster(runtime_name: str, cluster_name: str, kubeconfig: Path | None = None) -> None:
         deleted.append((runtime_name, cluster_name))
 
-    monkeypatch.setenv("NMP_AUTHENTIK_K8S_RUNTIME", "kind")
-    monkeypatch.setenv("NMP_AUTHENTIK_K8S_CLUSTER_NAME", "ci")
-    monkeypatch.delenv("NMP_AUTHENTIK_K8S_REUSE_CLUSTER", raising=False)
-    monkeypatch.delenv("NMP_AUTHENTIK_K8S_KEEP_CLUSTER", raising=False)
+    monkeypatch.setenv("NHX_AUTHENTIK_K8S_RUNTIME", "kind")
+    monkeypatch.setenv("NHX_AUTHENTIK_K8S_CLUSTER_NAME", "ci")
+    monkeypatch.delenv("NHX_AUTHENTIK_K8S_REUSE_CLUSTER", raising=False)
+    monkeypatch.delenv("NHX_AUTHENTIK_K8S_KEEP_CLUSTER", raising=False)
     monkeypatch.setattr(
         live_test,
         "_create_cluster",
@@ -851,7 +910,7 @@ def test_authentik_kubernetes_startup_preserves_original_error_when_diagnostics_
             cleanup_kubeconfig=True,
         ),
     )
-    monkeypatch.setattr(live_test, "_platform_image", lambda: "nmp:test")
+    monkeypatch.setattr(live_test, "_platform_image", lambda: "nhx:test")
     monkeypatch.setattr(live_test, "_load_platform_image", raise_startup_error)
     monkeypatch.setattr(live_test, "_collect_kubernetes_diagnostics", raise_diagnostics)
     monkeypatch.setattr(live_test, "_delete_cluster", delete_cluster)
@@ -869,7 +928,7 @@ def test_authentik_kubernetes_startup_preserves_original_error_when_diagnostics_
 def test_authentik_umbrella_values_configure_nemo_envoy_as_the_only_edge_proxy() -> None:
     values = _load_yaml(HELM_DIR / "values.yaml")
     helpers_template = (HELM_DIR / "templates" / "_helpers.tpl").read_text(encoding="utf-8")
-    nemo_values = values["nemo-platform"]
+    nemo_values = values["nemo-helix"]
     envoy = nemo_values["envoyProxy"]
     envoy_config = _load_rendered_authentik_envoy_config()
     http_manager = envoy_config["static_resources"]["listeners"][0]["filter_chains"][0]["filters"][0]["typed_config"]
@@ -881,7 +940,7 @@ def test_authentik_umbrella_values_configure_nemo_envoy_as_the_only_edge_proxy()
             "append_action": "OVERWRITE_IF_EXISTS_OR_ADD",
         }
     ]
-    assert envoy["configOverride"] == '{{ include "nemo-platform-authentik.envoyConfig" . }}'
+    assert envoy["configOverride"] == '{{ include "nemo-helix-authentik.envoyConfig" . }}'
     assert envoy["timeouts"]["upstreamIdle"] == "4s"
     nemo_cluster = next(cluster for cluster in clusters if cluster["name"] == "nemo")
     http_options = nemo_cluster["typed_extension_protocol_options"][
@@ -897,7 +956,7 @@ def test_authentik_umbrella_values_configure_nemo_envoy_as_the_only_edge_proxy()
         "body": {"inline_string": '{"status":"not_ready"}'},
     }
     for match in (
-        {"prefix": "/.well-known/nemo-platform/"},
+        {"prefix": "/.well-known/nemo-helix/"},
         {"prefix": "/apis/"},
         {"prefix": "/health/"},
         {"path": "/status"},
@@ -914,13 +973,13 @@ def test_authentik_umbrella_values_configure_nemo_envoy_as_the_only_edge_proxy()
     )
     lua_code = lua_filter["typed_config"]["inline_code"]
     assert 'headers:get(":path") ~= "/health/gateway/ready"' in lua_code
-    assert 'gateway_ready_http_call(request_handle, "nemo", "nemo-platform-api", "/health/ready")' in lua_code
+    assert 'gateway_ready_http_call(request_handle, "nemo", "nemo-helix-api", "/health/ready")' in lua_code
     assert (
         'gateway_ready_http_call(request_handle, "authentik", "authentik-server", '
         '"/application/o/nemo/.well-known/openid-configuration")'
     ) in lua_code
-    assert 'headers:remove("x-nmp-authorized")' in lua_code
-    assert 'headers:remove("x-nmp-scopes")' in lua_code
+    assert 'headers:remove("x-nhx-authorized")' in lua_code
+    assert 'headers:remove("x-nhx-scopes")' in lua_code
     for header in SEALED_EXTERNAL_PRINCIPAL_HEADERS:
         assert f'headers:remove("{header}")' in lua_code
 
@@ -939,46 +998,75 @@ def test_authentik_umbrella_values_configure_nemo_envoy_as_the_only_edge_proxy()
     assert ext_authz["failure_mode_allow"] is False
     assert ext_authz["http_service"]["path_prefix"] == "/apis/auth/ext-authz"
     assert ext_authz["http_service"]["server_uri"] == {
-        "uri": "http://nemo-platform-api:8080",
+        "uri": "http://nemo-helix-api:8080",
         "cluster": "nemo",
         "timeout": "5s",
     }
     allowed_headers = ext_authz["http_service"]["authorization_response"]["allowed_upstream_headers"]["patterns"]
     assert AUTH_CALLOUT_RESPONSE_PRINCIPAL_HEADERS.issubset(_exact_header_patterns(allowed_headers))
+    assert "authorization" in _exact_header_patterns(allowed_headers)
+    authorization_request = ext_authz["http_service"]["authorization_request"]
+    assert {"cookie", "x-source"}.issubset(_exact_header_patterns(authorization_request["allowed_headers"]["patterns"]))
+    assert "headers_to_add" not in authorization_request
 
     protected_api_route = next(route for route in routes if route["match"] == {"prefix": "/apis/"})
     assert "typed_per_filter_config" not in protected_api_route
 
+    public_broker_route = next(route for route in routes if "safe_regex" in route["match"])
+    assert public_broker_route["match"]["safe_regex"]["regex"] == (
+        "^/apis/auth/v2/(login(/callback)?|authorize(/[^/]+)?|token|logout|session)$"
+    )
+    assert public_broker_route["typed_per_filter_config"]["envoy.filters.http.ext_authz"] == {
+        "@type": "type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute",
+        "disabled": True,
+    }
     public_authenticate_route = next(route for route in routes if route["match"] == {"path": "/apis/auth/authenticate"})
     assert public_authenticate_route["typed_per_filter_config"]["envoy.filters.http.ext_authz"] == {
         "@type": "type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute",
         "disabled": True,
     }
     public_ext_authz_route = next(route for route in routes if route["match"] == {"prefix": "/apis/auth/ext-authz"})
+    assert public_ext_authz_route["direct_response"] == {"status": 404}
+    assert "route" not in public_ext_authz_route
     assert public_ext_authz_route["typed_per_filter_config"]["envoy.filters.http.ext_authz"] == {
         "@type": "type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute",
         "disabled": True,
     }
+    assert routes.index(public_broker_route) < routes.index(protected_api_route)
     assert routes.index(public_ext_authz_route) < routes.index(protected_api_route)
 
     platform_config = nemo_values["platformConfig"].get("platform", {})
-    assert "base_url" not in platform_config
+    assert platform_config["base_url"] == ENVOY_SERVICE_URL_TEMPLATE
     assert "auth" not in platform_config.get("service_discovery", {})
     token_signing = nemo_values["platformConfig"]["auth"]["token_signing"]
     assert token_signing == {
         "issuer": f"{ENVOY_SERVICE_URL_TEMPLATE}/apis/auth",
-        "key_id": "nemo-platform-signing",
-        "private_key_file": "/etc/nmp/workload-token/private-key.pem",
+        "key_id": "nemo-helix-signing",
+        "private_key_file": "/etc/nhx/workload-token/private-key.pem",
     }
     assert nemo_values["platformConfig"]["auth"]["access_keys"] == {"enabled": False}
     oidc = nemo_values["platformConfig"]["auth"]["oidc"]
-    assert oidc["issuer"] == f"{AUTHENTIK_SERVICE_URL_TEMPLATE}/application/o/nemo-cli/"
+    public_client = oidc["public_client"]
+    confidential_client = oidc["confidential_client"]
+    workload = oidc["workload"]
+    assert oidc["issuer"] == f"{AUTHENTIK_SERVICE_URL_TEMPLATE}/application/o/nemo-user/"
     assert oidc["additional_issuers"][0] == f"{AUTHENTIK_SERVICE_URL_TEMPLATE}/application/o/nemo/"
-    assert oidc["additional_issuers"][1] == f"{PUBLIC_GATEWAY_URL_TEMPLATE}/application/o/nemo-cli/"
-    assert oidc["additional_issuers"][2] == f"{PUBLIC_GATEWAY_URL_TEMPLATE}/application/o/nemo/"
-    assert oidc["workload_token_endpoint"] == f"{ENVOY_SERVICE_URL_TEMPLATE}/apis/auth/token"
-    assert oidc["workload_subject_jwks_uri"] == f"{AUTHENTIK_SERVICE_URL_TEMPLATE}/application/o/nemo-workload/jwks/"
-    assert oidc["workload_subject_issuers"] == [
+    assert oidc["additional_issuers"][1] == f"{AUTHENTIK_SERVICE_URL_TEMPLATE}/application/o/nemo-cli/"
+    assert oidc["additional_issuers"][2] == f"{PUBLIC_GATEWAY_URL_TEMPLATE}/application/o/nemo-user/"
+    assert oidc["additional_issuers"][3] == f"{PUBLIC_GATEWAY_URL_TEMPLATE}/application/o/nemo-cli/"
+    assert oidc["additional_issuers"][4] == f"{PUBLIC_GATEWAY_URL_TEMPLATE}/application/o/nemo/"
+    assert public_client["client_id"] == "nemo-helix-cli"
+    assert public_client["server_side_sessions"] is False
+    assert public_client["authorization_endpoint"] == f"{PUBLIC_GATEWAY_URL_TEMPLATE}/application/o/authorize/"
+    assert public_client["token_endpoint"] == f"{PUBLIC_GATEWAY_URL_TEMPLATE}/application/o/token/"
+    assert public_client["device_authorization_endpoint"] == f"{PUBLIC_GATEWAY_URL_TEMPLATE}/application/o/device/"
+    assert confidential_client["client_id"] == "nemo-helix-user"
+    assert confidential_client["authorization_endpoint"] == f"{PUBLIC_GATEWAY_URL_TEMPLATE}/application/o/authorize/"
+    assert confidential_client["token_endpoint"] == f"{AUTHENTIK_SERVICE_URL_TEMPLATE}/application/o/token/"
+    assert confidential_client["client_secret_env_var"] == "NHX_OIDC_CLIENT_SECRET"
+    assert oidc["server_sessions"] == {"encryption_key_env_var": "NHX_AUTH_SESSION_ENCRYPTION_KEY"}
+    assert workload["subject_jwks_uri"] == f"{AUTHENTIK_SERVICE_URL_TEMPLATE}/application/o/nemo-workload/jwks/"
+    assert workload["subject_issuers"] == [
         f"{AUTHENTIK_SERVICE_URL_TEMPLATE}/application/o/nemo-workload/",
         f"{ENVOY_SERVICE_URL_TEMPLATE}/application/o/nemo-workload/",
         f"{PUBLIC_GATEWAY_URL_TEMPLATE}/application/o/nemo-workload/",
@@ -986,20 +1074,18 @@ def test_authentik_umbrella_values_configure_nemo_envoy_as_the_only_edge_proxy()
     assert "workload_token_issuer" not in oidc
     assert "workload_token_key_id" not in oidc
     assert "workload_token_private_key_file" not in oidc
-    assert oidc["token_endpoint"] == f"{PUBLIC_GATEWAY_URL_TEMPLATE}/application/o/token/"
-    assert oidc["device_authorization_endpoint"] == f"{PUBLIC_GATEWAY_URL_TEMPLATE}/application/o/device/"
     assert nemo_values["authentikPublicGateway"] == {
         "scheme": "https",
         "host": "127.0.0.1",
         "port": 18081,
     }
-    assert "nemo-platform.authentikPublicGateway.host is required" in helpers_template
-    assert "nemo-platform.authentikPublicGateway.port is required" in helpers_template
+    assert "nemo-helix.authentikPublicGateway.host is required" in helpers_template
+    assert "nemo-helix.authentikPublicGateway.port is required" in helpers_template
     assert 'default "127.0.0.1"' not in helpers_template
     assert "default 18081" not in helpers_template
     assert nemo_values["authentikEnvoy"] == {"serviceName": "authentik-server", "servicePort": 80}
     assert nemo_values["envoyProxy"]["serviceNamespace"] == ""
-    assert values["integration"]["nemoPlatform"]["envoyServiceName"] == "nemo-platform-envoy"
+    assert values["integration"]["nemoHelix"]["envoyServiceName"] == "nemo-helix-envoy"
     assert nemo_values["rbac"]["volcanoEnabled"] is False
     assert nemo_values["api"]["startupProbe"] == {"failureThreshold": 80}
     assert nemo_values["core"]["controller"]["startupProbe"] == {"failureThreshold": 80}
@@ -1008,7 +1094,35 @@ def test_authentik_umbrella_values_configure_nemo_envoy_as_the_only_edge_proxy()
     }
 
 
-def test_nemo_platform_chart_does_not_use_volcano_disable_config() -> None:
+def test_kubernetes_deployment_workload_runtime_config_targets_in_cluster_envoy(tmp_path) -> None:
+    from tests.auth_idp import runtime_kubernetes as live_test
+
+    ca_bundle = tmp_path / "ca.crt"
+    ca_bundle.write_text("test-ca-bundle\n", encoding="utf-8")
+    runtime = live_test.KubernetesAuthIdpRuntime.__new__(live_test.KubernetesAuthIdpRuntime)
+    runtime.ca_bundle = ca_bundle
+
+    config = runtime.deployment_workload_runtime_config()
+
+    assert config.env == (
+        {
+            "name": "NHX_BASE_URL",
+            "value": f"https://nemo-helix-envoy.{live_test.NAMESPACE}.svc.cluster.local:8080",
+        },
+        {"name": "NHX_CLIENT_SSL_CERT_FILE", "value": "/etc/nhx/workload-token-ca/ca.crt"},
+        {"name": "SSL_CERT_FILE", "value": "/etc/nhx/workload-token-ca/ca.crt"},
+        {"name": "REQUESTS_CA_BUNDLE", "value": "/etc/nhx/workload-token-ca/ca.crt"},
+    )
+    assert config.config_files == (
+        {
+            "path": "/etc/nhx/workload-token-ca/ca.crt",
+            "content": "test-ca-bundle\n",
+            "mode": 0o644,
+        },
+    )
+
+
+def test_nemo_helix_chart_does_not_use_volcano_disable_config() -> None:
     values_template = Path("k8s/helm/values.yaml").read_text(encoding="utf-8")
 
     assert "enable_default_volcano_executor" not in values_template
@@ -1017,16 +1131,16 @@ def test_nemo_platform_chart_does_not_use_volcano_disable_config() -> None:
 def test_authentik_umbrella_values_mount_workload_token_signing_key_as_file() -> None:
     values = _load_yaml(HELM_DIR / "values.yaml")
     signing_key = values["workloadTokenSigningKey"]
-    nemo_values = values["nemo-platform"]
+    nemo_values = values["nemo-helix"]
     token_signing = nemo_values["platformConfig"]["auth"]["token_signing"]
 
     assert signing_key["secretName"] == "nemo-workload-token-signing-key"
     assert signing_key["key"] == "private-key.pem"
-    assert signing_key["mountPath"] == "/etc/nmp/workload-token"
-    assert signing_key["privateKeyPem"] == ""
-    assert token_signing["private_key_file"] == "/etc/nmp/workload-token/private-key.pem"
-    assert nemo_values["api"]["env"]["NMP_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE"] == (
-        "/etc/nmp/workload-token/private-key.pem"
+    assert signing_key["mountPath"] == "/etc/nhx/workload-token"
+    assert "privateKeyPem" not in signing_key
+    assert token_signing["private_key_file"] == "/etc/nhx/workload-token/private-key.pem"
+    assert nemo_values["api"]["env"]["NHX_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE"] == (
+        "/etc/nhx/workload-token/private-key.pem"
     )
 
     assert nemo_values["api"]["extraVolumes"] == [
@@ -1038,7 +1152,7 @@ def test_authentik_umbrella_values_mount_workload_token_signing_key_as_file() ->
     assert nemo_values["api"]["extraVolumeMounts"] == [
         {
             "name": "workload-token-signing-key",
-            "mountPath": "/etc/nmp/workload-token",
+            "mountPath": "/etc/nhx/workload-token",
             "readOnly": True,
         }
     ]
@@ -1072,6 +1186,9 @@ def test_authentik_umbrella_chart_uses_single_canonical_authentik_blueprint() ->
     assert "- password" in packaged
     assert "- urn:ietf:params:oauth:grant-type:device_code" in packaged
     assert 'blueprints.goauthentik.io/instantiate: "true"' in packaged
+    assert "url: !Env NHX_OIDC_LOGIN_REDIRECT_URI" in packaged
+    assert "https://127.0.0.1:18080/apis/auth/v2/login/callback" not in packaged
+    assert "https://nemo-helix-envoy:8080/apis/auth/v2/login/callback" not in packaged
     assert '.Files.Get "files/blueprints/nemo.yaml"' in configmap_template
 
     values = _load_yaml(HELM_DIR / "values.yaml")
@@ -1088,9 +1205,11 @@ def test_authentik_umbrella_chart_applies_blueprint_with_waitable_helm_hook() ->
     assert "- ak" in template
     assert "- apply_blueprint" in template
     assert "- /blueprints/mounted/cm-authentik-nemo-blueprint/nemo.yaml" in template
+    assert "- name: NHX_OIDC_LOGIN_REDIRECT_URI" in template
+    assert 'include "nemo-helix-authentik.publicGatewayUrl"' in template
     assert "authentik-nemo-blueprint" in template
     assert "automountServiceAccountToken: false" in template
-    assert "nmp.nvidia.com/blueprint-checksum" not in template
+    assert "nhx.nvidia.com/blueprint-checksum" not in template
 
 
 @pytest.mark.auth_idp_k8s
@@ -1106,26 +1225,22 @@ def test_authentik_tokenreview_rbac_does_not_grant_pod_or_job_reads() -> None:
     assert (("authentication.k8s.io",), ("tokenreviews",), ("create",)) in permissions
     granted_resources = {resource for rule in rules for resource in rule.get("resources", [])}
     assert not {"pods", "pods/log", "jobs", "jobs/status"} & granted_resources
-    assert ".Values.integration.nemoPlatform.apiServiceAccountName" in template
+    assert ".Values.integration.nemoHelix.apiServiceAccountName" in template
 
 
 def test_authentik_kubernetes_runner_uses_helm_not_kustomize() -> None:
     run_sh = (AUTHENTIK_DIR / "run.sh").read_text(encoding="utf-8")
     live_test_path = Path("tests/auth_idp/k8s/test_authentik_kubernetes_live.py")
     live_test = live_test_path.read_text(encoding="utf-8")
-    runtime_path = Path("tests/auth_idp/runtime_kubernetes.py")
-    runtime_impl = runtime_path.read_text(encoding="utf-8")
     ci_workflow = Path(".github/workflows/ci.yaml").read_text(encoding="utf-8")
-    setup_kind_action = Path(".github/actions/setup-kind-cluster/action.yaml").read_text(encoding="utf-8")
-    run_commands = _literal_run_commands(runtime_path)
 
-    assert "NMP_AUTHENTIK_K8S_HELM_RELEASE" in run_sh
-    assert 'K8S_RUNTIME="${NMP_AUTHENTIK_K8S_RUNTIME:-kind}"' in run_sh
-    assert "uv run --frozen pytest tests/auth_idp/contracts" in run_sh
-    assert "--auth-idp-runtime authentik-kubernetes" in run_sh
-    assert "-m auth_idp_runtime" in run_sh
-    assert "--run-e2e" not in run_sh
-    assert "uv run --frozen pytest tests/auth_idp/static -v" in ci_workflow
+    assert "NHX_AUTHENTIK_K8S_HELM_RELEASE" in run_sh
+    assert 'K8S_RUNTIME="${NHX_AUTHENTIK_K8S_RUNTIME:-kind}"' in run_sh
+    assert "tests/auth_idp/contracts" in run_sh
+    assert "--auth-idp-context" in run_sh
+    assert "deployment_context.py" in run_sh
+    assert "--run-e2e" in run_sh
+    assert "uv run --frozen --group auth-idp-e2e pytest tests/auth_idp/static -v" in ci_workflow
     assert 'uv run --frozen pytest tests/auth_idp -v -m "auth_idp and not auth_idp_runtime"' not in ci_workflow
     assert "--runtime RUNTIME" in run_sh
     assert "validate_k8s_runtime" in run_sh
@@ -1135,50 +1250,30 @@ def test_authentik_kubernetes_runner_uses_helm_not_kustomize() -> None:
     assert "--keep-cluster" not in run_sh
     assert "--skip-image-load" in run_sh
     expected_skip_image_load_line = (
-        "NMP_AUTHENTIK_K8S_SKIP_IMAGE_LOAD: "
+        "NHX_AUTHENTIK_K8S_SKIP_IMAGE_LOAD: "
         "${{ needs.build-cpu-smoke-images.outputs.publish_images == 'true' && '1' || '0' }}"
     )
     assert expected_skip_image_load_line in ci_workflow
-    assert "NMP_AUTHENTIK_K8S_NAMESPACE: nemo-authentik" in ci_workflow
-    assert "kube-namespace: ${{ env.NMP_AUTHENTIK_K8S_NAMESPACE }}" in ci_workflow
-    assert "NMP_AUTHENTIK_K8S_IMAGE_PULL_SECRET: ghcr-pull" in ci_workflow
-    assert "NMP_AUTHENTIK_K8S_NGC_EXISTING_SECRET: ngc-api" in ci_workflow
-    assert 'K8S_IMAGE_PULL_SECRET="${NMP_AUTHENTIK_K8S_IMAGE_PULL_SECRET:-}"' in run_sh
-    assert "NMP_AUTHENTIK_K8S_IMAGE_PULL_SECRET=${K8S_IMAGE_PULL_SECRET}" in run_sh
-    assert "NMP_AUTHENTIK_K8S_IMAGE_PULL_SECRET" in runtime_impl
-    assert "nemo-platform.imagePullSecrets[0].name=" in runtime_impl
-    assert "NMP_AUTHENTIK_K8S_NGC_EXISTING_SECRET" in runtime_impl
-    assert "nemo-platform.existingSecret=" in runtime_impl
+    assert "namespace: nemo-authentik" in ci_workflow
+    assert "NHX_AUTHENTIK_K8S_NAMESPACE: ${{ matrix.namespace }}" in ci_workflow
+    assert "kube-namespace: ${{ env.AUTH_IDP_K8S_NAMESPACE }}" in ci_workflow
+    assert "NHX_AUTHENTIK_K8S_IMAGE_PULL_SECRET: ghcr-pull" in ci_workflow
+    assert "NHX_AUTHENTIK_K8S_NGC_EXISTING_SECRET: ngc-api" in ci_workflow
+    assert 'K8S_IMAGE_PULL_SECRET="${NHX_AUTHENTIK_K8S_IMAGE_PULL_SECRET:-}"' in run_sh
+    assert 'args+=(--set-string "nemo-helix.imagePullSecrets[0].name=${K8S_IMAGE_PULL_SECRET}")' in run_sh
     assert 'DEFAULT_K8S_GATEWAY_PORT="18082"' in run_sh
-    assert 'K8S_GATEWAY_PORT="${NMP_AUTHENTIK_K8S_GATEWAY_PORT:-}"' in run_sh
-    assert "choose_free_tcp_port" in run_sh
-    assert "NMP_AUTHENTIK_K8S_GATEWAY_PORT=${K8S_GATEWAY_PORT}" in run_sh
-    assert "NMP_AUTHENTIK_K8S_GATEWAY_PORT" in runtime_impl
-    assert "nemo-platform.authentikPublicGateway.port=" in runtime_impl
-    assert "_port_forward_log_file" in runtime_impl
-    assert "nemo-platform.platformConfig.auth.access_keys.enabled=true" in runtime_impl
-    assert "GITHUB_TOKEN: ${{ inputs['kind-image-pull-token'] }}" in setup_kind_action
-    assert "CERT_MANAGER_CHART" not in runtime_impl
-    assert "_install_cert_manager" not in runtime_impl
-    assert ("helm", "repo", "add", "nvidia", "https://helm.ngc.nvidia.com/nvidia", "--force-update") in run_commands
-    assert ("helm", "repo", "add", "authentik", "https://charts.goauthentik.io", "--force-update") in run_commands
-    assert 'os.environ.get("NMP_AUTHENTIK_K8S_RUNTIME", "kind")' in runtime_impl
-    assert '"--no-hooks"' not in runtime_impl
-    assert "HELM_UPGRADE_COMMAND_GRACE_SECONDS = 300" in runtime_impl
-    assert "_helm_wait_seconds = _duration_seconds(HELM_WAIT_TIMEOUT)" in runtime_impl
-    timeout_assignment = (
-        "HELM_UPGRADE_COMMAND_TIMEOUT_SECONDS = _helm_wait_seconds + HELM_UPGRADE_COMMAND_GRACE_SECONDS"
-    )
-    assert timeout_assignment in runtime_impl
-    assert "_run(_helm_upgrade_args(context, kubeconfig), timeout=HELM_UPGRADE_COMMAND_TIMEOUT_SECONDS)" in runtime_impl
-    assert "PORT_FORWARD_READY_TIMEOUT_SECONDS = 30" in runtime_impl
-    assert "certificates.cert-manager.io" not in runtime_impl
-    assert "issuers.cert-manager.io" not in runtime_impl
-    assert "NMP_AUTHENTIK_K8S_KUSTOMIZATION" not in run_sh
-    assert "NMP_AUTHENTIK_K8S_KUSTOMIZATION" not in runtime_impl
-    assert 'kubectl", "--context", context, "apply"' not in runtime_impl
+    assert 'K8S_GATEWAY_PORT="${NHX_AUTHENTIK_K8S_GATEWAY_PORT:-}"' in run_sh
+    assert "choose_free_tcp_port" not in run_sh
+    assert 'port-forward svc/nemo-helix-envoy "${K8S_GATEWAY_PORT}:8080"' in run_sh
+    assert '"nemo-helix.authentikPublicGateway.port=${K8S_GATEWAY_PORT}"' in run_sh
+    assert '"nemo-helix.platformConfig.auth.access_keys.enabled=true"' in run_sh
+    assert "helm repo add nvidia https://helm.ngc.nvidia.com/nvidia --force-update" in run_sh
+    assert "helm repo add authentik https://charts.goauthentik.io --force-update" in run_sh
+    assert 'args+=(--set-string "nemo-helix.existingSecret=${K8S_NGC_EXISTING_SECRET}")' in run_sh
+    assert "--timeout" in run_sh
+    assert "NHX_AUTHENTIK_K8S_KUSTOMIZATION" not in run_sh
     assert "auth_idp_k8s" in live_test
-    assert "nmp.nvidia.com/blueprint-checksum" not in (HELM_DIR / "values.yaml").read_text(encoding="utf-8")
+    assert "nhx.nvidia.com/blueprint-checksum" not in (HELM_DIR / "values.yaml").read_text(encoding="utf-8")
 
 
 def test_authentik_kubernetes_runner_builds_when_only_image_tag_env_is_set() -> None:
@@ -1189,13 +1284,13 @@ def test_authentik_kubernetes_runner_builds_when_only_image_tag_env_is_set() -> 
         env={
             "IMAGE_REGISTRY": "registry.example.test/nemo",
             "BAKE_TAG": "tag-from-env",
-            "NMP_AUTHENTIK_K8S_REUSE_CLUSTER": "0",
-            "NMP_AUTHENTIK_K8S_SKIP_IMAGE_LOAD": "0",
+            "NHX_AUTHENTIK_K8S_REUSE_CLUSTER": "0",
+            "NHX_AUTHENTIK_K8S_SKIP_IMAGE_LOAD": "0",
         },
     )
 
     assert "Building auth-idp test image for" in output
-    assert "make docker-load DOCKER_TARGET=nmp-api-docker" in output
+    assert "make docker-load DOCKER_TARGET=nhx-api-docker" in output
     assert "Using prebuilt auth-idp Kubernetes test image" not in output
 
 
@@ -1203,19 +1298,19 @@ def test_authentik_compose_runner_reuse_uses_stable_project_and_port() -> None:
     output = _run_authentik_script("test", "compose", "--dry-run", "--reuse")
 
     assert "workload-token-private-key.pem" in output
-    assert "NMP_E2E_COMPOSE_LIFECYCLE=reuse" in output
-    assert "NMP_AUTHENTIK_COMPOSE_PROJECT_NAME=authentik-e2e-reuse" in output
-    assert "NMP_AUTHENTIK_COMPOSE_GATEWAY_PORT=18083" in output
-    assert "--auth-idp-runtime authentik-compose" in output
+    assert "COMPOSE_PROJECT_NAME=authentik-e2e-reuse" in output
+    assert "AUTHENTIK_GATEWAY_PORT=18080" in output
+    assert "--auth-idp-context" in output
+    assert "report-auth-idp-authentik-compose.xml" in output
 
 
 def test_authentik_compose_up_starts_reusable_stack_without_pytest() -> None:
     output = _run_authentik_script("up", "compose", "--dry-run")
 
     assert "COMPOSE_PROJECT_NAME=authentik-e2e-reuse" in output
-    assert "AUTHENTIK_GATEWAY_PORT=18083" in output
+    assert "AUTHENTIK_GATEWAY_PORT=18080" in output
     assert "docker compose up -d" in output
-    assert "https://127.0.0.1:18083/health/gateway/ready" in output
+    assert "https://127.0.0.1:18080/health/gateway/ready" in output
     assert "uv run --frozen nemo config set --context authentik-compose" in output
     assert "--certificate-authority" in output
     assert "write lifecycle state" in output
@@ -1230,7 +1325,7 @@ def test_authentik_compose_up_key_derives_managed_instance_names() -> None:
         "--key",
         "dev",
         "--dry-run",
-        env={"NMP_AUTHENTIK_COMPOSE_GATEWAY_PORT": "19083"},
+        env={"NHX_AUTHENTIK_COMPOSE_GATEWAY_PORT": "19083"},
     )
 
     assert "COMPOSE_PROJECT_NAME=authentik-e2e-dev" in output
@@ -1242,11 +1337,16 @@ def test_authentik_compose_up_key_derives_managed_instance_names() -> None:
     assert "run.sh down compose --key dev" in output
 
 
-def test_authentik_compose_test_action_runs_contract_pytest() -> None:
+def test_authentik_compose_test_action_runs_host_contracts() -> None:
     output = _run_authentik_script("test", "compose", "--dry-run")
 
-    assert "uv run --frozen pytest tests/auth_idp/contracts" in output
-    assert "--auth-idp-runtime authentik-compose" in output
+    assert "playwright install chromium" in output
+    assert "NHX_AUTH_IDP_BROWSER_ARTIFACTS_DIR=" in output
+    assert "--group auth-idp-e2e pytest" in output
+    assert "tests/auth_idp/contracts" in output
+    assert "--auth-idp-context" in output
+    assert "deployment_context.py" in output
+    assert "report-auth-idp-authentik-compose.xml" in output
 
 
 def test_authentik_runner_rejects_removed_bare_compose_and_k8s_aliases() -> None:
@@ -1272,30 +1372,108 @@ def test_authentik_ci_workflow_uses_explicit_test_actions() -> None:
     }
 
     assert commands_by_runtime == {
-        "authentik-compose": "test compose",
-        "authentik-kubernetes": "test k8s",
+        "authentik-compose": "test compose --gateway-port 18080",
+        "authentik-kubernetes": "test k8s --runtime kind --gateway-port 18082",
     }
+
+
+def test_authentik_ci_workflow_does_not_carry_separate_k3d_runner() -> None:
+    workflow = _load_yaml(Path(".github/workflows/ci.yaml"))
+
+    assert "python-auth-idp-k3d-e2e-test" not in workflow["jobs"]
+
+
+def test_authentik_compose_rejects_an_occupied_port_with_mismatched_state(tmp_path: Path) -> None:
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        port = listener.getsockname()[1]
+        state_file = tmp_path / "compose-authentik-e2e-reuse.json"
+        state_file.write_text(
+            '{"compose_gateway_port": "' + str(port) + '", "gateway_url": "https://127.0.0.1:1"}\n',
+            encoding="utf-8",
+        )
+        completed = subprocess.run(
+            [
+                str(AUTHENTIK_DIR / "run.sh"),
+                "up",
+                "compose",
+                "--gateway-port",
+                str(port),
+                "--image",
+                "example.invalid/nhx-api:test",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+            env={**os.environ, "NEMO_AUTHENTIK_STATE_DIR": str(tmp_path)},
+            timeout=AUTHENTIK_SCRIPT_TIMEOUT_SECONDS,
+        )
+
+    output = completed.stdout + completed.stderr
+    assert completed.returncode != 0
+    assert f"Gateway port {port} is already occupied" in output
+    assert "choose another --gateway-port or stop the owning process" in output
+
+
+def test_authentik_prepare_rotates_gateway_certificate_with_wrong_identity(tmp_path: Path) -> None:
+    if shutil.which("openssl") is None:
+        pytest.skip("openssl is required to exercise gateway TLS identity rotation")
+    tls_dir = tmp_path / "gateway-tls"
+    tls_dir.mkdir()
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            str(tls_dir / "tls.key"),
+            "-out",
+            str(tls_dir / "tls.crt"),
+            "-days",
+            "1",
+            "-subj",
+            "/CN=wrong-host",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=AUTHENTIK_SCRIPT_TIMEOUT_SECONDS,
+    )
+
+    output = _run_authentik_script(
+        "prepare-local",
+        env={"AUTHENTIK_GATEWAY_TLS_DIR": str(tls_dir)},
+    )
+    certificate = subprocess.run(
+        ["openssl", "x509", "-in", str(tls_dir / "tls.crt"), "-noout", "-text"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=AUTHENTIK_SCRIPT_TIMEOUT_SECONDS,
+    ).stdout
+
+    assert "Generated gateway TLS certificate" in output
+    assert "DNS:localhost" in certificate
+    assert "DNS:nemo-gateway" in certificate
+    assert "IP Address:127.0.0.1" in certificate
 
 
 def test_authentik_kubernetes_runner_reuse_uses_stable_cluster() -> None:
     output = _run_authentik_script("test", "k8s", "--dry-run", "--reuse")
 
-    assert "NMP_AUTHENTIK_K8S_CLUSTER_NAME=nmp-authentik-reuse" in output
-    assert _gateway_port_from_script_output(output)
-    assert "NMP_AUTHENTIK_K8S_REUSE_CLUSTER=1" in output
-    assert "NMP_AUTHENTIK_K8S_KEEP_CLUSTER=1" in output
-    assert "--auth-idp-runtime authentik-kubernetes" in output
+    assert "kind create cluster --name nhx-authentik-reuse" in output
+    assert _gateway_port_from_script_output(output) == "18082"
+    assert "--auth-idp-context" in output
+    assert "kind load docker-image my-registry/nhx-api:local" in output
 
 
-def test_authentik_kubernetes_test_action_chooses_dynamic_gateway_port_by_default(tmp_path: Path) -> None:
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    fake_python = fake_bin / "python3"
-    fake_python.write_text("#!/usr/bin/env bash\nprintf '19082\\n'\n", encoding="utf-8")
-    fake_python.chmod(0o755)
+def test_authentik_kubernetes_test_action_uses_stable_gateway_port_by_default() -> None:
     env = os.environ.copy()
-    env.pop("NMP_AUTHENTIK_K8S_GATEWAY_PORT", None)
-    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    env.pop("NHX_AUTHENTIK_K8S_GATEWAY_PORT", None)
     completed = subprocess.run(
         [str(AUTHENTIK_DIR / "run.sh"), "test", "k8s", "--dry-run"],
         text=True,
@@ -1306,7 +1484,16 @@ def test_authentik_kubernetes_test_action_chooses_dynamic_gateway_port_by_defaul
     )
 
     assert completed.returncode == 0, completed.stdout + completed.stderr
-    assert _gateway_port_from_script_output(completed.stdout) == "19082"
+    assert _gateway_port_from_script_output(completed.stdout) == "18082"
+
+
+def test_authentik_kubernetes_test_action_uses_k3d_compatible_fresh_cluster_name() -> None:
+    output = _run_authentik_script("test", "k8s", "--dry-run", "--runtime", "k3d")
+    match = re.search(r"\bk3d cluster create ([a-z0-9-]+)\b", output)
+
+    assert match is not None, output
+    assert match.group(1).startswith("nhx-ak-e2e-")
+    assert len(match.group(1)) <= 32
 
 
 def test_authentik_kubernetes_test_action_honors_explicit_gateway_port() -> None:
@@ -1314,24 +1501,26 @@ def test_authentik_kubernetes_test_action_honors_explicit_gateway_port() -> None
         "test",
         "k8s",
         "--dry-run",
-        env={"NMP_AUTHENTIK_K8S_GATEWAY_PORT": "19082"},
+        env={"NHX_AUTHENTIK_K8S_GATEWAY_PORT": "19082"},
     )
 
-    assert "NMP_AUTHENTIK_K8S_GATEWAY_PORT=19082" in output
+    assert "port-forward svc/nemo-helix-envoy 19082:8080" in output
+    assert "uv run --frozen nemo config set" in output
+    assert "nemo-helix.authentikPublicGateway.port=19082" in output
 
 
 def test_authentik_kubernetes_up_starts_reusable_stack_without_pytest() -> None:
     output = _run_authentik_script("up", "k8s", "--dry-run", "--skip-image-load")
     gateway_port = _gateway_port_from_script_output(output)
 
-    assert "kind create cluster --name nmp-authentik-reuse" in output
-    assert "kind export kubeconfig --name nmp-authentik-reuse" not in output
-    assert "kubectl config use-context kind-nmp-authentik-reuse" not in output
+    assert "kind create cluster --name nhx-authentik-reuse" in output
+    assert "kind export kubeconfig --name nhx-authentik-reuse" not in output
+    assert "kubectl config use-context kind-nhx-authentik-reuse" not in output
     assert "helm --kubeconfig" in output
     assert "upgrade --install authentik-demo" in output
     assert "--timeout 20m" in output
-    assert f"nemo-platform.authentikPublicGateway.port={gateway_port}" in output
-    assert f"port-forward svc/nemo-platform-envoy {gateway_port}:8080" in output
+    assert f"nemo-helix.authentikPublicGateway.port={gateway_port}" in output
+    assert f"port-forward svc/nemo-helix-envoy {gateway_port}:8080" in output
     assert f"https://127.0.0.1:{gateway_port}/health/gateway/ready" in output
     assert "Kubeconfig: " in output
     assert "Use it with: KUBECONFIG=" in output
@@ -1351,13 +1540,13 @@ def test_authentik_kubernetes_up_key_derives_managed_instance_names() -> None:
         "dev",
         "--dry-run",
         "--skip-image-load",
-        env={"NMP_AUTHENTIK_K8S_GATEWAY_PORT": "19084"},
+        env={"NHX_AUTHENTIK_K8S_GATEWAY_PORT": "19084"},
     )
 
-    assert "kind create cluster --name nmp-authentik-dev" in output
-    assert "kubectl config use-context kind-nmp-authentik-dev" not in output
-    assert "nemo-platform.authentikPublicGateway.port=19084" in output
-    assert "port-forward svc/nemo-platform-envoy 19084:8080" in output
+    assert "kind create cluster --name nhx-authentik-dev" in output
+    assert "kubectl config use-context kind-nhx-authentik-dev" not in output
+    assert "nemo-helix.authentikPublicGateway.port=19084" in output
+    assert "port-forward svc/nemo-helix-envoy 19084:8080" in output
     assert "uv run --frozen nemo config set --context authentik-k8s-dev" in output
     assert "write lifecycle state" in output
     assert "run.sh down k8s --key dev" in output
@@ -1367,10 +1556,10 @@ def test_authentik_kubernetes_up_does_not_update_default_k3d_kubeconfig_by_defau
     output = _run_authentik_script("up", "k8s", "--dry-run", "--runtime", "k3d", "--skip-image-load")
 
     default_kubeconfig_merge = (
-        "k3d kubeconfig merge nmp-authentik-reuse --kubeconfig-merge-default --kubeconfig-switch-context"
+        "k3d kubeconfig merge nhx-authentik-reuse --kubeconfig-merge-default --kubeconfig-switch-context"
     )
     assert default_kubeconfig_merge not in output
-    assert "kubectl config use-context k3d-nmp-authentik-reuse" not in output
+    assert "kubectl config use-context k3d-nhx-authentik-reuse" not in output
 
 
 def test_authentik_kubernetes_up_export_kubeconfig_updates_default_kind_kubeconfig() -> None:
@@ -1382,8 +1571,8 @@ def test_authentik_kubernetes_up_export_kubeconfig_updates_default_kind_kubeconf
         "--export-kubeconfig",
     )
 
-    assert "kind export kubeconfig --name nmp-authentik-reuse" in output
-    assert "kubectl config use-context kind-nmp-authentik-reuse" in output
+    assert "kind export kubeconfig --name nhx-authentik-reuse" in output
+    assert "kubectl config use-context kind-nhx-authentik-reuse" in output
 
 
 def test_authentik_kubernetes_up_export_kubeconfig_updates_default_k3d_kubeconfig() -> None:
@@ -1397,16 +1586,19 @@ def test_authentik_kubernetes_up_export_kubeconfig_updates_default_k3d_kubeconfi
         "--export-kubeconfig",
     )
 
-    assert "k3d kubeconfig merge nmp-authentik-reuse --kubeconfig-merge-default --kubeconfig-switch-context" in output
-    assert "kubectl config use-context k3d-nmp-authentik-reuse" in output
+    assert "k3d kubeconfig merge nhx-authentik-reuse --kubeconfig-merge-default --kubeconfig-switch-context" in output
+    assert "kubectl config use-context k3d-nhx-authentik-reuse" in output
 
 
-def test_authentik_kubernetes_test_action_runs_contract_pytest() -> None:
+def test_authentik_kubernetes_test_action_runs_host_contracts() -> None:
     output = _run_authentik_script("test", "k8s", "--dry-run")
 
-    assert "NMP_AUTHENTIK_K8S_HELM_WAIT_TIMEOUT=20m" in output
-    assert "uv run --frozen pytest tests/auth_idp/contracts" in output
-    assert "--auth-idp-runtime authentik-kubernetes" in output
+    assert "--timeout 20m" in output
+    assert "playwright install chromium" in output
+    assert "NHX_AUTH_IDP_BROWSER_ARTIFACTS_DIR=" in output
+    assert "--group auth-idp-e2e pytest" in output
+    assert "tests/auth_idp/contracts" in output
+    assert "--auth-idp-context" in output
 
 
 def test_authentik_down_cleans_reused_compose_and_kubernetes_resources(tmp_path: Path) -> None:
@@ -1414,11 +1606,11 @@ def test_authentik_down_cleans_reused_compose_and_kubernetes_resources(tmp_path:
 
     assert "docker compose down -v --remove-orphans" in output
     assert "COMPOSE_PROJECT_NAME=authentik-e2e-reuse" in output
-    assert "AUTHENTIK_GATEWAY_PORT=18083" in output
-    assert "AUTHENTIK_GATEWAY_TLS_VOLUME=authentik-e2e-18083-gateway-tls" in output
-    assert "AUTHENTIK_WORKLOAD_NETWORK_NAME=authentik-e2e-18083-workload" in output
+    assert "AUTHENTIK_GATEWAY_PORT=18080" in output
+    assert "AUTHENTIK_GATEWAY_TLS_VOLUME=authentik-e2e-18080-gateway-tls" in output
+    assert "AUTHENTIK_WORKLOAD_NETWORK_NAME=authentik-e2e-18080-workload" in output
     assert "port-forward.pid" in output
-    assert "kind delete cluster --name nmp-authentik-reuse" in output
+    assert "kind delete cluster --name nhx-authentik-reuse" in output
     assert "nemo config delete-context authentik-compose --prune-orphans" in output
     assert "nemo config delete-context authentik-k8s --prune-orphans" in output
 
@@ -1436,7 +1628,7 @@ def test_authentik_down_compose_only_cleans_compose_resources(tmp_path: Path) ->
 def test_authentik_down_k8s_only_cleans_kubernetes_resources(tmp_path: Path) -> None:
     output = _run_authentik_script("down", "k8s", "--dry-run", env={"NEMO_AUTHENTIK_STATE_DIR": str(tmp_path)})
 
-    assert "kind delete cluster --name nmp-authentik-reuse" in output
+    assert "kind delete cluster --name nhx-authentik-reuse" in output
     assert "port-forward.pid" in output
     assert "nemo config delete-context authentik-k8s --prune-orphans" in output
     assert "docker compose down" not in output
@@ -1451,9 +1643,12 @@ def test_authentik_kubernetes_port_forward_pid_reuse_checks_process_command() ->
     assert 'ps -p "${pid}" -o args=' in run_sh
     assert '[[ "${args}" == *"kubectl"* ]]' in run_sh
     assert '[[ "${args}" == *"port-forward"* ]]' in run_sh
-    assert '[[ "${args}" == *"svc/nemo-platform-envoy"* ]]' in run_sh
+    assert '[[ "${args}" == *"svc/nemo-helix-envoy"* ]]' in run_sh
     assert '[[ " ${args} " == *" ${expected_port}:8080 "* ]]' in run_sh
     assert 'k8s_port_forward_pid_is_running "${pid}" "${K8S_GATEWAY_PORT}"' in run_sh
+    assert "k8s_port_forward_namespace_file_for_cluster" in run_sh
+    assert 'expected_namespace="$(<"${namespace_file}")"' in run_sh
+    assert 'rm -f "${pid_file}" "${namespace_file}"' in run_sh
 
 
 def test_authentik_runner_runtime_failures_use_fail_without_usage() -> None:
@@ -1464,11 +1659,12 @@ def test_authentik_runner_runtime_failures_use_fail_without_usage() -> None:
     assert 'fail "openssl is required to generate the workload token signing key"' in run_sh
     assert 'fail "missing Authentik blueprint: ${source}"' in run_sh
     assert 'fail "curl is required to wait for ${url}"' in run_sh
-    assert 'fail "secret nemo-platform-envoy-tls in ${HELM_NAMESPACE} has no ca.crt entry"' in run_sh
+    assert 'fail "secret nemo-helix-envoy-tls in ${HELM_NAMESPACE} has no ca.crt entry"' in run_sh
     assert 'fail "failed to decode Kubernetes gateway CA bundle"' in run_sh
-    assert 'fail "timed out waiting for Kubernetes gateway port-forward readiness"' in run_sh
+    assert 'fail "existing Kubernetes gateway port-forward did not become ready"' in run_sh
+    assert 'fail "new Kubernetes gateway port-forward did not become ready"' in run_sh
     assert 'die "curl is required to wait for ${url}"' not in run_sh
-    assert 'die "timed out waiting for Kubernetes gateway port-forward readiness"' not in run_sh
+    assert 'die "new Kubernetes gateway port-forward did not become ready"' not in run_sh
 
 
 def test_authentik_kubernetes_ca_bundle_requires_secret_entry() -> None:
@@ -1482,7 +1678,8 @@ def test_authentik_kubernetes_port_forward_reports_log_on_readiness_failure() ->
 
     assert "show_k8s_port_forward_log_tail" in run_sh
     assert 'tail -n 40 "${log_file}"' in run_sh
-    assert "timed out waiting for Kubernetes gateway port-forward readiness" in run_sh
+    assert 'stop_k8s_port_forward_for_cluster "${cluster_name}"' in run_sh
+    assert "new Kubernetes gateway port-forward did not become ready" in run_sh
 
 
 def test_authentik_down_key_cleans_derived_compose_and_kubernetes_contexts(tmp_path: Path) -> None:
@@ -1492,7 +1689,7 @@ def test_authentik_down_key_cleans_derived_compose_and_kubernetes_contexts(tmp_p
     assert "AUTHENTIK_GATEWAY_TLS_VOLUME=authentik-e2e-dev-gateway-tls" in output
     assert "AUTHENTIK_WORKLOAD_NETWORK_NAME=authentik-e2e-dev-workload" in output
     assert "AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD=<redacted> docker compose down" not in output
-    assert "kind delete cluster --name nmp-authentik-dev" in output
+    assert "kind delete cluster --name nhx-authentik-dev" in output
     assert "nemo config delete-context authentik-compose-dev --prune-orphans" in output
     assert "nemo config delete-context authentik-k8s-dev --prune-orphans" in output
 
@@ -1515,29 +1712,28 @@ def test_authentik_down_accepts_kubernetes_runtime_for_reuse_cleanup(tmp_path: P
         "down", "--dry-run", "--runtime", "k3d", env={"NEMO_AUTHENTIK_STATE_DIR": str(tmp_path)}
     )
 
-    assert "k3d cluster delete nmp-authentik-reuse" in output
+    assert "k3d cluster delete nhx-authentik-reuse" in output
 
 
 def test_authentik_kubernetes_runner_skips_build_only_for_explicit_image() -> None:
-    output = _run_authentik_script("test", "k8s", "--dry-run", "--image", "registry.example.test/nmp-api:prebuilt")
+    output = _run_authentik_script("test", "k8s", "--dry-run", "--image", "registry.example.test/nhx-api:prebuilt")
 
-    assert "Using prebuilt auth-idp Kubernetes test image: registry.example.test/nmp-api:prebuilt" in output
-    assert "make docker-load DOCKER_TARGET=nmp-api-docker" not in output
-    assert "NMP_AUTHENTIK_K8S_WORKLOAD_TOKEN_PRIVATE_KEY_FILE=" in output
+    assert "Using prebuilt auth-idp Kubernetes image: registry.example.test/nhx-api:prebuilt" in output
+    assert "make docker-load DOCKER_TARGET=nhx-api-docker" not in output
 
 
 def test_authentik_kubernetes_runtime_uses_provisioned_signing_key_file() -> None:
     run_sh = (AUTHENTIK_DIR / "run.sh").read_text(encoding="utf-8")
     runtime_impl = Path("tests/auth_idp/runtime_kubernetes.py").read_text(encoding="utf-8")
-    helpers = (HELM_DIR / "templates" / "_helpers.tpl").read_text(encoding="utf-8")
 
     assert "ensure_workload_token_private_key" in run_sh
-    assert "NMP_AUTHENTIK_K8S_WORKLOAD_TOKEN_PRIVATE_KEY_FILE" in run_sh
+    assert "k8s_prepare_secrets" in run_sh
+    assert 'k8s_reconcile_secret "${context}" "${kubeconfig}" nemo-workload-token-signing-key' in run_sh
     assert "WORKLOAD_TOKEN_PRIVATE_KEY_FILE_ENV" in runtime_impl
-    assert '"--set-file"' in runtime_impl
-    assert "workloadTokenSigningKey.privateKeyPem=" in runtime_impl
-    assert "workloadTokenSigningKey.privateKeyPem" in helpers
-    assert 'genPrivateKey "rsa"' in helpers
+    assert "_prepare_precreated_secrets" in runtime_impl
+    assert '"--set-file"' not in runtime_impl
+    assert "workloadTokenSigningKey.privateKeyPem=" not in runtime_impl
+    assert not (HELM_DIR / "templates" / "workload-token-signing-key-secret.yaml").exists()
 
 
 def test_authentik_kubernetes_live_test_uses_workload_client_audience_for_subject_token() -> None:
@@ -1560,40 +1756,33 @@ def test_authentik_kubernetes_live_test_uses_workload_client_audience_for_subjec
 
 def test_authentik_runners_capture_ci_and_local_diagnostics() -> None:
     run_sh = (AUTHENTIK_DIR / "run.sh").read_text(encoding="utf-8")
-    runtime_impl = Path("tests/auth_idp/runtime_kubernetes.py").read_text(encoding="utf-8")
 
     assert "diagnostics_dir()" in run_sh
     assert "prepare_diagnostics_dir()" in run_sh
     assert "write_diagnostics_metadata()" in run_sh
     assert '>"${output}/run-metadata.txt"' in run_sh
-    assert "E2E_SERVICES_LOG_DIR=${diagnostics}" in run_sh
-    assert "NMP_AUTHENTIK_K8S_LOG_DIR=${k8s_diagnostics}" in run_sh
     assert 'tee "${diagnostics}/pytest.log"' in run_sh
+    assert '--junitxml="${junit_xml}"' in run_sh
+    assert "logs --no-color" in run_sh
+    assert '>"${diagnostics}/compose.log"' in run_sh
     assert "Auth-idp Compose diagnostics:" in run_sh
     assert "Auth-idp Kubernetes diagnostics:" in run_sh
 
-    assert 'configured_dir = os.environ.get("NMP_AUTHENTIK_K8S_LOG_DIR")' in runtime_impl
-    assert '"helm-status.txt"' in runtime_impl
-    assert '"helm-list.txt"' in runtime_impl
-    assert '"get-nodes.txt"' in runtime_impl
-    assert '"get-pods-json.txt"' in runtime_impl
-    assert "self._diagnostics_collected = False" in runtime_impl
-    assert "def _collect_diagnostics_best_effort" in runtime_impl
-    assert "with contextlib.suppress(Exception):" in runtime_impl
-    assert "Collected Authentik Kubernetes diagnostics:" in runtime_impl
+    assert 'cp "$(k8s_port_forward_log_file_for_cluster' in run_sh
+    assert "Kubernetes diagnostics:" in run_sh
 
 
-def test_authentik_compose_runner_uses_nemo_scoped_ca_bundle() -> None:
-    run_sh = (AUTHENTIK_DIR / "run.sh").read_text(encoding="utf-8")
+def test_authentik_compose_mounts_gateway_ca_without_test_runner_overlay() -> None:
+    compose_path = AUTHENTIK_DIR / "compose" / "docker-compose.yml"
+    compose = compose_path.read_text(encoding="utf-8")
+    compose_config = yaml.safe_load(compose)
+    services = compose_config["services"]
+    nemo_environment = services["nemo"]["environment"]
 
-    assert "NMP_CLIENT_SSL_CERT_FILE=$(gateway_tls_cert_file)" in run_sh
-    assert '"NMP_CLIENT_SSL_CERT_FILE=$(gateway_tls_cert_file)" \\' in run_sh
-    assert "uv run --frozen pytest tests/auth_idp/contracts" in run_sh
-    assert "--auth-idp-runtime authentik-compose" in run_sh
-    assert "-m auth_idp_runtime" in run_sh
-    stripped_lines = [line.strip() for line in run_sh.splitlines()]
-    assert not any(line.startswith('SSL_CERT_FILE="$(gateway_tls_cert_file)"') for line in stripped_lines)
-    assert not any(line.startswith('REQUESTS_CA_BUNDLE="$(gateway_tls_cert_file)"') for line in stripped_lines)
+    assert nemo_environment["SSL_CERT_FILE"] == "/etc/nhx/gateway-tls/tls.crt"
+    assert nemo_environment["REQUESTS_CA_BUNDLE"] == "/etc/nhx/gateway-tls/tls.crt"
+    assert "gateway-tls:/etc/nhx/gateway-tls:ro" in services["nemo"]["volumes"]
+    assert "auth-idp-e2e" not in services
 
 
 def test_authentik_compose_e2e_config_uses_global_docker_workload_identity_switch_only() -> None:
@@ -1609,48 +1798,91 @@ def test_authentik_compose_e2e_config_uses_global_docker_workload_identity_switc
     assert "workload_identity" not in workload_executor["config"]
 
 
+def test_authentik_compose_e2e_config_sets_deployments_workload_network() -> None:
+    from tests.auth_idp.authentik_live import AUTHENTIK_DOCKER_E2E_CONFIG
+
+    config_overlay = AUTHENTIK_DOCKER_E2E_CONFIG.mark.args[3]
+    deployment_executor = config_overlay["deployments"]["executors"][0]
+
+    assert config_overlay["deployments"]["default_executor"] == "auth-idp-docker"
+    assert deployment_executor == {
+        "name": "auth-idp-docker",
+        "backend": "docker",
+        "config": {
+            "pull_images": False,
+            "network": "authentik-e2e-${gateway_port}-workload",
+            "endpoint_mode": "network",
+            "docker_timeout": 600,
+            "oneshot_observe_timeout_seconds": 30,
+            "additional_volume_mounts": [
+                {
+                    "volume_name": "authentik-e2e-${gateway_port}-gateway-tls",
+                    "mount_path": "/etc/nhx/gateway-tls",
+                    "read_only": True,
+                }
+            ],
+        },
+    }
+
+
 def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
     values = _load_yaml(HELM_DIR / "values.yaml")
     tls_values = values["workloadTokenTls"]
-    nemo_values = values["nemo-platform"]
-    tls_template = (HELM_DIR / "templates" / "workload-token-tls.yaml").read_text(encoding="utf-8")
-    helpers_template = (HELM_DIR / "templates" / "_helpers.tpl").read_text(encoding="utf-8")
+    nemo_values = values["nemo-helix"]
 
-    assert tls_values["create"] is True
-    assert tls_values["secretName"] == "nemo-platform-envoy-tls"
-    assert tls_values["durationDays"] == 365
-    assert tls_values["mountPath"] == "/etc/nmp/workload-token-tls"
-    assert tls_values["caBundleFile"] == "/etc/nmp/workload-token-ca/ca.crt"
-    assert tls_values["dnsNames"] == ["localhost"]
-    assert "127.0.0.1" in tls_values["ipAddresses"]
-    assert "selfSignedIssuerName" not in tls_values
-    assert "caIssuerName" not in tls_values
-    assert "caSecretName" not in tls_values
-    assert "type: kubernetes.io/tls" in tls_template
-    assert 'define "nemo-platform-authentik.serviceDnsNames"' in helpers_template
-    assert 'include "nemo-platform-authentik.serviceDnsNames"' in tls_template
-    assert ".Values.integration.nemoPlatform.envoyServiceName" in tls_template
-    assert "$nemoPlatformValues.envoyProxy.serviceNamespace" in tls_template
-    assert 'include "nemo-platform-authentik.existingSecretData"' in tls_template
-    assert "genSignedCert" in tls_template
-    assert "kind: Issuer" not in tls_template
-    assert "kind: Certificate" not in tls_template
-    assert "cert-manager.io/v1" not in tls_template
+    assert tls_values["secretName"] == "nemo-helix-envoy-tls"
+    assert tls_values["mountPath"] == "/etc/nhx/workload-token-tls"
+    assert tls_values["caBundleFile"] == "/etc/nhx/workload-token-ca/ca.crt"
+    assert "create" not in tls_values
+    assert "durationDays" not in tls_values
+    assert "dnsNames" not in tls_values
+    assert "ipAddresses" not in tls_values
+    assert not (HELM_DIR / "templates" / "workload-token-tls.yaml").exists()
     assert nemo_values["envoyProxy"]["extraVolumes"] == [
         {"name": "tmp", "emptyDir": {}},
-        {"name": "workload-token-tls", "secret": {"secretName": "nemo-platform-envoy-tls"}},
+        {"name": "workload-token-tls", "secret": {"secretName": "nemo-helix-envoy-tls"}},
     ]
     assert nemo_values["envoyProxy"]["extraVolumeMounts"] == [
         {"name": "tmp", "mountPath": "/tmp"},
-        {"name": "workload-token-tls", "mountPath": "/etc/nmp/workload-token-tls", "readOnly": True},
+        {"name": "workload-token-tls", "mountPath": "/etc/nhx/workload-token-tls", "readOnly": True},
     ]
-    assert nemo_values["core"]["controller"]["env"] == {
-        "NMP_PLATFORM_URL": ENVOY_CONTROLLER_ENV_URL,
-        "NMP_AUTH_URL": ENVOY_CONTROLLER_ENV_URL,
-    }
+    controller = nemo_values["core"]["controller"]
+    assert controller["env"] == {"NHX_CLIENT_SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt"}
+    assert "NHX_PLATFORM_URL" not in controller["env"]
+    assert "NHX_AUTH_URL" not in controller["env"]
+    assert controller["extraVolumes"] == [
+        {
+            "name": "workload-token-signing-key",
+            "secret": {"secretName": "nemo-workload-token-signing-key"},
+        },
+        {
+            "name": "workload-token-tls-ca",
+            "secret": {
+                "secretName": "nemo-helix-envoy-tls",
+                "items": [{"key": "ca.crt", "path": "ca.crt"}],
+            },
+        },
+    ]
+    assert controller["extraVolumeMounts"] == [
+        {
+            "name": "workload-token-signing-key",
+            "mountPath": "/etc/nhx/workload-token",
+            "readOnly": True,
+        },
+        {
+            "name": "workload-token-tls-ca",
+            "mountPath": "/etc/nhx/workload-token-ca",
+            "readOnly": True,
+        },
+    ]
+
+    seed_job = nemo_values["platformSeedJob"]
+    assert seed_job["extraEnv"] == [{"name": "NHX_CLIENT_SSL_CERT_FILE", "value": "/etc/nhx/workload-token-ca/ca.crt"}]
+    assert seed_job["extraVolumes"] == controller["extraVolumes"]
+    assert seed_job["extraVolumeMounts"] == controller["extraVolumeMounts"]
     assert nemo_values["platformConfig"]["jobs"]["executor_defaults"]["kubernetes_job"]["env"] == {
-        "SSL_CERT_FILE": "/etc/nmp/workload-token-ca/ca.crt",
-        "REQUESTS_CA_BUNDLE": "/etc/nmp/workload-token-ca/ca.crt",
+        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
+        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca.crt",
     }
     assert "service_discovery" not in nemo_values["platformConfig"]["jobs"]["executor_defaults"]["kubernetes_job"]
     assert nemo_values["platformConfig"]["jobs"]["executor_defaults"]["kubernetes_job"]["storage"] == {
@@ -1658,7 +1890,7 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
             {
                 "name": "workload-token-tls-ca",
                 "secret": {
-                    "secret_name": "nemo-platform-envoy-tls",
+                    "secret_name": "nemo-helix-envoy-tls",
                     "items": [{"key": "ca.crt", "path": "ca.crt"}],
                 },
             }
@@ -1666,7 +1898,7 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
         "additional_volume_mounts": [
             {
                 "name": "workload-token-tls-ca",
-                "mount_path": "/etc/nmp/workload-token-ca",
+                "mount_path": "/etc/nhx/workload-token-ca",
                 "read_only": True,
             }
         ],
@@ -1677,12 +1909,12 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
         if executor["provider"] == "cpu" and executor["profile"] == "workload"
     )
     workload_config = workload_executor["config"]
-    assert workload_config["launcher_image"] == '{{ include "nmp-core.image" . }}'
+    assert workload_config["launcher_image"] == '{{ include "nhx-core.image" . }}'
     assert "default_task_image" not in workload_config
     assert "service_discovery" not in workload_config
     assert workload_config["env"] == {
-        "SSL_CERT_FILE": "/etc/nmp/workload-token-ca/ca.crt",
-        "REQUESTS_CA_BUNDLE": "/etc/nmp/workload-token-ca/ca.crt",
+        "SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt",
+        "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca.crt",
     }
     expected_storage = nemo_values["platformConfig"]["jobs"]["executor_defaults"]["kubernetes_job"]["storage"]
     assert workload_config["storage"] == expected_storage
@@ -1692,21 +1924,21 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
     )
 
 
-def test_nemo_platform_seed_hook_uses_internal_api_service_url() -> None:
+def test_nemo_helix_seed_hook_uses_internal_api_service_url() -> None:
     template = Path("k8s/helm/templates/platform-seed-job.yaml").read_text(encoding="utf-8")
 
-    assert "- name: NMP_BASE_URL" in template
-    assert 'include "nemo-platform.internalBaseUrl"' in template
+    assert "- name: NHX_BASE_URL" in template
+    assert 'include "nemo-helix.internalBaseUrl"' in template
 
 
-def test_nemo_platform_controller_uses_internal_api_service_url_for_embedded_pdp() -> None:
+def test_nemo_helix_controller_uses_internal_api_service_url_for_embedded_pdp() -> None:
     template = Path("k8s/helm/templates/core/controller-deployment.yaml").read_text(encoding="utf-8")
 
-    assert "- name: NMP_BASE_URL" in template
-    assert "- name: NMP_AUTH_POLICY_DECISION_POINT_BASE_URL" in template
+    assert "- name: NHX_BASE_URL" in template
+    assert "- name: NHX_AUTH_POLICY_DECISION_POINT_BASE_URL" in template
     assert (
-        "name: NMP_AUTH_POLICY_DECISION_POINT_BASE_URL\n"
-        '              value: {{ include "nemo-platform.internalBaseUrl" . | quote }}'
+        "name: NHX_AUTH_POLICY_DECISION_POINT_BASE_URL\n"
+        '              value: {{ include "nemo-helix.internalBaseUrl" . | quote }}'
     ) in template
 
 

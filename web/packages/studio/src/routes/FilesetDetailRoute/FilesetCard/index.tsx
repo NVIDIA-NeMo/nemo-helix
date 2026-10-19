@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getEntityReference } from '@nemo/common/src/namedEntity';
-import { useModelsListModels } from '@nemo/sdk/generated/platform/api';
+import { useModelsListModels } from '@nemo/sdk/generated/platform/models';
 import {
   FilesetPurpose,
   type FilesetFileOutput,

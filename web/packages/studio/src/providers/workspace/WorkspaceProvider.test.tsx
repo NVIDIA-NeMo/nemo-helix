@@ -6,7 +6,7 @@ import { SELECTED_WORKSPACE_KEY } from '@studio/util/localStorage';
 import { act, render, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 
-vi.mock('@nemo/sdk/generated/platform/api', () => ({
+vi.mock('@nemo/sdk/generated/platform/entity-store', () => ({
   useEntitiesGetWorkspace: () => ({
     error: undefined,
     isPending: false,

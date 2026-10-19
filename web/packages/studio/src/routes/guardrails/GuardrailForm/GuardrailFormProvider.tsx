@@ -6,7 +6,7 @@ import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import {
   getGuardrailsGetGuardrailConfigQueryKey,
   useGuardrailsUpdateConfig,
-} from '@nemo/sdk/generated/platform/api';
+} from '@nemo/sdk/generated/platform/guardrails';
 import type { GuardrailConfig } from '@nemo/sdk/generated/platform/schema';
 import {
   GuardrailFormContext,

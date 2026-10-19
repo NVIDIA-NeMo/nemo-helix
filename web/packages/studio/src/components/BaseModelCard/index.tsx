@@ -22,7 +22,6 @@ import React, { useMemo } from 'react';
 export interface BaseModelCardProps {
   model: ModelEntity;
   isChatAvailable?: boolean;
-  canPromptTune?: boolean;
   showCustomizationBadges?: boolean;
   onClick?: () => void;
 }
@@ -47,7 +46,6 @@ const formatContextSize = (contextSize: number): string => {
 export const BaseModelCard = ({
   model,
   isChatAvailable = false,
-  canPromptTune = false,
   showCustomizationBadges = true,
   onClick,
 }: BaseModelCardProps) => {
@@ -103,11 +101,6 @@ export const BaseModelCard = ({
             {isFineTuneable && (
               <Badge color="purple" kind="solid">
                 Fine-tunable
-              </Badge>
-            )}
-            {canPromptTune && isChatAvailable && (
-              <Badge color="green" kind="solid">
-                Prompt tunable
               </Badge>
             )}
           </Flex>

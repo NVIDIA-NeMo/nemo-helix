@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
-from nmp.guardrails.app.llms.completion.nim import NIM
+from nhx.guardrails.app.llms.completion.nim import NIM
 
 # Expected error messages - must match exactly with nim.py
 EXPECTED_401_MESSAGE = (
@@ -22,7 +22,7 @@ EXPECTED_404_MESSAGE = (
 @pytest.fixture
 def mock_main_model():
     """Patch get_main_model_from_context to allow NIM instantiation."""
-    with patch("nmp.guardrails.app.llms.utils.get_main_model_from_context") as mock:
+    with patch("nhx.guardrails.app.llms.utils.get_main_model_from_context") as mock:
         mock.return_value = None
         yield mock
 

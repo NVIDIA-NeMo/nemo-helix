@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { withOperators } from '@nemo/common/src/api/filterOperators';
-import { filesListFilesets, getFilesListFilesetsQueryKey } from '@nemo/sdk/generated/platform/api';
+import {
+  filesListFilesets,
+  getFilesListFilesetsQueryKey,
+} from '@nemo/sdk/generated/platform/files';
 import type {
   FilesetOutput,
   FilesetPurpose,
@@ -18,6 +21,9 @@ export interface UseFilesetSearchOptions {
   workspace: string;
   /** Restrict to one fileset `purpose`. Omit to list every purpose. */
   purpose?: FilesetPurpose;
+  /** Restrict to filesets carrying this exact `description`, which is how Studio
+   *  tags filesets it creates for a specific job. Omit to list every fileset. */
+  description?: string;
   enabled?: boolean;
   pageSize?: number;
 }
@@ -46,6 +52,7 @@ export interface UseFilesetSearchResult {
 export const useFilesetSearch = ({
   workspace,
   purpose,
+  description,
   enabled = true,
   pageSize = FILESETS_PAGE_SIZE,
 }: UseFilesetSearchOptions): UseFilesetSearchResult => {
@@ -55,11 +62,12 @@ export const useFilesetSearch = ({
     const clauses = {
       ...(search ? { name: { $like: `%${search}%` } } : {}),
       ...(purpose ? { purpose } : {}),
+      ...(description ? { description: { $eq: description } } : {}),
     };
     return Object.keys(clauses).length
       ? withOperators<FilesListFilesetsParams['filter']>(clauses)
       : undefined;
-  }, [search, purpose]);
+  }, [search, purpose, description]);
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError, error } =
     useInfiniteQuery({
@@ -68,6 +76,7 @@ export const useFilesetSearch = ({
         'infinite',
         'newest',
         purpose ?? 'all',
+        description ?? 'any',
         search,
         pageSize,
       ] as const,

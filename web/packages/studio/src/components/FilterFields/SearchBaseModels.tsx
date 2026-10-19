@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { TextInputSpinner } from '@nemo/common/src/components/form/TextInputSpinner';
-import { useModelsListModels as useListModels } from '@nemo/sdk/generated/platform/api';
+import { useModelsListModels as useListModels } from '@nemo/sdk/generated/platform/models';
 import {
   Button,
   ComboboxRoot,

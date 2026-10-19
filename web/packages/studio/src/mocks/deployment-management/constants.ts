@@ -77,7 +77,7 @@ export const getModelDeploymentsListResponse = {
         model: 'meta/llama-3.1-8b-instruct',
         nim_deployment: {
           gpu: 1,
-          image_name: 'registry.example.com/nemo-platform/llama-3.1-8b-instruct',
+          image_name: 'registry.example.com/nemo-helix/llama-3.1-8b-instruct',
           image_tag: '1.6-dev1',
           pvc_size: '25Gi',
         },

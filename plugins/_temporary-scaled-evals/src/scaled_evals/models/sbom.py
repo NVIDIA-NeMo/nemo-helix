@@ -21,6 +21,7 @@ from typing import Any
 
 from scaled_evals.models.execution_snapshot import current_process_identity
 from scaled_evals.models.gym_identity import (
+    backend_handle_raw,
     gym_run_identity,
     is_snapshot_backed,
     snapshot_evaluation,
@@ -87,6 +88,30 @@ def build_run_sbom(row: Mapping[str, Any], *, artifact_root: Path) -> dict[str, 
             expected_digest=_clean(bundle.get("image_digest")),
             observed_digest=_clean(bundle.get("observed_image_digest")),
         )
+
+    for index, image in enumerate(_harbor_dataset_images(row)):
+        component = _append_container(
+            components,
+            bom_ref=f"urn:scaled-evals:harbor-dataset-image:{evaluation_id}:{index}",
+            name=f"harbor-dataset-image:{image.get('task_id') or index}",
+            version=_clean(image.get("task_revision")),
+            submitted_ref=_clean(image.get("image_ref")),
+            expected_digest=_clean(image.get("image_digest")),
+            observed_digest=None,
+        )
+        if component is not None:
+            component["properties"].extend(
+                [
+                    {
+                        "name": "scaled-evals:image:upstream-reference",
+                        "value": str(image["source_image"]),
+                    },
+                    {
+                        "name": "scaled-evals:image:upstream-immutable-reference",
+                        "value": str(image["source_immutable_image"]),
+                    },
+                ]
+            )
 
     execution_identity = current_process_identity()
     _append_container(
@@ -159,6 +184,22 @@ def write_run_sbom(root: Path | str, row: Mapping[str, Any]) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+def _harbor_dataset_images(row: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    values = backend_handle_raw(row.get("backend_handle")).get("harbor_dataset_image_imports")
+    if not isinstance(values, list):
+        return []
+    required = {
+        "source_image",
+        "source_immutable_image",
+        "task_id",
+        "task_revision",
+        "image_ref",
+        "image_digest",
+        "runtime_image",
+    }
+    return [value for value in values if isinstance(value, Mapping) and required <= value.keys()]
 
 
 def file_sha256(path: Path) -> str:

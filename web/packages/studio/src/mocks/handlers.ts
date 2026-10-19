@@ -1,17 +1,19 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { EvaluateJob } from '@nemo/sdk/generated/evaluator/schema';
+import type { EvaluateJob } from '@nemo/sdk/generated/evals/schema';
 import {
   type AnnotationInput,
   HTTPValidationError,
   ModelEntitySortField,
-  PlatformJobLogPage,
-  PlatformJobResponsesPage,
+  HelixJobLogPage,
+  HelixJobResponsesPage,
   Project,
   TraceMetricBucketParam,
 } from '@nemo/sdk/generated/platform/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { agentDeploymentCapabilitiesHandlers } from '@studio/mocks/handlers/agentDeploymentCapabilities';
+import { agentOptimizeJobsHandlers } from '@studio/mocks/handlers/agentOptimizeJobs';
 import { customizerHandlers } from '@studio/mocks/handlers/customizer';
 import { deploymentsHandlers } from '@studio/mocks/handlers/deployments';
 import { evaluatorHandlers } from '@studio/mocks/handlers/evaluator';
@@ -117,11 +119,17 @@ const mockAgents = (workspace: unknown) => {
  * but tests can override these with `server.use`.
  */
 export const handlers = [
+  // Platform liveness probe gating the whole app (PlatformGuard)
+  http.get(`${PLATFORM_BASE_URL}/health/live`, () => HttpResponse.json({ status: 'live' })),
+  http.get(`${PLATFORM_BASE_URL}/apis/auth/discovery`, () =>
+    HttpResponse.json({ auth_enabled: false, oidc: null })
+  ),
+
   ...sampleDatasetsHandlers,
 
   // Evaluator V2 — fixtures loaded on first use to keep initial handler graph smaller
   http.get(
-    `${PLATFORM_BASE_URL}/apis/evaluator/v2/workspaces/:workspace/evaluate/jobs`,
+    `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/:workspace/evaluate/jobs`,
     async ({ request }) => {
       const rejection = rejectLegacySearchParam(request);
       if (rejection) return rejection;
@@ -129,22 +137,19 @@ export const handlers = [
       return HttpResponse.json(metricEvaluationJobsPage);
     }
   ),
-  http.post(
-    `${PLATFORM_BASE_URL}/apis/evaluator/v2/workspaces/:workspace/evaluate/jobs`,
+  http.post(`${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/:workspace/evaluate/jobs`, async () => {
+    const { metricEvaluationJob1 } = await import('@studio/mocks/evaluation/v1/evaluations');
+    return HttpResponse.json(metricEvaluationJob1);
+  }),
+  http.get(
+    `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/:workspace/evaluate/jobs/:name`,
     async () => {
       const { metricEvaluationJob1 } = await import('@studio/mocks/evaluation/v1/evaluations');
       return HttpResponse.json(metricEvaluationJob1);
     }
   ),
   http.get(
-    `${PLATFORM_BASE_URL}/apis/evaluator/v2/workspaces/:workspace/evaluate/jobs/:name`,
-    async () => {
-      const { metricEvaluationJob1 } = await import('@studio/mocks/evaluation/v1/evaluations');
-      return HttpResponse.json(metricEvaluationJob1);
-    }
-  ),
-  http.get(
-    `${PLATFORM_BASE_URL}/apis/evaluator/v2/workspaces/:workspace/evaluate/jobs/:name/logs`,
+    `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/:workspace/evaluate/jobs/:name/logs`,
     ({ params }) => {
       const jobName = params.name as string;
       return HttpResponse.json({
@@ -176,6 +181,10 @@ export const handlers = [
         prev_page: '',
       });
     }
+  ),
+  http.get(
+    `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/:workspace/evaluate/jobs/:name/results`,
+    () => HttpResponse.json({ data: [], pagination: {} })
   ),
 
   // Projects V2 (Platform) — fixtures loaded on first use
@@ -319,7 +328,7 @@ export const handlers = [
   }),
 
   // Jobs V1 (Safe Synthesizer)
-  http.get<never, never, PlatformJobResponsesPage>(`${PLATFORM_BASE_URL}/v1/jobs`, () => {
+  http.get<never, never, HelixJobResponsesPage>(`${PLATFORM_BASE_URL}/v1/jobs`, () => {
     return HttpResponse.json({
       data: [],
       pagination: {
@@ -334,7 +343,7 @@ export const handlers = [
   http.options(`${PLATFORM_BASE_URL}/v1/jobs`, () => new HttpResponse(null, { status: 200 })),
 
   // Jobs V2 (Platform)
-  http.get<never, never, PlatformJobResponsesPage>(
+  http.get<never, never, HelixJobResponsesPage>(
     `${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs`,
     () => {
       return HttpResponse.json({
@@ -349,7 +358,7 @@ export const handlers = [
       });
     }
   ),
-  http.get<never, never, PlatformJobLogPage>(
+  http.get<never, never, HelixJobLogPage>(
     `${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs/:name/logs`,
     () =>
       HttpResponse.json({
@@ -715,6 +724,10 @@ export const handlers = [
       );
     }
   ),
+  http.get(`${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/jobs/package`, () =>
+    HttpResponse.json({ data: [], total: 0 })
+  ),
+  ...agentDeploymentCapabilitiesHandlers,
   http.get(`${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployments`, () =>
     HttpResponse.json({
       data: [
@@ -777,6 +790,7 @@ export const handlers = [
   ...filesetsHandlers,
   ...guardrailsHandlers,
   ...insightsHandlers,
+  ...agentOptimizeJobsHandlers,
 ];
 
 // Re-export EvaluateJob so consumers of this module that previously relied on

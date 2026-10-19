@@ -6,10 +6,11 @@ import uuid
 
 import httpx
 import pytest
-from nemo_platform_ext.client.tls import client_verify_from_env
-from nmp.testing import grant_workspace_role
+from nemo_helix_ext.client.tls import HttpxTLSConfig
+from nhx.testing import grant_workspace_role
 
-from tests.auth_idp.common import jwt_claims, require_capability
+from tests.auth_idp.common import jwt_claims, require_capability, runtime_tls_config
+from tests.auth_idp.runtime_contract import AuthIdpRuntime, JsonObject
 
 pytestmark = [
     pytest.mark.auth_idp,
@@ -23,17 +24,14 @@ ROLE_GRANT_RETRY_TIMEOUT_SECONDS = 10.0
 ROLE_GRANT_RETRY_SLEEP_SECONDS = 0.5
 
 
-def _runtime_verify(auth_idp_runtime) -> str | bool:
-    return getattr(auth_idp_runtime, "verify", client_verify_from_env())
-
-
-def _create_access_key_with_body(auth_idp_runtime, bearer_token: str, body: dict[str, object]) -> dict[str, object]:
+def _create_access_key_with_body(auth_idp_runtime: AuthIdpRuntime, bearer_token: str, body: JsonObject) -> JsonObject:
+    tls_config = runtime_tls_config(auth_idp_runtime)
     response = httpx.post(
         f"{auth_idp_runtime.gateway_base_url}/apis/auth/v2/access-keys",
         json=body,
         headers={"Authorization": f"Bearer {bearer_token}"},
         timeout=REQUEST_TIMEOUT_SECONDS,
-        verify=_runtime_verify(auth_idp_runtime),
+        **tls_config,
     )
     assert response.status_code == 200, response.text
     body = response.json()
@@ -42,7 +40,7 @@ def _create_access_key_with_body(auth_idp_runtime, bearer_token: str, body: dict
     return body
 
 
-def _create_access_key(auth_idp_runtime, bearer_token: str) -> dict[str, object]:
+def _create_access_key(auth_idp_runtime: AuthIdpRuntime, bearer_token: str) -> JsonObject:
     return _create_access_key_with_body(
         auth_idp_runtime,
         bearer_token,
@@ -72,7 +70,7 @@ def _get_until_workspace_role_grant_applies(
     url: str,
     *,
     headers: dict[str, str],
-    verify: str | bool,
+    tls_config: HttpxTLSConfig,
 ) -> httpx.Response:
     deadline = time.monotonic() + ROLE_GRANT_RETRY_TIMEOUT_SECONDS
     while True:
@@ -80,7 +78,7 @@ def _get_until_workspace_role_grant_applies(
             url,
             headers=headers,
             timeout=REQUEST_TIMEOUT_SECONDS,
-            verify=verify,
+            **tls_config,
         )
         if response.status_code == 200:
             return response
@@ -104,19 +102,19 @@ def test_provider_platform_access_key_authenticates_and_uses_workspace_rbac(
     created = _create_access_key(auth_idp_runtime, workload_token.access_token)
     access_key = str(created["token"])
     access_key_claims = jwt_claims(access_key)
-    verify = _runtime_verify(auth_idp_runtime)
+    tls_config = runtime_tls_config(auth_idp_runtime)
 
     assert created["principal"] == workload_token.claims["sub"]
-    assert access_key_claims["nmp_token_type"] == "access_key"
+    assert access_key_claims["nhx_token_type"] == "access_key"
     assert access_key_claims["sub"] == workload_token.claims["sub"]
-    assert access_key_claims["aud"] == "nemo-platform-access-key"
+    assert access_key_claims["aud"] == "nemo-helix-access-key"
     access_key_headers = {"Authorization": f"Bearer {access_key}"}
 
     authenticate_response = httpx.get(
         f"{auth_idp_runtime.gateway_base_url}/apis/auth/authenticate",
         headers=access_key_headers,
         timeout=REQUEST_TIMEOUT_SECONDS,
-        verify=verify,
+        **tls_config,
     )
     authenticate_response.raise_for_status()
     authenticated = authenticate_response.json()
@@ -129,22 +127,64 @@ def test_provider_platform_access_key_authenticates_and_uses_workspace_rbac(
         workspace_url,
         headers=access_key_headers,
         timeout=REQUEST_TIMEOUT_SECONDS,
-        verify=verify,
+        **tls_config,
     )
     assert denied_response.status_code == 403, denied_response.text
 
-    e2e_setup_sdk = auth_idp_runtime.e2e_setup_sdk()
+    e2e_setup_client = auth_idp_runtime.e2e_setup_client()
     role_principals = sorted(_claim_values(access_key_claims.get("groups"))) or [str(created["principal"])]
     for principal in role_principals:
-        grant_workspace_role(e2e_setup_sdk, workspace=auth_idp_workspace, principal=principal, roles=["Viewer"])
+        grant_workspace_role(e2e_setup_client, workspace=auth_idp_workspace, principal=principal, roles=["Viewer"])
 
     allowed_response = _get_until_workspace_role_grant_applies(
         workspace_url,
         headers=access_key_headers,
-        verify=verify,
+        tls_config=tls_config,
     )
     assert allowed_response.status_code == 200, allowed_response.text
     assert allowed_response.headers.get("x-envoy-upstream-service-time") is not None
+    assert allowed_response.json()["name"] == auth_idp_workspace
+
+
+def test_provider_platform_access_key_is_allowed_by_principal_alias_binding(
+    auth_idp_case,
+    auth_idp_runtime,
+    auth_idp_workspace,
+):
+    require_capability(auth_idp_case, "platform_access_keys")
+    require_capability(auth_idp_case, "workload_provider_token")
+    require_capability(auth_idp_case, "workspace_rbac")
+
+    workload_token = auth_idp_runtime.workload_provider_token()
+    created = _create_access_key(auth_idp_runtime, workload_token.access_token)
+    access_key = str(created["token"])
+    access_key_headers = {"Authorization": f"Bearer {access_key}"}
+    tls_config = runtime_tls_config(auth_idp_runtime)
+    workspace_url = f"{auth_idp_runtime.gateway_base_url}/apis/entities/v2/workspaces/{auth_idp_workspace}"
+
+    denied_response = httpx.get(
+        workspace_url,
+        headers=access_key_headers,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+        **tls_config,
+    )
+    assert denied_response.status_code == 403, denied_response.text
+
+    principal = str(created["principal"])
+    grant_workspace_role(
+        auth_idp_runtime.e2e_setup_client(),
+        workspace=auth_idp_workspace,
+        principal=principal,
+        roles=["Viewer"],
+    )
+
+    allowed_response = _get_until_workspace_role_grant_applies(
+        workspace_url,
+        headers=access_key_headers,
+        tls_config=tls_config,
+    )
+
+    assert allowed_response.status_code == 200, allowed_response.text
     assert allowed_response.json()["name"] == auth_idp_workspace
 
 
@@ -176,13 +216,13 @@ def test_provider_platform_access_key_rejects_invalid_key(
     created = _create_access_key(auth_idp_runtime, workload_token.access_token)
     invalid_access_key = _tamper_jwt(str(created["token"]))
     invalid_access_key_headers = {"Authorization": f"Bearer {invalid_access_key}"}
-    verify = _runtime_verify(auth_idp_runtime)
+    tls_config = runtime_tls_config(auth_idp_runtime)
 
     authenticate_response = httpx.get(
         f"{auth_idp_runtime.gateway_base_url}/apis/auth/authenticate",
         headers=invalid_access_key_headers,
         timeout=REQUEST_TIMEOUT_SECONDS,
-        verify=verify,
+        **tls_config,
     )
     assert authenticate_response.status_code == 401, authenticate_response.text
 
@@ -190,7 +230,7 @@ def test_provider_platform_access_key_rejects_invalid_key(
         f"{auth_idp_runtime.gateway_base_url}/apis/entities/v2/workspaces",
         headers=invalid_access_key_headers,
         timeout=REQUEST_TIMEOUT_SECONDS,
-        verify=verify,
+        **tls_config,
     )
     assert protected_response.status_code == 401, protected_response.text
 
@@ -207,11 +247,20 @@ def test_provider_platform_access_key_ignores_spoofed_principal_headers(
     created = _create_access_key(auth_idp_runtime, workload_token.access_token)
     access_key_headers = {
         "Authorization": f"Bearer {created['token']}",
-        "X-NMP-Principal-Id": "service:bootstrap",
-        "X-NMP-Principal-Email": "attacker@example.com",
+        "X-NHX-Principal-Id": "service:bootstrap",
+        "X-NHX-Actor-Account-Id": "account-attacker",
+        "X-NHX-Actor-Aliases": "service:bootstrap,attacker@example.com",
+        "X-NHX-Principal-Email": "attacker@example.com",
+        "X-NHX-Principal-Groups": "platform-admins",
+        "X-NHX-Principal-On-Behalf-Of": "user:attacker",
+        "X-NHX-Principal-On-Behalf-Of-Email": "attacker@example.com",
+        "X-NHX-Principal-On-Behalf-Of-Groups": "platform-admins",
+        "X-NHX-Subject-Account-Id": "account-attacker-subject",
+        "X-NHX-Subject-Aliases": "user:attacker,attacker@example.com",
+        "X-NHX-Scopes": "platform:write",
     }
     workspace_name = f"access-key-spoof-{uuid.uuid4().hex[:8]}"
-    verify = _runtime_verify(auth_idp_runtime)
+    tls_config = runtime_tls_config(auth_idp_runtime)
 
     try:
         create_response = httpx.post(
@@ -219,7 +268,7 @@ def test_provider_platform_access_key_ignores_spoofed_principal_headers(
             json={"name": workspace_name, "description": "Access-key spoofed header check"},
             headers=access_key_headers,
             timeout=REQUEST_TIMEOUT_SECONDS,
-            verify=verify,
+            **tls_config,
         )
         create_response.raise_for_status()
 
@@ -231,5 +280,5 @@ def test_provider_platform_access_key_ignores_spoofed_principal_headers(
             f"{auth_idp_runtime.gateway_base_url}/apis/entities/v2/workspaces/{workspace_name}",
             headers=access_key_headers,
             timeout=REQUEST_TIMEOUT_SECONDS,
-            verify=verify,
+            **tls_config,
         )

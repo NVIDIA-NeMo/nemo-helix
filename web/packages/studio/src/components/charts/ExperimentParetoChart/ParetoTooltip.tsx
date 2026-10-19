@@ -8,13 +8,16 @@ import type {
 } from '@studio/components/charts/ExperimentParetoChart/utils';
 import type { FC } from 'react';
 
-/** Format a metric value for tooltips: cost as USD, latency in ms, evaluator scores as-is. */
+/** Format a metric value for tooltips: cost as USD, latency in ms, whole tokens, evaluator scores as-is. */
 const formatMetricValue = (metric: ParetoMetric, value: number): string => {
   if (metric.id === 'cost_usd') {
     return `$${value.toLocaleString(undefined, { maximumFractionDigits: 4 })}`;
   }
   if (metric.id === 'latency_ms') {
     return `${Math.round(value).toLocaleString()} ms`;
+  }
+  if (metric.id === 'tokens') {
+    return Math.round(value).toLocaleString();
   }
   return value.toLocaleString(undefined, { maximumFractionDigits: 3 });
 };

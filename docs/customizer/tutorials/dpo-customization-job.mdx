@@ -1,12 +1,400 @@
 ---
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-
 title: "DPO Customization"
 description: ""
 ---
 
-<NotebookViewer
-  name="dpo-customization-job"
-  colabUrl="https://colab.research.google.com/github/NVIDIA-NeMo/nemo-platform/blob/main/docs/customizer/tutorials/dpo-customization-job.ipynb"
-/>
+<div className="notebook-actions">
+  <a href="https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/customizer/tutorials/dpo-customization-job.ipynb" target="_blank" rel="noopener noreferrer" className="notebook-actions__button notebook-actions__button--primary">
+    <span aria-hidden="true">&#9654;</span><span>Run in Google Colab</span>
+  </a>
+</div>
+
+Learn how to use NeMo Helix to align a model with **DPO** (Direct Preference Optimization) on a preference dataset. For each prompt, DPO trains on a *chosen* (preferred) and a *rejected* response so the model prefers the chosen style — no separate reward model required.
+
+This tutorial uses the `rl` customization backend (powered by [NVIDIA NeMo-RL](https://github.com/NVIDIA-NeMo/RL)), which runs DPO on a **Ray** cluster. Unlike the [SFT](/documentation/customizer-reference/tutorials/sft-customization-job) and [LoRA](/documentation/customizer-reference/tutorials/lora-customization-job) tutorials (Docker GPU jobs), `rl` requires a **Kubernetes-backed** NeMo Helix deployment. DPO here is **full-weight** (no LoRA/adapter); the output is a full model entity. Full-weight DPO keeps a policy and a reference model in memory, so this tutorial uses [Qwen/Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B) to fit on one GPU.
+
+**Time to complete:** approximately 45-60 minutes. Job duration increases with model and dataset size.
+
+## Prerequisites
+
+Before starting this tutorial, ensure you have:
+
+1. **Completed the [Quickstart](/documentation/get-started)** to install NeMo Helix and Python SDK.
+2. **Installed the Python SDK** (PyPI wrapper: `pip install "nemo-helix[all,nemo-rl-plugin]"` so `RlJobInput` is available; source checkout: run `make bootstrap` from the repository root). `nemo-helix[all]` does not include the RL plugin.
+3. **Installed the `datasets` package**: `pip install datasets`.
+4. **A platform configured with `platform.runtime: kubernetes`.** The `rl` (DPO) backend provisions a Ray cluster and has **no local Docker fallback** — `submit` fails fast on a Docker-runtime platform. Multi-node jobs (`parallelism.num_nodes > 1`) additionally require the platform-side `NHX_RL_MULTINODE_SHARED_STORAGE_PATH`.
+5. **Optional: a Hugging Face token**, exported as `HF_TOKEN`, if you substitute a gated base model. This tutorial's `Qwen/Qwen3-0.6B` is public.
+6. **At least one GPU with CUDA 13+** and a GPU execution profile (`nemo jobs list-execution-profiles`).
+
+## Quick Start
+
+### 1. Initialize the SDK
+
+The SDK connects to the deployment in your current CLI context, using its base URL, default workspace, and credentials. To connect to another deployment, refer to [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments). These examples use the `default` workspace. If your current CLI context uses a different workspace, run `nemo config set --workspace default` first.
+
+In environments without a CLI configuration file, such as Google Colab, set `NHX_BASE_URL` (and `NHX_ACCESS_TOKEN` for an authenticated deployment) before you create the client. `NemoClient.from_config()` reads both:
+
+```python
+import os
+
+os.environ["NHX_BASE_URL"] = "<YOUR_NHX_BASE_URL>"
+```
+
+```python
+import json
+import os
+import time
+import uuid
+from pathlib import Path
+
+from IPython.display import clear_output
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.models.types import (
+    ContainerExecutorConfig,
+    CreateModelDeploymentConfigRequest,
+    CreateModelDeploymentRequest,
+    CreateModelEntityRequest,
+    Engine,
+    ModelDeploymentConfigModelSpec,
+)
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest, HelixSecretResponse
+from nemo_customizer.sdk import Customization
+from nemo_rl_plugin.schema import RlJobInput
+from filesets import FilesetFileSystem
+from nemo_helix_plugin.files.client import FilesClient
+from pydantic import SecretStr
+from nemo_helix_plugin.schema import SecretRef
+
+
+def max_wait_time_checker(seconds: int, label: str = ""):
+    """Return a check() that raises TimeoutError once `seconds` have elapsed."""
+    start = time.time()
+
+    def check():
+        if time.time() - start > seconds:
+            raise TimeoutError(f"{label} took longer than {seconds} seconds")
+
+    return check
+
+
+client = NemoClient.from_config()
+customization = Customization.from_client(client)
+```
+
+### 2. Prepare the Preference Dataset
+
+DPO trains on **preference data**. The `rl` backend takes a **single** dataset fileset that holds both `training.jsonl` and `validation.jsonl`, and auto-detects the row schema from the first line. Three preference formats are supported (see the platform's `BinaryPreferenceDatasetItemSchema` / `HelpSteer3DatasetItemSchema` / `Tulu3PreferenceDatasetItemSchema`):
+
+#### Binary Preference Format
+
+Simple `prompt` / `chosen` / `rejected` (the `prompt` may be a string or a list of chat messages):
+
+```json
+{"prompt": "What is the capital of France?", "chosen": "The capital of France is Paris.", "rejected": "I'm not sure."}
+```
+
+#### HelpSteer3 Format (used here)
+
+A conversation `context` (string or chat messages), two candidate `response1` / `response2`, and a signed `overall_preference` in -3..3 — **negative** means response 1 is preferred, **positive** means response 2, **0** is a tie. This is the **raw** schema of `nvidia/HelpSteer3`, so no conversion is needed:
+
+```json
+{"context": [{"role": "user", "content": "Explain how to use git rebase"}], "response1": "...", "response2": "...", "overall_preference": -2}
+```
+
+#### Tulu3 Preference Format
+
+Full chat conversations for both the chosen and rejected branches (each a list of messages ending with the assistant turn):
+
+```json
+{"chosen": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "preferred"}], "rejected": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "dispreferred"}]}
+```
+
+#### Download nvidia/HelpSteer3
+
+We use [nvidia/HelpSteer3](https://huggingface.co/datasets/nvidia/HelpSteer3) (the `preference` subset), NVIDIA's open preference dataset. It ships native `train` and `validation` splits and matches the HelpSteer3 schema above, so we upload the rows **as-is** — the platform's `HelpSteer3Dataset` loader handles the `overall_preference` semantics (including ties) at training time.
+
+```python
+from datasets import load_dataset, Dataset
+
+print("Loading dataset nvidia/HelpSteer3 (preference subset)")
+ds = load_dataset("nvidia/HelpSteer3", "preference")
+
+# Small subsets keep the tutorial fast; larger sets train better but take longer.
+training_size = 3000
+validation_size = 300
+DATASET_NAME = "dpo-dataset"
+DATASET_PATH = Path("dpo-dataset").absolute()
+os.makedirs(DATASET_PATH, exist_ok=True)
+
+train_dataset = ds["train"]
+validation_dataset = ds["validation"]
+assert isinstance(train_dataset, Dataset) and isinstance(validation_dataset, Dataset)
+
+# Save raw HelpSteer3 rows directly — no conversion. The platform detects the
+# HelpSteer3 schema from the row keys (context / response1 / response2 / overall_preference).
+train_dataset.select(range(training_size)).to_json(f"{DATASET_PATH}/training.jsonl")
+validation_dataset.select(range(validation_size)).to_json(f"{DATASET_PATH}/validation.jsonl")
+
+print(f"Saved training.jsonl ({training_size} rows) and validation.jsonl ({validation_size} rows)")
+with open(f"{DATASET_PATH}/training.jsonl") as f:
+    sample = json.loads(f.readline())
+print("Sample keys:", sorted(sample.keys()))
+print("overall_preference:", sample["overall_preference"])
+```
+
+### 3. Create FileSet and Upload Preference Data
+
+Upload both JSONL files to a single FileSet so the DPO job can read them.
+
+```python
+try:
+    client.files.create_fileset(
+        body=CreateFilesetRequest(name=DATASET_NAME, description="DPO preference data"),
+    ).data()
+    print(f"Created fileset: {DATASET_NAME}")
+except ConflictError:
+    print(f"Fileset '{DATASET_NAME}' already exists, continuing...")
+
+fs = FilesetFileSystem(client=FilesClient.from_client(client))
+fs.put(lpath=DATASET_PATH, rpath=f"default/{DATASET_NAME}/", recursive=True)
+
+print("Preference data:")
+print(json.dumps([f.model_dump() for f in client.files.list_files(name=DATASET_NAME).data().data], indent=2, default=str))
+```
+
+### 4. Secrets Setup
+
+The base model (`Qwen/Qwen3-0.6B`) is public, so the token is optional. For a gated model, store your Hugging Face token as a platform secret named `hf-token` and reference it on the model fileset.
+
+```python
+HF_TOKEN = os.getenv("HF_TOKEN")
+
+def create_or_get_secret(name: str, value: str | None, label: str) -> HelixSecretResponse | None:
+    if not value:
+        print(f"{label} is not set - skipping setting secret")
+        return None
+    try:
+        secret = client.secrets.create_secret(
+            body=HelixSecretCreateRequest(name=name, value=SecretStr(value)),
+        ).data()
+        print(f"Created secret: {name}")
+        return secret
+    except ConflictError:
+        print(f"Secret '{name}' already exists, continuing...")
+        return client.secrets.get_secret(name=name).data()
+
+
+hf_secret = create_or_get_secret("hf-token", HF_TOKEN, "HF_TOKEN")
+```
+
+### 5. Create Base Model FileSet and Model Entity
+
+DPO starts from an instruction-tuned base model. The model entity's spec is inferred asynchronously after creation.
+
+```python
+HF_REPO_ID = "Qwen/Qwen3-0.6B"
+MODEL_NAME = "qwen3-0.6b"
+
+storage = HuggingfaceStorageConfig(
+    repo_id=HF_REPO_ID,
+    repo_type="model",
+    token_secret=SecretRef(hf_secret.name) if hf_secret else None,
+)
+
+try:
+    base_model_fs = client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=MODEL_NAME,
+            description="Qwen3 0.6B base model",
+            storage=storage,
+        ),
+    ).data()
+    print(f"Created base model fileset: {MODEL_NAME}")
+except ConflictError:
+    base_model_fs = client.files.get_fileset(name=MODEL_NAME).data()
+    print("Base model fileset already exists.")
+
+try:
+    base_model = client.models.create_model(
+        body=CreateModelEntityRequest(name=MODEL_NAME, fileset=f"default/{MODEL_NAME}"),
+    ).data()
+except ConflictError:
+    base_model = client.models.get_model(name=MODEL_NAME).data()
+
+print(f"Base model fileset: fileset://default/{base_model.name}")
+
+# Wait for the ModelSpec to be inferred from the checkpoint.
+check = max_wait_time_checker(600, "Model spec")
+while not base_model.spec:
+    check()
+    time.sleep(10)
+    base_model = client.models.get_model(name=MODEL_NAME).data()
+print("Model spec ready")
+```
+
+### 6. Create the DPO Customization Job
+
+Submit a DPO job to the `rl` backend with `RlJobInput`. Note the DPO-specific shape:
+
+- `model` is a string ref to the model entity; `dataset` is a **single** string ref to the preference fileset (holding both files).
+- The training method is `{"type": "dpo", ...}` — full-weight, no `finetuning_type`/LoRA.
+- `ref_policy_kl_penalty` is **β** (DPO paper): how strongly the policy stays tied to the reference model.
+- `rl` auto-generates the job id (`rl-<hex>`); read it back from the response.
+
+The learning rate, β, and weight decay follow the NeMo-RL reference config [`dpo.yaml`](https://github.com/NVIDIA-NeMo/RL/blob/r0.8.0/examples/configs/dpo.yaml). `max_seq_length` is raised to 4096 so long HelpSteer3 conversations fit.
+
+Other configurable knobs: `optimizer_type`, `adam_eps`, `activation_checkpointing`, `keep_top_k`, `val_at_end`, `preference_loss_weight`, `sft_loss_weight`. Run `nemo customization rl explain` for the live schema.
+
+```python
+job_suffix = uuid.uuid4().hex[:8]
+OUTPUT_NAME = f"qwen3-0-6b-dpo-{job_suffix}"
+
+spec = RlJobInput(
+    model=f"default/{base_model.name}",
+    dataset=f"default/{DATASET_NAME}",
+    training={
+        "type": "dpo",
+        "epochs": 1,
+        "batch_size": 32,
+        "micro_batch_size": 1,
+        "learning_rate": 5e-6,
+        "weight_decay": 0.1,
+        "max_seq_length": 4096,
+        "ref_policy_kl_penalty": 0.05,
+        "parallelism": {
+            "num_nodes": 1,
+            "num_gpus_per_node": 1,
+            "tensor_parallel_size": 1,
+            "pipeline_parallel_size": 1,
+        },
+    },
+    output={"name": OUTPUT_NAME},
+)
+
+# `rl` auto-generates the job id (rl-<hex>); do not pass name=.
+job = customization.rl.jobs.create(spec=spec, workspace="default")
+print(f"Job ID: {job.job.name}")
+print(f"Output model: {OUTPUT_NAME}")
+```
+
+### 7. Track Training Progress
+
+The DPO job runs four steps: download -> **dpo-training** (Ray) -> upload -> model-entity. Each update shows the current step, how much of that step is done, and the latest loss. Once the backend reports a loss history, the cell charts loss by step.
+
+```python
+import time
+
+status = None
+while True:
+    status = client.jobs.get_job_status(name=job.job.name, workspace="default").data()
+    print(f"Status: {status.status}")
+    if status.status.lower() in ("completed", "failed", "cancelled", "error"):
+        break
+    time.sleep(15)
+
+assert status.status.lower() == "completed"
+
+```
+
+**Interpreting DPO training metrics** (in `status_details.metrics`):
+
+- **`loss`** — the DPO loss; should trend down as the policy learns to separate chosen from rejected.
+- **Reward margin** (chosen minus rejected reward) — should trend **up**: the model increasingly prefers chosen responses.
+- **Validation `loss`** — watch for divergence from training loss (overfitting). Raise `ref_policy_kl_penalty` (β) or add `sft_loss_weight` if the policy drifts too far from the reference.
+
+### 8. Validate the Output Model
+
+DPO produces a **full-weight model entity** (not an adapter). Confirm it was registered.
+
+```python
+model_entity = client.models.get_model(name=OUTPUT_NAME).data()
+print(model_entity.model_dump_json(indent=2))
+```
+
+### 9. Deploy and Evaluate (optional)
+
+The DPO output is a full model, so it deploys like any full-weight checkpoint (see the [Full SFT](/documentation/customizer-reference/tutorials/sft-customization-job) tutorial for details). We deploy with vLLM and send a chat completion.
+
+```python
+deploy_suffix = uuid.uuid4().hex[:8]
+DEPLOYMENT_CONFIG_NAME = f"dpo-deployment-cfg-{deploy_suffix}"
+DEPLOYMENT_NAME = f"dpo-deployment-{deploy_suffix}"
+
+deployment_config = client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name=DEPLOYMENT_CONFIG_NAME,
+        engine=Engine.VLLM,
+        model_spec=ModelDeploymentConfigModelSpec(model_namespace="default", model_name=OUTPUT_NAME),
+        executor_config=ContainerExecutorConfig(
+            gpu=1,
+            image_name="docker.io/vllm/vllm-openai",
+            image_tag="v0.22.1",
+        ),
+    ),
+).data()
+
+deployment = client.models.create_deployment(
+    body=CreateModelDeploymentRequest(name=DEPLOYMENT_NAME, config=deployment_config.name),
+).data()
+print(f"Deployment name: {deployment.name}")
+
+```
+
+```python
+check = max_wait_time_checker(1800, "Deployment")
+while True:
+    check()
+    deployment_status = client.models.get_deployment(name=deployment.name).data()
+    clear_output(wait=True)
+    print(f"Deployment status: {deployment_status.status}")
+    if deployment_status.status in ("READY", "RUNNING"):
+        if not client.models.wait_for_gateway(deployment.name, workspace="default", timeout=60):
+            raise RuntimeError("Inference gateway did not become ready")
+        break
+    if deployment_status.status in ("FAILED", "ERROR", "TERMINATED", "LOST"):
+        raise RuntimeError(f"Deployment failed with status: {deployment_status.status}")
+    time.sleep(15)
+```
+
+```python
+messages = [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "Write a short, friendly email to a colleague asking to reschedule our meeting to Thursday."},
+]
+
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
+
+response = InferenceGatewayClient.from_client(client).provider_post(
+    name=deployment.name,
+    workspace="default",
+    trailing_uri="v1/chat/completions",
+    body=JsonBody(
+        {
+            "model": f"default/{OUTPUT_NAME}",
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": 256,
+            # Qwen3 reasons by default; turn it off to get the email directly.
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+    ),
+).data()
+print("Model output:\n")
+print(response["choices"][0]["message"]["content"])
+```
+
+## Conclusion
+
+You aligned a base model with **DPO** on NeMo Helix using the `rl` backend:
+
+- Uploaded a HelpSteer3 preference dataset **as-is** (the platform detects the schema natively).
+- Submitted a full-weight DPO job that ran on a Ray cluster via the Kubernetes executor.
+- Registered the output as a full model entity and (optionally) deployed it for inference.
+
+**Next steps:** tune the alignment strength with `ref_policy_kl_penalty` (β), add `sft_loss_weight` to anchor the policy to the chosen responses, enable `activation_checkpointing` for memory headroom, or scale up with `parallelism`. See the [Training Configuration](/documentation/customizer-reference/manage-customization-jobs/training-configuration) reference for the full hyperparameter set.

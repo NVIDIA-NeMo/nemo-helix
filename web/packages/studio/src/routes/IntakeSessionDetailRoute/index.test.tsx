@@ -1,14 +1,21 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getGetSessionQueryKey } from '@nemo/sdk/generated/platform/sessions';
+import { getGetSpanQueryKey, getListSpansQueryKey } from '@nemo/sdk/generated/platform/spans';
+import { getGetTraceQueryKey, getListTracesQueryKey } from '@nemo/sdk/generated/platform/traces';
 import {
   mockSessionById,
   mockSpanById,
   mockSpansPage,
+  mockTraceById,
   mockTracesPage,
 } from '@studio/mocks/intake/telemetry';
+import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { IntakeSessionDetailRoute } from '@studio/routes/IntakeSessionDetailRoute';
+import { getAgentDetailRoute } from '@studio/routes/utils';
+import { mockFeatureFlags } from '@studio/tests/util/mockFeatureFlags';
 import { renderRoute, screen, waitFor, within } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -36,6 +43,8 @@ const renderSessionDetail = (sessionId = 'session-agent-run-001', search = '') =
   });
 
 describe('IntakeSessionDetailRoute', () => {
+  afterEach(() => sessionStorage.clear());
+
   it('hydrates the session header and all trace trajectories with summary payloads', async () => {
     const sessionDetailRequests: string[] = [];
     const traceListRequests: URL[] = [];
@@ -43,13 +52,13 @@ describe('IntakeSessionDetailRoute', () => {
     const spanListRequests: URL[] = [];
     const spanDetailRequests: string[] = [];
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/sessions/:sessionId', ({ params }) => {
+      http.get(mockApiUrl(getGetSessionQueryKey, ':workspace', ':sessionId'), ({ params }) => {
         const sessionId = String(params['sessionId']);
         sessionDetailRequests.push(sessionId);
         const session = mockSessionById(sessionId);
         return session ? HttpResponse.json(session) : new HttpResponse(null, { status: 404 });
       }),
-      http.get('*/apis/intake/v2/workspaces/:workspace/traces', ({ request }) => {
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), ({ request }) => {
         const url = new URL(request.url);
         traceListRequests.push(url);
         const data = mockTracesPage.data
@@ -65,11 +74,11 @@ describe('IntakeSessionDetailRoute', () => {
           },
         });
       }),
-      http.get('*/apis/intake/v2/workspaces/:workspace/traces/:traceId', ({ params }) => {
+      http.get(mockApiUrl(getGetTraceQueryKey, ':workspace', ':traceId'), ({ params }) => {
         traceDetailRequests.push(String(params['traceId']));
         return new HttpResponse(null, { status: 500 });
       }),
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans', ({ request }) => {
+      http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), ({ request }) => {
         const url = new URL(request.url);
         spanListRequests.push(url);
         const data = mockSpansPage.data.filter(
@@ -85,7 +94,7 @@ describe('IntakeSessionDetailRoute', () => {
           },
         });
       }),
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans/:spanId', ({ params }) => {
+      http.get(mockApiUrl(getGetSpanQueryKey, ':workspace', ':spanId'), ({ params }) => {
         spanDetailRequests.push(String(params['spanId']));
         return new HttpResponse(null, { status: 500 });
       })
@@ -100,6 +109,7 @@ describe('IntakeSessionDetailRoute', () => {
     expect(within(sessionSummary).getByText('2,948')).toBeInTheDocument();
     expect(screen.getByText('Tree')).toBeInTheDocument();
     expect(screen.getByText('List')).toBeInTheDocument();
+    expect(screen.queryByText('Graph')).not.toBeInTheDocument();
     expect(
       screen.queryByText('Can I deploy this model in a private workspace?')
     ).not.toBeInTheDocument();
@@ -137,12 +147,12 @@ describe('IntakeSessionDetailRoute', () => {
     expect(spanDetailRequests).toEqual([]);
   });
 
-  it('always sources the detail header from the session endpoint', async () => {
+  it('shows trace metrics when a trace is selected', async () => {
     const sessionDetailRequests: string[] = [];
     const session = mockSessionById('session-agent-run-001');
     expect(session).toBeDefined();
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/sessions/:sessionId', ({ params }) => {
+      http.get(mockApiUrl(getGetSessionQueryKey, ':workspace', ':sessionId'), ({ params }) => {
         sessionDetailRequests.push(String(params['sessionId']));
         return HttpResponse.json({ ...session!, span_count: 47, total_tokens: 9999 });
       })
@@ -150,10 +160,29 @@ describe('IntakeSessionDetailRoute', () => {
 
     renderSessionDetail('session-agent-run-001', '?traceId=trace-agent-run-001');
 
-    const sessionSummary = await screen.findByTestId('session-summary-header');
-    expect(within(sessionSummary).getByText('47')).toBeInTheDocument();
-    expect(within(sessionSummary).getByText('9,999')).toBeInTheDocument();
+    const traceSummary = await screen.findByTestId('session-summary-header');
+    expect(within(traceSummary).getByText('4')).toBeInTheDocument();
+    expect(within(traceSummary).getByText('1,754')).toBeInTheDocument();
+    expect(within(traceSummary).queryByText('47')).not.toBeInTheDocument();
     expect(sessionDetailRequests).toEqual(['session-agent-run-001']);
+  });
+
+  it('links the trace agent from the trace summary header', async () => {
+    const trace = mockTraceById('trace-agent-run-001');
+    expect(trace).toBeDefined();
+    server.use(
+      http.get(mockApiUrl(getGetTraceQueryKey, ':workspace', ':traceId'), () =>
+        HttpResponse.json({ ...trace!, agent_name: 'react-agent' })
+      )
+    );
+
+    renderSessionDetail('session-agent-run-001', '?traceId=trace-agent-run-001');
+
+    const traceSummary = await screen.findByTestId('session-summary-header');
+    expect(await within(traceSummary).findByRole('link', { name: 'react-agent' })).toHaveAttribute(
+      'href',
+      getAgentDetailRoute('default', 'react-agent')
+    );
   });
 
   it('navigates session to trace to span and back to the session summary', async () => {
@@ -166,12 +195,9 @@ describe('IntakeSessionDetailRoute', () => {
       within(trajectory).getAllByText('Explain private workspace access controls')[0]
     );
 
-    expect(screen.getByText('Session session-agent-run-001')).toBeInTheDocument();
-    expect(
-      screen.queryByText('Trace Explain private workspace access controls')
-    ).not.toBeInTheDocument();
+    expect(screen.getByText('Trace Explain private workspace access controls')).toBeInTheDocument();
     expect(screen.getAllByTestId('session-summary-header')).toHaveLength(1);
-    expect(within(screen.getByTestId('session-summary-header')).getByText('6')).toBeInTheDocument();
+    expect(within(screen.getByTestId('session-summary-header')).getByText('2')).toBeInTheDocument();
     expect(screen.getByTestId('location')).toHaveTextContent(
       '/workspaces/default/intake/sessions/session-agent-run-001?traceId=trace-agent-run-003'
     );
@@ -190,6 +216,7 @@ describe('IntakeSessionDetailRoute', () => {
     expect(screen.getByTestId('location')).toHaveTextContent(
       '/workspaces/default/intake/sessions/session-agent-run-001'
     );
+    expect(within(screen.getByTestId('session-summary-header')).getByText('6')).toBeInTheDocument();
   });
 
   it('deep-links a span from any expanded trace in the session summary', async () => {
@@ -208,7 +235,7 @@ describe('IntakeSessionDetailRoute', () => {
         'Generate access-control guidance'
       )
     ).toBeInTheDocument();
-    expect(screen.getByText('Session session-agent-run-001')).toBeInTheDocument();
+    expect(screen.getByText('Trace Explain private workspace access controls')).toBeInTheDocument();
     expect(screen.getByTestId('trace-trajectory-sidebar')).toBeInTheDocument();
   });
 
@@ -221,7 +248,7 @@ describe('IntakeSessionDetailRoute', () => {
       failSpans = () =>
         resolve(HttpResponse.json({ detail: 'Could not load span summaries' }, { status: 500 }));
     });
-    server.use(http.get('*/apis/intake/v2/workspaces/:workspace/spans', () => spansResponse));
+    server.use(http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), () => spansResponse));
 
     renderSessionDetail('session-agent-run-001', '?traceId=trace-agent-run-001');
 
@@ -245,7 +272,7 @@ describe('IntakeSessionDetailRoute', () => {
     };
     const spanDetailRequests: string[] = [];
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans', () =>
+      http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), () =>
         HttpResponse.json({
           ...mockSpansPage,
           data: [erroredChild],
@@ -256,7 +283,7 @@ describe('IntakeSessionDetailRoute', () => {
           },
         })
       ),
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans/:spanId', ({ params }) => {
+      http.get(mockApiUrl(getGetSpanQueryKey, ':workspace', ':spanId'), ({ params }) => {
         spanDetailRequests.push(String(params['spanId']));
         return HttpResponse.json(erroredChild);
       })
@@ -268,6 +295,46 @@ describe('IntakeSessionDetailRoute', () => {
     await waitFor(() => {
       expect(screen.getAllByText('Only the child span failed.')).toHaveLength(1);
     });
+  });
+
+  it('keeps the root failure visible while a successful child is selected', async () => {
+    const rootSpan = mockSpanById('span-root-002')!;
+    const successfulChild = {
+      ...mockSpanById('span-llm-001')!,
+      span_id: 'span-child-after-root-error',
+      session_id: rootSpan.session_id,
+      trace_id: rootSpan.trace_id,
+      parent_span_id: rootSpan.span_id,
+      name: 'Format available troubleshooting context',
+    };
+    server.use(
+      http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), () =>
+        HttpResponse.json({
+          ...mockSpansPage,
+          data: [rootSpan, successfulChild],
+          pagination: {
+            ...mockSpansPage.pagination,
+            current_page_size: 2,
+            total_results: 2,
+          },
+        })
+      ),
+      http.get(mockApiUrl(getGetSpanQueryKey, ':workspace', ':spanId'), ({ params }) => {
+        if (params['spanId'] === successfulChild.span_id) {
+          return HttpResponse.json(successfulChild);
+        }
+        return HttpResponse.json(rootSpan);
+      })
+    );
+
+    renderSessionDetail(
+      rootSpan.session_id,
+      `?traceId=${rootSpan.trace_id}&spanId=${successfulChild.span_id}`
+    );
+
+    expect(await screen.findByText('Trace failed')).toBeInTheDocument();
+    expect(screen.getByText('Knowledge base lookup timed out after 5s.')).toBeInTheDocument();
+    expect(screen.getAllByText('Format available troubleshooting context')).not.toHaveLength(0);
   });
 
   it('preserves the session view mode when selecting a trace', async () => {
@@ -288,6 +355,114 @@ describe('IntakeSessionDetailRoute', () => {
     expect(await screen.findByText('Generate access-control guidance')).toBeInTheDocument();
   });
 
+  it('switches a selected trace between graph modes', async () => {
+    mockFeatureFlags({ traceGraphEnabled: true });
+    const user = userEvent.setup();
+    renderSessionDetail('session-agent-run-001', '?traceId=trace-agent-run-001');
+
+    await screen.findByText('Trace Answer customer policy question');
+    await user.click(screen.getByText('Graph'));
+
+    expect(await screen.findByText('Grouped')).toBeInTheDocument();
+    expect(screen.getByText('All spans')).toBeInTheDocument();
+    expect(screen.getByText('2 groups from 2 spans')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Longest path' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Most tokens' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByText('All spans'));
+    expect(screen.getByText('2 spans and 1 parent link')).toBeInTheDocument();
+    const longestPath = screen.getByRole('button', { name: 'Longest path' });
+    expect(longestPath).toHaveAttribute('aria-pressed', 'false');
+    await user.click(longestPath);
+    expect(longestPath).toHaveAttribute('aria-pressed', 'true');
+
+    const mostTokens = screen.getByRole('button', { name: 'Most tokens' });
+    expect(mostTokens).toHaveAttribute('aria-pressed', 'false');
+    await user.click(mostTokens);
+    await waitFor(() => expect(mostTokens).toHaveAttribute('aria-pressed', 'true'));
+    expect(screen.getByTestId('location')).toHaveTextContent('spanId=span-llm-001');
+  });
+
+  it('loads graph spans by trace when the session page does not contain them', async () => {
+    mockFeatureFlags({ traceGraphEnabled: true });
+    const traceId = 'trace-agent-run-003';
+    const traceSpans = mockSpansPage.data.filter((span) => span.trace_id === traceId);
+    server.use(
+      http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), ({ request }) => {
+        const requestedTraceId = new URL(request.url).searchParams.get('filter[trace_id]');
+        const data = requestedTraceId === traceId ? traceSpans : [];
+        return HttpResponse.json({
+          ...mockSpansPage,
+          data,
+          pagination: {
+            ...mockSpansPage.pagination,
+            current_page_size: data.length,
+            total_results: data.length,
+          },
+        });
+      })
+    );
+    const user = userEvent.setup();
+    renderSessionDetail('session-agent-run-001', `?traceId=${traceId}`);
+
+    const trajectory = await screen.findByRole('navigation', { name: 'Trace trajectory' });
+    expect(within(trajectory).getByText('Generate access-control guidance')).toBeInTheDocument();
+
+    await user.click(await screen.findByText('Graph'));
+
+    expect(await screen.findByText('2 groups from 2 spans')).toBeInTheDocument();
+  });
+
+  it('warns when the trace span request fails and session spans are used', async () => {
+    mockFeatureFlags({ traceGraphEnabled: true });
+    server.use(
+      http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), ({ request }) => {
+        const traceId = new URL(request.url).searchParams.get('filter[trace_id]');
+        return traceId ? new HttpResponse(null, { status: 500 }) : HttpResponse.json(mockSpansPage);
+      })
+    );
+
+    renderSessionDetail('session-agent-run-001', '?traceId=trace-agent-run-001');
+
+    expect(
+      await screen.findByText(
+        'Could not load all spans for this trace. Showing the spans already loaded for the session.'
+      )
+    ).toBeInTheDocument();
+  });
+
+  it('restores graph mode separately for each trace', async () => {
+    mockFeatureFlags({ traceGraphEnabled: true });
+    const user = userEvent.setup();
+    sessionStorage.setItem('nemo-studio:trace-graph-mode:default:trace-agent-run-001', 'all');
+    sessionStorage.setItem('nemo-studio:trace-graph-mode:default:trace-agent-run-003', 'grouped');
+    renderSessionDetail('session-agent-run-001', '?traceId=trace-agent-run-001');
+
+    await user.click(await screen.findByText('Graph'));
+    expect(screen.getByRole('radio', { name: 'All spans' })).toBeChecked();
+
+    await user.click(screen.getByText('Tree'));
+    await user.click(screen.getByTitle('View session'));
+    const trajectory = screen.getByRole('navigation', { name: 'Trace trajectory' });
+    await user.click(
+      within(trajectory).getAllByText('Explain private workspace access controls')[0]
+    );
+
+    await user.click(await screen.findByText('Graph'));
+    expect(screen.getByRole('radio', { name: 'Grouped' })).toBeChecked();
+  });
+
+  it('hides graph mode when its feature flag is disabled', async () => {
+    mockFeatureFlags({ traceGraphEnabled: false });
+
+    renderSessionDetail('session-agent-run-001', '?traceId=trace-agent-run-001');
+
+    expect(await screen.findByText('Trace Answer customer policy question')).toBeInTheDocument();
+    expect(screen.queryByText('Graph')).not.toBeInTheDocument();
+    expect(screen.getByText('Tree')).toBeInTheDocument();
+    expect(screen.getByText('List')).toBeInTheDocument();
+  });
+
   it('keeps the detail shell useful for a session with one trace', async () => {
     renderSessionDetail('session-agent-run-002');
 
@@ -304,13 +479,16 @@ describe('IntakeSessionDetailRoute', () => {
 
   it('restores a span deep link without first loading the root span detail', async () => {
     const detailSpanIds: string[] = [];
-    const spanListModes: Array<string | null> = [];
+    const spanListRequests: URL[] = [];
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans', ({ request }) => {
+      http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), ({ request }) => {
         const url = new URL(request.url);
-        spanListModes.push(url.searchParams.get('mode'));
+        spanListRequests.push(url);
         const sessionId = url.searchParams.get('filter[session_id]');
-        const data = mockSpansPage.data.filter((span) => span.session_id === sessionId);
+        const traceId = url.searchParams.get('filter[trace_id]');
+        const data = mockSpansPage.data.filter(
+          (span) => span.session_id === sessionId && (!traceId || span.trace_id === traceId)
+        );
         return HttpResponse.json({
           ...mockSpansPage,
           data,
@@ -321,7 +499,7 @@ describe('IntakeSessionDetailRoute', () => {
           },
         });
       }),
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans/:spanId', ({ params }) => {
+      http.get(mockApiUrl(getGetSpanQueryKey, ':workspace', ':spanId'), ({ params }) => {
         const spanId = String(params['spanId']);
         detailSpanIds.push(spanId);
         const span = mockSpanById(spanId);
@@ -335,13 +513,20 @@ describe('IntakeSessionDetailRoute', () => {
     );
 
     expect((await screen.findAllByText('Generate final response')).length).toBeGreaterThan(0);
-    expect(screen.getByText('Session session-agent-run-001')).toBeInTheDocument();
+    expect(screen.getByText('Trace Answer customer policy question')).toBeInTheDocument();
     await waitFor(() => expect(detailSpanIds).toContain('span-llm-001'));
-    expect(spanListModes).toEqual(['summary']);
+    expect(spanListRequests).toHaveLength(2);
+    expect(spanListRequests.every((url) => url.searchParams.get('mode') === 'summary')).toBe(true);
+    expect(
+      spanListRequests.some(
+        (url) => url.searchParams.get('filter[trace_id]') === 'trace-agent-run-001'
+      )
+    ).toBe(true);
     expect(detailSpanIds).not.toContain('span-root-001');
   });
 
   it('preserves a directly linked span outside the loaded summary page', async () => {
+    mockFeatureFlags({ traceGraphEnabled: true });
     const user = userEvent.setup();
     let resolveOutsidePageSpan!: () => void;
     const outsidePageSpanGate = new Promise<void>((resolve) => {
@@ -355,7 +540,7 @@ describe('IntakeSessionDetailRoute', () => {
     };
 
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans', ({ request }) => {
+      http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), ({ request }) => {
         const sessionId = new URL(request.url).searchParams.get('filter[session_id]');
         const data = mockSpansPage.data.filter(
           (span) => span.session_id === sessionId && span.span_id === 'span-root-001'
@@ -366,7 +551,7 @@ describe('IntakeSessionDetailRoute', () => {
           pagination: { ...mockSpansPage.pagination, total_results: 1001, total_pages: 2 },
         });
       }),
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans/:spanId', async ({ params }) => {
+      http.get(mockApiUrl(getGetSpanQueryKey, ':workspace', ':spanId'), async ({ params }) => {
         if (params['spanId'] === outsidePageSpan.span_id) {
           await outsidePageSpanGate;
           return HttpResponse.json(outsidePageSpan);
@@ -385,6 +570,11 @@ describe('IntakeSessionDetailRoute', () => {
     expect(await screen.findByLabelText('Loading linked span')).toBeInTheDocument();
     resolveOutsidePageSpan();
     expect((await screen.findAllByText('Outside page span')).length).toBeGreaterThan(0);
+
+    await user.click(screen.getByText('Graph'));
+    await user.click(screen.getByText('Grouped'));
+    expect(screen.getByText('2 groups from 2 spans')).toBeInTheDocument();
+    expect(screen.getAllByText('Outside page span')).not.toHaveLength(0);
   });
 
   it('renders received spans while trace details are still arriving', async () => {
@@ -398,7 +588,7 @@ describe('IntakeSessionDetailRoute', () => {
     };
 
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/traces', () =>
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), () =>
         HttpResponse.json({
           ...mockTracesPage,
           data: [],
@@ -409,12 +599,12 @@ describe('IntakeSessionDetailRoute', () => {
           },
         })
       ),
-      http.get('*/apis/intake/v2/workspaces/:workspace/traces/:traceId', ({ params }) =>
+      http.get(mockApiUrl(getGetTraceQueryKey, ':workspace', ':traceId'), ({ params }) =>
         params['traceId'] === traceId
           ? new HttpResponse(null, { status: 404 })
           : new HttpResponse(null, { status: 500 })
       ),
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans', () =>
+      http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), () =>
         HttpResponse.json({
           ...mockSpansPage,
           data: [receivedSpan],
@@ -443,7 +633,7 @@ describe('IntakeSessionDetailRoute', () => {
   it('shows not found when neither trace details nor matching spans exist', async () => {
     const traceId = 'trace-never-received';
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/traces', () =>
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), () =>
         HttpResponse.json({
           ...mockTracesPage,
           data: [],
@@ -455,10 +645,10 @@ describe('IntakeSessionDetailRoute', () => {
         })
       ),
       http.get(
-        '*/apis/intake/v2/workspaces/:workspace/traces/:traceId',
+        mockApiUrl(getGetTraceQueryKey, ':workspace', ':traceId'),
         () => new HttpResponse(null, { status: 404 })
       ),
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans', () =>
+      http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), () =>
         HttpResponse.json({
           ...mockSpansPage,
           data: [],
@@ -480,7 +670,7 @@ describe('IntakeSessionDetailRoute', () => {
   it('shows an error when trace details are missing and session spans fail to load', async () => {
     const traceId = 'trace-with-failed-activity-request';
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/traces', () =>
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), () =>
         HttpResponse.json({
           ...mockTracesPage,
           data: [],
@@ -492,11 +682,11 @@ describe('IntakeSessionDetailRoute', () => {
         })
       ),
       http.get(
-        '*/apis/intake/v2/workspaces/:workspace/traces/:traceId',
+        mockApiUrl(getGetTraceQueryKey, ':workspace', ':traceId'),
         () => new HttpResponse(null, { status: 404 })
       ),
       http.get(
-        '*/apis/intake/v2/workspaces/:workspace/spans',
+        mockApiUrl(getListSpansQueryKey, ':workspace'),
         () => new HttpResponse(null, { status: 500 })
       )
     );

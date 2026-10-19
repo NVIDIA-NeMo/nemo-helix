@@ -7,7 +7,7 @@ import { CJobCancellableStatuses } from '@nemo/common/src/constants/query';
 import {
   getDataDesignerListCreateJobsQueryKey,
   useDataDesignerCancelCreateJob,
-} from '@nemo/sdk/generated/data-designer/api';
+} from '@nemo/sdk/generated/data-designer/data-designer';
 import type { CreateJob as DataDesignerJob } from '@nemo/sdk/generated/data-designer/schema';
 import { DeleteJobModal } from '@studio/components/dataViews/DataDesignerJobsDataView/DeleteJobModal';
 import { buildClonedJobRequest } from '@studio/components/NewDataDesignerJobForm/utils';

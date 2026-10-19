@@ -32,7 +32,7 @@ import time
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO, Iterator
+from typing import IO, Generator
 
 import httpx
 from nemo_guardrails_plugin.benchmarks.bootstrap import build_env
@@ -54,7 +54,7 @@ class SupervisedProcess:
     """
 
     # Human-readable identifier used in log messages (e.g. ``"mock-llama"``,
-    # ``"nmp-services"``). Also drives the log filename via ``log_path``.
+    # ``"nhx-services"``). Also drives the log filename via ``log_path``.
     name: str
     # The argv list passed to ``subprocess.Popen``. Constructed by the caller;
     # never assembled from user input here (hence the ``noqa: S603`` in ``start``).
@@ -67,7 +67,7 @@ class SupervisedProcess:
     # configs live.
     cwd: Path
     # Extra env vars to overlay on top of the parent's ``os.environ`` (e.g.
-    # ``PYTHONPATH``, ``NMP_DATA_DIR``). ``None`` means "inherit unchanged".
+    # ``PYTHONPATH``, ``NHX_DATA_DIR``). ``None`` means "inherit unchanged".
     env: dict[str, str] | None = None
     # Readiness probe polled after ``start()`` when this process is entered via
     # ``supervised_processes``. ``None`` skips the probe (e.g. when reusing an
@@ -176,12 +176,12 @@ class SupervisedProcess:
 
 
 @contextmanager
-def supervised_processes(specs: list[SupervisedProcess]) -> Iterator[list[SupervisedProcess]]:
+def supervised_processes(specs: list[SupervisedProcess]) -> Generator[list[SupervisedProcess], None, None]:
     """Start every spec in order; stop them in reverse on exit.
 
     Backed by ``ExitStack`` so that if any spec's ``start()`` raises, every
     already-started child gets ``stop()``-ed before the exception propagates.
-    On clean exit, children are torn down in LIFO order (i.e. NMP services
+    On clean exit, children are torn down in LIFO order (i.e. NHX services
     stop before the mock LLMs they depend on).
     """
     with ExitStack() as stack:

@@ -4,18 +4,20 @@
 
 # Shared helpers for OpenSandbox runtime verification.
 # Sourced by shared-kernel.sh / kata-qemu.sh — do not run directly.
-# Set OPEN_SANDBOX_WORKLOAD_NS (or NMP_NAMESPACE) to the platform job namespace.
+# Set OPEN_SANDBOX_WORKLOAD_NS (or NHX_NAMESPACE) to the platform job namespace.
 
 set -euo pipefail
 
 VALUES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SYSTEM_NS="${SYSTEM_NS:-opensandbox-system}"
+KUBE_CONTEXT="${KUBE_CONTEXT:-}"
 LOCAL_PORT="${LOCAL_PORT:-0}"  # 0 = pick a free port
 READY_TIMEOUT_S="${READY_TIMEOUT_S:-300}"
 SANDBOX_IMAGE="${SANDBOX_IMAGE:-docker.io/library/busybox:1.36}"
 SANDBOX_TIMEOUT_S="${SANDBOX_TIMEOUT_S:-600}"
 
 PF_PID=""
+CURL_PID=""
 SANDBOX_ID=""
 BASE_URL=""
 API_KEY=""
@@ -39,11 +41,23 @@ json_field() {
   python3 -c "import json,sys; o=json.load(sys.stdin); print(${expr})" <<<"${json}"
 }
 
+kubectl() {
+  if [[ -n "${KUBE_CONTEXT}" ]]; then
+    command kubectl --context "${KUBE_CONTEXT}" "$@"
+  else
+    command kubectl "$@"
+  fi
+}
+
 cleanup() {
   local ec=$?
+  if [[ -n "${CURL_PID}" ]] && kill -0 "${CURL_PID}" 2>/dev/null; then
+    kill "${CURL_PID}" 2>/dev/null || true
+    wait "${CURL_PID}" 2>/dev/null || true
+  fi
   if [[ -n "${SANDBOX_ID}" && -n "${BASE_URL}" && -n "${API_KEY}" ]]; then
     info "deleting sandbox ${SANDBOX_ID}"
-    curl -fsS -X DELETE \
+    curl -fsS --max-time 15 -X DELETE \
       -H "OPEN-SANDBOX-API-KEY: ${API_KEY}" \
       "${BASE_URL}/v1/sandboxes/${SANDBOX_ID}" >/dev/null 2>&1 || true
   fi
@@ -73,7 +87,7 @@ require_profile() {
     shared-kernel)
       SERVER_DEPLOY="opensandbox-server"
       SERVER_SVC="opensandbox-server"
-      WORKLOAD_NS="${OPEN_SANDBOX_WORKLOAD_NS:-${NMP_NAMESPACE:-}}"
+      WORKLOAD_NS="${OPEN_SANDBOX_WORKLOAD_NS:-${NHX_NAMESPACE:-}}"
       API_SECRET="opensandbox-server-api-key"
       EXPECT_RUNTIME_CLASS=""          # cluster default OCI runtime
       EXPECT_KATA_NODE="false"
@@ -81,7 +95,7 @@ require_profile() {
     kata-qemu)
       SERVER_DEPLOY="opensandbox-server-kata"
       SERVER_SVC="opensandbox-server-kata"
-      WORKLOAD_NS="${OPEN_SANDBOX_WORKLOAD_NS:-${NMP_NAMESPACE:-}}"
+      WORKLOAD_NS="${OPEN_SANDBOX_WORKLOAD_NS:-${NHX_NAMESPACE:-}}"
       API_SECRET="opensandbox-server-kata-api-key"
       EXPECT_RUNTIME_CLASS="kata-qemu"
       EXPECT_KATA_NODE="true"
@@ -90,7 +104,7 @@ require_profile() {
       die "unknown profile '${profile}' (expected shared-kernel|kata-qemu)"
       ;;
   esac
-  [[ -n "${WORKLOAD_NS}" ]] || die "set OPEN_SANDBOX_WORKLOAD_NS or NMP_NAMESPACE to the platform job namespace"
+  [[ -n "${WORKLOAD_NS}" ]] || die "set OPEN_SANDBOX_WORKLOAD_NS or NHX_NAMESPACE to the platform job namespace"
 }
 
 preflight_control_plane() {
@@ -139,9 +153,95 @@ start_port_forward() {
   die "port-forward/health failed; see /tmp/osb-pf-${SERVER_SVC}.log"
 }
 
+# Names of BatchSandboxes whose object JSON contains the request marker.
+batchsandbox_names_for_request() {
+  local marker="$1"
+  python3 - "${WORKLOAD_NS}" "${marker}" "${KUBE_CONTEXT}" <<'PY'
+import json, os, subprocess, sys
+
+ns, marker, context = sys.argv[1], sys.argv[2], sys.argv[3]
+cmd = ["kubectl"]
+if context:
+    cmd += ["--context", context]
+cmd += ["get", "batchsandboxes", "-n", ns, "-o", "json"]
+p = subprocess.run(cmd, capture_output=True, text=True)
+if p.returncode != 0:
+    sys.exit(0)
+try:
+    items = json.loads(p.stdout or "{}").get("items") or []
+except json.JSONDecodeError:
+    sys.exit(0)
+for item in items:
+    if marker in json.dumps(item, default=str):
+        name = (item.get("metadata") or {}).get("name")
+        if name:
+            print(name)
+PY
+}
+
+# Prints unschedulable details and returns 0 if this sandbox cannot be scheduled.
+unschedulable_report() {
+  local sid="$1"
+  python3 - "${sid}" "${WORKLOAD_NS}" "${KUBE_CONTEXT}" <<'PY'
+import json, subprocess, sys
+
+sid, ns, context = sys.argv[1], sys.argv[2], sys.argv[3]
+
+def kubectl_json(*args):
+    cmd = ["kubectl"]
+    if context:
+        cmd += ["--context", context]
+    cmd += list(args)
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    if p.returncode != 0:
+        return {}
+    try:
+        return json.loads(p.stdout or "{}")
+    except json.JSONDecodeError:
+        return {}
+
+hits, pod_names = [], []
+for p in kubectl_json("get", "pods", "-n", ns, "-o", "json").get("items", []):
+    name = p["metadata"]["name"]
+    owners = p["metadata"].get("ownerReferences") or []
+    if not (name.startswith(sid) or any(r.get("name") == sid for r in owners)):
+        continue
+    pod_names.append(name)
+    for c in (p.get("status") or {}).get("conditions") or []:
+        if c.get("type") == "PodScheduled" and c.get("status") == "False":
+            hits.append(f"{name}: {c.get('reason', '')} {c.get('message', '')}".strip())
+
+for e in kubectl_json("get", "events", "-n", ns, "-o", "json").get("items", []):
+    if e.get("reason") != "FailedScheduling":
+        continue
+    obj = (e.get("involvedObject") or {}).get("name") or ""
+    if obj.startswith(sid) or obj in pod_names:
+        hits.append(f"{obj}: FailedScheduling {e.get('message', '')}".strip())
+
+if not hits:
+    sys.exit(1)
+seen, out = set(), []
+for h in hits:
+    if h not in seen:
+        seen.add(h)
+        out.append(h)
+print("\n".join(out))
+PY
+}
+
+fail_if_unschedulable() {
+  local sid="$1"
+  local msg
+  [[ -n "${sid}" ]] || return 0
+  if msg="$(unschedulable_report "${sid}")"; then
+    die "sandbox unschedulable:\n${msg}"
+  fi
+}
+
 create_sandbox() {
-  info "creating sandbox image=${SANDBOX_IMAGE}"
-  local body resp
+  info "creating sandbox image=${SANDBOX_IMAGE} (timeout ${READY_TIMEOUT_S}s)"
+  local body curl_out curl_err curl_ec="" request_id
+  request_id="$(python3 -c 'import uuid; print(uuid.uuid4())')"
   body="$(python3 - <<PY
 import json
 print(json.dumps({
@@ -152,17 +252,69 @@ print(json.dumps({
   "metadata": {
     "purpose": "runtime-verify",
     "profile": "${PROFILE}",
+    "nhx-verify-request": "${request_id}",
   },
 }))
 PY
 )"
-  resp="$(curl -fsS -X POST "${BASE_URL}/v1/sandboxes" \
+  curl_out="$(mktemp)"
+  curl_err="$(mktemp)"
+  curl -sS --fail --max-time "${READY_TIMEOUT_S}" -X POST "${BASE_URL}/v1/sandboxes" \
     -H "OPEN-SANDBOX-API-KEY: ${API_KEY}" \
     -H "Content-Type: application/json" \
-    -d "${body}")"
-  SANDBOX_ID="$(json_field "${resp}" 'o["id"]')"
-  [[ -n "${SANDBOX_ID}" ]] || die "create response missing id: ${resp}"
-  ok "created sandbox id=${SANDBOX_ID}"
+    -d "${body}" \
+    -o "${curl_out}" \
+    --stderr "${curl_err}" &
+  CURL_PID=$!
+  local deadline=$((SECONDS + READY_TIMEOUT_S))
+  while (( SECONDS < deadline )); do
+    if [[ -z "${SANDBOX_ID}" ]]; then
+      local name
+      name="$(batchsandbox_names_for_request "${request_id}" | awk 'NF' | head -1)"
+      if [[ -n "${name}" ]]; then
+        SANDBOX_ID="${name}"
+      fi
+    fi
+    if [[ -n "${SANDBOX_ID}" ]]; then
+      fail_if_unschedulable "${SANDBOX_ID}"
+    fi
+    if ! kill -0 "${CURL_PID}" 2>/dev/null; then
+      wait "${CURL_PID}" && curl_ec=0 || curl_ec=$?
+      CURL_PID=""
+      break
+    fi
+    sleep 20
+  done
+  if [[ -n "${CURL_PID}" ]] && ! kill -0 "${CURL_PID}" 2>/dev/null; then
+    wait "${CURL_PID}" && curl_ec=0 || curl_ec=$?
+    CURL_PID=""
+  fi
+  if [[ -n "${CURL_PID}" ]]; then
+    kill "${CURL_PID}" 2>/dev/null || true
+    wait "${CURL_PID}" 2>/dev/null || true
+    CURL_PID=""
+    rm -f "${curl_out}" "${curl_err}"
+    if [[ -n "${SANDBOX_ID}" ]]; then
+      fail_if_unschedulable "${SANDBOX_ID}"
+    fi
+    die "timed out creating sandbox after ${READY_TIMEOUT_S}s${SANDBOX_ID:+ (id=${SANDBOX_ID})}"
+  fi
+  local resp_body err_body
+  resp_body="$(cat "${curl_out}" 2>/dev/null || true)"
+  err_body="$(cat "${curl_err}" 2>/dev/null || true)"
+  rm -f "${curl_out}" "${curl_err}"
+  if [[ "${curl_ec:-1}" -eq 0 ]]; then
+    local from_json
+    from_json="$(json_field "${resp_body}" 'o["id"]')"
+    SANDBOX_ID="${from_json:-${SANDBOX_ID}}"
+    [[ -n "${SANDBOX_ID}" ]] || die "create response missing id: ${resp_body}"
+    ok "created sandbox id=${SANDBOX_ID}"
+    return
+  fi
+  if [[ -n "${SANDBOX_ID}" ]]; then
+    fail_if_unschedulable "${SANDBOX_ID}"
+  fi
+  die "create sandbox failed (curl ${curl_ec:-unknown}): ${err_body} ${resp_body}"
 }
 
 wait_sandbox_running() {
@@ -170,11 +322,12 @@ wait_sandbox_running() {
   local deadline=$((SECONDS + READY_TIMEOUT_S))
   local resp state
   while (( SECONDS < deadline )); do
+    fail_if_unschedulable "${SANDBOX_ID}"
     # A bare assignment from a command substitution inherits curl's exit status, so
     # under `set -e` a single transient failure while the sandbox is still coming up
     # would abort the script and defeat READY_TIMEOUT_S. Treat a failed poll as
     # "not ready yet" and retry until the deadline.
-    if ! resp="$(curl -fsS \
+    if ! resp="$(curl -fsS --max-time 15 \
       -H "OPEN-SANDBOX-API-KEY: ${API_KEY}" \
       "${BASE_URL}/v1/sandboxes/${SANDBOX_ID}" 2>/dev/null)"; then
       sleep 3
@@ -190,6 +343,7 @@ wait_sandbox_running() {
     fi
     sleep 3
   done
+  fail_if_unschedulable "${SANDBOX_ID}"
   die "timed out waiting for Running; last state=${state:-unknown}"
 }
 
@@ -317,6 +471,36 @@ echo OSB_VERIFY_OK
   fi
 }
 
+HARBOR_MOUNT_PATHS=(/logs /solution /installed-agent)
+
+# The template's Harbor emptyDirs must reach the sandbox container and be
+# world-writable, or task images with a non-root USER fail at sandbox start.
+# Templates without any of them (e.g. Gym-only installs) only get a warning.
+assert_harbor_mounts() {
+  local pod="$1"
+  local mounts path probe
+  local missing=()
+  mounts="$(kubectl get pod -n "${WORKLOAD_NS}" "${pod}" \
+    -o jsonpath='{range .spec.containers[?(@.name=="sandbox")].volumeMounts[*]}{.mountPath}{"\n"}{end}')"
+  for path in "${HARBOR_MOUNT_PATHS[@]}"; do
+    grep -qx "${path}" <<<"${mounts}" || missing+=("${path}")
+  done
+  if [[ ${#missing[@]} -eq ${#HARBOR_MOUNT_PATHS[@]} ]]; then
+    warn "no Harbor mounts (${HARBOR_MOUNT_PATHS[*]}); scaled-evals harbor_opensandbox tasks with a non-root USER will fail"
+    return
+  fi
+  [[ ${#missing[@]} -eq 0 ]] \
+    || die "sandbox container is missing Harbor volumeMounts: ${missing[*]}; check the BatchSandbox template and restart the server"
+  probe="$(kubectl exec -n "${WORKLOAD_NS}" "${pod}" -c sandbox -- /bin/sh -c '
+for p in "$@"; do printf "%s=%s\n" "$p" "$(stat -c %a "$p")"; done
+' sh "${HARBOR_MOUNT_PATHS[@]}" 2>&1)" || die "kubectl exec (mount probe) failed: ${probe}"
+  for path in "${HARBOR_MOUNT_PATHS[@]}"; do
+    grep -qx "${path}=777" <<<"${probe}" \
+      || die "${path} is not world-writable in the sandbox container: ${probe}"
+  done
+  ok "Harbor mounts present and world-writable (${HARBOR_MOUNT_PATHS[*]})"
+}
+
 assert_batchsandbox() {
   kubectl get batchsandbox -n "${WORKLOAD_NS}" "${SANDBOX_ID}" >/dev/null \
     || die "BatchSandbox/${SANDBOX_ID} missing in ${WORKLOAD_NS}"
@@ -339,5 +523,6 @@ run_profile_verification() {
   assert_runtime_class "${pod}"
   assert_node_placement "${pod}"
   assert_kernel_isolation "${pod}"
+  assert_harbor_mounts "${pod}"
   info "PASS profile=${PROFILE}"
 }

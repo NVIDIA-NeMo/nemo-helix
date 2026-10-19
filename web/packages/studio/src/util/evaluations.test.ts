@@ -77,7 +77,7 @@ describe('parseEvaluationModelValue', () => {
 });
 
 describe('buildModelPayload', () => {
-  const origin = 'https://nmp.example.com';
+  const origin = 'https://nhx.example.com';
 
   const models: ModelEntity[] = [
     makeModel({
@@ -111,7 +111,7 @@ describe('buildModelPayload', () => {
     expect(result).toEqual({
       ok: true,
       payload: {
-        url: 'https://nmp.example.com/apis/inference-gateway/v2/workspaces/default/provider/nim-llama/-/v1',
+        url: 'https://nhx.example.com/apis/inference-gateway/v2/workspaces/default/provider/nim-llama/-/v1',
         name: 'my-lora',
       },
     });
@@ -134,7 +134,7 @@ describe('buildModelPayload', () => {
     expect(result).toEqual({
       ok: true,
       payload: {
-        url: 'https://nmp.example.com/apis/inference-gateway/v2/workspaces/team-a/provider/nim-mistral/-/v1',
+        url: 'https://nhx.example.com/apis/inference-gateway/v2/workspaces/team-a/provider/nim-mistral/-/v1',
         name: 'some-adapter',
       },
     });

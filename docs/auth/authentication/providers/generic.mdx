@@ -5,7 +5,7 @@
 title: "Generic OIDC Provider"
 description: ""
 ---
-A checklist for connecting NeMo Platform to any OIDC-compliant identity provider not covered by the [Azure AD](/documentation/access-control/authentication/providers/azure-ad-entra-id) page.
+A checklist for connecting NeMo Helix to any OIDC-compliant identity provider not covered by the [Azure AD](/documentation/access-control/authentication/providers/azure-ad-entra-id) page.
 
 **Prerequisites**: Familiarity with [OIDC Setup](/documentation/access-control/authentication/oidc-setup).
 
@@ -16,27 +16,33 @@ Verify your IdP meets these requirements:
 - [ ] Supports **OpenID Connect** (not just OAuth2)
 - [ ] Exposes a `.well-known/openid-configuration` discovery document
 - [ ] Supports the **device authorization grant** (required for `nemo auth login`)
-- [ ] Allows creating **custom API scopes** (`platform:read`, `platform:write`)
-- [ ] Includes **email** (or equivalent claim) in access tokens
+- [ ] Issues signed JWT bearer tokens, or signed ID tokens if you configure `bearer_token_source: "id_token"`
+- [ ] Includes **email** (or equivalent claim) in the selected bearer token
+- [ ] If you use group-based role bindings, includes group or entitlement values in a JWT claim that can be configured as `groups_claim`
+- [ ] If you use API-scope restrictions during OIDC login, can expose and return NeMo Helix API scopes such as `platform:read` and `platform:write`
 - [ ] Supports **JWKS** for token signature validation
 
 ## Configuration Template
 
 ```yaml
 auth:
- enabled: true
- oidc:
- enabled: true
- issuer: "<your-idp-issuer-url>"
- client_id: "<your-client-id>"
- # Uncomment and adjust if your IdP uses non-standard claim names:
- # email_claim: "email"
- # subject_claim: "sub"
- # groups_claim: "groups"
- # Uncomment if your IdP prefixes scopes:
- # scope_prefix: "<prefix>/"
- default_scopes: "openid profile email offline_access platform:read platform:write"
+  enabled: true
+  oidc:
+    enabled: true
+    issuer: "<your-idp-issuer-url>"
+    public_client:
+      client_id: "<your-client-id>"
+      default_scopes: "platform:read platform:write openid profile email offline_access"
+      # scope_prefix: "api://<your-client-id>/"
+    # Uncomment and adjust if your IdP uses non-standard claim names:
+    # email_claim: "email"
+    # subject_claim: "sub"
+    # Set this to the claim that contains group or entitlement values
+    # you will bind to NeMo Helix workspace roles.
+    # groups_claim: "groups"
 ```
+
+Keep short NeMo Helix API scope names in `public_client.default_scopes`. When the IdP expects `api://<client-id>/platform:read`, set `public_client.scope_prefix` to `api://<client-id>/`. Clients add that prefix to the API scopes they request, and discovery returns it on the interactive client. Omit the `platform:*` scopes when the login token should not restrict API access. Role bindings still apply.
 
 ## Claim Mapping Reference
 

@@ -161,7 +161,8 @@ def make_gym_docker_submitter(
             )
         selected_image = _digest_pinned_image_ref(selected_image, spec.runner_image_digest)
         eval_work = work / spec.evaluation_id
-        eval_work.mkdir(parents=True, exist_ok=True)
+        work.mkdir(parents=True, exist_ok=True)
+        eval_work.mkdir(exist_ok=False)
         log_path = eval_work / "gym.log"
         output_jsonl = str(eval_work / "rollouts.jsonl")
         target_env = load_env_file(envf)
