@@ -21,6 +21,7 @@ import { act, renderRoute, screen, within } from '@studio/tests/util/render';
 import { focusManager } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+import { useState } from 'react';
 import { generatePath } from 'react-router';
 
 const mockEnvironment = vi.hoisted(() => ({ customizerEnabled: true }));
@@ -75,6 +76,10 @@ const renderComponent = (search = '') =>
 describe('RecentJobsTable', () => {
   beforeEach(() => {
     mockEnvironment.customizerEnabled = true;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('renders the Name, Source, Status, and Elapsed time columns with job rows', async () => {
@@ -165,6 +170,8 @@ describe('RecentJobsTable', () => {
   });
 
   it('requests in-progress jobs and jobs that finished in the last 48 hours', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-01-03T12:34:56.789Z'));
     let filterParam: string | null = null;
     let sortParam: string | null = null;
     server.use(
@@ -176,7 +183,6 @@ describe('RecentJobsTable', () => {
       })
     );
 
-    const before = Date.now();
     renderComponent();
     await screen.findByText('my-job');
 
@@ -190,10 +196,56 @@ describe('RecentJobsTable', () => {
     expect(inProgress).toEqual({ status: { $in: IN_PROGRESS_JOB_STATUSES } });
     expect(recentlyFinished.$and[0]).toEqual({ status: { $in: HelixJobTerminalStatuses } });
 
-    const cutoff = Date.parse(recentlyFinished.$and[1].updated_at.$gte);
-    const fortyEightHours = 48 * 60 * 60 * 1000;
-    expect(cutoff).toBeLessThanOrEqual(before - fortyEightHours + 1000);
-    expect(cutoff).toBeGreaterThan(before - fortyEightHours - 60_000);
+    expect(recentlyFinished.$and[1]).toEqual({
+      updated_at: { $gte: '2026-01-01T12:00:00.000Z' },
+    });
+  });
+
+  it('shows cached rows right away when the table remounts within the hour', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-01-03T12:10:00.000Z'));
+    const filters: (string | null)[] = [];
+    let releaseRefetch = () => {};
+    server.use(
+      http.get(JOBS_URL, async ({ request }) => {
+        filters.push(new URL(request.url).searchParams.get('filter'));
+        if (filters.length > 1) {
+          await new Promise<void>((resolve) => {
+            releaseRefetch = resolve;
+          });
+          return HttpResponse.json(makeJobsPage([makeJob({ name: 'fresh-run' })]));
+        }
+        return HttpResponse.json(makeJobsPage([makeJob({ name: 'cached-run' })]));
+      })
+    );
+    const RemountableTable = () => {
+      const [isShown, setIsShown] = useState(true);
+      return (
+        <>
+          <button type="button" onClick={() => setIsShown((shown) => !shown)}>
+            toggle
+          </button>
+          {isShown && <RecentJobsTable />}
+        </>
+      );
+    };
+    renderRoute(<RemountableTable />, {
+      history: generatePath(ROUTES.workspace.dashboard, { workspace: WORKSPACE }),
+      routes: [{ path: ROUTES.workspace.dashboard, element: <RemountableTable /> }],
+    });
+    await screen.findByText('cached-run');
+
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await user.click(screen.getByRole('button', { name: 'toggle' }));
+    vi.setSystemTime(new Date('2026-01-03T12:40:00.000Z'));
+    await user.click(screen.getByRole('button', { name: 'toggle' }));
+
+    expect(screen.getByText('cached-run')).toBeInTheDocument();
+    await vi.waitFor(() => expect(filters).toHaveLength(2));
+    expect(filters[1]).toBe(filters[0]);
+
+    releaseRefetch();
+    expect(await screen.findByText('fresh-run')).toBeInTheDocument();
   });
 
   it.each(['?sort=name', '?sort=created_at', '?sort=source'])(

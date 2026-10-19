@@ -18,10 +18,16 @@ const JOBS_FETCH_SIZE = 100;
 // Used when nothing is running or the last poll failed. It picks up jobs started elsewhere and
 // recovers from a jobs service restart without polling the full list every 5s.
 const SLOW_POLLING_INTERVAL_MS = 30 * 1000;
+const CUTOFF_BUCKET_MS = 60 * 60 * 1000;
+
+const getFinishedSince = () =>
+  new Date(
+    Math.floor((Date.now() - RECENT_WINDOW_MS) / CUTOFF_BUCKET_MS) * CUTOFF_BUCKET_MS
+  ).toISOString();
 
 export const useRecentJobs = (workspace: string, dataViewState: StudioDataViewState) => {
-  // Fixed at mount to keep the query key stable across polls.
-  const [finishedSince] = useState(() => new Date(Date.now() - RECENT_WINDOW_MS).toISOString());
+  // Fixed at mount and rounded to the hour so polls and remounts reuse the query key.
+  const [finishedSince] = useState(getFinishedSince);
 
   // The API filters status/updated_at after paging, so server pages come back short. Fetch one
   // large page and paginate client-side until it filters first.
