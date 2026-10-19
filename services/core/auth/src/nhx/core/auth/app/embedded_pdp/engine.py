@@ -10,6 +10,7 @@ from functools import cache
 from typing import Any, Dict, List, Optional, cast
 
 from nhx.core.auth.app.embedded_pdp.policy_wasm import ensure_embedded_policy_wasm
+from nhx.core.auth.app.scope_families import with_scope_families
 from wasmtime import Config, Engine, Func, FuncType, Instance, Limits, Memory, MemoryType, Module, Store, ValType
 
 logger = logging.getLogger(__name__)
@@ -253,8 +254,8 @@ def get_policy() -> OPAPolicy:
 
 
 def set_policy_data(data: Dict[str, Any]) -> None:
-    """Set policy data (principals, roles, etc.)."""
-    _policy_runtime.set_data(data)
+    """Set policy data (principals, roles, etc.), deriving ``authz.scope_families`` for scopes.rego."""
+    _policy_runtime.set_data(with_scope_families(data))
 
 
 def reload_policy() -> None:

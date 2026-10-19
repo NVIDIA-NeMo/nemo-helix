@@ -69,6 +69,7 @@ test_model_get_with_workspace_no_check_header if {
     with data.authz.endpoints as models_test_data.endpoints
     with data.authz.workspaces as models_test_data.workspaces
     with data.authz.principals as models_test_data.principals
+    with data.authz.scope_families as scope_families_fixture
 
     result.allowed == true
     result.headers["X-NHX-Authorized"] == "true"
@@ -86,6 +87,7 @@ test_model_put_with_workspace_no_check_header if {
     with data.authz.endpoints as models_test_data.endpoints
     with data.authz.workspaces as models_test_data.workspaces
     with data.authz.principals as models_test_data.principals
+    with data.authz.scope_families as scope_families_fixture
 
     result.allowed == true
     result.headers["X-NHX-Authorized"] == "true"
@@ -103,6 +105,7 @@ test_model_delete_with_workspace_no_check_header if {
     with data.authz.endpoints as models_test_data.endpoints
     with data.authz.workspaces as models_test_data.workspaces
     with data.authz.principals as models_test_data.principals
+    with data.authz.scope_families as scope_families_fixture
 
     result.allowed == true
     result.headers["X-NHX-Authorized"] == "true"
@@ -120,6 +123,7 @@ test_model_list_without_workspace_has_check_header if {
     with data.authz.endpoints as models_test_data.endpoints
     with data.authz.workspaces as models_test_data.workspaces
     with data.authz.principals as models_test_data.principals
+    with data.authz.scope_families as scope_families_fixture
 
     result.allowed == true
 }
@@ -163,6 +167,7 @@ test_model_access_public_workspace if {
     with data.authz.endpoints as models_test_data.endpoints
     with data.authz.workspaces as models_test_data.workspaces
     with data.authz.principals as models_test_data.principals
+    with data.authz.scope_families as scope_families_fixture
 
     result.allowed == true
     result.headers["X-NHX-Authorized"] == "true"
