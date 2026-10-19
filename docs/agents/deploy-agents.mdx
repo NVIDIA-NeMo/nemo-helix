@@ -70,24 +70,9 @@ failure. Pass `--no-wait` to return immediately.
 
 ### Docker
 
-Point the Agents plugin at a Docker executor in the platform configuration, then restart the
-platform:
-
-```yaml
-agents:
-  deployments:
-    docker_executor: local-docker   # a deployments.executors[].name
-    default_image: ""               # used when --image is omitted
-
-deployments:
-  executors:
-    - name: local-docker
-      backend: docker
-      config:
-        pull_images: false          # set false for locally built images
-```
-
-Deploy with an [agent image](#build-and-publish-agent-images):
+The bundled local configuration defines a `local-docker` executor and makes it the default, so
+`--mode docker` works without extra configuration. Deploy with an
+[agent image](#build-and-publish-agent-images):
 
 <Tabs>
 
@@ -117,6 +102,11 @@ agents.deployments.create(
 
 </Tabs>
 
+To use another executor, add it to `deployments.executors` and set
+`agents.deployments.docker_executor` to its name. A `deployments.executors` list in your configuration
+replaces the default list, so keep the executors you already use. Set
+`agents.deployments.default_image` to deploy without `--image`.
+
 <Note>
 
 On Linux, `host.docker.internal` does not resolve inside containers, so model calls from the agent
@@ -133,11 +123,20 @@ agents:
 nemo services run --host 0.0.0.0 --port 8080
 ```
 
+If your Docker bridge uses a different subnet, use its gateway address instead:
+
+```bash
+docker network inspect bridge --format '{{ (index .IPAM.Config 0).Gateway }}'
+```
+
 </Note>
 
 ### Kubernetes
 
-Add a `k8s` executor and point the Agents plugin at it:
+Helm installs define a `local-k8s` executor in the release namespace and make it the default, so
+`--mode k8s` works there without extra configuration. Elsewhere, add a `k8s` executor and point the
+Agents plugin at it. A `deployments.executors` list replaces the default list, so keep the executors
+you already use:
 
 ```yaml
 agents:
@@ -146,10 +145,14 @@ agents:
 
 deployments:
   executors:
+    - name: local-docker               # keep existing executors
+      backend: docker
+      config:
+        pull_images: false
     - name: k8s-local
       backend: k8s
       config:
-        default_namespace: default   # omit kubeconfig_path to use in-cluster auth
+        default_namespace: default     # omit kubeconfig_path to use in-cluster auth
 ```
 
 ```bash
@@ -172,6 +175,21 @@ sidecar that authenticates the agent's calls to the platform and the Inference G
 an authenticated CLI or SDK client so the deployment can act on your behalf. The sidecar uses the
 platform API image by default; set `deployments.auth_proxy_image` if that image name does not
 resolve in your environment.
+
+The sidecar forwards to `platform.base_url`, not to `agents.deployments.gateway_url_override`, so that
+URL must be reachable from inside the agent container. On macOS, Docker deployments rewrite a loopback
+`platform.base_url` to `host.docker.internal`; on Linux, set it to an address the container can reach,
+such as the Docker bridge. With workload token exchange enabled, a remote `platform.base_url` must use
+HTTPS; plain HTTP is accepted only for loopback.
+
+### Readiness and Startup Timeouts
+
+`docker` and `k8s` agent containers serve `/health` on `agents.deployments.container_port` (default
+`8000`). For agents that start slowly, raise `agents.deployments.readiness_probe_timeout_seconds`
+(default `1`) and `agents.deployments.readiness_probe_failure_threshold` (default `12`), then restart
+the platform and redeploy; existing containers keep their old settings. A deployment that stays in
+`STARTING` longer than `deployments.controller.starting_timeout_seconds` (default `3600`, `0`
+disables it) is marked failed.
 
 ## Build and Publish Agent Images
 
@@ -288,7 +306,10 @@ nemo agents logs --agent calculator-agent --follow
 ```
 
 `nemo agents logs` reads subprocess logs from the platform host, so run it there. For other modes,
-use the agent's **Logs** tab in [NeMo Studio](/documentation/studio/agents).
+use the agent's **Logs** tab in [NeMo Studio](/documentation/studio/agents). For `nemo-agents-spec-v1`
+agents, the subprocess log holds the agent server's startup, validation, and request output. The
+harness's own output is saved per invocation under the deployment's `artifacts/.fabric/` directory on
+the platform host.
 
 ## Update a Deployed Agent
 

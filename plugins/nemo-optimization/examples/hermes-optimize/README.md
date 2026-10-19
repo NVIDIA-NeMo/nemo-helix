@@ -323,9 +323,14 @@ read them back from.
 profile when the platform registers one, and otherwise to the `cpu` profile
 (docker or `kubernetes_job`, whichever the deployment registered) using the
 `nhx-tasks` image. Either way the fileset is the only input, so both
-backends see the same tree. See
-[Operator notes](../../../../docs/agents/optimize-agents.mdx) for what each backend
-needs installed.
+backends see the same tree.
+
+- `subprocess` runs in the platform host's Python environment, which needs the
+  optimization plugins and the agent's Fabric harness installed, plus the Docker
+  socket if trials use it.
+- `cpu` runs in the `nhx-tasks` image, which includes the optimization plugins and
+  the Claude Code, Codex, and DeepAgents harnesses but not Hermes. Run these
+  Hermes studies under `subprocess`, or build a task image that includes Hermes.
 
 ---
 

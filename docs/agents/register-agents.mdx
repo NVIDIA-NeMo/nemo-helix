@@ -17,7 +17,8 @@ Registering an agent creates an `agent` entity in a workspace. Choose the method
 | [Remote endpoint](#register-a-remote-endpoint) | An `agent.yaml` that points at a URL | The agent runs elsewhere behind an OpenAI- or Anthropic-compatible API. |
 | [Traces](#register-from-traces) | A name | You only want to analyze traces the agent already sends. |
 
-Agent names can contain letters, digits, underscores, hyphens, and dots.
+Agent names must start with a lowercase letter, be 2–63 characters long, and use lowercase letters,
+digits, hyphens, and dots, with no consecutive hyphens and no trailing hyphen.
 
 <Markdown src="/snippets/_snippets/tutorials/cli-sdk-setup.mdx" />
 
@@ -291,7 +292,8 @@ the image's `ENTRYPOINT` and `CMD`. The server must:
 - Serve `GET /health`.
 - Serve `POST /v1/chat/completions` to work with `nemo agents invoke` and `nemo agents chat`.
 
-The deployment writes the stored config into the container and sets `AGENT_CONFIG_PATH` to its path.
+The deployment writes the stored config into the container and sets `AGENT_CONFIG_PATH` to its path
+(`NAT_CONFIG_PATH` for legacy NAT workflow configs).
 
 ## Register a Remote Endpoint
 
