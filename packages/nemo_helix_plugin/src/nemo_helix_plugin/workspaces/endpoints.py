@@ -22,6 +22,7 @@ from nemo_helix_plugin.workspaces.types import (
     UpdateWorkspaceMemberRequest,
     UpdateWorkspaceRequest,
     Workspace,
+    WorkspaceDeletionStatus,
     WorkspaceMember,
     WorkspaceMemberListResponse,
     WorkspaceMemberQueryParams,
@@ -65,6 +66,11 @@ def update_workspace(*, name: str, body: UpdateWorkspaceRequest) -> Workspace: .
 @delete("/apis/entities/v2/workspaces/{name}")
 @abstractmethod
 def delete_workspace(*, name: str) -> DeleteResponse: ...
+
+
+@get("/apis/entities/v2/workspace-deletions/{name}")
+@abstractmethod
+def get_workspace_deletion(*, name: str) -> WorkspaceDeletionStatus: ...
 
 
 # ---------------------------------------------------------------------------

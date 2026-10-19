@@ -844,6 +844,57 @@ class TestGenericEntitiesApiBlocked:
         assert plain_denied["allowed"] is False
         assert group_allowed["allowed"] is True
 
+    def test_workspace_deletion_status_is_system_scoped(self, static_authz_data):
+        path = "/apis/entities/v2/workspace-deletions/team-a"
+        static_authz_data["authz"]["principals"] = {
+            "creator@test.com": {"workspaces": {"system": ["WorkspaceCreator"]}},
+            "plain-user@test.com": {"workspaces": {"system": ["Viewer"]}},
+            "admin@test.com": {"workspaces": {"system": ["HelixAdmin"]}},
+        }
+        set_policy_data(static_authz_data)
+
+        creator = evaluate(
+            "allow",
+            {
+                "principal_id": "creator@test.com",
+                "method": "GET",
+                "path": path,
+                "scopes": ["entities:read", "platform:read"],
+            },
+        )
+        plain = evaluate(
+            "allow",
+            {
+                "principal_id": "plain-user@test.com",
+                "method": "GET",
+                "path": path,
+                "scopes": ["entities:read", "platform:read"],
+            },
+        )
+        admin = evaluate(
+            "allow",
+            {
+                "principal_id": "admin@test.com",
+                "method": "GET",
+                "path": path,
+                "scopes": ["entities:read", "platform:read"],
+            },
+        )
+        posted = evaluate(
+            "allow",
+            {
+                "principal_id": "creator@test.com",
+                "method": "POST",
+                "path": path,
+                "scopes": ["entities:write", "platform:write"],
+            },
+        )
+
+        assert creator["allowed"] is True
+        assert plain["allowed"] is False
+        assert admin["allowed"] is True
+        assert posted["allowed"] is False
+
 
 class TestPerAreaScopes:
     """Validate that every endpoint in static-authz.yaml has per-area scopes.
