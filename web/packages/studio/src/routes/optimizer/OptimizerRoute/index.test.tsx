@@ -61,7 +61,7 @@ const findCell = async (insightTitle: string, columnName: string): Promise<HTMLE
 };
 
 describe('OptimizerRoute', () => {
-  it('does not show empty row action menus for insights', async () => {
+  it('does not declare an empty row actions column for insights', async () => {
     server.use(
       http.get(INSIGHTS_URL, () =>
         HttpResponse.json(insightsPage([makeInsight('insight-1', 'Investigate latency')]))
@@ -72,6 +72,8 @@ describe('OptimizerRoute', () => {
 
     const row = await screen.findByRole('row', { name: /Investigate latency/ });
     expect(within(row).queryByRole('button', { name: 'Row Actions' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Row Actions' })).not.toBeInTheDocument();
+    expect(within(row).getAllByRole('cell')).toHaveLength(7);
   });
 
   it('renders server-provided list metadata without per-row requests', async () => {
