@@ -3493,6 +3493,66 @@ async def test_harbor_task_containers_have_a_docker_host_gateway_alias(
     assert compose == {"services": {"main": {"extra_hosts": {"host.docker.internal": "host-gateway"}}}}
 
 
+def _harbor_task(root: Path, name: str, toml: str = "") -> None:
+    task = root / name
+    (task / "environment").mkdir(parents=True)
+    (task / "tests").mkdir()
+    (task / "environment" / "Dockerfile").write_text("FROM python:3.13-slim\n")
+    (task / "tests" / "test.sh").write_text("#!/usr/bin/env bash\n")
+    (task / "instruction.md").write_text("Do it.\n")
+    (task / "task.toml").write_text(f'schema_version = "1.1"\n\n[task]\nname = "probe/{name}"\n{toml}')
+
+
+async def _compose_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dataset: Path) -> list[Path]:
+    import harbor.job
+
+    created: list[Any] = []
+
+    class FakeJob:
+        @classmethod
+        async def create(cls, job_config: Any) -> "FakeJob":
+            created.append(job_config)
+            return cls()
+
+        async def run(self) -> None:
+            return None
+
+    monkeypatch.setattr(harbor.job, "Job", FakeJob)
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", agent_name="oracle")
+    _, run_job = _build_native_job(config, dataset, None, job_name="j", env_templates={})
+    await run_job()
+    return list(created[0].environment.extra_docker_compose)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("toml", "aliased"),
+    [
+        ("", True),
+        # Harbor attaches the task container to its egress sidecar's network, and Docker refuses extra_hosts there.
+        ('\n[environment]\nnetwork_mode = "allowlist"\nallowed_hosts = ["example.com"]\n', False),
+        ('\n[environment]\nnetwork_mode = "no-network"\n', False),
+        ('\n[agent]\nnetwork_mode = "no-network"\n', False),
+        # A verifier sharing the agent's container restricts that container too.
+        ('\n[verifier]\nnetwork_mode = "no-network"\n', False),
+        # In its own container, a restricted verifier leaves the agent's container public.
+        ('\n[verifier]\nenvironment_mode = "separate"\nnetwork_mode = "no-network"\n', True),
+    ],
+)
+async def test_the_host_gateway_alias_is_left_out_where_harbor_restricts_the_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, toml: str, aliased: bool
+) -> None:
+    dataset = tmp_path / "dataset"
+    _harbor_task(dataset, "open")
+    _harbor_task(dataset, "probe", toml)
+
+    with caplog.at_level(logging.WARNING):
+        overrides = await _compose_overrides(tmp_path, monkeypatch, dataset)
+
+    assert bool(overrides) == aliased
+    assert ("['probe'] restrict network access" in caplog.text) == (not aliased)
+
+
 @pytest.mark.asyncio
 async def test_env_vars_are_literals_for_the_agent_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import harbor.job

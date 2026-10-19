@@ -1063,11 +1063,22 @@ def _build_native_job(
             # A custom environment replaces Harbor's Docker one. Only Docker takes compose overlays:
             # Linux Docker Engine needs an explicit host-gateway alias (Docker Desktop also accepts
             # it), so registered Fabric agents in the task container can call the Inference Gateway.
-            environment = (
-                config.environment.model_dump()
-                if config.environment
-                else EnvironmentConfig(extra_docker_compose=[Path(__file__).with_name("host-gateway.yaml")])
-            )
+            # Docker refuses the alias on a container that shares another's network, which is where
+            # Harbor puts a task with restricted network access, so a job with any such task runs
+            # without it.
+            if config.environment:
+                environment = config.environment.model_dump()
+            else:
+                restricted = await _tasks_behind_egress_control(dataset_path, task_names, agent)
+                if restricted:
+                    logger.warning(
+                        "Harbor tasks %s restrict network access, so their containers share Harbor's egress "
+                        "sidecar network, where Docker refuses host aliases: this job's task containers get no "
+                        "host.docker.internal -> host-gateway alias.",
+                        restricted,
+                    )
+                host_gateway = [] if restricted else [Path(__file__).with_name("host-gateway.yaml")]
+                environment = EnvironmentConfig(extra_docker_compose=host_gateway)
             job_config = JobConfig(
                 job_name=resolved_name,
                 jobs_dir=jobs_dir,
@@ -1141,6 +1152,61 @@ def _build_native_job(
             await _create_and_run(AgentConfig(import_path=config.agent_import_path, **agent_options))
 
     return job_dir, run_job
+
+
+async def _tasks_behind_egress_control(dataset_path: Path, task_names: Sequence[str] | None, agent: Any) -> list[str]:
+    """Selected tasks whose agent container Harbor's Docker environment attaches to its egress sidecar's network.
+
+    Mirrors Harbor's own decision (``Trial._init_agent_environment`` feeding
+    ``DockerEnvironment._requires_egress_control``) through Harbor's network planner: per step, the
+    ``[environment]`` baseline, the agent phase, and the verifier phase when the verifier shares the agent's
+    container. If any of these is not public, Harbor sets the main service's ``network_mode`` to the sidecar's,
+    and Docker refuses ``extra_hosts`` on such a service. A task Harbor can't load is counted as restricted:
+    leaving the alias out never stops a container from starting.
+    """
+    # Before importing Harbor: there is nothing to inspect without a dataset directory.
+    if not Path(dataset_path).is_dir():
+        return []
+    from harbor.job import DatasetConfig  # ty: ignore[unresolved-import,unused-ignore-comment]
+    from harbor.models.task.config import NetworkMode  # ty: ignore[unresolved-import,unused-ignore-comment]
+    from harbor.models.task.task import Task  # ty: ignore[unresolved-import,unused-ignore-comment]
+    from harbor.models.task.verifier_mode import (  # ty: ignore[unresolved-import,unused-ignore-comment]
+        resolve_step_verifier_mode,
+        resolve_task_verifier_mode,
+    )
+    from harbor.models.trial.config import EnvironmentConfig  # ty: ignore[unresolved-import,unused-ignore-comment]
+    from harbor.trial.network_policy import (  # ty: ignore[unresolved-import,unused-ignore-comment]
+        resolve_trial_network_plan,
+    )
+
+    selected = await DatasetConfig(
+        path=dataset_path, task_names=list(task_names) if task_names else None
+    ).get_task_configs()
+    restricted: list[str] = []
+    for entry in selected:
+        if entry.path is None:  # not a local task directory, so its network policy can't be read here
+            restricted.append(str(entry))
+            continue
+        name = entry.path.name
+        try:
+            task_config = Task(entry.path).config
+            for step in task_config.steps or [None]:
+                mode = (
+                    resolve_task_verifier_mode(task_config)
+                    if step is None
+                    else resolve_step_verifier_mode(task_config, step)
+                )
+                plan = resolve_trial_network_plan(task_config, agent, EnvironmentConfig(), step, verifier_mode=mode)
+                policies = [plan.agent_env_baseline, plan.agent_phase]
+                if plan.verifier_env_baseline is None:
+                    policies.append(plan.verifier_phase)
+                if any(policy.network_mode != NetworkMode.PUBLIC for policy in policies):
+                    restricted.append(name)
+                    break
+        except Exception:  # Harbor reports a broken task itself; here it only drops the alias
+            logger.debug("Could not read Harbor task %s's network policy", name, exc_info=True)
+            restricted.append(name)
+    return restricted
 
 
 def _is_harbor_resume_refusal(exc: FileExistsError, job_dir: Path) -> bool:
