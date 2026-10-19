@@ -6,6 +6,10 @@ package authz_test
 import data.authz
 import data.common
 
+# Scope families that `data.authz.scope_families` holds in production. Tests that mock `data.authz.endpoints`
+# must supply them, otherwise scope validation is skipped and scoped tests pass vacuously.
+scope_families_fixture := {"platform": true, "entities": true, "models": true, "inference": true, "intake": true, "auth": true}
+
 # Test helper functions
 
 test_envoy_header_extraction_is_case_insensitive if {
