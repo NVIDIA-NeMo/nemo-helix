@@ -154,30 +154,28 @@ Nemotron PII has been specifically fine-tuned to recognize many entity types out
 
 Beyond these built-in types, you can define custom entities using:
 
-- **Nemotron PII**: Fast, accurate zero-shot NER for standard and custom entity types
-- **Regex**: Deterministic pattern matching, best for consistent formats (SSN, credit cards)
-- **LLM**: Contextual understanding, handles complex patterns and ambiguous cases
-
-**Example Custom Entity:**
-
 ```json
 {
-  "classify": {
-    "enable_classify": true,
-    "entities": [
-      "first_name",
-      "last_name",
-      "email",
-      "employee_id",
-      "project_code"
-    ]
+  "replace_pii": {
+    "globals": {
+      "classify": {
+        "enable_classify": true,
+        "entities": [
+          "first_name",
+          "last_name",
+          "email",
+          "employee_id",
+          "project_code"
+        ]
+      }
+    }
   }
 }
 ```
 
 ## Configuration
 
-PII replacement is configured through the `replace_pii` section. For the full schema, refer to [reference](/documentation/synthesize-safe-data/about/parameters-reference).
+PII replacement is configured through the `replace_pii` section. For the full schema, refer to [Configuration Reference -- Replacing PII](https://nvidia-nemo.github.io/Safe-Synthesizer/0.1.13/user-guide/configuration/#replacing-pii) in the upstream Safe Synthesizer docs. For NeMo Helix-specific behavior, refer to [Parameters Reference](/documentation/synthesize-safe-data/about/parameters-reference#pii-replacement-configuration).
 
 ```json
 {

@@ -36,9 +36,8 @@ Differential privacy (DP) provides mathematical guarantees that synthetic data d
 **Key Concepts:**
 
 - **Epsilon (ε)**: Privacy budget - lower values mean stronger privacy
-    - ε = 1: Very strong privacy
-    - ε = 6-10: Moderate privacy
-    - ε > 10: Weak privacy
+    - Default: ε = 8.0
+    - Typical range: ε ∈ [4, 12]; values below 4 may make training convergence difficult
     - **Recommended starting range: ε ∈ [8, 12]** - adjust downward based on privacy needs
 
 - **Delta (δ)**: Probability of privacy breach
@@ -324,6 +323,8 @@ builder_grouped = (
     .with_data(
         group_training_examples_by="Clothing ID"
     )
+    .with_classify_model_provider(provider_name)
+    .with_replace_pii()
     .with_differential_privacy(dp_enabled=True, epsilon=8.0)
     .synthesize()
 )
@@ -424,33 +425,9 @@ check_data_requirements(len(df))
 
 ### Choosing Epsilon
 
-{/* @nemo-docs: skip-python-type-check */}
-```python
-def recommend_epsilon(dataset_size, sensitivity):
-    """
-    Recommend epsilon based on dataset characteristics.
-
-    Args:
-    dataset_size: Number of records
-    sensitivity: 'high' for medical/financial, 'medium' for general, 'low' for public
-    """
-    recommendations = {"high": (1.0, 3.0), "medium": (3.0, 6.0), "low": (6.0, 10.0)}
-
-    epsilon_range = recommendations[sensitivity]
-    delta = 1 / (dataset_size**1.2)
-
-    print(f"📋 Recommendations for {dataset_size} records, {sensitivity} sensitivity:")
-    print(f" Epsilon range: {epsilon_range[0]} - {epsilon_range[1]}")
-    print(f" Delta: {delta:.2e}")
-    print(f" Stronger privacy: Use lower epsilon within range")
-    print(f" Better utility: Use higher epsilon within range")
-    print(f"\n Starting point: ε = {(epsilon_range[0] + epsilon_range[1]) / 2:.1f}")
-
-recommend_epsilon(len(df), "medium")
-```
-
 **Explicit Epsilon Guidance:**
-- Start at **ε ∈ [8, 12]** for most use cases
+- Start at **ε ∈ [8, 12]** for most use cases; the default is ε = 8.0
+- Typical values fall in **ε ∈ [4, 12]**; values below 4 may make training convergence difficult
 - Reduce epsilon gradually if stronger privacy is required
 - Monitor SQS scores to understand quality impact
 - Delta calculation: use `"auto"` or `1/n^1.2` where n is dataset size
@@ -469,6 +446,8 @@ builder_optimized = (
         batch_size=256,  # Larger batch sizes benefit DP
         num_input_records_to_sample=len(df) * 10,  # Approximately ten passes over the input
     )
+    .with_classify_model_provider(provider_name)
+    .with_replace_pii()
     .with_differential_privacy(
         dp_enabled=True,
         epsilon=8.0,
