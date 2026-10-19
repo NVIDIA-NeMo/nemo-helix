@@ -1,15 +1,15 @@
 <p align="center">
-  <a href="docs/tutorial.md"><img src="docs/assets/readme/site.jpg" alt="The walkthrough site for this tutorial" width="860"></a>
+  <a href="https://nvidia-nemo.github.io/nemo-helix/gtc-berlin-2026-tutorial/"><img src="docs/assets/readme/site.jpg" alt="The walkthrough site for this tutorial" width="860"></a>
 </p>
 
 # Fine-tune your own fast decision model on an open stack
 
 Train a small open model to take over a decision that a large model makes inside your agent. Generate the training data, fine-tune on a single GPU and measure the result, all with open source tools in NeMo Helix.
 
-**[Read the tutorial](docs/tutorial.md)** • [Watch the demo](docs/assets/demo.mp4) • [See the results](RESULTS.md)
+**[Open the walkthrough site](https://nvidia-nemo.github.io/nemo-helix/gtc-berlin-2026-tutorial/)** • [Watch the demo](https://nvidia-nemo.github.io/nemo-helix/gtc-berlin-2026-tutorial/#watch-h) • [Read the tutorial](docs/tutorial.md) • [See the results](RESULTS.md)
 
 > [!NOTE]
-> **Draft for review.** Steps 7 to 9 haven't been run end to end on a single local GPU machine yet. The walkthrough site shown above is in `docs/`: clone this branch and open `docs/index.html` in your browser.
+> **Draft for review.** Steps 7 to 9 haven't been run end to end on a single local GPU machine yet. The walkthrough site is at [nvidia-nemo.github.io/nemo-helix/gtc-berlin-2026-tutorial](https://nvidia-nemo.github.io/nemo-helix/gtc-berlin-2026-tutorial/).
 
 ## What you'll build
 
@@ -38,7 +38,7 @@ Training took 22 minutes on one A100. We scored both models on 416 incidents hel
 
 ## Watch it first
 
-<a href="docs/assets/demo.mp4"><img src="docs/assets/readme/demo-thumbnail.jpg" alt="Watch the 4-minute demo" width="640"></a>
+<a href="https://nvidia-nemo.github.io/nemo-helix/gtc-berlin-2026-tutorial/#watch-h"><img src="docs/assets/readme/demo-thumbnail.jpg" alt="Watch the 4-minute demo" width="640"></a>
 
 Four minutes, narrated: the install, both agents on the same message, the training data, fine-tuning and the scores.
 
@@ -61,7 +61,7 @@ cd helix-specialized-agent-tutorial
 bash scripts/preflight.sh --no-gpu
 ```
 
-The preflight tells you what's missing. Then open `docs/index.html` in your browser for the walkthrough site, or follow [docs/tutorial.md](docs/tutorial.md). Every step shows the commands, what you should see and what to do if it fails.
+The preflight tells you what's missing. Then follow the [walkthrough site](https://nvidia-nemo.github.io/nemo-helix/gtc-berlin-2026-tutorial/) or [docs/tutorial.md](docs/tutorial.md). Every step shows the commands, what you should see and what to do if it fails.
 
 **Prefer to have your coding agent guide you?** Open the repo in Claude Code, Codex, Cursor or Pi and ask:
 
