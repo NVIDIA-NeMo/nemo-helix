@@ -502,7 +502,9 @@ async def test_persistence_preserves_optional_ratings(tmp_path, severity, confid
     remote = RemoteAnalystBackend(MagicMock())
     remote.client.insights.insights.create = AsyncMock(return_value=Insight.model_validate(record))
     await remote.persist_result(workspace="test", agent="target", result=result)
-    kwargs = remote.client.insights.insights.create.await_args.kwargs
+    call = remote.client.insights.insights.create.await_args
+    assert call is not None
+    kwargs = call.kwargs
     assert kwargs["severity"] == severity
     assert kwargs["confidence"] == confidence
 
