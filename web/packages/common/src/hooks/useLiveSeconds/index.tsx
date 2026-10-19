@@ -8,7 +8,7 @@ interface UseLiveSecondsProps {
   enabled?: boolean;
 }
 
-const secondsSince = (start: Date): number => Math.floor((Date.now() - start.getTime()) / 1000);
+const secondsSince = (startMs: number): number => Math.floor((Date.now() - startMs) / 1000);
 
 /**
  * Use this hook to get the live seconds since the start time.
@@ -17,36 +17,17 @@ const secondsSince = (start: Date): number => Math.floor((Date.now() - start.get
  * This behavior is useful for fetching job details async and then rendering the relative time.
  */
 export const useLiveSeconds = ({ startDate, enabled = true }: UseLiveSecondsProps) => {
-  const [liveSeconds, setLiveSeconds] = useState(0);
-  const [lockedStartDate, setLockedStartDate] = useState<Date | undefined>(undefined);
+  const startMs = enabled ? startDate?.getTime() : undefined;
+  const [, setTick] = useState(0);
 
-  // Only start counting when startDate is provided
   useEffect(() => {
-    if (startDate === undefined || !enabled) {
+    if (startMs === undefined) {
       return;
     }
 
-    if (lockedStartDate === undefined) {
-      // Lock the startDate value to prevent desync when startDate is provided asynchronously
-      setLockedStartDate(startDate);
-      setLiveSeconds(secondsSince(startDate));
-    }
-  }, [startDate, lockedStartDate, enabled]);
-
-  // Separate effect for the interval to avoid creating multiple timers
-  useEffect(() => {
-    if (lockedStartDate === undefined || !enabled) {
-      return;
-    }
-
-    setLiveSeconds(secondsSince(lockedStartDate));
-    const interval = setInterval(() => setLiveSeconds(secondsSince(lockedStartDate)), 1000);
+    const interval = setInterval(() => setTick((tick) => tick + 1), 1000);
     return () => clearInterval(interval);
-  }, [lockedStartDate, enabled]);
+  }, [startMs]);
 
-  if (lockedStartDate !== undefined) {
-    return liveSeconds;
-  }
-  // The start locks only after the first render; read the clock until then.
-  return startDate !== undefined && enabled ? secondsSince(startDate) : undefined;
+  return startMs === undefined ? undefined : secondsSince(startMs);
 };

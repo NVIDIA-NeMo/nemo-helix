@@ -15,8 +15,7 @@ interface ElapsedTimeProps {
   running: boolean;
 }
 
-/** Live count from `start` while `running`, else `durationMs`, else `start` → `end`. Key by item
- * in lists: the live count locks onto the first start it sees. */
+/** Live count from `start` while `running`, else `durationMs`, else `start` → `end`. */
 export const ElapsedTime: FC<ElapsedTimeProps> = ({ start, end, durationMs, running }) => {
   const startDate = utcToLocalDate(start);
   const liveSeconds = useLiveSeconds({ startDate, enabled: running });

@@ -47,25 +47,53 @@ describe('useLiveSeconds', () => {
     expect(result.current).toBe(3);
   });
 
-  it('should lock the startDate value to prevent desync when startDate is provided asynchronously', () => {
+  it('keeps counting when rerendered with an equal but new Date', () => {
     vi.setSystemTime(START);
     const { result, rerender } = renderHook(({ startDate }) => useLiveSeconds({ startDate }), {
       initialProps: { startDate: START },
     });
-    expect(result.current).toBe(0);
-
-    // Try to change the startDate - should be ignored (locked)
-    rerender({ startDate: new Date('2025-01-01T00:00:05.000Z') });
 
     act(() => {
-      vi.advanceTimersByTime(1000);
+      vi.advanceTimersByTime(500);
     });
+    rerender({ startDate: new Date(START.getTime()) });
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+
     expect(result.current).toBe(1);
+  });
+
+  it('follows a new startDate without remounting', () => {
+    vi.setSystemTime(new Date('2025-01-01T00:01:00.000Z'));
+    const { result, rerender } = renderHook(
+      ({ startDate }: { startDate?: Date }) => useLiveSeconds({ startDate }),
+      { initialProps: { startDate: START as Date | undefined } }
+    );
+    expect(result.current).toBe(60);
+
+    rerender({ startDate: new Date('2025-01-01T00:00:50.000Z') });
+    expect(result.current).toBe(10);
 
     act(() => {
       vi.advanceTimersByTime(1000);
     });
-    expect(result.current).toBe(2);
+    expect(result.current).toBe(11);
+  });
+
+  it('picks up a different startDate after going undefined in between', () => {
+    vi.setSystemTime(new Date('2025-01-01T00:01:00.000Z'));
+    const { result, rerender } = renderHook(
+      ({ startDate }: { startDate?: Date }) => useLiveSeconds({ startDate }),
+      { initialProps: { startDate: START as Date | undefined } }
+    );
+    expect(result.current).toBe(60);
+
+    rerender({ startDate: undefined });
+    expect(result.current).toBeUndefined();
+
+    rerender({ startDate: new Date('2025-01-01T00:00:30.000Z') });
+    expect(result.current).toBe(30);
   });
 
   it('should handle long durations', () => {
