@@ -427,7 +427,7 @@ check_data_requirements(len(df))
 
 **Explicit Epsilon Guidance:**
 - Start at **ε ∈ [8, 12]** for most use cases; the default is ε = 8.0
-- Typical values fall in **ε ∈ [4, 12]**; below 4, the noise required can make training fail to converge
+- Typical values fall in **ε ∈ [4, 12]**; values below 4 may make training convergence difficult
 - Reduce epsilon gradually if stronger privacy is required
 - Monitor SQS scores to understand quality impact
 - Delta calculation: use `"auto"` or `1/n^1.2` where n is dataset size
