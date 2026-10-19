@@ -89,43 +89,70 @@ class _IssuerBoundary:
     def __init__(self, config: AuthConfig) -> None:
         self.config = config
         self.jwt_validator = JWTValidator(config)
-        self._lock = asyncio.Lock()
+        self._first_check_lock = asyncio.Lock()
         self._verdict: _Verdict | None = None
-        # The error to raise again while the verdict is MISCONFIGURED; None otherwise.
-        self._misconfiguration: TokenIssuerBoundaryMisconfigurationError | None = None
+        # Why authentication fails closed while the verdict is MISCONFIGURED; None otherwise.
+        self._misconfiguration_reason: str | None = None
         self._reuse_verdict_until = 0.0
+        # The background recheck in progress, kept so it is not garbage-collected mid-flight.
+        self._recheck_task: asyncio.Task[None] | None = None
 
     async def check(self, workload_token_exchange_service: WorkloadTokenExchangeService) -> None:
         """Raise if IdP and NeMo-issued tokens could be confused, reusing a recent verdict."""
-        # Concurrent requests wait for one in-flight check instead of each fetching from the IdP.
-        async with self._lock:
-            if self._verdict is None or time.monotonic() >= self._reuse_verdict_until:
-                if self._verdict is not None:
-                    # Recheck against the IdP as it is now. The validator caches discovery and
-                    # JWKS for an hour, so reusing it would replay what the IdP served last time.
-                    self.jwt_validator = JWTValidator(self.config)
-                self._verdict, self._misconfiguration = await self._evaluate(workload_token_exchange_service)
-                self._reuse_verdict_until = time.monotonic() + _REUSE_VERDICT_SECONDS[self._verdict]
-            if self._misconfiguration is not None:
-                raise self._misconfiguration
+        if self._verdict is None:
+            # With no verdict yet, the first check decides before any request is answered, so a
+            # misconfiguration fails closed from the first request. Concurrent first requests
+            # wait for that one check instead of each fetching from the IdP.
+            async with self._first_check_lock:
+                if self._verdict is None:
+                    await self._recheck(workload_token_exchange_service)
+        elif time.monotonic() >= self._reuse_verdict_until and self._recheck_task is None:
+            # Keep answering from the expired verdict while one task rechecks, so a slow IdP never
+            # holds up requests. A MISCONFIGURED verdict keeps failing closed until it is cleared.
+            self._recheck_task = asyncio.create_task(self._recheck_in_background(workload_token_exchange_service))
 
-    async def _evaluate(
-        self, workload_token_exchange_service: WorkloadTokenExchangeService
-    ) -> tuple[_Verdict, TokenIssuerBoundaryMisconfigurationError | None]:
+        if self._misconfiguration_reason is not None:
+            # A new exception each time: re-raising one instance would grow its traceback, and keep
+            # every failed request's frames alive, for as long as the verdict is reused.
+            raise TokenIssuerBoundaryMisconfigurationError(self._misconfiguration_reason)
+
+    async def _recheck(self, workload_token_exchange_service: WorkloadTokenExchangeService) -> None:
+        # A recheck reads the IdP as it is now. The validator caches discovery and JWKS for an
+        # hour, so reusing it would replay what the IdP served last time.
+        jwt_validator = self.jwt_validator if self._verdict is None else JWTValidator(self.config)
         try:
             finished = await _validate_token_issuer_boundary(
-                self.config, workload_token_exchange_service, self.jwt_validator
+                self.config, workload_token_exchange_service, jwt_validator
             )
         except TokenIssuerBoundaryMisconfigurationError as exc:
-            return _Verdict.MISCONFIGURED, exc
-        return (_Verdict.CONSISTENT if finished else _Verdict.UNVERIFIED), None
+            verdict, reason = _Verdict.MISCONFIGURED, str(exc)
+        else:
+            verdict, reason = (_Verdict.CONSISTENT if finished else _Verdict.UNVERIFIED), None
+        self.jwt_validator = jwt_validator
+        self._verdict, self._misconfiguration_reason = verdict, reason
+        self._reuse_verdict_until = time.monotonic() + _REUSE_VERDICT_SECONDS[verdict]
+
+    async def _recheck_in_background(self, workload_token_exchange_service: WorkloadTokenExchangeService) -> None:
+        try:
+            await self._recheck(workload_token_exchange_service)
+        except Exception:
+            # Keep the current verdict and try again after the short window rather than on the
+            # next request.
+            logger.exception("Issuer-boundary recheck failed; keeping the current verdict")
+            self._reuse_verdict_until = time.monotonic() + _REUSE_VERDICT_SECONDS[_Verdict.UNVERIFIED]
+        finally:
+            self._recheck_task = None
 
 
 _ISSUER_BOUNDARY_STATE_KEY = "issuer_boundary"
 
 
-def get_issuer_boundary(request: Request) -> _IssuerBoundary:
-    """Return this app's shared validator state, starting afresh when the auth config changes."""
+async def get_issuer_boundary(request: Request) -> _IssuerBoundary:
+    """Return this app's shared validator state, starting afresh when the auth config changes.
+
+    ``async`` so FastAPI runs it on the event loop; as a sync dependency it would run in a worker
+    thread, and concurrent first requests could each build their own state.
+    """
     config = get_auth_config()
     issuer_boundary = getattr(request.app.state, _ISSUER_BOUNDARY_STATE_KEY, None)
     if isinstance(issuer_boundary, _IssuerBoundary) and issuer_boundary.config is config:
