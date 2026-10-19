@@ -627,13 +627,22 @@ async def test_extension_without_bundle_support_fails_before_creating(
     assert server.creates == []
 
 
-def test_bundle_must_be_pinned_by_digest(tmp_path: Path, server: Server) -> None:
+@pytest.mark.parametrize(
+    "image",
+    [
+        # Neither a digest nor a tag.
+        "registry.example.com/bundles/claude",
+        # No registry, which CRI-O won't resolve.
+        "bundles/claude@sha256:" + "a" * 64,
+    ],
+)
+def test_bundle_image_must_be_pinned_and_qualified(tmp_path: Path, server: Server, image: str) -> None:
     with pytest.raises(ValueError, match="image"):
         _environment(
             _task(tmp_path, compose=False),
             server,
             compose_services=None,
-            agent_bundle={**BUNDLE, "image": "registry.example.com/bundles/claude:2.1.301"},
+            agent_bundle={**BUNDLE, "image": image},
             session_id="bundle-task__abc__env",
             trial_paths=TrialPaths(trial_dir=tmp_path / "bundle-task__abc"),
         )

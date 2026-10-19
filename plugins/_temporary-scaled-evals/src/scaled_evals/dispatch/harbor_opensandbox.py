@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import string
 import subprocess
 from collections.abc import Callable, Mapping, MutableMapping, Sequence
@@ -35,7 +36,11 @@ import yaml
 from nhx_sandbox.opensandbox_policy import canonical_egress_target
 from tomlkit.items import InlineTable, Table
 
-from scaled_evals.api.build.task_image_identity import TaskImageIdentityError, validate_task_image_request
+from scaled_evals.api.build.task_image_identity import (
+    TaskImageIdentityError,
+    validate_task_image_request,
+    verify_stored_task_image,
+)
 from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_HARBOR_VERSIONS, HARBOR_OPENSANDBOX_RUNTIME
 from scaled_evals.api.settings import settings
 from scaled_evals.dispatch.credentials import merged_env_file
@@ -96,6 +101,8 @@ NEMO_OPENSANDBOX_IMPORT_PATH = "scaled_evals.harbor_opensandbox_environment:Nemo
 APPLIED_EGRESS_SUMMARY_FILENAME = "scaled-evals-applied-egress.json"
 # Evaluation network policies this runtime accepts.
 SUPPORTED_NETWORK_POLICIES = ("default_deny",)
+# A registered bundle's immutable identity, as the API stores it.
+_DIGEST_REF = re.compile(r"[^\s@]+@sha256:[0-9a-f]{64}")
 # Module the terminator runs, with the Harbor runner's interpreter, to kill an evaluation's sandboxes.
 CLEANUP_MODULE = "scaled_evals.harbor_opensandbox_cleanup"
 
@@ -446,22 +453,41 @@ def environment_agent_bundle(bundle: Mapping[str, Any]) -> SandboxAgentBundle:
     """The environment's ``agent_bundle`` kwarg for a registered bundle; ``ValueError`` if it can't be used.
 
     The API validated the record at registration. ``SandboxAgentBundle`` checks again what the sandbox
-    relies on: an image pinned by digest, so the trial runs exactly the registered bundle, and an
-    entrypoint inside ``/installed-agent``.
+    relies on: a registry-qualified image, and an entrypoint inside ``/installed-agent``. Like the
+    task image, the image is the registered digest, or in tag mode (which hosted admission requires)
+    the signed tag, which ``verify_agent_bundle_image`` checks at launch.
     """
-    sandbox_bundle = SandboxAgentBundle(
-        image=str(bundle.get("image_digest") or ""),
+    image_ref, image_digest = str(bundle.get("image_ref") or ""), str(bundle.get("image_digest") or "")
+    if not _DIGEST_REF.fullmatch(image_digest):
+        raise ValueError("agent bundle image: the bundle has no immutable digest")
+
+    # The bundle runs in the task's pod, so like service images it gets the task image registry policy.
+    try:
+        image = _image_ref_for_sandbox(image_ref, image_digest)
+        validate_task_image_request(image, image_digest)
+    except ValueError as exc:
+        raise ValueError(f"agent bundle image: {exc}") from exc
+
+    return SandboxAgentBundle(
+        image=image,
         # The installer path belongs to the bundle image's layout, so it comes from configuration.
         installer=settings.agent_bundle_installer_path,
         entrypoint=str(bundle.get("entrypoint") or ""),
     )
 
-    # The bundle runs in the task's pod, so like service images it gets the task image registry policy.
+
+def verify_agent_bundle_image(bundle: Mapping[str, Any]) -> None:
+    """Fail the launch if a bundle delivered by tag no longer resolves to its registered digest.
+
+    Registry I/O, so it runs at launch, not in preflight. Tag mode only: elsewhere the sandbox
+    pulls the digest itself.
+    """
+    if settings.sandbox_k8s_task_image_reference_mode != "tag":
+        return
     try:
-        validate_task_image_request(sandbox_bundle.image)
+        verify_stored_task_image(str(bundle.get("image_ref") or ""), str(bundle.get("image_digest") or ""))
     except TaskImageIdentityError as exc:
         raise ValueError(f"agent bundle image: {exc}") from exc
-    return sandbox_bundle
 
 
 def _check_agent_version_pins(config: Mapping[str, Any], bundle: Mapping[str, Any]) -> None:
@@ -624,6 +650,8 @@ def make_harbor_opensandbox_submitter(
         # Reject unsupported evaluations, and missing OpenSandbox connection settings, before
         # anything is downloaded or written.
         preflight(spec)
+        if spec.agent_bundle:
+            verify_agent_bundle_image(spec.agent_bundle)
         harbor_env = connection_env(os.environ if environ is None else environ, env_file)
 
         # The evaluation may pin its own Harbor runner venv; otherwise use the deployment default.

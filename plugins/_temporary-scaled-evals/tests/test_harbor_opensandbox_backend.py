@@ -74,7 +74,7 @@ def _write_task(task_dir: Path, environment: str = "") -> None:
         ({"network_policy": "unrestricted"}, "supports network_policy default_deny"),
         ({"network_policy": "scoped_egress"}, "supports network_policy default_deny"),
         ({"network_policy_config": {"allowed_hosts": ["x"]}}, "omit network_policy_config"),
-        ({"agent_bundle": {"object_key": "b"}}, "validation errors? for SandboxAgentBundle"),
+        ({"agent_bundle": {"object_key": "b"}}, "agent bundle image: the bundle has no immutable digest"),
         ({"image_digest": None}, "recorded digest"),
         ({"tarball_object_key": None}, "uploaded task pack"),
         ({"framework": "gym"}, "Harbor evaluations only"),
@@ -512,6 +512,57 @@ def test_render_passes_the_bundle_pinned_by_digest(tmp_path: Path) -> None:
     assert bundle["installer"] == settings.agent_bundle_installer_path
     assert bundle["entrypoint"] == "bin/claude"
     assert "env" not in bundle
+
+
+@pytest.fixture
+def hosted_tag_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hosted admission: signed tag-form references only, as the settings validator requires."""
+    monkeypatch.setattr(settings, "task_image_hosted_mode", True)
+    monkeypatch.setattr(settings, "sandbox_k8s_task_image_reference_mode", "tag")
+
+
+@pytest.mark.usefixtures("bundle_registry_allowed", "hosted_tag_mode")
+def test_hosted_mode_passes_the_bundle_by_its_signed_tag(tmp_path: Path) -> None:
+    backend.preflight(_spec(agent_bundle=AGENT_BUNDLE))
+    config = backend.render_harbor_config(
+        "agents: [{name: claude-code}]\n",
+        _spec(agent_bundle=AGENT_BUNDLE),
+        task_path=tmp_path,
+        jobs_dir="j",
+        trusted_hosts=[],
+    )
+
+    assert config["environment"]["kwargs"]["agent_bundle"]["image"] == "nvcr.io/org/agent-bundles/claude-code:2.1.301"
+
+
+@pytest.mark.usefixtures("bundle_registry_allowed")
+def test_bundle_without_an_immutable_digest_is_rejected() -> None:
+    with pytest.raises(ValueError, match="agent bundle image: the bundle has no immutable digest"):
+        backend.preflight(_spec(agent_bundle={**AGENT_BUNDLE, "image_digest": "nvcr.io/org/agent-bundles/claude-code"}))
+
+
+@pytest.mark.parametrize(("mode", "verified"), [("tag", True), ("digest", False)])
+def test_launch_verifies_a_tag_delivered_bundle(monkeypatch: pytest.MonkeyPatch, mode: str, verified: bool) -> None:
+    monkeypatch.setattr(settings, "sandbox_k8s_task_image_reference_mode", mode)
+    calls: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(backend, "verify_stored_task_image", lambda ref, digest: calls.append((ref, digest)))
+
+    backend.verify_agent_bundle_image(AGENT_BUNDLE)
+
+    # A digest-delivered bundle can't drift, so only tag delivery goes to the registry.
+    expected = [(AGENT_BUNDLE["image_ref"], AGENT_BUNDLE["image_digest"])] if verified else []
+    assert calls == expected
+
+
+@pytest.mark.usefixtures("bundle_registry_allowed", "hosted_tag_mode")
+def test_submit_fails_when_the_bundle_tag_moved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def moved(_ref: str, _digest: str | None) -> None:
+        raise backend.TaskImageIdentityError("task image tag moved")
+
+    monkeypatch.setattr(backend, "verify_stored_task_image", moved)
+
+    with pytest.raises(ValueError, match="agent bundle image: task image tag moved"):
+        _submit(tmp_path, monkeypatch, spec=_spec(agent_bundle=AGENT_BUNDLE))
 
 
 def test_render_without_a_bundle_sends_none(tmp_path: Path) -> None:

@@ -169,7 +169,7 @@ def add_agent_bundle(pod_spec: dict[str, Any], bundle: SandboxAgentBundle, image
     bundle_container: dict[str, Any] = {
         "name": AGENT_BUNDLE_CONTAINER,
         "image": bundle.image,
-        # Pinned by digest, so a cached copy is the same image.
+        # The operator's policy, as for the task image and the services.
         "imagePullPolicy": image_pull_policy,
         "command": [bundle.installer, INSTALLED_AGENT_DIR],
         "volumeMounts": [{"name": installed_agent_mount["name"], "mountPath": INSTALLED_AGENT_DIR}],

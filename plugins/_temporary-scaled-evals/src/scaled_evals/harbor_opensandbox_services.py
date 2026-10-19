@@ -261,9 +261,13 @@ class SandboxAgentBundle(_Strict):
     agent is in place before ``main`` starts; ``main`` mounts it read-only.
     """
 
-    # Pinned by digest, since a tag could move under a run; like services, it must name its registry.
+    # Pinned by digest, or the signed tag hosted admission requires, which dispatch checks still
+    # resolves to the registered digest at launch. Like services, it must name its registry.
     image: str = Field(
-        pattern=r"^([a-z0-9-]+(\.[a-z0-9-]+)+(:[0-9]+)?|localhost(:[0-9]+)?)/[^\s@]+@sha256:[0-9a-f]{64}$",
+        pattern=(
+            r"^([a-z0-9-]+(\.[a-z0-9-]+)+(:[0-9]+)?|localhost(:[0-9]+)?)/[^\s@]+"
+            r"(@sha256:[0-9a-f]{64}|:[^\s@/:]+)$"
+        ),
         max_length=512,
     )
     installer: AbsolutePath

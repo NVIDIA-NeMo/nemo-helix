@@ -143,25 +143,32 @@ data:
                 add_services(template["spec"], services, pull_policy)
 
         def get_status(self, workload: dict[str, Any]) -> dict[str, Any]:
-            """The stock status, except a sandbox with services counts as ``Allocated`` once its pod has an IP.
+            """The stock status, except a sandbox with services or a bundle is ``Allocated`` once its pod has an IP.
 
-            Kubernetes starts the sandbox container only after every sidecar is up, and the stock
-            create waits for that. Reporting the pod as allocated once it has an IP instead lets
-            create return (the client looks up its endpoints next, so the IP must be known), and a
-            failing or slow service is seen by the client's wait, not hidden behind the create call.
+            Kubernetes starts the sandbox container only after every init container and sidecar is up,
+            and the stock create waits for that. Reporting the pod as allocated once it has an IP instead
+            lets create return (the client looks up its endpoints next, so the IP must be known), and a
+            failing or slow service or bundle is seen by the client's wait, not hidden behind the create call.
             """
             status = super().get_status(workload)
+            if status["state"] != "Pending" or not self._parse_pod_ip(workload):
+                return status
+
             template = (workload.get("spec") or {}).get("template") or {}
-            if (
-                status["state"] == "Pending"
-                and self._parse_pod_ip(workload)
-                and POD_ANNOTATION in ((template.get("metadata") or {}).get("annotations") or {})
-            ):
+            annotations = (template.get("metadata") or {}).get("annotations") or {}
+            if POD_ANNOTATION in annotations:
                 return {
                     **status,
                     "state": "Allocated",
                     "reason": "SERVICES_STARTING",
                     "message": "Compose services are starting",
+                }
+            if AGENT_BUNDLE_POD_ANNOTATION in annotations:
+                return {
+                    **status,
+                    "state": "Allocated",
+                    "reason": "AGENT_BUNDLE_INSTALLING",
+                    "message": "The agent bundle is installing",
                 }
             return status
 
@@ -542,7 +549,7 @@ data:
         bundle_container: dict[str, Any] = {
             "name": AGENT_BUNDLE_CONTAINER,
             "image": bundle.image,
-            # Pinned by digest, so a cached copy is the same image.
+            # The operator's policy, as for the task image and the services.
             "imagePullPolicy": image_pull_policy,
             "command": [bundle.installer, INSTALLED_AGENT_DIR],
             "volumeMounts": [{"name": installed_agent_mount["name"], "mountPath": INSTALLED_AGENT_DIR}],
@@ -921,9 +928,13 @@ data:
         agent is in place before ``main`` starts; ``main`` mounts it read-only.
         """
 
-        # Pinned by digest, since a tag could move under a run; like services, it must name its registry.
+        # Pinned by digest, or the signed tag hosted admission requires, which dispatch checks still
+        # resolves to the registered digest at launch. Like services, it must name its registry.
         image: str = Field(
-            pattern=r"^([a-z0-9-]+(\.[a-z0-9-]+)+(:[0-9]+)?|localhost(:[0-9]+)?)/[^\s@]+@sha256:[0-9a-f]{64}$",
+            pattern=(
+                r"^([a-z0-9-]+(\.[a-z0-9-]+)+(:[0-9]+)?|localhost(:[0-9]+)?)/[^\s@]+"
+                r"(@sha256:[0-9a-f]{64}|:[^\s@/:]+)$"
+            ),
             max_length=512,
         )
         installer: AbsolutePath

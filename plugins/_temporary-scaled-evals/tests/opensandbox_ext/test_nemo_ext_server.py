@@ -35,6 +35,7 @@ from opensandbox_server.api.schema import ImageSpec, NetworkPolicy, NetworkRule
 from opensandbox_server.extensions import apply_extensions_to_annotations
 from opensandbox_server.services.k8s import provider_factory
 from opensandbox_server.services.k8s.batchsandbox_provider import BatchSandboxProvider
+from opensandbox_server.services.k8s.kubernetes_service import KubernetesSandboxService
 from scaled_evals.harbor_opensandbox_services import (
     AGENT_BUNDLE_EXTENSION_KEY,
     AGENT_BUNDLE_POD_ANNOTATION,
@@ -165,7 +166,8 @@ def test_invalid_bundle_is_a_value_error_and_creates_nothing(
     provider: ext.NemoComposeProvider, k8s: FakeK8sClient
 ) -> None:
     with pytest.raises(ValueError, match="image"):
-        _create(provider, {AGENT_BUNDLE_POD_ANNOTATION: BUNDLE_SPEC.replace("@sha256:", ":")})
+        # No registry, which CRI-O won't resolve.
+        _create(provider, {AGENT_BUNDLE_POD_ANNOTATION: BUNDLE_SPEC.replace("registry.example.com/", "")})
     assert k8s.created == []
 
 
@@ -190,14 +192,36 @@ def _workload(annotations: dict[str, str], phase: str, pod_ip: str | None) -> di
         ({POD_ANNOTATION: SPEC}, "Pending", None, "Pending"),
         ({POD_ANNOTATION: SPEC}, "Running", "10.0.0.5", "Running"),
         ({POD_ANNOTATION: SPEC}, "Failed", "10.0.0.5", "Failed"),
+        ({AGENT_BUNDLE_POD_ANNOTATION: BUNDLE_SPEC}, "Pending", "10.0.0.5", "Allocated"),
+        ({AGENT_BUNDLE_POD_ANNOTATION: BUNDLE_SPEC}, "Pending", None, "Pending"),
+        ({AGENT_BUNDLE_POD_ANNOTATION: BUNDLE_SPEC}, "Running", "10.0.0.5", "Running"),
         ({}, "Pending", "10.0.0.5", "Pending"),
     ],
 )
-def test_pod_with_services_and_an_ip_counts_as_allocated(
+def test_pod_with_services_or_a_bundle_and_an_ip_counts_as_allocated(
     provider: ext.NemoComposeProvider, annotations: dict[str, str], phase: str, pod_ip: str | None, state: str
 ) -> None:
     # The stock create returns on Allocated, so it doesn't block until every service is up.
     assert provider.get_status(_workload(annotations, phase, pod_ip))["state"] == state
+
+
+async def test_stock_create_wait_returns_for_a_pending_bundle_only_sandbox(
+    provider: ext.NemoComposeProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A bundle image that can't be pulled leaves the pod Pending with an IP. The stock create must
+    # return anyway, so the client's wait reports the bundle failure instead of a create timeout.
+    workload = _workload({AGENT_BUNDLE_POD_ANNOTATION: BUNDLE_SPEC}, "Pending", "10.0.0.5")
+    monkeypatch.setattr(provider, "get_workload", lambda **_: workload)
+    service = types.SimpleNamespace(workload_provider=provider, namespace="nemo")
+
+    returned = await KubernetesSandboxService._wait_for_sandbox_ready(
+        service,  # ty: ignore[invalid-argument-type]
+        SANDBOX_ID,
+        timeout_seconds=2,
+        poll_interval_seconds=0.01,
+    )
+
+    assert returned is workload
 
 
 @pytest.fixture

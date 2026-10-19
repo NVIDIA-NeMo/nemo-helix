@@ -108,25 +108,32 @@ class NemoComposeProvider(BatchSandboxProvider):
             add_services(template["spec"], services, pull_policy)
 
     def get_status(self, workload: dict[str, Any]) -> dict[str, Any]:
-        """The stock status, except a sandbox with services counts as ``Allocated`` once its pod has an IP.
+        """The stock status, except a sandbox with services or a bundle is ``Allocated`` once its pod has an IP.
 
-        Kubernetes starts the sandbox container only after every sidecar is up, and the stock
-        create waits for that. Reporting the pod as allocated once it has an IP instead lets
-        create return (the client looks up its endpoints next, so the IP must be known), and a
-        failing or slow service is seen by the client's wait, not hidden behind the create call.
+        Kubernetes starts the sandbox container only after every init container and sidecar is up,
+        and the stock create waits for that. Reporting the pod as allocated once it has an IP instead
+        lets create return (the client looks up its endpoints next, so the IP must be known), and a
+        failing or slow service or bundle is seen by the client's wait, not hidden behind the create call.
         """
         status = super().get_status(workload)
+        if status["state"] != "Pending" or not self._parse_pod_ip(workload):
+            return status
+
         template = (workload.get("spec") or {}).get("template") or {}
-        if (
-            status["state"] == "Pending"
-            and self._parse_pod_ip(workload)
-            and POD_ANNOTATION in ((template.get("metadata") or {}).get("annotations") or {})
-        ):
+        annotations = (template.get("metadata") or {}).get("annotations") or {}
+        if POD_ANNOTATION in annotations:
             return {
                 **status,
                 "state": "Allocated",
                 "reason": "SERVICES_STARTING",
                 "message": "Compose services are starting",
+            }
+        if AGENT_BUNDLE_POD_ANNOTATION in annotations:
+            return {
+                **status,
+                "state": "Allocated",
+                "reason": "AGENT_BUNDLE_INSTALLING",
+                "message": "The agent bundle is installing",
             }
         return status
 

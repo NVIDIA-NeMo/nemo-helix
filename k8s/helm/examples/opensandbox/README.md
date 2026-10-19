@@ -155,7 +155,7 @@ command in one service container (and only those).
 ### Agent bundles
 
 The same extension delivers scaled-evals agent bundles. A bundle is a
-prebuilt, digest-pinned image holding an agent (for example Claude Code) and
+prebuilt, pinned image holding an agent (for example Claude Code) and
 an installer. Harbor's installed agents need root to install themselves
 (`apt-get`), which fails on task images with a non-root `USER`, and they
 download the agent on every trial. With a bundle, a create request carries
@@ -176,6 +176,11 @@ client checks that `GET /v1/nemo-ext/health` lists `agent-bundle` under
 `features` before it creates a sandbox, so an older extension fails the trial
 instead of starting a sandbox without the agent. The bundle image must be
 pullable with the template's `imagePullSecrets`.
+
+Like the task image, the bundle is pulled by its digest, or by its signed tag
+when scaled-evals runs with `SANDBOX_K8S_TASK_IMAGE_REFERENCE_MODE=tag` (which
+hosted mode requires). A tag is checked to still resolve to the registered
+digest at launch.
 
 ### Enable it with the chart
 
