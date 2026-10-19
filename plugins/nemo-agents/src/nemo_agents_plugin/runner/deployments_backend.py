@@ -40,6 +40,7 @@ from nemo_agents_plugin.runner.fabric_artifact_staging import (
     stage_fabric_ethos_config_files,
 )
 from nemo_agents_plugin.spec_revision import SpecRevision, stage_with_spec_revision
+from nemo_agents_plugin.telemetry.container_urls import telemetry_url_fields
 from nemo_agents_plugin.telemetry.intake_export import (
     configure_intake_atif_export,
     supports_intake_atif_export,
@@ -233,8 +234,16 @@ def rewrite_fabric_config_base_urls(agent_config: dict[str, Any], gateway_url: s
 
     Rewrites ``models.*.base_url`` and harness ``model.base_url`` when the URL
     points at the Inference Gateway. Legacy ``settings.base_url`` values are
-    also supported. Loopback ATIF HTTP storage endpoints are rewritten so they
-    remain reachable from container deployments. Third-party URLs are left
+    also supported. ATIF, ATOF and OpenTelemetry trace, log and metric endpoints
+    in authoring and translated Relay configs that point at Intake are rewritten the same
+    way, which lands them on the loopback auth proxy when there is one.
+
+    Every rewrite is keyed on the platform route prefix in the path, whatever
+    host the author named: ``localhost``, a Compose service, the public ingress
+    and ``host.docker.internal`` all mean "the platform" and all have to reach
+    it from the container with the job's identity. Every rewrite takes
+    *gateway_url*'s host; HTTPS endpoints retain HTTPS. URLs that point elsewhere -- a
+    third-party model API, a collector the agent chose for itself -- are left
     unchanged.
     """
     reachable = urlsplit(gateway_url.rstrip("/"))
@@ -268,20 +277,20 @@ def rewrite_fabric_config_base_urls(agent_config: dict[str, Any], gateway_url: s
         parts = urlsplit(current)
         settings["base_url"] = f"{reachable_origin}{parts.path}"
 
-    telemetry = config.get("telemetry")
-    atif = telemetry.get("atif") if isinstance(telemetry, dict) else None
-    storage_configs = atif.get("storage", []) if isinstance(atif, dict) else []
-    for storage_config in storage_configs:
-        if not isinstance(storage_config, dict) or storage_config.get("type") != "http":
-            continue
-        endpoint = storage_config.get("endpoint")
+    for exporter, key in telemetry_url_fields(config):
+        endpoint = exporter.get(key)
         if not isinstance(endpoint, str):
             continue
         parts = urlsplit(endpoint)
-        if parts.hostname not in LOOPBACK_ADDRESSES:
+        if not parts.path.startswith("/apis/intake/"):
             continue
-        scheme = "https" if "https" in (parts.scheme, reachable.scheme) else reachable.scheme
-        storage_config["endpoint"] = parts._replace(scheme=scheme, netloc=reachable.netloc).geturl()
+        if parts.scheme in {"ws", "wss"}:
+            scheme = "wss" if reachable.scheme == "https" else "ws"
+        elif parts.scheme in {"http", "https"}:
+            scheme = "https" if "https" in (parts.scheme, reachable.scheme) else reachable.scheme
+        else:
+            continue
+        exporter[key] = parts._replace(scheme=scheme, netloc=reachable.netloc).geturl()
     return config
 
 

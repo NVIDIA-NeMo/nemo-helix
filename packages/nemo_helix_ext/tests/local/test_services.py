@@ -29,6 +29,11 @@ from nhx.platform_runner.config import (
 )
 
 
+@pytest.fixture(autouse=True)
+def no_docker_bridge_discovery(monkeypatch):
+    monkeypatch.setattr("nhx.platform_runner.local_network.docker_listener_host", lambda host: None)
+
+
 def _allow_tmp_path_socket_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(services, "_AF_UNIX_PATH_MAX_BYTES", 4096)
 
@@ -929,6 +934,7 @@ def test_serve_embedded_app_with_socket_path_listens_on_tcp_and_uds(tmp_path: Pa
         host="127.0.0.1",
         port=9090,
         socket_path=str(socket_path),
+        docker_host=None,
         keep_alive_timeout_seconds=12,
     )
 
