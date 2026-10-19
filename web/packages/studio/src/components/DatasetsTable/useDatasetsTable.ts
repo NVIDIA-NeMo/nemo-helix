@@ -11,6 +11,7 @@ import {
   type GenericSortField,
 } from '@nemo/sdk/generated/platform/schema';
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
+import { VISIBLE_PURPOSES } from '@studio/components/DatasetsTable/constants';
 import {
   type DatasetWithId,
   type DatasetsTableProps,
@@ -83,6 +84,8 @@ export function useDatasetsTable({
         ? (getSortParam(dataViewState.sorting.state) as GenericSortField)
         : undefined,
       filter: {
+        // "All" means every visible purpose; generic filesets are never listed.
+        ...withOperators<FilesetFilter>({ purpose: { $in: VISIBLE_PURPOSES } }),
         ...(enableFilters ? dataViewState.apiFilter.filter : undefined),
         ...(enableFilters && dataViewState.apiFilter.searchText
           ? withOperators<FilesetFilter>({

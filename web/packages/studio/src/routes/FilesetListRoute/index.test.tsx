@@ -15,7 +15,6 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, MemoryRouter, RouterProvider } from 'react-router';
 
-
 // Mock child components to isolate testing
 vi.mock('@studio/routes/FilesetListRoute/ActionMenu', () => ({
   ActionMenu: vi.fn(({ dataset, onNavigateToDetails, onDatasetUpdated, onDatasetDeleted }) => (
@@ -264,7 +263,11 @@ describe('FilesetListRoute', () => {
   });
 
   describe('Default view (ASTD-830)', () => {
-    const make = (name: string, purpose: FilesetOutput['purpose'], over: Partial<FilesetOutput> = {}) =>
+    const make = (
+      name: string,
+      purpose: FilesetOutput['purpose'],
+      over: Partial<FilesetOutput> = {}
+    ) =>
       ({
         ...mockDatasets[0],
         id: `${name}-id`,
@@ -288,7 +291,9 @@ describe('FilesetListRoute', () => {
             const url = new URL(request.url);
             requests.push(url);
             const allowed = url.searchParams.getAll('filter[purpose][$in]').join(',').split(',');
-            const data = allowed.includes('') ? rows : rows.filter((r) => allowed.includes(r.purpose));
+            const data = allowed.includes('')
+              ? rows
+              : rows.filter((r) => allowed.includes(r.purpose));
             return HttpResponse.json(pageEnvelope(data));
           }
         )
@@ -299,11 +304,9 @@ describe('FilesetListRoute', () => {
 
       // (a) single $in filter of dataset/environment/model, default sort is recency
       const lastUrl = requests.at(-1)!;
-      expect(lastUrl.searchParams.getAll('filter[purpose][$in]').join(',').split(',').sort()).toEqual([
-        'dataset',
-        'environment',
-        'model',
-      ]);
+      expect(
+        lastUrl.searchParams.getAll('filter[purpose][$in]').join(',').split(',').sort()
+      ).toEqual(['dataset', 'environment', 'model']);
       expect(lastUrl.searchParams.get('sort')).toBe('-created_at');
 
       // (b) generic never rendered
@@ -314,10 +317,15 @@ describe('FilesetListRoute', () => {
       const classes = purposes.map((p) => screen.getAllByTestId(`purpose-pill-${p}`)[0].className);
       expect(new Set(classes).size).toBe(purposes.length);
 
-      // dropdown: "All" selected, no "Generic" option
+      // dropdown: every filter defaults to "All"; Purpose offers no "Generic" option
       await user.click(screen.getByRole('button', { name: /filter/i }));
-      expect(screen.queryByRole('option', { name: 'Generic' })).not.toBeInTheDocument();
-      expect(screen.getByRole('option', { name: 'All' })).toHaveAttribute('aria-selected', 'true');
+      const options = screen.getAllByRole('option');
+      const names = options.map((o) => o.textContent);
+      expect(names).toEqual(expect.arrayContaining(['Dataset', 'Environment', 'Model']));
+      expect(names).not.toContain('Generic');
+      options
+        .filter((o) => o.textContent === 'All')
+        .forEach((o) => expect(o).toHaveAttribute('aria-selected', 'true'));
     });
   });
 });
