@@ -44,9 +44,11 @@ COPY ./ /workspace
 RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \
     uv venv --python ${PYTHON_VERSION} /workspace/.venv && \
     . /workspace/.venv/bin/activate && \
+    set -- /workspace/wheelhouse/nemo_helix-*.whl && \
+    [ "$#" -eq 1 ] && [ -f "$1" ] || { echo "expected exactly one nemo_helix wheel in wheelhouse/, found: $*" >&2; exit 1; } && \
     uv pip install --no-sources --constraint /workspace/constraints.fabric-local.txt \
-      "/workspace/wheelhouse/nemo_helix-0.4.0.post37.dev0+154a3933d-py3-none-any.whl[nemo-agents-plugin]" \
-      "nemo-fabric==0.4.0" . && \
+      "$1[nemo-agents-plugin]" \
+      "nemo-fabric==0.5.0" . && \
     chmod -R a+rX /opt/uv /workspace/.venv
 
 

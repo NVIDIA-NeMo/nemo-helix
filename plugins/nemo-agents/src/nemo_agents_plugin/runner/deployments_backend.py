@@ -234,8 +234,16 @@ def rewrite_fabric_config_base_urls(agent_config: dict[str, Any], gateway_url: s
 
     Rewrites ``models.*.base_url`` and harness ``model.base_url`` when the URL
     points at the Inference Gateway. Legacy ``settings.base_url`` values are
-    also supported. Loopback ATIF HTTP storage endpoints are rewritten so they
-    remain reachable from container deployments. Third-party URLs are left
+    also supported. ATIF HTTP storage endpoints and OpenTelemetry trace, log,
+    and metric endpoints whose path points at Intake are rewritten the same
+    way, which lands them on the loopback auth proxy when there is one.
+
+    Every rewrite is keyed on the platform route prefix in the path, whatever
+    host the author named: ``localhost``, a Compose service, the public ingress
+    and ``host.docker.internal`` all mean "the platform" and all have to reach
+    it from the container with the job's identity. Every rewrite takes
+    *gateway_url*'s scheme as well as its host. URLs that point elsewhere -- a
+    third-party model API, a collector the agent chose for itself -- are left
     unchanged.
     """
     reachable = urlsplit(gateway_url.rstrip("/"))
@@ -276,13 +284,24 @@ def rewrite_fabric_config_base_urls(agent_config: dict[str, Any], gateway_url: s
         if not isinstance(storage_config, dict) or storage_config.get("type") != "http":
             continue
         endpoint = storage_config.get("endpoint")
-        if not isinstance(endpoint, str):
+        if not isinstance(endpoint, str) or "/apis/intake/" not in endpoint:
             continue
         parts = urlsplit(endpoint)
-        if parts.hostname not in LOOPBACK_ADDRESSES:
-            continue
-        scheme = "https" if "https" in (parts.scheme, reachable.scheme) else reachable.scheme
-        storage_config["endpoint"] = parts._replace(scheme=scheme, netloc=reachable.netloc).geturl()
+        storage_config["endpoint"] = parts._replace(scheme=reachable.scheme, netloc=reachable.netloc).geturl()
+
+    opentelemetry = telemetry.get("opentelemetry") if isinstance(telemetry, dict) else None
+    if isinstance(opentelemetry, dict):
+        signal_sections = [opentelemetry, opentelemetry.get("logs"), opentelemetry.get("metrics")]
+        for section in signal_sections:
+            endpoint_configs = section.get("endpoints") if isinstance(section, dict) else None
+            for endpoint_config in endpoint_configs if isinstance(endpoint_configs, list) else []:
+                if not isinstance(endpoint_config, dict):
+                    continue
+                endpoint = endpoint_config.get("endpoint")
+                if not isinstance(endpoint, str) or "/apis/intake/" not in endpoint:
+                    continue
+                parts = urlsplit(endpoint)
+                endpoint_config["endpoint"] = parts._replace(scheme=reachable.scheme, netloc=reachable.netloc).geturl()
     return config
 
 

@@ -567,12 +567,28 @@ def _opensandbox_sandbox(row: Mapping[str, Any]) -> dict[str, str]:
         "egress_allowed_hosts": ",".join(str(host) for host in launch.get("trusted_allowed_hosts") or []),
         "egress_verification": launch.get("egress_verification"),
         "ownership_labels": json.dumps(dict(ownership), sort_keys=True) if ownership else None,
+        # Whether sandboxes carried an ephemeral-storage limit at all, and the ceiling on it.
+        "disk_limit_enforcement": (
+            None
+            if launch.get("enforce_disk_limit") is None
+            else ("enforced" if launch["enforce_disk_limit"] else "off")
+        ),
+        "max_task_disk_mb": launch.get("max_disk_mb"),
     }
     if "opensandbox_applied_egress" in row:
         applied = _opensandbox_applied_egress(row)
         fields["verified_sandboxes"] = len(applied)
         fields["applied_policy_sha256s"] = ",".join(
             sorted({str(item["policy_sha256"]) for item in applied if item.get("policy_sha256")})
+        )
+        # A sandbox without a limit can fill its node's disk, so count the ones that had none, and
+        # the ones whose limit was lowered below what the task asked for.
+        fields["sandboxes_without_disk_limit"] = sum(item.get("disk_limit_mb") is None for item in applied)
+        fields["sandboxes_with_clamped_disk_limit"] = sum(
+            item.get("disk_limit_mb") is not None
+            and item.get("disk_requested_mb") is not None
+            and item["disk_limit_mb"] < item["disk_requested_mb"]
+            for item in applied
         )
     return {key: str(value) for key, value in fields.items() if value not in (None, "")}
 

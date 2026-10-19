@@ -267,7 +267,7 @@ async def test_relay_activates_fabrics_config_and_scopes_the_agent(
                                 # auto-wiring: destination and credentials already
                                 # resolved, nothing for the adapter to decide.
                                 "config": {
-                                    "version": 3,
+                                    "version": 4,
                                     "atif": {
                                         "enabled": True,
                                         "agent_name": "insights-analyst",

@@ -28,19 +28,17 @@ const NewDeploymentRoute =
 
 export const deploymentRoutes: RouteObject[] = gateDeploymentsRoutes([
   {
-    path: ROUTES.workspace.deployments,
     element: DeploymentsListRoute ? <DeploymentsListRoute /> : null,
     errorElement: <RouteErrorPanel title="Deployments" />,
+    children: [
+      { path: ROUTES.workspace.deployments, element: null },
+      { path: ROUTES.workspace.deploymentsDeployment, element: null },
+    ],
   },
   {
     path: ROUTES.workspace.deploymentsNew,
     element: NewDeploymentRoute ? <NewDeploymentRoute /> : null,
     errorElement: <RouteErrorPanel title="Create Deployment" />,
-  },
-  {
-    path: ROUTES.workspace.deploymentsDeployment,
-    element: DeploymentsListRoute ? <DeploymentsListRoute /> : null,
-    errorElement: <RouteErrorPanel title="Deployments" />,
   },
 ]);
 

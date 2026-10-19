@@ -45,7 +45,7 @@ import { type ComponentProps, type FC, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 
 const SPAN_STATUS_FILTER_OPTIONS = [
-  { value: 'success', label: 'Success' },
+  { value: 'success', label: 'Completed' },
   { value: 'error', label: 'Error' },
   { value: 'cancelled', label: 'Cancelled' },
   { value: 'unknown', label: 'Unknown' },

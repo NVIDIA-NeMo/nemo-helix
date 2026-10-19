@@ -17,7 +17,7 @@ import logging
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, resolve_agent_config_for_deployment
@@ -27,7 +27,11 @@ from nemo_agents_plugin.environment_resolution import (
     merge_environment_spec_into_agent_config,
 )
 from nemo_agents_plugin.fabric.gateway_credentials import platform_gateway_credential_env
-from nemo_agents_plugin.fabric.translator import FabricTranslationError, translate_agent_config
+from nemo_agents_plugin.fabric.translator import (
+    FabricTranslationError,
+    translate_agent_config,
+    upgrade_relay_observability_version,
+)
 from nemo_agents_plugin.runner.deployments_backend import resolve_agent_gateway_url, rewrite_fabric_config_base_urls
 from nemo_agents_plugin.utils import get_base_url
 from nemo_evals.api.schemas import AgentRef
@@ -269,8 +273,10 @@ async def resolve_registered_agent(
     if not isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget)):
         return target
     source = registered_agent_source(target)
-    if source is None or registered_agent_config(target) is not None:
+    if source is None:
         return target
+    if registered_agent_config(target) is not None:
+        return upgrade_registered_agent_config(target)
 
     agent = await _load_registered_agent(
         source.agent.root, source.environment, workspace=workspace, async_sdk=async_sdk
@@ -283,6 +289,26 @@ async def resolve_registered_agent(
         if agent.files is not None and async_sdk is not None:
             await discard_registered_agent_files(client_from_platform(async_sdk, AsyncFilesClient), agent.files)
         raise
+
+
+_RunnerTargetT = TypeVar("_RunnerTargetT", bound=FabricRunnerTarget | HarborRunnerTarget | GymRunnerTarget)
+
+
+def upgrade_registered_agent_config(target: _RunnerTargetT) -> _RunnerTargetT:
+    """The target with a config resolved under an older Fabric brought up to what the running one accepts.
+
+    A resolved config is persisted with the spec, so a job submitted before a Fabric upgrade re-parses it
+    under the new release. Returns ``target`` itself when nothing needs raising.
+    """
+    config = registered_agent_config(target)
+    if config is None:
+        return target
+    upgraded = upgrade_relay_observability_version(config)
+    if upgraded is config:
+        return target
+    if isinstance(target, HarborRunnerTarget):
+        return target.model_copy(update={"agent_kwargs": {**target.agent_kwargs, "fabric_config": upgraded}})
+    return target.model_copy(update={"resolved_config": upgraded})
 
 
 def _gym_policy_params(config: dict[str, Any]) -> dict[str, Any]:

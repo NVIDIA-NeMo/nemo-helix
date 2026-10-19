@@ -16,6 +16,9 @@ shares, so the same class runs on Harbor 0.13.2 and 0.20.0. What it adds over a 
   if it cannot be read at all.
 * Every create attempt is labelled, so a sandbox the server created but whose handle was lost to a
   failed or retried request can still be found and killed.
+* Each sandbox's writable storage is capped at the task's ``storage_mb`` through an
+  ``ephemeral-storage`` limit. OpenSandbox has no disk limit of its own, so without this a task that
+  fills its disk fills the node's. Kubernetes evicts a pod that exceeds the limit.
 * On an image with a non-root ``USER``, Harbor's ``user="root"`` commands run as the image's user.
   ``execd`` runs as that user and the kernel refuses its switch to uid 0, so asking for root fails
   every such command before it starts, even checks like ``tmux -V``.
@@ -174,6 +177,10 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             ``/etc/resolv.conf``, which in-cluster is the resolver sandboxes share.
         egress_verification: How strictly to compare the applied policy with the requested one;
             see ``verify_applied_egress``. Readback itself is always required.
+        enforce_disk_limit: Cap each sandbox's ephemeral storage at the task's ``storage_mb``. Turn
+            this off only on a runtime that doesn't enforce the limit.
+        max_disk_mb: Ceiling on the limit, so a task asking for far more than any node holds can't
+            make its pod unschedulable. ``None`` applies the task's value as given.
         compose_services: The evaluation profile's ``compose_services``. Applied only when the
             environment directory has a Compose file, so a separate verifier environment (built
             from the task's ``tests/``) gets a plain sandbox.
@@ -201,6 +208,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         trusted_allowed_hosts: list[str] | None = None,
         resolver_addresses: list[str] | None = None,
         egress_verification: EgressVerificationMode = "default_action",
+        enforce_disk_limit: bool = True,
+        max_disk_mb: int | None = None,
         compose_services: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
@@ -226,6 +235,9 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         self._trusted_targets = frozenset(canonical_egress_target(host) for host in self._trusted_allowed_hosts)
         self._resolver_addresses = tuple(resolver_addresses) if resolver_addresses is not None else None
         self._egress_verification: EgressVerificationMode = egress_verification
+        self._enforce_disk_limit = enforce_disk_limit
+        self._max_disk_mb = max_disk_mb
+        self._disk_limit_mb: int | None = None
         self._sandbox: Any | None = None
         self._image_uid: int | None = None
         self._image_uid_probed = False
@@ -309,6 +321,13 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             "NemoOpenSandboxEnvironment requires a prebuilt image. Set task.environment.docker_image."
         )
 
+    def _task_disk_limit_mb(self) -> int | None:
+        """The task's ``storage_mb`` capped at ``max_disk_mb``, or ``None`` when no limit applies."""
+        requested = self._effective_storage_mb
+        if not self._enforce_disk_limit or requested is None:
+            return None
+        return min(requested, self._max_disk_mb) if self._max_disk_mb is not None else requested
+
     @override
     def validate_network_policy_support(self, network_policy: NetworkPolicy | None = None) -> None:
         """Run Harbor's checks, then reject ``allowlist`` tasks that ask for hosts outside the trusted allowlist."""
@@ -336,7 +355,11 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         return build_egress_policy(EgressAllowlist(targets=targets, resolver_addresses=self._resolver_addresses))
 
     def _resource(self) -> dict[str, str]:
-        """CPU, memory and GPU limits from the task; storage has no per-sandbox limit in OpenSandbox."""
+        """CPU, memory, GPU and disk limits from the task.
+
+        OpenSandbox has no disk limit of its own; its Kubernetes runtime passes ``ephemeral-storage``
+        through to the pod. Built on every create attempt, so a retry sends the same limit.
+        """
         # _resource_limit_value returns None when the task asks for a request rather than a limit,
         # so a reservation is never silently turned into a hard cap.
         cpu = self._resource_limit_value("cpu", auto_mode=ResourceMode.LIMIT)
@@ -348,6 +371,9 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             resource["memory"] = f"{memory}Mi"
         if self._effective_gpus > 0:
             resource["gpu"] = str(self._effective_gpus)
+        self._disk_limit_mb = self._task_disk_limit_mb()
+        if self._disk_limit_mb is not None:
+            resource["ephemeral-storage"] = f"{self._disk_limit_mb}Mi"
         return resource
 
     def _extensions(self) -> dict[str, str]:
@@ -417,6 +443,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             "network_mode": self._network_policy.network_mode.value,
             "policy_sha256": hashlib.sha256(canonical.encode()).hexdigest(),
             "policy": payload,
+            "disk_requested_mb": self._effective_storage_mb,
+            "disk_limit_mb": self._disk_limit_mb,
         }
         filename = applied_egress_filename(recorded_id or self.session_id)
         try:

@@ -498,12 +498,12 @@ class TestPublishedPackagingContract:
         pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
         extras = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["optional-dependencies"]
         assert "all" not in extras
-        assert extras["claude"] == ["nemo-fabric-adapters-claude[harness]>=0.4.0,<0.5.0"]
-        assert extras["codex"] == ["nemo-fabric-adapters-codex[harness]>=0.4.0,<0.5.0"]
-        assert extras["deepagents"] == ["nemo-fabric-adapters-deepagents[harness]>=0.4.0,<0.5.0"]
-        assert extras["mini-swe-agent"] == ["nemo-fabric-adapters-mini-swe-agent[harness]>=0.4.0,<0.5.0"]
+        assert extras["claude"] == ["nemo-fabric-adapters-claude[harness]>=0.5.0,<0.6.0"]
+        assert extras["codex"] == ["nemo-fabric-adapters-codex[harness]>=0.5.0,<0.6.0"]
+        assert extras["deepagents"] == ["nemo-fabric-adapters-deepagents[harness]>=0.5.0,<0.6.0"]
+        assert extras["mini-swe-agent"] == ["nemo-fabric-adapters-mini-swe-agent[harness]>=0.5.0,<0.6.0"]
         assert extras["nooa"] == [
-            "nemo-fabric-adapters-nooa[harness]>=0.4.0,<0.5.0; python_version >= '3.12' and python_version < '3.14'"
+            "nemo-fabric-adapters-nooa[harness]>=0.5.0,<0.6.0; python_version >= '3.12' and python_version < '3.14'"
         ]
 
     def test_published_mini_swe_agent_extra(self) -> None:
@@ -515,7 +515,7 @@ class TestPublishedPackagingContract:
         ]
         assert extras["nemo-agents-plugin-mini-swe-agent"] == [
             "nemo-helix[nemo-agents-plugin]",
-            "nemo-fabric-adapters-mini-swe-agent[harness]>=0.4.0,<0.5.0",
+            "nemo-fabric-adapters-mini-swe-agent[harness]>=0.5.0,<0.6.0",
         ]
 
     @pytest.mark.parametrize(

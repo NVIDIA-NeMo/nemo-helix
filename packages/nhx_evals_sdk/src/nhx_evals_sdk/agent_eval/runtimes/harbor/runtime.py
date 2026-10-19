@@ -194,8 +194,8 @@ class HarborRuntimeConfig(BaseModel):
         default_factory=dict,
         description=(
             "Non-secret environment variables for the Harbor agent, as literal values. They travel in the "
-            "spec and reach only the agent. Keys Harbor treats as secrets (matching KEY, SECRET, TOKEN, "
-            "PASSWORD, CREDENTIAL or AUTH) are rejected; use ``env_secrets`` for credentials."
+            "spec and reach only the agent. Keys Harbor treats as secrets (matching KEY, SECRET, TOKEN but not "
+            "TOKENS, PASSWORD, CREDENTIAL or AUTH) are rejected; use ``env_secrets`` for credentials."
         ),
     )
     n_attempts: int = Field(default=1, ge=1, description="Number of attempts Harbor runs per task.")

@@ -45,6 +45,18 @@ Helm YAML syntax alone does not catch flattened nesting that still parses. The H
 
 API examples live in service route/model definitions, not generated pages. Required object examples must have representative nonempty values: Fern can omit `{}` fields from its generated snippets even when the schema accepts them. The API example linter validates source examples and checks explicit bodyless-response code samples; it does not replace inspecting a Fern preview of generated language snippets.
 
+## Release notes
+
+Use one permanent file per release:
+`docs/about/release-notes/release-<major>-<minor>-<patch>.mdx`. Label its Fern nav
+entry with the version (for example `v0.8.0`) and give it the explicit slug
+`release-0-8-0`. Keep the release index and nav in descending semantic-version
+order, including when adding patches for an older release line. Do not overwrite
+or archive another version's page when adding a release. This avoids unrelated
+release lines sharing a rolling notes file; the index and nav still need normal
+merge reconciliation. Link to a version's canonical page, or to the release
+index when no specific version is intended.
+
 ## Generated pages — do not hand-edit
 
 These are generated; edit the source and regenerate:

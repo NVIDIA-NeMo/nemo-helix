@@ -170,6 +170,8 @@ iron-swarm.yaml
 docs/superpowers/
 # Per-worker fatal-signal tracebacks (PYTEST_CRASH_DUMP_DIR)
 crash-dumps/
+# Locally built nemo-helix wheels for Dockerfile.fabric-local builds
+agents/*/wheelhouse/
 
 # Names a specific cloud project (bucket, service accounts, registry paths), so
 # it stays local. plugins/_temporary-scaled-evals/deploy/k8s/local.env.example is the

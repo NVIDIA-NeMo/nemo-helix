@@ -516,6 +516,12 @@ class Settings(BaseSettings):
     harbor_opensandbox_allowed_hosts: str = ""
     # How strictly each sandbox's applied egress policy is checked; "off" is deliberately not allowed.
     harbor_opensandbox_egress_verification: Literal["default_action", "strict"] = "default_action"
+    # Cap each sandbox's ephemeral storage at its task's storage_mb. Kubernetes evicts a pod that
+    # exceeds it. Turn off only where the sandbox runtime doesn't enforce the limit.
+    harbor_opensandbox_enforce_disk_limit: bool = True
+    # Ceiling on that limit, in MB, so a task asking for more than any node holds can't leave its
+    # pod unschedulable. Unset applies each task's value as given.
+    harbor_opensandbox_max_disk_mb: int | None = Field(default=131072, gt=0)
     # Identifies this deployment in sandbox ownership metadata so cleanup never
     # matches another deployment's sandboxes on a shared control plane.
     harbor_opensandbox_deployment_id: str = "scaled-evals"
