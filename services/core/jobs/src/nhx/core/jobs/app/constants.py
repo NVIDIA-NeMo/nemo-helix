@@ -32,3 +32,7 @@ KUBE_JOB_SELECTOR_LABELS = {
 
 JOB_MULTINODE_NETWORKING_ANNOTATION = "nhx.nvidia.com/enable-multi-node-networking"
 JOB_NUM_NODES_ANNOTATION = "nhx.nvidia.com/num-nodes"
+
+PAUSE_REQUESTED_AT = "pause_requested_at"
+RESUMED_AT = "resumed_at"
+STOPPED_AT = "stopped_at"

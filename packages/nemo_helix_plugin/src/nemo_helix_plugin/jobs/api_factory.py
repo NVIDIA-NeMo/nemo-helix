@@ -76,6 +76,7 @@ from nemo_helix_plugin.jobs.spec import (
 from nemo_helix_plugin.jobs.telemetry import stamp_job_telemetry_plugins
 from nemo_helix_plugin.jobs.types import (
     CreateHelixJobRequest,
+    JobControl,
     JobLogsQueryParams,
     JobName,
     ListJobsQueryParams,
@@ -119,6 +120,7 @@ _JOB_PERMISSION_DESCRIPTIONS: dict[str, str] = {
     "cancel": "Cancel {ns} jobs",
     "pause": "Pause {ns} jobs",
     "resume": "Resume {ns} jobs",
+    "control": "Update {ns} job control settings",
 }
 
 JobConfigT = TypeVar("JobConfigT", bound=BaseModel)
@@ -1440,7 +1442,24 @@ def job_route_factory(
             ).data()
             return from_response(job_resp)
 
+        @router.patch("/jobs/{name}/control")
+        async def update_job_control(
+            name: str,
+            workspace: str,
+            body: JobControl,
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
+        ) -> TypedJobResponse:
+            f"""Change mutable job behavior for the {service_name} microservice."""
+
+            job_resp = (
+                await AsyncJobsClient.from_client(async_client).update_job_control(
+                    name=name, workspace=workspace, body=body
+                )
+            ).data()
+            return from_response(job_resp)
+
         _stamp(pause_job, perm="pause", write=True)
         _stamp(resume_job, perm="resume", write=True)
+        _stamp(update_job_control, perm="control", write=True)
 
     return router
