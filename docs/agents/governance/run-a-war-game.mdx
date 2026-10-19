@@ -37,7 +37,7 @@ to the agent is covered in
    service.
 1. At least one model provider registered in the workspace.
 
-Provision Agent Hardener once per machine, then confirm the prerequisites:
+Provision the Agent hardening plugin once per machine, then confirm the prerequisites:
 
 ```bash
 nemo agent-hardener setup
@@ -62,7 +62,7 @@ nemo agent-hardener init --agent react-agent
 ```
 
 The agent must be registered with `nemo agents create`. It does not have to be
-deployed: Agent Hardener reads the stored config and builds its own sandboxed copy.
+deployed: the Agent hardening plugin reads the stored config and builds its own sandboxed copy.
 
 The manifest is named after the agent, and that name is the `--manifest-id`
 every later command takes. `init` also writes `agent-hardener.yaml` as a readable
@@ -245,5 +245,5 @@ in Studio. There is no feature flag.
 ## Next Steps
 
 - [Review and Apply Mitigations](/documentation/agents/governance/apply-mitigations): choose which fixes to keep and write them back to the agent.
-- [Agent Hardener CLI Reference](/documentation/agents/governance/cli-reference): every command and flag.
+- [Agent Hardening CLI Reference](/documentation/agents/governance/cli-reference): every command and flag.
 - [Troubleshooting](/documentation/agents/governance/troubleshooting): setup, sandbox and victim failures.

@@ -267,4 +267,4 @@ Then open `http://localhost:5173/studio/workspaces/default/intake/traces`.
 
 - [Package the calculator agent as a container image](../../README.md#packaging-agents-as-container-images).
 - [Deploy an agent](../../../../docs/agents/deploy-agents.mdx).
-- [Review the agent configuration contract](../../../../docs/agents/index.mdx#agent-definition).
+- [Review the agent configuration contract](../../../../docs/agents/register-agents.mdx#register-with-code).
