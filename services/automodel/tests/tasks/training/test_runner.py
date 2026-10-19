@@ -196,7 +196,7 @@ def test_result_json_omits_duration_when_training_never_started(
     ],
 )
 def test_postprocessing_reports_the_work_it_is_doing(
-    tmp_path: Path, finetuning_type: FinetuningType, phase: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, finetuning_type: FinetuningType, phase: str
 ) -> None:
     """A LoRA merge loads the whole base model and can take as long as training did."""
     sent: list[str] = []
@@ -205,7 +205,7 @@ def test_postprocessing_reports_the_work_it_is_doing(
     backend.process_checkpoints.side_effect = lambda *a, **k: sent.append("process")
     runner = _ScriptedRunner(tmp_path, duration=1.0, compile_config=MagicMock, backend=backend)
     runner._config.training.finetuning_type = finetuning_type
-    runner._progress.report_running = lambda reported, **details: sent.append(reported)
+    monkeypatch.setattr(runner._progress, "report_running", lambda reported, **details: sent.append(reported))
 
     runner._postprocess_phase(None, TrainingMetrics(), MagicMock())
 
