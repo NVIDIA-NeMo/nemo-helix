@@ -109,11 +109,6 @@ footer p{margin:0 0 6px}
 <h1
 id="fine-tune-your-own-fast-decision-model-on-an-open-stack">Fine-tune
 your own fast decision model on an open stack</h1>
-<blockquote>
-<p><strong>Draft for review: not yet verified on a fresh
-machine.</strong> Commands marked <code>unverified</code> haven't been
-run in this exact form.</p>
-</blockquote>
 <p>This tutorial goes with the GTC Berlin session "Post Training Open
 Models with Synthetic Data for Specialized Agents" (Yamini Kagal and
 Stefan Gavrilovic, NVIDIA).</p>
@@ -145,9 +140,7 @@ Gemini, Ollama and any OpenAI-compatible endpoint. Base models come from
 Hugging Face; no token is needed for the two used here.</p>
 <p><strong>What we ran on.</strong> Our training, serving and model
 evaluations ran on a Helix cluster with one A100 80GB per job. The data
-generation and agent runs used a local Helix on a laptop. We haven't run
-steps 7 to 9 on a single local GPU machine end to end, which is why this
-is a draft.</p>
+generation and agent runs used a local Helix on a laptop.</p>
 <p><strong>Time and cost.</strong> Times below are what our runs took.
 Yours will differ with your data, model, hardware and provider. With the
 packaged data on one A100 80GB, plan on about 2 to 4 hours end to end

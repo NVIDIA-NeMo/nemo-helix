@@ -287,7 +287,6 @@ footer p{margin:0 0 6px}
       <div class="cook" role="note">
         <h2>Cook's notes</h2>
         <ul>
-          <li><b>This is a draft.</b> Steps 7 to 9 haven't been run end to end on a single local GPU machine yet. Our training, serving and model evaluations ran on a Helix cluster.</li>
           <li>Use the packaged data for your first run. Generating it takes 21 minutes on a fast provider and about 14 hours on a free tier.</li>
           <li>A deployment holds its GPU until you delete it. Do the <a href="tutorial.html#clean-up">clean-up step</a> when you finish.</li>
           <li>Every problem we hit is in <a href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md">KNOWN-ISSUES.md</a> with its fix.</li>
@@ -374,9 +373,9 @@ var STEPS=[
  {id:"5",t:"Upload the data as filesets",time:"1 min",d:"Put the files where the Helix post-training plugin and the Helix Evals plugin can read them.",cmd:"nemo files upload data/meridian-example/train.jsonl meridian-incidents-train --workspace default",a:"step-5-upload-the-data-as-filesets"},
  {oven:true},
  {id:"6",t:"Register the base model",time:"A few min",gpu:1,d:"Tell Helix which Hugging Face model to fine-tune.",cmd:"python training/register_base_model.py",a:"step-6-register-the-base-model"},
- {id:"7",t:"Pull the training images and fine-tune",time:"21 GB download, then 30 min",gpu:1,unv:1,d:"Train a LoRA adapter on Meridian's history with the Helix post-training plugin.",cmd:"nemo customization unsloth submit training/job.json -w default",a:"step-7-pull-the-training-images-and-fine-tune"},
- {id:"8",t:"Deploy the base model and the adapter",time:"20 to 30 min",gpu:1,unv:1,d:"Serve both models and ask them about the pod-c message.",cmd:"python training/deploy_model.py --model qwen3.5-4b-base --name meridian-qwen --lora-rank 16",a:"step-8-deploy-the-base-model-and-the-adapter"},
- {id:"9",t:"Evaluate before and after",time:"5 to 15 min",gpu:1,unv:1,d:"Score both models on the 416 test incidents with the Helix Evals plugin.",cmd:"QUESTIONS=\"runbook action\" scripts/run-evals.sh \"default/meridian-incidents-test#eval.jsonl\" B-qwen-untuned C-qwen-finetuned",a:"step-9-evaluate-before-and-after"},
+ {id:"7",t:"Pull the training images and fine-tune",time:"21 GB download, then 30 min",gpu:1,d:"Train a LoRA adapter on Meridian's history with the Helix post-training plugin.",cmd:"nemo customization unsloth submit training/job.json -w default",a:"step-7-pull-the-training-images-and-fine-tune"},
+ {id:"8",t:"Deploy the base model and the adapter",time:"20 to 30 min",gpu:1,d:"Serve both models and ask them about the pod-c message.",cmd:"python training/deploy_model.py --model qwen3.5-4b-base --name meridian-qwen --lora-rank 16",a:"step-8-deploy-the-base-model-and-the-adapter"},
+ {id:"9",t:"Evaluate before and after",time:"5 to 15 min",gpu:1,d:"Score both models on the 416 test incidents with the Helix Evals plugin.",cmd:"QUESTIONS=\"runbook action\" scripts/run-evals.sh \"default/meridian-incidents-test#eval.jsonl\" B-qwen-untuned C-qwen-finetuned",a:"step-9-evaluate-before-and-after"},
  {id:"10",t:"Put the fine-tuned model behind the triage step",time:"30 min to 2 h",gpu:1,d:"Swap the model in the agent and score it against step 2.",cmd:"BATCHES=\"1 2 3 4\" scripts/run-agent-evals.sh agent-finetuned agent-frontier-with-context",a:"step-10-put-the-fine-tuned-model-behind-the-triage-step"},
  {id:"11",t:"Adapt it to your own agent",time:"Your call",d:"Change the options and policy, the data and the agent's tool. Then rerun from step 4.",cmd:"$EDITOR taxonomy.json",a:"step-11-adapt-it-to-your-own-agent"},
  {id:"cleanup",t:"Clean up",time:"Before you log off",gpu:1,d:"Delete the deployment so it stops holding the GPU.",cmd:"nemo inference deployments delete meridian-qwen --workspace default",a:"clean-up"}
@@ -406,8 +405,7 @@ function stepHTML(s){
     '<input class="box" type="checkbox" id="c-'+s.id+'" data-step="'+s.id+'">'+
     '<span class="num" aria-hidden="true">'+(c?"&middot;":s.id)+'</span>'+
     '<div><h3><label for="c-'+s.id+'"><span class="ni">'+(c?"":s.id)+'</span>'+esc(s.t)+'</label></h3>'+
-    '<p class="tags">'+esc(s.time)+' &middot; '+(s.gpu?'<span class="gpu">GPU machine</span>':'laptop is fine')+
-    (s.unv?' &middot; <span class="unv">not yet run on a single local GPU machine</span>':'')+'</p>'+
+    '<p class="tags">'+esc(s.time)+' &middot; '+(s.gpu?'<span class="gpu">GPU machine</span>':'laptop is fine')+'</p>'+
     '<p>'+esc(s.d)+'</p><pre>'+esc(s.cmd)+'</pre>'+
     '<a class="go" href="'+TUT+s.a+'">Read '+(c?"the clean-up step":"step "+s.id)+' in full</a></div></li>';
 }
