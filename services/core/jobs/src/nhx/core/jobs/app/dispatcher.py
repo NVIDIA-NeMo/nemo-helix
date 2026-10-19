@@ -68,7 +68,7 @@ class StateTransitionConflictError(Exception):
 
 
 class JobOperationConflictError(Exception):
-    """Exception raised when a pause or resume cannot proceed."""
+    """Exception raised when a job operation cannot proceed in the job's current state."""
 
     def __init__(self, detail: str):
         super().__init__(detail)
@@ -1060,6 +1060,7 @@ class JobDispatcher:
         saved_step: HelixJobStep | None = None
         requested_details = status_details
         for attempt in range(2):
+            previous_step_status = step_to_save.status
             if not step_to_save.status.can_transition_to(status):
                 raise StateTransitionConflictError(
                     f"Invalid status transition from {step_to_save.status} to {status} for step {step_to_save.id}"
@@ -1186,7 +1187,9 @@ class JobDispatcher:
                     )
                 # The step being paused finished before it saw the pause. The pause no
                 # longer applies and the pipeline moves on, so the job is running again.
-                if attempt.status == HelixJobStatus.PAUSING:
+                # Only that step's own pausing -> completed move counts: a replayed update
+                # for a step that had already completed must not undo a later step's pause.
+                if attempt.status == HelixJobStatus.PAUSING and previous_step_status == HelixJobStatus.PAUSING:
                     new_attempt_status = HelixJobStatus.ACTIVE
             else:
                 new_attempt_status = HelixJobStatus.COMPLETED
@@ -1353,7 +1356,7 @@ class JobDispatcher:
         else:
             attempt = await self.get_current_attempt(job_entity.name, workspace=job_entity.workspace)
             if attempt is None:
-                raise Exception(f"Job Attempt with Job ID {job_entity.id} does not exist.")
+                raise JobOperationConflictError(f"Cannot cancel job '{job_entity.name}': it has no current attempt.")
             steps = await self._list_all_entities(
                 HelixJobStep,
                 filter_obj={"attempt_id": attempt.id},
@@ -1442,7 +1445,7 @@ class JobDispatcher:
 
         attempt = await self.get_current_attempt(job_entity.name, workspace=job_entity.workspace)
         if attempt is None:
-            raise Exception(f"Job Attempt with Job ID {job_entity.id} does not exist.")
+            raise JobOperationConflictError(f"Cannot pause job '{job_entity.name}': it has no current attempt.")
 
         # A live step is paused even when another step is already pausing or paused.
         # The idempotent return applies only when nothing is still created, pending, or active.
@@ -1479,7 +1482,7 @@ class JobDispatcher:
 
         attempt = await self.get_current_attempt(job.name, workspace=job.workspace)
         if attempt is None:
-            raise Exception(f"Job Attempt with Job ID {job.id} does not exist.")
+            raise JobOperationConflictError(f"Cannot resume job '{job.name}': it has no current attempt.")
 
         if attempt.status in (HelixJobStatus.ACTIVE, HelixJobStatus.RESUMING):
             operations_counter.add(1, attributes={"operation": "resume_job"})
@@ -1531,7 +1534,7 @@ class JobDispatcher:
 
         attempt = await self.get_current_attempt(job.name, workspace=job.workspace)
         if attempt is None:
-            raise Exception(f"Job Attempt with Job ID {job.id} does not exist.")
+            raise JobOperationConflictError(f"Cannot update control for job '{job.name}': it has no current attempt.")
 
         job.control = job.control.model_copy(update=changes)
         # Restore auth context around the write. The store can sanitize it for

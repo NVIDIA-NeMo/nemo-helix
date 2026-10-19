@@ -2992,6 +2992,32 @@ async def test_pausing_step_that_completes_lets_the_job_finish(
 
 
 @pytest.mark.asyncio
+async def test_replayed_completion_of_an_earlier_step_keeps_a_later_pause(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """A repeated completed report for a finished step must not set a pausing job back to active."""
+    request = _two_step_request(sample_platform_job_request, "pause-later-step")
+    request.platform_spec.steps[1].lifecycle = StepLifecycle(pause_deadline_seconds=60)
+    job = await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE)
+    training = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
+    assert training is not None
+    training, _ = await mock_dispatcher.update_job_status_from_step(training, HelixJobStatus.ACTIVE)
+    training, _ = await mock_dispatcher.update_job_status_from_step(training, HelixJobStatus.COMPLETED)
+    upload = await mock_dispatcher.get_current_job_step_by_name(job.name, "upload", DEFAULT_WORKSPACE)
+    assert upload is not None
+    upload, _ = await mock_dispatcher.update_job_status_from_step(upload, HelixJobStatus.ACTIVE)
+    paused = await mock_dispatcher.pause_job(job.name, DEFAULT_WORKSPACE)
+    assert paused is not None and paused.status == HelixJobStatus.PAUSING
+
+    _, attempt = await mock_dispatcher.update_job_status_from_step(training, HelixJobStatus.COMPLETED)
+
+    assert attempt.status == HelixJobStatus.PAUSING
+    assert (await mock_store.get_by_id(HelixJobStep, upload.id)).status == HelixJobStatus.PAUSING
+
+
+@pytest.mark.asyncio
 async def test_repeated_pause_keeps_the_first_request_time(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
