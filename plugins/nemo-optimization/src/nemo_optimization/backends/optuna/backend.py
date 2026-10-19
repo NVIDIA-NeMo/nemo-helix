@@ -78,7 +78,7 @@ class OptunaBackend:
         try:
             _parse_numeric_config(payload)
         except StudyDriverError as exc:
-            raise OptimizerConfigError(str(exc), phase="numeric") from exc
+            raise OptimizerConfigError(str(exc), phase=exc.phase or "numeric") from exc
 
     def run_phase(
         self,
