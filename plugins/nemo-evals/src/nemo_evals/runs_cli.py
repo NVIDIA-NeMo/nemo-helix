@@ -137,6 +137,48 @@ def list_hub_tasks(dataset: str) -> list[str]:
     return sorted(task_id.get_name() for task_id in metadata.task_ids)
 
 
+def check_git_source(source: str) -> None:
+    """Reject a ``--harbor-git`` source that Harbor can't parse or that names no tag or commit.
+
+    Raises:
+        ValueError: The source isn't a git URL, or has no ``@<ref>``.
+    """
+    from harbor.registry.client.git_repo import resolve_repo_source
+
+    if resolve_repo_source(source).ref is None:
+        raise ValueError(f"{source!r} names no tag or commit; pass <url>@<ref> so the run is reproducible")
+
+
+def download_git_tasks(source: str, names: str | None, output_dir: Path) -> tuple[str, str, list[Path], int]:
+    """Download the selected tasks of git repo ``<url>@<ref>`` (its ``tasks/`` directory) into ``output_dir``.
+
+    Returns the repo's ``org/name``, the commit SHA the ref resolved to, the task directories in name order,
+    and how many tasks the repo has.
+    """
+    from harbor.models.task.id import GitTaskId
+    from harbor.registry.client.git_repo import GitRepoRegistryClient, resolve_repo_source
+
+    check_git_source(source)
+    repo = resolve_repo_source(source)
+    client = GitRepoRegistryClient(repo)
+    metadata = asyncio.run(client.get_dataset_metadata(""))  # no dataset name: every task under tasks/
+    ids = sorted(metadata.task_ids, key=lambda task_id: task_id.get_name())
+    candidates = [Candidate(i, entity_name(t.get_name()), t.get_name()) for i, t in enumerate(ids)]
+    chosen = [ids[c.index] for c in select_tasks(candidates, names)]
+    result = asyncio.run(client._task_client.download_tasks(task_ids=chosen, output_dir=output_dir, export=True))
+    sha = ids[0].git_commit_id if isinstance(ids[0], GitTaskId) else None  # every id pins the resolved commit
+    assert sha is not None
+    return f"{repo.org}/{repo.name}", sha, list(result.paths), len(ids)
+
+
+def list_git_tasks(source: str) -> list[str]:
+    from harbor.registry.client.git_repo import GitRepoRegistryClient, resolve_repo_source
+
+    check_git_source(source)
+    metadata = asyncio.run(GitRepoRegistryClient(resolve_repo_source(source)).get_dataset_metadata(""))
+    return sorted(task_id.get_name() for task_id in metadata.task_ids)
+
+
 def publish_tasks(
     evaluator: Evaluator, task_dirs: Sequence[Path], *, prefix: str, workspace: str, echo: Callable[[str], None]
 ) -> list[str]:
@@ -258,8 +300,8 @@ def run_request(
     """The run request: ``--spec-file``'s with its tasks replaced, or ``--agent`` with default execution.
 
     ``--experiment`` sets ``publication.intake``, replacing the spec file's.
-    ``dataset`` is the Harbor Hub dataset the tasks came from, as ``(name, version)``: the Evaluation's
-    dataset instead of the taskset. ``dispatcher_profile`` and ``sandbox`` apply
+    ``dataset`` is the Harbor Hub dataset or git repo the tasks came from, as ``(name, version or commit)``:
+    the Evaluation's dataset instead of the taskset. ``dispatcher_profile`` and ``sandbox`` apply
     to ``--agent`` only; a spec file carries its own ``execution``. The idempotency key is
     ``idempotency_key``, else the spec file's, else a new one.
     """
@@ -306,11 +348,14 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
     def submit(
         harbor_dir: Path | None = typer.Option(None, "--harbor-dir", help="Local Harbor dataset directory."),
         harbor_hub: str | None = typer.Option(None, "--harbor-hub", help="Harbor Hub dataset, org/name@ref."),
+        harbor_git: str | None = typer.Option(
+            None, "--harbor-git", help="Public git repo of Harbor tasks under tasks/, <url>@<tag or commit>."
+        ),
         spec_file: Path | None = typer.Option(
             None,
             "--spec-file",
-            help="TasksetRunInput JSON: its target and execution, and its taskset unless --harbor-dir or --harbor-hub "
-            "supplies the tasks.",
+            help="TasksetRunInput JSON: its target and execution, and its taskset unless --harbor-dir, --harbor-hub "
+            "or --harbor-git supplies the tasks.",
         ),
         tasks: str | None = typer.Option(None, "--tasks", help="Indexes or names, comma-separated; default all."),
         agent: str = typer.Option("oracle", "--agent", help="Harbor built-in agent (without --spec-file)."),
@@ -349,12 +394,28 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         ),
     ) -> None:
         """Publish the selected tasks as a taskset, build their images, and submit one task Job per task."""
-        if harbor_dir is not None and harbor_hub is not None:
-            raise typer.BadParameter("pass --harbor-dir or --harbor-hub, not both")
-        if harbor_dir is None and harbor_hub is None and spec_file is None:
-            raise typer.BadParameter("pass --harbor-dir, --harbor-hub or --spec-file")
+        sources = [
+            flag
+            for flag, value in (
+                ("--harbor-dir", harbor_dir),
+                ("--harbor-hub", harbor_hub),
+                ("--harbor-git", harbor_git),
+            )
+            if value is not None
+        ]
+        if len(sources) > 1:
+            raise typer.BadParameter(
+                f"pass one of --harbor-dir, --harbor-hub or --harbor-git, not {' and '.join(sources)}"
+            )
+        if not sources and spec_file is None:
+            raise typer.BadParameter("pass --harbor-dir, --harbor-hub, --harbor-git or --spec-file")
+        if harbor_git is not None:
+            try:
+                check_git_source(harbor_git)
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc), param_hint="--harbor-git") from exc
         # A spec file alone selects from its own taskset; with a dataset it supplies only the target and settings.
-        from_spec = harbor_dir is None and harbor_hub is None
+        from_spec = not sources
         if spec_file is not None and any(value is not None for value in (sandbox_profile, cpus, memory_mb, storage_mb)):
             raise typer.BadParameter(
                 "--sandbox-profile, --cpus, --memory-mb and --storage-mb don't apply with --spec-file; "
@@ -365,7 +426,9 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         workspace = client.resolve_workspace(workspace)
         try:
             if list_tasks:
-                _print_tasks(client_factory, harbor_dir, harbor_hub, spec_file if from_spec else None, workspace)
+                _print_tasks(
+                    client_factory, harbor_dir, harbor_hub, harbor_git, spec_file if from_spec else None, workspace
+                )
                 return
             evaluator = Evaluator.from_client(client)
             dataset: tuple[str, str | None] | None = None
@@ -379,6 +442,10 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                         dataset = (hub_name, hub_version)
                         prefix = hub_name.rpartition("/")[2]
                         total = len(list_hub_tasks(harbor_hub))
+                    elif harbor_git is not None:
+                        repo_name, sha, task_dirs, total = download_git_tasks(harbor_git, tasks, Path(scratch))
+                        dataset = (repo_name, sha)
+                        prefix = repo_name.rpartition("/")[2]
                     else:
                         assert harbor_dir is not None
                         all_dirs = _task_dirs(harbor_dir)
@@ -477,11 +544,14 @@ def _print_tasks(
     client_factory: Callable[[], NemoClient],
     harbor_dir: Path | None,
     harbor_hub: str | None,
+    harbor_git: str | None,
     spec_file: Path | None,
     workspace: str,
 ) -> None:
     if harbor_hub is not None:
         rows = list_hub_tasks(harbor_hub)
+    elif harbor_git is not None:
+        rows = list_git_tasks(harbor_git)
     elif harbor_dir is not None:
         rows = [_native_id(d) for d in _task_dirs(harbor_dir)]
     else:
