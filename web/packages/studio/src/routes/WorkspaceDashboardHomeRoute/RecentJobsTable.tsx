@@ -168,7 +168,7 @@ export const RecentJobsTable = () => {
         if (!sourceValue) return '-';
         const display = SOURCE_DISPLAY[sourceValue];
         return (
-          <Tag kind="outline" color="gray" density="compact">
+          <Tag kind="outline" color="gray" density="compact" readOnly>
             <Flex align="center" gap="density-sm">
               {display?.icon ?? <Cog className={iconColorClass} size={14} />}
               {display?.label ?? sourceValue}
