@@ -60,6 +60,27 @@ describe('ElapsedTime', () => {
     expect(screen.getByText('59m')).toBeInTheDocument();
   });
 
+  it('prefers a recorded duration once stopped, keeping milliseconds below a minute', () => {
+    const { rerender } = render(
+      <ElapsedTime
+        start="2026-10-16T10:00:00Z"
+        end="2026-10-16T11:00:00Z"
+        durationMs={12_345}
+        running={false}
+      />
+    );
+    expect(screen.getByText('12s 345ms')).toBeInTheDocument();
+
+    rerender(<ElapsedTime durationMs={612_013} running={false} />);
+    expect(screen.getByText('10m 12s')).toBeInTheDocument();
+  });
+
+  it('counts live while running even when a recorded duration is given', () => {
+    render(<ElapsedTime start="2026-10-16T11:59:30Z" durationMs={12_345} running />);
+
+    expect(screen.getByText('30s')).toBeInTheDocument();
+  });
+
   it('shows an em dash without a start, or without an end once stopped', () => {
     const { rerender } = render(<ElapsedTime running />);
     expect(screen.getByText('—')).toBeInTheDocument();

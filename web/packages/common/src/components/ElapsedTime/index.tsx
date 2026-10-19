@@ -3,21 +3,31 @@
 
 import { EM_DASH } from '@nemo/common/src/constants';
 import { useLiveSeconds } from '@nemo/common/src/hooks/useLiveSeconds';
-import { formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
+import { formatDurationMs, formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
 import { Text } from '@nvidia/foundations-react-core';
 import type { FC } from 'react';
 
 interface ElapsedTimeProps {
   start?: string;
   end?: string;
+  /** Recorded duration; when stopped, shown instead of `start` → `end`. */
+  durationMs?: number;
   running: boolean;
 }
 
-/** Live count from `start` while `running`, else `start` → `end`. Key by item in lists: the
- * live count locks onto the first start it sees. */
-export const ElapsedTime: FC<ElapsedTimeProps> = ({ start, end, running }) => {
+/** Live count from `start` while `running`, else `durationMs`, else `start` → `end`. Key by item
+ * in lists: the live count locks onto the first start it sees. */
+export const ElapsedTime: FC<ElapsedTimeProps> = ({ start, end, durationMs, running }) => {
   const startDate = utcToLocalDate(start);
   const liveSeconds = useLiveSeconds({ startDate, enabled: running });
+
+  if (!running && durationMs != null) {
+    return (
+      <Text className="tabular-nums">
+        {formatDurationMs(durationMs, { hideMsAboveMinute: true })}
+      </Text>
+    );
+  }
 
   if (!startDate) {
     return <Text>{EM_DASH}</Text>;
