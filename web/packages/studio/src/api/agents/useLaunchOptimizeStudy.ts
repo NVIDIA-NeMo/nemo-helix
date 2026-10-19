@@ -40,12 +40,6 @@ export interface LaunchStrategyRunParams {
   name?: string;
 }
 
-/**
- * The optimization strategy Studio submits a staged bundle to unless the caller names another.
- *
- * `run-strategy` is strategy-agnostic, but an optimize YAML plus the assets it references is the
- * input the `config-tuning` strategy takes, so Studio's own upload and guided flows submit to it.
- */
 export const STUDIO_OPTIMIZE_STRATEGY = 'config-tuning';
 
 // Marks a bundle fileset that Studio created for exactly one study, so deleting the study may delete it.
