@@ -12,6 +12,10 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from rich.console import Console
+from rich.markdown import Markdown
+
+from nemo_helix_ext.cli.core.mdx_markdown import mdx_to_markdown
 
 DOC_EXT = ".mdx"
 
@@ -95,6 +99,13 @@ def docs_command(
             help="List available documentation topics.",
         ),
     ] = False,
+    raw: Annotated[
+        bool,
+        typer.Option(
+            "--raw",
+            help="Print the original MDX source instead of converted Markdown.",
+        ),
+    ] = False,
 ) -> None:
     """Read NeMo Helix documentation.
 
@@ -147,4 +158,12 @@ def docs_command(
         raise typer.Exit(code=1) from None
 
     content = doc_path.read_text(encoding="utf-8")
-    sys.stdout.write(content)
+    if raw:
+        sys.stdout.write(content)
+        return
+
+    markdown = mdx_to_markdown(content, docs_root=docs_root)
+    if sys.stdout.isatty():
+        Console().print(Markdown(markdown))
+    else:
+        sys.stdout.write(markdown)

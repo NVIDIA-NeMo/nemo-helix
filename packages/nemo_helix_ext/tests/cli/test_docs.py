@@ -102,13 +102,13 @@ class TestDocsCommand:
         result = _invoke("docs", "get-started/setup")
         assert result.exit_code == 0
         assert "Setup" in result.stdout
-        assert "nemo-setup" in result.stdout
+        assert "nemo setup" in result.stdout
 
     def test_docs_read_with_mdx_extension(self):
         result = _invoke("docs", "get-started/setup.mdx")
         assert result.exit_code == 0
         assert "Setup" in result.stdout
-        assert "nemo-setup" in result.stdout
+        assert "nemo setup" in result.stdout
 
     def test_docs_nonexistent(self):
         result = _invoke("docs", "nonexistent/path")
@@ -127,3 +127,36 @@ class TestDocsCommand:
         result = _invoke("docs", "test-topic", env={"NHX_DOCS_ROOT": str(tmp_path)})
         assert result.exit_code == 0
         assert "Hello from test" in result.stdout
+
+    def test_docs_read_converts_mdx_to_markdown(self):
+        result = _invoke("docs", "safe-synthesizer/about/index")
+
+        assert result.exit_code == 0
+        assert result.stdout.startswith("# About Generating Safe Synthetic Data\n")
+        assert "<Card" not in result.stdout
+        assert "<Button" not in result.stdout
+        assert "md-tag" not in result.stdout
+        assert "SPDX" not in result.stdout
+        assert "](/documentation/" not in result.stdout
+
+    def test_docs_read_expands_snippets(self, tmp_path: Path):
+        snippet = tmp_path / "fern" / "snippets" / "_snippets" / "note.mdx"
+        snippet.parent.mkdir(parents=True)
+        snippet.write_text("<Note>\nShared snippet text.\n</Note>\n")
+        (tmp_path / "topic.mdx").write_text(
+            '---\ntitle: "Topic"\n---\n{/* @nemo-docs: skip */}\n<Markdown src="/snippets/_snippets/note.mdx" />\n'
+        )
+
+        result = _invoke("docs", "topic", env={"NHX_DOCS_ROOT": str(tmp_path)})
+
+        assert result.exit_code == 0
+        assert result.stdout == "# Topic\n\n> **Note:**\n> Shared snippet text.\n"
+
+    def test_docs_raw_prints_source(self, tmp_path: Path):
+        source = '---\ntitle: "Topic"\n---\n<Note>\nHi.\n</Note>\n'
+        (tmp_path / "topic.mdx").write_text(source)
+
+        result = _invoke("docs", "topic", "--raw", env={"NHX_DOCS_ROOT": str(tmp_path)})
+
+        assert result.exit_code == 0
+        assert result.stdout == source
