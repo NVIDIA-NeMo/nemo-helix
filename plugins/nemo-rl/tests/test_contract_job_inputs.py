@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 
 import pytest
-from nemo_rl_plugin.schema import OutputRequest, RlJobInput
+from nemo_rl_plugin.schema import GRPOTraining, OutputRequest, RlJobInput
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 
@@ -103,6 +103,7 @@ def test_grpo_fixtures_satisfy_training_divisibility(fixture_name: str) -> None:
     data_parallel = total_gpus // model_parallel
     assert t.batch_size % (t.micro_batch_size * data_parallel) == 0
 
+    assert isinstance(t, GRPOTraining), "these fixtures are GRPO jobs"
     prompts = t.num_prompts_per_step or max(t.batch_size // max(t.num_generations_per_prompt, 1), 1)
     assert (prompts * t.num_generations_per_prompt) % t.batch_size == 0
 

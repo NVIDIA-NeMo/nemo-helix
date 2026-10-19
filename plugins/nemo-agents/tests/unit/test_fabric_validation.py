@@ -230,6 +230,7 @@ class TestValidateHelixAgentConfig:
 
         assert result.agent_config.name == "example-agent"
         assert result.fabric_config.metadata.name == "example-agent"
+        assert result.fabric_config.harness is not None
         assert result.fabric_config.harness.adapter_id == "nvidia.fabric.hermes"
         assert result.fabric_validation_result.plan == {"plan": "ok"}
         assert result.fabric_validation_result.doctor_report is doctor_report
@@ -251,6 +252,7 @@ class TestValidateHelixAgentConfig:
             fabric=_FakeFabric(),
         )
 
+        assert result.fabric_config.harness is not None
         assert result.fabric_config.harness.adapter_id == "nvidia.fabric.codex"
         assert result.fabric_config.models["default"].model == "openai/gpt-5.4"
 

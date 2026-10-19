@@ -25,6 +25,7 @@ def test_base_example_has_no_mcp_servers() -> None:
     fabric_config = translate_agent_config(config)
 
     assert config.name == "calculator-agent"
+    assert fabric_config.harness is not None
     assert fabric_config.harness.adapter_id == "nvidia.fabric.langchain.deepagents"
     assert fabric_config.mcp is not None
     assert fabric_config.mcp.servers == {}
@@ -50,6 +51,7 @@ def test_mcp_example_adds_harness_native_stdio_server() -> None:
     assert calculator.url == "calculator-server"
     assert calculator.exposure == "harness_native"
     assert fabric_config.relay is not None
+    assert fabric_config.relay.observability is not None
     assert fabric_config.relay.observability.atif is None
     assert fabric_config.relay.observability.atof is not None
 

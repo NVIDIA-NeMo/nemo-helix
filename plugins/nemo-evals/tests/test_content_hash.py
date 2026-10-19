@@ -115,6 +115,7 @@ def test_harbor_scoring_fields_are_part_of_canonical_content():
     metrics_digest = content_hash(restored)
     restored.spec.views = _DEFAULT_VIEWS
     assert content_hash(restored) != metrics_digest
+    assert isinstance(restored.spec, HarborTaskDefinition) and isinstance(entity.spec, HarborTaskDefinition)
     assert restored.spec.source == entity.spec.source
 
 

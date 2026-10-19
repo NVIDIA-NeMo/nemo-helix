@@ -261,10 +261,13 @@ def test_openmathreasoning_locks_contract_shape():
     assert _item_field(prompt_feature, 0).name == "role"
     # Verifiability carries its own coverage + scoped evidence.
     verify = part.classification.verifiability
+    assert verify is not None
     assert verify.method == "extractable_final_answer"
     assert verify.coverage == pytest.approx(0.81)
     # Message stats fold into the messages block.
+    assert part.stats["prompt"].messages is not None
     assert part.stats["prompt"].messages.ends_with_assistant_rate == 0.0
+    assert part.stats["completion"].messages is not None
     assert part.stats["completion"].messages.roles_seen == ["assistant"]
 
 
@@ -279,7 +282,9 @@ def test_helpsteer2_flat_schema_and_no_verifiability():
     response_feature = next(f for f in part.features if f.name == "response")
     assert response_feature.semantic_role == "completion"
     # Bounded rating scale corroborated by cardinality.
+    assert part.stats["helpfulness"].categorical is not None
     assert part.stats["helpfulness"].categorical.distinct_count == 5
+    assert part.stats["helpfulness"].numeric is not None
     assert part.stats["helpfulness"].numeric.max == 4.0
     # card_metadata evidence survives (declared card tags corroborate, never override).
     kinds = {e.kind for e in part.classification.evidence}

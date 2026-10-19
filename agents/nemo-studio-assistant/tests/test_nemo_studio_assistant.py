@@ -100,6 +100,7 @@ def test_agent_config_translates_to_fabric_deepagents() -> None:
 
     assert config.default_harness == "deepagents"
     assert config.models["default"].model == "${NEMO_DEFAULT_MODEL}"
+    assert translated.harness is not None
     assert translated.harness.adapter_id == "nvidia.fabric.langchain.deepagents"
     assert translated.models["default"].provider == "nvidia"
     assert translated.mcp is not None

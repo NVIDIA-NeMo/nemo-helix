@@ -9,6 +9,7 @@ import importlib.util
 import inspect
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -23,7 +24,7 @@ from nemo_evals.api.schemas import (
     TasksetInput,
     TasksetRef,
 )
-from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, FabricRunnerTarget
+from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, AgentEvalTaskInput, FabricRunnerTarget
 from nemo_evals.jobs.evaluate import EvaluateInputSpec
 from nemo_evals.sdk.job_resources import AgentEvaluatorJobResource, EvaluatorJobResource
 from nemo_evals.sdk.metric_resources import EvaluatorMetricsResource
@@ -249,7 +250,9 @@ def test_checked_durable_fabric_job_is_a_valid_agent_eval_spec() -> None:
     spec = AgentEvalInputSpec.model_validate(generated[path])
 
     assert isinstance(spec.tasks, list)
-    metric_payload = spec.tasks[0].metrics[0].model_dump(mode="json")
+    task = spec.tasks[0]
+    assert isinstance(task, AgentEvalTaskInput)
+    metric_payload = task.metrics[0].model_dump(mode="json")
     bundle = MetricBundle.model_validate(metric_payload)
     assert bundle.payload.kind == "inline"
     assert {
@@ -497,8 +500,8 @@ class _RecordingResource:
     passing against a permissive mock.
     """
 
-    def __init__(self, resource_type: type) -> None:
-        self._signature = inspect.signature(resource_type.create)
+    def __init__(self, create: Callable[..., object]) -> None:
+        self._signature = inspect.signature(create)
         self.calls: list[inspect.BoundArguments] = []
 
     def create(self, *args: Any, **kwargs: Any) -> None:
@@ -513,9 +516,9 @@ class _RecordingResource:
 
 class _RecordingEvaluator:
     def __init__(self) -> None:
-        self.metrics = _RecordingResource(EvaluatorMetricsResource)
-        self.tasks = _RecordingResource(EvaluatorTasksResource)
-        self.tasksets = _RecordingResource(EvaluatorTasksetsResource)
+        self.metrics = _RecordingResource(EvaluatorMetricsResource.create)
+        self.tasks = _RecordingResource(EvaluatorTasksResource.create)
+        self.tasksets = _RecordingResource(EvaluatorTasksetsResource.create)
 
 
 class _RecordingClient:

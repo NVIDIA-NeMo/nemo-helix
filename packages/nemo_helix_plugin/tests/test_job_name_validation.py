@@ -22,11 +22,11 @@ class _Spec(BaseModel):
     pass
 
 
-def _plugin_request(name: str | None, output_location: str | None) -> BaseModel:
+def _plugin_request(name: str | None, output_location: str | None) -> BaseJobRequest[_Spec]:
     return BaseJobRequest[_Spec](spec=_Spec(), name=name, output_location=output_location)
 
 
-def _create_request(name: str | None, output_location: str | None) -> BaseModel:
+def _create_request(name: str | None, output_location: str | None) -> CreateHelixJobRequest:
     return CreateHelixJobRequest.model_validate(
         {
             "name": name,
@@ -42,7 +42,7 @@ def _create_request(name: str | None, output_location: str | None) -> BaseModel:
     )
 
 
-RequestFactory = Callable[[str | None, str | None], BaseModel]
+RequestFactory = Callable[[str | None, str | None], BaseJobRequest[_Spec] | CreateHelixJobRequest]
 REQUEST_FACTORIES = pytest.mark.parametrize(
     "make_request", [_plugin_request, _create_request], ids=["plugin", "create"]
 )

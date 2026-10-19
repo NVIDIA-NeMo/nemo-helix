@@ -32,9 +32,9 @@ def test_entity_from_response_restores_store_metadata() -> None:
     )
 
     assert config.id == "entity-123"
-    assert config.created_at.isoformat() == "2026-07-13T12:00:00+00:00"
+    assert config.created_at is not None and config.created_at.isoformat() == "2026-07-13T12:00:00+00:00"
     assert config.created_by == "service:platform"
-    assert config.updated_at.isoformat() == "2026-07-13T12:01:00+00:00"
+    assert config.updated_at is not None and config.updated_at.isoformat() == "2026-07-13T12:01:00+00:00"
     assert config.updated_by == "user:tester"
     assert config.parent == "entity-parent"
     assert config._db_version == 3

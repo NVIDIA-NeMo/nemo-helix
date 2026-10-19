@@ -394,6 +394,8 @@ class Docker(E2EBackend):
 
     def _wait_for_healthy(self) -> None:
         """Wait for the container to be healthy."""
+        if self.container is None:
+            raise RuntimeError("the container must be started before waiting for it to be healthy")
         # Get the container host - this handles Docker Desktop on Mac/Windows correctly
         container_host = self.container.get_container_host_ip()
         base_url = f"http://{container_host}:{self._host_port}"

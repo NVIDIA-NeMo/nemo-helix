@@ -77,9 +77,10 @@ async def test_scheduler_logs_escape_endpoint_but_preserve_state_key(caplog: pyt
     with caplog.at_level(logging.DEBUG, logger="nhx_evals_sdk.resilience.scheduler"):
         assert await scheduler.run_with_resilience(_FORGED_NAME, operation, max_attempts=2, deadline_at=None) == "ok"
 
-    records = [record for record in caplog.records if hasattr(record, "endpoint_key")]
-    assert len(records) >= 3  # Started, retried, completed, plus any admission changes.
-    assert all(len(record.endpoint_key.splitlines()) == 1 for record in records)
+    # ``endpoint_key`` arrives through logging's ``extra``, so it is only in each record's __dict__.
+    endpoint_keys = [record.__dict__["endpoint_key"] for record in caplog.records if "endpoint_key" in record.__dict__]
+    assert len(endpoint_keys) >= 3  # Started, retried, completed, plus any admission changes.
+    assert all(len(str(key).splitlines()) == 1 for key in endpoint_keys)
     assert (await scheduler._get_controller(_FORGED_NAME)).state.key == _FORGED_NAME
 
 

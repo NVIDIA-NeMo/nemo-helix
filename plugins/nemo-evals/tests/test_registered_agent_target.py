@@ -308,6 +308,7 @@ async def test_a_config_resolved_under_an_older_fabric_is_raised_to_the_running_
     fabric = await resolve_registered_agent(
         _by_agent(AgentRef(root="dev/calc"), resolved_config=persisted), workspace="dev", async_sdk=None
     )
+    assert isinstance(fabric, FabricRunnerTarget)
     assert fabric.resolved_config == raised
 
     harbor = await resolve_registered_agent(
@@ -318,11 +319,13 @@ async def test_a_config_resolved_under_an_older_fabric_is_raised_to_the_running_
         workspace="dev",
         async_sdk=None,
     )
+    assert isinstance(harbor, HarborRunnerTarget)
     assert harbor.agent_kwargs == {"fabric_config": raised, "fabric_workspace": "/app"}
 
     gym = await resolve_registered_agent(
         _gym_by_agent(AgentRef(root="dev/calc"), resolved_config=persisted), workspace="dev", async_sdk=None
     )
+    assert isinstance(gym, GymRunnerTarget)
     assert gym.resolved_config == raised
 
 

@@ -105,6 +105,9 @@ def test_compose_config_enables_relay_via_current_signature(tmp_path: Path) -> N
     """
     from nemo_fabric import (
         FabricConfig,
+        RelayAtifConfig,
+        RelayAtofConfig,
+        RelayAtofFileSinkConfig,
         RelayConfig,
         RelayObservabilityConfig,
     )
@@ -130,13 +133,14 @@ def test_compose_config_enables_relay_via_current_signature(tmp_path: Path) -> N
     # nothing — these assertions are what actually pin the current schema.
     relay_dir = str(evidence_dir / "relay")
     atif = observability.atif
-    assert atif is not None and atif.enabled is True
+    assert isinstance(atif, RelayAtifConfig) and atif.enabled is True
     assert str(atif.output_directory) == relay_dir
     assert atif.filename_template == _common.ATIF_FILENAME_TEMPLATE
 
     atof = observability.atof
-    assert atof is not None and atof.enabled is True
+    assert isinstance(atof, RelayAtofConfig) and atof.enabled is True
     (atof_sink,) = atof.sinks or []
+    assert isinstance(atof_sink, RelayAtofFileSinkConfig)
     assert str(atof_sink.output_directory) == relay_dir
     assert atof_sink.filename == _common.ATOF_FILENAME
 
@@ -164,6 +168,7 @@ def test_compose_config_is_a_complete_config_fabric_accepts(tmp_path: Path) -> N
     # Evaluator-owned per-task settings live on the config itself, not in a trailing overlay.
     assert composed.environment is not None and str(composed.environment.workspace) == str(workspace_dir)
     assert composed.models["default"].model == "openai/gpt-5.4"
+    assert composed.skills is not None
     assert str(tmp_path / "staged-skill") in [str(p) for p in composed.skills.paths]
 
     # It survives Fabric's own round-trip and planner, so it is a complete config by Fabric's rules.

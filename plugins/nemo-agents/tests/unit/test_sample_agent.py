@@ -70,7 +70,8 @@ async def test_existing_sample_uses_marker_and_owner() -> None:
             ]
         )
     )
-    assert (await sample._existing_sample(workspaces, "alice", auth_enabled=True)).name == "sample-owned"
+    existing = await sample._existing_sample(workspaces, "alice", auth_enabled=True)
+    assert existing is not None and existing.name == "sample-owned"
 
 
 @pytest.mark.asyncio
@@ -78,7 +79,8 @@ async def test_existing_sample_is_shared_without_auth() -> None:
     workspaces = MagicMock()
     workspaces.list_workspaces = AsyncMock(return_value=_Page([_workspace("sample-shared", owner="other")]))
 
-    assert (await sample._existing_sample(workspaces, "alice", auth_enabled=False)).name == "sample-shared"
+    existing = await sample._existing_sample(workspaces, "alice", auth_enabled=False)
+    assert existing is not None and existing.name == "sample-shared"
 
 
 @pytest.mark.asyncio

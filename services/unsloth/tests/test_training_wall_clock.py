@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import sys
 import types
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -45,10 +46,30 @@ class Callback:
         self.events.append("close")
 
 
+class _FakeUnslothModule(types.ModuleType):
+    """Stand-in ``unsloth`` exposing the model loader the training backend imports."""
+
+    FastLanguageModel: type
+
+
+class _FakeDatasetsModule(types.ModuleType):
+    """Stand-in ``datasets`` exposing what the training backend imports."""
+
+    Dataset: type
+    load_dataset: Callable[..., object]
+
+
+class _FakeTrlModule(types.ModuleType):
+    """Stand-in ``trl`` exposing the SFT config and trainer the training backend imports."""
+
+    SFTConfig: type
+    SFTTrainer: type
+
+
 def test_wall_clock_wraps_load_and_train_but_not_save(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     events: list[str] = []
 
-    unsloth_mod = types.ModuleType("unsloth")
+    unsloth_mod = _FakeUnslothModule("unsloth")
 
     class FastLanguageModel:
         @staticmethod
@@ -56,15 +77,15 @@ def test_wall_clock_wraps_load_and_train_but_not_save(tmp_path: Path, monkeypatc
             events.append("load")
             return object(), object()
 
-    unsloth_mod.FastLanguageModel = FastLanguageModel  # type: ignore[attr-defined]
+    unsloth_mod.FastLanguageModel = FastLanguageModel
     monkeypatch.setitem(sys.modules, "unsloth", unsloth_mod)
 
-    datasets_mod = types.ModuleType("datasets")
-    datasets_mod.Dataset = object  # type: ignore[attr-defined]
-    datasets_mod.load_dataset = lambda *args, **kwargs: None  # type: ignore[attr-defined]
+    datasets_mod = _FakeDatasetsModule("datasets")
+    datasets_mod.Dataset = object
+    datasets_mod.load_dataset = lambda *args, **kwargs: None
     monkeypatch.setitem(sys.modules, "datasets", datasets_mod)
 
-    trl_mod = types.ModuleType("trl")
+    trl_mod = _FakeTrlModule("trl")
 
     class SFTConfig:
         def __init__(self, **kwargs: object) -> None:
@@ -78,8 +99,8 @@ def test_wall_clock_wraps_load_and_train_but_not_save(tmp_path: Path, monkeypatc
             events.append("train")
             return SimpleNamespace(training_loss=0.2)
 
-    trl_mod.SFTConfig = SFTConfig  # type: ignore[attr-defined]
-    trl_mod.SFTTrainer = SFTTrainer  # type: ignore[attr-defined]
+    trl_mod.SFTConfig = SFTConfig
+    trl_mod.SFTTrainer = SFTTrainer
     monkeypatch.setitem(sys.modules, "trl", trl_mod)
 
     monkeypatch.setattr(unsloth_sft.NHXJobContext, "from_env", staticmethod(lambda: SimpleNamespace()))
