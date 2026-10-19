@@ -237,7 +237,6 @@ def test_run_schema_has_only_the_four_request_fields():
     [
         {"idempotency_key": "retry-1"},
         {"idempotency_key": "retry-2", "timeout_seconds": None},
-        {"execution": {"sandbox_policy": "harbor-standard", "dispatcher_profile": "local-k8s"}},
         {
             "spec": {
                 "tasks": "default/sort-suite",
@@ -317,7 +316,7 @@ def test_digest_hashes_the_exact_compact_json_projection(run_body):
         "execution": {
             "kind": "harbor-task-jobs",
             "sandbox_policy": "harbor-standard",
-            "dispatcher_profile": "local-k8s",
+            "dispatcher_profile": None,
             "missing_prebuilt_image": "fail",
             "max_concurrent_task_jobs": None,
             "max_failed_tasks": None,

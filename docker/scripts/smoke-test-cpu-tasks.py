@@ -38,6 +38,9 @@ EVALUATOR_IMPORTS: dict[str, str | None] = {
     "nemo_evals.tasks.agent_evaluate": None,
     "nemo_evals.tasks.evaluate": None,
     "nemo_evals.tasks.stage_environment": None,
+    # Harbor task Jobs name this class by import path, so only an import here catches its absence.
+    "nemo_evals.harbor.opensandbox_environment": "AgentChannelOpenSandboxEnvironment",
+    "tomlkit": "__version__",  # imported lazily by nemo-evals' bind_task_image
     "uvicorn": "__version__",
     "yaml": "__version__",
     "opensandbox.config": "ConnectionConfig",
@@ -181,11 +184,27 @@ def check_bundled_harness_clis() -> list[str]:
     return failures
 
 
+def check_sandboxed_codex_archive() -> list[str]:
+    """The codex archive nemo-evals' SandboxedCodex uploads into Harbor sandboxes holds its binary."""
+    import tarfile
+
+    from nemo_evals.harbor.agents import CODEX_ARCHIVE_MEMBER, DEFAULT_CODEX_ARCHIVE
+
+    try:
+        with tarfile.open(DEFAULT_CODEX_ARCHIVE) as archive:
+            archive.getmember(CODEX_ARCHIVE_MEMBER)
+    except Exception as exc:  # noqa: BLE001 - report, do not abort the suite
+        return [f"{DEFAULT_CODEX_ARCHIVE}: {exc!r}"]
+    print(f"codex archive: {DEFAULT_CODEX_ARCHIVE} holds {CODEX_ARCHIVE_MEMBER}")
+    return []
+
+
 CHECKS = (
     check_evaluator_imports,
     check_task_entrypoints,
     check_fabric_adapters,
     check_bundled_harness_clis,
+    check_sandboxed_codex_archive,
 )
 
 

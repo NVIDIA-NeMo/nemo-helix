@@ -272,6 +272,8 @@ cpu-tasks = [
   # Insights Analyst Fabric adapter and insights.analysis execute extension.
   { include-group = "insights" },
   "nemo-evals-plugin",
+  # nemo-evals' bind_task_image rewrites task.toml with it; scaled-evals pins the same version.
+  "tomlkit>=0.15.0,<0.15.1",
   "nemo-sandboxed-gym[server,opensandbox]",
   "nemo-anonymizer-plugin",
   "nemo-data-designer-plugin[retrieval-sdg]",

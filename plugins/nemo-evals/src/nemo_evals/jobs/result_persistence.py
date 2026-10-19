@@ -35,7 +35,7 @@ from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.entities import EntityBase, EntityClient
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.job_context import JobContext
-from nhx_evals_sdk.agent_eval.results import AgentEvalResult
+from nhx_evals_sdk.agent_eval.results import AgentEvalResult, AgentEvalSummary
 from nhx_evals_sdk.values import Agent, AgentBase, Model
 from nhx_evals_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nhx_evals_sdk.values.results import EvaluationResult
@@ -144,19 +144,43 @@ def persist_agent_eval_result(
     if ctx.job_id is None:
         logger.info("No job id; skipping result-entity persistence.")
         return
-    target_kind, target_name, target_url = _agent_target_fields(target)
-    entity = AgentEvalResultEntity(
+    entity = agent_eval_result_entity(
+        result.summary,
         name=ctx.job_id,
         workspace=ctx.workspace,
         job_id=ctx.job_id,
+        target=target,
+        bundle_ref=bundle_ref,
+    )
+    _persist(entity, async_client=async_client)
+
+
+def agent_eval_result_entity(
+    summary: AgentEvalSummary,
+    *,
+    name: str,
+    workspace: str,
+    job_id: str,
+    target: Target | None,
+    bundle_ref: str,
+) -> AgentEvalResultEntity:
+    """The queryable record of an agent-eval run: aggregate scores, target traits and the bundle it rolls up.
+
+    Shared by the agent-evaluate Job and the taskset run controller, which saves a run's record
+    (``name`` = run id, ``job_id`` = the bundle Job) from the merged bundle's summary.
+    """
+    target_kind, target_name, target_url = _agent_target_fields(target)
+    return AgentEvalResultEntity(
+        name=name,
+        workspace=workspace,
+        job_id=job_id,
         target_kind=target_kind,
         target_name=target_name,
         target_url=target_url,
-        scores=result.summary.scores,
+        scores=summary.scores,
         bundle_ref=bundle_ref,
-        summary=AgentEvalResultSummary.from_summary(result.summary),
+        summary=AgentEvalResultSummary.from_summary(summary),
     )
-    _persist(entity, async_client=async_client)
 
 
 def persist_evaluate_result(

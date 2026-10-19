@@ -56,11 +56,11 @@ class HarborTaskJobsExecutionInput(BaseModel):
         ),
         examples=["harbor-standard"],
     )
-    dispatcher_profile: str = Field(
-        default="local-k8s",
+    dispatcher_profile: str | None = Field(
+        default=None,
         description=(
             "Name of a Jobs Service profile that decides where task Jobs run and what resources they get. "
-            "Operators define the available profiles; defaults to local-k8s, the profile the Helm chart ships."
+            "Operators define the available profiles; omitted uses the first one they list."
         ),
         examples=["local-k8s"],
     )

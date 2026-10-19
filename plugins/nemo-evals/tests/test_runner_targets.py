@@ -24,7 +24,11 @@ from nemo_evals.jobs.runner_targets import UnsubmittableRunnerError, runner_to_t
 from nemo_evals.sdk.resources import Evaluator
 from nemo_helix_plugin.evals.client import EvaluatorClient
 from nhx_evals_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
-from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
+from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import (
+    HarborAgentTaskRunner,
+    HarborEnvironmentConfig,
+    HarborRuntimeConfig,
+)
 from nhx_evals_sdk.values import SecretRef
 from pydantic import ValidationError
 
@@ -61,6 +65,7 @@ HARBOR_REJECTED_VALUES = {
     "timeout_multiplier": 2.0,
     "verifier_timeout_multiplier": 2.0,
     "environment_build_timeout_multiplier": 2.0,
+    "environment": HarborEnvironmentConfig(import_path="custom.environment:Environment"),
 }
 
 
