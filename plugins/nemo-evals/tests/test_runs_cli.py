@@ -5,6 +5,7 @@
 
 import io
 import json
+import subprocess
 import tarfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -325,6 +326,25 @@ def test_list_tasks_reads_the_git_repo(git_registry):
     assert result.exit_code == 0, result.output
     assert result.output.split("\n")[1:4] == ["  0  bun-sourcemap-leak", "  1  greet-universe", "  2  sum-three"]
     assert git_registry.downloads == []
+
+
+def test_a_failed_git_command_is_an_error_not_a_traceback(monkeypatch):
+    from harbor.registry.client import git_repo
+
+    class UnreachableRepo(FakeGitRegistry):
+        async def get_dataset_metadata(self, name):
+            raise subprocess.CalledProcessError(
+                128, ["git", "ls-remote", TB, "v9"], b"", b"fatal: repository not found\n"
+            )
+
+    monkeypatch.setattr(git_repo, "GitRepoRegistryClient", UnreachableRepo)
+    client = NemoClient(base_url="http://platform.test", workspace="default")
+    app = typer.Typer()
+    add_runs_commands(app, lambda: client)
+    result = CliRunner().invoke(app, ["runs", "submit", "--harbor-git", f"{TB}@v9", "--list-tasks"])
+    assert result.exit_code == 1
+    assert "Error: git ls-remote failed: fatal: repository not found" in result.output
+    assert not isinstance(result.exception, subprocess.CalledProcessError)
 
 
 def _runs_app() -> typer.Typer:

@@ -15,11 +15,12 @@ import hashlib
 import json
 import re
 import shutil
+import subprocess
 import tarfile
 import tempfile
 import time
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -161,11 +162,11 @@ def download_git_tasks(source: str, names: str | None, output_dir: Path) -> tupl
     check_git_source(source)
     repo = resolve_repo_source(source)
     client = GitRepoRegistryClient(repo)
-    metadata = asyncio.run(client.get_dataset_metadata(""))  # no dataset name: every task under tasks/
+    metadata = _run_git(client.get_dataset_metadata(""))  # no dataset name: every task under tasks/
     ids = sorted(metadata.task_ids, key=lambda task_id: task_id.get_name())
     candidates = [Candidate(i, entity_name(t.get_name()), t.get_name()) for i, t in enumerate(ids)]
     chosen = [ids[c.index] for c in select_tasks(candidates, names)]
-    result = asyncio.run(client._task_client.download_tasks(task_ids=chosen, output_dir=output_dir, export=True))
+    result = _run_git(client._task_client.download_tasks(task_ids=chosen, output_dir=output_dir, export=True))
     sha = ids[0].git_commit_id if isinstance(ids[0], GitTaskId) else None  # every id pins the resolved commit
     assert sha is not None
     return f"{repo.org}/{repo.name}", sha, list(result.paths), len(ids)
@@ -175,8 +176,21 @@ def list_git_tasks(source: str) -> list[str]:
     from harbor.registry.client.git_repo import GitRepoRegistryClient, resolve_repo_source
 
     check_git_source(source)
-    metadata = asyncio.run(GitRepoRegistryClient(resolve_repo_source(source)).get_dataset_metadata(""))
+    metadata = _run_git(GitRepoRegistryClient(resolve_repo_source(source)).get_dataset_metadata(""))
     return sorted(task_id.get_name() for task_id in metadata.task_ids)
+
+
+def _run_git[T](operation: Coroutine[Any, Any, T]) -> T:
+    """Run a Harbor git operation; a failed git command becomes a RuntimeError carrying git's own message.
+
+    Raises:
+        RuntimeError: A git command Harbor ran failed (unreachable repo, unknown ref, …).
+    """
+    try:
+        return asyncio.run(operation)
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else str(exc.stderr or "")
+        raise RuntimeError(f"{' '.join(exc.cmd[:2])} failed: {stderr.strip() or exc}") from exc
 
 
 def publish_tasks(
