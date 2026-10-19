@@ -5403,15 +5403,6 @@ components:
           description: 'Execution strategy: one Kubernetes Job per Harbor task. Future
             strategies add new kinds.'
           default: harbor-task-jobs
-        sandbox_policy:
-          type: string
-          title: Sandbox Policy
-          description: 'Name of an operator-approved sandbox policy: which sandbox
-            provider and isolation policy each task''s agent and environment run under,
-            meaning the security and isolation boundary. It does not control compute
-            resources; see dispatcher_profile. Operators define the available policies.'
-          examples:
-          - harbor-standard
         dispatcher_profile:
           title: Dispatcher Profile
           description: Name of a Jobs Service profile that decides where task Jobs
@@ -5428,10 +5419,23 @@ components:
           - 5
           type: integer
           minimum: 1.0
+        sandbox:
+          allOf:
+          - $ref: '#/components/schemas/SandboxSelection'
+          description: 'Sandbox for every task, agent and verifier alike. profile
+            names an operator sandbox profile: isolation, egress and resource ceilings;
+            omitted uses the operator''s default. cpus, memory_mb and storage_mb beat
+            the task''s task.toml [environment]; each must stay within the profile''s
+            ceilings, or submit fails with 422. Omit the whole object for the default
+            profile and each task''s own resources.'
+          examples:
+          - cpus: 4
+            memory_mb: 8192
+            storage_mb: 20480
+          - memory_mb: 4096
+            profile: harbor-open
       additionalProperties: false
       type: object
-      required:
-      - sandbox_policy
       title: HarborTaskJobsExecutionInput
       description: 'Settings that run a Harbor taskset as many independent task Jobs
         instead of one Job.
@@ -5458,13 +5462,17 @@ components:
         runs.
 
 
-        Submit resolves ``sandbox_policy`` and ``dispatcher_profile`` against the
-        operator''s
+        Submit validates this input and freezes the ``sandbox`` profile, with its
+        resource
 
-        config and freezes them, the pinned dispatcher image and the concurrency cap
-        into the
+        overrides checked against the profile''s ceilings, the ``dispatcher_profile``,
+        the pinned
 
-        run''s plan. Earlier development runs are deleted rather than migrated.'
+        dispatcher image and the concurrency cap into the run''s plan, so operator
+        config edits
+
+        never reach a running run. Earlier development runs are deleted rather than
+        migrated.'
     HelixJobListResultResponse:
       properties:
         data:
@@ -7619,6 +7627,34 @@ components:
       type: object
       title: RunConfigOnlineModel
       description: Job parameters for model online evaluation.
+    SandboxSelection:
+      properties:
+        cpus:
+          title: Cpus
+          type: integer
+          exclusiveMinimum: 0.0
+        memory_mb:
+          title: Memory Mb
+          type: integer
+          exclusiveMinimum: 0.0
+        storage_mb:
+          title: Storage Mb
+          type: integer
+          exclusiveMinimum: 0.0
+        profile:
+          title: Profile
+          description: 'Name of an operator sandbox profile: the sandbox''s isolation
+            and egress rules and its resource ceilings. Omit for the operator''s default
+            profile.'
+          examples:
+          - harbor-standard
+          type: string
+          minLength: 1
+      additionalProperties: false
+      type: object
+      title: SandboxSelection
+      description: '``execution.sandbox``: an operator sandbox profile by name, and
+        resource overrides within its ceilings.'
     SecretRef:
       type: string
       pattern: ^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)?$
@@ -8158,8 +8194,8 @@ components:
         execution:
           allOf:
           - $ref: '#/components/schemas/HarborTaskJobsExecutionInput'
-          description: 'Kubernetes task Job settings: sandbox policy, dispatcher profile
-            and run-wide task Job concurrency.'
+          description: 'Kubernetes task Job settings: sandbox profile and resources,
+            dispatcher profile and run-wide task Job concurrency.'
         idempotency_key:
           title: Idempotency Key
           description: Optional key, scoped to workspace and caller, so retries of

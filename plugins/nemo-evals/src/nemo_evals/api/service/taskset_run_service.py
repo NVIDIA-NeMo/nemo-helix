@@ -389,16 +389,18 @@ class TasksetRunService:
     ) -> tuple[HarborTaskJobsConfig, ResolvedHarborSandboxPolicy, str]:
         """Check the deployment can run the request's execution settings; freeze its sandbox and dispatcher profiles.
 
-        An omitted dispatcher profile is the operator's first ``dispatcher_profiles`` entry.
+        The sandbox profile is frozen with the request's resource overrides. An omitted dispatcher profile
+        is the operator's first ``dispatcher_profiles`` entry.
 
         Raises:
-            TasksetRunResolutionError: Runs are off, or the profile or dispatcher profile can't be used.
+            TasksetRunResolutionError: Runs are off, the profile or dispatcher profile can't be used, or a
+                resource override exceeds the profile's ceilings.
         """
         harbor = self._config.runs.harbor
         if harbor is None:
             raise TasksetRunResolutionError("Kubernetes taskset runs aren't configured in this deployment")
         try:
-            policy = resolve_sandbox_policy(harbor, self._platform, req.execution.sandbox_policy)
+            policy = resolve_sandbox_policy(harbor, self._platform, req.execution.sandbox)
         except SandboxPolicyError as exc:
             raise TasksetRunResolutionError(str(exc)) from exc
         profile = req.execution.dispatcher_profile or harbor.dispatcher_profiles[0]

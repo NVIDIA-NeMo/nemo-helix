@@ -29,6 +29,7 @@ import typer
 from nemo_evals.api.fields import TaskRef, TasksetRef
 from nemo_evals.api.schemas import AgentEvalResult, TasksetInput
 from nemo_evals.api.taskset_run_schemas import TasksetRunInput
+from nemo_evals.harbor.remote.profile import SandboxSelection
 from nemo_evals.image_builds.models import TERMINAL_BUILD_STATUSES, ImageBuild
 from nemo_evals.jobs.agent_evaluate import DEFAULT_RESULT_NAME, SUMMARY_FILE_NAME
 from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, HarborBuiltinAgentSource, HarborRunnerTarget
@@ -248,8 +249,8 @@ def run_request(
     *,
     spec_file: Path | None,
     agent: str,
-    sandbox_policy: str,
     dispatcher_profile: str | None,
+    sandbox: SandboxSelection | None = None,
     experiment: str | None = None,
     dataset: tuple[str, str | None] | None = None,
     idempotency_key: str | None = None,
@@ -258,8 +259,9 @@ def run_request(
 
     ``--experiment`` sets ``publication.intake``, replacing the spec file's.
     ``dataset`` is the Harbor Hub dataset the tasks came from, as ``(name, version)``: the Evaluation's
-    dataset instead of the taskset. The idempotency key is ``idempotency_key``, else the spec file's, else a
-    new one.
+    dataset instead of the taskset. ``dispatcher_profile`` and ``sandbox`` apply
+    to ``--agent`` only; a spec file carries its own ``execution``. The idempotency key is
+    ``idempotency_key``, else the spec file's, else a new one.
     """
     publication: dict[str, Any] | None = None
     if experiment is not None:
@@ -277,9 +279,11 @@ def run_request(
             raw["publication"] = publication  # --experiment replaces the file's, before it's validated
         raw["idempotency_key"] = idempotency_key or raw.get("idempotency_key") or str(uuid.uuid4())
         return TasksetRunInput.model_validate(raw)
-    execution: dict[str, Any] = {"sandbox_policy": sandbox_policy}
+    execution: dict[str, Any] = {}
     if dispatcher_profile is not None:
         execution["dispatcher_profile"] = dispatcher_profile
+    if sandbox is not None:
+        execution["sandbox"] = sandbox.model_dump(exclude_none=True)
     return TasksetRunInput.model_validate(
         {
             "spec": AgentEvalInputSpec(
@@ -310,8 +314,19 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         ),
         tasks: str | None = typer.Option(None, "--tasks", help="Indexes or names, comma-separated; default all."),
         agent: str = typer.Option("oracle", "--agent", help="Harbor built-in agent (without --spec-file)."),
-        sandbox_policy: str = typer.Option("harbor-standard", "--sandbox-policy", help="Operator sandbox profile."),
+        sandbox_profile: str | None = typer.Option(
+            None, "--sandbox-profile", help="Operator sandbox profile; default: the operator's (without --spec-file)."
+        ),
         dispatcher_profile: str | None = typer.Option(None, "--dispatcher-profile", help="Jobs profile for task Jobs."),
+        cpus: int | None = typer.Option(
+            None, "--cpus", min=1, help="CPUs for every task sandbox, over task.toml (without --spec-file)."
+        ),
+        memory_mb: int | None = typer.Option(
+            None, "--memory-mb", min=1, help="Memory in MB for every task sandbox (without --spec-file)."
+        ),
+        storage_mb: int | None = typer.Option(
+            None, "--storage-mb", min=1, help="Disk in MB for every task sandbox (without --spec-file)."
+        ),
         no_build_images: bool = typer.Option(
             False,
             "--no-build-images",
@@ -340,6 +355,11 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
             raise typer.BadParameter("pass --harbor-dir, --harbor-hub or --spec-file")
         # A spec file alone selects from its own taskset; with a dataset it supplies only the target and settings.
         from_spec = harbor_dir is None and harbor_hub is None
+        if spec_file is not None and any(value is not None for value in (sandbox_profile, cpus, memory_mb, storage_mb)):
+            raise typer.BadParameter(
+                "--sandbox-profile, --cpus, --memory-mb and --storage-mb don't apply with --spec-file; "
+                "set execution.sandbox in it"
+            )
         echo = typer.echo
         client = client_factory()
         workspace = client.resolve_workspace(workspace)
@@ -381,8 +401,8 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 taskset_ref,
                 spec_file=spec_file,
                 agent=agent,
-                sandbox_policy=sandbox_policy,
                 dispatcher_profile=dispatcher_profile,
+                sandbox=_sandbox_selection(sandbox_profile, cpus, memory_mb, storage_mb),
                 experiment=experiment,
                 dataset=dataset,
                 idempotency_key=idempotency_key,
@@ -399,6 +419,15 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         echo("")
         flag = _workspace_flag(workspace, client.resolve_workspace())
         echo(f"View evaluation run: nemo evals runs status {status['run_id']}{flag} --watch")
+
+
+def _sandbox_selection(
+    profile: str | None, cpus: int | None, memory_mb: int | None, storage_mb: int | None
+) -> SandboxSelection | None:
+    """``execution.sandbox`` from the sandbox flags, or None when none is given."""
+    if profile is None and cpus is None and memory_mb is None and storage_mb is None:
+        return None
+    return SandboxSelection(profile=profile, cpus=cpus, memory_mb=memory_mb, storage_mb=storage_mb)
 
 
 def _task_dirs(dataset: Path) -> list[Path]:

@@ -38,19 +38,44 @@ async def test_runs_off_in_this_deployment(service, request_body, entity_store):
     assert not await runs(entity_store)
 
 
-async def test_unknown_sandbox_policy_lists_the_profiles(service, request_body):
-    request_body["execution"]["sandbox_policy"] = "strict"
+async def test_omitted_sandbox_freezes_the_default_profile(service, request_body, run_store):
+    assert "sandbox" not in request_body["execution"]
+    outcome = await submit(service, request_body)
+    plan = await run_store.load_plan(await run_store.find("default", outcome.status.run_id))
+    assert plan.sandbox_policy.profile == "harbor-standard"
+    assert plan.sandbox_policy.egress_allow == ("igw.svc.cluster.local",)
+
+
+async def test_unknown_sandbox_profile_lists_the_profiles(service, request_body):
+    request_body["execution"]["sandbox"] = {"profile": "strict"}
     with pytest.raises(TasksetRunResolutionError, match="harbor-open, harbor-standard"):
         await submit(service, request_body)
 
 
 async def test_open_profile_is_frozen_into_the_plan(service, request_body, run_store, fake_task_jobs):
-    request_body["execution"]["sandbox_policy"] = "harbor-open"
+    request_body["execution"]["sandbox"] = {"profile": "harbor-open"}
     outcome = await submit(service, request_body)
     plan = await run_store.load_plan(await run_store.find("default", outcome.status.run_id))
     assert plan.sandbox_policy.egress_allow == ("igw.svc.cluster.local", "inference-api.nvidia.com")
     (job,) = fake_task_jobs.created
     assert HarborTaskJobSpec.model_validate(job.spec).sandbox_policy == plan.sandbox_policy
+
+
+async def test_sandbox_overrides_are_frozen_into_the_plan(service, request_body, run_store, fake_task_jobs):
+    request_body["execution"]["sandbox"] = {"cpus": 4, "memory_mb": 8192}
+    outcome = await submit(service, request_body)
+    plan = await run_store.load_plan(await run_store.find("default", outcome.status.run_id))
+    assert plan.sandbox_policy.resource_overrides.model_dump(exclude_none=True) == {"cpus": 4, "memory_mb": 8192}
+    (job,) = fake_task_jobs.created
+    assert HarborTaskJobSpec.model_validate(job.spec).sandbox_policy == plan.sandbox_policy
+
+
+async def test_sandbox_override_over_the_ceiling_is_rejected(service, request_body, entity_store):
+    service._config.runs.harbor.sandbox_profiles["harbor-standard"].max_cpus = 2
+    request_body["execution"]["sandbox"] = {"cpus": 4}
+    with pytest.raises(TasksetRunResolutionError, match="execution.sandbox.cpus=4 exceeds .*'s max_cpus=2"):
+        await submit(service, request_body)
+    assert not await runs(entity_store)
 
 
 async def test_dispatcher_profile_must_be_allowed(service, request_body):
@@ -223,7 +248,7 @@ async def test_a_retry_after_the_execution_deadline_creates_no_task_jobs(
     assert outcome.created is False and outcome.status.warnings == [] and not fake_task_jobs.created
 
 
-@pytest.mark.parametrize("revoke", ["dispatcher_profile", "sandbox_policy", "runs"])
+@pytest.mark.parametrize("revoke", ["dispatcher_profile", "sandbox_profile", "runs"])
 async def test_retry_after_execution_policy_change_starts_no_jobs(
     service, request_body, fake_task_jobs, entity_store, harbor_config, revoke
 ):
@@ -238,8 +263,9 @@ async def test_retry_after_execution_policy_change_starts_no_jobs(
         frozen = execution.dispatcher_profile or harbor_config.dispatcher_profiles[0]  # what the plan froze
         profiles = [p for p in harbor_config.dispatcher_profiles if p != frozen]
         service._config.runs.harbor = harbor_config.model_copy(update={"dispatcher_profiles": profiles})
-    elif revoke == "sandbox_policy":
-        sandboxes = {k: v for k, v in harbor_config.sandbox_profiles.items() if k != execution.sandbox_policy}
+    elif revoke == "sandbox_profile":
+        frozen = harbor_config.default_sandbox_profile  # the request names none
+        sandboxes = {k: v for k, v in harbor_config.sandbox_profiles.items() if k != frozen}
         service._config.runs.harbor = harbor_config.model_copy(update={"sandbox_profiles": sandboxes})
     else:
         service._config.runs.harbor = None

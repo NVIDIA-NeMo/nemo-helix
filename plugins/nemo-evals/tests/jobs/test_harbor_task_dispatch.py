@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from nemo_evals.filesets import FilesetRef
+from nemo_evals.harbor.remote.profile import ResourceOverrides
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evals.jobs.agent_spec import AgentEvalSpec, RegisteredAgentSource
 from nemo_evals.jobs.harbor_task_dispatch import (
@@ -173,6 +174,8 @@ def test_runtime_selects_opensandbox_with_frozen_policy_and_no_key(task_spec, tm
     assert kwargs["trusted_allowed_hosts"] == ["igw.svc.cluster.local"]
     assert kwargs["agent_channel_hosts"] == []
     assert kwargs["sandbox_timeout_sec"] == 30_600 and kwargs["use_server_proxy"] is True
+    assert kwargs["enforce_disk_limit"] is True and kwargs["max_disk_mb"] == 131_072
+    assert not any(key.startswith("override_") for key in kwargs)
     assert kwargs["metadata"] == {"nemo-run": "run-0123456789abcdef", "nemo-task-index": "1", "nemo-job": ctx.job_id}
     assert configured.n_concurrent_trials == 1
     assert "private-worker-value" not in json.dumps(configured.model_dump(mode="json"))
@@ -186,6 +189,19 @@ def test_runtime_passes_the_frozen_agent_channel(task_spec, tmp_path):
     configured = configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path), ctx, spec)
     assert configured.environment is not None
     assert configured.environment.kwargs["agent_channel_hosts"] == ["igw.svc.cluster.local"]
+
+
+def test_runtime_passes_request_overrides_as_harbor_override_kwargs(task_spec, tmp_path):
+    overrides = ResourceOverrides(cpus=4, storage_mb=20_480)
+    policy = task_spec.sandbox_policy.model_copy(update={"resource_overrides": overrides})
+    spec = task_spec.model_copy(update={"sandbox_policy": policy})
+    ctx = MagicMock(spec=JobContext)
+    ctx.job_id = "run-0123456789abcdef-task-1"
+    configured = configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path), ctx, spec)
+    assert configured.environment is not None
+    kwargs = configured.environment.kwargs
+    assert kwargs["override_cpus"] == 4 and kwargs["override_storage_mb"] == 20_480
+    assert "override_memory_mb" not in kwargs
 
 
 def write_task(root: Path, toml: str, *, compose: bool = False) -> Path:

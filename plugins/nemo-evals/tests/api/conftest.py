@@ -29,7 +29,7 @@ NOW = datetime(2026, 10, 14, 12, tzinfo=timezone.utc)
 def request_body():
     return {
         "spec": {"tasks": "default/suite", "target": {"kind": "harbor"}},
-        "execution": {"sandbox_policy": "harbor-standard"},
+        "execution": {},
         "idempotency_key": "ci-run",
     }
 

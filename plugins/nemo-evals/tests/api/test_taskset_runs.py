@@ -65,6 +65,22 @@ async def test_taskset_run_create_replay_and_conflict(run_client, published, req
     )
 
 
+async def test_taskset_run_resent_with_other_sandbox_overrides_conflicts(run_client, published, request_body):
+    request_body["execution"]["sandbox"] = {"cpus": 2}
+    first = await run_client.post(PATH, json=request_body)
+    assert first.status_code == 201, first.text
+    request_body["execution"]["sandbox"] = {"cpus": 4}
+    conflict = await run_client.post(PATH, json=request_body)
+    assert conflict.status_code == 409, conflict.text
+
+
+async def test_taskset_run_sandbox_override_over_the_disk_limit_is_422(run_client, published, request_body):
+    request_body["execution"]["sandbox"] = {"storage_mb": 262_144}
+    response = await run_client.post(PATH, json=request_body)
+    assert response.status_code == 422, response.text
+    assert "execution.sandbox.storage_mb=262144 exceeds" in response.json()["detail"]
+
+
 async def test_taskset_run_timeout_validation_shape_matches_invalid_body(
     run_client, request_body, files_client, files_service, authorizer
 ):

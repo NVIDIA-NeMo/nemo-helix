@@ -302,16 +302,12 @@ SANDBOX_DOMAIN = "opensandbox.opensandbox-system.svc.cluster.local"
 
 def harbor_task_jobs_config(**overrides: object) -> HarborTaskJobsConfig:
     """An operator ``evals.runs.harbor`` block with the MVP's two profiles."""
-    resource_classes = {"cpu": {"template": "harbor-cpu", "dispatcher_profile": "k8s-cpu"}}
     data: dict[str, object] = {
         "dispatcher_image": DISPATCHER_IMAGE,
         "dispatcher_profiles": ["local-k8s", "k8s-cpu"],
         "sandbox_profiles": {
-            "harbor-standard": {"resource_classes": resource_classes, "egress_allow": ["igw.svc.cluster.local"]},
-            "harbor-open": {
-                "resource_classes": resource_classes,
-                "egress_allow": ["igw.svc.cluster.local", "inference-api.nvidia.com"],
-            },
+            "harbor-standard": {"egress_allow": ["igw.svc.cluster.local"]},
+            "harbor-open": {"egress_allow": ["igw.svc.cluster.local", "inference-api.nvidia.com"]},
         },
     }
     data.update(overrides)
@@ -341,7 +337,7 @@ def harbor_config() -> HarborTaskJobsConfig:
 
 @pytest.fixture
 def sandbox_policy() -> ResolvedHarborSandboxPolicy:
-    return resolve_sandbox_policy(harbor_task_jobs_config(), sandbox_platform_config(), "harbor-standard")
+    return resolve_sandbox_policy(harbor_task_jobs_config(), sandbox_platform_config())
 
 
 class FakePreparer:
