@@ -107,7 +107,7 @@ def _prepare_artifact_capture(capture: ArtifactCapture, manifest: str) -> str:
         data = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
         if not isinstance(data, dict):
             raise ValueError(f"Agent Hardener config root must be a mapping: {manifest_path}")
-        run_id = f"nemo-platform-{uuid.uuid4().hex}"
+        run_id = f"nhx-agent-hardener-{uuid.uuid4().hex}"
         run_dir = _storage_scope(data, manifest_path, run_id)
         hitlog_dir, hitlog_prefix = _garak_scope(data, run_dir, run_id, manifest_path)
         scoped_path = manifest_path.with_name(f".{manifest_path.stem}.{run_id}.yaml")

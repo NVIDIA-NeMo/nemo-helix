@@ -128,7 +128,7 @@ def test_service_driven_flow_sequences_up_hitl_then_reuse_run(tmp_path: Path, mo
     assert len(hitl_calls) == 1
     assert Path(hitl_calls[0]).parent == manifest.parent  # private sibling keeps project-relative paths stable
     assert hitl_calls[0] != str(manifest)
-    assert not list(tmp_path.glob(".agent-hardener.nemo-platform-*.yaml"))
+    assert not list(tmp_path.glob(".agent-hardener.nhx-agent-hardener-*.yaml"))
     # up first, then the war-game reusing the warm sandbox with the reviewed suite handed in as a file.
     assert commands[0][1] == "up"
     assert commands[1][1] == "run"
