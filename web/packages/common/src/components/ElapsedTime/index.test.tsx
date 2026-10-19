@@ -35,7 +35,6 @@ describe('ElapsedTime', () => {
   it('counts up live from start while running, starting at the real elapsed time', () => {
     render(<ElapsedTime start="2026-10-13T12:00:00Z" end="2026-10-13T12:00:01Z" running />);
 
-    // Not `0s` before the first 1s tick: the count starts at the time already elapsed.
     expect(screen.getByText('72h')).toBeInTheDocument();
 
     act(() => {

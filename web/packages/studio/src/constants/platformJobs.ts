@@ -17,10 +17,7 @@ export const STATUS_FILTER_OPTIONS = [
   { value: HelixJobStatus.resuming, label: 'Resuming' },
 ];
 
-/**
- * Statuses of a job that has not yet reached a terminal state: every status outside
- * `HelixJobTerminalStatuses`, so a newly added status counts as in progress rather than neither.
- */
+/** Every status outside `HelixJobTerminalStatuses`, so new statuses count as in progress. */
 export const IN_PROGRESS_JOB_STATUSES: readonly HelixJobStatus[] = Object.values(
   HelixJobStatus
 ).filter((status) => !HelixJobTerminalStatuses.includes(status));

@@ -46,10 +46,7 @@ const HIDDEN_SOURCES = CUSTOMIZER_ENABLED
   ? HIDDEN_JOB_SOURCES
   : [...HIDDEN_JOB_SOURCES, JOB_SOURCE.CUSTOMIZATION];
 
-/**
- * Jobs that are still running, or that finished within the last 48 hours. Jobs carry no
- * completion timestamp, so `updated_at` stands in for when a terminal job finished.
- */
+/** Running jobs, or jobs finished in the last 48 hours (`updated_at` stands in for finish time). */
 const buildFilter = (finishedSince: string): HelixJobsListFilter =>
   jsonFilter<HelixJobsListFilter>({
     $and: [
@@ -68,14 +65,12 @@ const buildFilter = (finishedSince: string): HelixJobsListFilter =>
     ],
   });
 
-/** `buildFilter`'s test for a later cutoff than the request's: in progress, or finished since. */
 const isRecentJob = (job: HelixJobResponse, finishedSinceMs: number): boolean => {
   if (IN_PROGRESS_JOB_STATUSES.includes(job.status)) return true;
   const finishedAt = utcToLocalDate(job.updated_at);
   return finishedAt !== undefined && finishedAt.getTime() >= finishedSinceMs;
 };
 
-/** Still moving; a paused job's clock stops at the pause, like a finished job's. */
 const isJobRunning = (status: HelixJobStatus): boolean =>
   IN_PROGRESS_JOB_STATUSES.includes(status) && status !== HelixJobStatus.paused;
 
@@ -83,19 +78,17 @@ export const RecentJobsTable = () => {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();
   const openRow = useRowNavigation();
-  // Fixed at mount so the query key stays stable across polls; `recentJobs` keeps the window moving.
+  // Fixed at mount to keep the query key stable across polls.
   const [finishedSince] = useState(() => new Date(Date.now() - RECENT_WINDOW_MS).toISOString());
 
   const dataViewState = useStudioDataViewState({
     defaultSort: [{ id: 'created_at', desc: true }],
     defaultPageSize: 10,
-    // Hidden, but still the default sort: newest first.
     columnVisibility: { created_at: false },
   });
 
-  // The jobs API checks status and updated_at only after it pages (both live on the job's attempt),
-  // so a server page of this filter comes back short and its total counts every job. Until the API
-  // filters before paging, fetch the newest JOBS_FETCH_SIZE jobs at once and page them here.
+  // The API filters status/updated_at after paging, so server pages come back short. Fetch one
+  // large page and paginate client-side until it filters first.
   const {
     data: jobsData,
     dataUpdatedAt,
@@ -121,18 +114,16 @@ export const RecentJobsTable = () => {
     }
   );
 
-  // The request's cutoff stays fixed at mount, so narrow its rows to each poll's 48-hour window.
   const recentJobs = useMemo(() => {
     const finishedSinceMs = dataUpdatedAt - RECENT_WINDOW_MS;
     return (jobsData?.data ?? []).filter((job) => isRecentJob(job, finishedSinceMs));
   }, [jobsData, dataUpdatedAt]);
 
-  // StudioDataView renders exactly the rows it is handed, so apply the page here. Jobs age out of
-  // the window between polls, so step back when the page in view runs past the end.
+  // Jobs age out between polls, so step back when the current page runs past the end.
   const { pageIndex, pageSize } = dataViewState.pagination.state;
   const lastPageIndex = Math.max(0, Math.ceil(recentJobs.length / pageSize) - 1);
   const safePageIndex = Math.min(pageIndex, lastPageIndex);
-  // Only once real rows are in: the empty list while loading would discard a linked page.
+  // Wait for real rows: the empty loading list would discard a linked page.
   const hasFreshJobs = jobsData !== undefined && !isPlaceholderData;
   const setPagination = dataViewState.pagination.set;
   useEffect(() => {
@@ -191,9 +182,7 @@ export const RecentJobsTable = () => {
     accessor((original) => original?.created_at || '', {
       id: 'elapsed',
       header: 'Elapsed time',
-      // The accessor value is only the start, which the automatic cell tooltip would show raw.
       meta: { title: false },
-      // Keyed by job so a live count never carries over from another job's start.
       cell: ({ row }) => (
         <ElapsedTime
           key={row.original.id}

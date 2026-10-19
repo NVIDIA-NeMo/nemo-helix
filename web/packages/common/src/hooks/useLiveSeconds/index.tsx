@@ -8,7 +8,6 @@ interface UseLiveSecondsProps {
   enabled?: boolean;
 }
 
-/** Whole seconds from `start` to now. */
 const secondsSince = (start: Date): number => Math.floor((Date.now() - start.getTime()) / 1000);
 
 /**
@@ -30,7 +29,6 @@ export const useLiveSeconds = ({ startDate, enabled = true }: UseLiveSecondsProp
     if (lockedStartDate === undefined) {
       // Lock the startDate value to prevent desync when startDate is provided asynchronously
       setLockedStartDate(startDate);
-      // Start from the time already elapsed, not 0, so the first second doesn't read as `0s`
       setLiveSeconds(secondsSince(startDate));
     }
   }, [startDate, lockedStartDate, enabled]);
@@ -41,14 +39,12 @@ export const useLiveSeconds = ({ startDate, enabled = true }: UseLiveSecondsProp
       return;
     }
 
-    // Catch up at once: after a pause the count is stale until the first tick.
     setLiveSeconds(secondsSince(lockedStartDate));
     const interval = setInterval(() => setLiveSeconds(secondsSince(lockedStartDate)), 1000);
     return () => clearInterval(interval);
   }, [lockedStartDate, enabled]);
 
   if (lockedStartDate !== undefined) return liveSeconds;
-  // The effect above locks the start only after the first render; read the clock until then so
-  // that render shows the elapsed time rather than nothing.
+  // The start locks only after the first render; read the clock until then.
   return startDate !== undefined && enabled ? secondsSince(startDate) : undefined;
 };

@@ -33,8 +33,7 @@ vi.mock('@studio/constants/environment', async (importOriginal) => ({
 
 const JOBS_URL = `${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs`;
 const WORKSPACE = workspace1.workspace;
-// "Recent" is judged against the real clock, so fixture times sit near it. They count back from one
-// instant so the gaps between them are exact.
+// "Recent" uses the real clock; fixtures count back from one instant for exact gaps.
 const NOW = Date.now();
 const hoursAgo = (hours: number) => new Date(NOW - hours * 60 * 60 * 1000).toISOString();
 
@@ -133,7 +132,6 @@ describe('RecentJobsTable', () => {
     renderComponent();
 
     const runningRow = await screen.findByRole('row', { name: /running-run/ });
-    // Started 3h ago, so the live count is past the 2h between created_at and updated_at.
     expect(within(runningRow).queryByText('2h')).not.toBeInTheDocument();
     expect(within(runningRow).getByText(/^3h( \d+m)?( \d+s)?$/)).toBeInTheDocument();
   });
@@ -154,7 +152,6 @@ describe('RecentJobsTable', () => {
     renderComponent();
     await screen.findByText('my-job');
 
-    // The Created column is hidden, but rows still come newest first.
     expect(sortParam).toBe('-created_at');
     expect(filterParam).not.toBeNull();
     const filter = JSON.parse(filterParam ?? '');
@@ -180,7 +177,7 @@ describe('RecentJobsTable', () => {
       http.get(JOBS_URL, ({ request }) => {
         requests.push(new URL(request.url).searchParams);
         const page = makeJobsPage(jobs);
-        // The API's total counts every job, not only the ones that pass the status filter.
+        // The API's total counts every job, not just those passing the status filter.
         return HttpResponse.json({
           ...page,
           pagination: { ...page.pagination, total_results: 500 },
@@ -196,12 +193,10 @@ describe('RecentJobsTable', () => {
     expect(screen.getByText('11-12 of 12 items')).toBeInTheDocument();
     expect(requests[0].get('page')).toBe('1');
     expect(requests[0].get('page_size')).toBe('100');
-    // Page 2 is sliced from that one large page rather than requested from the API.
     expect(requests.every((params) => params.get('page') === '1')).toBe(true);
   });
 
   it('drops finished jobs once they age out of the 48-hour window', async () => {
-    // The request's cutoff is fixed at mount, so a long-open dashboard still gets these back.
     server.use(
       http.get(JOBS_URL, () =>
         HttpResponse.json(
@@ -228,7 +223,6 @@ describe('RecentJobsTable', () => {
     renderComponent();
 
     expect(await screen.findByText('recent-run')).toBeInTheDocument();
-    // Still in progress, however long ago it last changed.
     expect(screen.getByText('long-run')).toBeInTheDocument();
     expect(screen.queryByText('old-run')).not.toBeInTheDocument();
     expect(screen.getByText('1-2 of 2 items')).toBeInTheDocument();

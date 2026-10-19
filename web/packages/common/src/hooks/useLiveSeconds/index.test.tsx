@@ -60,7 +60,6 @@ describe('useLiveSeconds', () => {
     act(() => {
       vi.advanceTimersByTime(1000);
     });
-    // Still counting from the original startDate (00:00:00); now at 00:00:01
     expect(result.current).toBe(1);
 
     act(() => {
