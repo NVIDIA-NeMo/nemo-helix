@@ -49,12 +49,12 @@ The builder methods accept the same field names as keyword arguments, for exampl
 
 The following behavior is specific to running Safe Synthesizer as a NeMo Helix job.
 
+<a id="pii-replacement-configuration"></a>
 ### PII Replacement
 
 PII replacement is on by default for jobs created through the CLI or REST API; set `config.enable_replace_pii` to `false` to disable it.
 The Python SDK builder runs PII replacement only when you call `.with_replace_pii()`.
 
-<a id="pii-replacement-configuration"></a>
 ### Column Classification (`replace_pii.globals.classify`)
 
 Column classification uses an LLM served through the Inference Gateway, selected by
