@@ -24,7 +24,7 @@ from scaled_evals.api.db import Database, get_conn, get_stream_database_factory
 from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
 from scaled_evals.api.routers import evaluations as evaluations_router
 from scaled_evals.api.schemas.common import decode_cursor
-from scaled_evals.api.schemas.evaluations import CreateEvaluationRequest
+from scaled_evals.api.schemas.evaluations import CreateEvaluationRequest, Framework
 from scaled_evals.api.settings import settings
 from scaled_evals.dispatch import (
     LaunchHandle,
@@ -311,6 +311,34 @@ def test_create_rejects_initial_user_turns_for_non_harbor_framework() -> None:
         )
 
 
+@pytest.mark.parametrize("runtime", ["sandbox_k8s", "harbor_opensandbox"])
+def test_create_accepts_agent_bundle_on_bundle_runtimes(runtime: str) -> None:
+    request = CreateEvaluationRequest(
+        name="x",
+        task_id="task_abc",
+        task_revision=1,
+        framework_profile_id="cfg_h",
+        agent_bundle_id="ab_claude",
+        runtime=runtime,
+    )
+
+    assert request.agent_bundle_id == "ab_claude"
+
+
+@pytest.mark.parametrize(("framework", "runtime"), [("harbor", "docker"), ("nemo_gym", "harbor_opensandbox")])
+def test_create_rejects_agent_bundle_elsewhere(framework: Framework, runtime: str) -> None:
+    with pytest.raises(ValueError, match="agent_bundle currently requires"):
+        CreateEvaluationRequest(
+            name="x",
+            task_id="task_abc",
+            task_revision=1,
+            framework=framework,
+            framework_profile_id="cfg_h",
+            agent_bundle_id="ab_claude",
+            runtime=runtime,
+        )
+
+
 def test_create_409_when_revision_not_ready() -> None:
     conn = _conn_with_fetchone({"status": "building"})
     _override_conn(conn)
@@ -556,7 +584,12 @@ def test_create_gym_runtime_persists_runtime_runner_identity(monkeypatch) -> Non
     assert runner_metadata["framework_artifact"]["image_ref"] == "scaled-evals-api:dev"
 
 
-def test_create_resolves_and_persists_agent_bundle(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("runtime", "network_policy"),
+    # harbor_opensandbox never runs unrestricted.
+    [("sandbox_k8s", "unrestricted"), ("harbor_opensandbox", "default_deny")],
+)
+def test_create_resolves_and_persists_agent_bundle(monkeypatch, runtime: str, network_policy: str) -> None:
     conn = _conn(
         fetchone=[
             {"status": "ready"},
@@ -587,6 +620,8 @@ def test_create_resolves_and_persists_agent_bundle(monkeypatch) -> None:
             "task_revision": 1,
             "framework_profile_id": "cfg_h",
             "agent_bundle_id": "ab_claude",
+            "runtime": runtime,
+            "network_policy": network_policy,
         },
     )
 
