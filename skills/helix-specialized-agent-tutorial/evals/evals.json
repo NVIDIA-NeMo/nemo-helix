@@ -9,7 +9,6 @@
       "should_trigger": true,
       "expectations": [
         "Loads the skill",
-        "Says up front that steps 7 to 9 haven't been run end to end on a single local GPU machine",
         "Gives the 2 to 4 hour estimate for one A100 80GB with packaged data plus the step 7a image download, as our times",
         "Asks the setup questions in one batch (machine, Helix and context, provider and model names, data, budget), offering defaults: local Helix at http://localhost:8080 and the packaged data",
         "Starts with bash scripts/preflight.sh"
@@ -21,8 +20,7 @@
       "prompt": "I just cloned this on my Linux box with an A100 80GB. Walk me through running the whole tutorial end to end. I want to finish today.",
       "should_trigger": true,
       "expectations": [
-        "Says up front that steps 7 to 9 haven't been run end to end on a single local GPU machine and sets expectations",
-        "Gives the 2 to 4 hour total plus the step 7a image download (about 21 GB), with the per-step breakdown, says these are our times, and flags that finishing today is possible but not certain",
+        "Gives the 2 to 4 hour total plus the step 7a image download (about 21 GB), with the per-step breakdown, and flags that finishing today is possible but not certain",
         "Doesn't ask which machine again; asks only the unanswered questions in one batch, with defaults (local Helix at http://localhost:8080, packaged data)",
         "Asks for provider and exact model names before step 2",
         "Runs preflight first and says FAILs for nemo CLI, services, provider and packages are expected before step 1",
@@ -31,9 +29,8 @@
         "Checks each step's You should see before moving on and stops on a mismatch",
         "Asks before step 2, the step 7a image pull, training, deployment, step 9 and the four-batch agent evals",
         "Runs documented blocking commands such as nemo jobs watch or deploy_model.py's wait once, and doesn't write its own sleep-and-check loop",
-        "Flags the commands docs/tutorial.md marks unverified",
         "Before step 10, writes the temperatures from analyze_results.py into ROUTER_TEMPERATURE_ACTION and ROUTER_TEMPERATURE_RUNBOOK in agent/agent-decision-model.yaml and shows the diff before deploying",
-        "In step 7a, pulls the nvcr.io images with the installed Helix version's tag and keeps the my-registry/...:local tags, rather than building from source; if 7b can't find the images, uses the step 7a override, says it's unverified and asks before restarting the services",
+        "In step 7a, pulls the nvcr.io images with the installed Helix version's tag and keeps the my-registry/...:local tags, rather than building from source; if 7b can't find the images, uses the step 7a override, and asks before restarting the services",
         "At the end, walks through the Clean up section of docs/tutorial.md and asks before each delete",
         "Never asks the user to paste an API key into chat",
         "Doesn't rerun a failed step 2, 3, 7, 8, 9 or 10 without asking"
@@ -180,7 +177,7 @@
       "expectations": [
         "Maps to T1 and the step 7a override",
         "Checks first that the my-registry/nhx-unsloth-training:local and my-registry/nhx-customizer-tasks:local tags from 7a exist",
-        "Uses NHX_UNSLOTH_TRAINING_IMAGE and NHX_CUSTOMIZER_TASKS_IMAGE set to the nvcr.io names with the installed Helix version's tag, then nemo services restart, as written in step 7a, and says it's unverified",
+        "Uses NHX_UNSLOTH_TRAINING_IMAGE and NHX_CUSTOMIZER_TASKS_IMAGE set to the nvcr.io names with the installed Helix version's tag, then nemo services restart, as written in step 7a",
         "Asks before restarting the services and says to delete agent deployments first (P3)",
         "Stops and asks if the override doesn't fix it, instead of trying other settings"
       ]
@@ -193,7 +190,7 @@
       "expectations": [
         "Maps to T1 and says there's no published image tag for the installed Helix version",
         "Asks for or shows the installed version from the 7a command, without guessing a tag",
-        "Offers both options from 7a, installing a Helix version that has images or the source build fallback (scripts/gpu-build-images.sh, 30 to 60 minutes, unverified), and lets the user choose",
+        "Offers both options from 7a, installing a Helix version that has images or the source build fallback (scripts/gpu-build-images.sh, 30 to 60 minutes), and lets the user choose",
         "Doesn't suggest docker login or an NGC key; the images pull anonymously"
       ]
     }

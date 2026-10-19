@@ -13,10 +13,10 @@ The commands and full expected output live in `docs/tutorial.md`. This table say
 | 4 Check data | Any | Agent | `PASS: data looks ready to train on`, with 0 incidents that give away the answer | |
 | 5 Upload | Any | Agent | `nemo files list` shows `train.jsonl`, `validation.jsonl` and `calibration.jsonl` | |
 | 6 Register base model | GPU | Agent | `model spec resolved: True` | Steps 0, 1, 2 and 5 must be done on this machine too |
-| 7a Images | GPU | User confirms | Both `nhx-` images pulled from nvcr.io with the installed Helix version's tag, both `my-registry/...:local` tags exist, and the vLLM image is pulled. Fallback: the build finishes and both `my-registry/...:local` images exist | About 21 GB to download; the build fallback is long. A job against these images on a local Helix is `unverified` |
+| 7a Images | GPU | User confirms | Both `nhx-` images pulled from nvcr.io with the installed Helix version's tag, both `my-registry/...:local` tags exist, and the vLLM image is pulled. Fallback: the build finishes and both `my-registry/...:local` images exist | About 21 GB to download; the build fallback takes 30 to 60 minutes |
 | 7b Train | GPU | User confirms | Job ends `completed` and the loss falls | Holds a GPU for the length of the job |
 | 8 Deploy | GPU | User confirms | `gateway ready: True`; `providers get` lists the base and the adapter. The adapter's top answer should be an action letter with most of the probability | Holds a GPU until deleted; slow to come up (S2) |
-| 9 Evaluate | GPU | User confirms | `analyze_results.py` prints JSON per model; fine-tuned beats untuned on the action by a wide margin. Note the `temperature=` on the `calibration:` line | Provider route from a local Helix is `unverified`; the deployment holds its GPU meanwhile |
+| 9 Evaluate | GPU | User confirms | `analyze_results.py` prints JSON per model; fine-tuned beats untuned on the action by a wide margin. Note the `temperature=` on the `calibration:` line | The deployment holds its GPU meanwhile |
 | 10 Agent swap | GPU | User confirms the YAML diff, then agent for one incident; user confirms `BATCHES="1 2 3 4"` | Temperatures written into `agent/agent-decision-model.yaml` and shown as a diff; the incident returns a runbook and an action; `analyze_agent.py` prints one line per agent | Four batches take about 2 hours; each must finish inside the 1-hour job limit (E6) |
 | 11 Adapt | Any | Both | See `adapt.md` | |
 

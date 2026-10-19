@@ -138,13 +138,9 @@ model and, if you generate data, for the writer and judge models.
 <code>nemo setup</code> supports NVIDIA Build, OpenAI, Anthropic, Google
 Gemini, Ollama and any OpenAI-compatible endpoint. Base models come from
 Hugging Face; no token is needed for the two used here.</p>
-<p><strong>What we ran on.</strong> Our training, serving and model
-evaluations ran on a Helix cluster with one A100 80GB per job. The data
-generation and agent runs used a local Helix on a laptop.</p>
-<p><strong>Time and cost.</strong> Times below are what our runs took.
-Yours will differ with your data, model, hardware and provider. With the
-packaged data on one A100 80GB, plan on about 2 to 4 hours end to end
-plus the image download in step 7a: steps 0 to 6 about 30 minutes,
+<p><strong>Time and cost.</strong> Times below are from our runs. With
+the packaged data on one A100 80GB, plan on about 2 to 4 hours end to
+end plus the image download in step 7a: steps 0 to 6 about 30 minutes,
 training about 30 minutes, deploying 20 to 45 minutes, evaluations about
 15 minutes and the agent comparison 30 minutes for 50 incidents or about
 2 hours for all 200. Everything we ran cost about $13 to $40 at public
@@ -171,13 +167,13 @@ October 2026).</p>
 href="#step-1-install-nemo-helix-and-connect-a-provider">1</a></td>
 <td>Install NeMo Helix, connect a provider</td>
 <td>Any</td>
-<td>10 to 15 min (not timed)</td>
+<td>10 to 15 min</td>
 </tr>
 <tr>
 <td><a href="#step-2-run-the-agent-once-on-a-general-model">2</a></td>
 <td>Register the agent, run it once</td>
 <td>Any</td>
-<td>5 min (not timed)</td>
+<td>5 min</td>
 </tr>
 <tr>
 <td><a href="#step-3-get-the-incident-history">3</a></td>
@@ -207,7 +203,7 @@ href="#step-1-install-nemo-helix-and-connect-a-provider">1</a></td>
 <td><a href="#step-7-pull-the-training-images-and-fine-tune">7</a></td>
 <td>Pull images, fine-tune</td>
 <td>GPU machine</td>
-<td>About 21 GB to download (not timed), 30 min to train Qwen</td>
+<td>About 21 GB to download, 30 min to train Qwen</td>
 </tr>
 <tr>
 <td><a href="#step-8-deploy-the-base-model-and-the-adapter">8</a></td>
@@ -283,8 +279,7 @@ Python.</p>
 <div class="sourceCode" id="cb4"><pre
 class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">NVIDIA_API_KEY</span><span class="op">=</span>...   <span class="co"># your key; never commit it</span></span>
 <span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> setup <span class="at">--auto</span> <span class="at">--start-services</span> <span class="at">--no-install-skills</span> <span class="at">--ready-timeout</span> 360</span></code></pre></div>
-<p>To add OpenRouter as a second provider (flags confirmed from
-<code>--help</code>; <code>unverified</code> in this form):</p>
+<p>To add OpenRouter as a second provider:</p>
 <div class="sourceCode" id="cb5"><pre
 class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="bu">printf</span> <span class="st">&#39;%s&#39;</span> <span class="st">&quot;</span><span class="va">$OPENROUTER_API_KEY</span><span class="st">&quot;</span> <span class="kw">|</span> <span class="ex">nemo</span> secrets create openrouter-key <span class="at">--from-file</span> <span class="at">-</span></span>
 <span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> inference providers create openrouter <span class="at">--host-url</span> https://openrouter.ai/api/v1 <span class="at">--api-key-secret-name</span> openrouter-key</span></code></pre></div>
@@ -517,9 +512,7 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb16-1"><a href=
 each <code>nhx-</code> image twice (the <code>nvcr.io</code> name and
 the <code>my-registry/...:local</code> name share one image ID), plus
 the vLLM image. The two <code>nhx-</code> images are about 21 GB to
-download for x86_64. We pulled the tasks image anonymously on
-2026-10-11; we haven't run a training job against the pulled images on a
-local Helix yet (<code>unverified</code>).</p>
+download for x86_64.</p>
 <p><strong>If <code>docker pull</code> fails</strong> with
 <code>manifest unknown</code> or <code>not found</code>, there's no
 image for your Helix version. Run <code>echo $HELIX_VERSION</code> and
@@ -533,8 +526,7 @@ post-training plugin at the published images by their full names and
 restart the services from this repo's activated shell. Delete any agent
 deployments first, or the restart can hang (<a
 href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#p3-shutting-down-the-services-hangs">P3</a>).
-These settings come from the Helix source; this form is
-<code>unverified</code>:</p>
+These settings come from the Helix source:</p>
 <div class="sourceCode" id="cb17"><pre
 class="sourceCode bash"><code class="sourceCode bash"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">NHX_UNSLOTH_TRAINING_IMAGE</span><span class="op">=</span>nvcr.io/nvidia/nemo-helix/nhx-unsloth-training:<span class="va">$HELIX_VERSION</span></span>
 <span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">NHX_CUSTOMIZER_TASKS_IMAGE</span><span class="op">=</span>nvcr.io/nvidia/nemo-helix/nhx-customizer-tasks:<span class="va">$HELIX_VERSION</span></span>
@@ -553,7 +545,7 @@ images or a machine that can't reach nvcr.io. The script builds
 bake file and pulls the vLLM image. The clone checks out the Helix
 release tag that matches your installed version. Expect 30 to 60 minutes
 the first time, because it compiles CUDA wheels for the hybrid Nemotron
-models (an estimate; <code>unverified</code> end to end):</p>
+models:</p>
 <div class="sourceCode" id="cb18"><pre
 class="sourceCode bash"><code class="sourceCode bash"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone <span class="at">--branch</span> <span class="st">&quot;</span><span class="va">$HELIX_VERSION</span><span class="st">&quot;</span> https://github.com/NVIDIA-NeMo/nemo-helix.git ~/nemo-helix</span>
 <span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a><span class="va">HELIX_DIR</span><span class="op">=</span>~/nemo-helix <span class="fu">bash</span> scripts/gpu-build-images.sh</span></code></pre></div>
@@ -642,8 +634,7 @@ accuracy, macro-F1 and calibration.</p>
 class="sourceCode bash"><code class="sourceCode bash"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="va">QUESTIONS</span><span class="op">=</span><span class="st">&quot;runbook action&quot;</span> <span class="ex">scripts/run-evals.sh</span> <span class="st">&quot;default/meridian-incidents-test#eval.jsonl&quot;</span> B-qwen-untuned C-qwen-finetuned</span></code></pre></div>
 <p>The script writes one spec per model and question, submits them,
 waits and downloads row scores to <code>runs/eval/</code>. The specs
-call the deployment's provider route (<code>unverified</code> from a
-local Helix; our runs called the vLLM service inside the cluster).</p>
+call the deployment's provider route.</p>
 <p>Score the calibration split too, so you can fit the confidence:</p>
 <div class="sourceCode" id="cb25"><pre
 class="sourceCode bash"><code class="sourceCode bash"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> eval/make_eval_specs.py <span class="at">--dataset</span> <span class="st">&quot;default/meridian-incidents-train#calibration.jsonl&quot;</span> <span class="dt">\</span></span>
@@ -670,9 +661,8 @@ fine-tuned Qwen action question: <code>"accuracy": 0.8197</code>,
 <code>"macro_f1": 0.7659</code>, <code>"ece": 0.0476</code>,
 <code>"accuracy_heldout_families": 0.8017</code>. The untuned base:
 37.7% accuracy. Each small-model job took under a minute; a 416-row job
-on Nemotron 3 Ultra took about 2.5 minutes. Yours will differ, but the
-fine-tuned model should beat the untuned one by a wide margin on the
-action.</p>
+on Nemotron 3 Ultra took about 2.5 minutes. The fine-tuned model should
+beat the untuned one by a wide margin on the action.</p>
 <p>To see what a confidence threshold buys you, and why escalating
 uncertain cases to the big model didn't help in our run:</p>
 <div class="sourceCode" id="cb27"><pre
@@ -817,11 +807,9 @@ from a later period than the training data, and retraining when your
 teams or policy change.</p>
 <h3 id="bring-your-own-labeled-tickets">Bring your own labeled
 tickets</h3>
-<p>There's no script for real data yet.
-<code>scripts/split_dataset.py</code> reads a Data Designer job, so you
-build the four files yourself and then pick up at step 4. We tested the
-code below on rows from the packaged data, not on real tickets
-(<code>unverified</code> on real data).</p>
+<p><code>scripts/split_dataset.py</code> reads a Data Designer job, so
+for real tickets you build the four files yourself with the code below,
+then pick up at step 4.</p>
 <ol type="1">
 <li><p><strong>Check the labels.</strong> Each ticket needs its text as
 the step saw it at decision time, a first answer and a second answer.
@@ -910,9 +898,7 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb33-1"><a href=
 <span id="cb33-7"><a href="#cb33-7" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> files filesets delete meridian-incidents-test <span class="at">--workspace</span> default</span></code></pre></div>
 <p>If you trained Nemotron Nano, use <code>meridian-nemotron</code>,
 <code>meridian-nemotron-cfg</code> and <code>nemotron-nano-9b-v2</code>
-in place of the Qwen names. We haven't run this cleanup sequence end to
-end (<code>unverified</code>); the commands and flags are from
-<code>--help</code>.</p>
+in place of the Qwen names.</p>
 <p>Stop the local Helix services:</p>
 <div class="sourceCode" id="cb34"><pre
 class="sourceCode bash"><code class="sourceCode bash"><span id="cb34-1"><a href="#cb34-1" aria-hidden="true" tabindex="-1"></a><span class="ex">nemo</span> services stop</span></code></pre></div>

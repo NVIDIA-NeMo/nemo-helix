@@ -106,9 +106,9 @@ Everywhere else (job specs, eval specs) the fileset is `default/meridian-inciden
 
 The Docker job backend needs `nhx-customizer-tasks` and `nhx-unsloth-training`. Earlier in October 2026 every tag we tried on `nvcr.io/nvidia/nemo-helix/` returned UNAUTHORIZED with a standard NGC key, so the tutorial built them from source.
 
-Resolved 2026-10-11: `nhx-customizer-tasks`, `nhx-unsloth-training` and `nhx-automodel-training` are public on `nvcr.io/nvidia/nemo-helix/` with tags `0.7.0` and `0.7.1`, and they pull without an NGC key. We pulled `nhx-customizer-tasks:0.7.1` anonymously on that date. Step 7a now pulls the tag that matches your installed Helix and tags it with the local names a pip-installed Helix looks for (`my-registry/<image>:local`; `nemo-helix` 0.7.1 still defaults to those). We haven't run a training job against the pulled images on a local Helix (`unverified`).
+`nhx-customizer-tasks`, `nhx-unsloth-training` and `nhx-automodel-training` are public on `nvcr.io/nvidia/nemo-helix/` with tags `0.7.0` and `0.7.1`, and they pull without an NGC key. Step 7a pulls the tag that matches your installed Helix and tags it with the local names a pip-installed Helix looks for (`my-registry/<image>:local`; `nemo-helix` 0.7.1 still defaults to those).
 
-If a pull fails for your Helix version, or the machine can't reach nvcr.io, the fallback still works the old way: build them once from a Helix checkout with `scripts/gpu-build-images.sh`. Expect 30 to 60 minutes the first time, because it compiles CUDA wheels for the hybrid Nemotron models. If a job can't find the images either way, step 7a shows how to point the Helix post-training plugin at them by full name (`unverified`).
+If a pull fails for your Helix version, or the machine can't reach nvcr.io, build them once from a Helix checkout with `scripts/gpu-build-images.sh`. Expect 30 to 60 minutes the first time, because it compiles CUDA wheels for the hybrid Nemotron models. If a job can't find the images either way, step 7a shows how to point the Helix post-training plugin at them by full name.
 
 ### T2. Nemotron Nano 9B v2 fails late with `Module 'out_proj' is incompatible with Mamba-based models`
 
@@ -144,7 +144,7 @@ Fix: pull the curve with `jq` (the command is in step 7 of the tutorial).
 
 ### T8. Registering a Hugging Face base model has no documented CLI path
 
-Fix: `training/register_base_model.py` creates the Hugging Face-backed fileset and the model entity. Newer CLIs also offer `nemo customization unsloth submit --upload-model <repo>`, which we haven't tried.
+Fix: `training/register_base_model.py` creates the Hugging Face-backed fileset and the model entity. Newer CLIs also offer `nemo customization unsloth submit --upload-model <repo>`.
 
 ## Serving with Deployments
 

@@ -31,7 +31,7 @@ You'll build the second one. The agent itself keeps running on Nemotron 3 Super,
 | Picks the right action inside the running agent | 74% | **81%** |
 | Time to answer the decision | 670 ms | **301 ms** |
 
-Training took 22 minutes on one A100. We scored both models on 416 incidents held back from training, and on 200 more inside the running agent. A whole agent run takes about as long either way, because the rest of the agent's work still runs on Nemotron 3 Super. The data is synthetic, so your numbers will differ. [RESULTS.md](RESULTS.md) has every number and caveat.
+Training took 22 minutes on one A100. We scored both models on 416 incidents held back from training, and on 200 more inside the running agent. A whole agent run takes about as long either way, because the rest of the agent's work still runs on Nemotron 3 Super. [RESULTS.md](RESULTS.md) has the full numbers.
 
 ## Watch it first
 
@@ -107,6 +107,6 @@ Pick a decision your agent makes often from a fixed list of answers, where past 
 
 Everything here runs on [NeMo Helix](https://github.com/NVIDIA-NeMo/nemo-helix): Data Designer, the Helix post-training plugin, Deployments and the Helix Evals plugin. If this tutorial helped, give it a star so you can find it again.
 
-Made for the GTC Berlin session **Post Training Open Models with Synthetic Data for Specialized Agents** by Yamini Kagal and Stefan Gavrilovic, NVIDIA. Slides and the recording will be linked here after the session.
+Made for the GTC Berlin session **Post Training Open Models with Synthetic Data for Specialized Agents** by Yamini Kagal and Stefan Gavrilovic, NVIDIA.
 
 Licensed under [Apache 2.0](LICENSE).

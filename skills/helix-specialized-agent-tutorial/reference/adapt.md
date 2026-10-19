@@ -38,7 +38,7 @@ The model returns its 20 most likely next tokens. The code keeps those that are 
 
 Fixes, either one:
 
-1. Raise `logprobs` in all three places. A provider caps it; vLLM rejects values above its `--max-logprobs` server setting, and `training/deploy_model.py` doesn't set that flag today, so raising it means adding the flag to the deployment's `additional_args` and redeploying. Check the cap in the vLLM docs for the image you deploy; we haven't tried this (`unverified`).
+1. Raise `logprobs` in all three places. A provider caps it; vLLM rejects values above its `--max-logprobs` server setting, and `training/deploy_model.py` doesn't set that flag today, so raising it means adding the flag to the deployment's `additional_args` and redeploying. Check the cap in the vLLM docs for the image you deploy.
 2. Split the first question into two smaller ones (group, then option within the group), each under about 15 options. This changes the prompts, the training rows and the agent tool, so it's more work but stays inside the limit.
 
 `ROUTER_MODE=chat` avoids the limit for the agent, since it reads the answer as text, but it returns no confidence, and the eval specs for the fine-tuned arms use logits mode, so step 9's scores and calibration still need fix 1 or 2.

@@ -1,8 +1,8 @@
 # Results
 
-What we measured when we gave the triage step of the Meridian incident agent a small fine-tuned model. Runs date from 2026-10-07 and 2026-10-08. Every row-level score behind these tables is in [`results/`](results/), so you can recompute them without calling any model.
+What we measured when a small fine-tuned open model took over one decision in the Meridian incident agent: which runbook owns an incident and what action to take. Runs date from 2026-10-07 and 2026-10-08. Every row-level score behind these tables is in [`results/`](results/), so you can recompute them without calling any model.
 
-The incident history is synthetic and Meridian Compute is made up. The numbers show the mechanism. Your own tickets and policy will give you your own numbers, and your time and cost will differ with your data, model and hardware.
+Meridian Compute is made up and its incident history is synthetic.
 
 ## Setup
 

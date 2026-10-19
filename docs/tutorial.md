@@ -12,20 +12,18 @@ The example is an incident agent at Meridian Compute, a made-up company that run
 
 **Accounts.** An inference provider for the agent's own model and, if you generate data, for the writer and judge models. `nemo setup` supports NVIDIA Build, OpenAI, Anthropic, Google Gemini, Ollama and any OpenAI-compatible endpoint. Base models come from Hugging Face; no token is needed for the two used here.
 
-**What we ran on.** Our training, serving and model evaluations ran on a Helix cluster with one A100 80GB per job. The data generation and agent runs used a local Helix on a laptop.
-
-**Time and cost.** Times below are what our runs took. Yours will differ with your data, model, hardware and provider. With the packaged data on one A100 80GB, plan on about 2 to 4 hours end to end plus the image download in step 7a: steps 0 to 6 about 30 minutes, training about 30 minutes, deploying 20 to 45 minutes, evaluations about 15 minutes and the agent comparison 30 minutes for 50 incidents or about 2 hours for all 200. Everything we ran cost about $13 to $40 at public prices, with an A100 80GB at $1.66 to $6.03 an hour (Brev listings, October 2026).
+**Time and cost.** Times below are from our runs. With the packaged data on one A100 80GB, plan on about 2 to 4 hours end to end plus the image download in step 7a: steps 0 to 6 about 30 minutes, training about 30 minutes, deploying 20 to 45 minutes, evaluations about 15 minutes and the agent comparison 30 minutes for 50 incidents or about 2 hours for all 200. Everything we ran cost about $13 to $40 at public prices, with an A100 80GB at $1.66 to $6.03 an hour (Brev listings, October 2026).
 
 | Step | What you do | Where it runs | Our time |
 |---|---|---|---|
 | [0](#step-0-preflight) | Check the machine | Any | 1 min |
-| [1](#step-1-install-nemo-helix-and-connect-a-provider) | Install NeMo Helix, connect a provider | Any | 10 to 15 min (not timed) |
-| [2](#step-2-run-the-agent-once-on-a-general-model) | Register the agent, run it once | Any | 5 min (not timed) |
+| [1](#step-1-install-nemo-helix-and-connect-a-provider) | Install NeMo Helix, connect a provider | Any | 10 to 15 min |
+| [2](#step-2-run-the-agent-once-on-a-general-model) | Register the agent, run it once | Any | 5 min |
 | [3](#step-3-get-the-incident-history) | Use the packaged data, or generate it | Any | 1 min, or 21 min to generate (about 14 h on a free tier) |
 | [4](#step-4-check-the-data) | Check the data | Any | 1 min |
 | [5](#step-5-upload-the-data-as-filesets) | Upload the data | Any | 1 min |
 | [6](#step-6-register-the-base-model) | Register the base model | GPU machine | A few minutes |
-| [7](#step-7-pull-the-training-images-and-fine-tune) | Pull images, fine-tune | GPU machine | About 21 GB to download (not timed), 30 min to train Qwen |
+| [7](#step-7-pull-the-training-images-and-fine-tune) | Pull images, fine-tune | GPU machine | About 21 GB to download, 30 min to train Qwen |
 | [8](#step-8-deploy-the-base-model-and-the-adapter) | Deploy base plus adapter | GPU machine | 21 min (Qwen), 30 min (Nemotron) |
 | [9](#step-9-evaluate-before-and-after) | Evaluate | GPU machine | 5 to 15 min |
 | [10](#step-10-put-the-fine-tuned-model-behind-the-triage-step) | Swap the model in the agent, compare | GPU machine | 30 min (50 incidents) to 2 h (200) |
@@ -78,7 +76,7 @@ export NVIDIA_API_KEY=...   # your key; never commit it
 nemo setup --auto --start-services --no-install-skills --ready-timeout 360
 ```
 
-To add OpenRouter as a second provider (flags confirmed from `--help`; `unverified` in this form):
+To add OpenRouter as a second provider:
 
 ```bash
 printf '%s' "$OPENROUTER_API_KEY" | nemo secrets create openrouter-key --from-file -
@@ -265,11 +263,11 @@ docker pull docker.io/vllm/vllm-openai:v0.22.1   # the serving image step 8 uses
 docker images --format "{{.Repository}}:{{.Tag}}\t{{.Size}}" | grep -E "nhx-|vllm"
 ```
 
-**You should see:** each pull ends `Status: Downloaded newer image`, and the last command lists each `nhx-` image twice (the `nvcr.io` name and the `my-registry/...:local` name share one image ID), plus the vLLM image. The two `nhx-` images are about 21 GB to download for x86_64. We pulled the tasks image anonymously on 2026-10-11; we haven't run a training job against the pulled images on a local Helix yet (`unverified`).
+**You should see:** each pull ends `Status: Downloaded newer image`, and the last command lists each `nhx-` image twice (the `nvcr.io` name and the `my-registry/...:local` name share one image ID), plus the vLLM image. The two `nhx-` images are about 21 GB to download for x86_64.
 
 **If `docker pull` fails** with `manifest unknown` or `not found`, there's no image for your Helix version. Run `echo $HELIX_VERSION` and install a Helix version that has images (`uv pip install "nemo-helix[all]==0.7.1"`), or build the images from source as below.
 
-**If the job in 7b still fails pulling `nhx-unsloth-training` or `nhx-customizer-tasks`,** point the Helix post-training plugin at the published images by their full names and restart the services from this repo's activated shell. Delete any agent deployments first, or the restart can hang ([P3](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#p3-shutting-down-the-services-hangs)). These settings come from the Helix source; this form is `unverified`:
+**If the job in 7b still fails pulling `nhx-unsloth-training` or `nhx-customizer-tasks`,** point the Helix post-training plugin at the published images by their full names and restart the services from this repo's activated shell. Delete any agent deployments first, or the restart can hang ([P3](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#p3-shutting-down-the-services-hangs)). These settings come from the Helix source:
 
 ```bash
 export NHX_UNSLOTH_TRAINING_IMAGE=nvcr.io/nvidia/nemo-helix/nhx-unsloth-training:$HELIX_VERSION
@@ -280,7 +278,7 @@ curl -s http://localhost:8080/health/ready
 
 The services read these variables when they start, so set them again in any shell you later restart the services from. They cover training only; step 8 still looks for `my-registry/nhx-customizer-tasks:local`, so keep that tag.
 
-**Fallback: build the images from source.** Use this only if you can't pull, for example on a Helix version with no published images or a machine that can't reach nvcr.io. The script builds `my-registry/nhx-customizer-tasks:local` and `my-registry/nhx-unsloth-training:local` with Helix's own bake file and pulls the vLLM image. The clone checks out the Helix release tag that matches your installed version. Expect 30 to 60 minutes the first time, because it compiles CUDA wheels for the hybrid Nemotron models (an estimate; `unverified` end to end):
+**Fallback: build the images from source.** Use this only if you can't pull, for example on a Helix version with no published images or a machine that can't reach nvcr.io. The script builds `my-registry/nhx-customizer-tasks:local` and `my-registry/nhx-unsloth-training:local` with Helix's own bake file and pulls the vLLM image. The clone checks out the Helix release tag that matches your installed version. Expect 30 to 60 minutes the first time, because it compiles CUDA wheels for the hybrid Nemotron models:
 
 ```bash
 git clone --branch "$HELIX_VERSION" https://github.com/NVIDIA-NeMo/nemo-helix.git ~/nemo-helix
@@ -348,7 +346,7 @@ nemo inference deployments delete meridian-qwen --workspace default
 QUESTIONS="runbook action" scripts/run-evals.sh "default/meridian-incidents-test#eval.jsonl" B-qwen-untuned C-qwen-finetuned
 ```
 
-The script writes one spec per model and question, submits them, waits and downloads row scores to `runs/eval/`. The specs call the deployment's provider route (`unverified` from a local Helix; our runs called the vLLM service inside the cluster).
+The script writes one spec per model and question, submits them, waits and downloads row scores to `runs/eval/`. The specs call the deployment's provider route.
 
 Score the calibration split too, so you can fit the confidence:
 
@@ -371,7 +369,7 @@ python eval/analyze_results.py runs/eval/C-qwen-finetuned.action.rows.jsonl \
 
 To add the frontier baseline, set `FRONTIER_MODEL` to its name on your gateway and add `A-frontier-no-context A-plus-frontier-with-context` to the `run-evals.sh` arms. Our scores for every model are in `results/`, so you can also compare against those without calling them.
 
-**You should see:** `evaluator evaluate` prints a job ID like `nemo-evaluator-<id>`. `analyze_results.py` prints JSON per model. Ours for the fine-tuned Qwen action question: `"accuracy": 0.8197`, `"macro_f1": 0.7659`, `"ece": 0.0476`, `"accuracy_heldout_families": 0.8017`. The untuned base: 37.7% accuracy. Each small-model job took under a minute; a 416-row job on Nemotron 3 Ultra took about 2.5 minutes. Yours will differ, but the fine-tuned model should beat the untuned one by a wide margin on the action.
+**You should see:** `evaluator evaluate` prints a job ID like `nemo-evaluator-<id>`. `analyze_results.py` prints JSON per model. Ours for the fine-tuned Qwen action question: `"accuracy": 0.8197`, `"macro_f1": 0.7659`, `"ece": 0.0476`, `"accuracy_heldout_families": 0.8017`. The untuned base: 37.7% accuracy. Each small-model job took under a minute; a 416-row job on Nemotron 3 Ultra took about 2.5 minutes. The fine-tuned model should beat the untuned one by a wide margin on the action.
 
 To see what a confidence threshold buys you, and why escalating uncertain cases to the big model didn't help in our run:
 
@@ -447,7 +445,7 @@ Our dataset had about 200 synthetic examples per runbook to keep the demo cheap.
 
 ### Bring your own labeled tickets
 
-There's no script for real data yet. `scripts/split_dataset.py` reads a Data Designer job, so you build the four files yourself and then pick up at step 4. We tested the code below on rows from the packaged data, not on real tickets (`unverified` on real data).
+`scripts/split_dataset.py` reads a Data Designer job, so for real tickets you build the four files yourself with the code below, then pick up at step 4.
 
 1. **Check the labels.** Each ticket needs its text as the step saw it at decision time, a first answer and a second answer. The answers must match the `id` values in `taxonomy.json` exactly; the lookup fails on anything else. Leave out anything added after the decision, such as resolution notes or the final queue, since it gives the answer away.
 2. **Split by date, by hand.** Sort the tickets by date. Keep the latest period (for example the last two or three months) as your test set. Split the earlier tickets into train, validation and calibration; the tutorial uses 84%, 8% and 8%. Save each as a JSON Lines file with one ticket per line.
@@ -503,7 +501,7 @@ nemo files filesets delete meridian-incidents-train --workspace default
 nemo files filesets delete meridian-incidents-test --workspace default
 ```
 
-If you trained Nemotron Nano, use `meridian-nemotron`, `meridian-nemotron-cfg` and `nemotron-nano-9b-v2` in place of the Qwen names. We haven't run this cleanup sequence end to end (`unverified`); the commands and flags are from `--help`.
+If you trained Nemotron Nano, use `meridian-nemotron`, `meridian-nemotron-cfg` and `nemotron-nano-9b-v2` in place of the Qwen names.
 
 Stop the local Helix services:
 

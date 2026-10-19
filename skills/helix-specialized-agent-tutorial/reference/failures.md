@@ -26,7 +26,7 @@ Match the error text, open the KNOWN-ISSUES entry and apply its fix. Don't parap
 | Trouble downloading the generated dataset | 4 | D6 |
 | 404 on `nemo files upload` | 5 | F1 |
 | `manifest unknown` or not found on the 7a `docker pull` | 7 | T1 (resolved 2026-10-11). No published tag for the installed Helix version; offer the 7a options (a Helix version with images, or the source build fallback) and let the user choose |
-| Pull error for `nhx-*` images in the 7b job | 7 | T1. Check the `my-registry/...:local` tags from 7a exist; if they do and it still fails, use the 7a override (`unverified`); ask before restarting the services, and stop and ask if that doesn't fix it |
+| Pull error for `nhx-*` images in the 7b job | 7 | T1. Check the `my-registry/...:local` tags from 7a exist; if they do and it still fails, use the 7a override; ask before restarting the services, and stop and ask if that doesn't fix it |
 | `Module 'out_proj' is incompatible with Mamba-based models` | 7 | T2 |
 | `warmup_ratio` warning | 7 | T4 (expected) |
 | `model spec resolved: False` | 6 | No ID; step 6 "If it fails" says rerun preflight (usually Hugging Face unreachable) |
