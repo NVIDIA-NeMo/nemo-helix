@@ -166,6 +166,7 @@ class FabricSessionManager:
         async with session.invocation_lock:
             if session.closing:
                 raise FabricSessionNotFoundError(f"Fabric session '{session.session_id}' was not found.")
+            session.has_invoked = True
             try:
                 async with self._invocation_slot():
                     return await invoke_fabric_runtime(session.runtime, request)
@@ -182,6 +183,7 @@ class FabricSessionManager:
         async with session.invocation_lock:
             if session.closing:
                 raise FabricSessionNotFoundError(f"Fabric session '{session.session_id}' was not found.")
+            session.has_invoked = True
             try:
                 async with self._invocation_slot():
                     yield stream_fabric_runtime(session.runtime, request, streaming_method=session.streaming_method)

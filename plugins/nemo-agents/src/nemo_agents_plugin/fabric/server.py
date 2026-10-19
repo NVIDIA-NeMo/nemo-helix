@@ -80,15 +80,15 @@ def _to_fabric_invocation_request(
     request: ChatCompletionRequest,
     *,
     session_id: str | None,
+    runtime_has_history: bool = False,
 ) -> FabricInvocationRequest:
     """Translate the chat transcript into a Platform-owned Fabric request."""
     messages = request.messages
-    # Interim behavior to get multi-turn in Studio chat.
-    input_text = (
-        messages[0].content
-        if len(messages) == 1
-        else "\n\n".join(f"{message.role}: {message.content}" for message in messages)
-    )
+    if runtime_has_history or len(messages) == 1:
+        input_text = messages[-1].content
+    else:
+        # A fresh runtime has no history, so replay the caller's transcript into it.
+        input_text = "\n\n".join(f"{message.role}: {message.content}" for message in messages)
     caller_context = {"session_id": session_id} if session_id is not None else {}
     return FabricInvocationRequest(
         input=input_text,
@@ -400,7 +400,11 @@ def create_fabric_serving_app(
                 raise HTTPException(status_code=404, detail=str(error)) from error
             except FabricSessionStartError as error:
                 raise HTTPException(status_code=503, detail=str(error)) from error
-            invocation_request = _to_fabric_invocation_request(request, session_id=session.session_id)
+            invocation_request = _to_fabric_invocation_request(
+                request,
+                session_id=session.session_id,
+                runtime_has_history=session.has_invoked,
+            )
             response_headers = _session_headers(session.session_id)
             invoke = partial(app.state.session_manager.invoke_session, session)
             stream = partial(app.state.session_manager.stream_session, session)

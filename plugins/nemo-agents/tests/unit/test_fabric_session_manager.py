@@ -680,6 +680,50 @@ async def test_stream_session_refreshes_activity(
 
 
 @pytest.mark.asyncio
+async def test_invoke_session_marks_runtime_as_having_history(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = FabricSessionRegistry()
+    session = await registry.register(cast(Any, _FakeRuntime()), session_id="session-1")
+    manager = FabricSessionManager(
+        _agent_config(),
+        base_dir=tmp_path,
+        session_registry=registry,
+    )
+
+    async def invoke_fabric_runtime(runtime: Any, request: FabricInvocationRequest) -> FabricRuntimeResult:
+        return FabricRuntimeResult(status="succeeded", response=request.input)
+
+    monkeypatch.setattr(session_manager, "invoke_fabric_runtime", invoke_fabric_runtime)
+
+    assert not session.has_invoked
+    await manager.invoke_session(session, FabricInvocationRequest(input="hello"))
+
+    assert session.has_invoked
+
+
+@pytest.mark.asyncio
+async def test_stream_session_marks_runtime_as_having_history(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = FabricSessionRegistry()
+    session = await registry.register(cast(Any, _FakeRuntime()), session_id="session-1")
+    manager = FabricSessionManager(
+        _agent_config(),
+        base_dir=tmp_path,
+        session_registry=registry,
+    )
+    monkeypatch.setattr(session_manager, "stream_fabric_runtime", lambda runtime, request: object())
+
+    async with manager.stream_session(session, FabricInvocationRequest(input="hello")):
+        pass
+
+    assert session.has_invoked
+
+
+@pytest.mark.asyncio
 async def test_invoke_session_serializes_turns_for_same_runtime(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

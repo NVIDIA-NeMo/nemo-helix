@@ -449,7 +449,7 @@ def test_chat_completion_with_session_id_reuses_session(
 
     async def resolve_session(session_id: str) -> Any:
         resolve_calls.append(session_id)
-        return SimpleNamespace(session_id="session-1", runtime=object())
+        return SimpleNamespace(session_id="session-1", runtime=object(), has_invoked=False)
 
     async def invoke_session(session: Any, request: Any) -> FabricRuntimeResult:
         return FabricRuntimeResult(status="succeeded", response="hello again")
@@ -508,7 +508,7 @@ def test_session_chat_completion_runtime_error_returns_session_header(
     app = create_fabric_serving_app(_write_agent_config(tmp_path))
 
     async def resolve_session(session_id: str) -> Any:
-        return SimpleNamespace(session_id=session_id, runtime=object())
+        return SimpleNamespace(session_id=session_id, runtime=object(), has_invoked=False)
 
     async def invoke_session(session: Any, request: Any) -> FabricRuntimeResult:
         raise FabricRuntimeTimeoutError("timed out")
@@ -653,7 +653,7 @@ def test_streaming_chat_completion_reuses_supplied_session_id(
 
     async def resolve_session(session_id: str) -> Any:
         resolve_calls.append(session_id)
-        return SimpleNamespace(session_id="session-1", runtime=object())
+        return SimpleNamespace(session_id="session-1", runtime=object(), has_invoked=False)
 
     def stream_session(session: Any, request: Any) -> _FakeStreamContext:
         return _FakeStreamContext(_FakeFabricStream(result=FabricRuntimeResult(status="succeeded", response="done")))
@@ -1046,6 +1046,28 @@ def test_chat_completion_request_serializes_full_transcript() -> None:
 
     assert invocation_request.input == ("system: Be concise.\n\nassistant: How can I help?\n\nuser: Say hello.")
     assert invocation_request.caller_context == {"session_id": "session-1"}
+    assert invocation_request.relay_session_root == server._relay_session_root("session-1")
+
+
+def test_session_runtime_with_history_receives_only_the_latest_message() -> None:
+    request = ChatCompletionRequest.model_validate(
+        {
+            "messages": [
+                {"role": "user", "content": "What is 2+3?"},
+                {"role": "assistant", "content": "5"},
+                {"role": "user", "content": "Multiply that by 10."},
+            ],
+            "model": "test-model",
+        }
+    )
+
+    invocation_request = server._to_fabric_invocation_request(
+        request,
+        session_id="session-1",
+        runtime_has_history=True,
+    )
+
+    assert invocation_request.input == "Multiply that by 10."
     assert invocation_request.relay_session_root == server._relay_session_root("session-1")
 
 
