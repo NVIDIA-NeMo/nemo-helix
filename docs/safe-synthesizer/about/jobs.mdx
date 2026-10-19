@@ -97,19 +97,6 @@ Track job progress through:
 - **Status checks**: Poll job state
 - **Logs**: View real-time execution logs
 
-With the CLI:
-
-```shell
-# Current status
-nemo jobs get-status <job-name>
-
-# Most recent log lines
-nemo jobs tail <job-name>
-
-# Stream status and logs until the job reaches a terminal state
-nemo jobs watch <job-name>
-```
-
 With the Python SDK, from the `SafeSynthesizerJob` returned by `SafeSynthesizerJobBuilder.create_job()`:
 
 {/* @nemo-docs: skip-python-type-check */}
@@ -128,15 +115,9 @@ When the job completes, access these job results:
 - **`summary`**: Job summary with scores and timing
 - **`adapter`**: LoRA adapter from the training step (when synthesis ran)
 
-List and download them with the CLI:
-
-```shell
-nemo jobs results list <job-name>
-nemo jobs results download synthetic-data --job <job-name> --output-file ./synthetic-data.csv
-```
-
-Or with the Python SDK: `job.fetch_data()`, `job.save_report(path)`, and `job.fetch_summary()`.
-Logs remain available through `nemo jobs get-logs <job-name>` or `job.fetch_logs()`.
+With the Python SDK, retrieve them with `job.fetch_data()`, `job.save_report(path)`, and `job.fetch_summary()`.
+Logs remain available through `job.fetch_logs()`.
+For the equivalent CLI commands, refer to [Getting Started](/documentation/synthesize-safe-data).
 
 ### Reusing a Trained Adapter
 

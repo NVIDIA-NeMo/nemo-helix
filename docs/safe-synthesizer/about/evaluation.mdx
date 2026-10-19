@@ -103,13 +103,7 @@ A machine-readable `summary` result contains the same scores and timing data as 
 - Detailed subscores for each metric
 - Visualizations comparing training and synthetic data
 
-Download the report with the CLI:
-
-```shell
-nemo jobs results download evaluation-report --job <job-name> --output-file ./evaluation_report.html
-```
-
-Or with the Python SDK, from the `SafeSynthesizerJob` returned by `SafeSynthesizerJobBuilder.create_job()`:
+Download the report with the Python SDK, from the `SafeSynthesizerJob` returned by `SafeSynthesizerJobBuilder.create_job()`:
 
 {/* @nemo-docs: skip-python-type-check */}
 ```python
