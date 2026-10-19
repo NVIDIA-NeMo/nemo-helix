@@ -1008,7 +1008,13 @@ def sweep_step_secrets(
     Secret holds credentials. ``workload_exists`` raises when it can't tell; that Secret is kept for the next sweep.
     """
     selector = ",".join(f"{key}={value}" for key, value in KUBE_JOB_SELECTOR_LABELS.items())
-    for secret in core_v1.list_namespaced_secret(namespace=namespace, label_selector=selector).items:
+    try:
+        secrets = core_v1.list_namespaced_secret(namespace=namespace, label_selector=selector).items
+    except Exception:
+        # The rest of cleanup mustn't wait on this; the next pass sweeps again.
+        logger.warning("Couldn't list step Secrets for cleanup", extra=dict(namespace=namespace), exc_info=True)
+        return
+    for secret in secrets:
         name = secret.metadata.name
         labels = secret.metadata.labels or {}
         job, step_name, workspace = (

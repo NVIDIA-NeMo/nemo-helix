@@ -4070,6 +4070,14 @@ class TestStepSecretsDoNotOutliveTheirJobs:
 
         kubernetes_job._core_v1.delete_namespaced_secret.assert_not_called()
 
+    def test_a_failed_secret_listing_doesnt_stop_job_cleanup(self, kubernetes_job) -> None:
+        kubernetes_job._core_v1.list_namespaced_secret.side_effect = ApiException(status=500)
+
+        with patch.object(kubernetes_job, "get_kubernetes_job_list_by_labels", return_value=[]) as list_jobs:
+            kubernetes_job.cleanup_steps()
+
+        list_jobs.assert_called_once()
+
 
 class TestAResumedStepReadsItsSecretsAgain:
     """Resuming a suspended Job starts a new pod: it gets the secrets as the submitter may read them now."""

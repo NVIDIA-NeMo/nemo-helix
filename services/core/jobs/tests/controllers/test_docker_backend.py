@@ -3794,8 +3794,13 @@ def test_docker_job_gets_its_secret_values_from_the_controller_under_token_excha
     assert not env.get("NEMO_JOB_SECRETS")
 
 
-def _resume_with_secret(docker_job, docker_client_mock, step, *, existing_value: str, current_value: str):
-    """Resume ``step`` over an existing container that holds ``existing_value``, the secret now being ``current_value``."""
+def _resume_with_secret(
+    docker_job, docker_client_mock, step, *, existing_value: str, current_value: str, owner: str | None = None
+):
+    """Resume ``step`` over an existing container that holds ``existing_value``, the secret now being ``current_value``.
+
+    The container belongs to ``docker_job`` unless ``owner`` names another controller instance.
+    """
     step.status = HelixJobStatus.RESUMING
     step.step_spec.environment = [
         *(step.step_spec.environment or []),
@@ -3804,6 +3809,13 @@ def _resume_with_secret(docker_job, docker_client_mock, step, *, existing_value:
     existing = MagicMock()
     existing.name = "job-test-job-id-test-step"
     existing.attrs = {"Config": {"Env": [f"TOKEN={existing_value}", "OTHER=1"]}}
+    existing.labels = {
+        JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER,
+        JOB_CONTROLLER_INSTANCE_ID_LABEL: owner or docker_job._jobs_controller_instance_id,
+        JOB_WORKSPACE_ID_LABEL: step.workspace,
+        JOB_ID_LABEL: step.job,
+        JOB_TASK_ID_LABEL: "old-task",
+    }
     lookup = docker_client_mock.containers.get._original_side_effect
 
     def get(name: str):
@@ -3831,6 +3843,33 @@ def test_a_resumed_docker_step_gets_a_rotated_secret(docker_job, docker_client_m
 
     existing.remove.assert_called_once_with(force=True)
     assert [c.kwargs["environment"]["TOKEN"] for c in created] == ["rotated"]
+    # The replaced container's own task volumes go with it; the job's shared storage stays.
+    removed_volumes = {c.args[0] for c in docker_client_mock.volumes.get.call_args_list}
+    assert (
+        docker_job.task_storage_volume_name(
+            test_job_step_with_auth_context.workspace, test_job_step_with_auth_context.job, "old-task"
+        )
+        in removed_volumes
+    )
+
+
+def test_a_resumed_docker_step_never_replaces_a_container_another_controller_owns(
+    docker_job, docker_client_mock, test_job_step_with_auth_context
+):
+    """Its secrets changed, but the container isn't ours to remove: the step fails rather than run stale values."""
+    existing, created = _resume_with_secret(
+        docker_job,
+        docker_client_mock,
+        test_job_step_with_auth_context,
+        existing_value="old",
+        current_value="rotated",
+        owner="another-controller",
+    )
+
+    existing.remove.assert_not_called()
+    assert created == []
+    update = docker_job._jobs.update_job_step_status.call_args.kwargs["body"]
+    assert update.status == HelixJobStatus.ERROR
 
 
 def test_a_resumed_docker_step_keeps_its_container_when_its_secrets_are_unchanged(

@@ -1506,8 +1506,12 @@ chmod -R 777 {job_vol}/{storage_subpath}
             container = None
         if container is not None and _secrets_changed(container, container_args["environment"], step_secret_names):
             # A container's environment is fixed at creation; a resumed step must run with its secrets as they are now.
-            logger.info("Replacing container: its step's secrets changed", extra={"container_name": container.name})
-            container.remove(force=True)
+            # Only a container this controller owns is replaced, and its task volumes go with it.
+            if not self._remove_container_before_resource_release(step, container, reason="step secrets changed"):
+                raise FailedToScheduleError(
+                    f"Job step {step.job}/{step.name}'s secrets changed, but its container {container.name} "
+                    "couldn't be replaced"
+                )
             container = None
         if container is not None:
             logger.info("Container already exists, not creating a new one", extra={"container_name": container.name})
