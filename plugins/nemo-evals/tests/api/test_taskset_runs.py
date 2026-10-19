@@ -48,12 +48,12 @@ async def test_taskset_run_create_replay_and_conflict(run_client, published, req
     assert first.status_code == 201, first.text
     assert first.json()["phase"] == "accepted" and first.json()["result_state"] == "pending"
     assert first.json()["created_by"] == "user:alice"
-    assert first.json()["warnings"] == []
+    assert first.json()["warnings"] == [f"task 0 (task-1): Job {first.json()['run_id']}-task-0"]
     assert not {"plan_ref", "plan_digest", "request_digest", "db_version"} & first.json().keys()
     before = list(files_service.calls)
     replay = await run_client.post(PATH, json=request_body)
     assert replay.status_code == 200 and replay.json() == first.json()
-    assert files_service.calls == before
+    assert not [call for call in files_service.calls[len(before) :] if call[0] != "download"]
     request_body["timeout_seconds"] = 1
     conflict = await run_client.post(PATH, json=request_body)
     assert conflict.status_code == 409
@@ -254,3 +254,29 @@ async def test_taskset_run_lost_create_reply_through_production_store(
             assert tuple(snapshot_ref.split("/")) in files_service.filesets
             if mode != "uncommitted-exhausted":
                 assert len(files_service.filesets) == 2
+
+
+async def test_taskset_run_missing_task_job_is_retryable_503(run_client, published, request_body, fake_task_jobs):
+    fake_task_jobs.refuse = {"run-11f77762178b0e05-task-0"}
+    response = await run_client.post(PATH, json=request_body)
+    assert response.status_code == 503, response.text
+    assert response.headers["x-should-retry"] == "true"
+    assert "task 0" in response.json()["detail"]
+    assert response.json()["detail"].endswith("retry the same submit with its idempotency_key")
+    fake_task_jobs.refuse = set()
+    retry = await run_client.post(PATH, json=request_body)
+    assert retry.status_code == 200 and len(fake_task_jobs.created) == 1
+
+
+class _Everything(set):
+    def __contains__(self, item: object) -> bool:
+        return True
+
+
+async def test_keyless_missing_task_job_503_is_not_retryable(run_client, published, request_body, fake_task_jobs):
+    """A keyless retry cannot replay the accepted run, so the SDK must not resubmit it."""
+    fake_task_jobs.refuse = _Everything()
+    response = await run_client.post(PATH, json=request_body | {"idempotency_key": None})
+    assert response.status_code == 503, response.text
+    assert response.headers["x-should-retry"] == "false"
+    assert "retry the same submit" not in response.json()["detail"]

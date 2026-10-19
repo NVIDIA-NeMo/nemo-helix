@@ -19,6 +19,7 @@ from nemo_evals.authz import scope
 from nemo_evals.taskset_runs.entities import MemberPhase
 from nemo_evals.taskset_runs.store import RunRequestConflict
 from nemo_evals.taskset_runs.submission import TimeoutAboveMaximumError
+from nemo_evals.taskset_runs.task_jobs import TaskJobsIncompleteError
 from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
 from nemo_helix_plugin.dependencies import get_effective_principal_id
 from nemo_helix_plugin.log_utils import sanitize_for_log
@@ -48,7 +49,11 @@ router = APIRouter()
         200: {"model": TasksetRunSubmitResponse, "description": "Replay an identical existing run."},
         201: {"description": "Accept a new run with frozen taskset and agent inputs."},
         409: {"description": "The idempotency key already belongs to a different request."},
-        422: {"description": "Invalid request, excessive timeout, or missing or incompatible source."},
+        422: {
+            "description": "Invalid request, excessive timeout, missing or incompatible source, "
+            "unconfigured execution, or a task without images."
+        },
+        503: {"description": "The run was accepted but some task Jobs weren't created; retry the same request."},
     },
 )
 @scope.write
@@ -75,13 +80,17 @@ async def submit_taskset_run(
         service: Caller-delegated request-scoped acceptance service.
 
     Returns:
-        Public run status with advisory overlap warnings; 201 for acceptance or 200
-        for replay. Submission creates no Jobs or member records.
+        Public run status with advisory overlap warnings and one notice per task Job;
+        201 for acceptance or 200 for replay. Submission creates one task Job per task
+        right after acceptance; a keyed replay creates any that are still missing.
 
     Raises:
         RequestValidationError: The execution budget exceeds the operator maximum.
         HTTPException: Source denial (403), conflicting key (409), resolution rejection
-            (422), or a sanitized unexpected failure (500).
+            (422), missing task Jobs after acceptance (503, which the SDK retries only with an
+            idempotency_key), or a sanitized unexpected failure (500, which the SDK retries automatically).
+            Without an idempotency_key a submit is at-least-once: a retried 5xx or timeout may accept a
+            second run. Send a key for exactly-once.
     """
     try:
         outcome = await service.submit(req, workspace=workspace, caller=caller)
@@ -105,6 +114,16 @@ async def submit_taskset_run(
         ) from exc
     except TasksetRunResolutionError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except TaskJobsIncompleteError as exc:
+        # The run is already accepted here. Its ID is derived from (workspace, caller, req.idempotency_key),
+        # so a retry with the same idempotency_key finds this run and creates only its missing Jobs. Without
+        # an idempotency_key the run ID is random, so the SDK's automatic retry would create a new run and
+        # new Jobs.
+        if req.idempotency_key is not None:
+            detail, retry = f"{exc}; retry the same submit with its idempotency_key", "true"
+        else:
+            detail, retry = f"{exc}; a submit without an idempotency_key can't complete them", "false"
+        raise HTTPException(status_code=503, detail=detail, headers={"x-should-retry": retry}) from exc
     except HTTPException:
         raise
     except Exception:

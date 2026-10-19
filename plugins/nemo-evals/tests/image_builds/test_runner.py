@@ -104,7 +104,7 @@ def archive(monkeypatch) -> list[str]:
     async def read(files_client, definition):
         return TaskArchive(root="sort-task", files=frozenset(f"sort-task/{f}" for f in files), compose=None)
 
-    monkeypatch.setattr("nemo_evals.image_builds.runner._read_archive", read)
+    monkeypatch.setattr("nemo_evals.image_builds.runner.read_task_archive", read)
     return files
 
 
@@ -217,7 +217,7 @@ async def test_an_unexpected_error_fails_the_build_instead_of_leaving_it_running
     async def corrupt(files_client, definition):
         raise ValueError("Downloaded object checksum mismatch")
 
-    monkeypatch.setattr("nemo_evals.image_builds.runner._read_archive", corrupt)
+    monkeypatch.setattr("nemo_evals.image_builds.runner.read_task_archive", corrupt)
 
     build = await _run(entity_store, spec, _Builder({}))
 

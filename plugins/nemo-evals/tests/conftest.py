@@ -5,17 +5,39 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 import pickle
 import tempfile
+from collections.abc import Callable, Mapping
+from collections.abc import Set as AbstractSet
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import httpx
 import pytest
 from nemo_evals.api.schemas import MetricInline
-from nemo_evals.config import get_config
+from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash, ResolvedHarborTaskDefinition
+from nemo_evals.api.task_definitions.provenance import TaskProvenance
+from nemo_evals.config import HarborTaskJobsConfig, get_config
+from nemo_evals.harbor.remote.preparation import (
+    ImagePreparation,
+    ImageRole,
+    PreparationClients,
+    PreparationErrorCode,
+    PreparationErrorInfo,
+    TaskPreparation,
+)
+from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy
+from nemo_evals.harbor.remote.sandbox_policy import resolve_sandbox_policy
+from nemo_evals.jobs.agent_spec import AgentEvalSpec, HarborBuiltinAgentSource, HarborRunnerTarget, ResolvedTask
+from nemo_evals.jobs.harbor_task_spec import PreparedHarborEnvironment, PreparedImage
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager, CloudpickleMetricPayload
+from nemo_evals.taskset_runs.entities import TasksetRunEntity
+from nemo_evals.taskset_runs.specs import MissingPrebuiltImagePolicy, TasksetRunPlan
+from nemo_helix_plugin.client.errors import ConflictError, InternalServerError, NemoHTTPError
+from nemo_helix_plugin.config import NemoHelixConfig, get_platform_config
 from nemo_helix_plugin.entities import (
     DEFAULT_WORKSPACE,
     EntityBase,
@@ -28,6 +50,7 @@ from nemo_helix_plugin.entities.types import DeleteResponse
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.in_memory_filter import InMemoryFilterRepository
+from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, HelixJobResponse, HelixJobStatus
 from nhx.testing.files import InMemoryFilesService
 from nhx.testing.secrets import InMemorySecretsService
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
@@ -175,7 +198,7 @@ class FakeEntityStore(EntityClient):
         items = [
             entity
             for (entity_type_name, record_workspace, _, _), entity in self.entities.items()
-            if entity_type_name == entity_type.__entity_type__ and record_workspace == workspace
+            if entity_type_name == entity_type.__entity_type__ and workspace in ("-", record_workspace)  # "-": all
         ]
         items = [entity for entity in items if matches_filter(entity, filter_operation)]
         if sort and items:
@@ -257,3 +280,272 @@ def _guard_codex_home(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pyt
     temp_root = guard / "tmp"
     temp_root.mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(temp_root))
+
+
+# --- Taskset runs on Kubernetes (M1 story 5 contracts, M2 story 0) -----------------------------------------
+
+DISPATCHER_IMAGE = "registry.invalid/nhx-tasks@sha256:" + "1" * 64
+SANDBOX_DOMAIN = "opensandbox.opensandbox-system.svc.cluster.local"
+
+
+def harbor_task_jobs_config(**overrides: object) -> HarborTaskJobsConfig:
+    """An operator ``evals.runs.harbor`` block with the MVP's two profiles."""
+    resource_classes = {"cpu": {"template": "harbor-cpu", "dispatcher_profile": "k8s-cpu"}}
+    data: dict[str, object] = {
+        "dispatcher_image": DISPATCHER_IMAGE,
+        "dispatcher_profiles": ["local-k8s", "k8s-cpu"],
+        "sandbox_profiles": {
+            "harbor-standard": {"resource_classes": resource_classes, "egress_allow": ["igw.svc.cluster.local"]},
+            "harbor-open": {
+                "resource_classes": resource_classes,
+                "egress_allow": ["igw.svc.cluster.local", "inference-api.nvidia.com"],
+            },
+        },
+    }
+    data.update(overrides)
+    return HarborTaskJobsConfig.model_validate(data)
+
+
+def sandbox_platform_config(**overrides: object) -> NemoHelixConfig:
+    """Platform settings naming an in-cluster OpenSandbox server."""
+    fields: dict[str, object] = {
+        "sandbox_cluster_capable": True,
+        "sandbox_server_domain": SANDBOX_DOMAIN,
+        "sandbox_server_protocol": "http",
+    }
+    fields.update(overrides)
+    return get_platform_config().model_copy(update=fields)
+
+
+@pytest.fixture
+def sandbox_platform() -> NemoHelixConfig:
+    return sandbox_platform_config()
+
+
+@pytest.fixture
+def harbor_config() -> HarborTaskJobsConfig:
+    return harbor_task_jobs_config()
+
+
+@pytest.fixture
+def sandbox_policy() -> ResolvedHarborSandboxPolicy:
+    return resolve_sandbox_policy(harbor_task_jobs_config(), sandbox_platform_config(), "harbor-standard")
+
+
+class FakePreparer:
+    """Stand-in for ``prepare_task_images``: prebuilt images only, deterministic, no network.
+
+    Satisfies ``ImagePreparer``. Keep it in step with the real function when M3 story 7 lands.
+    ``ready_at_once=True`` skips step A and returns ``ready`` on the first call, as the MVP body does.
+    """
+
+    def __init__(
+        self,
+        *,
+        fail: Mapping[str, PreparationErrorCode] | None = None,
+        stay_pending: AbstractSet[str] = frozenset(),
+        with_verifier: AbstractSet[str] = frozenset(),
+        ready_at_once: bool = False,
+    ) -> None:
+        self.fail = dict(fail or {})
+        self.stay_pending = stay_pending
+        self.with_verifier = with_verifier
+        self.ready_at_once = ready_at_once
+        self.calls: list[tuple[str, TaskPreparation | None]] = []
+
+    async def __call__(
+        self,
+        task: ResolvedTask,
+        recorded: TaskPreparation | None,
+        *,
+        policy: ResolvedHarborSandboxPolicy,
+        missing_prebuilt_image: MissingPrebuiltImagePolicy,
+        caller: str,
+        clients: PreparationClients,
+        deadline: datetime,
+    ) -> TaskPreparation:
+        self.calls.append((task.id, recorded))
+        if task.id in self.fail:
+            return TaskPreparation(
+                status="failed", error=PreparationErrorInfo(code=self.fail[task.id], detail="scripted")
+            )
+        roles: tuple[ImageRole, ...] = ("agent", "verifier") if task.id in self.with_verifier else ("agent",)
+        if recorded is None and not self.ready_at_once:
+            return TaskPreparation(
+                status="pending",
+                resource_class="cpu",
+                images={
+                    r: ImagePreparation(role=r, preparation_key=_key(task.id, r), source="prebuilt") for r in roles
+                },
+            )
+        if task.id in self.stay_pending:
+            assert recorded is not None
+            return recorded
+        prepared = {r: _prepared(task.id, r) for r in roles}
+        return TaskPreparation(
+            status="ready",
+            resource_class="cpu",
+            images={
+                r: ImagePreparation(role=r, preparation_key=_key(task.id, r), source="prebuilt", prepared=prepared[r])
+                for r in roles
+            },
+            environment=prepared_environment(task.id, with_verifier="verifier" in roles),
+        )
+
+
+def prepared_environment(task_id: str, *, with_verifier: bool = False) -> PreparedHarborEnvironment:
+    """The environment ``FakePreparer`` gives a ready task."""
+    return PreparedHarborEnvironment(
+        task_revision_digest=_key(task_id, "revision"),
+        archive_digest=_key(task_id, "archive"),
+        agent=_prepared(task_id, "agent"),
+        verifier=_prepared(task_id, "verifier") if with_verifier else None,
+    )
+
+
+def _key(task_id: str, part: str) -> str:
+    return hashlib.sha256(f"{task_id}:{part}".encode()).hexdigest()
+
+
+def _prepared(task_id: str, role: ImageRole) -> PreparedImage:
+    return PreparedImage(
+        image_ref=f"registry.invalid/fake/{task_id}-{role}@sha256:{_key(task_id, role)}",
+        preparation_key=_key(task_id, role),
+    )
+
+
+@pytest.fixture
+def fake_preparer() -> FakePreparer:
+    return FakePreparer()
+
+
+class FakeTaskJobs:
+    """In-memory ``TaskJobs``: Jobs keyed by name, with scripted failures.
+
+    - ``subprocess_profiles``: profiles Jobs would run as host subprocesses.
+    - ``refuse``: names whose create answers 409 before any Job exists (a missing secret).
+    - ``fail_create``: names whose create raises a 500 after saving the Job without its first step.
+    - ``lose_reply``: names whose create commits, then raises (a lost response).
+    """
+
+    def __init__(self) -> None:
+        self.jobs: dict[str, HelixJobResponse] = {}
+        self.steps: dict[str, int] = {}
+        self.subprocess_profiles: set[str] = set()
+        self.refuse: set[str] = set()
+        self.fail_create: set[str] = set()
+        self.lose_reply: set[str] = set()
+        self.created: list[CreateHelixJobRequest] = []
+
+    async def is_subprocess_profile(self, profile: str) -> bool:
+        return profile in self.subprocess_profiles
+
+    async def create(self, workspace: str, request: CreateHelixJobRequest) -> None:
+        assert request.name is not None
+        if request.name in self.refuse:
+            raise _http_error(ConflictError, 409)
+        if request.name in self.jobs:
+            raise _http_error(ConflictError, 409)
+        self.jobs[request.name] = HelixJobResponse(
+            id=f"job-{len(self.jobs)}",
+            attempt_id=f"attempt-{len(self.jobs)}",
+            name=request.name,
+            workspace=workspace,
+            source=request.source,
+            spec=request.spec,
+            platform_spec=request.platform_spec,
+            fileset=f"{workspace}/{request.name}",
+            status=HelixJobStatus.CREATED,
+        )
+        if request.name in self.fail_create:
+            self.fail_create.discard(request.name)
+            raise _http_error(InternalServerError, 500)
+        self.steps[request.name] = len(request.platform_spec.steps)
+        self.created.append(request)
+        if request.name in self.lose_reply:
+            self.lose_reply.discard(request.name)
+            raise httpx.ReadTimeout("reply lost")
+
+    async def get(self, workspace: str, name: str) -> HelixJobResponse | None:
+        return self.jobs.get(name)
+
+    async def has_steps(self, workspace: str, name: str) -> bool:
+        return self.steps.get(name, 0) > 0
+
+
+def _http_error[ErrorT: NemoHTTPError](cls: type[ErrorT], status: int) -> ErrorT:
+    return cls(httpx.Response(status, json={"detail": "scripted"}, request=httpx.Request("POST", "http://jobs.test")))
+
+
+@pytest.fixture
+def fake_task_jobs() -> FakeTaskJobs:
+    return FakeTaskJobs()
+
+
+def harbor_resolved_task(name: str = "sum-three", *, config: dict | None = None) -> ResolvedTask:
+    """A resolved stored Harbor task snapshot, as submit freezes it into a plan."""
+    digest = hashlib.sha256(name.encode()).hexdigest()
+    return ResolvedTask(
+        id=f"hello/{name}",
+        spec=ResolvedHarborTaskDefinition(
+            kind="harbor",
+            native_task_id=f"hello/{name}",
+            instruction="Solve the task.",
+            source=HarborArchiveSource(
+                fileset_ref=f"default/harbor-tasks#{name}/{digest}/task_archive", files_hash=digest
+            ),
+            harbor_hash=HarborTaskHash(digest=digest, harbor_version="0.20.0"),
+            config=config if config is not None else {"environment": {}, "verifier": {"environment_mode": "separate"}},
+            provenance=TaskProvenance(entity_name=f"default/debug-{name}", revision_digest=digest),
+        ),
+    )
+
+
+@pytest.fixture(name="harbor_resolved_task")
+def harbor_resolved_task_factory() -> Callable[..., ResolvedTask]:
+    """``harbor_resolved_task`` for tests that build tasks with their own ``task.toml``."""
+    return harbor_resolved_task
+
+
+@pytest.fixture
+def harbor_spec() -> AgentEvalSpec:
+    """A resolved two-task Harbor spec running the built-in oracle agent."""
+    return AgentEvalSpec(
+        tasks=[harbor_resolved_task("greet-universe"), harbor_resolved_task("sum-three")],
+        target=HarborRunnerTarget(source=HarborBuiltinAgentSource(name="oracle")),
+    )
+
+
+@pytest.fixture
+def harbor_plan(harbor_spec, sandbox_policy, harbor_config) -> TasksetRunPlan:
+    """An accepted two-task Harbor run's frozen plan."""
+    return TasksetRunPlan(
+        run_id="run-0123456789abcdef",
+        workspace="default",
+        taskset_ref="default/debug#" + "e" * 64,
+        spec=harbor_spec,
+        missing_prebuilt_image="fail",
+        max_concurrent_task_jobs=None,
+        max_failed_tasks=None,
+        sandbox_policy=sandbox_policy,
+        dispatcher_image=harbor_config.dispatcher_image,
+        dispatcher_profile="k8s-cpu",
+        task_environments=[prepared_environment(task.id) for task in harbor_spec.tasks],
+    )
+
+
+@pytest.fixture
+def harbor_run() -> TasksetRunEntity:
+    """The run record ``harbor_plan`` belongs to."""
+    accepted = datetime(2026, 10, 15, 12, tzinfo=timezone.utc)
+    return TasksetRunEntity(
+        name="run-0123456789abcdef",
+        workspace="default",
+        plan_ref="default/run-plan#plan.json",
+        plan_digest="f" * 64,
+        request_digest="0" * 64,
+        taskset_ref="default/debug#" + "e" * 64,
+        accepted_at=accepted,
+        execution_deadline_at=accepted + timedelta(hours=1),
+        finalization_deadline_at=accepted + timedelta(hours=2),
+    )

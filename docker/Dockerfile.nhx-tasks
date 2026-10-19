@@ -11,6 +11,17 @@ FROM ${NHX_PYTHON_BASE} AS builder
 COPY --from=nhx-workspace . .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --only-group cpu-tasks --no-editable
+# Harbor task Jobs (nemo-evals) load scaled-evals' OpenSandbox environment. Copy just its four
+# modules onto the venv with a .pth file, as the scaled-evals runner image does, so the plugin's
+# control-plane deps stay out. Remove once nemo-evals carries these modules itself.
+COPY plugins/_temporary-scaled-evals/src/scaled_evals/harbor_opensandbox_environment.py \
+     plugins/_temporary-scaled-evals/src/scaled_evals/harbor_opensandbox_driver.py \
+     plugins/_temporary-scaled-evals/src/scaled_evals/harbor_opensandbox_cleanup.py \
+     plugins/_temporary-scaled-evals/src/scaled_evals/harbor_opensandbox_services.py \
+     /app/.venv/nemo-extensions/scaled_evals/
+RUN site="$(/app/.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" && \
+    echo /app/.venv/nemo-extensions > "${site}/nemo-extensions.pth" && \
+    /app/.venv/bin/python -c 'import nemo_evals.harbor.opensandbox_environment'
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -71,6 +82,13 @@ COPY --chown=1000:1000 --from=builder /app/.runtime-home/nvs /home/nvs
 COPY --chown=1000:1000 --from=builder /app/.venv /app/.venv
 COPY --chown=1000:1000 --from=builder /app/.source-distributions/nhx-tasks/ /usr/share/nemo-helix/source-distributions/nhx-tasks/
 COPY --chown=1000:1000 --from=builder /app/plugins/nemo-data-designer/tiktoken-cache /app/tiktoken-cache
+# nemo-evals' SandboxedCodex uploads this pinned static codex into Harbor sandboxes, which can't
+# download it themselves on no-network tasks. It's copied, never run here, so it's x86_64 on every
+# platform. Temporary: remove once codex reaches sandboxes as an agent bundle, which
+# https://github.com/NVIDIA-NeMo/nemo-helix/pull/3074 enables (nemo-evals must then pass the bundle).
+ADD --chmod=0755 --checksum=sha256:86f268d81b898f3e144c5ecff2ad2fda2c5802e042d6195b72538fe0fa125057 \
+    https://github.com/openai/codex/releases/download/rust-v0.162.1/codex-x86_64-unknown-linux-musl.tar.gz \
+    /opt/nemo/codex/codex-x86_64-unknown-linux-musl.tar.gz
 ENV TIKTOKEN_CACHE_DIR=/app/tiktoken-cache
 ENV VIRTUAL_ENV=/app/.venv \
     PATH="/app/.venv/bin:$PATH" \

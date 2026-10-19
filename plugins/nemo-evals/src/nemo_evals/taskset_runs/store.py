@@ -5,9 +5,10 @@
 
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Self, cast
+from typing import Protocol, Self, cast
 
 from nemo_evals.taskset_runs.entities import (
+    TERMINAL_RUN_PHASES,
     MemberPhase,
     ResultState,
     TasksetRunEntity,
@@ -21,16 +22,22 @@ from nemo_evals.taskset_runs.plan_storage import StoredPlan, delete_fileset_ref,
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
 from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY
 from nemo_helix_plugin.entities import EntityBase, EntityClient, EntityClientProtocol, ListResponse
+from nemo_helix_plugin.entities.base import EntityUpdateClientProtocol
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nemo_helix_plugin.schema import Page, PaginationData
 
+
 # The platform default retries 409. For a named create, 409 means "this name is taken": a final
 # answer that no retry can change. Retrying it only adds backoff before ``accept`` settles the
 # conflict. 5xx and timeouts are still retried; those retries are what turn a committed create
 # whose reply was lost into a 409 for our own record, which ``accept`` recognizes by ``plan_ref``.
+class RunEntityClient(EntityClientProtocol[TasksetRunEntity], EntityUpdateClientProtocol[TasksetRunEntity], Protocol):
+    """Run-record reads and writes, including the run controller's versioned updates."""
+
+
 _ACCEPT_RETRY_POLICY = replace(PLATFORM_DEFAULT_RETRY_POLICY, retryable_status_codes=(408, 429))
 
 
@@ -202,9 +209,7 @@ class TasksetRunStore:
         self._bind(EntityClient(entities_client.with_retry(_ACCEPT_RETRY_POLICY)), files_client)
 
     @classmethod
-    def _with_entity_adapter(
-        cls, entity_client: EntityClientProtocol[TasksetRunEntity], files_client: AsyncFilesClient
-    ) -> Self:
+    def _with_entity_adapter(cls, entity_client: RunEntityClient, files_client: AsyncFilesClient) -> Self:
         """Test seam: build a store over an injected entity adapter, skipping ``__init__``.
 
         Applies no retry policy, so it is for tests with an in-memory fake such as
@@ -221,7 +226,7 @@ class TasksetRunStore:
         store._bind(entity_client, files_client)
         return store
 
-    def _bind(self, entity_client: EntityClientProtocol[TasksetRunEntity], files_client: AsyncFilesClient) -> None:
+    def _bind(self, entity_client: RunEntityClient, files_client: AsyncFilesClient) -> None:
         """Set the two clients every store method uses; shared by both constructors.
 
         Args:
@@ -422,6 +427,59 @@ class TasksetRunStore:
             page_size=page_size,
         )
         return _to_page(result, sort="-created_at")
+
+    async def list_open_runs(self, *, page_size: int = 50) -> list[TasksetRunEntity]:
+        """Every run in every workspace that hasn't finished (accepted or running), oldest first.
+
+        For the run controller, whose client acts as the evals service principal. Reads every page:
+        runs that never finish (no deadlines until M4) must not hide newer ones. A run that finishes
+        mid-scan shifts later pages, so one may be skipped until the next pass.
+        """
+        runs: list[TasksetRunEntity] = []
+        page = 1
+        while True:
+            result = await self.entity_client.list(
+                TasksetRunEntity,
+                workspace="-",
+                filter_operation=ComparisonOperation(
+                    field="data.phase",
+                    operator=FilterOperator.IN,
+                    value=[TasksetRunPhase.ACCEPTED, TasksetRunPhase.RUNNING],
+                ),
+                sort="created_at",
+                page=page,
+                page_size=page_size,
+            )
+            runs.extend(result.data)
+            if not result.data or page >= result.pagination.total_pages:
+                return runs
+            page += 1
+
+    async def set_state(
+        self,
+        run: TasksetRunEntity,
+        *,
+        phase: TasksetRunPhase | None = None,
+        result_state: ResultState | None = None,
+        error: str | None = None,
+    ) -> TasksetRunEntity:
+        """Write the run's phase, result state and error; a versioned update of only those fields.
+
+        A terminal phase is never changed. Raises ``NemoEntityConflictError`` when another writer
+        updated the run first; the controller re-reads it on its next pass.
+        """
+        if run.phase in TERMINAL_RUN_PHASES:
+            return run
+        update: dict[str, object] = {}
+        if phase is not None:
+            update["phase"] = phase
+        if result_state is not None:
+            update["result_state"] = result_state
+        if error is not None:
+            update["error"] = error
+        if not update:
+            return run
+        return await self.entity_client.update(run.model_copy(update=update))
 
     async def list_members(
         self,

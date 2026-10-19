@@ -7720,6 +7720,8 @@ cpu-tasks = [
     { name = "nhx-common", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-hello-world", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-platform", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nhx-sandbox", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "tomlkit", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "trace-ingest", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 dev = [
@@ -8010,6 +8012,8 @@ cpu-tasks = [
     { name = "nhx-common", editable = "packages/nhx_common" },
     { name = "nhx-hello-world", editable = "services/hello-world" },
     { name = "nhx-platform", editable = "packages/nhx_platform" },
+    { name = "nhx-sandbox", editable = "packages/nhx_sandbox" },
+    { name = "tomlkit", specifier = ">=0.15.0,<0.15.1" },
     { name = "trace-ingest", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?subdirectory=packages%2Ftrace-ingest&rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
 ]
 dev = [

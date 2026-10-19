@@ -41,3 +41,8 @@ def member_name(task_index: int) -> str:
 def task_job_name(run_id: str, task_index: int) -> str:
     """Return the task Job name for run_id and its zero-based task index."""
     return f"{run_id}-{member_name(task_index)}"
+
+
+def bundle_job_name(run_id: str, attempt: int) -> str:
+    """Return the name of the run's ``attempt``-th bundle Job (1-based): ``<run_id>-bundle-<attempt>``."""
+    return f"{run_id}-bundle-{attempt}"

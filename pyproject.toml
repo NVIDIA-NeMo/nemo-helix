@@ -272,6 +272,11 @@ cpu-tasks = [
   # Insights Analyst Fabric adapter and insights.analysis execute extension.
   { include-group = "insights" },
   "nemo-evals-plugin",
+  # Harbor task Jobs (nemo-evals) load scaled-evals' OpenSandbox environment, which imports
+  # nhx_sandbox. The image copies just those modules in (see docker/Dockerfile.nhx-tasks).
+  "nhx-sandbox",
+  # nemo-evals' bind_task_image rewrites task.toml with it; scaled-evals pins the same version.
+  "tomlkit>=0.15.0,<0.15.1",
   "nemo-sandboxed-gym[server,opensandbox]",
   "nemo-anonymizer-plugin",
   "nemo-data-designer-plugin[retrieval-sdg]",
@@ -773,3 +778,15 @@ include = [
 
 [tool.ty.overrides.rules]
 no-matching-overload = "ignore"
+
+# The dispatcher image installs the `scaled-evals` group, so this module imports scaled-evals'
+# OpenSandbox environment. The type-check lint doesn't install that group, and the staging plugin
+# is excluded above, so the import can't resolve there. Scoped to the one file and rule; remove
+# once scaled-evals' environment moves into nemo-evals.
+[[tool.ty.overrides]]
+include = [
+  "plugins/nemo-evals/src/nemo_evals/harbor/opensandbox_environment.py",
+]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
