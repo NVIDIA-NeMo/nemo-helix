@@ -152,11 +152,13 @@ class TestDocsCommand:
         assert result.exit_code == 0
         assert result.stdout == "# Topic\n\n> **Note:**\n> Shared snippet text.\n"
 
-    def test_docs_raw_prints_source(self, tmp_path: Path):
+    def test_docs_falls_back_to_source_when_conversion_fails(self, tmp_path: Path):
         source = '---\ntitle: "Topic"\n---\n<Note>\nHi.\n</Note>\n'
         (tmp_path / "topic.mdx").write_text(source)
 
-        result = _invoke("docs", "topic", "--raw", env={"NHX_DOCS_ROOT": str(tmp_path)})
+        with patch("nemo_helix_ext.cli.commands.docs.mdx_to_markdown", side_effect=ValueError("boom")):
+            result = _invoke("docs", "topic", env={"NHX_DOCS_ROOT": str(tmp_path)})
 
         assert result.exit_code == 0
         assert result.stdout == source
+        assert "could not convert topic" in result.stderr

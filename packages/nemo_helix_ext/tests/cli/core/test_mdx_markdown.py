@@ -159,6 +159,16 @@ class TestHtml:
 
         assert mdx_to_markdown(source) == "[Run in Google Colab](https://colab.example/nb.ipynb)\n\nNext.\n"
 
+    def test_multiline_anchor_with_inline_code(self):
+        source = '<a href="/documentation/x">\n  Run `nemo setup`\n</a>\n'
+
+        assert mdx_to_markdown(source) == f"[Run `nemo setup`]({DOCS_SITE_URL}/documentation/x)\n"
+
+    def test_multiline_anchor_keeps_each_lines_inline_code(self):
+        source = '<a href="https://x.example">\n  Run `a`\n</a> then `b`\n'
+
+        assert mdx_to_markdown(source) == "[Run `a`](https://x.example) then `b`\n"
+
 
 class TestLinks:
     def test_site_relative_links_made_absolute(self):

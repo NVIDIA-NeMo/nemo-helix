@@ -135,18 +135,19 @@ def _strip_comments(line: str, state: _State) -> str:
     return line
 
 
-def _convert_inline(line: str, state: _State) -> str | None:
+def _convert_inline(line: str, state: _State, spans: list[str]) -> str | None:
     """Rewrite inline HTML/JSX on a prose line. Returns None when the line is consumed."""
     line = _BUTTON_RE.sub(lambda m: _link(m.group("text"), _attrs(m.group("attrs")).get("href")), line)
     line = _MD_TAG_RE.sub(lambda m: f"`{m.group('text')}`", line)
     line = _HIDDEN_SPAN_RE.sub("", line)
     line = _ANCHOR_RE.sub(lambda m: _link(m.group("text"), _attrs(m.group("attrs")).get("href")), line)
 
-    # An <a href> whose text spans several lines: buffer the text until </a>.
+    # An <a href> whose text spans several lines: buffer the text until </a>. Buffered text has its
+    # inline code restored now, since the caller only restores spans from the line it is processing.
     if state.pending_link is not None:
         href, parts = state.pending_link
         text, closed, rest = line.partition("</a>")
-        parts.append(_PRESENTATIONAL_TAG_RE.sub("", text).strip())
+        parts.append(_restore_inline_code(_PRESENTATIONAL_TAG_RE.sub("", text).strip(), spans))
         if not closed:
             return None
         state.pending_link = None
@@ -157,7 +158,8 @@ def _convert_inline(line: str, state: _State) -> str | None:
         if href is None:
             line = before + line[opening.end() :]
         else:
-            state.pending_link = (href, [_PRESENTATIONAL_TAG_RE.sub("", line[opening.end() :]).strip()])
+            opening_text = _PRESENTATIONAL_TAG_RE.sub("", line[opening.end() :]).strip()
+            state.pending_link = (href, [_restore_inline_code(opening_text, spans)])
             return before.rstrip() or None
 
     line = _PRESENTATIONAL_TAG_RE.sub("", line)
@@ -250,7 +252,7 @@ def _convert_body(body: str, state: _State) -> None:
             _handle_component(component, state)
             continue
 
-        converted = _convert_inline(line, state)
+        converted = _convert_inline(line, state, spans)
         if converted is None:
             continue
         if not converted.strip() and line.strip():

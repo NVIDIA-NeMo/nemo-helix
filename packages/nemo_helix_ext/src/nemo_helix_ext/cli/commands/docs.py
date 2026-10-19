@@ -99,13 +99,6 @@ def docs_command(
             help="List available documentation topics.",
         ),
     ] = False,
-    raw: Annotated[
-        bool,
-        typer.Option(
-            "--raw",
-            help="Print the original MDX source instead of converted Markdown.",
-        ),
-    ] = False,
 ) -> None:
     """Read NeMo Helix documentation.
 
@@ -158,11 +151,14 @@ def docs_command(
         raise typer.Exit(code=1) from None
 
     content = doc_path.read_text(encoding="utf-8")
-    if raw:
+    try:
+        markdown = mdx_to_markdown(content, docs_root=docs_root)
+    except Exception:
+        # The converter is best-effort; never let it make a page unreadable.
+        typer.echo(f"Warning: could not convert {path} to Markdown; showing the MDX source.", err=True)
         sys.stdout.write(content)
         return
 
-    markdown = mdx_to_markdown(content, docs_root=docs_root)
     if sys.stdout.isatty():
         Console().print(Markdown(markdown))
     else:
