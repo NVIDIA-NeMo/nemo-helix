@@ -157,7 +157,11 @@ def check_sandbox_server(spec: HarborTaskJobSpec) -> None:
 
 
 def configure_runtime(config: HarborRuntimeConfig, ctx: JobContext, spec: HarborTaskJobSpec) -> HarborRuntimeConfig:
-    """Select ``NemoOpenSandboxEnvironment`` with the run's frozen policy, labels and one trial at a time."""
+    """Select ``NemoOpenSandboxEnvironment`` with the run's frozen policy, labels and one trial at a time.
+
+    The request's resource overrides go in as Harbor's ``override_*`` constructor arguments, so they beat
+    task.toml in the agent sandbox and in a separate verifier sandbox, which reuses this environment config.
+    """
     policy = spec.sandbox_policy
     connection = policy.connection
     environment = HarborEnvironmentConfig(
@@ -172,6 +176,9 @@ def configure_runtime(config: HarborRuntimeConfig, ctx: JobContext, spec: Harbor
             "trusted_allowed_hosts": [*policy.egress_allow, *policy.request_egress_allow],
             "agent_channel_hosts": list(policy.agent_channel),
             "egress_verification": policy.egress_verification,
+            "enforce_disk_limit": policy.enforce_disk_limit,
+            "max_disk_mb": policy.max_disk_mb,
+            **policy.resource_overrides.harbor_kwargs(),
             "metadata": {
                 "nemo-run": spec.run_id,
                 "nemo-task-index": str(spec.task_index),

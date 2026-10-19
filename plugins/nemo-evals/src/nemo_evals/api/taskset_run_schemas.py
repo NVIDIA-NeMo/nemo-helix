@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Annotated, Literal, Self
 
 from nemo_evals.api.fields import TasksetRef
+from nemo_evals.harbor.remote.profile import SandboxSelection
 from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, HarborRunnerTarget
 from nemo_evals.taskset_runs.entities import (
     MemberPhase,
@@ -34,12 +35,11 @@ class HarborTaskJobsExecutionInput(BaseModel):
     than new ``submit`` methods. It never changes benchmark content or which agent runs.
 
     Submit validates this input, resolves the percent form of ``max_failed_tasks`` into a
-    count, and stores the M1 execution caps and missing-image policy in the run's plan.
-    In M1, ``sandbox_policy`` and ``dispatcher_profile`` participate in request identity
-    only; their names are intentionally neither resolved nor stored while execution is
-    unavailable. M2 Story 3 validates these selections and adds the resolved sandbox
-    policy, dispatcher profile and pinned dispatcher image as required plan fields before
-    execution is enabled. Earlier development runs are deleted rather than migrated.
+    count, and stores the execution caps and missing-image policy in the run's plan. It
+    freezes the ``sandbox`` profile, with its resource overrides checked against the
+    profile's ceilings, and the ``dispatcher_profile`` into the plan too, so operator
+    config edits never reach a running run. Earlier development runs are deleted rather
+    than migrated.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -47,14 +47,6 @@ class HarborTaskJobsExecutionInput(BaseModel):
     kind: Literal["harbor-task-jobs"] = Field(
         default="harbor-task-jobs",
         description="Execution strategy: one Kubernetes Job per Harbor task. Future strategies add new kinds.",
-    )
-    sandbox_policy: str = Field(
-        description=(
-            "Name of an operator-approved sandbox policy: which sandbox provider and isolation policy "
-            "each task's agent and environment run under, meaning the security and isolation boundary. "
-            "It does not control compute resources; see dispatcher_profile. Operators define the available policies."
-        ),
-        examples=["harbor-standard"],
     )
     dispatcher_profile: str | None = Field(
         default=None,
@@ -93,6 +85,17 @@ class HarborTaskJobsExecutionInput(BaseModel):
             "Submit resolves a percent into a count. Omit for no limit."
         ),
         examples=[3, "10%"],
+    )
+    sandbox: SandboxSelection | None = Field(
+        default=None,
+        description=(
+            "Sandbox for every task, agent and verifier alike. profile names an operator sandbox profile: "
+            "isolation, egress and resource ceilings; omitted uses the operator's default. cpus, memory_mb "
+            "and storage_mb beat the task's task.toml [environment]; each must stay within the profile's "
+            "ceilings, or submit fails with 422. Omit the whole object for the default profile and each "
+            "task's own resources."
+        ),
+        examples=[{"cpus": 4, "memory_mb": 8192, "storage_mb": 20480}, {"profile": "harbor-open", "memory_mb": 4096}],
     )
 
     def resolve_max_failed_tasks(self, task_count: int) -> int | None:
@@ -166,7 +169,7 @@ class TasksetRunInput(BaseModel):
         "Inline tasks and precomputed trials are not supported for Kubernetes runs."
     )
     execution: HarborTaskJobsExecutionInput = Field(
-        description="Kubernetes task Job settings: sandbox policy, dispatcher profile, "
+        description="Kubernetes task Job settings: sandbox profile and resources, dispatcher profile, "
         "run-wide task Job concurrency and failure tolerance."
     )
     idempotency_key: str | None = Field(

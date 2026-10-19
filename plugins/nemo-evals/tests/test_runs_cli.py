@@ -12,6 +12,7 @@ import pytest
 import typer
 from nemo_evals.api.fields import TasksetRef
 from nemo_evals.api.schemas import AgentEvalResult
+from nemo_evals.harbor.remote.profile import SandboxSelection
 from nemo_evals.runs_cli import (
     BundleJobView,
     Candidate,
@@ -86,7 +87,7 @@ def test_spec_file_keeps_its_settings_and_takes_the_selected_taskset(tmp_path):
         json.dumps(
             {
                 "spec": {"tasks": "default/full", "target": {"kind": "harbor", "source": {"name": "oracle"}}},
-                "execution": {"sandbox_policy": "harbor-open", "max_failed_tasks": "10%"},
+                "execution": {"sandbox": {"profile": "harbor-open"}, "max_failed_tasks": "10%"},
             }
         )
     )
@@ -94,46 +95,40 @@ def test_spec_file_keeps_its_settings_and_takes_the_selected_taskset(tmp_path):
         "default/full-sel-1234abcd#" + "a" * 64,
         spec_file=spec,
         agent="ignored",
-        sandbox_policy="ignored",
         dispatcher_profile=None,
+        sandbox=SandboxSelection(profile="ignored", cpus=64),
     )
     assert isinstance(request.spec.tasks, TasksetRef)
     assert request.spec.tasks.root.startswith("default/full-sel-1234abcd#")
-    assert request.execution.sandbox_policy == "harbor-open" and request.execution.max_failed_tasks == "10%"
+    assert request.execution.sandbox == SandboxSelection(profile="harbor-open")
+    assert request.execution.max_failed_tasks == "10%"
     assert request.idempotency_key
 
 
 def test_experiment_publishes_the_run_to_intake(tmp_path):
-    plain = run_request(
-        "default/t#" + "a" * 64, spec_file=None, agent="codex", sandbox_policy="p", dispatcher_profile=None
-    )
+    plain = run_request("default/t#" + "a" * 64, spec_file=None, agent="codex", dispatcher_profile=None)
     assert plain.publication is None
     request = run_request(
         "default/t#" + "a" * 64,
         spec_file=None,
         agent="codex",
-        sandbox_policy="p",
         dispatcher_profile=None,
         experiment="swe-agent-tuning",
     )
     assert request.publication is not None and request.publication.intake.experiment == "swe-agent-tuning"
     spec = tmp_path / "run.json"
-    spec.write_text(
-        json.dumps({"spec": {"tasks": "default/t", "target": {"kind": "harbor"}}, "execution": {"sandbox_policy": "p"}})
-    )
+    spec.write_text(json.dumps({"spec": {"tasks": "default/t", "target": {"kind": "harbor"}}, "execution": {}}))
     # With --harbor-hub/--harbor-dir the dataset supplies the tasks, so the file may leave spec.tasks out.
     no_tasks = tmp_path / "no-tasks.json"
-    no_tasks.write_text(json.dumps({"spec": {"target": {"kind": "harbor"}}, "execution": {"sandbox_policy": "p"}}))
-    selected = run_request(
-        "default/t#" + "a" * 64, spec_file=no_tasks, agent="", sandbox_policy="", dispatcher_profile=None
-    )
+    no_tasks.write_text(json.dumps({"spec": {"target": {"kind": "harbor"}}, "execution": {}}))
+    selected = run_request("default/t#" + "a" * 64, spec_file=no_tasks, agent="", dispatcher_profile=None)
     assert selected.spec.tasks.root == "default/t#" + "a" * 64
     # --experiment replaces the file's publication before validation, so an invalid one doesn't block it.
     no_tasks.write_text(
         json.dumps(
             {
                 "spec": {"target": {"kind": "harbor"}},
-                "execution": {"sandbox_policy": "p"},
+                "execution": {},
                 "publication": {"intake": {"experiment": ""}},
             }
         )
@@ -142,7 +137,6 @@ def test_experiment_publishes_the_run_to_intake(tmp_path):
         "default/t#" + "a" * 64,
         spec_file=no_tasks,
         agent="",
-        sandbox_policy="",
         dispatcher_profile=None,
         experiment="x",
     )
@@ -150,19 +144,14 @@ def test_experiment_publishes_the_run_to_intake(tmp_path):
     for bad in ([], {"spec": ["not", "an", "object"]}):
         no_tasks.write_text(json.dumps(bad))
         with pytest.raises(ValueError, match="expected a TasksetRunInput JSON object"):
-            run_request(
-                "default/t#" + "a" * 64, spec_file=no_tasks, agent="", sandbox_policy="", dispatcher_profile=None
-            )
-    from_file = run_request(
-        "default/t#" + "a" * 64, spec_file=spec, agent="", sandbox_policy="", dispatcher_profile=None, experiment="x"
-    )
+            run_request("default/t#" + "a" * 64, spec_file=no_tasks, agent="", dispatcher_profile=None)
+    from_file = run_request("default/t#" + "a" * 64, spec_file=spec, agent="", dispatcher_profile=None, experiment="x")
     assert from_file.publication is not None and from_file.publication.intake.experiment == "x"
     assert from_file.publication.intake.dataset_name is None  # no Hub dataset: the server uses the taskset
     hub = run_request(
         "default/t#" + "a" * 64,
         spec_file=spec,
         agent="",
-        sandbox_policy="",
         dispatcher_profile=None,
         experiment="x",
         dataset=("datacurve/deep-swe", "sha256:" + "b" * 64),
@@ -172,6 +161,43 @@ def test_experiment_publishes_the_run_to_intake(tmp_path):
         "datacurve/deep-swe",
         "sha256:" + "b" * 64,
     )
+
+
+@pytest.mark.parametrize(
+    ("sandbox", "expected"),
+    [
+        (SandboxSelection(cpus=4, storage_mb=20_480), {"cpus": 4, "storage_mb": 20_480}),
+        (SandboxSelection(profile="harbor-open"), {"profile": "harbor-open"}),
+        (None, None),
+    ],
+)
+def test_agent_request_carries_the_sandbox_selection(sandbox, expected):
+    request = run_request(
+        "default/full#" + "a" * 64,
+        spec_file=None,
+        agent="oracle",
+        dispatcher_profile=None,
+        sandbox=sandbox,
+    )
+    assert request.model_dump(mode="json", exclude_none=True)["execution"].get("sandbox") == expected
+
+
+@pytest.mark.parametrize(
+    ("flag", "value"),
+    [("--sandbox-profile", "harbor-open"), ("--cpus", "4"), ("--memory-mb", "4"), ("--storage-mb", "4")],
+)
+def test_sandbox_flags_are_rejected_with_a_spec_file(tmp_path, flag, value):
+    spec = tmp_path / "run.json"
+    spec.write_text("{}")
+    app = typer.Typer()
+
+    def no_client() -> NemoClient:
+        raise AssertionError("no request is made")
+
+    add_runs_commands(app, no_client)
+    result = CliRunner().invoke(app, ["runs", "submit", "--spec-file", str(spec), flag, value])
+    assert result.exit_code == 2
+    assert "don't apply with --spec-file" in " ".join(result.output.replace("│", " ").split())
 
 
 def test_submit_retries_a_503_with_the_same_body():

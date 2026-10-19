@@ -199,15 +199,16 @@ def test_execution_input() -> None:
     """Verify caller configuration defaults and reject unsupported execution inputs.
 
     Locally built sandbox settings must accept a supported percentage and apply
-    documented defaults; invalid limits, unknown fields/kinds, and a missing
-    sandbox policy must raise ValidationError before submit resolution.
+    documented defaults; invalid limits, unknown fields/kinds, and the removed
+    sandbox_policy field must raise ValidationError before submit resolution.
     """
-    input_model = HarborTaskJobsExecutionInput(sandbox_policy="sandbox")
+    input_model = HarborTaskJobsExecutionInput()
     assert input_model.kind == "harbor-task-jobs"
     assert input_model.dispatcher_profile is None  # submit resolves the operator's first profile
+    assert input_model.sandbox is None  # submit resolves the operator's default sandbox profile
     assert input_model.missing_prebuilt_image == "fail"
     assert input_model.max_concurrent_task_jobs is input_model.max_failed_tasks is None
-    assert HarborTaskJobsExecutionInput(sandbox_policy="sandbox", max_failed_tasks="10%").max_failed_tasks == "10%"
+    assert HarborTaskJobsExecutionInput(max_failed_tasks="10%").max_failed_tasks == "10%"
     for changes in (
         {"max_failed_tasks": -1},
         {"max_failed_tasks": "1.5%"},
@@ -216,10 +217,12 @@ def test_execution_input() -> None:
         {"max_concurrent_task_jobs": 0},
         {"unexpected": True},
         {"kind": "other"},
+        {"sandbox_policy": "harbor-standard"},
+        {"sandbox": {"profile": ""}},
+        {"sandbox": {"gpus": 1}},
+        {"sandbox": {"root_template": "harbor-cpu-root"}},
     ):
         with pytest.raises(ValidationError):
             HarborTaskJobsExecutionInput.model_validate({**input_model.model_dump(), **changes})
-    data = input_model.model_dump()
-    del data["sandbox_policy"]
-    with pytest.raises(ValidationError):
-        HarborTaskJobsExecutionInput.model_validate(data)
+    selected = HarborTaskJobsExecutionInput.model_validate({"sandbox": {"profile": "harbor-open"}}).sandbox
+    assert selected is not None and selected.profile == "harbor-open"

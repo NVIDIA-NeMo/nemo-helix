@@ -52,7 +52,7 @@ class _TimezoneWithoutOffset(tzinfo):
     ],
 )
 def test_failure_threshold_resolves_to_count(threshold, task_count, expected):
-    execution = HarborTaskJobsExecutionInput(sandbox_policy="harbor-standard", max_failed_tasks=threshold)
+    execution = HarborTaskJobsExecutionInput(max_failed_tasks=threshold)
     assert execution.resolve_max_failed_tasks(task_count) == expected
 
 

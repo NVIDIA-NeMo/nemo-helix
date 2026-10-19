@@ -36,7 +36,7 @@ from pydantic import ValidationError
 def run_body() -> dict[str, Any]:
     return {
         "spec": {"tasks": "default/sort-suite", "target": {"kind": "harbor"}},
-        "execution": {"sandbox_policy": "harbor-standard"},
+        "execution": {},
     }
 
 
@@ -86,12 +86,17 @@ def test_run_requires_execution(run_body):
 @pytest.mark.parametrize(
     "execution",
     [
-        {},
-        {"sandbox_policy": "harbor-standard", "kind": "docker"},
-        {"sandbox_policy": "harbor-standard", "max_concurrent_task_jobs": 0},
-        {"sandbox_policy": "harbor-standard", "max_failed_tasks": -1},
-        {"sandbox_policy": "harbor-standard", "max_failed_tasks": "101%"},
-        {"sandbox_policy": "harbor-standard", "max_failed_tasks": "1.5%"},
+        {"sandbox_policy": "harbor-standard"},
+        {"kind": "docker"},
+        {"sandbox": {"profile": ""}},
+        {"sandbox": {"gpus": 1}},
+        {"max_concurrent_task_jobs": 0},
+        {"max_failed_tasks": -1},
+        {"max_failed_tasks": "101%"},
+        {"max_failed_tasks": "1.5%"},
+        {"sandbox": {"cpus": 0}},
+        {"sandbox": {"memory_mb": -1}},
+        {"sandbox": {"cpu": 4}},
     ],
 )
 def test_run_preserves_execution_validation(run_body, execution):
@@ -253,6 +258,15 @@ def test_digest_ignores_key_and_fills_accepted_defaults(run_body, overrides):
     )
 
 
+def test_digest_fills_omitted_sandbox_overrides(run_body):
+    run_body["execution"]["sandbox"] = {"cpus": 4}
+    other = deepcopy(run_body)
+    other["execution"]["sandbox"] = {"cpus": 4, "profile": None}
+    assert request_digest(TasksetRunInput.model_validate(run_body)) == request_digest(
+        TasksetRunInput.model_validate(other)
+    )
+
+
 def test_digest_sorts_nested_dictionary_keys(run_body):
     run_body["spec"]["target"]["env_vars"] = {"LANG": "C", "DEBUG": "1"}
     other = deepcopy(run_body)
@@ -268,10 +282,11 @@ def test_digest_sorts_nested_dictionary_keys(run_body):
         (("spec", "tasks"), "default/sort-suite", "sort-suite"),
         (("spec", "target", "source"), {"name": "oracle"}, {"name": "codex"}),
         (("timeout_seconds",), None, 3600),
-        (("execution", "sandbox_policy"), "harbor-standard", "another-policy"),
+        (("execution", "sandbox"), {"profile": "harbor-standard"}, {"profile": "another-profile"}),
         (("execution", "dispatcher_profile"), "local-k8s", "remote-k8s"),
         (("spec", "target", "artifacts"), ["/a", "/b"], ["/b", "/a"]),
         (("execution", "max_failed_tasks"), "10%", 10),
+        (("execution", "sandbox"), {"cpus": 2}, {"cpus": 4}),
         (("spec", "target", "agent_kwargs"), {"value": 1}, {"value": 1.0}),
     ],
 )
@@ -333,11 +348,11 @@ def test_digest_hashes_the_exact_compact_json_projection(run_body):
         },
         "execution": {
             "kind": "harbor-task-jobs",
-            "sandbox_policy": "harbor-standard",
             "dispatcher_profile": None,
             "missing_prebuilt_image": "fail",
             "max_concurrent_task_jobs": None,
             "max_failed_tasks": None,
+            "sandbox": None,
         },
         "timeout_seconds": None,
     }
