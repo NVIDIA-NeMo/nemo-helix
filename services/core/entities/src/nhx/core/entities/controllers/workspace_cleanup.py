@@ -33,6 +33,14 @@ _TERMINAL_JOB_STATUSES: frozenset[HelixJobStatus] = frozenset(
 _JOB_TERMINAL_WAIT_TIMEOUT_SECONDS = 300.0
 _JOB_TERMINAL_WAIT_POLL_SECONDS = 2.0
 _FAILED_CLEANUP_RETRY_BACKOFF_SECONDS = 60.0
+
+
+def _deletion_error_text(error: BaseException) -> str:
+    """Return a single-line cleanup failure, falling back to the exception type."""
+    message = " ".join(str(error).split())
+    return message or type(error).__name__
+
+
 _DELETION_LEASE_TIMEOUT_SECONDS = 60.0
 _DELETION_LEASE_RENEW_INTERVAL_SECONDS = 20.0
 
@@ -336,6 +344,7 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
         failed = await self._workspace_repository.fail_workspace_deletion_if_claimed(
             name=workspace.name,
             expected_updated_at=lease.updated_at,
+            deletion_error=_deletion_error_text(error),
         )
         if not failed:
             logger.warning(
@@ -350,7 +359,7 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
             jobs_client = AsyncJobsClient.from_client(self._client)
             jobs = [job async for job in (await jobs_client.list_jobs(workspace=workspace.name)).items()]
 
-            cleanup_errors: list[Exception] = []
+            cleanup_errors: list[tuple[str, Exception]] = []
             for job in jobs:
                 try:
                     if not _job_status_is_terminal(job.status):
@@ -376,13 +385,14 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
                     logger.info(f"Job already deleted: {job.name}")
                 except Exception as e:
                     logger.warning(f"Failed to delete job {job.name}: {e}")
-                    cleanup_errors.append(e)
+                    cleanup_errors.append((job.name, e))
                 finally:
                     self.emit_heartbeat()
 
             if cleanup_errors:
+                details = "; ".join(f"{name}: {error}" for name, error in cleanup_errors)
                 raise WorkspaceJobCleanupError(
-                    f"Failed to delete {len(cleanup_errors)} job(s) while cleaning workspace {workspace.name}"
+                    f"Failed to delete {len(cleanup_errors)} job(s) while cleaning workspace {workspace.name}: {details}"
                 )
 
         except Exception as e:
@@ -416,9 +426,9 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
         delete: Callable[[str], Awaitable[object]],
         *,
         kind: str,
-    ) -> list[Exception]:
+    ) -> list[tuple[str, Exception]]:
         """Delete each resource. A missing resource is success; other errors are returned."""
-        cleanup_errors: list[Exception] = []
+        cleanup_errors: list[tuple[str, Exception]] = []
         for name in names:
             try:
                 logger.info(f"Deleting {kind}: {name}")
@@ -427,15 +437,18 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
                 logger.info(f"{kind} already deleted: {name}")
             except Exception as e:
                 logger.warning(f"Failed to delete {kind} {name}: {e}")
-                cleanup_errors.append(e)
+                cleanup_errors.append((name, e))
             finally:
                 self.emit_heartbeat()
         return cleanup_errors
 
-    def _raise_if_resource_deletes_failed(self, workspace_name: str, errors: list[Exception], kind: str) -> None:
+    def _raise_if_resource_deletes_failed(
+        self, workspace_name: str, errors: list[tuple[str, Exception]], kind: str
+    ) -> None:
         if errors:
+            details = "; ".join(f"{name}: {error}" for name, error in errors)
             raise WorkspaceResourceCleanupError(
-                f"Failed to delete {len(errors)} {kind} while cleaning workspace {workspace_name}"
+                f"Failed to delete {len(errors)} {kind} while cleaning workspace {workspace_name}: {details}"
             )
 
     @tracer.start_as_current_span("workspace_cleanup/cleanup_deployments")
