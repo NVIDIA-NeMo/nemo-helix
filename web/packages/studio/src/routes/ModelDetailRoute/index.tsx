@@ -31,7 +31,7 @@ import {
   getWorkspaceCustomizationJobDetailsRoute,
 } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
-import type { FC, ReactNode } from 'react';
+import type { FC } from 'react';
 import { Link, useParams } from 'react-router';
 
 export const ModelDetailRoute: FC = () => {
@@ -78,19 +78,7 @@ export const ModelDetailRoute: FC = () => {
       ? tabFromUrl
       : MODEL_DETAIL_DEFAULT_TAB;
 
-  const openJobAction = job.jobName ? (
-    <Button kind="secondary" size="small" asChild>
-      <Link to={getWorkspaceCustomizationJobDetailsRoute(job.workspace, job.jobName)}>
-        Open Job
-      </Link>
-    </Button>
-  ) : null;
-  const actionsByTab: Record<ModelDetailTab, ReactNode> = {
-    [ModelDetailTab.Details]: null,
-    [ModelDetailTab.Chat]: null,
-    [ModelDetailTab.Training]: openJobAction,
-    [ModelDetailTab.Logs]: openJobAction,
-  };
+  const isJobTab = selectedTab === ModelDetailTab.Training || selectedTab === ModelDetailTab.Logs;
 
   if (lineage.isLoading) {
     return <Loading description="Loading model..." />;
@@ -142,15 +130,25 @@ export const ModelDetailRoute: FC = () => {
                 {tag}
               </Badge>
             ))}
+            description={(adapter ?? model).description}
             tabs={tabs}
-            slotActions={actionsByTab[selectedTab]}
+            slotActions={
+              isJobTab &&
+              job.jobName && (
+                <Button kind="secondary" size="small" asChild>
+                  <Link to={getWorkspaceCustomizationJobDetailsRoute(job.workspace, job.jobName)}>
+                    Open Job
+                  </Link>
+                </Button>
+              )
+            }
           />
 
           <TabsContent
             value={ModelDetailTab.Details}
             className="min-h-0 flex-1 overflow-y-auto p-0"
           >
-            <DetailsTab workspace={workspace} model={model} adapter={adapter} lineage={lineage} />
+            <DetailsTab model={model} adapter={adapter} lineage={lineage} jobRecord={jobDetails} />
           </TabsContent>
 
           <TabsContent value={ModelDetailTab.Chat} className="flex min-h-0 flex-1 p-0">

@@ -3,7 +3,11 @@
 
 import { StatTile } from '@nemo/common/src/components/StatTile';
 import { Divider, Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
-import type { DetailField, DetailTile } from '@studio/routes/ModelDetailRoute/DetailsTab/fields';
+import {
+  type DetailField,
+  type DetailTile,
+  hasDetailValue,
+} from '@studio/routes/ModelDetailRoute/DetailsTab/fields';
 import { FieldGrid } from '@studio/routes/ModelDetailRoute/DetailsTab/layout/FieldGrid';
 import { type FC, useId } from 'react';
 
@@ -17,6 +21,7 @@ export interface DetailPanelProps {
 /** A raised panel: headline numbers as stat tiles above the remaining fields. */
 export const DetailPanel: FC<DetailPanelProps> = ({ heading, description, tiles, fields }) => {
   const headingId = useId();
+  const hasFields = fields.some((field) => hasDetailValue(field.value));
   return (
     <Panel elevation="high" className="h-full" aria-labelledby={headingId}>
       <Stack gap="density-xl">
@@ -31,16 +36,14 @@ export const DetailPanel: FC<DetailPanelProps> = ({ heading, description, tiles,
           )}
         </Stack>
         {tiles.length > 0 && (
-          <>
-            <Flex gap="density-3xl" wrap="wrap">
-              {tiles.map((tile) => (
-                <StatTile key={tile.label} {...tile} bordered={false} />
-              ))}
-            </Flex>
-            <Divider />
-          </>
+          <Flex gap="density-3xl" wrap="wrap">
+            {tiles.map((tile) => (
+              <StatTile key={tile.label} {...tile} bordered={false} />
+            ))}
+          </Flex>
         )}
-        <FieldGrid fields={fields} />
+        {tiles.length > 0 && hasFields && <Divider />}
+        {hasFields && <FieldGrid fields={fields} />}
       </Stack>
     </Panel>
   );

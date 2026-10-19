@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCustomizationJob } from '@studio/hooks/useCustomizationJob';
 import {
   LineageSection,
   type LineageSectionProps,
@@ -9,14 +8,12 @@ import {
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 
-vi.mock('@studio/hooks/useCustomizationJob');
-
 const renderLineage = (props: Partial<LineageSectionProps> = {}) =>
   render(
     <MemoryRouter>
       <LineageSection
         base={{ name: 'base-model', note: 'Checkpoint it was fine-tuned from' }}
-        job={{ jobName: 'job-1', workspace: 'ws', isLoading: false, to: '/training' }}
+        job={{ jobName: 'job-1', isLoading: false, to: '/training' }}
         fileset={{ workspace: 'ws', name: 'weights' }}
         deployment={{ kind: 'not-deployed' }}
         isAdapter={false}
@@ -26,13 +23,6 @@ const renderLineage = (props: Partial<LineageSectionProps> = {}) =>
   );
 
 describe('LineageSection', () => {
-  beforeEach(() => {
-    vi.mocked(useCustomizationJob).mockReturnValue({
-      job: undefined,
-      isLoading: false,
-    } as unknown as ReturnType<typeof useCustomizationJob>);
-  });
-
   it('links the job card to the training tab', () => {
     renderLineage();
 
@@ -65,7 +55,7 @@ describe('LineageSection', () => {
   });
 
   it('shows when no job produced the model', () => {
-    renderLineage({ job: { jobName: undefined, workspace: 'ws', isLoading: false, to: '/t' } });
+    renderLineage({ job: { jobName: undefined, isLoading: false, to: '/t' } });
 
     expect(screen.getByText('Not found')).toBeInTheDocument();
   });

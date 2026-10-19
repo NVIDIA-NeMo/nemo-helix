@@ -3,20 +3,24 @@
 
 import { KVPair } from '@nemo/common/src/components/KVPair';
 import { Grid } from '@nvidia/foundations-react-core';
-import type { DetailField } from '@studio/routes/ModelDetailRoute/DetailsTab/fields';
+import {
+  type DetailField,
+  hasDetailValue,
+} from '@studio/routes/ModelDetailRoute/DetailsTab/fields';
+import { formatMaybe } from '@studio/util/intakeTelemetry';
 import type { FC } from 'react';
 
 /** Fields without a value are dropped rather than shown as dashes. */
 export const FieldGrid: FC<{ fields: DetailField[] }> = ({ fields }) => (
   <Grid colMinWidth="180px" gap="density-xl">
     {fields
-      .filter((field) => field.value != null && field.value !== '')
+      .filter((field) => hasDetailValue(field.value))
       .map((field) => (
         <KVPair
           key={field.label}
           orientation="vertical"
           label={field.label}
-          value={field.value}
+          value={formatMaybe(field.value)}
           attributes={{ value: { className: 'break-words min-w-0' } }}
         />
       ))}

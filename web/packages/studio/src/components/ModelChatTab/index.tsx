@@ -41,10 +41,16 @@ export const ModelChatTab: FC<ModelChatTabProps> = ({ model, adapter }) => {
 
   return (
     <ModelChat
+      // An adapter goes on the wire as `base&adapters/{ws}/{name}`, which the
+      // gateway resolves through the base model's VirtualModel — so it needs no
+      // special base URL and inherits that VM's middleware.
       model={toInferenceModelName(model, adapter)}
       workspace={workspace}
       promptData={model.prompt}
       modelChatStatus={modelChatStatus}
+      // `model` is the base model in both branches. Deploying it is what makes
+      // an adapter servable, so the adapter case links to the same wizard —
+      // only the copy changes, since "this model" would name the wrong entity.
       deployModelRef={`${workspace}/${model.name}`}
       deployModelLabel={adapter ? 'Deploy base model' : undefined}
     />

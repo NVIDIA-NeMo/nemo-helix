@@ -4,9 +4,9 @@
 import { formatAbsoluteTimestamp } from '@nemo/common/src/components/RelativeTime/util';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
+import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Grid } from '@nvidia/foundations-react-core';
 import { DeploymentStatusBadge } from '@studio/components/dataViews/CustomModelsDataView/DeploymentStatusBadge';
-import { useCustomizationJob } from '@studio/hooks/useCustomizationJob';
 import type { DeploymentIndicatorState } from '@studio/hooks/useModelDeploymentStatuses';
 import type { FilesetRef } from '@studio/hooks/useModelLineage';
 import { LineageCard } from '@studio/routes/ModelDetailRoute/DetailsTab/LineageSection/LineageCard';
@@ -42,8 +42,14 @@ export interface LineageSectionProps {
    * Base model card: the model an adapter belongs to, or a checkpoint's `base_model`. This and
    * `job` are omitted for base models, which have neither.
    */
-  base?: { name: string | undefined; to?: string; note: string };
-  job?: { jobName: string | undefined; workspace: string; isLoading: boolean; to: string };
+  base?: { name: string; to?: string; note: string };
+  job?: {
+    jobName: string | undefined;
+    isLoading: boolean;
+    status?: HelixJobStatus;
+    createdAt?: string;
+    to: string;
+  };
   fileset: FilesetRef | null;
   deployment: DeploymentIndicatorState;
   isAdapter: boolean;
@@ -57,35 +63,23 @@ export const LineageSection: FC<LineageSectionProps> = ({
   deployment,
   isAdapter,
 }) => {
-  const { job: jobRecord, isLoading: isJobRecordLoading } = useCustomizationJob(
-    job?.workspace ?? '',
-    job?.jobName ?? '',
-    { enabled: Boolean(job?.jobName) }
-  );
   const deploymentCard = getDeploymentCard(deployment);
 
   return (
     <Grid asChild colMinWidth="220px" gap="density-lg" aria-label="Lineage">
       <section>
-        {base && (
-          <LineageCard
-            label="Base Model"
-            value={base.name ?? 'Unknown'}
-            to={base.name ? base.to : undefined}
-            note={base.note}
-          />
-        )}
+        {base && <LineageCard label="Base Model" value={base.name} to={base.to} note={base.note} />}
 
         {job && (
           <LineageCard
             label="Training Job"
-            loading={job.isLoading || (Boolean(job.jobName) && isJobRecordLoading)}
+            loading={job.isLoading}
             value={job.jobName ?? 'Not found'}
             to={job.jobName ? job.to : undefined}
-            badge={jobRecord?.status && <StatusBadge status={jobRecord.status} />}
+            badge={job.status && <StatusBadge status={job.status} />}
             note={
               job.jobName
-                ? jobRecord?.created_at && formatAbsoluteTimestamp(jobRecord.created_at)
+                ? job.createdAt && formatAbsoluteTimestamp(job.createdAt)
                 : 'No job lists this model as its output'
             }
           />
