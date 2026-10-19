@@ -255,6 +255,28 @@ describe('AssistantChat', () => {
     );
   });
 
+  it('renders streamed reasoning as a collapsible thinking block', async () => {
+    const stream = {
+      controller: new AbortController(),
+      async *[Symbol.asyncIterator]() {
+        yield createReasoningCompletionChunk('Weighing ');
+        yield createReasoningCompletionChunk('options.');
+        yield createCompletionChunk('Done.');
+      },
+    } as unknown as Stream<ChatCompletionChunk>;
+    mocks.createChatCompletion.mockResolvedValueOnce(stream);
+
+    renderAssistantChat(<AssistantChat model="test-model" workspace="default" />);
+
+    await userEvent.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'Think');
+    await userEvent.click(screen.getByRole('button', { name: /Submit/i }));
+
+    expect(await screen.findByText('Done.')).toBeInTheDocument();
+    expect(screen.getByTestId('assistant-collapsed-thinking')).toHaveTextContent(
+      'ThinkingWeighing options.'
+    );
+  });
+
   it('counts reasoning-only chunks when the server reports no usage', async () => {
     const stream = {
       controller: new AbortController(),
@@ -278,6 +300,51 @@ describe('AssistantChat', () => {
       )
     );
     expect(onMessageComplete.mock.calls[0][0].tokensPerSec).toBeGreaterThan(0);
+  });
+
+  it('passes streamed reasoning and tool calls to the tool call part component', async () => {
+    const toolCallChunk = {
+      ...createCompletionChunk(''),
+      choices: [
+        {
+          index: 0,
+          delta: {
+            tool_calls: [{ index: 0, id: 'call_a', function: { name: 'search', arguments: '{}' } }],
+          },
+          finish_reason: null,
+          logprobs: null,
+        },
+      ],
+    } as ChatCompletionChunk;
+    const stream = {
+      controller: new AbortController(),
+      async *[Symbol.asyncIterator]() {
+        yield createReasoningCompletionChunk('Plan.');
+        yield toolCallChunk;
+        yield createCompletionChunk('It is sunny.');
+      },
+    } as unknown as Stream<ChatCompletionChunk>;
+    mocks.createChatCompletion.mockResolvedValueOnce(stream);
+
+    renderAssistantChat(
+      <AssistantChat
+        model="test-model"
+        workspace="default"
+        toolCallPartComponent={({ toolName, args }) => (
+          <div data-testid="tool-part">{`${toolName}:${String(args.label ?? '')}`}</div>
+        )}
+      />
+    );
+
+    await userEvent.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'Weather?');
+    await userEvent.click(screen.getByRole('button', { name: /Submit/i }));
+
+    expect(await screen.findByText('It is sunny.')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId('tool-part')).toHaveTextContent(
+        'AssistantCollapsedStudioDetails:Work details'
+      )
+    );
   });
 
   it(

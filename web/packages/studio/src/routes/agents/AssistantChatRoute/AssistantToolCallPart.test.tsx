@@ -242,6 +242,28 @@ describe('AssistantToolCallPart', () => {
     expect(screen.queryByText('worked for unknown')).not.toBeInTheDocument();
   });
 
+  it('renders reasoning inside collapsed work details as a thinking disclosure', () => {
+    render(
+      <AssistantToolCallPart
+        addResult={vi.fn()}
+        args={{
+          label: 'Work details',
+          parts: [{ type: 'reasoning', text: 'Comparing options.' }],
+        }}
+        argsText=""
+        resume={vi.fn()}
+        status={{ type: 'complete' }}
+        toolCallId="assistant-collapsed-studio-details"
+        toolName={ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME}
+        type="tool-call"
+      />
+    );
+
+    expect(screen.getByTestId('assistant-collapsed-thinking')).toHaveTextContent(
+      'ThinkingComparing options.'
+    );
+  });
+
   it.each(subtleToolCases)(
     'renders $toolName as subtle text',
     ({ args, expectedText, toolName }) => {

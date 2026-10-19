@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ToolCallMessagePartComponent } from '@assistant-ui/react';
+import { ReasoningContent } from '@nemo/common/src/components/AssistantChat/ReasoningPart';
 import { CollapsedThinkingToolCall } from '@nemo/common/src/components/AssistantChat/toolCall/CollapsedThinkingToolCall';
 import { TOOL_LABELS } from '@nemo/common/src/components/AssistantChat/toolCall/constants';
 import { FileChangeToolCallCard } from '@nemo/common/src/components/AssistantChat/toolCall/FileChangeToolCallCard';
@@ -52,7 +53,15 @@ interface CollapsedStudioDetailsToolPart {
   readonly type: 'tool-call';
 }
 
-type CollapsedStudioDetailsPart = CollapsedStudioDetailsTextPart | CollapsedStudioDetailsToolPart;
+interface CollapsedStudioDetailsReasoningPart {
+  readonly text: string;
+  readonly type: 'reasoning';
+}
+
+type CollapsedStudioDetailsPart =
+  | CollapsedStudioDetailsReasoningPart
+  | CollapsedStudioDetailsTextPart
+  | CollapsedStudioDetailsToolPart;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -67,8 +76,12 @@ const getCollapsedStudioDetailsParts = (
     .map((part): CollapsedStudioDetailsPart | undefined => {
       if (!isRecord(part)) return undefined;
 
-      if (part.type === 'text' && typeof part.text === 'string' && part.text.trim()) {
-        return { type: 'text', text: part.text };
+      if (
+        (part.type === 'text' || part.type === 'reasoning') &&
+        typeof part.text === 'string' &&
+        part.text.trim()
+      ) {
+        return { type: part.type, text: part.text };
       }
 
       if (
@@ -101,6 +114,7 @@ const CollapsedStudioDetailsPartContent = ({
   readonly part: CollapsedStudioDetailsPart;
 }) => {
   if (part.type === 'text') return <CollapsedStudioDetailsText text={part.text} />;
+  if (part.type === 'reasoning') return <ReasoningContent text={part.text} />;
 
   return (
     <AssistantToolCallPartContent
@@ -144,7 +158,7 @@ const CollapsedStudioDetailsToolCall = ({ args }: { readonly args: AssistantTool
         >
           {parts.map((part, index) => (
             <CollapsedStudioDetailsPartContent
-              key={`${part.type}-${part.type === 'text' ? part.text.slice(0, 24) : part.toolCallId}-${index}`}
+              key={`${part.type}-${part.type === 'tool-call' ? part.toolCallId : part.text.slice(0, 24)}-${index}`}
               part={part}
             />
           ))}
