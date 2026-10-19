@@ -262,9 +262,12 @@ class FakeGitRegistry:
 
     downloads: list[list[str]] = []
 
+    repos: list = []
+
     def __init__(self, repo):
         self.repo = repo
         self._task_client = self
+        FakeGitRegistry.repos.append(repo)
 
     async def get_dataset_metadata(self, name):
         from harbor.models.task.id import GitTaskId
@@ -284,6 +287,7 @@ def git_registry(monkeypatch):
     from harbor.registry.client import git_repo
 
     FakeGitRegistry.downloads = []
+    FakeGitRegistry.repos = []
     monkeypatch.setattr(git_repo, "GitRepoRegistryClient", FakeGitRegistry)
     return FakeGitRegistry
 
@@ -328,6 +332,16 @@ def test_list_tasks_reads_the_git_repo(git_registry):
     assert git_registry.downloads == []
 
 
+def test_a_tree_url_reads_tasks_from_its_directory(git_registry):
+    result = CliRunner().invoke(
+        _listing_app(),
+        ["runs", "submit", "--harbor-git", "https://github.com/acme/evals/tree/v2/suites/smoke", "--list-tasks"],
+    )
+    assert result.exit_code == 0, result.output
+    (repo,) = git_registry.repos
+    assert (repo.git_url, repo.ref, repo.subdir) == ("https://github.com/acme/evals", "v2", "suites/smoke")
+
+
 @pytest.mark.parametrize(
     ("error", "message"),
     [
@@ -353,6 +367,13 @@ def test_a_failed_git_command_is_an_error_not_a_traceback(monkeypatch, error, me
     assert result.exit_code == 1
     assert message in result.output
     assert isinstance(result.exception, SystemExit)  # typer.Exit, not the git error
+
+
+def _listing_app() -> typer.Typer:
+    client = NemoClient(base_url="http://platform.test", workspace="default")
+    app = typer.Typer()
+    add_runs_commands(app, lambda: client)
+    return app
 
 
 def _runs_app() -> typer.Typer:

@@ -151,7 +151,8 @@ def check_git_source(source: str) -> None:
 
 
 def download_git_tasks(source: str, names: str | None, output_dir: Path) -> tuple[str, str, list[Path], int]:
-    """Download the selected tasks of git repo ``<url>@<ref>`` (its ``tasks/`` directory) into ``output_dir``.
+    """Download the selected tasks of git repo ``<url>@<ref>`` (its ``tasks/`` directory, or the ``<dir>`` of a
+    ``…/tree/<ref>/<dir>`` URL) into ``output_dir``.
 
     Returns the repo's ``org/name``, the commit SHA the ref resolved to, the task directories in name order,
     and how many tasks the repo has.
@@ -367,7 +368,10 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         harbor_dir: Path | None = typer.Option(None, "--harbor-dir", help="Local Harbor dataset directory."),
         harbor_hub: str | None = typer.Option(None, "--harbor-hub", help="Harbor Hub dataset, org/name@ref."),
         harbor_git: str | None = typer.Option(
-            None, "--harbor-git", help="Public git repo of Harbor tasks under tasks/, <url>@<tag or commit>."
+            None,
+            "--harbor-git",
+            help="Public git repo of Harbor tasks, pinned to a tag or commit: <url>@<ref> reads tasks/ at that ref. "
+            "For another directory, use a GitHub tree URL: https://github.com/<org>/<repo>/tree/<ref>/<dir>.",
         ),
         spec_file: Path | None = typer.Option(
             None,
