@@ -74,7 +74,7 @@ def _write_task(task_dir: Path, environment: str = "") -> None:
         ({"network_policy": "unrestricted"}, "supports network_policy default_deny"),
         ({"network_policy": "scoped_egress"}, "supports network_policy default_deny"),
         ({"network_policy_config": {"allowed_hosts": ["x"]}}, "omit network_policy_config"),
-        ({"agent_bundle": {"object_key": "b"}}, "agent bundle image: the bundle has no immutable digest"),
+        ({"agent_bundle": {"object_key": "b"}}, "agent bundles support only claude-code"),
         ({"image_digest": None}, "recorded digest"),
         ({"tarball_object_key": None}, "uploaded task pack"),
         ({"framework": "gym"}, "Harbor evaluations only"),
@@ -536,6 +536,30 @@ def test_hosted_mode_passes_the_bundle_by_its_signed_tag(tmp_path: Path) -> None
 
 
 @pytest.mark.usefixtures("bundle_registry_allowed")
+def test_preflight_rejects_a_bundle_for_an_unverified_agent() -> None:
+    # Codex's install would skip for a bundle too, but no Codex bundle has been run end to end.
+    with pytest.raises(ValueError, match="agent bundles support only claude-code, not 'codex'"):
+        backend.preflight(_spec(agent_bundle={**AGENT_BUNDLE, "agent_name": "codex"}))
+
+
+@pytest.mark.parametrize(
+    "agents",
+    [
+        "[{name: oracle}]",
+        # A custom agent isn't the bundle's agent, whatever it loads.
+        "[{import_path: 'my.agents:ClaudeCode'}]",
+        "[]",
+    ],
+)
+@pytest.mark.usefixtures("bundle_registry_allowed")
+def test_render_rejects_an_evaluation_that_does_not_run_the_bundle_agent(tmp_path: Path, agents: str) -> None:
+    with pytest.raises(ValueError, match="the agent bundle provides 'claude-code', but the evaluation doesn't run"):
+        backend.render_harbor_config(
+            f"agents: {agents}\n", _spec(agent_bundle=AGENT_BUNDLE), task_path=tmp_path, jobs_dir="j", trusted_hosts=[]
+        )
+
+
+@pytest.mark.usefixtures("bundle_registry_allowed")
 def test_bundle_without_an_immutable_digest_is_rejected() -> None:
     with pytest.raises(ValueError, match="agent bundle image: the bundle has no immutable digest"):
         backend.preflight(_spec(agent_bundle={**AGENT_BUNDLE, "image_digest": "nvcr.io/org/agent-bundles/claude-code"}))
@@ -578,7 +602,7 @@ def test_render_without_a_bundle_sends_none(tmp_path: Path) -> None:
         ("[{name: claude-code, kwargs: {version: 2.1.301}}]", False),
         ("[{name: claude-code}]", False),
         # Only the bundle's own agent is checked.
-        ("[{name: codex, kwargs: {version: 0.1.0}}]", False),
+        ("[{name: claude-code}, {name: codex, kwargs: {version: 0.1.0}}]", False),
     ],
 )
 @pytest.mark.usefixtures("bundle_registry_allowed")
@@ -597,7 +621,8 @@ def test_render_rejects_a_version_pin_the_bundle_does_not_provide(tmp_path: Path
 
 @pytest.mark.usefixtures("bundle_registry_allowed")
 def test_submit_records_the_bundle_delivery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    handle, _ = _submit(tmp_path, monkeypatch, spec=_spec(agent_bundle=AGENT_BUNDLE))
+    profile = {"harbor_config": yaml.safe_dump({"agents": [{"name": "claude-code"}]})}
+    handle, _ = _submit(tmp_path, monkeypatch, spec=_spec(agent_bundle=AGENT_BUNDLE, harbor_config=profile))
 
     assert handle.raw["provenance"]["agent_bundle_image"] == f"nvcr.io/org/agent-bundles/claude-code@{DIGEST}"
     assert handle.raw["provenance"]["agent_bundle_delivery"] == "init_container"

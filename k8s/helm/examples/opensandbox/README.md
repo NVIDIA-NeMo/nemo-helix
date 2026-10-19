@@ -171,6 +171,12 @@ adds an `agent-bundle` init container that runs the bundle's installer into
 - If it can't pull the image or exits non-zero, the services route reports
   `agent bundle ...` with its last log lines, and the create fails.
 
+A bundle only takes effect when the agent's Harbor install finds the agent
+already on `PATH` and skips itself (Harbor 0.20 or later); most of Harbor's
+installed agents always install. scaled-evals therefore accepts bundles only
+for agents verified end to end, currently `claude-code`, and only when the
+evaluation runs that agent.
+
 Only the agent's sandbox gets the bundle, never a separate verifier's. The
 client checks that `GET /v1/nemo-ext/health` lists `agent-bundle` under
 `features` before it creates a sandbox, so an older extension fails the trial

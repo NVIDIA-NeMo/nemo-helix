@@ -101,6 +101,10 @@ NEMO_OPENSANDBOX_IMPORT_PATH = "scaled_evals.harbor_opensandbox_environment:Nemo
 APPLIED_EGRESS_SUMMARY_FILENAME = "scaled-evals-applied-egress.json"
 # Evaluation network policies this runtime accepts.
 SUPPORTED_NETWORK_POLICIES = ("default_deny",)
+# Agents whose bundles are verified to be used. A bundle only takes effect when the agent's Harbor
+# install finds the agent on PATH and skips itself; most installed agents always install, which
+# would ignore the bundle while provenance recorded it.
+AGENT_BUNDLE_SUPPORTED_AGENTS = ("claude-code",)
 # A registered bundle's immutable identity, as the API stores it.
 _DIGEST_REF = re.compile(r"[^\s@]+@sha256:[0-9a-f]{64}")
 # Module the terminator runs, with the Harbor runner's interpreter, to kill an evaluation's sandboxes.
@@ -457,6 +461,13 @@ def environment_agent_bundle(bundle: Mapping[str, Any]) -> SandboxAgentBundle:
     task image, the image is the registered digest, or in tag mode (which hosted admission requires)
     the signed tag, which ``verify_agent_bundle_image`` checks at launch.
     """
+    agent_name = bundle.get("agent_name")
+    if agent_name not in AGENT_BUNDLE_SUPPORTED_AGENTS:
+        raise ValueError(
+            f"agent bundles support only {', '.join(AGENT_BUNDLE_SUPPORTED_AGENTS)}, not {agent_name!r}: "
+            "Harbor's install for that agent doesn't skip itself for an installed copy, so the bundle would be unused"
+        )
+
     image_ref, image_digest = str(bundle.get("image_ref") or ""), str(bundle.get("image_digest") or "")
     if not _DIGEST_REF.fullmatch(image_digest):
         raise ValueError("agent bundle image: the bundle has no immutable digest")
@@ -490,18 +501,23 @@ def verify_agent_bundle_image(bundle: Mapping[str, Any]) -> None:
         raise ValueError(f"agent bundle image: {exc}") from exc
 
 
-def _check_agent_version_pins(config: Mapping[str, Any], bundle: Mapping[str, Any]) -> None:
-    """Reject an agent the config pins to a version other than the bundle's.
+def _check_bundle_agent(config: Mapping[str, Any], bundle: Mapping[str, Any]) -> None:
+    """Reject a config that doesn't run the bundle's agent, or pins it to a version other than the bundle's.
 
-    Harbor's installed agents skip their install only when the agent they find has the version
-    they were given, so a different pin would ignore the bundle and attempt the root install.
+    Without the agent, the bundle would be installed and recorded but never used. Harbor's installed
+    agents skip their install only when the agent they find has the version they were given, so a
+    different pin would ignore the bundle and attempt the root install.
     """
     agent_name, agent_version = bundle.get("agent_name"), str(bundle.get("agent_version") or "")
+    agents = [agent for agent in config.get("agents") or [] if isinstance(agent, Mapping)]
 
-    # Only the bundle's own agent matters; an unpinned agent accepts whatever version it finds.
-    for agent in config.get("agents") or []:
-        if not isinstance(agent, Mapping) or agent.get("name") != agent_name:
-            continue
+    # Matched by name; an agent loaded by import_path isn't the bundle's agent.
+    bundle_agents = [agent for agent in agents if agent.get("name") == agent_name]
+    if not bundle_agents:
+        raise ValueError(f"the agent bundle provides {agent_name!r}, but the evaluation doesn't run that agent")
+
+    # An unpinned agent accepts whatever version it finds.
+    for agent in bundle_agents:
         kwargs = agent.get("kwargs") if isinstance(agent.get("kwargs"), Mapping) else {}
         pinned = kwargs.get("version")
         if pinned is not None and str(pinned) != agent_version:
@@ -579,7 +595,7 @@ def render_harbor_config(
         )
     # The environment installs the bundle into the agent's sandbox; Harbor then finds the agent and skips its install.
     if spec.agent_bundle:
-        _check_agent_version_pins(config, spec.agent_bundle)
+        _check_bundle_agent(config, spec.agent_bundle)
         config["environment"]["kwargs"]["agent_bundle"] = environment_agent_bundle(spec.agent_bundle).model_dump(
             mode="json", exclude_defaults=True
         )
