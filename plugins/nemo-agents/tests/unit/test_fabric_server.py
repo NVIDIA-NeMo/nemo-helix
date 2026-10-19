@@ -952,7 +952,7 @@ def test_chat_completion_request_preserves_single_user_turn() -> None:
     assert invocation_request.caller_context == {"session_id": "session-1"}
 
 
-def test_chat_completion_request_serializes_full_transcript() -> None:
+def test_session_chat_completion_request_sends_only_latest_message() -> None:
     request = ChatCompletionRequest.model_validate(
         {
             "messages": [
@@ -967,8 +967,17 @@ def test_chat_completion_request_serializes_full_transcript() -> None:
 
     invocation_request = server._to_fabric_invocation_request(request, session_id="session-1")
 
-    assert invocation_request.input == ("system: Be concise.\n\nassistant: How can I help?\n\nuser: Say hello.")
+    assert invocation_request.input == "Say hello."
     assert invocation_request.caller_context == {"session_id": "session-1"}
+
+
+def test_stateless_chat_completion_request_preserves_single_user_turn() -> None:
+    request = ChatCompletionRequest.model_validate({"messages": [{"role": "user", "content": "Say hello."}]})
+
+    invocation_request = server._to_fabric_invocation_request(request, session_id=None)
+
+    assert invocation_request.input == "Say hello."
+    assert invocation_request.caller_context == {}
 
 
 def test_stateless_chat_completion_request_serializes_full_transcript_without_session_context() -> None:

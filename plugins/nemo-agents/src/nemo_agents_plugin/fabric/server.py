@@ -80,14 +80,18 @@ def _to_fabric_invocation_request(
     *,
     session_id: str | None,
 ) -> FabricInvocationRequest:
-    """Translate the chat transcript into a Platform-owned Fabric request."""
+    """Translate a chat completion request into a Platform-owned Fabric request.
+
+    A session-bound request sends only the latest message, because the session's
+    runtime already holds the earlier turns. A one-shot request has no runtime
+    history, so it sends the whole transcript as ``role: content`` lines; a
+    single message is sent as-is.
+    """
     messages = request.messages
-    # Interim behavior to get multi-turn in Studio chat.
-    input_text = (
-        messages[0].content
-        if len(messages) == 1
-        else "\n\n".join(f"{message.role}: {message.content}" for message in messages)
-    )
+    if session_id is not None or len(messages) == 1:
+        input_text = messages[-1].content
+    else:
+        input_text = "\n\n".join(f"{message.role}: {message.content}" for message in messages)
     caller_context = {"session_id": session_id} if session_id is not None else {}
     return FabricInvocationRequest(
         input=input_text,
