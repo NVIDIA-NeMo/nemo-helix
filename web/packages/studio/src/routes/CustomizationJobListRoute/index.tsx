@@ -6,6 +6,7 @@ import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { Button, Flex, PageHeader, Stack } from '@nvidia/foundations-react-core';
 import { CustomModelsDataView } from '@studio/components/dataViews/CustomModelsDataView';
 import { CustomizeModelButton } from '@studio/components/dataViews/CustomModelsDataView/CustomizeModelButton';
+import { InProgressCustomizationsTable } from '@studio/components/dataViews/InProgressCustomizationsTable';
 import { ModelPanel, ModelPanelTab } from '@studio/components/sidePanels/ModelPanels/ModelPanel';
 import { INTAKE_ENABLED } from '@studio/constants/environment';
 import { useCustomizationJobForModel } from '@studio/hooks/useCustomizationJobForModel';
@@ -42,6 +43,12 @@ export const CustomizationJobListRoute: FC = () => {
           slotDescription="Create, manage, and deploy fine-tuned models."
           slotActions={<CustomizeModelButton workspace={workspace} />}
         />
+        {/*
+          Above the catalogue, not merged into it: a run has no model entity until its
+          last step, so these rows describe jobs rather than models and cannot share the
+          table's sorting, filtering or row actions.
+        */}
+        <InProgressCustomizationsTable workspace={workspace} />
         <CustomModelsDataView
           workspace={workspace}
           onRowClick={(model: ModelEntity, tab: ModelPanelTab, adapter?: Adapter) => {
