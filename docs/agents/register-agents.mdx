@@ -222,8 +222,7 @@ OTLP); see [Collect Agent Traces](/documentation/agents/traces-and-insights/coll
 <Tab title="CLI">
 
 ```bash
-echo '{}' > no-config.yaml
-nemo agents create --name support-agent --agent-config no-config.yaml
+nemo agents create --name support-agent --agent-config <(echo '{}')
 ```
 
 </Tab>
