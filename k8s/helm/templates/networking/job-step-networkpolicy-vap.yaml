@@ -1,0 +1,65 @@
+{{/*
+SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/}}
+
+{{- /*
+RBAC cannot restrict NetworkPolicy writes by content. This admits only the shape built by build_step_network_policy
+(services/core/jobs/.../backends/kubernetes/common.py); keep the two in sync. A missing field or label is an
+evaluation error, which failurePolicy: Fail turns into a denial.
+*/ -}}
+{{- if and .Values.core.enabled (include "nemo-helix.jobStepNetworkPoliciesEnabled" .) }}
+{{- $name := printf "%s-%s-job-step-networkpolicies" (include "nemo-helix.fullname" .) .Release.Namespace }}
+{{- $apiVersion := include "nemo-helix.validatingAdmissionPolicyApiVersion" . }}
+apiVersion: {{ $apiVersion }}
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["networking.k8s.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["networkpolicies"]
+  matchConditions:
+    - name: jobs-controller
+      expression: >-
+        request.userInfo.username == 'system:serviceaccount:{{ .Release.Namespace }}:{{ include "nhx-core.controllerServiceAccountName" . }}'
+  variables:
+    - name: sel
+      expression: object.spec.podSelector.matchLabels
+    - name: jobId
+      expression: string(variables.sel['nhx.nvidia.com/job_id'])
+  validations:
+    - expression: >-
+        request.operation == 'CREATE' || oldObject.metadata.labels['nhx.nvidia.com/managed_by'] == 'jobs-controller'
+      message: The jobs controller may only modify or delete NetworkPolicies it manages.
+    - expression: >-
+        request.operation == 'DELETE' ||
+        (object.metadata.labels['nhx.nvidia.com/managed_by'] == 'jobs-controller' &&
+        object.spec.policyTypes == ['Ingress'] && !has(object.spec.egress) &&
+        !has(object.spec.podSelector.matchExpressions) && variables.sel['nhx.nvidia.com/managed_by'] == 'jobs-controller' &&
+        variables.sel['nhx.nvidia.com/job_step_id'] != '' && variables.jobId != '')
+      message: The jobs controller may only write managed, ingress-only NetworkPolicies that select one job step.
+    - expression: >-
+        request.operation == 'DELETE' || !has(object.spec.ingress) ||
+        object.spec.ingress.all(rule, rule.from.size() > 0 && rule.from.all(peer,
+        !has(peer.ipBlock) && !has(peer.namespaceSelector) && !has(peer.podSelector.matchExpressions) &&
+        (peer.podSelector.matchLabels == {'nhx.nvidia.com/managed_by': 'jobs-controller', 'nhx.nvidia.com/job_id': variables.jobId} ||
+        (peer.podSelector.matchLabels.size() == 1 && peer.podSelector.matchLabels.all(k, peer.podSelector.matchLabels[k] == variables.jobId)))))
+      message: Ingress peers may only be same-namespace pods labelled with the target job's id.
+---
+apiVersion: {{ $apiVersion }}
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+spec:
+  policyName: {{ $name }}
+  validationActions: ["Deny"]
+{{- end }}

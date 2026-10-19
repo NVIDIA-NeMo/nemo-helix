@@ -82,6 +82,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     cleanup_job_persistent_storage,
     common_labels_for_step,
     create_configmap,
+    create_step_network_policy,
     delete_configmap,
     delete_step_network_policy,
     last_task_exit_time,
@@ -3440,6 +3441,7 @@ def test_build_step_network_policy_limits_peers_to_declared_ports(test_step_pend
     assert policy.spec.policy_types == ["Ingress"]
     assert policy.spec.pod_selector.match_labels == {
         JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER,
+        JOB_ID_LABEL: "test-job-id",
         JOB_STEP_ID_LABEL: "test-step-id",
     }
     same_job, sandboxes = policy.spec.ingress
@@ -3489,6 +3491,26 @@ def test_schedule_fails_closed_when_network_policy_cannot_be_created(
     kubernetes_job._batch_v1.create_namespaced_job.assert_not_called()
 
 
+def test_create_step_network_policy_recreates_a_leftover_policy(test_step_pending):
+    networking_v1 = MagicMock()
+    networking_v1.create_namespaced_network_policy.side_effect = [ApiException(status=409), None]
+
+    name = create_step_network_policy(networking_v1, "test-namespace", _step_with_network(test_step_pending))
+
+    networking_v1.delete_namespaced_network_policy.assert_called_once_with(name=name, namespace="test-namespace")
+    assert networking_v1.create_namespaced_network_policy.call_count == 2
+    networking_v1.replace_namespaced_network_policy.assert_not_called()
+
+
+def test_create_step_network_policy_fails_closed_when_leftover_cannot_be_removed(test_step_pending):
+    networking_v1 = MagicMock()
+    networking_v1.create_namespaced_network_policy.side_effect = ApiException(status=409)
+    networking_v1.delete_namespaced_network_policy.side_effect = ApiException(status=403)
+
+    with pytest.raises(FailedToScheduleError):
+        create_step_network_policy(networking_v1, "test-namespace", _step_with_network(test_step_pending))
+
+
 def test_schedule_ignores_declared_network_when_profile_disables_policies(
     kubernetes_job, cpu_execution_provider, test_step_pending
 ):
@@ -3504,9 +3526,6 @@ def test_schedule_ignores_declared_network_when_profile_disables_policies(
 def test_terminate_job_deletes_network_policy_only_when_enabled(kubernetes_job, test_step_pending, enabled):
     kubernetes_job._execution_profile_config.step_network_policies_enabled = enabled
     kubernetes_job._networking_v1 = MagicMock()
-    kubernetes_job._networking_v1.read_namespaced_network_policy.return_value = MagicMock(
-        metadata=MagicMock(labels={JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER})
-    )
 
     kubernetes_job.terminate_job(_kubernetes_job_for_step(test_step_pending))
 
@@ -3514,16 +3533,22 @@ def test_terminate_job_deletes_network_policy_only_when_enabled(kubernetes_job, 
     if enabled:
         delete.assert_called_once_with(name=name_for_step(test_step_pending), namespace="test-namespace")
     else:
-        kubernetes_job._networking_v1.read_namespaced_network_policy.assert_not_called()
         delete.assert_not_called()
 
 
-def test_delete_step_network_policy_skips_unmanaged_and_missing_policies():
+@pytest.mark.parametrize("status", [403, 404])
+def test_delete_step_network_policy_tolerates_denied_and_missing_policies(status):
     networking_v1 = MagicMock()
-    networking_v1.read_namespaced_network_policy.return_value = MagicMock(metadata=MagicMock(labels={"other": "owner"}))
-    delete_step_network_policy(networking_v1, "test-namespace", "step")
-    networking_v1.delete_namespaced_network_policy.assert_not_called()
+    networking_v1.delete_namespaced_network_policy.side_effect = ApiException(status=status)
 
-    networking_v1.read_namespaced_network_policy.side_effect = ApiException(status=404)
     delete_step_network_policy(networking_v1, "test-namespace", "step")
-    networking_v1.delete_namespaced_network_policy.assert_not_called()
+
+    networking_v1.read_namespaced_network_policy.assert_not_called()
+
+
+def test_delete_step_network_policy_raises_other_errors():
+    networking_v1 = MagicMock()
+    networking_v1.delete_namespaced_network_policy.side_effect = ApiException(status=500)
+
+    with pytest.raises(ApiException):
+        delete_step_network_policy(networking_v1, "test-namespace", "step")

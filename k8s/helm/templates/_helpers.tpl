@@ -585,11 +585,28 @@ true
 
 {{/*
 Determine if the jobs controller creates per-step ingress NetworkPolicies.
-Returns "true" when enabled, empty string otherwise.
+Returns "true" when enabled, empty string otherwise. Fails when the cluster cannot run the
+ValidatingAdmissionPolicy that restricts what the controller may write.
 */}}
 {{- define "nemo-helix.jobStepNetworkPoliciesEnabled" -}}
 {{- if and .Values.networkPolicies.enabled .Values.networkPolicies.jobSteps.enabled -}}
+{{- $_ := include "nemo-helix.validatingAdmissionPolicyApiVersion" . -}}
 true
+{{- end -}}
+{{- end -}}
+
+{{/*
+The ValidatingAdmissionPolicy API version served by the cluster: GA v1 (Kubernetes 1.30+) or
+v1beta1 (1.28 and 1.29, where the ValidatingAdmissionPolicy feature gate and API must be enabled).
+Fails on clusters serving neither.
+*/}}
+{{- define "nemo-helix.validatingAdmissionPolicyApiVersion" -}}
+{{- if .Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy" -}}
+admissionregistration.k8s.io/v1
+{{- else if .Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1beta1/ValidatingAdmissionPolicy" -}}
+admissionregistration.k8s.io/v1beta1
+{{- else -}}
+{{- fail "networkPolicies.jobSteps.enabled requires ValidatingAdmissionPolicy: admissionregistration.k8s.io/v1 (Kubernetes 1.30+) or v1beta1 (Kubernetes 1.28+ with the feature enabled). Set networkPolicies.jobSteps.enabled=false, or for offline rendering pass --api-versions admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy." -}}
 {{- end -}}
 {{- end -}}
 

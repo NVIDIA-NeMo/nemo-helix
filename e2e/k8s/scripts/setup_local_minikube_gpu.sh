@@ -10,6 +10,7 @@
 #   NGC_API_KEY (required) - NVIDIA NGC API key for pulling GPU images
 #   HF_TOKEN (optional) - HuggingFace token for model downloads
 #   MINIKUBE_PROFILE (optional) - Minikube profile name (defaults to minikube)
+#   MINIKUBE_CNI (optional) - minikube --cni value, e.g. calico to enforce NetworkPolicy (defaults to minikube's own choice)
 
 set -euo pipefail
 
@@ -17,6 +18,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib.sh"
 
 MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-minikube}"
+MINIKUBE_CNI="${MINIKUBE_CNI:-}"
 
 log_info "Validating environment..."
 
@@ -57,6 +59,7 @@ start_minikube() {
       --driver docker \
       --gpus "${GPUS}" \
       --container-runtime docker \
+      ${MINIKUBE_CNI:+--cni "${MINIKUBE_CNI}"} \
       --cpus max \
       --memory no-limit \
       --wait-timeout=15m \
@@ -76,6 +79,8 @@ if ! minikube status -p "${MINIKUBE_PROFILE}" &> /dev/null; then
 else
     log_info "Minikube cluster already running"
 fi
+
+check_minikube_network_policy_cni "${MINIKUBE_PROFILE}" "${MINIKUBE_CNI}"
 
 log_info "Setting up ingress controller..."
 

@@ -522,7 +522,7 @@ For the complete default values, see [values.yaml](values.yaml).
 | networkPolicies.controller.sameReleasePods.enabled | bool | `true` | Enable ingress from same-release pods. |
 | networkPolicies.enabled | bool | `false` | Create NetworkPolicy resources for enabled subpolicies. |
 | networkPolicies.jobSteps | object | [See values.yaml](values.yaml#L323) | Per-step ingress NetworkPolicies created by the jobs controller for steps that declare `network`, such as sandboxed GRPO training. |
-| networkPolicies.jobSteps.enabled | bool | `true` | Let the jobs controller create and delete per-step ingress NetworkPolicies. |
+| networkPolicies.jobSteps.enabled | bool | `true` | Let the jobs controller create and delete per-step ingress NetworkPolicies. Also installs a cluster-scoped ValidatingAdmissionPolicy that limits the controller to those policies, so it needs Kubernetes 1.30+ (or 1.28+ with the ValidatingAdmissionPolicy feature and v1beta1 API enabled) and permission to create cluster-scoped admission resources. |
 | networkPolicies.jobs | object | [See values.yaml](values.yaml#L270) | NetworkPolicy configuration for pods created by the jobs controller. |
 | networkPolicies.jobs.dns | object | [See values.yaml](values.yaml#L285) | Allow DNS lookup from managed job pods. |
 | networkPolicies.jobs.dns.enabled | bool | `true` | Enable egress to DNS pods. |

@@ -160,6 +160,16 @@ For local API access without ingress, use port-forwarding after the release is r
 kubectl -n "$NHX_NAMESPACE" port-forward svc/nemo-helix-api 8080:8080
 ```
 
+`networkPolicies.*` values only take effect on a cluster whose CNI enforces NetworkPolicy. minikube's default CNI with the Docker driver accepts NetworkPolicy resources but does not enforce them, so create the cluster with Calico (`--cni` cannot be changed on an existing profile):
+
+```sh
+minikube start --driver docker --cni calico
+```
+
+The `e2e/k8s/scripts/setup_local_minikube_*.sh` scripts keep minikube's default CNI unless you set `MINIKUBE_CNI=calico`.
+
+For Kind, see [NetworkPolicy smoke test](/documentation/kubernetes-deployment/setup/helm/network-policy-smoke-test).
+
 ### EKS example
 
 For EKS, use a ReadWriteMany-capable StorageClass for jobs storage. The example below assumes an EFS CSI StorageClass named `efs-sc` and an EBS CSI StorageClass named `gp3`:

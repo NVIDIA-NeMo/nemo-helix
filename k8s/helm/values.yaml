@@ -321,7 +321,7 @@ networkPolicies:
   # -- Per-step ingress NetworkPolicies created by the jobs controller for steps that declare `network`, such as sandboxed GRPO training.
   # @default -- This object has the following default values for per-step ingress isolation.
   jobSteps:
-    # -- Let the jobs controller create and delete per-step ingress NetworkPolicies.
+    # -- Let the jobs controller create and delete per-step ingress NetworkPolicies. Also installs a cluster-scoped ValidatingAdmissionPolicy that limits the controller to those policies, so it needs Kubernetes 1.30+ (or 1.28+ with the ValidatingAdmissionPolicy feature and v1beta1 API enabled) and permission to create cluster-scoped admission resources.
     enabled: true
 
 # -- NCCL chart test (`helm test`): multi-node allreduce check. Templates use helm.sh/hook: test — they are not created on install/upgrade, only when you run helm test.

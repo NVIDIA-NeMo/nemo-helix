@@ -44,9 +44,10 @@ rules:
   # Deployment is stuck in DELETING. Mirrors the configmaps verb set.
   verbs: ["get", "list", "create", "delete"]
 {{- if include "nemo-helix.jobStepNetworkPoliciesEnabled" . }}
+# Restricted to job-step policies by networking/job-step-networkpolicy-vap.yaml.
 - apiGroups: ["networking.k8s.io"]
   resources: ["networkpolicies"]
-  verbs: ["get", "create", "update", "patch", "delete"]
+  verbs: ["create", "patch", "delete"]
 {{- end }}
 {{- if .Values.rbac.volcanoEnabled }}
 # Volcano

@@ -74,3 +74,19 @@ create_platform_secrets() {
         log_warn "HF_TOKEN not set, skipping HuggingFace token secret"
     fi
 }
+
+# Waits for Calico when the cluster runs it. When MINIKUBE_CNI=calico was requested
+# but the profile lacks it, warns that NetworkPolicy resources (networkPolicies.*
+# chart values) will be accepted but not enforced. minikube's default docker-driver
+# CNI ignores NetworkPolicy, and --cni only takes effect when the profile is created.
+check_minikube_network_policy_cni() {
+    local profile="$1" cni="$2"
+    if kubectl -n kube-system get daemonset calico-node >/dev/null 2>&1; then
+        log_info "Waiting for Calico (NetworkPolicy enforcement)..."
+        kubectl -n kube-system rollout status daemonset/calico-node --timeout=5m
+        kubectl -n kube-system rollout status deployment/calico-kube-controllers --timeout=5m
+    elif [ "${cni}" = "calico" ]; then
+        log_warn "Profile ${profile} is running without Calico, so NetworkPolicy is not enforced."
+        log_warn "Recreate it to enforce: minikube delete -p ${profile} && rerun this script"
+    fi
+}

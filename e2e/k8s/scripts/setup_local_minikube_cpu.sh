@@ -4,6 +4,8 @@
 
 # Script: setup_local_minikube_cpu.sh
 # Description: Sets up a local minikube cluster for CPU-only auth Helm/E2E validation.
+# Environment Variables:
+#   MINIKUBE_CNI (optional) - minikube --cni value, e.g. calico to enforce NetworkPolicy (defaults to minikube's own choice)
 
 set -euo pipefail
 
@@ -16,6 +18,7 @@ INGRESS_NODEPORT="${INGRESS_NODEPORT:-30080}"
 INGRESS_HOST_PORT="${INGRESS_HOST_PORT:-30080}"
 MINIKUBE_CPUS="${MINIKUBE_CPUS:-4}"
 MINIKUBE_MEMORY_MB="${MINIKUBE_MEMORY_MB:-6144}"
+MINIKUBE_CNI="${MINIKUBE_CNI:-}"
 
 for tool in minikube docker kubectl helm; do
     if ! command -v "$tool" >/dev/null 2>&1; then
@@ -28,6 +31,7 @@ start_minikube() {
     minikube start \
       --driver docker \
       --container-runtime docker \
+      ${MINIKUBE_CNI:+--cni "${MINIKUBE_CNI}"} \
       --cpus "${MINIKUBE_CPUS}" \
       --memory "${MINIKUBE_MEMORY_MB}" \
       --wait-timeout=15m \
@@ -44,6 +48,8 @@ if ! minikube status -p "${MINIKUBE_PROFILE}" >/dev/null 2>&1; then
 else
     log_info "Minikube profile ${MINIKUBE_PROFILE} is already running"
 fi
+
+check_minikube_network_policy_cni "${MINIKUBE_PROFILE}" "${MINIKUBE_CNI}"
 
 log_info "Enabling ingress addon..."
 minikube addons enable ingress -p "${MINIKUBE_PROFILE}"

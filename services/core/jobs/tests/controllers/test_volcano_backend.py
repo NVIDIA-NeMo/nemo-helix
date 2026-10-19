@@ -2003,9 +2003,6 @@ def test_schedule_removes_network_policy_when_volcano_is_missing(
 ):
     volcano_job._execution_profile_config.step_network_policies_enabled = True
     volcano_job._networking_v1 = MagicMock()
-    volcano_job._networking_v1.read_namespaced_network_policy.return_value = MagicMock(
-        metadata=MagicMock(labels={JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER})
-    )
     volcano_job._custom_v1.create_namespaced_custom_object.side_effect = ApiException(status=404)  # ty: ignore[unresolved-attribute]
 
     update = volcano_job.schedule(distributed_gpu_execution_provider, _step_with_network(test_step_pending))
@@ -2019,9 +2016,6 @@ def test_terminate_volcano_job_deletes_network_policy(
 ):
     volcano_job._execution_profile_config.step_network_policies_enabled = True
     volcano_job._networking_v1 = MagicMock()
-    volcano_job._networking_v1.read_namespaced_network_policy.return_value = MagicMock(
-        metadata=MagicMock(labels={JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER})
-    )
 
     volcano_job.terminate_job(_volcano_job_for_step(test_step_pending))
 
