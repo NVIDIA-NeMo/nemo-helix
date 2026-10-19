@@ -5,7 +5,7 @@ import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { GradientBackground } from '@nemo/common/src/components/GradientBackground';
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import { Banner, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
-import { AGENTS_ENABLED } from '@studio/constants/environment';
+import { AGENTS_ENABLED, JOBS_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
@@ -84,13 +84,15 @@ export const WorkspaceDashboardHomeRoute: FC = () => {
               />
             )}
           </Stack>
-          <Stack gap="density-lg">
-            <Text kind="title/md">Recent Jobs</Text>
-            <Text kind="body/regular/sm" className="text-secondary">
-              Jobs in progress and jobs that finished in the last 48 hours.
-            </Text>
-            <RecentJobsTable />
-          </Stack>
+          {JOBS_ENABLED && (
+            <Stack gap="density-lg">
+              <Text kind="title/md">Recent Jobs</Text>
+              <Text kind="body/regular/sm" className="text-secondary">
+                Jobs in progress and jobs that finished in the last 48 hours.
+              </Text>
+              <RecentJobsTable />
+            </Stack>
+          )}
         </Stack>
       </AccessibleTitle>
     </GradientBackground>
