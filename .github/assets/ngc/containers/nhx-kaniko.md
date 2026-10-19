@@ -14,6 +14,8 @@ of the osscontainertools fork of kaniko, unchanged, with a BusyBox shell.
 
 [Documentation](https://docs.nvidia.com/nemo-helix)
 
+[NeMo Helix on GitHub](https://github.com/NVIDIA-NeMo/nemo-helix)
+
 ### License
 
 This container includes [kaniko](https://github.com/osscontainertools/kaniko) and the registry
