@@ -10,6 +10,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from kubernetes import client
 from kubernetes.client.rest import ApiException
+from nemo_helix_plugin.jobs.spec import StepIngressRule, StepNetwork
 from nhx.common.auth import (
     KUBERNETES_POD_UID_REFERENCE_NAME,
     NHX_PRINCIPAL_ENVVAR,
@@ -51,6 +52,7 @@ from nhx.core.jobs.controllers.backends.base import (
     WORKLOAD_IDENTITY_VOLUME_PATH,
     JobUpdate,
 )
+from nhx.core.jobs.controllers.backends.exceptions import FailedToScheduleError
 from nhx.core.jobs.controllers.backends.kubernetes import (
     CPUKubernetesJobBackend,
     GPUKubernetesJobBackend,
@@ -73,11 +75,13 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     build_image_pull_secrets,
     build_metadata,
     build_pod_security_context,
+    build_step_network_policy,
     build_tolerations,
     cleanup_job_persistent_storage,
     common_labels_for_step,
     create_configmap,
     delete_configmap,
+    delete_step_network_policy,
     name_for_step,
 )
 from nhx.core.jobs.controllers.backends.workload_tokens import WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS
@@ -3115,3 +3119,114 @@ def test_image_pull_ttl_can_be_disabled(kubernetes_job, test_step_pending):
 
     assert update.status == HelixJobStatus.PENDING
     terminate.assert_not_called()
+
+
+def _step_with_network(step: HelixJobStepWithContext) -> HelixJobStepWithContext:
+    step = step.model_copy(deep=True)
+    assert step.step_spec is not None
+    step.step_spec.network = StepNetwork(
+        ingress=[StepIngressRule(job_id_label="nemo-rl-job-id", tcp_ports=[8000, 51234])]
+    )
+    return step
+
+
+def test_build_step_network_policy_requires_declared_network(test_step_pending):
+    assert build_step_network_policy(test_step_pending) is None
+
+
+def test_build_step_network_policy_limits_peers_to_declared_ports(test_step_pending):
+    policy = build_step_network_policy(_step_with_network(test_step_pending))
+
+    assert policy is not None
+    assert policy.metadata.name == name_for_step(test_step_pending)
+    assert policy.metadata.labels[JOB_MANAGED_BY_LABEL] == JOB_MANAGED_BY_JOBS_CONTROLLER
+    assert policy.spec.policy_types == ["Ingress"]
+    assert policy.spec.pod_selector.match_labels == {
+        JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER,
+        JOB_STEP_ID_LABEL: "test-step-id",
+    }
+    same_job, sandboxes = policy.spec.ingress
+    assert same_job.ports is None
+    assert same_job._from[0].pod_selector.match_labels == {
+        JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER,
+        JOB_ID_LABEL: "test-job-id",
+    }
+    assert sandboxes._from[0].pod_selector.match_labels == {"nemo-rl-job-id": "test-job-id"}
+    assert sandboxes._from[0].namespace_selector is None
+    assert [(p.protocol, p.port) for p in sandboxes.ports] == [("TCP", 8000), ("TCP", 51234)]
+
+
+def test_schedule_creates_network_policy_before_job_and_hands_it_to_the_job(
+    kubernetes_job, cpu_execution_provider, test_step_pending
+):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = True
+    calls = MagicMock()
+    kubernetes_job._networking_v1 = calls.networking
+    kubernetes_job._batch_v1 = calls.batch
+    calls.batch.create_namespaced_job.return_value = client.V1Job(metadata=client.V1ObjectMeta(uid="job-uid"))
+
+    kubernetes_job.schedule(cpu_execution_provider, _step_with_network(test_step_pending))
+
+    order = [
+        c[0]
+        for c in calls.mock_calls
+        if c[0] in ("networking.create_namespaced_network_policy", "batch.create_namespaced_job")
+    ]
+    assert order == ["networking.create_namespaced_network_policy", "batch.create_namespaced_job"]
+    patch_kwargs = calls.networking.patch_namespaced_network_policy.call_args.kwargs
+    assert patch_kwargs["name"] == name_for_step(test_step_pending)
+    (owner,) = patch_kwargs["body"]["metadata"]["ownerReferences"]
+    assert (owner["api_version"], owner["kind"], owner["uid"]) == ("batch/v1", "Job", "job-uid")
+
+
+def test_schedule_fails_closed_when_network_policy_cannot_be_created(
+    kubernetes_job, cpu_execution_provider, test_step_pending
+):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = True
+    kubernetes_job._networking_v1 = MagicMock()
+    kubernetes_job._networking_v1.create_namespaced_network_policy.side_effect = ApiException(status=403)
+
+    with pytest.raises(FailedToScheduleError):
+        kubernetes_job.schedule(cpu_execution_provider, _step_with_network(test_step_pending))
+
+    kubernetes_job._batch_v1.create_namespaced_job.assert_not_called()
+
+
+def test_schedule_ignores_declared_network_when_profile_disables_policies(
+    kubernetes_job, cpu_execution_provider, test_step_pending
+):
+    kubernetes_job._networking_v1 = MagicMock()
+
+    kubernetes_job.schedule(cpu_execution_provider, _step_with_network(test_step_pending))
+
+    kubernetes_job._networking_v1.create_namespaced_network_policy.assert_not_called()
+    kubernetes_job._batch_v1.create_namespaced_job.assert_called_once()
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_terminate_job_deletes_network_policy_only_when_enabled(kubernetes_job, test_step_pending, enabled):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = enabled
+    kubernetes_job._networking_v1 = MagicMock()
+    kubernetes_job._networking_v1.read_namespaced_network_policy.return_value = MagicMock(
+        metadata=MagicMock(labels={JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER})
+    )
+
+    kubernetes_job.terminate_job(_kubernetes_job_for_step(test_step_pending))
+
+    delete = kubernetes_job._networking_v1.delete_namespaced_network_policy
+    if enabled:
+        delete.assert_called_once_with(name=name_for_step(test_step_pending), namespace="test-namespace")
+    else:
+        kubernetes_job._networking_v1.read_namespaced_network_policy.assert_not_called()
+        delete.assert_not_called()
+
+
+def test_delete_step_network_policy_skips_unmanaged_and_missing_policies():
+    networking_v1 = MagicMock()
+    networking_v1.read_namespaced_network_policy.return_value = MagicMock(metadata=MagicMock(labels={"other": "owner"}))
+    delete_step_network_policy(networking_v1, "test-namespace", "step")
+    networking_v1.delete_namespaced_network_policy.assert_not_called()
+
+    networking_v1.read_namespaced_network_policy.side_effect = ApiException(status=404)
+    delete_step_network_policy(networking_v1, "test-namespace", "step")
+    networking_v1.delete_namespaced_network_policy.assert_not_called()

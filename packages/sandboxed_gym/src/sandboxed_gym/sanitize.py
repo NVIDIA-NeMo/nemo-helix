@@ -27,6 +27,7 @@ from sandboxed_gym.backends.base import SanitizedEpisodeSpec
 from sandboxed_gym.config import (
     JOB_ID_METADATA_KEY,
     K8S_LABEL_KEY_RE,
+    PLATFORM_LABEL_PREFIX,
     RESERVED_ENV_PREFIX,
     RESERVED_METADATA_PREFIX,
     EpisodeBrokerConfig,
@@ -100,7 +101,9 @@ def _sanitize_metadata(request: EpisodeCreateRequest, config: EpisodeBrokerConfi
     Broker-owned keys are refused rather than overwritten so a backend label always identifies the
     job that really owns an episode, including during reconciliation after a broker restart.
     """
-    reserved = sorted(key for key in request.metadata if key.startswith(RESERVED_METADATA_PREFIX))
+    reserved = sorted(
+        key for key in request.metadata if key.startswith((RESERVED_METADATA_PREFIX, PLATFORM_LABEL_PREFIX))
+    )
     if reserved:
         _reject(
             BrokerErrorCode.FIELD_NOT_ALLOWED,

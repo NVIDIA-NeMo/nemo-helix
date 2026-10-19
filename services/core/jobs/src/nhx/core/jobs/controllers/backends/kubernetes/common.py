@@ -694,6 +694,110 @@ def delete_configmap(core_v1: client.CoreV1Api, namespace: str, name: str) -> No
         raise e
 
 
+def build_step_network_policy(step: HelixJobStepWithContext) -> client.V1NetworkPolicy | None:
+    """Build the ingress NetworkPolicy for a step that declares ``network``, else ``None``.
+
+    The step's pods accept ingress from pods of the same job on any port, and from pods matching each
+    declared rule on that rule's TCP ports. NetworkPolicy allows are additive across policies, so this only
+    isolates the step when no other policy in the namespace selects its pods with a broader allow.
+    """
+    network = step.step_spec.network if step.step_spec else None
+    if network is None:
+        return None
+    managed = {JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER}
+    ingress = [
+        client.V1NetworkPolicyIngressRule(
+            _from=[
+                client.V1NetworkPolicyPeer(
+                    pod_selector=client.V1LabelSelector(match_labels={**managed, JOB_ID_LABEL: step.job})
+                )
+            ]
+        )
+    ]
+    for rule in network.ingress:
+        ingress.append(
+            client.V1NetworkPolicyIngressRule(
+                _from=[
+                    client.V1NetworkPolicyPeer(
+                        pod_selector=client.V1LabelSelector(match_labels={rule.job_id_label: step.job})
+                    )
+                ],
+                ports=[client.V1NetworkPolicyPort(protocol="TCP", port=port) for port in rule.tcp_ports],
+            )
+        )
+    return client.V1NetworkPolicy(
+        api_version="networking.k8s.io/v1",
+        kind="NetworkPolicy",
+        metadata=client.V1ObjectMeta(name=name_for_step(step), labels=common_labels_for_step(step)),
+        spec=client.V1NetworkPolicySpec(
+            pod_selector=client.V1LabelSelector(match_labels={**managed, JOB_STEP_ID_LABEL: step.id}),
+            policy_types=["Ingress"],
+            ingress=ingress,
+        ),
+    )
+
+
+def create_step_network_policy(
+    networking_v1: client.NetworkingV1Api, namespace: str, step: HelixJobStepWithContext
+) -> str | None:
+    """Create the step's ingress NetworkPolicy before its pods exist. Returns its name, or ``None`` if not needed."""
+    policy = build_step_network_policy(step)
+    if policy is None:
+        return None
+    name = policy.metadata.name
+    try:
+        networking_v1.create_namespaced_network_policy(namespace=namespace, body=policy)
+        logger.info("Created step NetworkPolicy", extra=dict(network_policy=name, job=step.job, step=step.name))
+    except ApiException as e:
+        if e.status != 409:
+            raise FailedToScheduleError(
+                f"Failed to create NetworkPolicy {name} for job step {step.job}/{step.name}: {e}"
+            ) from e
+        networking_v1.replace_namespaced_network_policy(name=name, namespace=namespace, body=policy)
+    return name
+
+
+def adopt_step_network_policy(
+    networking_v1: client.NetworkingV1Api, namespace: str, name: str, owner: client.V1OwnerReference
+) -> None:
+    """Make the workload own the policy so garbage collection removes it with the workload."""
+    try:
+        networking_v1.patch_namespaced_network_policy(
+            name=name,
+            namespace=namespace,
+            body={"metadata": {"ownerReferences": [owner.to_dict()]}},
+        )
+    except ApiException:
+        logger.warning(
+            "Failed to set owner on step NetworkPolicy; it will be deleted on termination",
+            extra=dict(network_policy=name, namespace=namespace),
+            exc_info=True,
+        )
+
+
+def delete_step_network_policy(networking_v1: client.NetworkingV1Api, namespace: str, name: str) -> None:
+    """Delete the step's NetworkPolicy if the jobs controller manages it."""
+    try:
+        policy = networking_v1.read_namespaced_network_policy(name=name, namespace=namespace)
+    except ApiException as e:
+        if e.status == 404:
+            return
+        raise
+    labels = (policy.metadata.labels if policy.metadata else None) or {}
+    if labels.get(JOB_MANAGED_BY_LABEL) != JOB_MANAGED_BY_JOBS_CONTROLLER:
+        logger.warning(
+            "Skipping NetworkPolicy deletion: not managed by jobs-controller",
+            extra=dict(network_policy=name, namespace=namespace),
+        )
+        return
+    try:
+        networking_v1.delete_namespaced_network_policy(name=name, namespace=namespace)
+        logger.info("Deleted step NetworkPolicy", extra=dict(network_policy=name, namespace=namespace))
+    except ApiException as e:
+        if e.status != 404:
+            raise
+
+
 def load_from_dict(data: dict, klass: str):
     """
     Convert a dictionary containing kubernetes config to a deserialized object

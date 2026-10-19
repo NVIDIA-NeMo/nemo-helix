@@ -15131,6 +15131,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/StepLifecycle'
           description: Lifecycle configuration settings for the step
+        network:
+          allOf:
+          - $ref: '#/components/schemas/StepNetwork'
+          description: Network isolation for the step's pods. Unset leaves ingress
+            unrestricted.
       type: object
       required:
       - name
@@ -16158,6 +16163,13 @@ components:
           type: object
           title: Pod Security Context
           description: Pod security context for the Kubernetes job pods.
+        step_network_policies_enabled:
+          type: boolean
+          title: Step Network Policies Enabled
+          description: Create an ingress NetworkPolicy for each step that declares
+            `network`. Requires a NetworkPolicy-enforcing CNI and controller RBAC
+            on networking.k8s.io/networkpolicies.
+          default: false
         image_pull_secrets:
           items:
             $ref: '#/components/schemas/ImagePullSecret'
@@ -20362,6 +20374,30 @@ components:
       - success
       - unknown
       title: StatusEnum
+    StepIngressRule:
+      properties:
+        job_id_label:
+          type: string
+          pattern: ^([a-z0-9]([-a-z0-9.]*[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$
+          title: Job Id Label
+          description: Label key on peer pods whose value must equal the job ID, e.g.
+            'nemo-rl-job-id'.
+        tcp_ports:
+          items:
+            type: integer
+            maximum: 65535.0
+            minimum: 1.0
+          type: array
+          minItems: 1
+          title: Tcp Ports
+          description: TCP ports on the step's pods that matching peers may reach.
+      type: object
+      required:
+      - job_id_label
+      - tcp_ports
+      title: StepIngressRule
+      description: Ingress into the step's pods from peer pods that carry this job's
+        ID under ``job_id_label``.
     StepLifecycle:
       properties:
         staleness_timeout_seconds:
@@ -20387,6 +20423,24 @@ components:
         as opposed to ``config`` which is the task payload forwarded to
 
         the container.'
+    StepNetwork:
+      properties:
+        ingress:
+          items:
+            $ref: '#/components/schemas/StepIngressRule'
+          type: array
+          title: Ingress
+          description: Additional ingress allowed into the step's pods.
+      type: object
+      title: StepNetwork
+      description: 'Network isolation for a step''s pods.
+
+
+        Enforced only when the execution profile enables step network policies. The
+        step''s pods then
+
+        accept ingress from other pods of the same job plus the listed rules, and
+        nothing else.'
     StorageConfigType:
       enum:
       - local
@@ -21853,6 +21907,13 @@ components:
           type: object
           title: Pod Security Context
           description: Pod security context for the Kubernetes job pods.
+        step_network_policies_enabled:
+          type: boolean
+          title: Step Network Policies Enabled
+          description: Create an ingress NetworkPolicy for each step that declares
+            `network`. Requires a NetworkPolicy-enforcing CNI and controller RBAC
+            on networking.k8s.io/networkpolicies.
+          default: false
         image_pull_secrets:
           items:
             $ref: '#/components/schemas/ImagePullSecret'

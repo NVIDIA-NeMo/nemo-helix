@@ -318,6 +318,12 @@ networkPolicies:
     # -- Extra NetworkPolicy egress rules appended to the managed job policy, for cluster-specific dependencies or additional allowed CIDRs.
     extraEgress: []
 
+  # -- Per-step ingress NetworkPolicies created by the jobs controller for steps that declare `network`, such as sandboxed GRPO training.
+  # @default -- This object has the following default values for per-step ingress isolation.
+  jobSteps:
+    # -- Let the jobs controller create and delete per-step ingress NetworkPolicies.
+    enabled: true
+
 # -- NCCL chart test (`helm test`): multi-node allreduce check. Templates use helm.sh/hook: test — they are not created on install/upgrade, only when you run helm test.
 # Requires nodes labeled with gpuNodeLabelKey/gpuNodeLabelValue (default NFD / GPU operator style).
 # See https://helm.sh/docs/topics/chart_tests/
@@ -635,6 +641,9 @@ baseHelixConfig: |
         pod_security_context: {{ .Values.podSecurityContext | toYaml | nindent 10 }}
         env:
           NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS: {{ .Values.evals.allowInsecureCloudpickleMetrics | toString | quote }}
+        {{- if include "nemo-helix.jobStepNetworkPoliciesEnabled" . }}
+        step_network_policies_enabled: true
+        {{- end }}
       volcano_job:
         service_account_name: {{ include "nhx-core.jobsServiceAccountName" . | quote }}
         launcher_image: {{ include "nhx-core.image" . | quote }}
@@ -647,6 +656,9 @@ baseHelixConfig: |
         {{- if include "nemo-helix.multinodeNetworkingEnabled" . }}
         # Enable multi-node networking (triggers Kyverno policies for cloud-specific configuration)
         enable_multi_node_networking: true
+        {{- end }}
+        {{- if include "nemo-helix.jobStepNetworkPoliciesEnabled" . }}
+        step_network_policies_enabled: true
         {{- end }}
 
   # -- secrets is the configuration specific to storing secrets on the platform

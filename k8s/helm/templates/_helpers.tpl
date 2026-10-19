@@ -584,6 +584,16 @@ true
 {{- end -}}
 
 {{/*
+Determine if the jobs controller creates per-step ingress NetworkPolicies.
+Returns "true" when enabled, empty string otherwise.
+*/}}
+{{- define "nemo-helix.jobStepNetworkPoliciesEnabled" -}}
+{{- if and .Values.networkPolicies.enabled .Values.networkPolicies.jobSteps.enabled -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
 nemo-helix.env generates an env var array out of a dict to allow better
 interleaving, easier use and default settings. It will still work if a you use
 an array to render directly, but it is not recommended. It is available across

@@ -21,6 +21,7 @@ from nemo_helix_plugin.models.types import ModelEntity
 from nhx.common.entities.utils import get_random_id
 from nhx.customization_common.schemas.values import OutputNameType
 from nhx.customization_common.service.platform_client import AsyncCustomizationHelixClients
+from nhx.rl.app.constants import NHX_BROKER_PORT_ENVVAR, NHX_VLLM_PORT_ENVVAR
 from nhx.rl.app.jobs.compiler import (
     _build_download_config,
     _build_model_entity_config,
@@ -37,6 +38,7 @@ from nhx.rl.schemas import (
     ParallelismParams,
     RlJobOutput,
 )
+from sandboxed_gym.config import JOB_ID_METADATA_KEY
 
 
 def _adapter_lookup(platform: AsyncCustomizationHelixClients) -> AsyncMock:
@@ -306,6 +308,24 @@ def test_explicit_profile_overrides_default() -> None:
     job = _make_job_output()
     step = _build_training_step(job, [], trust_remote_code=False, profile="custom-gpu")
     assert step["executor"]["profile"] == "custom-gpu"
+
+
+def test_grpo_training_step_admits_sandboxes_only_on_vllm_and_broker(sandbox_capable: None) -> None:
+    job = _make_job_output(GRPOTraining(type="grpo"), environment="default/env")
+    step = _build_training_step(job, [], trust_remote_code=False, profile=None)
+
+    assert step.network is not None
+    (rule,) = step.network.ingress
+    assert rule.job_id_label == JOB_ID_METADATA_KEY
+    assert rule.tcp_ports == [8000, 51234]
+    env = {e.name: e.value for e in step.environment or []}
+    assert env[NHX_VLLM_PORT_ENVVAR] == "8000"
+    assert env[NHX_BROKER_PORT_ENVVAR] == "51234"
+
+
+def test_dpo_training_step_declares_no_network() -> None:
+    step = _build_training_step(_make_job_output(), [], trust_remote_code=False, profile=None)
+    assert step.network is None
 
 
 # --------------------------------------------------------------------------- #

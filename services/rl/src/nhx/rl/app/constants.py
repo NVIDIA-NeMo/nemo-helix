@@ -25,6 +25,7 @@ from nhx.customization_common.service.constants import (
 
 __all__ = [
     "BASE_LOG_DIR_ENVVAR",
+    "DEFAULT_BROKER_PORT",
     "DEFAULT_DATASET_PATH",
     "DEFAULT_ENVIRONMENT_PATH",
     "DEFAULT_MODEL_PATH",
@@ -33,6 +34,7 @@ __all__ = [
     "DEFAULT_TRAINING_OUTPUT_PATH",
     "DEFAULT_TRAINING_RESULT_FILE_NAME",
     "DEFAULT_VALIDATION_DATASET_PATH",
+    "DEFAULT_VLLM_PORT",
     "NHX_BROKER_HOST_ENVVAR",
     "NHX_BROKER_PORT_ENVVAR",
     "NHX_FILES_URL_ENVVAR",
@@ -42,6 +44,7 @@ __all__ = [
     "NHX_VLLM_PORT_ENVVAR",
     "SANDBOX_DATASET_PATH",
     "SANDBOX_ENVIRONMENT_PATH",
+    "SANDBOX_JOB_ID_LABEL",
     "SANDBOX_WORK_PATH",
     "SERVICE_NAME",
 ]
@@ -55,6 +58,12 @@ NHX_VLLM_HOST_ENVVAR = "NHX_VLLM_SERVICE_HOST"
 NHX_VLLM_PORT_ENVVAR = "NHX_VLLM_SERVICE_PORT"
 NHX_BROKER_HOST_ENVVAR = "NHX_BROKER_SERVICE_HOST"
 NHX_BROKER_PORT_ENVVAR = "NHX_BROKER_SERVICE_PORT"
+DEFAULT_VLLM_PORT = 8000
+DEFAULT_BROKER_PORT = 51234
+
+# Pod label the Gym broker stamps on every sandbox with the owning job ID. Mirrors
+# sandboxed_gym.config.JOB_ID_METADATA_KEY, which this package does not depend on.
+SANDBOX_JOB_ID_LABEL = "nemo-rl-job-id"
 
 # Job-storage PVC claim name, injected by the compiler so the training master can
 # tell the Gym host which claim to re-mount for the environment/dataset directories.

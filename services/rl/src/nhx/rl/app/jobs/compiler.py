@@ -41,6 +41,7 @@ from nemo_helix_plugin.jobs.api_factory import (
     ResourcesSpec,
 )
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+from nemo_helix_plugin.jobs.spec import StepIngressRule, StepNetwork
 from nemo_helix_plugin.models.types import ModelDeploymentConfig, ModelEntity
 from nhx.common.auth import auth_client_context
 from nhx.common.entities.utils import parse_entity_ref
@@ -65,10 +66,12 @@ from nhx.customization_common.service.platform_client import (
 from nhx.customization_common.tasks.file_io_metadata import build_output_fileset_metadata_from_model_entity
 from nhx.rl.app.constants import (
     BASE_LOG_DIR_ENVVAR,
+    DEFAULT_BROKER_PORT,
     DEFAULT_DATASET_PATH,
     DEFAULT_ENVIRONMENT_PATH,
     DEFAULT_MODEL_PATH,
     DEFAULT_OUTPUT_MODEL_PATH,
+    DEFAULT_VLLM_PORT,
     NHX_BROKER_HOST_ENVVAR,
     NHX_BROKER_PORT_ENVVAR,
     NHX_JOB_STORAGE_PVC_ENVVAR,
@@ -76,6 +79,7 @@ from nhx.rl.app.constants import (
     NHX_VLLM_PORT_ENVVAR,
     SANDBOX_DATASET_PATH,
     SANDBOX_ENVIRONMENT_PATH,
+    SANDBOX_JOB_ID_LABEL,
 )
 from nhx.rl.app.jobs.training.schemas import (
     DPOConfig,
@@ -600,14 +604,21 @@ def _build_training_step(
     warn_incomplete_integrations(job_spec.integrations)
     environment = [*base_env, *collect_integration_secret_envs(job_spec.integrations)]
 
+    network: StepNetwork | None = None
     if job_spec.training_type == TrainingType.GRPO:
         for name, value in (
             (NHX_VLLM_HOST_ENVVAR, "127.0.0.1"),
-            (NHX_VLLM_PORT_ENVVAR, "8000"),
+            (NHX_VLLM_PORT_ENVVAR, str(DEFAULT_VLLM_PORT)),
             (NHX_BROKER_HOST_ENVVAR, "127.0.0.1"),
-            (NHX_BROKER_PORT_ENVVAR, "51234"),
+            (NHX_BROKER_PORT_ENVVAR, str(DEFAULT_BROKER_PORT)),
         ):
             environment.append(EnvironmentVariable(name=name, value=value))
+        # Sandboxes reach the training pods only on vLLM and the broker, never on Ray.
+        network = StepNetwork(
+            ingress=[
+                StepIngressRule(job_id_label=SANDBOX_JOB_ID_LABEL, tcp_ports=[DEFAULT_VLLM_PORT, DEFAULT_BROKER_PORT])
+            ]
+        )
         if config.job_storage_pvc_claim:
             environment.append(EnvironmentVariable(name=NHX_JOB_STORAGE_PVC_ENVVAR, value=config.job_storage_pvc_claim))
 
@@ -643,6 +654,7 @@ def _build_training_step(
         executor=executor,
         environment=environment,
         config=step_config.model_dump(mode="json"),
+        network=network,
     )
 
 

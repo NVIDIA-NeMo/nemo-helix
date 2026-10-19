@@ -39,6 +39,7 @@ from nhx.core.jobs.controllers.backends.base import (
 )
 from nhx.core.jobs.controllers.backends.kubernetes.common import (
     BaseKubernetesExecutionProfileConfig,
+    adopt_step_network_policy,
     aggregate_pod_statuses_for_job_step,
     build_event_field_selector,
     build_metadata,
@@ -46,7 +47,9 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     common_labels_for_step,
     create_configmap,
     create_pod_template_spec,
+    create_step_network_policy,
     delete_configmap,
+    delete_step_network_policy,
     get_namespace_from_environment,
     image_pull_backoff_failure,
     list_pod_status,
@@ -102,6 +105,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         load_kubernetes_config()
         self._batch_v1 = client.BatchV1Api()
         self._core_v1 = client.CoreV1Api()
+        self._networking_v1 = client.NetworkingV1Api()
         self.namespace = self._execution_profile_config.namespace or get_namespace_from_environment()
         self._workload_delegation_store = create_authenticated_workload_delegation_store(self._nemo_client)
         self._workload_delegations = KubernetesPodBoundWorkloadDelegationManager(
@@ -116,6 +120,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
     def shutdown(self):
         self._batch_v1.api_client.close()
         self._core_v1.api_client.close()
+        self._networking_v1.api_client.close()
         return
 
     def _workload_delegation_target_for_job(self, job: V1Job) -> KubernetesPodBoundWorkloadDelegationTarget | None:
@@ -219,6 +224,11 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             namespace=self.namespace,
             step=step,
         )
+        network_policy_name = (
+            create_step_network_policy(self._networking_v1, self.namespace, step)
+            if self._execution_profile_config.step_network_policies_enabled
+            else None
+        )
 
         # Otherwise, create a new job
         common_labels = common_labels_for_step(step)
@@ -261,10 +271,19 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
 
         try:
             # Create the job in Kubernetes
-            self._batch_v1.create_namespaced_job(namespace=self.namespace, body=k8s_job)
+            created = self._batch_v1.create_namespaced_job(namespace=self.namespace, body=k8s_job)
             logger.info(
                 "Scheduled job step with Kubernetes job", extra={"job_name": job_name, "namespace": self.namespace}
             )
+            if network_policy_name and created.metadata and created.metadata.uid:
+                adopt_step_network_policy(
+                    self._networking_v1,
+                    self.namespace,
+                    network_policy_name,
+                    client.V1OwnerReference(
+                        api_version="batch/v1", kind="Job", name=job_name, uid=created.metadata.uid
+                    ),
+                )
             self._ensure_initial_workload_delegation(step, k8s_job)
         except ApiException:
             logger.exception(
@@ -565,6 +584,8 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             namespace=self.namespace,
             name=job_name,
         )
+        if self._execution_profile_config.step_network_policies_enabled:
+            delete_step_network_policy(self._networking_v1, self.namespace, job_name)
 
     def cleanup_steps(self):
         jobs = self.get_kubernetes_job_list_by_labels(labels=KUBE_JOB_SELECTOR_LABELS)
