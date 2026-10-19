@@ -9127,7 +9127,8 @@ nemo evals runs submit [OPTIONS]
 
 * `--harbor-dir <PATH>`: Local Harbor dataset directory.
 * `--harbor-hub`: Harbor Hub dataset, org/name@ref.
-* `--spec-file <PATH>`: TasksetRunInput JSON: its target and execution, and its taskset unless --harbor-dir or --harbor-hub supplies the tasks.
+* `--harbor-git`: Public git repo of Harbor tasks under tasks/, \<url>@\<tag or commit>.
+* `--spec-file <PATH>`: TasksetRunInput JSON: its target and execution, and its taskset unless --harbor-dir, --harbor-hub or --harbor-git supplies the tasks.
 * `--tasks`: Indexes or names, comma-separated; default all.
 * `--agent`: Harbor built-in agent (without --spec-file). [default: oracle]
 * `--sandbox-profile`: Operator sandbox profile; default: the operator's (without --spec-file).
