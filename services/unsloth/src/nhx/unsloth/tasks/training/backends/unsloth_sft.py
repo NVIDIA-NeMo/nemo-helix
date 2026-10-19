@@ -25,6 +25,7 @@ from dataclasses import replace
 from typing import Any, Literal
 
 from nemo_helix_plugin.job_context import JobContext
+from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.service.context import NHXJobContext
 from nhx.customization_common.training.reporting import DIAGNOSTIC_TIME_SERIES, ProgressReportingConfig
 from nhx.unsloth.integrations.hf_bridge import apply_integrations_to_sft_config
@@ -352,11 +353,15 @@ def train_sft(
                 callbacks=[create_hf_trainer_progress_callback(progress)],
             )
             train_result = trainer.train()
+
+        # ── Save ──────────────────────────────────────────────────────
+        progress.report_phase(
+            TrainingPhase.FINALIZING_CHECKPOINT if spec.output.save_method == "lora" else TrainingPhase.MERGING_ADAPTER
+        )
+        saved_path = _save_model(model, tokenizer, output_dir, spec)
+        progress.reporter.report_completed("Training completed")
     finally:
         progress.close()
-
-    # ── Save ──────────────────────────────────────────────────────────
-    saved_path = _save_model(model, tokenizer, output_dir, spec)
 
     return {
         "loss": float(train_result.training_loss),
