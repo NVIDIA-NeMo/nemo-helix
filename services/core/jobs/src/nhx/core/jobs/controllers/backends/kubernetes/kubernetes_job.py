@@ -64,6 +64,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     load_kubernetes_config,
     name_for_step,
     reclaim_job_persistent_storage,
+    sweep_step_secrets,
     update_all_tasks,
     update_tasks_with_pause_outcome,
 )
@@ -194,6 +195,16 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             )
             raise
 
+    def _job_exists(self, name: str) -> bool:
+        """Whether the Job exists; raises when Kubernetes can't say."""
+        try:
+            self._batch_v1.read_namespaced_job(name=name, namespace=self.namespace)
+        except client.ApiException as e:
+            if e.status == 404:
+                return False
+            raise
+        return True
+
     def get_kubernetes_job_list_by_labels(self, labels: dict[str, str]) -> list[V1Job]:
         label_selector = ",".join([f"{k}={v}" for k, v in labels.items()])
         try:
@@ -225,6 +236,10 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
                 raise SchedulingDeferred(f"Could not check for the previous Kubernetes Job '{job_name}'") from exc
             if k8s_job is not None and k8s_job.spec is not None and k8s_job.spec.suspend:
                 # Jobs paused before cooperative pause left a suspended Job object.
+                # Its new pod reads the Secret, so write what the submitter may read now: a secret rotated or
+                # revoked while the step was paused takes effect, as the launcher's own fetch would.
+                if secret_values := self.resolve_step_secrets(step):
+                    create_step_secret(self._core_v1, self.namespace, step, secret_values)
                 self.resume_job(k8s_job)
                 return JobUpdate(
                     status=HelixJobStatus.PENDING,
@@ -314,6 +329,14 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
                     "Failed to delete step NetworkPolicy after Kubernetes job creation failed",
                     extra={"network_policy": network_policy_name, "namespace": self.namespace},
                 )
+            if secret_env:
+                try:
+                    delete_step_secret(self._core_v1, self.namespace, job_name)
+                except Exception:
+                    logger.exception(
+                        "Failed to delete step Secret after Kubernetes job creation failed",
+                        extra={"kind": "Secret", "resource_name": job_name, "namespace": self.namespace},
+                    )
             raise
         logger.info("Scheduled job step with Kubernetes job", extra={"job_name": job_name, "namespace": self.namespace})
         if network_policy_name and created.metadata and created.metadata.uid:
@@ -674,6 +697,14 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         )
 
     def cleanup_steps(self):
+        sweep_step_secrets(
+            self._core_v1,
+            self.namespace,
+            workload_exists=self._job_exists,
+            step_is_terminal=lambda job, step_name, workspace: self.check_step_is_terminal(
+                job=job, step_name=step_name, workspace=workspace
+            ),
+        )
         jobs = self.get_kubernetes_job_list_by_labels(labels=KUBE_JOB_SELECTOR_LABELS)
         for job in jobs:
             # Cleanup completed jobs immediately if the config says to. Otherwise rely on k8s job TTL.

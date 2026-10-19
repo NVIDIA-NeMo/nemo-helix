@@ -936,7 +936,8 @@ chmod -R 777 {job_vol}/{storage_subpath}
                     env[envvar.name] = envvar.value
 
         # Under workload token exchange the controller reads the step's secrets for its submitter: the launcher can't.
-        env.update(self.resolve_step_secrets(step))
+        step_secrets = self.resolve_step_secrets(step)
+        env.update(step_secrets)
 
         # Thread through shared platform envvars to the job
         # Note: address_override defaults to None, which triggers automatic loopback detection
@@ -973,6 +974,8 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 task_storage_mount=task_storage_mount,
                 step_config_json=step_config_json,
             )
+            if step_secrets:
+                container_args["_nhx_step_secret_names"] = sorted(step_secrets)
             submitted_to_threadpool_at = time.monotonic()
             self._container_run_threadpool.submit(self.run_container, step, container_args, submitted_to_threadpool_at)
             submitted = True
@@ -1453,6 +1456,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
         status_details = {}
         status = HelixJobStatus.PENDING
         workload_delegation_name = container_args.pop("_nhx_workload_delegation_name", None)
+        step_secret_names: list[str] = container_args.pop("_nhx_step_secret_names", [])
 
         # If a request to pause or cancel came in while we were waiting for scheduling loop,
         # cancel scheduling the container
@@ -1499,6 +1503,11 @@ chmod -R 777 {job_vol}/{storage_subpath}
             # only sees one that stopped since. Creating over it would fail on the name.
             if not self._remove_container_before_resource_release(step, container, reason="reschedule"):
                 raise FailedToScheduleError(f"Could not remove the previous container '{container.name}'")
+            container = None
+        if container is not None and _secrets_changed(container, container_args["environment"], step_secret_names):
+            # A container's environment is fixed at creation; a resumed step must run with its secrets as they are now.
+            logger.info("Replacing container: its step's secrets changed", extra={"container_name": container.name})
+            container.remove(force=True)
             container = None
         if container is not None:
             logger.info("Container already exists, not creating a new one", extra={"container_name": container.name})
@@ -2415,3 +2424,10 @@ class GPUDockerJobBackend(DockerJobBackend[GPUExecutionProvider]):
         ]
 
         return container_args
+
+
+def _secrets_changed(container: Container, environment: dict[str, str], names: list[str]) -> bool:
+    """Whether ``container`` holds a value other than ``environment``'s for any of the secret variables ``names``."""
+    config = (container.attrs or {}).get("Config") or {}
+    held = dict(entry.partition("=")[::2] for entry in config.get("Env") or [])
+    return any(held.get(name) != environment.get(name) for name in names)

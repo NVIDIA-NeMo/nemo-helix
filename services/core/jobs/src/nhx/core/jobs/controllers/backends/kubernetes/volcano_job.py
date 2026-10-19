@@ -64,6 +64,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     load_kubernetes_config,
     name_for_step,
     reclaim_job_persistent_storage,
+    sweep_step_secrets,
     update_all_tasks,
     update_tasks_with_pause_outcome,
 )
@@ -196,6 +197,18 @@ class VolcanoJobBackend(
         except Exception:
             logger.exception("Unexpected error fetching Volcano job by name")
             raise
+
+    def _volcano_job_exists(self, name: str) -> bool:
+        """Whether the Volcano Job exists; raises when Kubernetes can't say."""
+        try:
+            self._custom_v1.get_namespaced_custom_object(
+                group="batch.volcano.sh", version="v1alpha1", namespace=self.namespace, plural="jobs", name=name
+            )
+        except ApiException as e:
+            if e.status == 404:
+                return False
+            raise
+        return True
 
     def get_volcano_job_list_by_labels(self, labels: dict[str, str]) -> list[dict]:
         label_selector = ",".join([f"{k}={v}" for k, v in labels.items()])
@@ -437,10 +450,14 @@ class VolcanoJobBackend(
                 extra={"job_name": job_name, "namespace": self.namespace, "error_message": e.reason},
             )
             self._delete_step_network_policy(network_policy_name)
+            if secret_env:
+                delete_step_secret(self._core_v1, self.namespace, configmap_name)
             raise
         except Exception:
             logger.exception("Failed to create Volcano Job", extra={"job_name": job_name, "namespace": self.namespace})
             self._delete_step_network_policy(network_policy_name)
+            if secret_env:
+                delete_step_secret(self._core_v1, self.namespace, configmap_name)
             raise
         logger.info("Scheduled job step with Volcano job", extra={"job_name": job_name, "namespace": self.namespace})
         uid = created.get("metadata", {}).get("uid") if isinstance(created, dict) else None
@@ -572,6 +589,14 @@ class VolcanoJobBackend(
         )
 
     def cleanup_steps(self):
+        sweep_step_secrets(
+            self._core_v1,
+            self.namespace,
+            workload_exists=self._volcano_job_exists,
+            step_is_terminal=lambda job, step_name, workspace: self.check_step_is_terminal(
+                job=job, step_name=step_name, workspace=workspace
+            ),
+        )
         jobs = self.get_volcano_job_list_by_labels(labels=KUBE_JOB_SELECTOR_LABELS)
         for job in jobs:
             # Extract job_id and step_name from labels

@@ -3,7 +3,7 @@
 
 import datetime
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 from jsonschema import Draft202012Validator
@@ -3994,6 +3994,126 @@ class TestSecretsUnderWorkloadTokenExchange:
         kubernetes_job._core_v1.delete_namespaced_secret.assert_called_once_with(
             name=job.metadata.name, namespace=kubernetes_job.namespace
         )
+
+
+class TestStepSecretsDoNotOutliveTheirJobs:
+    """A step's Secret holds credentials, so nothing may leave it behind once its Job can no longer use it."""
+
+    def test_a_failed_job_create_deletes_the_secret(
+        self, kubernetes_job, cpu_execution_provider, test_step_pending_with_auth_context, workload_exchange_auth_config
+    ) -> None:
+        step = _with_secret_env(test_step_pending_with_auth_context)
+        values = {("default", "local-secret"): "local-value", ("other-ws", "shared-secret"): "shared-value"}
+        kubernetes_job._batch_v1.create_namespaced_job.side_effect = ApiException(status=500)
+        kubernetes_job._core_v1.read_namespaced_secret.return_value = SimpleNamespace(
+            metadata=SimpleNamespace(labels={JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER})
+        )
+
+        with pytest.raises(ApiException):
+            TestSecretsUnderWorkloadTokenExchange()._schedule(
+                kubernetes_job, cpu_execution_provider, step, workload_exchange_auth_config, values
+            )
+
+        kubernetes_job._core_v1.delete_namespaced_secret.assert_called_once_with(
+            name=name_for_step(step), namespace=kubernetes_job.namespace
+        )
+
+    @pytest.mark.parametrize(
+        ("job_exists", "step_terminal", "deleted"),
+        [
+            pytest.param(False, True, True, id="job-gone-step-ended"),
+            pytest.param(True, True, False, id="job-still-there"),
+            pytest.param(False, False, False, id="step-still-running"),
+        ],
+    )
+    def test_cleanup_deletes_a_secret_only_once_its_job_is_gone_and_its_step_ended(
+        self, kubernetes_job, test_step_pending_with_auth_context, job_exists: bool, step_terminal: bool, deleted: bool
+    ) -> None:
+        from nhx.core.jobs.controllers.backends.kubernetes.common import common_labels_for_step
+
+        step = test_step_pending_with_auth_context
+        name = name_for_step(step)
+        secret = SimpleNamespace(metadata=SimpleNamespace(name=name, labels=common_labels_for_step(step)))
+        kubernetes_job._core_v1.list_namespaced_secret.return_value = SimpleNamespace(items=[secret])
+        kubernetes_job._core_v1.read_namespaced_secret.return_value = secret
+
+        with (
+            patch.object(kubernetes_job, "get_kubernetes_job_list_by_labels", return_value=[]),
+            patch.object(kubernetes_job, "check_step_is_terminal", return_value=step_terminal),
+        ):
+            if job_exists:
+                kubernetes_job._batch_v1.read_namespaced_job.return_value = MagicMock()
+            else:
+                kubernetes_job._batch_v1.read_namespaced_job.side_effect = ApiException(status=404)
+            kubernetes_job.cleanup_steps()
+
+        calls = kubernetes_job._core_v1.delete_namespaced_secret.call_args_list
+        assert (calls == [call(name=name, namespace=kubernetes_job.namespace)]) is deleted
+
+    def test_cleanup_keeps_a_secret_when_it_cannot_tell_whether_the_job_exists(
+        self, kubernetes_job, test_step_pending_with_auth_context
+    ) -> None:
+        from nhx.core.jobs.controllers.backends.kubernetes.common import common_labels_for_step
+
+        step = test_step_pending_with_auth_context
+        secret = SimpleNamespace(
+            metadata=SimpleNamespace(name=name_for_step(step), labels=common_labels_for_step(step))
+        )
+        kubernetes_job._core_v1.list_namespaced_secret.return_value = SimpleNamespace(items=[secret])
+        kubernetes_job._batch_v1.read_namespaced_job.side_effect = ApiException(status=500)
+
+        with (
+            patch.object(kubernetes_job, "get_kubernetes_job_list_by_labels", return_value=[]),
+            patch.object(kubernetes_job, "check_step_is_terminal", return_value=True),
+        ):
+            kubernetes_job.cleanup_steps()
+
+        kubernetes_job._core_v1.delete_namespaced_secret.assert_not_called()
+
+
+class TestAResumedStepReadsItsSecretsAgain:
+    """Resuming a suspended Job starts a new pod: it gets the secrets as the submitter may read them now."""
+
+    def _resume(self, kubernetes_job, provider, step, auth_config, values):
+        suspended = MagicMock()
+        resumed = step.model_copy(update={"status": HelixJobStatus.RESUMING})
+        with (
+            patch.object(kubernetes_job, "get_job_by_name", return_value=suspended),
+            patch.object(kubernetes_job, "resume_job") as resume_job,
+        ):
+            TestSecretsUnderWorkloadTokenExchange()._schedule(kubernetes_job, provider, resumed, auth_config, values)
+        return resume_job, suspended
+
+    def test_resuming_rewrites_the_secret_before_the_job_runs_again(
+        self, kubernetes_job, cpu_execution_provider, test_step_pending_with_auth_context, workload_exchange_auth_config
+    ) -> None:
+        step = _with_secret_env(test_step_pending_with_auth_context)
+        values = {("default", "local-secret"): "rotated", ("other-ws", "shared-secret"): "shared-value"}
+        order: list[str] = []
+        kubernetes_job._core_v1.create_namespaced_secret.side_effect = lambda **_: order.append("secret")
+
+        resume_job, suspended = self._resume(
+            kubernetes_job, cpu_execution_provider, step, workload_exchange_auth_config, values
+        )
+
+        body = kubernetes_job._core_v1.create_namespaced_secret.call_args.kwargs["body"]
+        assert body.string_data == {"LOCAL_SECRET": "rotated", "CROSS_WORKSPACE_SECRET": "shared-value"}
+        resume_job.assert_called_once_with(suspended)
+        assert order == ["secret"]
+
+    def test_a_secret_no_longer_readable_fails_the_resume(
+        self, kubernetes_job, cpu_execution_provider, test_step_pending_with_auth_context, workload_exchange_auth_config
+    ) -> None:
+        step = _with_secret_env(test_step_pending_with_auth_context)
+
+        with pytest.raises(FailedToScheduleError, match="other-ws/shared-secret"):
+            self._resume(
+                kubernetes_job,
+                cpu_execution_provider,
+                step,
+                workload_exchange_auth_config,
+                {("default", "local-secret"): "local-value"},
+            )
 
 
 def test_a_resumed_steps_secret_is_written_again_with_the_controllers_verbs(test_step_pending_with_auth_context):

@@ -2252,3 +2252,59 @@ def test_terminate_volcano_job_deletes_network_policy(
     volcano_job._networking_v1.delete_namespaced_network_policy.assert_called_once_with(
         name=name_for_step(test_step_pending), namespace="test-namespace"
     )
+
+
+def _with_a_secret(step: HelixJobStepWithContext) -> HelixJobStepWithContext:
+    step = step.model_copy(deep=True)
+    assert step.step_spec is not None
+    step.step_spec.environment = [
+        *(step.step_spec.environment or []),
+        HelixJobEnvironmentVariable(name="TOKEN", from_secret=HelixJobSecretEnvironmentVariableRef(name="token")),
+    ]
+    return step
+
+
+def _managed_secret(name: str, labels: dict[str, str]) -> SimpleNamespace:
+    return SimpleNamespace(metadata=SimpleNamespace(name=name, labels=labels))
+
+
+def test_a_failed_volcano_create_deletes_the_steps_secret(
+    volcano_job: VolcanoJobBackend,
+    distributed_gpu_execution_provider,
+    test_step_pending_with_auth_context: HelixJobStepWithContext,
+    workload_exchange_auth_config,
+):
+    """The Secret holds credentials; a Job that never existed must not leave it behind."""
+    step = _with_a_secret(test_step_pending_with_auth_context)
+    managed = _managed_secret(name_for_step(step), {JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER})
+
+    with (
+        patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config),
+        patch.object(volcano_job, "_read_secret_value", return_value="value"),
+        patch.object(volcano_job._custom_v1, "create_namespaced_custom_object", side_effect=ApiException(status=500)),
+        patch.object(volcano_job._core_v1, "read_namespaced_secret", return_value=managed),
+        patch.object(volcano_job._core_v1, "delete_namespaced_secret") as delete,
+        pytest.raises(ApiException),
+    ):
+        volcano_job.schedule(distributed_gpu_execution_provider, step)
+
+    delete.assert_called_once_with(name=name_for_step(step), namespace=volcano_job.namespace)
+
+
+def test_volcano_cleanup_deletes_a_secret_whose_job_is_gone(
+    volcano_job: VolcanoJobBackend, test_step_pending_with_auth_context: HelixJobStepWithContext
+):
+    step = test_step_pending_with_auth_context
+    secret = _managed_secret(name_for_step(step), common_labels_for_step(step))
+
+    with (
+        patch.object(volcano_job, "get_volcano_job_list_by_labels", return_value=[]),
+        patch.object(volcano_job, "check_step_is_terminal", return_value=True),
+        patch.object(volcano_job._custom_v1, "get_namespaced_custom_object", side_effect=ApiException(status=404)),
+        patch.object(volcano_job._core_v1, "list_namespaced_secret", return_value=SimpleNamespace(items=[secret])),
+        patch.object(volcano_job._core_v1, "read_namespaced_secret", return_value=secret),
+        patch.object(volcano_job._core_v1, "delete_namespaced_secret") as delete,
+    ):
+        volcano_job.cleanup_steps()
+
+    delete.assert_called_once_with(name=name_for_step(step), namespace=volcano_job.namespace)

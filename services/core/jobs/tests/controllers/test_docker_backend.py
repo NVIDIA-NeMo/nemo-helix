@@ -3792,3 +3792,53 @@ def test_docker_job_gets_its_secret_values_from_the_controller_under_token_excha
     env = job_create_call.kwargs["environment"]
     assert env["SECRET_ENV_VAR"] == "secret-value"
     assert not env.get("NEMO_JOB_SECRETS")
+
+
+def _resume_with_secret(docker_job, docker_client_mock, step, *, existing_value: str, current_value: str):
+    """Resume ``step`` over an existing container that holds ``existing_value``, the secret now being ``current_value``."""
+    step.status = HelixJobStatus.RESUMING
+    step.step_spec.environment = [
+        *(step.step_spec.environment or []),
+        HelixJobEnvironmentVariable(name="TOKEN", from_secret=HelixJobSecretEnvironmentVariableRef(name="token")),
+    ]
+    existing = MagicMock()
+    existing.name = "job-test-job-id-test-step"
+    existing.attrs = {"Config": {"Env": [f"TOKEN={existing_value}", "OTHER=1"]}}
+    lookup = docker_client_mock.containers.get._original_side_effect
+
+    def get(name: str):
+        return existing if name == existing.name else lookup(name)
+
+    docker_client_mock.containers.get.side_effect = get
+    docker_job._workload_delegation_store = workload_delegation_store_mock()
+    with (
+        patch("nhx.common.config.get_auth_config", return_value=workload_token_exchange_auth_config()),
+        patch.object(docker_job, "_write_workload_identity_subject_token"),
+        patch.object(docker_job, "_read_secret_value", return_value=current_value),
+    ):
+        docker_job.schedule(step.step_spec.executor, step)
+    docker_job._container_run_threadpool.shutdown(wait=True)
+    docker_job._container_run_threadpool = MagicMock()
+    created = [c for c in docker_client_mock.containers.create.call_args_list if c.kwargs.get("name") == existing.name]
+    return existing, created
+
+
+def test_a_resumed_docker_step_gets_a_rotated_secret(docker_job, docker_client_mock, test_job_step_with_auth_context):
+    """A container's environment is fixed when it's created, so a changed secret needs a new container."""
+    existing, created = _resume_with_secret(
+        docker_job, docker_client_mock, test_job_step_with_auth_context, existing_value="old", current_value="rotated"
+    )
+
+    existing.remove.assert_called_once_with(force=True)
+    assert [c.kwargs["environment"]["TOKEN"] for c in created] == ["rotated"]
+
+
+def test_a_resumed_docker_step_keeps_its_container_when_its_secrets_are_unchanged(
+    docker_job, docker_client_mock, test_job_step_with_auth_context
+):
+    existing, created = _resume_with_secret(
+        docker_job, docker_client_mock, test_job_step_with_auth_context, existing_value="same", current_value="same"
+    )
+
+    existing.remove.assert_not_called()
+    assert created == []

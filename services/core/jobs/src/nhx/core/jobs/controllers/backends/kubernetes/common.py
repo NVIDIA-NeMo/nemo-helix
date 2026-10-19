@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 from kubernetes import client, config
@@ -992,6 +993,39 @@ def delete_step_secret(core_v1: client.CoreV1Api, namespace: str, name: str) -> 
     except ApiException as e:
         if e.status != 404:
             raise
+
+
+def sweep_step_secrets(
+    core_v1: client.CoreV1Api,
+    namespace: str,
+    *,
+    workload_exists: Callable[[str], bool],
+    step_is_terminal: Callable[[str, str, str], bool],
+) -> None:
+    """Delete each step Secret whose workload is gone and whose step has ended.
+
+    A failed launch, or a Job Kubernetes removed after its TTL, never reaches the controller's own deletion, and the
+    Secret holds credentials. ``workload_exists`` raises when it can't tell; that Secret is kept for the next sweep.
+    """
+    selector = ",".join(f"{key}={value}" for key, value in KUBE_JOB_SELECTOR_LABELS.items())
+    for secret in core_v1.list_namespaced_secret(namespace=namespace, label_selector=selector).items:
+        name = secret.metadata.name
+        labels = secret.metadata.labels or {}
+        job, step_name, workspace = (
+            labels.get(key) for key in (JOB_ID_LABEL, JOB_STEP_NAME_LABEL, JOB_WORKSPACE_ID_LABEL)
+        )
+        if labels.get(JOB_MANAGED_BY_LABEL) != JOB_MANAGED_BY_JOBS_CONTROLLER or not (job and step_name and workspace):
+            continue
+        try:
+            if workload_exists(name) or not step_is_terminal(job, step_name, workspace):
+                continue
+            delete_step_secret(core_v1, namespace, name)
+        except Exception:
+            logger.warning(
+                "Couldn't check a step Secret for cleanup; keeping it for now",
+                extra=dict(kind="Secret", resource_name=name, namespace=namespace),
+                exc_info=True,
+            )
 
 
 def load_from_dict(data: dict, klass: str):

@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import hashlib
 import uuid
 
 import pytest
@@ -132,9 +133,11 @@ def test_provider_workload_job_reads_its_secrets(
                                 "container": {
                                     "image": nhx_api_image(),
                                     "entrypoint": ["sh", "-c"],
-                                    # Compared, never printed: the value would land in the job's logs.
+                                    # Compared by hash: the launcher logs the command, so the value can't be in it.
                                     "command": [
-                                        f'if [ "${{WORKLOAD_SECRET:-}}" = "{secret_value}" ]; then '
+                                        "if python3 -c 'import hashlib, os, sys; sys.exit(hashlib.sha256("
+                                        'os.environ.get("WORKLOAD_SECRET", "").encode()).hexdigest() != sys.argv[1])\' '
+                                        f"{hashlib.sha256(secret_value.encode()).hexdigest()}; then "
                                         "echo 'Workload secret delivered'; "
                                         "else echo 'Workload secret missing or wrong'; exit 45; fi"
                                     ],
