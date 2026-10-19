@@ -17,7 +17,8 @@ import { getNewCustomizationJobRoute } from '@studio/routes/utils';
 import { RecentJobsTable } from '@studio/routes/WorkspaceDashboardHomeRoute/RecentJobsTable';
 import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
 import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
-import { renderRoute, screen, within } from '@studio/tests/util/render';
+import { act, renderRoute, screen, within } from '@studio/tests/util/render';
+import { focusManager } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { generatePath } from 'react-router';
@@ -134,6 +135,33 @@ describe('RecentJobsTable', () => {
     const runningRow = await screen.findByRole('row', { name: /running-run/ });
     expect(within(runningRow).queryByText('2h')).not.toBeInTheDocument();
     expect(within(runningRow).getByText(/^3h( \d+m)?( \d+s)?$/)).toBeInTheDocument();
+  });
+
+  it('updates cells in place when a poll returns new data instead of remounting them', async () => {
+    let requestCount = 0;
+    server.use(
+      http.get(JOBS_URL, () => {
+        requestCount += 1;
+        return HttpResponse.json(
+          makeJobsPage([makeJob({ name: requestCount === 1 ? 'first-name' : 'second-name' })])
+        );
+      })
+    );
+
+    renderComponent();
+    await screen.findByText('first-name');
+    const [nameCell] = screen.getAllByTestId('line-clamp');
+
+    act(() => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    });
+
+    expect(await screen.findByText('second-name')).toBeInTheDocument();
+    expect(requestCount).toBe(2);
+    expect(screen.getAllByTestId('line-clamp')[0]).toBe(nameCell);
+    expect(nameCell).toHaveTextContent('second-name');
+    focusManager.setFocused(undefined);
   });
 
   it('requests in-progress jobs and jobs that finished in the last 48 hours', async () => {
