@@ -14,11 +14,7 @@ import asyncio
 from typing import Any
 
 import pytest
-
-pytest.importorskip("scaled_evals", reason="scaled-evals plugin not installed")
-
-from opensandbox_mocks import SandboxApiException, Server, execution, mock_sdk
-from scaled_evals.harbor_opensandbox_driver import (
+from nhx_sandbox.harbor_opensandbox_driver import (
     CREATE_ATTEMPT_METADATA_KEY,
     CREATE_ATTEMPTS,
     Connection,
@@ -26,6 +22,7 @@ from scaled_evals.harbor_opensandbox_driver import (
     OpenSandboxDriver,
     harbor_backoff_sec,
 )
+from opensandbox_mocks import SandboxApiException, Server, execution, mock_sdk
 
 
 class SandboxReadyTimeoutException(Exception):

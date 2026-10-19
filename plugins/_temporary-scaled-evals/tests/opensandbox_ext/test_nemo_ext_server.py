@@ -31,17 +31,17 @@ from kubernetes.client import (
     V1Pod,
     V1PodStatus,
 )
-from opensandbox_server.api.schema import ImageSpec, NetworkPolicy, NetworkRule
-from opensandbox_server.extensions import apply_extensions_to_annotations
-from opensandbox_server.services.k8s import provider_factory
-from opensandbox_server.services.k8s.batchsandbox_provider import BatchSandboxProvider
-from opensandbox_server.services.k8s.kubernetes_service import KubernetesSandboxService
-from scaled_evals.harbor_opensandbox_services import (
+from nhx_sandbox.harbor_opensandbox_services import (
     AGENT_BUNDLE_EXTENSION_KEY,
     AGENT_BUNDLE_POD_ANNOTATION,
     EXTENSION_KEY,
     POD_ANNOTATION,
 )
+from opensandbox_server.api.schema import ImageSpec, NetworkPolicy, NetworkRule
+from opensandbox_server.extensions import apply_extensions_to_annotations
+from opensandbox_server.services.k8s import provider_factory
+from opensandbox_server.services.k8s.batchsandbox_provider import BatchSandboxProvider
+from opensandbox_server.services.k8s.kubernetes_service import KubernetesSandboxService
 
 SANDBOX_ID = "sbx-1"
 SPEC = (

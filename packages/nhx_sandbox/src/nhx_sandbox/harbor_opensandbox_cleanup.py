@@ -6,7 +6,7 @@
 Run with a Harbor runner's interpreter; the runner venvs that support ``harbor_opensandbox`` are the
 only environments that carry the OpenSandbox SDK::
 
-    <harbor_dir>/.venv/bin/python -m scaled_evals.harbor_opensandbox_cleanup \\
+    <harbor_dir>/.venv/bin/python -m nhx_sandbox.harbor_opensandbox_cleanup \\
         --selector nemo-scaled-evals-deployment=<id> --selector nemo-scaled-evals-evaluation=<id>
 
 It kills every sandbox matching all selectors, across every page, then waits until none of them is

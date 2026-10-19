@@ -68,7 +68,7 @@ RUN set -eu; \
 # Each selectable Harbor version installs from its own requirements file, so
 # versions can carry different extras. Versions that pin the OpenSandbox SDK
 # support the harbor_opensandbox runtime and also check that the SDK imports.
-COPY plugins/_temporary-scaled-evals/harbor-runners /opt/harbor/requirements
+COPY packages/nhx_sandbox/harbor-runners /opt/harbor/requirements
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     set -eu; \
@@ -120,8 +120,9 @@ RUN set -eu; for version in $(cat /opt/harbor/selectable-versions.txt); do \
         fi; \
     done
 
-# The harbor_opensandbox runtime's Harbor environment takes its egress policy
-# from nhx_sandbox, so every runner venv that carries the OpenSandbox SDK gets it.
+# Harbor loads NemoOpenSandboxEnvironment, and the backend runs the cleanup
+# module, inside every runner venv that carries the OpenSandbox SDK. Both come
+# from nhx_sandbox, which also supplies the egress policy.
 # Not editable: only /opt/harbor is copied into the final image.
 COPY packages/nhx_sandbox /tmp/nhx_sandbox
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -129,25 +130,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         runner="/opt/harbor/${version}"; \
         grep -q '^opensandbox==' "/opt/harbor/requirements/${version}.txt" || continue; \
         VIRTUAL_ENV="${runner}/.venv" uv pip install /tmp/nhx_sandbox; \
-        "${runner}/.venv/bin/python" -c 'import nhx_sandbox.egress, nhx_sandbox.opensandbox_policy'; \
-    done
-
-# Harbor loads NemoOpenSandboxEnvironment, and the backend runs the cleanup
-# module, inside those same venvs. The rest of scaled_evals is not installed
-# there, so a .pth file adds just these modules.
-COPY plugins/_temporary-scaled-evals/src/scaled_evals/harbor_opensandbox_environment.py \
-     plugins/_temporary-scaled-evals/src/scaled_evals/harbor_opensandbox_driver.py \
-     plugins/_temporary-scaled-evals/src/scaled_evals/harbor_opensandbox_cleanup.py \
-     plugins/_temporary-scaled-evals/src/scaled_evals/harbor_opensandbox_services.py \
-     /tmp/nemo-extensions/scaled_evals/
-RUN set -eu; for version in $(cat /opt/harbor/selectable-versions.txt); do \
-        runner="/opt/harbor/${version}"; \
-        grep -q '^opensandbox==' "/opt/harbor/requirements/${version}.txt" || continue; \
-        cp -R /tmp/nemo-extensions "${runner}/nemo-extensions"; \
-        site="$("${runner}/.venv/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"; \
-        echo "${runner}/nemo-extensions" > "${site}/nemo-extensions.pth"; \
         "${runner}/.venv/bin/python" -c \
-            'from scaled_evals.harbor_opensandbox_environment import NemoOpenSandboxEnvironment; import scaled_evals.harbor_opensandbox_cleanup, scaled_evals.harbor_opensandbox_driver'; \
+            'from nhx_sandbox.harbor_opensandbox_environment import NemoOpenSandboxEnvironment; import nhx_sandbox.harbor_opensandbox_cleanup, nhx_sandbox.harbor_opensandbox_driver'; \
     done
 
 # Harbor resolves jobs_dir relative to its own root, so point it at the path the

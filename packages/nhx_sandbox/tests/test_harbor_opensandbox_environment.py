@@ -21,21 +21,20 @@ import pytest
 
 pytest.importorskip("harbor.environments.base")
 pytest.importorskip("nhx_sandbox")
-pytest.importorskip("scaled_evals", reason="scaled-evals plugin not installed")
 
 from harbor.environments.base import BaseEnvironment
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.paths import TrialPaths
-from opensandbox_mocks import Sandbox, SandboxApiException, Server, execution, mock_sdk
-from scaled_evals.harbor_opensandbox_cleanup import APPLIED_EGRESS_GLOB, applied_egress_filename
-from scaled_evals.harbor_opensandbox_driver import OpenSandboxDriver
-from scaled_evals.harbor_opensandbox_environment import (
+from nhx_sandbox.harbor_opensandbox_cleanup import APPLIED_EGRESS_GLOB, applied_egress_filename
+from nhx_sandbox.harbor_opensandbox_driver import OpenSandboxDriver
+from nhx_sandbox.harbor_opensandbox_environment import (
     CREATE_ATTEMPT_METADATA_KEY,
     MANAGED_BY_METADATA_KEY,
     MANAGED_BY_METADATA_VALUE,
     NemoOpenSandboxEnvironment,
     sandbox_role,
 )
+from opensandbox_mocks import Sandbox, SandboxApiException, Server, execution, mock_sdk
 
 # The runner's trusted egress allowlist: an IP, a wildcard hostname and an IPv6 CIDR, one of each form.
 TRUSTED = ["10.96.0.20", "*.nvidia.com", "2001:db8::/48"]
@@ -112,7 +111,7 @@ def _imports_with_blocked_modules(module: str, blocked: list[str]) -> subprocess
 def test_environment_does_not_need_harbors_own_opensandbox_environment() -> None:
     """The point of this class: it loads on a Harbor release that has no OpenSandbox environment."""
     result = _imports_with_blocked_modules(
-        "scaled_evals.harbor_opensandbox_environment", ["harbor.environments.opensandbox"]
+        "nhx_sandbox.harbor_opensandbox_environment", ["harbor.environments.opensandbox"]
     )
 
     assert result.returncode == 0, result.stderr
@@ -120,8 +119,8 @@ def test_environment_does_not_need_harbors_own_opensandbox_environment() -> None
 
 
 def test_driver_does_not_need_harbor() -> None:
-    """The driver is Harbor-free, so it can move into a shared package as is."""
-    result = _imports_with_blocked_modules("scaled_evals.harbor_opensandbox_driver", ["harbor"])
+    """The driver is Harbor-free, so the shared package's runner-side tools can import it without Harbor."""
+    result = _imports_with_blocked_modules("nhx_sandbox.harbor_opensandbox_driver", ["harbor"])
 
     assert result.returncode == 0, result.stderr
 

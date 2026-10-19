@@ -379,14 +379,14 @@ with `422 unsupported_framework_version`.
 
 Harbor loads `NemoOpenSandboxEnvironment` through `environment.import_path`. It
 is a plain Harbor `BaseEnvironment` written on the OpenSandbox SDK
-(`scaled_evals.harbor_opensandbox_driver`), not a subclass of Harbor's own
+(`nhx_sandbox.harbor_opensandbox_driver`), not a subclass of Harbor's own
 OpenSandbox environment, so it uses only the environment API both releases share.
 Harbor's task model sets one difference: a task's `allowlist` may name hostnames
 and `*.` wildcards on 0.13.2, and also IP addresses and CIDRs on 0.20.0. The
 operator allowlist accepts all of them on both.
 
 To support another runner, pin `opensandbox==0.1.16` in its
-`harbor-runners/<version>.txt` and list `opensandbox` under that release's
+`packages/nhx_sandbox/harbor-runners/<version>.txt` and list `opensandbox` under that release's
 `packages` in `data/harbor_runner_qualifications.json` (the image then installs the
 environment into that venv, and CI runs the environment tests against it), then
 add the version to `HARBOR_OPENSANDBOX_HARBOR_VERSIONS`.

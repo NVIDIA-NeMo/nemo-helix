@@ -22,7 +22,7 @@ from kubernetes.client import (
     V1PodStatus,
 )
 from nemo_ext_pod import add_agent_bundle, add_services, agent_bundle_state, service_states
-from scaled_evals.harbor_opensandbox_services import ComposeServices, SandboxAgentBundle, parse_compose_services
+from nhx_sandbox.harbor_opensandbox_services import ComposeServices, SandboxAgentBundle, parse_compose_services
 
 SERVICES = parse_compose_services(
     {

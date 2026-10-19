@@ -1222,7 +1222,7 @@ jobs:
       # every runner harbor_opensandbox accepts: those whose requirements pin the OpenSandbox SDK.
       # Build each runner's venv from its own requirements, as the image does, and run the tests there.
       - name: Run harbor_opensandbox environment tests on each supported Harbor runner
-        working-directory: plugins/_temporary-scaled-evals
+        working-directory: packages/nhx_sandbox
         run: |
           set -eu
           for requirements in harbor-runners/*.txt; do
@@ -1232,7 +1232,7 @@ jobs:
             uv venv --python 3.12 "$venv"
             # --python, not VIRTUAL_ENV: setup-uv exports UV_PYTHON, which would otherwise send the
             # install to the workspace .venv.
-            uv pip install --python "$venv/bin/python" -r "$requirements" ../../packages/nhx_sandbox pytest pytest-asyncio
+            uv pip install --python "$venv/bin/python" -r "$requirements" . pytest pytest-asyncio
             echo "::group::Harbor $version"
             "$venv/bin/python" -m pytest -p no:cacheprovider -v \
               tests/test_harbor_opensandbox_environment.py tests/test_harbor_opensandbox_driver.py \

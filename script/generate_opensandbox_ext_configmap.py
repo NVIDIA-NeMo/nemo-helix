@@ -5,8 +5,8 @@
 """
 Generate the OpenSandbox compose services extension ConfigMap from its source files.
 
-The extension is four Python files that the stock OpenSandbox server loads from a ConfigMap. The
-sources stay in the scaled-evals plugin, because one of them is also part of the plugin. The chart
+The extension is four Python files that the stock OpenSandbox server loads from a ConfigMap. Three
+sources stay in the scaled-evals plugin; the fourth is part of the shared nhx-sandbox package. The chart
 ships a generated copy, with no namespace, at k8s/helm/files/opensandbox-ext/configmap.yaml, and
 renders it into the OpenSandbox server's namespace.
 
@@ -29,6 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Where the extension's source files live. This is the one place to change when the plugin moves.
 PLUGIN_DIR = REPO_ROOT / "plugins" / "_temporary-scaled-evals"
+SANDBOX_PACKAGE_DIR = REPO_ROOT / "packages" / "nhx_sandbox" / "src" / "nhx_sandbox"
 
 # The ConfigMap the chart ships: its name, the generated file, and the example server values that mount it.
 CONFIGMAP_NAME = "nemo-opensandbox-ext"
@@ -40,7 +41,7 @@ SOURCES: dict[str, Path] = {
     "sitecustomize.py": PLUGIN_DIR / "opensandbox_ext" / "sitecustomize.py",
     "nemo_ext_server.py": PLUGIN_DIR / "opensandbox_ext" / "nemo_ext_server.py",
     "nemo_ext_pod.py": PLUGIN_DIR / "opensandbox_ext" / "nemo_ext_pod.py",
-    "harbor_opensandbox_services.py": PLUGIN_DIR / "src" / "scaled_evals" / "harbor_opensandbox_services.py",
+    "harbor_opensandbox_services.py": SANDBOX_PACKAGE_DIR / "harbor_opensandbox_services.py",
 }
 
 HEADER = f"""\
