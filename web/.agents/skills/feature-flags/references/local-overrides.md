@@ -41,7 +41,21 @@ express that distinction, which is why the controls are selects rather than
 switches.
 
 Edits accumulate in a draft and commit as one write plus one reload, so changing
-several flags costs a single reload. "Reset all" clears every override.
+several flags costs a single reload.
+
+Three bulk actions act on the rows the filter is currently showing, so narrowing
+the filter first scopes them:
+
+| Action      | Effect                                                                     |
+| ----------- | -------------------------------------------------------------------------- |
+| All on      | Writes an explicit `true` override for every listed boolean/preview flag   |
+| All off     | Writes an explicit `false` override for the same                            |
+| Reset all   | Removes overrides entirely, so flags fall back to the deployment default   |
+
+"All off" and "Reset all" are not the same: the first pins flags off regardless
+of what the deployment ships, the second stops overriding them at all. String
+and number flags are left alone by the first two, since `true`/`false` is not a
+meaningful value for them.
 
 The gate flag itself is deliberately absent from the list. Since it is read only
 from the build environment, a row for it would render a control that silently

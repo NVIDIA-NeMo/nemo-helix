@@ -4,6 +4,7 @@
 import {
   Badge,
   Button,
+  ButtonGroup,
   Divider,
   Flex,
   Modal,
@@ -186,6 +187,30 @@ export const FeatureFlagPanel: FC = () => {
     });
   };
 
+  /**
+   * Bulk-set every visible flag. Scoped to what the filter is showing, since
+   * silently changing rows the user cannot see is the more surprising option.
+   *
+   * Only fixed-choice flags are touched: "true"/"false" is not a meaningful
+   * value for a string or number flag, and the schema guard would drop it on
+   * the next read anyway.
+   *
+   * Distinct from "Reset all", which removes overrides so flags fall back to
+   * the deployment default — this writes an explicit value.
+   */
+  const setAllVisible = (value: 'true' | 'false') => {
+    setSaveFailed(false);
+    setDraft((previous) => {
+      const next = { ...previous };
+      for (const row of visible) {
+        if (isFixedChoice(row.typeName)) next[row.key] = value;
+      }
+      return next;
+    });
+  };
+
+  const bulkCount = visible.filter((row) => isFixedChoice(row.typeName)).length;
+
   const applyAndReload = () => {
     if (writeStoredOverrides(draft)) {
       window.location.reload();
@@ -216,9 +241,19 @@ export const FeatureFlagPanel: FC = () => {
         <>
           <ModalCloseButton kind="tertiary">Close</ModalCloseButton>
           <Flex align="center" gap="density-sm">
-            <Button kind="secondary" disabled={count === 0} onClick={() => setDraft({})}>
-              Reset all
-            </Button>
+            {/* Grouped because all three act on the same set of rows; "Apply and
+                reload" stays the one primary action on the trailing edge. */}
+            <ButtonGroup kind="secondary">
+              <Button disabled={bulkCount === 0} onClick={() => setAllVisible('true')}>
+                All on
+              </Button>
+              <Button disabled={bulkCount === 0} onClick={() => setAllVisible('false')}>
+                All off
+              </Button>
+              <Button disabled={count === 0} onClick={() => setDraft({})}>
+                Reset all
+              </Button>
+            </ButtonGroup>
             <Button color="brand" disabled={!isDirty || hasInvalid} onClick={applyAndReload}>
               Apply and reload
             </Button>

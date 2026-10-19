@@ -124,6 +124,90 @@ describe('FeatureFlagPanel', () => {
     expect(readBlob()).toBeNull();
   });
 
+  it('all on sets every listed flag to true', async () => {
+    const user = await openPanel();
+    await user.click(screen.getByRole('button', { name: 'All on' }));
+
+    const comboboxes = screen.getAllByRole('combobox');
+    expect(screen.getByText(`${comboboxes.length} overrides pending`)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply and reload' })).toBeEnabled();
+  });
+
+  it('all off sets every listed flag to false', async () => {
+    const reload = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, reload },
+    });
+
+    const user = await openPanel();
+    await user.click(screen.getByRole('button', { name: 'All off' }));
+    await user.click(screen.getByRole('button', { name: 'Apply and reload' }));
+
+    const blob = readBlob()!;
+    expect(Object.values(blob).every((value) => value === 'false')).toBe(true);
+    expect(blob['tourEnabled']).toBe('false');
+  });
+
+  // The gate is excluded from the list, so a bulk action must not reach it —
+  // writing it would be a no-op entry that confuses the pending count.
+  it('bulk actions never touch the hidden gate flag', async () => {
+    const reload = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, reload },
+    });
+
+    const user = await openPanel();
+    await user.click(screen.getByRole('button', { name: 'All on' }));
+    await user.click(screen.getByRole('button', { name: 'Apply and reload' }));
+
+    expect(readBlob()).not.toHaveProperty('flagOverridesEnabled');
+  });
+
+  // Acting on rows the user cannot see is the more surprising behaviour.
+  it('bulk actions apply only to rows the filter is showing', async () => {
+    const reload = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, reload },
+    });
+
+    const user = await openPanel();
+    await user.type(screen.getByLabelText('Filter flags'), 'tourEnabled');
+    await user.click(screen.getByRole('button', { name: 'All off' }));
+    await user.click(screen.getByRole('button', { name: 'Apply and reload' }));
+
+    expect(readBlob()).toEqual({ tourEnabled: 'false' });
+  });
+
+  // "Reset all" removes overrides so flags fall back to the deployment default;
+  // "All off" writes an explicit false. They are not the same action.
+  it('reset all differs from all off', async () => {
+    const reload = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, reload },
+    });
+
+    // Start from a stored override so Apply is genuinely enabled and the write
+    // path runs; otherwise this would only assert that nothing happened.
+    window.localStorage.setItem(
+      FEATURE_FLAG_OVERRIDES_KEY,
+      JSON.stringify({ tourEnabled: 'true' })
+    );
+
+    const user = await openPanel();
+    await user.click(screen.getByRole('button', { name: 'All off' }));
+    expect(screen.getByRole('button', { name: 'Apply and reload' })).toBeEnabled();
+
+    await user.click(screen.getByRole('button', { name: 'Reset all' }));
+    await user.click(screen.getByRole('button', { name: 'Apply and reload' }));
+
+    expect(readBlob()).toBeNull();
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
   it('reset all clears every pending override', async () => {
     window.localStorage.setItem(
       FEATURE_FLAG_OVERRIDES_KEY,
