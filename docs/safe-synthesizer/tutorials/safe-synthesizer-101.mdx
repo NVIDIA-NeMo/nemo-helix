@@ -15,7 +15,7 @@ Before you begin, make sure that you have:
 
 - Access to a deployment of NeMo Helix with NeMo Safe Synthesizer available (see [getting-started](/documentation/synthesize-safe-data))
 - **An NVIDIA GPU with 80 GB+ VRAM** — Safe Synthesizer requires GPU access for model training.
-- Python environment with `nemo-helix` SDK installed
+- A Python environment where you can install packages (Step 1 installs the `nemo-helix` SDK)
 - Basic understanding of Python and pandas
 
 ---
@@ -356,7 +356,7 @@ all_jobs = safe_synthesizer.jobs.list()
 print(f"Total jobs: {len(list(all_jobs.items()))}")
 
 # Delete this job (optional)
-# safe_synthesizer.jobs.list()
+# client.jobs.delete_job(name=job.job_name, workspace="default")
 # print(f"✅ Job {job.job_name} deleted")
 ```
 
@@ -381,7 +381,7 @@ print(f"Total jobs: {len(list(all_jobs.items()))}")
 **Slow performance:**
 
 - Reduce dataset size for testing
-- Use smaller model (adjust `training.pretrained_model`)
+- Use a smaller model, for example `.with_train(pretrained_model="TinyLlama/TinyLlama-1.1B-Chat-v1.0")` on the builder. Models other than the default are downloaded from Hugging Face Hub when the job starts; see [Pretrained Model](/documentation/synthesize-safe-data/about/parameters-reference#pretrained-model)
 - Check GPU availability
 
 **Error: "Dataset must have at least 200 records to use holdout."**
