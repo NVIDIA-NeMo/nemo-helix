@@ -564,8 +564,8 @@ navigation:
             path: ../../support-matrix.mdx
           - page: Telemetry and Privacy
             path: ../../telemetry-and-privacy.mdx
-          - page: Plugins and Skills
-            path: ../../plugins-and-skills.mdx
+          - page: Plugin Architecture
+            path: ../../plugin-architecture.mdx
           - api: API Reference
           - section: Python SDK
             path: ../../pysdk/index.mdx
