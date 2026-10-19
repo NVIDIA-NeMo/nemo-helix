@@ -140,7 +140,10 @@ export const ExperimentRoute: FC = () => {
   );
 
   const experiments = data?.data ?? [];
-  const totalResults = data?.pagination?.total_results ?? 0;
+  // When favorites are not truncated, the main list query excludes them (is_favorite: false),
+  // so add the favorites count back to get the true total shown in the footer.
+  const totalResults =
+    (data?.pagination?.total_results ?? 0) + (favoritesTruncated ? 0 : favoritesTotal);
 
   return (
     <AccessibleTitle title="Experiments">
