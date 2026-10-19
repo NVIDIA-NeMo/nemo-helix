@@ -288,6 +288,20 @@ def test_durations_are_stamped_without_dropping_existing_metadata(intake: InMemo
     assert float(metadata[PUBLISH_DURATION_KEY]) >= 0
 
 
+def test_a_taskset_task_job_publishes_without_touching_the_shared_evaluation(intake: InMemoryIntakeService) -> None:
+    # A taskset run's task Jobs share one Evaluation; each stamping its own duration would race.
+    outcome = publish_agent_eval_result(
+        _result(),
+        spec=IntakePublicationSpec(evaluation_id="eval-1", agent_name="a", required=False),
+        target=None,
+        workspace="default",
+        intake=intake.client(),
+        record_durations=False,
+    )
+    assert outcome.status == HelixJobStatus.COMPLETED and outcome.trial_count == 1
+    assert intake.evaluation_patches == []
+
+
 def test_a_started_at_only_result_does_not_count_publish_time_as_run_time(intake: InMemoryIntakeService) -> None:
     # A row-eval result carries no `duration_sec`, so the run's length is derived from `started_at`.
     # Deriving it after the publish instead of before would fold the publish into the run.

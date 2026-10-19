@@ -24,7 +24,8 @@ Expiry keeps no partial result. TODO(M4 stories 5, 7): merge the tasks that fini
 
 Task Jobs save their result bundle as a Job result and, being agent-evaluate Jobs, also a per-task
 result record named after the Job. The bundle Job saves files only. This controller writes the run's
-state and its result record (name = run id), and does not publish to Intake.
+state and its result record (name = run id). When the run publishes to Intake, task Jobs publish their
+own trials and this controller only stamps the run's Evaluation (outcome, duration) once, at the end.
 """
 
 from __future__ import annotations
@@ -43,6 +44,7 @@ from nemo_evals.jobs.result_persistence import agent_eval_result_entity
 from nemo_evals.jobs.taskset_bundle import BUNDLE_JOB_SOURCE, TasksetBundleJob
 from nemo_evals.taskset_runs.entities import ResultState, TasksetRunEntity, TasksetRunPhase
 from nemo_evals.taskset_runs.identifiers import bundle_job_name
+from nemo_evals.taskset_runs.run_evaluation import IntakeRunEvaluations, RunEvaluations, stamp_run_evaluation
 from nemo_evals.taskset_runs.specs import AcceptedTaskOutput, TasksetBundleSpec, TasksetRunPlan
 from nemo_evals.taskset_runs.store import TasksetRunStore
 from nemo_evals.taskset_runs.task_jobs import runs_request, task_job_request
@@ -53,6 +55,7 @@ from nemo_helix_plugin.entities import EntityBase, EntityClient
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.file_manager import AsyncFilesetFileManager
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, HelixJobResponse
@@ -96,6 +99,11 @@ class RunJobs(Protocol):
         """Cancel Job ``name``; a missing or already finished Job is not an error."""
         ...
 
+    @property
+    def evaluations(self) -> RunEvaluations:
+        """The run's Intake Evaluation, which the controller stamps once at the end."""
+        ...
+
 
 @dataclass(frozen=True)
 class PassOutcome:
@@ -118,7 +126,7 @@ async def complete_run(
     task_jobs = [await _own_task_job(run, plan, i, jobs) for i in range(len(plan.spec.tasks))]
     if any(job is None or _status(job) not in TERMINAL_JOB_STATUSES for job in task_jobs):
         if now >= _utc(run.execution_deadline_at):
-            return await _expire(run, task_jobs, jobs, store)
+            return await _expire(run, plan, task_jobs, jobs, store, now)
         # A missing Job is left to submit's 503 retry, which creates it from the plan.
         started = any(job is not None and _status(job) not in NOT_STARTED_JOB_STATUSES for job in task_jobs)
         if run.phase is TasksetRunPhase.ACCEPTED and started:
@@ -132,12 +140,12 @@ async def complete_run(
         if _status(job) == "completed" and (ref := await jobs.result_url(job.name, DEFAULT_RESULT_NAME)):
             accepted.append(AcceptedTaskOutput(task_index=index, job=job.name, bundle_ref=ref))
     if not accepted:
-        await store.set_state(
-            run, phase=TasksetRunPhase.FAILED, result_state=ResultState.NONE, error="no task Job completed"
+        await _finish(
+            run, plan, jobs, store, now, TasksetRunPhase.FAILED, ResultState.NONE, error="no task Job completed"
         )
         return PassOutcome("failed", "no task Job completed")
     if now >= _utc(run.finalization_deadline_at):
-        return await _miss_finalization(run, plan, accepted, jobs, store)
+        return await _miss_finalization(run, plan, accepted, jobs, store, now)
 
     try:
         bundle = await _ensure_bundle_job(run, plan, accepted, task_jobs, jobs, now)
@@ -167,16 +175,42 @@ async def complete_run(
             existing = await jobs.get_record(run.name)
             if existing is None or existing.job_id != bundle.name:
                 raise
-        await store.set_state(run, phase=TasksetRunPhase.COMPLETED, result_state=ResultState.READY)
+        await _finish(run, plan, jobs, store, now, TasksetRunPhase.COMPLETED, ResultState.READY)
         return PassOutcome("completed", bundle_ref)
     # The newest attempt failed and no further attempt is allowed.
     error = f"bundle Job {bundle.name} ended {_status(bundle)}"
-    await store.set_state(run, phase=TasksetRunPhase.COMPLETED, result_state=ResultState.FAILED, error=error)
+    await _finish(run, plan, jobs, store, now, TasksetRunPhase.COMPLETED, ResultState.FAILED, error=error)
     return PassOutcome("bundle_failed", error)
 
 
+async def _finish(
+    run: TasksetRunEntity,
+    plan: TasksetRunPlan,
+    jobs: RunJobs,
+    store: TasksetRunStore,
+    now: datetime,
+    phase: TasksetRunPhase,
+    result_state: ResultState,
+    *,
+    error: str | None = None,
+) -> None:
+    """End the run: stamp its Intake Evaluation (when it publishes), then write its final state.
+
+    Stamps first: no pass runs after the final state, so a stamp after it that failed would never be retried.
+    A stamp is best effort and never stops the state write.
+    """
+    if plan.intake is not None:
+        await stamp_run_evaluation(jobs.evaluations, run, plan, phase=phase, result_state=result_state, now=now)
+    await store.set_state(run, phase=phase, result_state=result_state, error=error)
+
+
 async def _expire(
-    run: TasksetRunEntity, task_jobs: list[HelixJobResponse | None], jobs: RunJobs, store: TasksetRunStore
+    run: TasksetRunEntity,
+    plan: TasksetRunPlan,
+    task_jobs: list[HelixJobResponse | None],
+    jobs: RunJobs,
+    store: TasksetRunStore,
+    now: datetime,
 ) -> PassOutcome:
     """Cancel the unfinished task Jobs, then end the run ``expired`` without a result.
 
@@ -193,7 +227,7 @@ async def _expire(
             if job is not None:
                 await jobs.cancel(job.name)
     error = f"execution deadline passed with {unfinished} of {len(task_jobs)} task Jobs unfinished"
-    await store.set_state(run, phase=TasksetRunPhase.EXPIRED, result_state=ResultState.NONE, error=error)
+    await _finish(run, plan, jobs, store, now, TasksetRunPhase.EXPIRED, ResultState.NONE, error=error)
     return PassOutcome("expired", error)
 
 
@@ -220,13 +254,14 @@ async def _miss_finalization(
     accepted: list[AcceptedTaskOutput],
     jobs: RunJobs,
     store: TasksetRunStore,
+    now: datetime,
 ) -> PassOutcome:
     """Past the finalization deadline without a saved result: cancel the bundle Job and fail the result."""
     names = [bundle_job_name(run.name, n) for n in range(1, MAX_BUNDLE_ATTEMPTS + 1)]
     record = await jobs.get_record(run.name)
     if record is not None and record.job_id in names:
         # An earlier pass saved the result, then failed before marking the run done.
-        await store.set_state(run, phase=TasksetRunPhase.COMPLETED, result_state=ResultState.READY)
+        await _finish(run, plan, jobs, store, now, TasksetRunPhase.COMPLETED, ResultState.READY)
         return PassOutcome("completed", record.bundle_ref)
     for name in names:
         bundle = await jobs.get(name)
@@ -239,7 +274,7 @@ async def _miss_finalization(
             continue
         await jobs.cancel(name)
     error = "finalization deadline passed before the result was saved"
-    await store.set_state(run, phase=TasksetRunPhase.COMPLETED, result_state=ResultState.FAILED, error=error)
+    await _finish(run, plan, jobs, store, now, TasksetRunPhase.COMPLETED, ResultState.FAILED, error=error)
     return PassOutcome("finalization_missed", error)
 
 
@@ -398,7 +433,12 @@ class JobsServiceRunJobs:
         self._jobs = AsyncJobsClient.from_client(client)
         self._files = AsyncFilesClient.from_client(client)
         self._entities = EntityClient(AsyncEntitiesClient.from_client(client))
+        self._evaluations = IntakeRunEvaluations(AsyncIntakeClient.from_client(client))
         self._workspace = workspace
+
+    @property
+    def evaluations(self) -> RunEvaluations:
+        return self._evaluations
 
     async def get(self, name: str) -> HelixJobResponse | None:
         try:

@@ -28,7 +28,7 @@ import httpx
 import typer
 from nemo_evals.api.fields import TaskRef, TasksetRef
 from nemo_evals.api.schemas import AgentEvalResult, TasksetInput
-from nemo_evals.api.taskset_run_schemas import HarborTaskJobsExecutionInput, TasksetRunInput
+from nemo_evals.api.taskset_run_schemas import TasksetRunInput
 from nemo_evals.image_builds.models import TERMINAL_BUILD_STATUSES, ImageBuild
 from nemo_evals.jobs.agent_evaluate import DEFAULT_RESULT_NAME, SUMMARY_FILE_NAME
 from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, HarborBuiltinAgentSource, HarborRunnerTarget
@@ -111,10 +111,11 @@ def is_compose_task(task_dir: Path) -> bool:
     return any((task_dir / "environment" / name).is_file() for name in COMPOSE_FILENAMES)
 
 
-def download_hub_tasks(dataset: str, names: str | None, output_dir: Path) -> tuple[str, list[Path]]:
+def download_hub_tasks(dataset: str, names: str | None, output_dir: Path) -> tuple[str, str | None, list[Path]]:
     """Download the selected tasks of Harbor Hub dataset ``org/name@ref`` into ``output_dir``.
 
-    Returns the dataset's name and the task directories, in the dataset's order.
+    Returns the dataset's name, its resolved version (``sha256:…``, also without ``@ref``) and the task
+    directories, in the dataset's order.
     """
     from harbor.registry.client.package import PackageDatasetClient
 
@@ -124,7 +125,7 @@ def download_hub_tasks(dataset: str, names: str | None, output_dir: Path) -> tup
     candidates = [Candidate(i, entity_name(t.get_name().rpartition("/")[2]), t.get_name()) for i, t in enumerate(ids)]
     chosen = [ids[c.index] for c in select_tasks(candidates, names)]
     result = asyncio.run(client._task_client.download_tasks(task_ids=chosen, output_dir=output_dir, export=True))
-    return metadata.name, list(result.paths)
+    return metadata.name, metadata.version, list(result.paths)
 
 
 def list_hub_tasks(dataset: str) -> list[str]:
@@ -248,27 +249,45 @@ def run_request(
     agent: str,
     sandbox_policy: str,
     dispatcher_profile: str | None,
+    experiment: str | None = None,
+    dataset: tuple[str, str | None] | None = None,
     idempotency_key: str | None = None,
 ) -> TasksetRunInput:
     """The run request: ``--spec-file``'s with its tasks replaced, or ``--agent`` with default execution.
 
-    The idempotency key is ``idempotency_key``, else the spec file's, else a new one.
+    ``--experiment`` sets ``publication.intake``, replacing the spec file's.
+    ``dataset`` is the Harbor Hub dataset the tasks came from, as ``(name, version)``: the Evaluation's
+    dataset instead of the taskset. The idempotency key is ``idempotency_key``, else the spec file's, else a
+    new one.
     """
+    publication: dict[str, Any] | None = None
+    if experiment is not None:
+        publication = {"intake": {"experiment": experiment}}
+        if dataset is not None:
+            name, version = dataset
+            publication["intake"] |= {"dataset_name": name} | ({"dataset_version": version} if version else {})
     if spec_file is not None:
-        request = TasksetRunInput.model_validate(json.loads(spec_file.read_text()))
-        spec = request.spec.model_copy(update={"tasks": TasksetRef(taskset_ref)})
-        data = request.model_dump(mode="json", exclude={"spec"}) | {"spec": spec.model_dump(mode="json")}
-        data["idempotency_key"] = idempotency_key or data.get("idempotency_key") or str(uuid.uuid4())
-        return TasksetRunInput.model_validate(data)
+        # The selected taskset replaces spec.tasks before validation: with a dataset the file may leave it out.
+        raw = json.loads(spec_file.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict) or not isinstance(raw.get("spec") or {}, dict):
+            raise ValueError(f"{spec_file}: expected a TasksetRunInput JSON object with an object 'spec'")
+        raw["spec"] = {**(raw.get("spec") or {}), "tasks": taskset_ref}
+        if publication is not None:
+            raw["publication"] = publication  # --experiment replaces the file's, before it's validated
+        raw["idempotency_key"] = idempotency_key or raw.get("idempotency_key") or str(uuid.uuid4())
+        return TasksetRunInput.model_validate(raw)
     execution: dict[str, Any] = {"sandbox_policy": sandbox_policy}
     if dispatcher_profile is not None:
         execution["dispatcher_profile"] = dispatcher_profile
-    return TasksetRunInput(
-        spec=AgentEvalInputSpec(
-            tasks=TasksetRef(taskset_ref), target=HarborRunnerTarget(source=HarborBuiltinAgentSource(name=agent))
-        ),
-        execution=HarborTaskJobsExecutionInput.model_validate(execution),
-        idempotency_key=idempotency_key or str(uuid.uuid4()),
+    return TasksetRunInput.model_validate(
+        {
+            "spec": AgentEvalInputSpec(
+                tasks=TasksetRef(taskset_ref), target=HarborRunnerTarget(source=HarborBuiltinAgentSource(name=agent))
+            ).model_dump(mode="json", exclude_none=True),
+            "execution": execution,
+            "publication": publication,
+            "idempotency_key": idempotency_key or str(uuid.uuid4()),
+        }
     )
 
 
@@ -282,7 +301,12 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
     def submit(
         harbor_dir: Path | None = typer.Option(None, "--harbor-dir", help="Local Harbor dataset directory."),
         harbor_hub: str | None = typer.Option(None, "--harbor-hub", help="Harbor Hub dataset, org/name@ref."),
-        spec_file: Path | None = typer.Option(None, "--spec-file", help="TasksetRunInput JSON naming a taskset."),
+        spec_file: Path | None = typer.Option(
+            None,
+            "--spec-file",
+            help="TasksetRunInput JSON: its target and execution, and its taskset unless --harbor-dir or --harbor-hub "
+            "supplies the tasks.",
+        ),
         tasks: str | None = typer.Option(None, "--tasks", help="Indexes or names, comma-separated; default all."),
         agent: str = typer.Option("oracle", "--agent", help="Harbor built-in agent (without --spec-file)."),
         sandbox_policy: str = typer.Option("harbor-standard", "--sandbox-policy", help="Operator sandbox profile."),
@@ -302,25 +326,37 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
             None, "--workspace", help="Workspace for tasks, taskset and run; default: the configured workspace."
         ),
         poll_seconds: float = typer.Option(10.0, "--poll-seconds", help="Image-build polling interval."),
+        experiment: str | None = typer.Option(
+            None,
+            "--experiment",
+            help="Intake Experiment (name) to publish the run to: one Evaluation per run, trials as each task ends.",
+        ),
     ) -> None:
         """Publish the selected tasks as a taskset, build their images, and submit one task Job per task."""
-        if sum(source is not None for source in (harbor_dir, harbor_hub, spec_file)) != 1:
-            raise typer.BadParameter("pass exactly one of --harbor-dir, --harbor-hub or --spec-file")
+        if harbor_dir is not None and harbor_hub is not None:
+            raise typer.BadParameter("pass --harbor-dir or --harbor-hub, not both")
+        if harbor_dir is None and harbor_hub is None and spec_file is None:
+            raise typer.BadParameter("pass --harbor-dir, --harbor-hub or --spec-file")
+        # A spec file alone selects from its own taskset; with a dataset it supplies only the target and settings.
+        from_spec = harbor_dir is None and harbor_hub is None
         echo = typer.echo
         client = client_factory()
         workspace = client.resolve_workspace(workspace)
         try:
             if list_tasks:
-                _print_tasks(client_factory, harbor_dir, harbor_hub, spec_file, workspace)
+                _print_tasks(client_factory, harbor_dir, harbor_hub, spec_file if from_spec else None, workspace)
                 return
             evaluator = Evaluator.from_client(client)
+            dataset: tuple[str, str | None] | None = None
             with tempfile.TemporaryDirectory(prefix="nemo-runs-") as scratch:
-                if spec_file is not None:
+                if from_spec:
+                    assert spec_file is not None
                     refs, total, prefix = _select_from_spec(evaluator, spec_file, tasks, workspace)
                 else:
                     if harbor_hub is not None:
-                        prefix, task_dirs = download_hub_tasks(harbor_hub, tasks, Path(scratch))
-                        prefix = prefix.rpartition("/")[2]
+                        hub_name, hub_version, task_dirs = download_hub_tasks(harbor_hub, tasks, Path(scratch))
+                        dataset = (hub_name, hub_version)
+                        prefix = hub_name.rpartition("/")[2]
                         total = len(list_hub_tasks(harbor_hub))
                     else:
                         assert harbor_dir is not None
@@ -330,7 +366,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                         prefix, total = harbor_dir.resolve().name, len(all_dirs)
                     refs = publish_tasks(evaluator, task_dirs, prefix=prefix, workspace=workspace, echo=echo)
                 taskset = entity_name(
-                    f"{prefix}-sel-{selection_suffix(refs)}" if spec_file else f"{prefix}-{selection_suffix(refs)}"
+                    f"{prefix}-sel-{selection_suffix(refs)}" if from_spec else f"{prefix}-{selection_suffix(refs)}"
                 )
                 evaluator.tasksets.replace(
                     taskset, taskset=TasksetInput(tasks=[TaskRef(ref) for ref in refs]), workspace=workspace
@@ -346,6 +382,8 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 agent=agent,
                 sandbox_policy=sandbox_policy,
                 dispatcher_profile=dispatcher_profile,
+                experiment=experiment,
+                dataset=dataset,
                 idempotency_key=idempotency_key,
             )
             status = submit_run(
@@ -383,7 +421,7 @@ def _select_from_spec(
     evaluator: Evaluator, spec_file: Path, tokens: str | None, workspace: str
 ) -> tuple[list[str], int, str]:
     """The pinned refs of ``--spec-file``'s taskset, narrowed by ``--tasks``; tasks are not re-uploaded."""
-    request = TasksetRunInput.model_validate(json.loads(spec_file.read_text()))
+    request = TasksetRunInput.model_validate(json.loads(spec_file.read_text(encoding="utf-8")))
     assert isinstance(request.spec.tasks, TasksetRef)
     ref = request.spec.tasks.root
     head, _, fragment = ref.partition("#")

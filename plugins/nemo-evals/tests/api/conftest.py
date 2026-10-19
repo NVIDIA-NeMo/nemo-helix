@@ -70,7 +70,15 @@ def run_preparer(fake_preparer):
 
 @pytest.fixture
 def service(
-    run_store, entity_store, async_client, authorizer, run_config, run_preparer, fake_task_jobs, sandbox_platform
+    run_store,
+    entity_store,
+    async_client,
+    authorizer,
+    run_config,
+    run_preparer,
+    fake_task_jobs,
+    fake_evaluations,
+    sandbox_platform,
 ):
     return TasksetRunService(
         run_store,
@@ -82,6 +90,7 @@ def service(
         platform=sandbox_platform,
         preparer=run_preparer,
         task_jobs=fake_task_jobs,
+        evaluations=fake_evaluations,
     )
 
 

@@ -621,8 +621,8 @@ paths:
           description: Invalid request, excessive timeout, missing or incompatible
             source, unconfigured execution, or a task without images.
         '503':
-          description: The run was accepted but some task Jobs weren't created; retry
-            the same request.
+          description: The run was accepted but some task Jobs, or its Intake Evaluation,
+            weren't created; retry the same request.
     get:
       tags:
       - Evals Plugin Taskset Run Routes
@@ -5943,8 +5943,9 @@ components:
           minLength: 1
           title: Agent Version
           description: Agent version recorded on each published trajectory. Neither
-            a Model nor an Agent carries a version, so this defaults to 'unknown'
-            unless the submitter supplies one.
+            a Model nor an Agent carries a version, so this defaults to the version
+            the agent's own trajectory records (a Harbor agent's, such as codex's),
+            else 'unknown'.
           default: unknown
         required:
           type: boolean
@@ -7442,8 +7443,9 @@ components:
           minLength: 1
           title: Agent Version
           description: Agent version recorded on each published trajectory. Neither
-            a Model nor an Agent carries a version, so this defaults to 'unknown'
-            unless the submitter supplies one.
+            a Model nor an Agent carries a version, so this defaults to the version
+            the agent's own trajectory records (a Harbor agent's, such as codex's),
+            else 'unknown'.
           default: unknown
         required:
           type: boolean
@@ -8166,6 +8168,11 @@ components:
           type: string
           maxLength: 256
           minLength: 1
+        publication:
+          allOf:
+          - $ref: '#/components/schemas/TasksetRunPublicationInput'
+          description: Publish the run's trials to an Intake Experiment. Omit to publish
+            nowhere.
         timeout_seconds:
           title: Timeout Seconds
           description: Execution budget in seconds from acceptance. Omit to use evals.runs.default_timeout_seconds.
@@ -8183,6 +8190,46 @@ components:
         \ references or doing\nservice I/O. Submit uses it to derive request identity\
         \ and acceptance budgets.\n\nRaises:\n    ValidationError: Fields are invalid\
         \ or the spec violates Kubernetes run rules."
+    TasksetRunIntakeInput:
+      properties:
+        experiment:
+          type: string
+          minLength: 1
+          title: Experiment
+          description: Name of an existing Intake Experiment. Submit creates one Evaluation
+            in it per run, named after the run; each task Job publishes its trials
+            there when it finishes.
+          examples:
+          - swe-agent-tuning
+        agent_name:
+          title: Agent Name
+          description: Agent name recorded on each published trajectory. Defaults
+            to the Harbor agent.
+          type: string
+          minLength: 1
+        dataset_name:
+          title: Dataset Name
+          description: The Evaluation's dataset, such as the Harbor Hub dataset the
+            tasks came from. Defaults to the taskset (workspace/name).
+          examples:
+          - datacurve/deep-swe
+          type: string
+          minLength: 1
+        dataset_version:
+          title: Dataset Version
+          description: The dataset's version, such as a Harbor Hub dataset digest.
+            Defaults to the pinned taskset's content digest.
+          examples:
+          - sha256:aaa82ceb8404dccc17689c9383f93dbcbc8f029a7601d2e3856a416f2cb89269
+          type: string
+          minLength: 1
+      additionalProperties: false
+      type: object
+      required:
+      - experiment
+      title: TasksetRunIntakeInput
+      description: Publish the run's trials to an existing Intake Experiment, as one
+        Evaluation named after the run.
     TasksetRunPhase:
       type: string
       enum:
@@ -8202,6 +8249,19 @@ components:
         finalization is tracked separately by ``ResultState`` so execution completion
 
         does not imply that combined results are already available.'
+    TasksetRunPublicationInput:
+      properties:
+        intake:
+          allOf:
+          - $ref: '#/components/schemas/TasksetRunIntakeInput'
+          description: Publish trials and scores to an Intake Experiment.
+      additionalProperties: false
+      type: object
+      required:
+      - intake
+      title: TasksetRunPublicationInput
+      description: Where the run publishes its results, beyond its result bundle and
+        record.
     TasksetRunStatus:
       properties:
         run_id:

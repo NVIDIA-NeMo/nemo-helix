@@ -32,6 +32,7 @@ from nemo_evals.jobs.harbor_task_spec import (
     build_task_job_input,
 )
 from nemo_evals.tasks import harbor_task_dispatch as entrypoint
+from nemo_evals.taskset_runs.specs import RunIntakePublication
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import CPUExecutionProvider
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig
@@ -54,6 +55,39 @@ def test_input_runs_only_its_task_and_leaves_the_plan_alone(harbor_plan, task_sp
     assert task_spec.execution_deadline_at == NOW + timedelta(hours=1)
     assert task_spec.sandbox_policy == harbor_plan.sandbox_policy
     assert HarborTaskJobSpec.model_validate_json(task_spec.model_dump_json()) == task_spec
+
+
+def test_a_run_without_publication_gives_its_task_jobs_none(task_spec):
+    assert task_spec.spec.publication is None
+
+
+def test_a_publishing_run_gives_each_task_job_the_runs_evaluation_never_required(harbor_plan, harbor_run):
+    intake = RunIntakePublication(
+        experiment="swe",
+        experiment_id="exp-1",
+        agent_name="codex",
+        dataset_name="d",
+        dataset_version="1",
+    )
+    plan = harbor_plan.model_copy(update={"intake": intake})
+    publication = build_task_job_input(plan, harbor_run, 1, ENVIRONMENT).spec.publication
+    assert publication is not None and publication.intake is not None
+    # Named after the run record, not the plan: a keyless run's id can change during acceptance.
+    assert publication.intake.evaluation_id == harbor_run.name
+    # The version is left to each trial's own trajectory (codex records its release).
+    assert (publication.intake.agent_name, publication.intake.agent_version) == ("codex", "unknown")
+    # A failed publish must not fail the task Job and drop its scored result from the run's bundle.
+    assert publication.intake.required is False
+
+
+def test_a_task_job_publishes_under_its_own_name_and_leaves_the_evaluation_to_the_controller(task_spec):
+    job = HarborTaskAgentEvalJob()
+    job._task_spec = task_spec
+    # Stable sessions (<run>-task-<i>:<trial>): a re-publish replaces them instead of adding a random run.
+    assert job._run_id() == f"{task_spec.run_id}-task-1"
+    assert HarborTaskAgentEvalJob.record_publication_durations is False
+    assert AsyncAgentEvalJob.record_publication_durations is True
+    assert AsyncAgentEvalJob()._run_id() is None
 
 
 def test_only_task_rejects_an_out_of_range_index(harbor_spec):

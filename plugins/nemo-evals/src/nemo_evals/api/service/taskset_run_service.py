@@ -34,22 +34,30 @@ from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy
 from nemo_evals.harbor.remote.sandbox_policy import SandboxPolicyError, resolve_sandbox_policy
 from nemo_evals.image_builds.service import ImageBuildService, JobsServiceBuildJobs, builder_authorizer
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
-from nemo_evals.jobs.agent_spec import AgentEvalSpec, ResolvedTask, registered_agent_source
+from nemo_evals.jobs.agent_spec import AgentEvalSpec, ResolvedTask, registered_agent_source, target_agent_identity
 from nemo_evals.jobs.harbor_task_spec import PreparedHarborEnvironment
 from nemo_evals.revisions import RevisionNotFoundError, get_revision
 from nemo_evals.source_authorization import remember_allowed
 from nemo_evals.taskset_runs.entities import TERMINAL_RUN_PHASES, MemberPhase, TasksetRunEntity
 from nemo_evals.taskset_runs.identifiers import derive_run_id
 from nemo_evals.taskset_runs.plan_storage import delete_fileset_ref
-from nemo_evals.taskset_runs.specs import TasksetRunPlan
+from nemo_evals.taskset_runs.run_evaluation import (
+    ForeignEvaluationError,
+    IntakeRunEvaluations,
+    RunEvaluations,
+    ensure_run_evaluation,
+)
+from nemo_evals.taskset_runs.specs import RunIntakePublication, TasksetRunPlan
 from nemo_evals.taskset_runs.store import PlanStorageError, RunAcceptance, RunRequestConflict, TasksetRunStore
 from nemo_evals.taskset_runs.submission import check_timeout, resolve_deadlines
 from nemo_evals.taskset_runs.task_jobs import JobsServiceTaskJobs, TaskJobs, create_task_jobs
 from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import AuthenticationError, NemoClientError, PermissionDeniedError
 from nemo_helix_plugin.config import NemoHelixConfig
 from nemo_helix_plugin.dependencies import RequestAuthorizer
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.schema import Page
 
@@ -112,6 +120,18 @@ class TasksetRunResolutionError(ValueError):
     """Represent an expected missing or incompatible request input during resolution."""
 
 
+class IntakeUnavailableError(RuntimeError):
+    """Intake failed while submit looked up the Experiment; nothing was accepted, so a retry is safe."""
+
+
+class RunEvaluationError(RuntimeError):
+    """The accepted run's Intake Evaluation couldn't be created; no task Jobs were started."""
+
+    def __init__(self, run_id: str, reason: str) -> None:
+        super().__init__(f"run {run_id}: {reason}")
+        self.run_id = run_id
+
+
 async def pin_taskset_ref(entity_client: EntityClient, ref: TasksetRef, workspace: str) -> TasksetRef:
     """Resolve a taskset selector to its verified, fully qualified content digest.
 
@@ -155,6 +175,7 @@ class TasksetRunService:
         platform: NemoHelixConfig = platform_config,
         preparer: ImagePreparer = prepare_task_images,
         task_jobs: TaskJobs | None = None,
+        evaluations: RunEvaluations | None = None,
     ) -> None:
         """Bind request-scoped storage, identity and budget dependencies.
 
@@ -168,6 +189,7 @@ class TasksetRunService:
             platform: Platform configuration naming the OpenSandbox server.
             preparer: Checks every task, then prepares each one's images, before acceptance.
             task_jobs: Jobs operations for fan-out; defaults to the Jobs service as the caller.
+            evaluations: Intake operations for a run's Evaluation; defaults to Intake as the caller.
         """
         self._store = store
         self._entities = entity_client
@@ -178,6 +200,7 @@ class TasksetRunService:
         self._platform = platform
         self._preparer = preparer
         self._task_jobs = task_jobs or JobsServiceTaskJobs(AsyncJobsClient.from_client(async_client))
+        self._evaluations = evaluations or IntakeRunEvaluations(AsyncIntakeClient.from_client(async_client))
 
     async def get(self, workspace: str, run_id: str) -> TasksetRunStatus | None:
         """Read one stored run without joining members, plans or Jobs.
@@ -301,7 +324,7 @@ class TasksetRunService:
         replay = await self._store.replay(workspace, run_id, digest)
         if replay is not None:
             # A retry completes the task Jobs an earlier attempt didn't create.
-            warnings = await self._start_task_jobs(replay)
+            warnings = await self._start_task_jobs(replay, keyed=True)
             status = TasksetRunSubmitResponse(**to_status(replay).model_dump(), warnings=warnings)
             return SubmitOutcome(status, created=False)
 
@@ -317,6 +340,7 @@ class TasksetRunService:
                     f"this deployment starts every task Job at once: {len(spec.tasks)} tasks exceed "
                     f"execution.max_concurrent_task_jobs={req.execution.max_concurrent_task_jobs}; select fewer tasks"
                 )
+            intake = await self._resolve_publication(req, workspace, spec, taskset_ref=pinned.root)
             prepared = await self._prepare_images(spec.tasks, policy, caller=caller)
             accepted_at = self._clock()
             execution, finalization = resolve_deadlines(accepted_at, timeout, self._config.runs)
@@ -330,6 +354,7 @@ class TasksetRunService:
                 dispatcher_image=harbor.dispatcher_image,
                 dispatcher_profile=dispatcher_profile,
                 task_environments=prepared,
+                intake=intake,
             )
             acceptance = RunAcceptance(
                 plan=plan,
@@ -352,7 +377,7 @@ class TasksetRunService:
             raise
 
         warnings = await self._duplicate_warnings(result.run, caller) if result.created else []
-        warnings += await self._start_task_jobs(result.run)
+        warnings += await self._start_task_jobs(result.run, keyed=True)
         status = TasksetRunSubmitResponse(**to_status(result.run).model_dump(), warnings=warnings)
         return SubmitOutcome(status, created=result.created)
 
@@ -425,7 +450,83 @@ class TasksetRunService:
         jobs = JobsServiceBuildJobs(AsyncJobsClient.from_client(self._async_client), workspace=workspace)
         return ImageBuildService(self._entities, jobs, builder_authorizer(self._authorizer))
 
-    async def _start_task_jobs(self, run: TasksetRunEntity) -> list[str]:
+    async def _resolve_publication(
+        self, req: TasksetRunInput, workspace: str, spec: AgentEvalSpec, *, taskset_ref: str
+    ) -> RunIntakePublication | None:
+        """Resolve ``publication.intake`` for the plan: the Experiment's id, the agent and the dataset.
+
+        The dataset defaults to the pinned taskset: its name, and its content digest as the version.
+
+        Raises:
+            TasksetRunResolutionError: The Experiment doesn't exist, or no agent name can be derived.
+            HTTPException: 403 when the caller can't read the Experiment.
+            IntakeUnavailableError: Any other Intake failure; a retry is safe.
+        """
+        if req.publication is None:
+            return None
+        requested = req.publication.intake
+        try:
+            experiment_id = await self._evaluations.experiment_id(workspace, requested.experiment)
+        except (AuthenticationError, PermissionDeniedError) as exc:
+            raise HTTPException(
+                status_code=403, detail=f"you can't read Intake Experiment {workspace}/{requested.experiment}"
+            ) from exc
+        except NemoClientError as exc:
+            raise IntakeUnavailableError(
+                f"looking up Intake Experiment {workspace}/{requested.experiment} failed ({type(exc).__name__}); "
+                "nothing was accepted, retry the submit"
+            ) from exc
+        if experiment_id is None:
+            raise TasksetRunResolutionError(
+                f"Intake Experiment {workspace}/{requested.experiment} doesn't exist; create it first "
+                f"(nemo experiments create {requested.experiment} --workspace {workspace})"
+            )
+        taskset_name, _, taskset_digest = taskset_ref.partition("#")
+        agent_name = requested.agent_name or target_agent_identity(spec.target)[0]
+        if not agent_name:
+            raise TasksetRunResolutionError(
+                "publication.intake.agent_name is required: the Harbor target names no agent to derive it from"
+            )
+        return RunIntakePublication(
+            experiment=requested.experiment,
+            experiment_id=experiment_id,
+            agent_name=agent_name,
+            dataset_name=requested.dataset_name or taskset_name,
+            dataset_version=requested.dataset_version or taskset_digest,
+        )
+
+    async def _ensure_run_evaluation(self, run: TasksetRunEntity, plan: TasksetRunPlan, *, keyed: bool) -> list[str]:
+        """Create (or adopt) the run's Intake Evaluation before any task Job can publish to it.
+
+        Returns:
+            Notices for the submit response.
+
+        Raises:
+            RunEvaluationError: The Evaluation isn't the run's, or Intake failed and a retry with the
+                same idempotency_key can create it. A keyless run, or one the caller may not create
+                Evaluations for, goes on without it: its task Jobs' publishes then fail without failing the Jobs.
+        """
+        assert plan.intake is not None
+        try:
+            await ensure_run_evaluation(self._evaluations, run, plan)
+        except ForeignEvaluationError as exc:
+            raise RunEvaluationError(run.name, str(exc)) from exc
+        except (AuthenticationError, PermissionDeniedError):
+            # A retry would be denied again, and refusing now would strand an accepted run with no Jobs:
+            # run it unpublished, keyed or not, and say so.
+            logger.warning("Run %s: not allowed to create its Intake Evaluation", run.name, exc_info=True)
+            return [
+                f"Intake: you can't create Evaluations in workspace {run.workspace}; "
+                f"run {run.name} goes ahead, but its trials won't be published"
+            ]
+        except NemoClientError as exc:
+            if keyed:
+                raise RunEvaluationError(run.name, f"creating its Intake Evaluation failed: {exc}") from exc
+            logger.warning("Run %s: creating its Intake Evaluation failed", run.name, exc_info=True)
+            return [f"Intake: creating Evaluation {run.name} failed ({type(exc).__name__}); trials won't be published"]
+        return [f"Intake: Evaluation {run.name} in Experiment {plan.intake.experiment}"]
+
+    async def _start_task_jobs(self, run: TasksetRunEntity, *, keyed: bool) -> list[str]:
         """Create or adopt every task Job of ``run`` from its stored plan; one notice per task Job.
 
         Images come from the plan, never prepared again: a retry must give each Job the images it was accepted with.
@@ -443,8 +544,12 @@ class TasksetRunService:
             raise TasksetRunResolutionError(
                 f"run {run.name}'s dispatcher_profile {plan.dispatcher_profile!r} is no longer allowed"
             )
+        notices = await self._ensure_run_evaluation(run, plan, keyed=keyed) if plan.intake is not None else []
         names = await create_task_jobs(self._task_jobs, plan, run, plan.task_environments)
-        return [f"task {i} ({task.id}): Job {name}" for i, (task, name) in enumerate(zip(plan.spec.tasks, names))]
+        return [
+            *(f"task {i} ({task.id}): Job {name}" for i, (task, name) in enumerate(zip(plan.spec.tasks, names))),
+            *notices,
+        ]
 
     async def _resolve(self, req: TasksetRunInput, workspace: str) -> tuple[TasksetRef, AgentEvalSpec]:
         """Pin before resolving so a concurrent publication cannot replace task members.

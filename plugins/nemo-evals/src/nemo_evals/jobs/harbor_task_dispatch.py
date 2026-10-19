@@ -23,6 +23,7 @@ from nemo_evals.jobs.agent_compiler import _environment_stage_step, _secret_refs
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evals.jobs.harbor_task_spec import HarborTaskJobSpec
 from nemo_evals.jobs.secret_env import build_task_environment
+from nemo_evals.taskset_runs.identifiers import task_job_name
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
@@ -96,9 +97,13 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
     - Fails before any sandbox if the platform's OpenSandbox server isn't the one the run was accepted for.
     - Binds the materialized task to its prepared image digests.
     - Never deletes the agent-files snapshot: sibling task Jobs and Jobs retries still stage it.
+    - Runs under its own name as the SDK run id, so trials it publishes to the run's Intake Evaluation
+      have stable sessions (``<run_id>-task-<i>:<trial>``) and a re-publish replaces them.
+    - Never writes the shared Evaluation's metadata: the run controller stamps the run's duration once.
     """
 
     discard_agent_files: ClassVar[bool] = False
+    record_publication_durations: ClassVar[bool] = False
     _task_spec: HarborTaskJobSpec
 
     def run(self, config: dict, *, ctx: JobContext, async_client: AsyncNemoClient) -> dict:
@@ -110,6 +115,9 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
         return self._run_with_client(
             spec.spec.model_dump(mode="json"), ctx=ctx, platform_client=async_client, async_client=async_client
         )
+
+    def _run_id(self) -> str | None:
+        return task_job_name(self._task_spec.run_id, self._task_spec.task_index)
 
     def _prepared_tasks(self, tasks: list[AgentEvalTask]) -> None:
         environment = self._task_spec.environment
