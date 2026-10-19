@@ -21,7 +21,11 @@ from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, vali
 from nemo_agents_plugin.api.v2._perms import AgentPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client
 from nemo_agents_plugin.authz import scope
-from nemo_agents_plugin.deployment_routing import get_deployment_endpoint, is_deployment_routable
+from nemo_agents_plugin.deployment_routing import (
+    get_deployment_endpoint,
+    get_deployment_transport,
+    is_deployment_routable,
+)
 from nemo_agents_plugin.entities import Agent, AgentDeployment
 from nemo_agents_plugin.mcp_status import (
     McpServerStatus,
@@ -186,7 +190,11 @@ async def get_agent_status(
     name: str,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AgentStatus:
-    """Report the runtime status of an agent, including its MCP servers."""
+    """Report the runtime status of an agent, including its MCP servers.
+
+    Each running deployment checks its servers by launching (stdio) or connecting to
+    (remote) them, and reuses that check briefly so polling does not relaunch them.
+    """
     agent = await _get_agent_or_404(workspace, name, entity_client)
 
     try:
@@ -223,7 +231,7 @@ async def _deployment_status(deployment: AgentDeployment) -> AgentDeploymentStat
     if not is_deployment_routable(deployment):
         return status
 
-    probed, probe_error = await _probe_deployment(endpoint)
+    probed, probe_error = await _probe_deployment(deployment, endpoint)
     if probed is None:
         status.probe_error = probe_error
         status.mcp_servers = [_unknown(server, probe_error) for server in declared]
@@ -232,12 +240,23 @@ async def _deployment_status(deployment: AgentDeployment) -> AgentDeploymentStat
     return status
 
 
-async def _probe_deployment(endpoint: str) -> tuple[McpStatusResponse | None, str]:
+async def _probe_deployment(deployment: AgentDeployment, endpoint: str) -> tuple[McpStatusResponse | None, str]:
     """Ask one runtime for its MCP status, or return a short reason it could not be read."""
-    url = f"{endpoint.rstrip('/')}/mcp/status"
+    # Dial the way the gateway does: an executor may route through a service address with its own TLS.
     try:
-        async with httpx.AsyncClient(timeout=_RUNTIME_PROBE_TIMEOUT_SECONDS) as client:
-            response = await client.get(url)
+        transport = get_deployment_transport(deployment)
+        url, routing_headers = transport.target(f"{endpoint.rstrip('/')}/mcp/status")
+        client_kwargs = transport.client_kwargs()
+    except Exception:
+        logger.exception("Failed to resolve how to reach deployment '%s'", deployment.name)
+        return None, "Could not reach the runtime."
+    try:
+        async with httpx.AsyncClient(
+            timeout=_RUNTIME_PROBE_TIMEOUT_SECONDS,
+            follow_redirects=False,
+            **client_kwargs,
+        ) as client:
+            response = await client.get(url, headers=routing_headers)
     except httpx.TimeoutException:
         logger.debug("MCP status check of %s timed out", url, exc_info=True)
         return None, "Runtime did not respond in time."

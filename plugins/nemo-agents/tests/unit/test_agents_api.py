@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -30,6 +30,7 @@ from nemo_agents_plugin.entities import (
     AgentDeployment,
     DeploymentStatus,
 )
+from nemo_deployments_plugin.endpoint_transport import EndpointTransport
 from nemo_helix_plugin.entity_client import (
     NemoEntityConflictError,
     NemoEntityNotFoundError,
@@ -627,6 +628,33 @@ class TestGetAgentStatus:
         [server] = deployment["mcp_servers"]
         assert server["state"] == "unresolved"
         assert server["detail"] == "Command not found."
+
+    def test_runtime_is_dialed_through_the_executor_transport(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        """An openshell runtime is reached at the executor's service address, with the advertised Host."""
+        dep = _make_deployment(agent="triage", status="running")
+        dep.config = _mcp_agent_config()
+        dep.endpoint = "https://default--triage--http.openshell.localhost:8080"
+        mock_entity_client.get = AsyncMock(
+            return_value=_make_agent("triage", config=_mcp_agent_config(), config_format=NEMO_AGENTS_SPEC_CONFIG_FORMAT)
+        )
+        mock_entity_client.list = AsyncMock(return_value=_list_response([dep]))
+        transport = EndpointTransport(connect_base="https://openshell.openshell.svc.cluster.local:8080")
+
+        with (
+            patch.object(agents_router_module, "get_deployment_transport", return_value=transport),
+            respx.mock,
+        ):
+            route = respx.get("https://openshell.openshell.svc.cluster.local:8080/mcp/status").respond(
+                200,
+                json={"runtime_instance_id": "runtime-1", "checked_at": NOW.isoformat(), "servers": []},
+            )
+            resp = client.get("/apis/agents/v2/workspaces/default/agents/triage/status")
+
+        [deployment] = resp.json()["deployments"]
+        assert deployment["probe_error"] == ""
+        assert route.calls.last.request.headers["Host"] == "default--triage--http.openshell.localhost:8080"
 
     def test_unreachable_runtime_marks_servers_unknown(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
         """A runtime we cannot ask is reported as such, not as a healthy or failed server."""

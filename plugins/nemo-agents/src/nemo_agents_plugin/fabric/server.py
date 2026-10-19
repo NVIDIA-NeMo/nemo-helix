@@ -50,11 +50,7 @@ from nemo_agents_plugin.fabric.streaming import (
     iter_openai_chat_completion_sse,
     openai_chat_completion_error_sse,
 )
-from nemo_agents_plugin.mcp_status import (
-    DEFAULT_PROBE_TIMEOUT_SECONDS,
-    McpStatusResponse,
-    probe_mcp_servers,
-)
+from nemo_agents_plugin.mcp_status import McpStatusCache, McpStatusResponse
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
 from starlette.types import Receive, Scope, Send
 
@@ -344,6 +340,7 @@ def create_fabric_serving_app(
                 max_concurrent_invocations=settings.max_concurrent_invocations,
             )
             app.state.session_manager = session_manager
+            app.state.mcp_status_cache = McpStatusCache(agent_config)
             cleanup_shutdown = asyncio.Event()
             cleanup_task = asyncio.create_task(
                 _run_idle_session_cleanup(
@@ -381,11 +378,11 @@ def create_fabric_serving_app(
     @app.get("/mcp/status", response_model=McpStatusResponse)
     async def mcp_status() -> McpStatusResponse:
         """Report every declared MCP server as this runtime process sees it."""
-        agent_config: AgentConfig = app.state.agent_config
-        servers = await probe_mcp_servers(agent_config, timeout=DEFAULT_PROBE_TIMEOUT_SECONDS)
+        cache: McpStatusCache = app.state.mcp_status_cache
+        servers, checked_at = await cache.get()
         return McpStatusResponse(
             runtime_instance_id=runtime_instance_id,
-            checked_at=datetime.now(UTC),
+            checked_at=checked_at,
             servers=servers,
         )
 

@@ -191,7 +191,14 @@ paths:
       tags:
       - Agents
       summary: Get Agent Status
-      description: Report the runtime status of an agent, including its MCP servers.
+      description: 'Report the runtime status of an agent, including its MCP servers.
+
+
+        Each running deployment checks its servers by launching (stdio) or connecting
+        to
+
+        (remote) them, and reuses that check briefly so polling does not relaunch
+        them.'
       operationId: get_agent_status_apis_agents_v2_workspaces__workspace__agents__name__status_get
       parameters:
       - name: workspace
@@ -2647,6 +2654,7 @@ components:
           - subprocess
           - docker
           - k8s
+          - openshell
           title: Deployment Mode
           description: subprocess | docker | k8s.
         status:
@@ -3109,7 +3117,8 @@ components:
           type: string
           format: date-time
           title: Checked At
-          description: When the status was assembled.
+          description: When the status was assembled, after every deployment's probe
+            completed; not when individual probes began.
         declared_mcp_servers:
           items:
             $ref: '#/components/schemas/McpServerStatus'
@@ -4526,11 +4535,14 @@ components:
           - not_started
           - unknown
           title: State
-          description: 'running: reachable and initialized. unresolved: stdio command
-            not found on the runtime PATH. spawn_failed: command resolved but the
-            server died or never initialized. unreachable: remote server did not answer.
-            not_started: nothing is running to check against. unknown: transport not
-            understood, so no check was made.'
+          description: 'running: a probe from the runtime process started (stdio)
+            or connected to (remote) the server, initialized an MCP session, and listed
+            its tools. The probe is its own launch or connection, not the harness''s
+            live one, so this says the server can come up, not that the harness has
+            it. unresolved: stdio command not found on the runtime PATH. spawn_failed:
+            command resolved but the server died or never initialized. unreachable:
+            remote server did not answer. not_started: nothing is running to check
+            against. unknown: transport not understood, so no check was made.'
         command_resolved:
           type: boolean
           title: Command Resolved

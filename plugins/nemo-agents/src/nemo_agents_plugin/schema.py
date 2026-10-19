@@ -88,7 +88,11 @@ class AgentStatus(BaseModel):
 
     agent: str = Field(description="Name of the agent.")
     workspace: str = Field(description="Workspace the agent belongs to.")
-    checked_at: datetime = Field(description="When the status was assembled.")
+    checked_at: datetime = Field(
+        description=(
+            "When the status was assembled, after every deployment's probe completed; not when individual probes began."
+        )
+    )
     declared_mcp_servers: list[McpServerStatus] = Field(
         default_factory=list,
         description="MCP servers declared in the stored agent config, each reported as 'not_started'.",
