@@ -6,7 +6,7 @@ import { Breadcrumbs } from '@studio/components/Breadcrumbs';
 import { DocumentationLink } from '@studio/components/Layouts/GlobalNav/components/DocumentationLink';
 import { ThemeSwitch } from '@studio/components/Layouts/GlobalNav/components/ThemeSwitch';
 import { UserPopover } from '@studio/components/UserPopover';
-import { TOUR_ENABLED } from '@studio/constants/environment';
+import { FLAG_OVERRIDES_ENABLED, TOUR_ENABLED } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { useWorkspaceFromPathIfExists } from '@studio/hooks/useWorkspaceFromPath';
 import { AssistantTopBarChat } from '@studio/routes/agents/AssistantChatRoute/AssistantTopBarChat';
@@ -18,6 +18,12 @@ import { Link, matchPath, useLocation } from 'react-router';
 
 const WelcomeTour = lazy(() =>
   import('@studio/components/WelcomeTour').then((m) => ({ default: m.WelcomeTour }))
+);
+
+// Lazy so the flag editor never enters a bundle for a deployment that has
+// overrides turned off.
+const FeatureFlagPanel = lazy(() =>
+  import('@studio/components/FeatureFlagPanel').then((m) => ({ default: m.FeatureFlagPanel }))
 );
 
 interface Props {
@@ -88,6 +94,11 @@ const GlobalNavContent: FC<GlobalNavContentProps> = ({
               </Suspense>
             )}
             {shouldMountAssistantTopBarChat && <AssistantTopBarChat />}
+            {FLAG_OVERRIDES_ENABLED && (
+              <Suspense>
+                <FeatureFlagPanel />
+              </Suspense>
+            )}
             <ThemeSwitch />
             <DocumentationLink />
             <UserPopover />

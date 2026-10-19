@@ -11,11 +11,7 @@
  */
 
 import { flagDefinitions, FeatureFlags } from '@studio/constants/featureFlags/featureFlags';
-import {
-  installFlagsGlobal,
-  readFlagOverrides,
-  writeFlagManifest,
-} from '@studio/constants/featureFlags/overrides';
+import { readFlagOverrides } from '@studio/constants/featureFlags/overrides';
 import { parseFlags } from '@studio/constants/featureFlags/utils';
 
 // --- Parse cascade ---
@@ -25,6 +21,12 @@ import { parseFlags } from '@studio/constants/featureFlags/utils';
 // override blob, anyone could set it to `true` in production and unlock every
 // other flag, which would defeat the point of making it server-controlled.
 const baseFlags = parseFlags<FeatureFlags>(flagDefinitions, import.meta.env);
+
+/**
+ * Flag values with no override applied — what the deployment ships, and what
+ * clearing an override returns to. Exported for the override panel.
+ */
+export const flagDefaults: FeatureFlags = baseFlags;
 
 const overridesEnabled = baseFlags.flagOverridesEnabled;
 
@@ -50,14 +52,3 @@ export const featureFlags: FeatureFlags = overridesEnabled
       ...readFlagOverrides(flagDefinitions),
     })
   : baseFlags;
-
-/**
- * Publish the override tooling: `window.__flags` for devtools, and the
- * localStorage manifest the companion Chrome extension reads. Called from
- * `main.tsx` rather than at import time so tests and SSR-ish consumers can
- * import flags without the side effects.
- */
-export const initFlagOverrideTooling = (): void => {
-  writeFlagManifest(flagDefinitions, baseFlags, featureFlags, overridesEnabled);
-  installFlagsGlobal(flagDefinitions, baseFlags, featureFlags, overridesEnabled);
-};

@@ -12,8 +12,6 @@ export const SELECTED_WORKSPACE_KEY = 'selected-workspace';
 export const TOUR_SEEN_KEY = 'tour-seen';
 export const NAV_ACCORDION_STATE_KEY = 'nav-accordion-state';
 export const DASHBOARD_QUICKSTART_DISMISSED_KEY_PREFIX = 'dashboard-quickstart-dismissed';
-// Feature-flag override layer. `OVERRIDES` is written by the developer (devtools
-// via `window.__flags`, or the companion Chrome extension); `MANIFEST` is written
-// by the app and read by the extension, which cannot see page-world globals.
+// Feature-flag override layer, written by the in-app override panel. Clearing
+// this key by hand is the recovery path if an override breaks the app's render.
 export const FEATURE_FLAG_OVERRIDES_KEY = 'feature-flag-overrides';
-export const FEATURE_FLAG_MANIFEST_KEY = 'feature-flag-manifest';

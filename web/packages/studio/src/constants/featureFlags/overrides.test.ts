@@ -12,12 +12,9 @@
 
 import { logger } from '@nemo/common/src/utils/logger';
 import {
-  FLAG_MANIFEST_VERSION,
-  FlagManifest,
-  FlagsGlobal,
-  installFlagsGlobal,
   readFlagOverrides,
-  writeFlagManifest,
+  readStoredOverrides,
+  writeStoredOverrides,
 } from '@studio/constants/featureFlags/overrides';
 import {
   booleanFlag,
@@ -26,7 +23,7 @@ import {
   previewFlag,
   stringFlag,
 } from '@studio/constants/featureFlags/utils';
-import { FEATURE_FLAG_MANIFEST_KEY, FEATURE_FLAG_OVERRIDES_KEY } from '@studio/util/localStorage';
+import { FEATURE_FLAG_OVERRIDES_KEY } from '@studio/util/localStorage';
 
 const definitions = {
   alphaEnabled: previewFlag('VITE_FF_ALPHA_ENABLED', false),
@@ -40,11 +37,6 @@ const setBlob = (value: unknown) =>
     FEATURE_FLAG_OVERRIDES_KEY,
     typeof value === 'string' ? value : JSON.stringify(value)
   );
-
-const flagsGlobal = () => (window as unknown as { __flags?: FlagsGlobal }).__flags;
-
-const readManifest = (): FlagManifest =>
-  JSON.parse(window.localStorage.getItem(FEATURE_FLAG_MANIFEST_KEY)!) as FlagManifest;
 
 /**
  * Simulate a browser where storage is blocked. Reading `window.localStorage` is
@@ -92,7 +84,6 @@ const withFailingWrites = (fn: () => void) => {
 
 beforeEach(() => {
   window.localStorage.clear();
-  delete (window as unknown as Record<string, unknown>).__flags;
   vi.spyOn(logger, 'warn').mockImplementation(() => {});
   vi.spyOn(logger, 'error').mockImplementation(() => {});
   vi.spyOn(logger, 'info').mockImplementation(() => {});
@@ -184,164 +175,78 @@ describe('readFlagOverrides', () => {
   });
 });
 
-describe('writeFlagManifest', () => {
-  it('describes every flag with its base and effective value', () => {
-    setBlob({ alphaEnabled: 'preview' });
-
-    writeFlagManifest(
-      definitions,
-      { alphaEnabled: false, betaEnabled: true, gammaCount: 3, deltaName: 'base' },
-      { alphaEnabled: 'preview', betaEnabled: true, gammaCount: 3, deltaName: 'base' },
-      true
-    );
-
-    const manifest = readManifest();
-    expect(manifest.version).toBe(FLAG_MANIFEST_VERSION);
-    expect(manifest.overridesEnabled).toBe(true);
-    expect(manifest.overridesKey).toBe(FEATURE_FLAG_OVERRIDES_KEY);
-
-    const alpha = manifest.flags.find((f) => f.key === 'alphaEnabled');
-    expect(alpha).toEqual({
-      key: 'alphaEnabled',
-      envVar: 'VITE_FF_ALPHA_ENABLED',
-      type: 'preview',
-      baseValue: false,
-      effectiveValue: 'preview',
-      overridden: true,
-    });
-    expect(manifest.flags.find((f) => f.key === 'betaEnabled')?.overridden).toBe(false);
+describe('readStoredOverrides', () => {
+  it('returns an empty blob when nothing is stored', () => {
+    expect(readStoredOverrides(definitions)).toEqual({});
   });
 
-  // The extension needs to tell "disabled here" apart from "not a Studio page".
-  it('writes a stub manifest when overrides are disabled', () => {
-    writeFlagManifest(definitions, {}, {}, false);
+  // The panel shows what the app would apply on reload, not whatever happens to
+  // be sitting in storage, so the same filtering applies as the parse layer.
+  it('returns valid entries keyed by flag name', () => {
+    setBlob({ alphaEnabled: 'preview', gammaCount: '7' });
 
-    const manifest = readManifest();
-    expect(manifest).toEqual({
-      version: FLAG_MANIFEST_VERSION,
-      overridesEnabled: false,
-      overridesKey: '',
-      flags: [],
+    expect(readStoredOverrides(definitions)).toEqual({
+      alphaEnabled: 'preview',
+      gammaCount: '7',
     });
   });
-});
 
-describe('writeFlagManifest storage failures', () => {
-  it('does not throw when localStorage access is blocked', () => {
+  it('omits stale entries for flags that no longer exist', () => {
+    setBlob({ removedFlag: 'true', alphaEnabled: 'true' });
+
+    expect(readStoredOverrides(definitions)).toEqual({ alphaEnabled: 'true' });
+  });
+
+  it('omits values that no longer satisfy their flag schema', () => {
+    setBlob({ gammaCount: 'not-a-number', alphaEnabled: 'true' });
+
+    expect(readStoredOverrides(definitions)).toEqual({ alphaEnabled: 'true' });
+  });
+
+  it('returns an empty blob when localStorage access throws', () => {
     withBlockedStorage(() => {
-      expect(() => writeFlagManifest(definitions, {}, {}, true)).not.toThrow();
-    });
-  });
-
-  it('does not throw when the write is rejected', () => {
-    withFailingWrites(() => {
-      expect(() => writeFlagManifest(definitions, {}, {}, true)).not.toThrow();
+      expect(() => readStoredOverrides(definitions)).not.toThrow();
+      expect(readStoredOverrides(definitions)).toEqual({});
     });
   });
 });
 
-describe('installFlagsGlobal', () => {
-  const install = (enabled = true) =>
-    installFlagsGlobal(
-      definitions,
-      { alphaEnabled: false, betaEnabled: true, gammaCount: 3, deltaName: 'base' },
-      { alphaEnabled: false, betaEnabled: true, gammaCount: 3, deltaName: 'base' },
-      enabled
-    );
-
-  it('does not attach when overrides are disabled', () => {
-    install(false);
-    expect(flagsGlobal()).toBeUndefined();
-  });
-
-  it('writes a valid override and refreshes the manifest', () => {
-    install();
-    flagsGlobal()!.set('alphaEnabled', 'preview');
-
+describe('writeStoredOverrides', () => {
+  it('persists the blob and reports success', () => {
+    expect(writeStoredOverrides({ alphaEnabled: 'preview' })).toBe(true);
     expect(JSON.parse(window.localStorage.getItem(FEATURE_FLAG_OVERRIDES_KEY)!)).toEqual({
       alphaEnabled: 'preview',
     });
-    expect(readManifest().flags.find((f) => f.key === 'alphaEnabled')?.overridden).toBe(true);
   });
 
-  it('rejects an unknown flag without writing', () => {
-    install();
-    flagsGlobal()!.set('nopeEnabled', 'true');
+  // A cleared state should be indistinguishable from one that was never set.
+  it('removes the key entirely for an empty blob', () => {
+    window.localStorage.setItem(FEATURE_FLAG_OVERRIDES_KEY, '{"alphaEnabled":"true"}');
 
-    expect(window.localStorage.getItem(FEATURE_FLAG_OVERRIDES_KEY)).toBeNull();
-    expect(logger.error).toHaveBeenCalled();
-  });
-
-  it('rejects a value that fails the flag schema without writing', () => {
-    install();
-    flagsGlobal()!.set('gammaCount', 'banana');
-
+    expect(writeStoredOverrides({})).toBe(true);
     expect(window.localStorage.getItem(FEATURE_FLAG_OVERRIDES_KEY)).toBeNull();
   });
 
-  it('merges successive set calls', () => {
-    install();
-    flagsGlobal()!.set('alphaEnabled', 'preview');
-    flagsGlobal()!.set('betaEnabled', 'false');
+  it('round-trips through readStoredOverrides', () => {
+    writeStoredOverrides({ alphaEnabled: 'preview', betaEnabled: 'false' });
 
-    expect(JSON.parse(window.localStorage.getItem(FEATURE_FLAG_OVERRIDES_KEY)!)).toEqual({
+    expect(readStoredOverrides(definitions)).toEqual({
       alphaEnabled: 'preview',
       betaEnabled: 'false',
     });
   });
 
-  it('unset removes a single flag', () => {
-    install();
-    flagsGlobal()!.set('alphaEnabled', 'preview');
-    flagsGlobal()!.set('betaEnabled', 'false');
-    flagsGlobal()!.unset('alphaEnabled');
-
-    expect(JSON.parse(window.localStorage.getItem(FEATURE_FLAG_OVERRIDES_KEY)!)).toEqual({
-      betaEnabled: 'false',
-    });
-  });
-
-  // An empty blob is removed rather than left as "{}" so a cleared state is
-  // indistinguishable from never having set one.
-  it('reset clears the stored blob entirely', () => {
-    install();
-    flagsGlobal()!.set('alphaEnabled', 'preview');
-    flagsGlobal()!.reset();
-
-    expect(window.localStorage.getItem(FEATURE_FLAG_OVERRIDES_KEY)).toBeNull();
-  });
-
-  it('does not attach when localStorage access is blocked', () => {
-    withBlockedStorage(() => {
-      install();
-      expect(flagsGlobal()).toBeUndefined();
-    });
-  });
-
-  it('rejects an inherited key without writing', () => {
-    install();
-    flagsGlobal()!.set('constructor', 'true');
-
-    expect(window.localStorage.getItem(FEATURE_FLAG_OVERRIDES_KEY)).toBeNull();
-    expect(logger.error).toHaveBeenCalled();
-  });
-
-  // Throwing out of a devtools call would also report a save that never landed.
-  it('reports a failed write instead of throwing or claiming success', () => {
+  it('reports failure instead of throwing when the write is rejected', () => {
     withFailingWrites(() => {
-      install();
-      expect(() => flagsGlobal()!.set('alphaEnabled', 'preview')).not.toThrow();
+      expect(() => writeStoredOverrides({ alphaEnabled: 'preview' })).not.toThrow();
+      expect(writeStoredOverrides({ alphaEnabled: 'preview' })).toBe(false);
       expect(logger.error).toHaveBeenCalled();
-      expect(logger.info).not.toHaveBeenCalled();
     });
   });
 
-  it('list returns one entry per defined flag', () => {
-    install();
-    expect(
-      flagsGlobal()!
-        .list()
-        .map((f) => f.key)
-    ).toEqual(Object.keys(definitions));
+  it('reports failure when localStorage access is blocked', () => {
+    withBlockedStorage(() => {
+      expect(writeStoredOverrides({ alphaEnabled: 'preview' })).toBe(false);
+    });
   });
 });
