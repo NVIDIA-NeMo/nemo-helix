@@ -36,7 +36,9 @@ You do not need to deploy your agents on NeMo Helix. To start, run the platform,
 representative interaction, and confirm that it appears.
 
 NeMo Helix wires trace export for `nemo-agents-spec-v1` agents that it deploys or runs as jobs: their
-ATIF trajectories go to Intake under the agent's name. This applies to the DeepAgents, Claude Code,
+ATIF trajectories go to Intake under the agent's registered name. An explicit `telemetry.agent_name`
+in `agent.yaml` takes precedence, so keep it equal to the registered name or name-based features such
+as Insights will not find the traces. This applies to the DeepAgents, Claude Code,
 Codex, Hermes, and NOOA harnesses, and only when the `agent.yaml` leaves the destination open:
 
 - `telemetry.enabled: false` or `telemetry.atif.enabled: false` opts out.

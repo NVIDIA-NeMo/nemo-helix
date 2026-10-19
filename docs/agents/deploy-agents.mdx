@@ -273,7 +273,10 @@ curl -s "${NHX_BASE_URL:-http://localhost:8080}/apis/agents/v2/workspaces/defaul
   -d '{"messages": [{"role": "user", "content": "What is 12 multiplied by 8?"}]}'
 ```
 
-Replace `agents/<agent>` with `deployments/<deployment>` to target one deployment.
+Replace `agents/<agent>` with `deployments/<deployment>` to target one deployment. The example
+defaults to a local platform at `http://localhost:8080`. If your CLI context points at a remote
+deployment, export its URL as `NHX_BASE_URL` first, and for an authenticated deployment add
+`-H "Authorization: Bearer $(nemo auth token)"`.
 
 ## Inspect a Deployment
 

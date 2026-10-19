@@ -102,8 +102,8 @@ class BlocklistMiddleware(NemoInferenceMiddleware):
         request: InferenceRequest,
         middleware_config: BlocklistConfig,
     ) -> InferenceRequest | ImmediateResponse:
-        text = " ".join(str(m.get("content", "")) for m in request.body.get("messages", []))
-        if any(word in text for word in middleware_config.blocked_keywords):
+        text = " ".join(str(m.get("content", "")) for m in request.body.get("messages", [])).lower()
+        if any(word.lower() in text for word in middleware_config.blocked_keywords):
             return ImmediateResponse(
                 data={"choices": [{"index": 0, "message": {"role": "assistant", "content": "Blocked."}}]}
             )

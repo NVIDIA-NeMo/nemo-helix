@@ -150,10 +150,11 @@ class AcmeRuntime:
     async def start(self, payload: dict) -> None:
         config: AgentConfig = payload["config"]
         model = config.models["default"]
+        system = config.instructions.system if config.instructions else None
         self.agent = build_agent(
             model=model.model,
             base_url=model.base_url,  # the Inference Gateway, filled in by NeMo Helix
-            system_prompt=config.instructions.system.content,
+            system_prompt=system.content if system else None,
         )
 
     async def invoke(self, request: AgentRunRequest, context: RuntimeContext) -> AgentRunResult:
@@ -166,6 +167,10 @@ class AcmeRuntime:
 
 def main() -> None:
     lifecycle.serve(AcmeRuntime, config_loader=AgentConfig.from_mapping)
+
+
+if __name__ == "__main__":  # Fabric starts the runner with `python -m`
+    main()
 ```
 
 **2. Describe it** in `acme-agent.fabric-adapter.json`. `config.accepts` lists the `agent.yaml` fields
@@ -217,7 +222,8 @@ harnesses:
 
 - The environment where you run `nemo agents create` and `nemo agents package`, which validate the
   agent against its adapter.
-- The platform's Python environment, for subprocess deployments.
+- The platform's Python environment, for subprocess deployments. If you installed NeMo Helix with
+  `uv tool install`, add your package to that tool environment with `--with`.
 - The agent image, for Docker and Kubernetes deployments. Package with `--pyproject` so the image
   installs your project; the `nemo agents package-agent` platform job cannot.
 

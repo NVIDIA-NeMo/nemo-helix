@@ -74,6 +74,10 @@ curl -s "${NHX_BASE_URL:-http://localhost:8080}/apis/inference-gateway/v2/worksp
 
 </Tabs>
 
+The `curl` example defaults to a local platform at `http://localhost:8080`. If your CLI context points
+at a remote deployment, export its URL as `NHX_BASE_URL` first, and for an authenticated deployment add
+`-H "Authorization: Bearer $(nemo auth token)"`.
+
 The gateway resolves names in the workspace from the request path, so a virtual model must be in the
 same workspace as its callers.
 
