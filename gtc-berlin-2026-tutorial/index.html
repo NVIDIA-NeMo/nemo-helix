@@ -189,6 +189,9 @@ footer p{margin:0 0 6px}
   .card{break-inside:auto}.step{break-inside:avoid}
   body{font-size:11pt}
 }
+.transcript{margin-top:1rem}
+.transcript summary{cursor:pointer;font-weight:600;color:var(--green-ink)}
+.transcript p{font-size:.95rem;line-height:1.6;max-width:65ch}
 </style>
 </head>
 <body>
@@ -256,10 +259,20 @@ footer p{margin:0 0 6px}
       <div class="watch-grid">
         <div>
           <h2 id="watch-h">Watch it made first</h2>
-          <p>A 4-minute narrated run through the whole recipe. You'll see the install, both agents on this message, the data, training and scoring.</p>
+          <p>A 4-minute narrated run through the whole recipe, with captions. You'll see the install, both agents on this message, the data, training and scoring.</p>
+          <details class="transcript">
+            <summary>Read the transcript</summary>
+            <p>NeMo Helix is available on GitHub under Apache 2.0. You can install it with one command and then run nemo setup to start it up locally. From here on, I can work in a coding assistant, Claude Code in this case. I ask it to register our incident agent with Helix and deploy it. The agent is described as a YAML file. It&#x27;s running in NeMo Studio. The included web UI shows it as healthy. Now, let&#x27;s look at our example. We have a Slack message from an engineer.</p>
+            <p>The scheduler on pod-c is lagging, but nothing is broken for users yet. The agent&#x27;s triage step runs on Nemotron 3 Ultra with Meridian&#x27;s notes in its prompt. It pages the on-call engineer. This issue isn&#x27;t really urgent and could have waited until the morning. In Studio, you can see the three steps of that run. Only the first one needs Meridian&#x27;s knowledge. Next, we send the same message to the same agent with that one step moved to a fine-tuned Qwen3.5-4B. It opens a ticket for the morning, which is the right decision.</p>
+            <p>Let&#x27;s see how we fine-tuned the fast decision model. We&#x27;ll start with creating the training data using Data Designer. Here&#x27;s the actual recipe file. At the top are the two models it uses. First, it picks the answer for each example, which team owns the incident and what to do about it. Then, a model writes a realistic incident report to match, without naming the answer. A second model checks every example. Now I ask Claude Code to run it in Helix.</p>
+            <p>It starts generating incidents. Each example comes back with a quality score. Here&#x27;s what the data looks like. The answer and the incident written for it. Slack messages, pager alerts, tickets. We throw out examples like this one that give the answer away, so the model is learning without being given the answers. This is the dataset we trained on. We turn the dataset into questions and answers for the model. And upload them to Helix.</p>
+            <p>Then, Claude Code starts the fine-tuning job with the Helix post-training plugin. The plugin can train with NeMo Automodel, NeMo RL, or Unsloth. We used Unsloth because this is a small fine-tune on one GPU. Here&#x27;s the finished training run. Helix serves the original model and the fine-tuned one side-by-side. We ask both the same question. The original model doesn&#x27;t pick an action. The fine-tuned one picks the ticket. With the fine-tuned model in the agent, the same message gets a ticket.</p>
+            <p>One message isn&#x27;t proof, so we run an evaluation with the Helix Evals plugin. Every version of the agent is scored here on the same test incidents. You can open any one of them. Here&#x27;s one side-by-side. The fine-tuned agent opens a ticket. The big model pages on-call.</p>
+          </details>
         </div>
         <video controls preload="metadata" playsinline poster="assets/demo-poster.jpg" width="1280" height="720" aria-label="Narrated demo of the recipe, 4 minutes">
           <source src="assets/demo.mp4" type="video/mp4">
+          <track kind="captions" src="assets/demo.en.vtt" srclang="en" label="English" default>
           <p>Your browser can't play this video. <a href="assets/demo.mp4">Download the demo (MP4)</a>.</p>
         </video>
       </div>
