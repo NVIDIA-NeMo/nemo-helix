@@ -159,6 +159,23 @@ class TestFilesBasic:
                 assert any(fs.id == generic_fileset.id for fs in generic_filesets)
                 assert not any(fs.id == dataset_fileset.id for fs in generic_filesets)
 
+    def test_fileset_list_filter_by_purpose_in(self, client: NemoClient):
+        """Test listing filesets with a multi-value purpose filter ($in), excluding generic."""
+        files = FilesClient.from_client(client)
+        with create_fileset(FilesClient.from_client(client), purpose="dataset") as dataset_fileset:
+            with create_fileset(FilesClient.from_client(client), purpose="model") as model_fileset:
+                with create_fileset(FilesClient.from_client(client), purpose="generic") as generic_fileset:
+                    filesets = list(
+                        files.list_filesets(
+                            workspace=DEFAULT_WORKSPACE_ID,
+                            query_params={"filter": {"purpose": {"$in": ["dataset", "environment", "model"]}}},
+                        ).items()
+                    )
+                    ids = {fs.id for fs in filesets}
+                    assert dataset_fileset.id in ids
+                    assert model_fileset.id in ids
+                    assert generic_fileset.id not in ids
+
     def test_fileset_list_filter_by_storage_type(self, client: NemoClient):
         """Test listing filesets with storage_type filter."""
         files = FilesClient.from_client(client)

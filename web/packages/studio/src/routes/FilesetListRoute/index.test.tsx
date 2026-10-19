@@ -15,6 +15,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, MemoryRouter, RouterProvider } from 'react-router';
 
+
 // Mock child components to isolate testing
 vi.mock('@studio/routes/FilesetListRoute/ActionMenu', () => ({
   ActionMenu: vi.fn(({ dataset, onNavigateToDetails, onDatasetUpdated, onDatasetDeleted }) => (
@@ -259,6 +260,64 @@ describe('FilesetListRoute', () => {
       await screen.findByTestId('navigate-to-details-dataset-1', undefined, {
         timeout: LG_SELECTOR_TIMEOUT,
       });
+    });
+  });
+
+  describe('Default view (ASTD-830)', () => {
+    const make = (name: string, purpose: FilesetOutput['purpose'], over: Partial<FilesetOutput> = {}) =>
+      ({
+        ...mockDatasets[0],
+        id: `${name}-id`,
+        name,
+        purpose,
+        ...over,
+      }) as FilesetOutput;
+
+    it('shows dataset/environment/model by default with distinct pills, hides generic, and sorts by recency', async () => {
+      const requests: URL[] = [];
+      const rows = [
+        make('a-dataset', 'dataset'),
+        make('b-environment', 'environment'),
+        make('c-model', 'model'),
+        make('d-generic', 'generic'),
+      ];
+      server.use(
+        http.get(
+          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets`,
+          ({ request }) => {
+            const url = new URL(request.url);
+            requests.push(url);
+            const allowed = url.searchParams.getAll('filter[purpose][$in]').join(',').split(',');
+            const data = allowed.includes('') ? rows : rows.filter((r) => allowed.includes(r.purpose));
+            return HttpResponse.json(pageEnvelope(data));
+          }
+        )
+      );
+
+      renderRoute();
+      await screen.findByText('a-dataset', undefined, { timeout: LG_SELECTOR_TIMEOUT });
+
+      // (a) single $in filter of dataset/environment/model, default sort is recency
+      const lastUrl = requests.at(-1)!;
+      expect(lastUrl.searchParams.getAll('filter[purpose][$in]').join(',').split(',').sort()).toEqual([
+        'dataset',
+        'environment',
+        'model',
+      ]);
+      expect(lastUrl.searchParams.get('sort')).toBe('-created_at');
+
+      // (b) generic never rendered
+      expect(screen.queryByText('d-generic')).not.toBeInTheDocument();
+
+      // (c) one pill per purpose, each with a distinct color class
+      const purposes = ['dataset', 'environment', 'model'] as const;
+      const classes = purposes.map((p) => screen.getAllByTestId(`purpose-pill-${p}`)[0].className);
+      expect(new Set(classes).size).toBe(purposes.length);
+
+      // dropdown: "All" selected, no "Generic" option
+      await user.click(screen.getByRole('button', { name: /filter/i }));
+      expect(screen.queryByRole('option', { name: 'Generic' })).not.toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'All' })).toHaveAttribute('aria-selected', 'true');
     });
   });
 });
