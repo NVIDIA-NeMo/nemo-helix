@@ -68,8 +68,8 @@ export const SAFE_SYNTHESIZER_ENABLED = featureFlags.safeSynthesizerEnabled !== 
 export const SECRETS_ENABLED = featureFlags.secretsEnabled !== false;
 export const SETTINGS_ENABLED = featureFlags.settingsEnabled !== false;
 export const GUARDRAILS_ENABLED = featureFlags.guardrailsEnabled !== false;
-// Gates the local override panel in the global header. Strict `=== true`: this
-// is a developer tool, so it is opt-in per deployment rather than on-by-absence.
+// `=== true`, unlike its neighbours: the override editor must stay off by
+// default rather than on-by-absence.
 export const FLAG_OVERRIDES_ENABLED = featureFlags.flagOverridesEnabled === true;
 export const TOOL_CALLING_ENABLED = featureFlags.toolCallingEnabled !== false;
 export const TOUR_ENABLED = featureFlags.tourEnabled !== false;
