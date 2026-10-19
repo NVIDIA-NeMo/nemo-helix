@@ -38,25 +38,27 @@ Both `workspace` and `provider` are required. Other keys inside `nhx_uri_spec` a
 
 ## Worked Example
 
-Audit a NIM endpoint registered as the `nvidia-inference-api` provider in the `default` workspace:
+Audit a model through the `nvidia-build` provider in the `default` workspace. This provider uses NVIDIA Build (`https://integrate.api.nvidia.com/v1`) and requires a Build API key with completion access to the model:
 
 ```python
 from nemo_garak.sdk import GarakPluginResource
+from nemo_helix_plugin.client.client import NemoClient
 
+client = NemoClient.from_config()
 garak = GarakPluginResource(client)
 
 target = garak.targets.create(
     workspace="default",
     name="nemotron-3.5-lightning-30b",
     type="nim.NVOpenAIChat",
-    model="nvidia/nvidia/nemotron-3.5-lightning-30b-a3b",
+    model="nvidia/nemotron-3.5-lightning-30b-a3b",
     options={
         "nim": {
             "max_tokens": 1024,
             "nhx_uri_spec": {
                 "inference_gateway": {
                     "workspace": "default",
-                    "provider": "nvidia-inference-api",
+                    "provider": "nvidia-build",
                 },
             },
         },
