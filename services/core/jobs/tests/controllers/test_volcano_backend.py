@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from kubernetes import client
 from kubernetes.client.rest import ApiException
+from nemo_helix_plugin.jobs.spec import StepIngressRule, StepNetwork
 from nhx.common.auth import KUBERNETES_POD_UID_REFERENCE_NAME, AuthContext, reference_delegation_name
 from nhx.common.jobs.constants import (
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
@@ -944,7 +945,7 @@ def test_schedule_job_volcano_not_installed(
     """Test job scheduling when Volcano is not installed (404 error)."""
 
     # Mock API exception with 404 status (Volcano CRD not found)
-    volcano_job._custom_v1.create_namespaced_custom_object.side_effect = ApiException(status=404)  # ty: ignore[invalid-assignment]
+    volcano_job._custom_v1.create_namespaced_custom_object.side_effect = ApiException(status=404)  # ty: ignore[unresolved-attribute]
 
     # delete_configmap reads first and only deletes if managed by jobs-controller; mock so cleanup proceeds
     volcano_job._core_v1.read_namespaced_config_map.return_value = MagicMock(  # ty: ignore[attr-defined]
@@ -1961,3 +1962,69 @@ def test_volcano_pausing_deadline_returns_error(volcano_job, test_step_pausing):
     assert update.status == HelixJobStatus.ERROR
     assert update.error_details["message"] == "Pause deadline exceeded"
     terminate.assert_called_once_with(job)
+
+
+def _step_with_network(step: HelixJobStepWithContext) -> HelixJobStepWithContext:
+    step = step.model_copy(deep=True)
+    assert step.step_spec is not None
+    step.step_spec.network = StepNetwork(
+        ingress=[StepIngressRule(job_id_label="nemo-rl-job-id", tcp_ports=[8000, 51234])]
+    )
+    return step
+
+
+def test_schedule_creates_network_policy_before_volcano_job_and_hands_it_to_the_job(
+    volcano_job: VolcanoJobBackend,
+    distributed_gpu_execution_provider: DistributedGPUExecutionProvider,
+    test_step_pending: HelixJobStepWithContext,
+):
+    volcano_job._execution_profile_config.step_network_policies_enabled = True
+    calls = MagicMock()
+    volcano_job._networking_v1 = calls.networking
+    volcano_job._custom_v1 = calls.custom
+    calls.custom.create_namespaced_custom_object.return_value = {"metadata": {"uid": "vcjob-uid"}}
+
+    volcano_job.schedule(distributed_gpu_execution_provider, _step_with_network(test_step_pending))
+
+    order = [
+        c[0]
+        for c in calls.mock_calls
+        if c[0] in ("networking.create_namespaced_network_policy", "custom.create_namespaced_custom_object")
+    ]
+    assert order == ["networking.create_namespaced_network_policy", "custom.create_namespaced_custom_object"]
+    (owner,) = calls.networking.patch_namespaced_network_policy.call_args.kwargs["body"]["metadata"]["ownerReferences"]
+    assert (owner["api_version"], owner["kind"], owner["uid"]) == ("batch.volcano.sh/v1alpha1", "Job", "vcjob-uid")
+
+
+def test_schedule_removes_network_policy_when_volcano_is_missing(
+    volcano_job: VolcanoJobBackend,
+    distributed_gpu_execution_provider: DistributedGPUExecutionProvider,
+    test_step_pending: HelixJobStepWithContext,
+):
+    volcano_job._execution_profile_config.step_network_policies_enabled = True
+    volcano_job._networking_v1 = MagicMock()
+    volcano_job._networking_v1.read_namespaced_network_policy.return_value = MagicMock(
+        metadata=MagicMock(labels={JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER})
+    )
+    volcano_job._custom_v1.create_namespaced_custom_object.side_effect = ApiException(status=404)  # ty: ignore[unresolved-attribute]
+
+    update = volcano_job.schedule(distributed_gpu_execution_provider, _step_with_network(test_step_pending))
+
+    assert update.status == HelixJobStatus.ERROR
+    volcano_job._networking_v1.delete_namespaced_network_policy.assert_called_once()
+
+
+def test_terminate_volcano_job_deletes_network_policy(
+    volcano_job: VolcanoJobBackend, test_step_pending: HelixJobStepWithContext
+):
+    volcano_job._execution_profile_config.step_network_policies_enabled = True
+    volcano_job._networking_v1 = MagicMock()
+    volcano_job._networking_v1.read_namespaced_network_policy.return_value = MagicMock(
+        metadata=MagicMock(labels={JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER})
+    )
+
+    volcano_job.terminate_job(_volcano_job_for_step(test_step_pending))
+
+    volcano_job._networking_v1.delete_namespaced_network_policy.assert_called_once_with(
+        name=name_for_step(test_step_pending), namespace="test-namespace"
+    )

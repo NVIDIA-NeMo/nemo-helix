@@ -43,6 +43,11 @@ rules:
   # before delete. Without get, delete_deployment fails with 403 and the
   # Deployment is stuck in DELETING. Mirrors the configmaps verb set.
   verbs: ["get", "list", "create", "delete"]
+{{- if include "nemo-helix.jobStepNetworkPoliciesEnabled" . }}
+- apiGroups: ["networking.k8s.io"]
+  resources: ["networkpolicies"]
+  verbs: ["get", "create", "update", "patch", "delete"]
+{{- end }}
 {{- if .Values.rbac.volcanoEnabled }}
 # Volcano
 - apiGroups: ["batch.volcano.sh"]
