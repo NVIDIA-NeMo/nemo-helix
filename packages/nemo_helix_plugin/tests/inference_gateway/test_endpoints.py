@@ -52,7 +52,9 @@ def test_named_proxy_routes(endpoint: Any, http_method: str, surface: str) -> No
     prepared = endpoint(**kwargs)
 
     assert prepared.method == http_method
-    assert prepared.path_template == f"{BASE}/{surface}/{{name}}/-/{{trailing_uri:path}}"
+    # Model names span segments (``workspace/name``), provider names do not; both match the gateway routes.
+    name_placeholder = "{name:path}" if surface == "model" else "{name}"
+    assert prepared.path_template == f"{BASE}/{surface}/{name_placeholder}/-/{{trailing_uri:path}}"
     assert prepared.path_params == {"workspace": "ws", "name": "nvidia-build", "trailing_uri": "v1/chat/completions"}
     if "body" in kwargs:
         assert _json_body(prepared) == {"model": "m"}
@@ -110,7 +112,7 @@ def test_openai_model_listing_routes() -> None:
 
     assert listing.path_template == f"{BASE}/openai/-/v1/models"
     assert listing.response_type is OpenAIModelList
-    assert single.path_template == f"{BASE}/openai/-/v1/models/{{name}}"
+    assert single.path_template == f"{BASE}/openai/-/v1/models/{{name:path}}"
     assert single.path_params == {"workspace": "ws", "name": "default/vm"}
     assert single.response_type is OpenAIModel
 
@@ -176,6 +178,16 @@ def test_named_route_encodes_name_and_keeps_trailing_uri_literal() -> None:
     assert recorder.requests[0].url.raw_path == (
         b"/apis/inference-gateway/v2/workspaces/default/provider/my%20provider/-/v1/models"
     )
+
+
+def test_model_name_slashes_are_literal_on_the_wire() -> None:
+    recorder = _Recorder()
+
+    _client(recorder).model_get(name="a/b", trailing_uri="v1/models")
+
+    raw_path = recorder.requests[0].url.raw_path
+    assert raw_path == b"/apis/inference-gateway/v2/workspaces/default/model/a/b/-/v1/models"
+    assert b"%2F" not in raw_path
 
 
 def test_trailing_uri_rejects_traversal() -> None:

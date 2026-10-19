@@ -297,10 +297,10 @@ def _retry_after(response: httpx.Response) -> float | None:
 # A ``{name:path}`` value keeps ``/`` literal because a percent-encoded ``/``
 # (``%2F``) in a request-target is rejected by HTTP proxies that refuse encoded
 # slashes, such as the OpenShell sandbox supervisor. Its segments therefore become
-# real URL segments, so ``.``, ``..`` and empty segments (including a leading
-# ``/``) are rejected: they would resolve into a different route, e.g. a sibling
-# fileset. One trailing ``/`` is allowed (``v1/models/`` is a distinct, valid
-# target).
+# real URL segments, so ``.``, ``..`` and empty segments are rejected: they would
+# resolve into a different route, e.g. a sibling fileset. A leading ``/`` is
+# dropped (the template already ends its literal part with one) and one trailing
+# ``/`` is allowed (``v1/models/`` is a distinct, valid target).
 def _format_path(template: str, params: Mapping[str, str]) -> str:
     """Fill a path template, percent-encoding each value per its placeholder kind."""
     parts: list[str] = []
@@ -310,6 +310,7 @@ def _format_path(template: str, params: Mapping[str, str]) -> str:
             continue
         value = str(params[field_name])
         if format_spec == PATH_SPEC:
+            value = value.removeprefix("/")
             if any(segment in ("", ".", "..") for segment in value.removesuffix("/").split("/")):
                 raise ValueError(
                     f"Path parameter {field_name!r} must not contain empty, '.' or '..' segments, got {value!r}"

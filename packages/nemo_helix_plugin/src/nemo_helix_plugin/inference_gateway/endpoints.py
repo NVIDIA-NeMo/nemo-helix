@@ -77,32 +77,32 @@ def provider_ready(*, workspace: str | None = None, name: str) -> ProviderReadyR
 # ---------------------------------------------------------------------------
 
 
-@get(f"{_BASE}/model/{{name}}/-/{{trailing_uri:path}}")
+@get(f"{_BASE}/model/{{name:path}}/-/{{trailing_uri:path}}")
 @abstractmethod
 def model_get(*, workspace: str | None = None, name: str, trailing_uri: str) -> Any: ...
 
 
-@post(f"{_BASE}/model/{{name}}/-/{{trailing_uri:path}}")
+@post(f"{_BASE}/model/{{name:path}}/-/{{trailing_uri:path}}")
 @abstractmethod
 def model_post(*, workspace: str | None = None, name: str, trailing_uri: str, body: JsonBody) -> Any: ...
 
 
-@put(f"{_BASE}/model/{{name}}/-/{{trailing_uri:path}}")
+@put(f"{_BASE}/model/{{name:path}}/-/{{trailing_uri:path}}")
 @abstractmethod
 def model_put(*, workspace: str | None = None, name: str, trailing_uri: str, body: JsonBody) -> Any: ...
 
 
-@patch(f"{_BASE}/model/{{name}}/-/{{trailing_uri:path}}")
+@patch(f"{_BASE}/model/{{name:path}}/-/{{trailing_uri:path}}")
 @abstractmethod
 def model_patch(*, workspace: str | None = None, name: str, trailing_uri: str, body: JsonBody) -> Any: ...
 
 
-@delete(f"{_BASE}/model/{{name}}/-/{{trailing_uri:path}}")
+@delete(f"{_BASE}/model/{{name:path}}/-/{{trailing_uri:path}}")
 @abstractmethod
 def model_delete(*, workspace: str | None = None, name: str, trailing_uri: str) -> None: ...
 
 
-@post(f"{_BASE}/model/{{name}}/-/{{trailing_uri:path}}")
+@post(f"{_BASE}/model/{{name:path}}/-/{{trailing_uri:path}}")
 @abstractmethod
 def stream_model(*, workspace: str | None = None, name: str, trailing_uri: str, body: JsonBody) -> BinaryContent: ...
 
@@ -132,6 +132,6 @@ def stream_openai(*, workspace: str | None = None, trailing_uri: str, body: Json
 def list_openai_models(*, workspace: str | None = None) -> OpenAIModelList: ...
 
 
-@get(f"{_BASE}/openai/-/v1/models/{{name}}")
+@get(f"{_BASE}/openai/-/v1/models/{{name:path}}")
 @abstractmethod
 def get_openai_model(*, workspace: str | None = None, name: str) -> OpenAIModel: ...
