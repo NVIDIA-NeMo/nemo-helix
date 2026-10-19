@@ -198,6 +198,13 @@ async def _finish(
 
     Stamps first: no pass runs after the final state, so a stamp after it that failed would never be retried.
     A stamp is best effort and never stops the state write.
+
+    Relies on this controller being the only writer of a terminal phase, one pass at a time (one replica,
+    ``Recreate``; ``reconcile`` is sequential). If ``set_state`` loses to another write, the run stays open and
+    the next pass stamps again before its own write, so the last stamp matches the state that wins. A second
+    writer of terminal phases (a cancel route that sets ``cancelled`` itself, more replicas, concurrent passes)
+    breaks this: a losing pass's stamp could outlive its rejected write. Then stamp from the winning state
+    instead, after ``set_state`` succeeds or on reading back a terminal run (M1 story 4).
     """
     if plan.intake is not None:
         await stamp_run_evaluation(jobs.evaluations, run, plan, phase=phase, result_state=result_state, now=now)
