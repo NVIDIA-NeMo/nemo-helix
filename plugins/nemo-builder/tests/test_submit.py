@@ -36,7 +36,11 @@ from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 #: The build's Jobs execution profiles, as the quickstart has them.
 PROFILES = [
     KubernetesJobExecutionProfile.model_validate(
-        {"profile": name, "config": {"namespace": "nhx-builds", "storage": {"pvc_name": "nhx-build-work"}}}
+        {
+            "profile": name,
+            "allowed_services": ["builder"],
+            "config": {"namespace": "nhx-builds", "storage": {"pvc_name": "nhx-build-work"}},
+        }
     )
     for name in ("build-fetch", "build-control", "build-push")
 ]

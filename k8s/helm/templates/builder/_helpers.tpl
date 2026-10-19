@@ -57,6 +57,8 @@ a profile the config adds doesn't inherit executor_defaults.
 - provider: cpu
   profile: {{ printf "build-%s" $step }}
   backend: kubernetes_job
+  # Only Builder's own jobs: a pod in the build namespace can mount any Secret there, a step's included.
+  allowed_services: ["builder"]
   config:
     namespace: {{ include "nemo-helix.builder.namespace" $ | quote }}
     service_account_name: {{ include "nemo-helix.builder.serviceAccountName" (list $ $step) | quote }}

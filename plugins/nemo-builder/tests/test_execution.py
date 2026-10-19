@@ -34,9 +34,17 @@ def _config(**overrides: object) -> BuilderConfig:
     return BuilderConfig.model_validate(settings | overrides)
 
 
-def _profile(name: str, **config: object) -> KubernetesJobExecutionProfile:
+def _profile(
+    name: str, *, allowed_services: list[str] | None = None, **config: object
+) -> KubernetesJobExecutionProfile:
     settings: dict[str, object] = {"namespace": "nhx-builds", "storage": {"pvc_name": "nhx-build-work"}}
-    return KubernetesJobExecutionProfile.model_validate({"profile": name, "config": settings | config})
+    return KubernetesJobExecutionProfile.model_validate(
+        {
+            "profile": name,
+            "allowed_services": ["builder"] if allowed_services is None else allowed_services,
+            "config": settings | config,
+        }
+    )
 
 
 #: The build's Jobs execution profiles, as the quickstart has them.
@@ -93,6 +101,17 @@ class TestTheBuildProfiles:
                 [*PROFILES[:2], _profile("build-push", storage={"pvc_name": "other"})],
                 "one work volume",
                 id="two-work-volumes",
+            ),
+            # A pod in the build namespace can mount any Secret there, so no one else's job may run in it.
+            pytest.param(
+                [*PROFILES[:2], _profile("build-push", allowed_services=[])],
+                "cpu/build-push isn't reserved for Builder",
+                id="open-to-anyone",
+            ),
+            pytest.param(
+                [PROFILES[0], _profile("build-control", allowed_services=["builder", "evals"]), PROFILES[2]],
+                "cpu/build-control isn't reserved for Builder",
+                id="shared-with-another-service",
             ),
         ],
     )

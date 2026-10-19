@@ -773,22 +773,25 @@ volume and `node_selector`, so the profiles must agree with each other:
   credential and signing key the same way. With exchange, each step exchanges its pod's token for
   one acting for the submitter, and the jobs controller reads the push step's secrets for the
   submitter and hands them over in a Kubernetes Secret in the build namespace, deleted with the
-  step. `complete` admits a caller only when it acts for the image's submitter; reading an image
-  admits one acting for any person.
+  step. The builder creates each build's job as `service:builder`, acting for the submitter.
+  `complete` admits a caller only when it acts for the image's submitter; reading an image admits one
+  acting for any person.
 - **With exchange, the build steps must trust the gateway's certificate.** They call the platform
   over TLS to exchange their tokens. The chart gives its build profiles no extra environment or
   volumes, so if a private CA signs that certificate, define `build-fetch`, `build-control` and
   `build-push` yourself under `platformConfig.jobs.executors`, with the CA mounted and
-  `SSL_CERT_FILE` pointing at it: a profile you define replaces the chart's.
+  `SSL_CERT_FILE` pointing at it: a profile you define replaces the chart's. Give each
+  `allowed_services: ["builder"]`, as the chart's do; the builder refuses a build profile without it.
 - **`fetch` unpacks archives the request names.** It runs acting for the submitter and parses an
   archive anyone who can write to the fileset put there. Python's `data` filter keeps every entry
   inside the archive's directory, and refuses links out of it and devices; the caps bound what one
   archive writes to the work volume every build on the node shares.
-- **Execution profiles aren't authorized in Jobs.** Anyone who can submit a build can run a raw job
-  under any of the builder's profiles. Under `build-control` such a job can create any pod in the
-  build namespace: it can mount the whole work volume, with every build's contexts and outputs, and
-  rewrite a layout another job's push step is about to publish; read any build pod's log; and delete
-  any build pod. Closing it needs Jobs to restrict these profiles to the builder.
+- **Only the builder's jobs run under its profiles.** Each build profile sets
+  `allowed_services: ["builder"]`, so Jobs refuses any other job on it, and the builder refuses a
+  build profile without it. Otherwise a raw job under `build-control` could create any pod in the
+  build namespace: mount the whole work volume and rewrite a layout another job's push step is about
+  to publish, mount another build's push-step Secret, read any build pod's log, or delete any build
+  pod.
 - **Nothing restricts the sandbox's network.** A Dockerfile's `RUN` can reach anything a pod can:
   the platform, as any user or service it names, every other Service, and on a cloud cluster the
   node's metadata server. A NetworkPolicy allowing the sandbox only public addresses would close

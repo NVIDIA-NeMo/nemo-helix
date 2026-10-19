@@ -250,8 +250,10 @@ def get_platform_jobs_steps_list_filter(request: Request) -> HelixJobStepsListFi
 def validate_job_spec(
     job_spec: HelixJobSpec,
     execution_profiles: list[ExecutionProfileT],
+    *,
+    creator: str,
 ) -> None:
-    """Validate that the job spec is compatible with the execution profile."""
+    """Validate that the job spec is compatible with the execution profile, and that ``creator`` may use it."""
     for step in job_spec.steps:
         profile_name = step.executor.profile
         execution_profile = next(
@@ -262,6 +264,14 @@ def validate_job_spec(
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"The execution profile '{step.executor.provider}/{profile_name}' specified in step '{step.name}' does not exist.",
+            )
+
+        allowed = [f"service:{service}" for service in execution_profile.allowed_services]
+        if allowed and creator not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"The execution profile '{execution_profile}' specified in step '{step.name}' is reserved "
+                f"for {', '.join(allowed)}.",
             )
 
         if step.requires_persistent_storage and not execution_profile.supports_persistent_storage:
@@ -335,7 +345,7 @@ async def create_job(
         request.platform_spec, configured_subprocess_translation_profiles()
     )
     request = request.model_copy(update={"platform_spec": platform_spec})
-    validate_job_spec(request.platform_spec, profiles)
+    validate_job_spec(request.platform_spec, profiles, creator=auth_client.principal.id)
 
     try:
         return await dispatcher.create_job(

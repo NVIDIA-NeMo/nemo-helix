@@ -332,3 +332,67 @@ class TestAResubmitFindsItsJob:
         assert ("GET", "/apis/jobs/v2/workspaces/ws-a/jobs/builder-build-1") in [
             (r.method, r.url.path) for r in requests
         ]
+
+
+class TestTheBuildJobIsBuilders:
+    """Jobs reserves the build profiles for Builder, so the route creates its job as Builder, for its caller."""
+
+    def test_the_job_is_created_as_builder_for_the_caller(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from contextlib import asynccontextmanager
+
+        from nemo_helix_plugin.auth import AuthContext, RuntimePrincipal
+        from nemo_helix_plugin.client.errors import NemoResponseValidationError
+        from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
+
+        caller = AuthContext(principal_id="alice@example.com", principal_email="alice@example.com")
+        made: list[tuple[str | None, str | RuntimePrincipal | None]] = []
+        created_through: list[str] = []
+
+        def transport(name: str) -> httpx.MockTransport:
+            def handle(request: httpx.Request) -> httpx.Response:
+                if request.url.path.endswith("/execution-profiles"):
+                    return httpx.Response(200, json=[])
+                created_through.append(name)
+                return httpx.Response(201, json={})
+
+            return httpx.MockTransport(handle)
+
+        @asynccontextmanager
+        async def service_client(*, as_service: str | None = None, internal: bool = False, on_behalf_of=None):
+            made.append((as_service, on_behalf_of))
+            yield AsyncNemoClient(
+                base_url="http://platform.test", http_client=httpx.AsyncClient(transport=transport("builder"))
+            )
+
+        async def submit(*_args, create_job, **_kwargs) -> SubmitResult:
+            request = CreateHelixJobRequest(
+                name="builder-build-1",
+                source="builder",
+                spec={},
+                platform_spec={
+                    "steps": [{"name": "fetch", "executor": {"provider": "cpu", "container": {"image": "b"}}}]
+                },
+            )
+            try:
+                await create_job(request)
+            except NemoResponseValidationError:
+                pass  # the fake Jobs answer isn't a job; only the client the create went through matters
+            return SubmitResult(job="builder-build-1", images=[])
+
+        monkeypatch.setattr(service, "load_backend", lambda *_args: None)
+        monkeypatch.setattr(service, "submit_build_set", submit)
+        monkeypatch.setattr(service, "current_auth_context", lambda: caller)
+        monkeypatch.setattr(service, "get_async_nemo_client", service_client)
+        app = _app(AsyncMock())
+        app.dependency_overrides[get_nemo_client] = lambda: AsyncNemoClient(
+            base_url="http://platform.test", http_client=httpx.AsyncClient(transport=transport("caller"))
+        )
+        body = {"name": "build", "revision": 1, "build_specs": [{"source": {"fileset": "ws-a/ctx"}}]}
+
+        response = TestClient(app).post("/v2/workspaces/ws-a/builds", json=body)
+
+        assert response.status_code == 201, response.text
+        assert [service for service, _ in made] == ["builder"]
+        delegated = made[0][1]
+        assert delegated is not None and not isinstance(delegated, str) and delegated.id == "alice@example.com"
+        assert created_through == ["builder"]

@@ -61,6 +61,12 @@ class ExecutionBackend:
                 f"Jobs execution profile cpu/{name} runs on {profile.backend}, but builds need kubernetes_job: "
                 "each runs its Dockerfiles in a pod of its own"
             )
+        if profile.allowed_services != ["builder"]:
+            # A pod in the build namespace can mount any Secret there, the push step's credentials included.
+            raise BackendRejectedError(
+                f"Jobs execution profile cpu/{name} isn't reserved for Builder: set its allowed_services to "
+                '["builder"], so no other job can run in the build namespace'
+            )
         return profile.config
 
     def _work_profile(self) -> KubernetesJobExecutionProfileConfig:

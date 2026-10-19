@@ -4,6 +4,7 @@
 import pytest
 from fastapi import HTTPException
 from nhx.core.jobs.api.v2.jobs.endpoints import translate_cpu_container_steps_to_subprocess, validate_job_spec
+from nhx.core.jobs.app.profiles import ExecutionProfileT
 from nhx.core.jobs.app.providers import ContainerSpec, CPUExecutionProvider, SubprocessExecutionProvider
 from nhx.core.jobs.app.schemas import HelixJobSpec, HelixJobStepSpec
 from nhx.core.jobs.controllers.backends.docker import DockerJobExecutionProfile, DockerJobExecutionProfileConfig
@@ -55,4 +56,52 @@ def test_validate_job_spec_matches_provider_and_profile() -> None:
     ]
 
     with pytest.raises(HTTPException, match="subprocess/default"):
-        validate_job_spec(spec, profiles)
+        validate_job_spec(spec, profiles, creator="alice@example.com")
+
+
+def _builder_only_profiles() -> list[ExecutionProfileT]:
+    return [
+        DockerJobExecutionProfile(
+            provider="cpu",
+            profile="build-push",
+            backend="docker",
+            allowed_services=["builder"],
+            config=DockerJobExecutionProfileConfig(),
+        )
+    ]
+
+
+def test_a_profile_restricted_to_a_service_refuses_anyone_else() -> None:
+    spec = HelixJobSpec(steps=[_cpu_step("push", profile="build-push")])
+
+    with pytest.raises(HTTPException) as refused:
+        validate_job_spec(spec, _builder_only_profiles(), creator="alice@example.com")
+
+    assert refused.value.status_code == 403
+    assert "build-push" in str(refused.value.detail)
+
+
+def test_a_profile_restricted_to_a_service_refuses_another_service() -> None:
+    spec = HelixJobSpec(steps=[_cpu_step("push", profile="build-push")])
+
+    with pytest.raises(HTTPException) as refused:
+        validate_job_spec(spec, _builder_only_profiles(), creator="service:evals")
+
+    assert refused.value.status_code == 403
+
+
+def test_a_profile_restricted_to_a_service_admits_that_service() -> None:
+    spec = HelixJobSpec(steps=[_cpu_step("push", profile="build-push")])
+
+    validate_job_spec(spec, _builder_only_profiles(), creator="service:builder")
+
+
+def test_an_unrestricted_profile_admits_anyone() -> None:
+    spec = HelixJobSpec(steps=[_cpu_step("step")])
+    profiles: list[ExecutionProfileT] = [
+        DockerJobExecutionProfile(
+            provider="cpu", profile="default", backend="docker", config=DockerJobExecutionProfileConfig()
+        )
+    ]
+
+    validate_job_spec(spec, profiles, creator="alice@example.com")

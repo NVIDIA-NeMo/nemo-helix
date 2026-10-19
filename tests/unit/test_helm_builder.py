@@ -98,6 +98,8 @@ def test_the_build_steps_profiles_and_config() -> None:
         assert profile.config.service_account_name == name.replace("build-", "nhx-build-")
         assert profile.config.storage.pvc_name == "nhx-build-work"
         assert profile.config.cleanup_completed_jobs_immediately is True
+        # Only Builder may run steps here: a pod in the build namespace can mount any Secret in it.
+        assert profile.allowed_services == ["builder"]
     # Build pods run in another namespace, so the platform's URL must name its own.
     assert config["platform"]["base_url"] == "http://nemo-helix-api.nhx.svc:8080"
 

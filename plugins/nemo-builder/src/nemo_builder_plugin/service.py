@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import ClassVar, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -36,9 +38,11 @@ from nemo_builder_plugin.submit import (
     submit_build_set,
 )
 from nemo_builder_plugin.upstream import UpstreamRegistry
+from nemo_helix_plugin.auth import current_auth_context
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NotFoundError, PermissionDeniedError
+from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
@@ -51,6 +55,17 @@ from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nemo_helix_plugin.service import NemoService, RouterSpec
 
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _as_builder(request_client: AsyncNemoClient) -> AsyncGenerator[AsyncNemoClient, None]:
+    """A client calling the platform as Builder for the request's caller; the caller's own without one."""
+    caller = current_auth_context()
+    if caller is None:
+        yield request_client
+        return
+    async with get_async_nemo_client(as_service="builder", internal=True, on_behalf_of=caller.to_principal()) as client:
+        yield client
 
 
 async def _get_row(entity_client: NemoEntitiesClient, workspace: str, name: str) -> ContainerImage:
@@ -96,63 +111,65 @@ def _build_router() -> APIRouter:
         refusal = submit_refusal(caller)
         if refusal is not None:
             raise HTTPException(status_code=403, detail=refusal)
-        jobs_client = AsyncJobsClient.from_client(client)
+        # Jobs reserves the build profiles for Builder, so the job is Builder's, created for the caller.
+        async with _as_builder(client) as builder_client:
+            jobs_client = AsyncJobsClient.from_client(builder_client)
 
-        async def create_job(request):
-            return await jobs_client.create_job(workspace=workspace, body=request)
+            async def create_job(request):
+                return await jobs_client.create_job(workspace=workspace, body=request)
 
-        async def get_job_fields(name: str):
-            return (await jobs_client.get_job(workspace=workspace, name=name)).data().custom_fields or {}
+            async def get_job_fields(name: str):
+                return (await jobs_client.get_job(workspace=workspace, name=name)).data().custom_fields or {}
 
-        secrets_client = AsyncSecretsClient.from_client(client)
+            secrets_client = AsyncSecretsClient.from_client(client)
 
-        async def secret_readable(secret_workspace: str, name: str) -> bool:
+            async def secret_readable(secret_workspace: str, name: str) -> bool:
+                try:
+                    (await secrets_client.get_secret(workspace=secret_workspace, name=name)).data()
+                except (NotFoundError, PermissionDeniedError):
+                    return False
+                return True
+
+            async def resolve_upstream(reference: ImageReference, platform: str) -> str:
+                registry = UpstreamRegistry()
+                try:
+                    return (await asyncio.to_thread(registry.resolve, reference, platform=platform)).manifest_digest
+                finally:
+                    registry.close()
+
             try:
-                (await secrets_client.get_secret(workspace=secret_workspace, name=name)).data()
-            except (NotFoundError, PermissionDeniedError):
-                return False
-            return True
+                # The sandbox runs where the build's profiles put its steps.
+                backend = load_backend(BuilderConfig.get(), await jobs_client.list_execution_profiles())
+                result = await submit_build_set(
+                    body,
+                    backend=backend,
+                    workspace=workspace,
+                    entity_client=entity_client,
+                    create_job=create_job,
+                    get_job_fields=get_job_fields,
+                    secret_readable=secret_readable,
+                    resolve_upstream=resolve_upstream,
+                )
+            except InvalidBuildRequest as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except (BackendRejectedError, BuildConflict, MissingSecrets) as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except UpstreamUnavailable as exc:
+                raise HTTPException(status_code=502, detail=f"Couldn't resolve an image to copy: {exc}") from exc
+            except PermissionDeniedError as exc:
+                # From Jobs, which lists the profiles and creates the job as Builder for the caller. A refused listing
+                # writes nothing; a refused job leaves the rows written before it pending.
+                raise HTTPException(status_code=403, detail=f"Not permitted: {exc.detail}") from exc
+            except NemoHTTPError as exc:
+                logger.exception("a platform service refused build set %r", sanitize_for_log(body.name))
+                raise HTTPException(
+                    status_code=502, detail=f"A platform service refused the build (HTTP {exc.status_code})."
+                ) from exc
+            except Exception as exc:
+                logger.exception("failed to submit build set %r", sanitize_for_log(body.name))
+                raise HTTPException(status_code=500, detail="Failed to submit build.") from exc
 
-        async def resolve_upstream(reference: ImageReference, platform: str) -> str:
-            registry = UpstreamRegistry()
-            try:
-                return (await asyncio.to_thread(registry.resolve, reference, platform=platform)).manifest_digest
-            finally:
-                registry.close()
-
-        try:
-            # The sandbox runs where the build's profiles put its steps.
-            backend = load_backend(BuilderConfig.get(), await jobs_client.list_execution_profiles())
-            result = await submit_build_set(
-                body,
-                backend=backend,
-                workspace=workspace,
-                entity_client=entity_client,
-                create_job=create_job,
-                get_job_fields=get_job_fields,
-                secret_readable=secret_readable,
-                resolve_upstream=resolve_upstream,
-            )
-        except InvalidBuildRequest as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except (BackendRejectedError, BuildConflict, MissingSecrets) as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except UpstreamUnavailable as exc:
-            raise HTTPException(status_code=502, detail=f"Couldn't resolve an image to copy: {exc}") from exc
-        except PermissionDeniedError as exc:
-            # From Jobs, which lists the profiles and creates the job as the caller. A refused listing writes nothing;
-            # a refused job leaves the rows written before it pending.
-            raise HTTPException(status_code=403, detail=f"Not permitted: {exc.detail}") from exc
-        except NemoHTTPError as exc:
-            logger.exception("a platform service refused build set %r", sanitize_for_log(body.name))
-            raise HTTPException(
-                status_code=502, detail=f"A platform service refused the build (HTTP {exc.status_code})."
-            ) from exc
-        except Exception as exc:
-            logger.exception("failed to submit build set %r", sanitize_for_log(body.name))
-            raise HTTPException(status_code=500, detail="Failed to submit build.") from exc
-
-        return SubmitBuildResponse(job=result.job, images=result.images)
+            return SubmitBuildResponse(job=result.job, images=result.images)
 
     @router.get("/container-images", response_model=list[ContainerImage], tags=["Builder"])
     @scope.read

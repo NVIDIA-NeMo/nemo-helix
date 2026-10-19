@@ -33,7 +33,11 @@ def _profiles(**fetch: object) -> list[KubernetesJobExecutionProfile]:
     settings: dict[str, object] = {"namespace": "nhx-builds", "storage": {"pvc_name": "nhx-build-work"}}
     return [
         KubernetesJobExecutionProfile.model_validate(
-            {"profile": name, "config": settings | (fetch if name == "build-fetch" else {})}
+            {
+                "profile": name,
+                "allowed_services": ["builder"],
+                "config": settings | (fetch if name == "build-fetch" else {}),
+            }
         )
         for name in ("build-fetch", "build-control", "build-push")
     ]
