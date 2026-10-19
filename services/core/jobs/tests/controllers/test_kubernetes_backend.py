@@ -3294,3 +3294,35 @@ def test_classify_task_containers_reads_only_the_task_container():
     pod = SimpleNamespace(status=SimpleNamespace(container_statuses=[sidecar, task], phase="Running"))
 
     assert classify_task_containers([pod]) == (False, 75)
+
+
+def _classified_pod(task: int | str) -> SimpleNamespace:
+    """A pod whose task exited with ``task``, is ``"running"``, or has no readable status in phase ``task``."""
+    if isinstance(task, int):
+        return _terminated_task_pod(task)
+    if task == "running":
+        container = SimpleNamespace(name="nemo-job-task", state=SimpleNamespace(terminated=None))
+        return SimpleNamespace(status=SimpleNamespace(container_statuses=[container], phase="Running"))
+    return SimpleNamespace(status=SimpleNamespace(container_statuses=None, phase=task))
+
+
+@pytest.mark.parametrize(
+    "tasks,expected",
+    [
+        pytest.param([0, 0], (False, 0), id="all-exit-0"),
+        pytest.param([0, 75], (False, 75), id="0-then-75"),
+        pytest.param([75, 0], (False, 75), id="75-then-0"),
+        pytest.param([75, 1], (False, 1), id="75-then-failure"),
+        pytest.param([1, 75], (False, 1), id="failure-then-75"),
+        pytest.param([2, 3], (False, 2), id="first-failure-wins"),
+        pytest.param([75, "running"], (True, None), id="75-then-running"),
+        pytest.param(["running", 75], (True, None), id="running-then-75"),
+        pytest.param([], (False, None), id="no-pods"),
+        pytest.param([75, "Failed"], (False, 1), id="75-then-unreadable-failed-pod"),
+        pytest.param([0, "Failed"], (False, 1), id="0-then-unreadable-failed-pod"),
+        pytest.param([75, "Succeeded"], (False, 75), id="75-then-unreadable-succeeded-pod"),
+        pytest.param([75, "Pending"], (True, None), id="75-then-unstarted-pod"),
+    ],
+)
+def test_classify_task_containers(tasks: list[int | str], expected: tuple[bool, int | None]):
+    assert classify_task_containers([_classified_pod(task) for task in tasks]) == expected

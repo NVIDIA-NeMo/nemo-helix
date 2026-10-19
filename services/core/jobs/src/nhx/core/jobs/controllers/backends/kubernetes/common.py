@@ -490,18 +490,22 @@ def list_pod_status(core_v1: client.CoreV1Api, namespace: str, labels: dict[str,
 def classify_task_containers(pods: list[V1Pod]) -> tuple[bool, int | None]:
     """Classify task containers while a step is pausing.
 
-    Returns ``(still_running, exit_code)``. ``still_running`` is true when a
-    task container has not exited. ``exit_code`` is ``75`` when a container
-    stopped for a pause and no other container failed, ``0`` when every task
-    container exited 0, and the first other code otherwise. It is ``None`` when
-    no task container has terminated.
+    Returns ``(still_running, exit_code)``:
+
+    - ``(True, None)`` while any task container has not exited.
+    - ``(False, 0)`` when every task exited 0.
+    - ``(False, 75)`` when every task exited 0 or 75, and at least one exited 75.
+    - ``(False, code)`` for the first other exit code, which wins over 0 and 75.
+    - ``(False, None)`` when there are no pods, so no exit code is readable.
 
     Only the task container is read, by name. Injected sidecars can keep running
-    after the task exits, and their exit codes say nothing about the pause.
+    after the task exits, and their exit codes say nothing about the pause. A
+    finished pod with no readable task status counts by its phase: a succeeded pod
+    as exit 0, and a failed pod as exit 1, because nothing confirms that its task
+    saved a checkpoint.
     """
     if not pods:
         return False, None
-    saw_exit = False
     saw_pause = False
     other: int | None = None
     for pod in pods:
@@ -510,23 +514,25 @@ def classify_task_containers(pods: list[V1Pod]) -> tuple[bool, int | None]:
             statuses = [
                 status for status in pod.status.container_statuses if status.name == NEMO_JOB_TASK_CONTAINER_NAME
             ]
+        codes: list[int] = []
         if not statuses:
             phase = pod.status.phase if pod.status is not None else None
-            if phase in ("Succeeded", "Failed"):
-                continue
-            return True, None
+            if phase == "Succeeded":
+                codes.append(0)
+            elif phase == "Failed":
+                codes.append(1)
+            else:
+                return True, None
         for container in statuses:
             terminated = container.state.terminated if container.state is not None else None
             if terminated is None:
                 return True, None
-            saw_exit = True
-            code = terminated.exit_code if isinstance(terminated.exit_code, int) else 1
+            codes.append(terminated.exit_code if isinstance(terminated.exit_code, int) else 1)
+        for code in codes:
             if code == PAUSE_EXIT_CODE:
                 saw_pause = True
             elif code != 0 and other is None:
                 other = code
-    if not saw_exit:
-        return False, None
     if other is not None:
         return False, other
     if saw_pause:
