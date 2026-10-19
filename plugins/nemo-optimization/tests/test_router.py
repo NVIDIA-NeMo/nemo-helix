@@ -233,6 +233,31 @@ def test_dispatch_real_prompt_config_failure_skips_numeric_preflight(ctx: JobCon
 
 
 @pytest.mark.integration
+def test_dispatch_missing_prompt_purpose_attributes_preflight_failure_to_prompt(ctx: JobContext) -> None:
+    """NVBug 6922850: preserve the prompt phase through numeric preflight wrappers."""
+    payload = _real_backend_payload()
+    del payload["optimizer"]["search_space"]["system_prompt"]["purpose"]
+
+    result = OptimizeRouter.dispatch_payload(payload, ctx=ctx)
+
+    assert result["status"] == "failed"
+    assert result["trial_number_range"] == {"start": 0, "end_exclusive": 0, "count": 0}
+
+    out_dir = ctx.storage.persistent / "results" / "optimizer_results"
+    assert not (out_dir / "final_optimized_config.yml").exists()
+    assert not (out_dir / "intermediate_numeric_config.yml").exists()
+    phase_results = json.loads((out_dir / "phase_results.json").read_text(encoding="utf-8"))
+    assert [phase["trial_number_range"]["count"] for phase in phase_results] == [0, 0]
+    assert any(
+        phase["summary"].get("error") == "Prompt search-space entry 'system_prompt' requires non-empty 'purpose'."
+        for phase in phase_results
+    )
+    assert [phase["status"] for phase in phase_results] == ["skipped", "failed"]
+    assert [phase["status"] for phase in result["phases"]] == ["skipped", "failed"]
+    assert (out_dir / "prompt_phase_failure.json").is_file()
+
+
+@pytest.mark.integration
 def test_dispatch_real_failed_numeric_reports_executed_trial_range(
     ctx: JobContext,
     monkeypatch: pytest.MonkeyPatch,
