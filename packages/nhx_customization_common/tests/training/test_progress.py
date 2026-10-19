@@ -349,7 +349,7 @@ def test_a_failed_write_does_not_raise_into_the_training_loop(jobs: _Jobs, error
     reporter = _reporter(jobs)
     jobs.send_error = error
 
-    reporter.report_running(phase="training", step=1, train_loss=0.5)
+    reporter.report_running(phase=TrainingPhase.TRAINING, step=1, train_loss=0.5)
 
 
 def test_a_failed_write_is_logged_rather_than_swallowed_silently(jobs: _Jobs, caplog: pytest.LogCaptureFixture) -> None:
@@ -362,7 +362,7 @@ def test_a_failed_write_is_logged_rather_than_swallowed_silently(jobs: _Jobs, ca
     jobs.send_error = ConnectionError("jobs service unreachable")
 
     with caplog.at_level(logging.WARNING):
-        reporter.report_running(phase="training", step=1)
+        reporter.report_running(phase=TrainingPhase.TRAINING, step=1)
 
     assert "jobs service unreachable" in caplog.text
 
@@ -376,10 +376,10 @@ def test_reporting_survives_a_failure_and_resumes(jobs: _Jobs) -> None:
     """
     reporter = _reporter(jobs)
     jobs.send_error = ConnectionError("brief blip")
-    reporter.report_running(phase="training", step=1)
+    reporter.report_running(phase=TrainingPhase.TRAINING, step=1)
 
     jobs.send_error = None
-    reporter.report_running(phase="training", step=2)
+    reporter.report_running(phase=TrainingPhase.TRAINING, step=2)
 
     assert [sent["body"].status_details["step"] for sent in jobs.sent] == [2]
 

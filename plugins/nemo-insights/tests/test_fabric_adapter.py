@@ -72,8 +72,8 @@ def _runtime_context(telemetry: contract.RuntimeTelemetryContext | None = None) 
         environment=contract.EnvironmentHandle(
             environment_id="environment-1",
             provider="local",
-            control_location="in_env_control",
-            ownership="caller_owned",
+            control_location=contract.ControlLocation.IN_ENV_CONTROL,
+            ownership=contract.EnvironmentOwnership.CALLER_OWNED,
         ),
         artifacts=contract.ArtifactManifest(),
         telemetry=telemetry,

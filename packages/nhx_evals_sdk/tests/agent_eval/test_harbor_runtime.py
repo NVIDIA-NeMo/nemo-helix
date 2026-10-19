@@ -99,7 +99,7 @@ def test_custom_environment_rejects_persisted_api_key():
 @pytest.mark.parametrize("directory", ["omitted", "none", "path"])
 def test_jobs_dir_is_optional_until_execution(directory, tmp_path):
     options = {} if directory == "omitted" else {"jobs_dir": None if directory == "none" else tmp_path}
-    config = HarborRuntimeConfig(**options)
+    config = HarborRuntimeConfig.model_validate(options)
     assert config.jobs_dir == (tmp_path if directory == "path" else None)
     info = HarborAgentTaskRunner(config=config).runner_info()
     assert info.config["jobs_dir"] == (str(tmp_path) if directory == "path" else None)
@@ -1231,7 +1231,7 @@ async def test_agent_kwargs_and_env_reach_harbor_agent_config_unchanged(
         agent_dir.mkdir()
         (agent_dir / "harbor_wrapper.py").write_text("x = 1\n", encoding="utf-8")
         agent_options.update(agent_import_path="harbor_wrapper:WrappedAgent", agent_dir=agent_dir)
-    config = HarborRuntimeConfig(jobs_dir=jobs_dir, job_name="kwargs-job", **agent_options)
+    config = HarborRuntimeConfig.model_validate({"jobs_dir": jobs_dir, "job_name": "kwargs-job", **agent_options})
 
     created: list[Any] = []
 

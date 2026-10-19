@@ -147,7 +147,7 @@ def _agent(config: dict[str, Any] | None = None, *, config_format: str = "nemo-a
     return SimpleNamespace(name="calculator-agent", config_format=config_format, config=config or _calculator_config())
 
 
-async def _resolve(target: FabricRunnerTarget | HarborRunnerTarget, workspace: str = "dev") -> Any:
+async def _resolve(target: FabricRunnerTarget | GymRunnerTarget | HarborRunnerTarget, workspace: str = "dev") -> Any:
     return await resolve_registered_agent(target, workspace=workspace, async_sdk=_async_platform())
 
 

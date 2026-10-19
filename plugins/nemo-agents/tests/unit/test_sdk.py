@@ -117,14 +117,18 @@ async def test_async_agents_resource_uses_default_workspace_when_platform_worksp
     assert paths == ["/apis/agents/v2/workspaces/default/jobs/execute"]
 
 
+# Typed as Any, as an untyped caller's value would be: the runtime check is what's under test.
+_NOT_A_CLIENT: Any = object()
+
+
 def test_agents_resource_rejects_legacy_or_unknown_platform_client() -> None:
     with pytest.raises(TypeError, match="AgentsResource requires .*NemoClient"):
-        AgentsResource(object())  # type: ignore[arg-type]
+        AgentsResource(_NOT_A_CLIENT)
 
 
 def test_async_agents_resource_rejects_legacy_or_unknown_platform_client() -> None:
     with pytest.raises(TypeError, match="AsyncAgentsResource requires .*AsyncNemoClient"):
-        AsyncAgentsResource(object())  # type: ignore[arg-type]
+        AsyncAgentsResource(_NOT_A_CLIENT)
 
 
 def test_deployments_create_uses_client_workspace_by_default() -> None:

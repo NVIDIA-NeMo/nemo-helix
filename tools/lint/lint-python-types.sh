@@ -11,9 +11,6 @@ set -euo pipefail
 # Generate error reports by running `make reports` in script/ty_issues_report.
 # Counts reflect the violation count at the time of suppression.
 ci_ignored_rules=(
-  invalid-argument-type    # 204
-  # Re-enable last: while the rules above are ignored, the ty: ignore comments that suppress
-  # their (still real) violations would all report as unused.
   unused-ignore-comment    # 14
 )
 

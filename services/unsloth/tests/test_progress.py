@@ -4,6 +4,7 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.service.context import NHXJobContext
 from nhx.unsloth.app.constants import SERVICE_NAME
 from nhx.unsloth.tasks.training.progress import JobsServiceProgressReporter
@@ -30,7 +31,7 @@ def test_progress_reporter_calls_sdk_create_or_update() -> None:
         patch("nhx.customization_common.training.progress.JobsClient.from_client", return_value=jobs_client),
     ):
         reporter = JobsServiceProgressReporter(ctx)
-        reporter.report_running(phase="training", step=1, train_loss=2.5, backend="unsloth")
+        reporter.report_running(phase=TrainingPhase.TRAINING, step=1, train_loss=2.5, backend="unsloth")
 
     get_task_nemo_client.assert_called_once_with(SERVICE_NAME)
 

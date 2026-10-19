@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pytest
 from nemo_deployments_plugin.backends.docker.containers import DeploymentConfigError, restart_policy_kwargs
+from nemo_deployments_plugin.types import RestartPolicy
 
 
 @pytest.mark.parametrize(
@@ -17,8 +18,8 @@ from nemo_deployments_plugin.backends.docker.containers import DeploymentConfigE
         ("Never", 6, {}),
     ],
 )
-def test_restart_policy_kwargs(policy: str, backoff: int, expected: dict) -> None:
-    assert restart_policy_kwargs(policy, backoff) == expected  # type: ignore[arg-type]
+def test_restart_policy_kwargs(policy: RestartPolicy, backoff: int, expected: dict) -> None:
+    assert restart_policy_kwargs(policy, backoff) == expected
 
 
 def test_restart_policy_kwargs_rejects_zero_on_failure_backoff() -> None:
