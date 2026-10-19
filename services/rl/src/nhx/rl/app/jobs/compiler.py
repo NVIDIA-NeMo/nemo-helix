@@ -101,7 +101,11 @@ from nhx.rl.schemas import DPOTraining, GRPOTraining, RlJobOutput
 logger = logging.getLogger(__name__)
 
 
-GPU_TRAINING_SHM_GIB_PER_GPU = 8
+# NeMo-RL's recommended container shm size. Async checkpoint staging and Ray's
+# object store both live in /dev/shm; LoRA stages only the adapter. Operators
+# raise either through the execution profile's resources.shm_size.
+ALL_WEIGHTS_SHM_SIZE = "64Gi"
+LORA_SHM_SIZE = "8Gi"
 
 
 def _get_cpu_resources() -> ResourcesSpec:
@@ -117,11 +121,11 @@ def _get_cpu_resources() -> ResourcesSpec:
     )
 
 
-def _gpu_training_resources(*, num_nodes: int = 1, num_gpus: int) -> ResourcesSpec:
+def _gpu_training_resources(*, num_nodes: int = 1, num_gpus: int, lora: bool) -> ResourcesSpec:
     return ResourcesSpec(
         num_nodes=num_nodes,
         num_gpus=num_gpus,
-        shm_size=f"{GPU_TRAINING_SHM_GIB_PER_GPU * max(1, num_gpus)}Gi",
+        shm_size=LORA_SHM_SIZE if lora else ALL_WEIGHTS_SHM_SIZE,
     )
 
 
@@ -626,7 +630,11 @@ def _build_training_step(
         executor = DistributedGPUExecutionProviderSpec(
             provider="gpu_distributed",
             container=container,
-            resources=_gpu_training_resources(num_nodes=num_nodes, num_gpus=num_gpus_per_node),
+            resources=_gpu_training_resources(
+                num_nodes=num_nodes,
+                num_gpus=num_gpus_per_node,
+                lora=job_spec.trains_lora_adapter,
+            ),
             profile=resolved_profile if resolved_profile is not None else "default",
         )
     else:
@@ -634,7 +642,11 @@ def _build_training_step(
         executor = GPUExecutionProviderSpec(
             provider="gpu",
             container=container,
-            resources=_gpu_training_resources(num_gpus=num_gpus_per_node),
+            resources=_gpu_training_resources(
+                num_nodes=1,
+                num_gpus=num_gpus_per_node,
+                lora=job_spec.trains_lora_adapter,
+            ),
             profile=resolved_profile if resolved_profile is not None else "default",
         )
 

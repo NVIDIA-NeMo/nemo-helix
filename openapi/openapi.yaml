@@ -10691,8 +10691,9 @@ components:
         shm_size:
           title: Shm Size
           description: Shared memory (/dev/shm) size as a Kubernetes quantity (e.g.
-            '1Gi', '4Gi'). Used for GPU and distributed-GPU job executors. When unset,
-            defaults to 1Gi per allocated GPU.
+            '1Gi', '4Gi'). Used for GPU and distributed-GPU job executors. When both
+            the step and the execution profile set shm_size, the larger value is used.
+            When neither is set, the size is 8Gi per allocated GPU.
           type: string
       type: object
       title: ComputeResources

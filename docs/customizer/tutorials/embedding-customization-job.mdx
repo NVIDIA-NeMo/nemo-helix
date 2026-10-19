@@ -6,8 +6,14 @@ description: ""
 ---
 
 <div className="notebook-actions">
-  <a href="https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/customizer/tutorials/embedding-customization-job.ipynb" target="_blank" rel="noopener noreferrer" className="notebook-actions__button notebook-actions__button--primary">
-    <span aria-hidden="true">&#9654;</span><span>Run in Google Colab</span>
+  <a
+    href="https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/customizer/tutorials/embedding-customization-job.ipynb"
+    target="_blank"
+    rel="noopener noreferrer"
+    className="notebook-actions__button notebook-actions__button--primary"
+  >
+    <span aria-hidden="true">&#9654;</span>
+    <span>Run in Google Colab</span>
   </a>
 </div>
 
@@ -17,13 +23,13 @@ Pre-trained embeddings handle general retrieval well but underperform on special
 
 This notebook starts from NVIDIA's published NVDocs Stage 0 dump instead of generating Q&A pairs, so the first job it runs is hard-negative mining.
 
-| Stage | Command | Notes |
-| --- | --- | --- |
-| 0 SDG | `nemo data-designer retrieval-generate` | Skipped here. Run it on your own corpus with [Generate retrieval training data](/documentation/design-synthetic-data/tutorials/retrieval-generate) |
-| 1 Prep | `nemo data-designer retrieval-prepare` with `enable_mining: true` | Writes `training.jsonl` and the frozen `eval_beir/` split |
-| 2 Finetune | Automodel `recipe: bi_encoder` | Alternate data: [SPECTER or triplet JSONL](/documentation/customizer-reference/tutorials/embedding-triplet-dataset) |
-| 3 Deploy | Retriever NIM 2.2.0 | Base and tuned endpoints |
-| 4 Eval | `nemo evals retrieve-eval` | nDCG@k, Recall@k, Precision@k, MAP@k |
+| Stage      | Command                                                           | Notes                                                                                                                                              |
+| ---------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0 SDG      | `nemo data-designer retrieval-generate`                           | Skipped here. Run it on your own corpus with [Generate retrieval training data](/documentation/design-synthetic-data/tutorials/retrieval-generate) |
+| 1 Prep     | `nemo data-designer retrieval-prepare` with `enable_mining: true` | Writes `training.jsonl` and the frozen `eval_beir/` split                                                                                          |
+| 2 Finetune | Automodel `recipe: bi_encoder`                                    | Alternate data: [SPECTER or triplet JSONL](/documentation/customizer-reference/tutorials/embedding-triplet-dataset)                                |
+| 3 Deploy   | Retriever NIM 2.2.0                                               | Base and tuned endpoints                                                                                                                           |
+| 4 Eval     | `nemo evals retrieve-eval`                                        | nDCG@k, Recall@k, Precision@k, MAP@k                                                                                                               |
 
 Deployment precedes evaluation because `retrieve-eval` scores Inference Gateway providers rather than filesets, so both models have to be served first. Export is a setting on the training job rather than a stage of its own.
 
@@ -32,7 +38,11 @@ Deployment precedes evaluation because `retrieve-eval` scores Inference Gateway 
 Stage 1 writes contrastive rows as JSONL:
 
 ```json
-{"query": "What is machine learning?", "pos_doc": "Machine learning is a subset of AI...", "neg_doc": ["A related but incorrect passage..."]}
+{
+  "query": "What is machine learning?",
+  "pos_doc": "Machine learning is a subset of AI...",
+  "neg_doc": ["A related but incorrect passage..."]
+}
 ```
 
 `neg_doc` is a non-empty list of hard negatives: passages that score close to the positive but do not answer the query. Mining fills it during Stage 1 against a fileset-backed encoder, and Automodel samples four of them per query (`train_n_passages: 5`).
@@ -62,7 +72,6 @@ Export your NGC API key. It becomes a Platform secret so the cluster can pull NI
 ```sh
 export NGC_API_KEY=<YOUR_NGC_API_KEY>
 ```
-
 
 ```bash
 echo "$NGC_API_KEY" | nemo secrets create ngc-api-key --workspace default --from-file -
@@ -354,18 +363,18 @@ The NVDocs artifacts fileset has no validation JSONL. `schedule.validation_split
 
 These values are the configuration validated on the frozen 20,909-query NVDocs split. The scores under [Interpreting results](#interpreting-results) are from this job.
 
-| Knob | Value |
-| --- | --- |
-| `training.recipe` | `bi_encoder` |
-| `training.finetuning_type` | `all_weights`, or `lora_merged` to merge adapters back into the checkpoint |
-| `training.retrieval.export.primary` | `hf` |
-| `training.retrieval.do_distributed_inbatch_negative` | `false` |
-| Sequence length | 512, the same at mine, train, and eval time |
-| LR / min LR / warmup | `2.5e-5` / `1.25e-5` / `432` |
-| GBS / MBS | `128` / `8` |
-| Epochs | `3` |
-| GPUs | `4`, tensor parallel `1` |
-| Validation | `validation_split: 0.01`, `val_check_interval: 0.25`, `checkpoint_selection: both` |
+| Knob                                                 | Value                                                                              |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `training.recipe`                                    | `bi_encoder`                                                                       |
+| `training.finetuning_type`                           | `all_weights`, or `lora_merged` to merge adapters back into the checkpoint         |
+| `training.retrieval.export.primary`                  | `hf`                                                                               |
+| `training.retrieval.do_distributed_inbatch_negative` | `false`                                                                            |
+| Sequence length                                      | 512, the same at mine, train, and eval time                                        |
+| LR / min LR / warmup                                 | `2.5e-5` / `1.25e-5` / `432`                                                       |
+| GBS / MBS                                            | `128` / `8`                                                                        |
+| Epochs                                               | `3`                                                                                |
+| GPUs                                                 | `4`, tensor parallel `1`                                                           |
+| Validation                                           | `validation_split: 0.01`, `val_check_interval: 0.25`, `checkpoint_selection: both` |
 
 `export.primary: hf` writes the Hugging Face checkpoint to the fileset root, where Retriever NIM 2.2.0 looks for it, and keeps ONNX under `alternates/onnx`. Unmerged `lora` is rejected for `bi_encoder`, since an embedding NIM serves a full checkpoint and cannot load a standalone adapter.
 
@@ -659,7 +668,7 @@ eval_spec = {
 }
 cmd = [
     shutil.which("nemo") or "nemo",
-    "evaluator",
+    "evals",
     "retrieve-eval",
     "--workspace",
     "default",
@@ -718,20 +727,20 @@ These scores are from the job above on that frozen split. Validation loss was lo
 
 Learning rate is the most sensitive parameter, followed by epochs, warmup, and batch size.
 
-| Parameter | API field | Value |
-| --- | --- | --- |
-| Learning rate | `optimizer.learning_rate` | `2.5e-5` |
-| Min learning rate | `optimizer.min_learning_rate` | `1.25e-5` |
-| Warmup | `optimizer.warmup_steps` | `432` |
-| Decay | `optimizer.lr_decay_style` | `cosine` |
-| Weight decay | `optimizer.weight_decay` | `0.01` |
-| Epochs | `schedule.epochs` | `3` |
-| Global batch | `batch.global_batch_size` | `128` |
-| Micro batch | `batch.micro_batch_size` | `8` |
-| Distributed in-batch negatives | `training.retrieval.do_distributed_inbatch_negative` | `false` |
-| GPUs | `parallelism.num_gpus_per_node` | `4`, tensor parallel `1` |
-| Sequence length | `training.max_seq_length`, `training.retrieval.query_max_length`, `training.retrieval.passage_max_length` | `512` |
-| Passages per query | `training.retrieval.train_n_passages` | `5`, one positive and four mined negatives |
+| Parameter                      | API field                                                                                                 | Value                                      |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| Learning rate                  | `optimizer.learning_rate`                                                                                 | `2.5e-5`                                   |
+| Min learning rate              | `optimizer.min_learning_rate`                                                                             | `1.25e-5`                                  |
+| Warmup                         | `optimizer.warmup_steps`                                                                                  | `432`                                      |
+| Decay                          | `optimizer.lr_decay_style`                                                                                | `cosine`                                   |
+| Weight decay                   | `optimizer.weight_decay`                                                                                  | `0.01`                                     |
+| Epochs                         | `schedule.epochs`                                                                                         | `3`                                        |
+| Global batch                   | `batch.global_batch_size`                                                                                 | `128`                                      |
+| Micro batch                    | `batch.micro_batch_size`                                                                                  | `8`                                        |
+| Distributed in-batch negatives | `training.retrieval.do_distributed_inbatch_negative`                                                      | `false`                                    |
+| GPUs                           | `parallelism.num_gpus_per_node`                                                                           | `4`, tensor parallel `1`                   |
+| Sequence length                | `training.max_seq_length`, `training.retrieval.query_max_length`, `training.retrieval.passage_max_length` | `512`                                      |
+| Passages per query             | `training.retrieval.train_n_passages`                                                                     | `5`, one positive and four mined negatives |
 
 Batch size sets how many gradient steps an epoch takes rather than how many negatives each query sees, so smaller datasets benefit from a smaller global batch. When you scale data, adding documents helps more than generating more queries per document: new documents bring new vocabulary and retrieval patterns, while extra queries cover the same passage from another angle.
 
