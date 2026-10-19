@@ -52,6 +52,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     delete_configmap,
     get_namespace_from_environment,
     image_pull_backoff_failure,
+    last_task_exit_time,
     list_pods_by_labels,
     load_kubernetes_config,
     name_for_step,
@@ -163,6 +164,11 @@ class VolcanoJobBackend(
         return None
 
     def get_volcano_job_by_name(self, name: str) -> dict | None:
+        """Return the Volcano job, or ``None`` only when Kubernetes reports it does not exist.
+
+        Other lookup errors are raised: callers act on a missing job, for example by
+        marking a pausing step paused, so an unknown state must not look like one.
+        """
         try:
             return self._custom_v1.get_namespaced_custom_object(
                 group="batch.volcano.sh",
@@ -174,11 +180,11 @@ class VolcanoJobBackend(
         except ApiException as e:
             if e.status == 404:
                 return None
-            else:
-                logger.warning("Error API fetching Volcano job by name: %s", e.reason)
+            logger.warning("Error API fetching Volcano job by name: %s", e.reason)
+            raise
         except Exception:
             logger.exception("Unexpected error fetching Volcano job by name")
-        return None
+            raise
 
     def get_volcano_job_list_by_labels(self, labels: dict[str, str]) -> list[dict]:
         label_selector = ",".join([f"{k}={v}" for k, v in labels.items()])
@@ -213,7 +219,10 @@ class VolcanoJobBackend(
         """
         job_name = name_for_step(step)
         if step.status == HelixJobStatus.RESUMING:
-            existing_job = self.get_volcano_job_by_name(job_name)
+            try:
+                existing_job = self.get_volcano_job_by_name(job_name)
+            except Exception as exc:
+                raise SchedulingDeferred(f"Could not check for the previous Volcano job '{job_name}'") from exc
             if existing_job is not None:
                 # The paused job is deleted with foreground propagation, so it can still exist. The
                 # new job has the same name, so creating it before the old one is gone fails with
@@ -284,6 +293,13 @@ class VolcanoJobBackend(
             # job rules, and ResumeJob does nothing to a running job, so the other pods keep
             # running until they exit too. The job then ends Failed with every pod kept,
             # and sync_pausing reads the exit codes.
+            #
+            # Volcano reads a failed pod's exit code from its first container status, and
+            # the kubelet sorts those by container name. A classic sidecar named before the
+            # task container (istio-proxy, for example) hides the 75, so this rule cannot
+            # match and the job restarts. sync_pausing does not rely on this rule: it deletes
+            # the job as soon as every task container has exited, which usually happens before
+            # such a sidecar exits. Native sidecars are init containers and are not affected.
             pause_policy = {"exitCode": PAUSE_EXIT_CODE, "action": "ResumeJob"}
             leader_policies.append(pause_policy)
             worker_policies.append(pause_policy)
@@ -451,8 +467,33 @@ class VolcanoJobBackend(
     def sync_pausing(self, step: HelixJobStepWithContext, volcano_job: dict | None) -> JobUpdate:
         """Leave a pausing VolcanoJob running until it exits or the pause deadline passes.
 
-        Exit 75 is a pause. A Completed phase is exit 0, so training finished.
+        Exit 75 is a pause. Exit 0 means training finished. Any other exit is an error.
+        The task containers are read on every tick, whatever the job's phase: a classic
+        sidecar keeps the pod running after the task exits, so the job may never reach
+        Completed or Failed on its own. Only when no task container is readable does
+        the job's phase decide, with Completed as exit 0 and Failed as exit 1.
+
+        An exit counts when the task exited before the deadline, even if it is seen
+        later. When the exit time is unreadable, the deadline is checked against now.
+        A missing job has nothing left to stop, so the step is paused.
         """
+        if volcano_job is None:
+            return JobUpdate(status=HelixJobStatus.PAUSED, status_details={"message": "Job is paused"})
+
+        phase = (volcano_job.get("status") or {}).get("state", {}).get("phase")
+        pods = list_pods_by_labels(self._core_v1, self.namespace, common_labels_for_step(step))
+        running, exit_code = classify_task_containers(pods)
+        if not running and exit_code is None and phase in ("Completed", "Failed"):
+            exit_code = 0 if phase == "Completed" else 1
+        if not running and exit_code is not None and not pause_deadline_exceeded(step, now=last_task_exit_time(pods)):
+            status, message, error_details = describe_paused_exit(exit_code)
+            if status == HelixJobStatus.PAUSED:
+                self.terminate_job(volcano_job)
+            return JobUpdate(
+                status=status,
+                status_details={"message": message},
+                error_details=error_details or None,
+            )
         if pause_deadline_exceeded(step):
             message = "Pause deadline exceeded"
             return self.sync_remove_job_with_status(
@@ -462,27 +503,7 @@ class VolcanoJobBackend(
                 status_details={"message": message},
                 error_details={"message": message},
             )
-        if volcano_job is None:
-            return JobUpdate(status=HelixJobStatus.PAUSED, status_details={"message": "Job is paused"})
-
-        phase = (volcano_job.get("status") or {}).get("state", {}).get("phase")
-        if phase not in ("Completed", "Failed"):
-            return JobUpdate(status=HelixJobStatus.PAUSING, status_details={"message": "Job is being paused"})
-
-        pods = list_pods_by_labels(self._core_v1, self.namespace, common_labels_for_step(step))
-        running, exit_code = classify_task_containers(pods)
-        if running:
-            return JobUpdate(status=HelixJobStatus.PAUSING, status_details={"message": "Job is being paused"})
-        if exit_code is None:
-            exit_code = 0 if phase == "Completed" else 1
-        status, message, error_details = describe_paused_exit(exit_code)
-        if status == HelixJobStatus.PAUSED:
-            self.terminate_job(volcano_job)
-        return JobUpdate(
-            status=status,
-            status_details={"message": message},
-            error_details=error_details or None,
-        )
+        return JobUpdate(status=HelixJobStatus.PAUSING, status_details={"message": "Job is being paused"})
 
     def cleanup_steps(self):
         jobs = self.get_volcano_job_list_by_labels(labels=KUBE_JOB_SELECTOR_LABELS)

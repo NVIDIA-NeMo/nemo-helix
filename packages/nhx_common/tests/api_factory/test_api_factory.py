@@ -45,6 +45,7 @@ from nemo_helix_plugin.jobs.api_factory import (
 from nemo_helix_plugin.jobs.exceptions import HelixJobDependencyUnavailableError
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.jobs.types import HelixJobResponse as HelixJob
+from nemo_helix_plugin.jobs.types import JobControl
 from nhx.common.errors.sdk_exception_handlers import register_sdk_exception_handlers
 from nhx.common.jobs.exceptions import HelixJobCompilationError
 from nhx.common.jobs.schemas import (
@@ -853,6 +854,18 @@ def test_list_jobs_with_results(mock_service_with_job_routes):
             "filter": json.dumps({"source": {"$eq": "test_service"}}),
         },
     )
+
+
+def test_update_job_control_returns_the_new_control(mock_service_with_job_routes):
+    """A plugin's control route returns the updated settings, like the core jobs route."""
+    app, mock_jobs = mock_service_with_job_routes
+    job = create_mock_platform_job("job-1", "paused").model_copy(update={"control": JobControl(pause_ttl_seconds=600)})
+    mock_jobs.update_job_control = AsyncMock(return_value=_resp(job))
+
+    response = TestClient(app).patch("/v2/workspaces/default/test/jobs/job-1/control", json={"pause_ttl_seconds": 600})
+
+    assert response.status_code == 200
+    assert response.json()["control"] == {"pause_ttl_seconds": 600}
 
 
 def test_list_jobs_with_multiple_pages(mock_service_with_job_routes):

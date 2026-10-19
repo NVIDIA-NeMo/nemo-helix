@@ -19,7 +19,7 @@ from typing import Generator
 import pytest
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.jobs.client import JobsClient
-from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
+from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, JobControl
 from nhx.core.files.service import FilesService
 from nhx.core.jobs.service import JobsService
 from nhx.testing import as_user, create_test_client, short_unique_name, unique_email
@@ -132,3 +132,47 @@ class TestJobCreationWithAuth:
         assert step.auth_context.principal_id == creator_email
         assert step.auth_context.principal_email == creator_email
         assert step.auth_context.principal_groups == creator_groups
+
+    def test_control_update_by_another_user_keeps_the_creators_identity(self, client: NemoClient):
+        """Changing a job's settings must not change who the job runs as."""
+        creator_email = unique_email("creator")
+        workspace = "default"
+        job_name = short_unique_name("auth-control-test")
+
+        JobsClient.from_client(as_user(client, creator_email, groups=["team-alpha"])).create_job(
+            workspace=workspace,
+            body=CreateHelixJobRequest(
+                name=job_name,
+                source="auth-propagation-test",
+                spec={},
+                platform_spec={
+                    "steps": [
+                        {
+                            "name": "test-step",
+                            "executor": {
+                                "provider": "cpu",
+                                "profile": "default",
+                                "container": {
+                                    "image": "busybox:latest",
+                                    "entrypoint": ["entrypoint"],
+                                    "command": ["command"],
+                                },
+                            },
+                        },
+                    ]
+                },
+            ),
+        )
+
+        editor_client = as_user(client, unique_email("editor"), groups=["team-beta"])
+        updated = (
+            JobsClient.from_client(editor_client)
+            .update_job_control(name=job_name, workspace=workspace, body=JobControl(pause_ttl_seconds=600))
+            .data()
+        )
+        assert updated.control is not None and updated.control.pause_ttl_seconds == 600
+
+        service_client = _as_service_principal(client)
+        steps = list(JobsClient.from_client(service_client).list_steps(name=job_name, workspace=workspace).items())
+        assert steps[0].auth_context is not None
+        assert steps[0].auth_context.principal_id == creator_email

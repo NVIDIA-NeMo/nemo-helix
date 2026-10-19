@@ -540,6 +540,27 @@ def classify_task_containers(pods: list[V1Pod]) -> tuple[bool, int | None]:
     return False, 0
 
 
+def last_task_exit_time(pods: list[V1Pod]) -> datetime.datetime | None:
+    """Return when the last task container exited.
+
+    ``None`` when there are no pods, or when any pod has no readable exit time for
+    its task container, so the caller cannot tell when the task finished.
+    """
+    exit_times: list[datetime.datetime] = []
+    for pod in pods:
+        container_statuses = pod.status.container_statuses if pod.status is not None else None
+        statuses = [status for status in container_statuses or [] if status.name == NEMO_JOB_TASK_CONTAINER_NAME]
+        if not statuses:
+            return None
+        for status in statuses:
+            terminated = status.state.terminated if status.state is not None else None
+            finished_at = terminated.finished_at if terminated is not None else None
+            if not isinstance(finished_at, datetime.datetime):
+                return None
+            exit_times.append(finished_at)
+    return max(exit_times, default=None)
+
+
 def get_pod_details(core_v1: client.CoreV1Api, namespace: str, name: str) -> tuple[dict[str, Any], dict[str, str], str]:
     """Get details for pods associated with the step's k8s job."""
     try:

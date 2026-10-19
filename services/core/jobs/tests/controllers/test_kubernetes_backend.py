@@ -81,6 +81,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     common_labels_for_step,
     create_configmap,
     delete_configmap,
+    last_task_exit_time,
     name_for_step,
 )
 from nhx.core.jobs.controllers.backends.workload_tokens import WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS
@@ -1153,6 +1154,18 @@ def test_schedule_from_resuming_finished_job_is_replaced(kubernetes_job, cpu_exe
     kubernetes_job._batch_v1.create_namespaced_job.assert_called_once()
 
 
+def test_schedule_from_resuming_defers_when_the_previous_job_lookup_fails(
+    kubernetes_job, cpu_execution_provider, test_step_resuming
+):
+    """A failed lookup is retried on a later tick instead of failing the step or creating a second Job."""
+    kubernetes_job._batch_v1.read_namespaced_job.side_effect = ApiException(status=500)
+
+    with pytest.raises(SchedulingDeferred):
+        kubernetes_job.schedule(cpu_execution_provider, test_step_resuming)
+
+    kubernetes_job._batch_v1.create_namespaced_job.assert_not_called()
+
+
 def test_schedule_from_resuming_no_existing_job(kubernetes_job, cpu_execution_provider, test_step_resuming):
     """Test scheduling when resuming but no existing job is found."""
     # Mock existing job not found
@@ -1562,8 +1575,8 @@ def test_sync_pausing_deadline_deletes_job_and_returns_error(kubernetes_job, tes
     terminate.assert_called_once_with(job)
 
 
-def _terminated_task_pod(exit_code: int):
-    terminated = SimpleNamespace(exit_code=exit_code)
+def _terminated_task_pod(exit_code: int, finished_at: datetime.datetime | None = None):
+    terminated = SimpleNamespace(exit_code=exit_code, finished_at=finished_at)
     state = SimpleNamespace(terminated=terminated)
     container = SimpleNamespace(name="nemo-job-task", state=state)
     return SimpleNamespace(status=SimpleNamespace(container_statuses=[container], phase="Succeeded"))
@@ -1626,6 +1639,52 @@ def test_sync_pausing_without_a_job_is_paused(kubernetes_job, test_step_pausing)
     update = kubernetes_job.sync(step)
 
     assert update.status == HelixJobStatus.PAUSED
+
+
+def test_sync_pausing_without_a_job_is_paused_after_the_deadline(kubernetes_job, test_step_pausing):
+    """A missing Job has nothing left to stop, so the deadline does not turn it into an error."""
+    step = _cooperative_pausing_step(test_step_pausing, requested_ago_seconds=120, deadline_seconds=30)
+    kubernetes_job._batch_v1.read_namespaced_job.side_effect = ApiException(status=404)
+
+    assert kubernetes_job.sync(step).status == HelixJobStatus.PAUSED
+
+
+@pytest.mark.parametrize("error", [ApiException(status=500), RuntimeError("connection reset")])
+def test_sync_pausing_lookup_error_is_not_a_missing_job(kubernetes_job, test_step_pausing, error):
+    """An unknown Job state must not mark the step paused. The reconciler retries on the next tick."""
+    step = _cooperative_pausing_step(test_step_pausing)
+    kubernetes_job._batch_v1.read_namespaced_job.side_effect = error
+
+    with pytest.raises(type(error)):
+        kubernetes_job.sync(step)
+
+
+@pytest.mark.parametrize(
+    "exited_after_request_seconds,expected",
+    [(20, HelixJobStatus.PAUSED), (40, HelixJobStatus.ERROR)],
+)
+def test_sync_pausing_judges_an_exit_seen_late_by_its_exit_time(
+    kubernetes_job, test_step_pausing, exited_after_request_seconds, expected
+):
+    """Exit 75 seen after the deadline still pauses when the task exited before it."""
+    step = _cooperative_pausing_step(test_step_pausing, requested_ago_seconds=120, deadline_seconds=30)
+    requested_at = datetime.datetime.fromisoformat(step.status_details["pause_requested_at"])
+    exited_at = requested_at + datetime.timedelta(seconds=exited_after_request_seconds)
+    job = _running_pause_job()
+    job.status.failed = 1
+    kubernetes_job._batch_v1.read_namespaced_job.return_value = job
+
+    with (
+        patch(
+            "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pods_by_labels",
+            return_value=[_terminated_task_pod(75, finished_at=exited_at)],
+        ),
+        patch.object(kubernetes_job, "terminate_job") as terminate,
+    ):
+        update = kubernetes_job.sync(step)
+
+    assert update.status == expected
+    terminate.assert_called_once_with(job)
 
 
 def test_sync_job_cancelling_with_errored_pods(kubernetes_job, test_step_cancelling):
@@ -3289,7 +3348,9 @@ def test_image_pull_ttl_can_be_disabled(kubernetes_job, test_step_pending):
 
 def test_classify_task_containers_reads_only_the_task_container():
     """A sidecar that keeps running after the task exits must not hold the pause open."""
-    task = SimpleNamespace(name="nemo-job-task", state=SimpleNamespace(terminated=SimpleNamespace(exit_code=75)))
+    task = SimpleNamespace(
+        name="nemo-job-task", state=SimpleNamespace(terminated=SimpleNamespace(exit_code=75, finished_at=None))
+    )
     sidecar = SimpleNamespace(name="istio-proxy", state=SimpleNamespace(terminated=None))
     pod = SimpleNamespace(status=SimpleNamespace(container_statuses=[sidecar, task], phase="Running"))
 
@@ -3326,3 +3387,29 @@ def _classified_pod(task: int | str) -> SimpleNamespace:
 )
 def test_classify_task_containers(tasks: list[int | str], expected: tuple[bool, int | None]):
     assert classify_task_containers([_classified_pod(task) for task in tasks]) == expected
+
+
+def test_last_task_exit_time_is_the_latest_task_exit():
+    first = datetime.datetime(2026, 10, 19, 12, 0, tzinfo=datetime.timezone.utc)
+    last = first + datetime.timedelta(seconds=30)
+    pods = [_terminated_task_pod(75, finished_at=last), _terminated_task_pod(75, finished_at=first)]
+
+    assert last_task_exit_time(pods) == last
+
+
+@pytest.mark.parametrize(
+    "pods",
+    [
+        pytest.param([], id="no-pods"),
+        pytest.param([_terminated_task_pod(75)], id="no-exit-time"),
+        pytest.param(
+            [
+                _terminated_task_pod(75, finished_at=datetime.datetime(2026, 10, 19, tzinfo=datetime.timezone.utc)),
+                _classified_pod("Failed"),
+            ],
+            id="a-pod-without-task-status",
+        ),
+    ],
+)
+def test_last_task_exit_time_is_unknown_unless_every_task_has_one(pods):
+    assert last_task_exit_time(pods) is None

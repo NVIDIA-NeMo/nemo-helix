@@ -1825,7 +1825,7 @@ def test_volcano_pausing_without_a_job_is_paused(volcano_job, test_step_pausing)
 def test_volcano_pausing_exit_75_deletes_job(volcano_job, test_step_pausing):
     step = _cooperative_pausing_step(test_step_pausing)
     job = {"status": {"state": {"phase": "Failed"}}, "metadata": {"name": "vj"}}
-    terminated = SimpleNamespace(exit_code=75)
+    terminated = SimpleNamespace(exit_code=75, finished_at=None)
     container = SimpleNamespace(name="nemo-job-task", state=SimpleNamespace(terminated=terminated))
     pod = SimpleNamespace(status=SimpleNamespace(container_statuses=[container], phase="Failed"))
 
@@ -1840,6 +1840,108 @@ def test_volcano_pausing_exit_75_deletes_job(volcano_job, test_step_pausing):
         update = volcano_job.sync(step)
 
     assert update.status == HelixJobStatus.PAUSED
+    terminate.assert_called_once_with(job)
+
+
+def _volcano_task_pod(exit_code: int, finished_at: datetime.datetime | None) -> SimpleNamespace:
+    terminated = SimpleNamespace(exit_code=exit_code, finished_at=finished_at)
+    container = SimpleNamespace(name="nemo-job-task", state=SimpleNamespace(terminated=terminated))
+    return SimpleNamespace(status=SimpleNamespace(container_statuses=[container], phase="Failed"))
+
+
+def test_volcano_pausing_reads_the_task_while_a_sidecar_keeps_the_job_running(volcano_job, test_step_pausing):
+    """A classic sidecar named before the task keeps the pod running and hides exit 75 from Volcano."""
+    step = _cooperative_pausing_step(test_step_pausing)
+    job = {"status": {"state": {"phase": "Running"}}, "metadata": {"name": "vj"}}
+    sidecar = SimpleNamespace(name="istio-proxy", state=SimpleNamespace(terminated=None))
+    task = _volcano_task_pod(75, None).status.container_statuses[0]
+    pod = SimpleNamespace(status=SimpleNamespace(container_statuses=[sidecar, task], phase="Running"))
+
+    with (
+        patch.object(volcano_job, "get_volcano_job_by_name", return_value=job),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.list_pods_by_labels", return_value=[pod]),
+        patch.object(volcano_job, "terminate_job") as terminate,
+    ):
+        update = volcano_job.sync(step)
+
+    assert update.status == HelixJobStatus.PAUSED
+    terminate.assert_called_once_with(job)
+
+
+def test_volcano_pausing_running_job_without_pods_keeps_pausing(volcano_job, test_step_pausing):
+    """The job's phase decides only once it has finished, so a running job without pods yet is not an exit."""
+    step = _cooperative_pausing_step(test_step_pausing)
+    job = {"status": {"state": {"phase": "Running"}}, "metadata": {"name": "vj"}}
+
+    with (
+        patch.object(volcano_job, "get_volcano_job_by_name", return_value=job),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.list_pods_by_labels", return_value=[]),
+        patch.object(volcano_job, "terminate_job") as terminate,
+    ):
+        update = volcano_job.sync(step)
+
+    assert update.status == HelixJobStatus.PAUSING
+    terminate.assert_not_called()
+
+
+def test_volcano_pausing_without_a_job_is_paused_after_the_deadline(volcano_job, test_step_pausing):
+    """A missing job has nothing left to stop, so the deadline does not turn it into an error."""
+    step = _cooperative_pausing_step(test_step_pausing, requested_ago_seconds=120, deadline_seconds=30)
+
+    with patch.object(volcano_job, "get_volcano_job_by_name", return_value=None):
+        update = volcano_job.sync(step)
+
+    assert update.status == HelixJobStatus.PAUSED
+
+
+@pytest.mark.parametrize("error", [ApiException(status=500), RuntimeError("connection reset")])
+def test_volcano_lookup_error_is_not_a_missing_job(volcano_job, test_step_pausing, error):
+    """An unknown job state must not mark the step paused. The reconciler retries on the next tick."""
+    volcano_job._custom_v1.get_namespaced_custom_object.side_effect = error  # ty: ignore[invalid-assignment]
+
+    with pytest.raises(type(error)):
+        volcano_job.sync(_cooperative_pausing_step(test_step_pausing))
+
+
+def test_volcano_schedule_from_resuming_defers_when_the_previous_job_lookup_fails(
+    volcano_job: VolcanoJobBackend, distributed_gpu_execution_provider, test_step_resuming: HelixJobStepWithContext
+):
+    """A failed lookup is retried on a later tick instead of failing the step or creating a second job."""
+    volcano_job._custom_v1.get_namespaced_custom_object.side_effect = ApiException(status=500)  # ty: ignore[invalid-assignment]
+
+    with pytest.raises(SchedulingDeferred):
+        volcano_job.schedule(distributed_gpu_execution_provider, test_step_resuming)
+
+    volcano_job._custom_v1.create_namespaced_custom_object.assert_not_called()  # ty: ignore[possibly-unbound-attribute]
+
+
+@pytest.mark.parametrize(
+    "exited_after_request_seconds,expected",
+    [(20, HelixJobStatus.PAUSED), (40, HelixJobStatus.ERROR)],
+)
+def test_volcano_pausing_judges_an_exit_seen_late_by_its_exit_time(
+    volcano_job, test_step_pausing, exited_after_request_seconds, expected
+):
+    """Exit 75 seen after the deadline still pauses when the task exited before it."""
+    step = _cooperative_pausing_step(test_step_pausing, requested_ago_seconds=120, deadline_seconds=30)
+    requested_at = datetime.datetime.fromisoformat(step.status_details["pause_requested_at"])
+    exited_at = requested_at + datetime.timedelta(seconds=exited_after_request_seconds)
+    job = {"status": {"state": {"phase": "Failed"}}, "metadata": {"name": "vj"}}
+
+    with (
+        patch.object(volcano_job, "get_volcano_job_by_name", return_value=job),
+        patch(
+            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.list_pods_by_labels",
+            return_value=[_volcano_task_pod(75, exited_at)],
+        ),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks", return_value=False),
+        patch.object(volcano_job, "get_volcano_job_events", return_value=[]),
+        patch.object(volcano_job, "get_volcano_pod_group_events", return_value=[]),
+        patch.object(volcano_job, "terminate_job") as terminate,
+    ):
+        update = volcano_job.sync(step)
+
+    assert update.status == expected
     terminate.assert_called_once_with(job)
 
 

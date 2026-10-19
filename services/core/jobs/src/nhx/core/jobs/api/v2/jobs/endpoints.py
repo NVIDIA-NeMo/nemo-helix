@@ -525,19 +525,13 @@ async def update_job_control(
     name: str,
     workspace: str,
     request: JobControl,
-    auth_client: AuthClient = Depends(get_auth_client),
     dispatcher: JobDispatcher = Depends(dep_dispatcher),
 ) -> HelixJobResponse:
     """Change mutable job behavior, such as how long a pause keeps storage."""
     with scoped_app_ctx(JobContext(id=name)):
         try:
             with job_operation_errors("update control for", name, workspace):
-                job = await dispatcher.update_job_control(
-                    name,
-                    workspace,
-                    request,
-                    auth_context=AuthContext.from_principal(auth_client.principal),
-                )
+                job = await dispatcher.update_job_control(name, workspace, request)
         except PauseTTLLimitError as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.detail) from exc
         if not job:
