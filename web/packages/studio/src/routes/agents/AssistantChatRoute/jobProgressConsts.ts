@@ -3,8 +3,10 @@
 
 import { JOB_SOURCE } from '@studio/components/dataViews/JobsDataView/constants';
 
-export const ASSISTANT_JOB_PROGRESS_TOOL_NAME = 'job_progress';
-export const ASSISTANT_JOB_PROGRESS_MCP_TOOL_NAME = 'mcp__nemo_studio__job_progress';
+export {
+  ASSISTANT_JOB_PROGRESS_MCP_TOOL_NAME,
+  ASSISTANT_JOB_PROGRESS_TOOL_NAME,
+} from '@nemo/common/src/components/AssistantChat/toolParts';
 
 export const JOB_PROGRESS_JOB_TYPE = {
   AGENT_EVALUATION: 'agent_evaluation',

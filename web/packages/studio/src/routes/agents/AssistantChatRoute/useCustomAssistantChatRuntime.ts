@@ -20,11 +20,11 @@ import {
 } from '@nemo/common/src/components/AssistantChat/messageUtils';
 import {
   createAssistantThinkingPart,
-  getAssistantCompletedMessageParts,
   getAssistantThinkingPartText,
   groupConsecutiveAssistantSubtleToolCalls,
   isAssistantThinkingPart,
-} from '@studio/routes/agents/AssistantChatRoute/toolParts';
+} from '@nemo/common/src/components/AssistantChat/toolParts';
+import { getAssistantCompletedMessageParts } from '@studio/routes/agents/AssistantChatRoute/toolParts';
 import { useCallback, useRef, useState } from 'react';
 
 export interface CustomAssistantRunContext {

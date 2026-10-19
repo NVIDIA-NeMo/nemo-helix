@@ -2,13 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ToolCallMessagePartComponent } from '@assistant-ui/react';
-import { MessageContent } from '@nemo/common/src/components/Chat/MessageContent';
-import { Text } from '@nvidia/foundations-react-core';
-import { AssistantStudioLink } from '@studio/routes/agents/AssistantChatRoute/AssistantStudioLink';
-import { JobProgressToolCall } from '@studio/routes/agents/AssistantChatRoute/JobProgressToolCall';
-import { CollapsedThinkingToolCall } from '@studio/routes/agents/AssistantChatRoute/toolCall/CollapsedThinkingToolCall';
-import { TOOL_LABELS } from '@studio/routes/agents/AssistantChatRoute/toolCall/constants';
-import { FileChangeToolCallCard } from '@studio/routes/agents/AssistantChatRoute/toolCall/FileChangeToolCallCard';
+import { CollapsedThinkingToolCall } from '@nemo/common/src/components/AssistantChat/toolCall/CollapsedThinkingToolCall';
+import { TOOL_LABELS } from '@nemo/common/src/components/AssistantChat/toolCall/constants';
+import { FileChangeToolCallCard } from '@nemo/common/src/components/AssistantChat/toolCall/FileChangeToolCallCard';
 import {
   formatSubtleToolMessage,
   getFileChangeSummary,
@@ -19,8 +15,8 @@ import {
   getSubtleToolMessage,
   getToolInvocation,
   getToolSummary,
-} from '@studio/routes/agents/AssistantChatRoute/toolCall/helpers';
-import { SubtleToolCallRow } from '@studio/routes/agents/AssistantChatRoute/toolCall/SubtleToolCallRow';
+} from '@nemo/common/src/components/AssistantChat/toolCall/helpers';
+import { SubtleToolCallRow } from '@nemo/common/src/components/AssistantChat/toolCall/SubtleToolCallRow';
 import {
   ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME,
   ASSISTANT_COLLAPSED_THINKING_TOOL_NAME,
@@ -30,7 +26,11 @@ import {
   isAssistantJobProgressToolName,
   toAssistantToolArgs,
   type AssistantToolArgs,
-} from '@studio/routes/agents/AssistantChatRoute/toolParts';
+} from '@nemo/common/src/components/AssistantChat/toolParts';
+import { MessageContent } from '@nemo/common/src/components/Chat/MessageContent';
+import { Text } from '@nvidia/foundations-react-core';
+import { AssistantStudioLink } from '@studio/routes/agents/AssistantChatRoute/AssistantStudioLink';
+import { JobProgressToolCall } from '@studio/routes/agents/AssistantChatRoute/JobProgressToolCall';
 import { ChevronRight, ClipboardList } from 'lucide-react';
 
 interface AssistantToolCallPartContentProps {

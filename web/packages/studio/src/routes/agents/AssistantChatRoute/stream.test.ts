@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  ASSISTANT_SUBTLE_TOOL_GROUP_NAME,
+  ASSISTANT_THINKING_TOOL_NAME,
+} from '@nemo/common/src/components/AssistantChat/toolParts';
 import { logger } from '@nemo/common/src/utils/logger';
 import { ASSISTANT_JOB_PROGRESS_MCP_TOOL_NAME } from '@studio/routes/agents/AssistantChatRoute/jobProgressConsts';
 import {
@@ -9,10 +13,6 @@ import {
   parseJsonObject,
   parseSseChunk,
 } from '@studio/routes/agents/AssistantChatRoute/stream';
-import {
-  ASSISTANT_SUBTLE_TOOL_GROUP_NAME,
-  ASSISTANT_THINKING_TOOL_NAME,
-} from '@studio/routes/agents/AssistantChatRoute/toolParts';
 
 describe('Assistant stream utilities', () => {
   it('parses SSE events and preserves incomplete trailing data', () => {

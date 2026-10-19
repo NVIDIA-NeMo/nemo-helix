@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Text } from '@nvidia/foundations-react-core';
 import {
   CODE_BLOCK_SURFACE_CLASS,
   FILE_CHANGE_ADDITION_CLASS,
   FILE_CHANGE_DELETION_CLASS,
-} from '@studio/routes/agents/AssistantChatRoute/toolCall/constants';
+} from '@nemo/common/src/components/AssistantChat/toolCall/constants';
+import { Text } from '@nvidia/foundations-react-core';
 import { ChevronRight, FilePenLine, FilePlus2 } from 'lucide-react';
 
 interface FileChangeToolCallCardProps {

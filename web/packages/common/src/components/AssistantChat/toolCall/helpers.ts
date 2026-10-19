@@ -6,16 +6,16 @@ import {
   SUBTLE_TOOL_ICONS,
   TOOL_ICONS,
   TOOL_LABELS,
-} from '@studio/routes/agents/AssistantChatRoute/toolCall/constants';
+} from '@nemo/common/src/components/AssistantChat/toolCall/constants';
 import type {
   FileChangeSummary,
   SubtleToolAction,
-} from '@studio/routes/agents/AssistantChatRoute/toolCall/types';
+} from '@nemo/common/src/components/AssistantChat/toolCall/types';
 import {
   isAssistantSubtleToolCallName,
   toAssistantToolArgs,
   type AssistantToolArgs,
-} from '@studio/routes/agents/AssistantChatRoute/toolParts';
+} from '@nemo/common/src/components/AssistantChat/toolParts';
 import { Terminal, type LucideIcon } from 'lucide-react';
 
 const getStringArg = (args: AssistantToolArgs, keys: string[]): string | undefined => {

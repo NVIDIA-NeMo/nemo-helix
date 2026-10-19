@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ThreadAssistantMessagePart } from '@assistant-ui/react';
-import { ASSISTANT_JOB_PROGRESS_MCP_TOOL_NAME } from '@studio/routes/agents/AssistantChatRoute/jobProgressConsts';
 import {
   ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME,
   ASSISTANT_COLLAPSED_THINKING_TOOL_NAME,
   createAssistantThinkingPart,
+} from '@nemo/common/src/components/AssistantChat/toolParts';
+import { ASSISTANT_JOB_PROGRESS_MCP_TOOL_NAME } from '@studio/routes/agents/AssistantChatRoute/jobProgressConsts';
+import {
   getAssistantCompletedMessageParts,
   STUDIO_MESSAGE_SUMMARY_END,
   STUDIO_MESSAGE_SUMMARY_START,
