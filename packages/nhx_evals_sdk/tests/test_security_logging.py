@@ -22,6 +22,7 @@ from nhx_evals_sdk.retrieval.nim_embeddings import NimEmbeddingClient
 from nhx_evals_sdk.structured_output import InferenceStructuredOutput, StructuredOutputMode
 from nhx_evals_sdk.values.models import Model
 from nhx_evals_sdk.values.params import RunConfigOnlineModel
+from openai.types.chat import ChatCompletion
 
 _FORGED_NAME = "model\r\nINFO forged-success\u2028next-entry"
 
@@ -43,7 +44,7 @@ async def test_inference_logs_escape_model_and_url_without_changing_request(
     client = Mock()
     client.base_url = "https://example.test/v1\r\nINFO forged-url"
     client.api_key = "test-key"
-    completion = Mock()
+    completion = Mock(spec=ChatCompletion)
     completion.model_dump.return_value = {"choices": []}
     operation = AsyncMock(return_value=completion)
     if failure == "rate-limit":

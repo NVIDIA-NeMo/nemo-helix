@@ -92,10 +92,6 @@ class EndpointMethod(Generic[P, SyncReturnT, AsyncReturnT]):
     # Copied from the endpoint in __init__ so help() and autodoc describe the
     # endpoint. Declared here so the descriptor's introspection surface is part of
     # its type rather than something callers have to discover at runtime.
-    # The endpoint on a sync owner. On an async owner it is a coroutine-function marker
-    # instead, so `inspect.unwrap` terminates at something awaitable -- see `bound_to_owner`.
-    # `.endpoint` is the unambiguous way to reach the endpoint itself.
-    __wrapped__: Callable[..., object]
     __name__: str
     __qualname__: str
     __doc__: str | None
@@ -116,7 +112,7 @@ class EndpointMethod(Generic[P, SyncReturnT, AsyncReturnT]):
         #
         # inspect.signature(SomeClient.method) works because class-level access
         # returns a functools.wraps'd stub (see __get__), not the raw descriptor.
-        self.__wrapped__ = endpoint_fn
+        self._unwrap_target: Callable[..., object] = endpoint_fn
         for attr in functools.WRAPPER_ASSIGNMENTS:
             try:
                 setattr(self, attr, getattr(endpoint_fn, attr))
@@ -174,8 +170,18 @@ class EndpointMethod(Generic[P, SyncReturnT, AsyncReturnT]):
         """
         clone = type(self)(self._endpoint_fn)
         if issubclass(owner, AsyncNemoClient):
-            clone.__wrapped__ = _async_unwrap_target(self._endpoint_fn)
+            clone._unwrap_target = _async_unwrap_target(self._endpoint_fn)
         return clone
+
+    @property
+    def __wrapped__(self) -> Callable[..., object]:
+        """What ``inspect.unwrap`` follows: the endpoint on a sync owner.
+
+        On an async owner it is a coroutine-function marker instead, so ``inspect.unwrap``
+        terminates at something awaitable -- see ``bound_to_owner``. ``.endpoint`` is the
+        unambiguous way to reach the endpoint itself.
+        """
+        return self._unwrap_target
 
     @property
     def endpoint(self) -> Callable[P, PreparedRequest]:

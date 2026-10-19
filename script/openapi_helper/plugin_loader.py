@@ -19,7 +19,7 @@ relying on this loader.
 
 from fastapi import FastAPI
 from nemo_helix_plugin.discovery import discover_services
-from nhx.common.api.utils import install_query_param_schema_openapi_hook
+from nhx.common.api.utils import QueryParamSchemaFastAPI
 from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
 
 
@@ -31,7 +31,6 @@ def build_plugin_app(plugin_name: str) -> FastAPI:
     cls = services[plugin_name]
     sub_app = NemoServiceAdapter(cls()).create_app()
 
-    parent = FastAPI(title=f"{plugin_name} (plugin)")
+    parent = QueryParamSchemaFastAPI(title=f"{plugin_name} (plugin)")
     parent.include_router(sub_app.router, prefix=f"/apis/{plugin_name}")
-    install_query_param_schema_openapi_hook(parent)
     return parent
