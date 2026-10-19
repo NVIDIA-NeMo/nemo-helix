@@ -5,6 +5,10 @@ package authz
 
 import future.keywords.if
 
+# Scope families that `data.authz.scope_families` holds in production. Tests that mock `data.authz.endpoints`
+# must supply them, otherwise scope validation is skipped and scoped tests pass vacuously.
+scope_families_fixture := {"platform": true, "entities": true, "models": true, "inference": true, "intake": true, "auth": true}
+
 # Test get_required_scopes
 
 test_get_required_scopes_for_defined_endpoint if {
@@ -140,6 +144,7 @@ test_allow_with_valid_scopes if {
             }
         }
     }
+    with data.authz.scope_families as scope_families_fixture
 
     result.allowed == true
 }
@@ -165,6 +170,7 @@ test_allow_fails_with_invalid_scopes if {
             }
         }
     }
+    with data.authz.scope_families as scope_families_fixture
 
     result.allowed == false
 }
@@ -240,6 +246,7 @@ test_list_allow_with_valid_scopes if {
             }
         }
     }
+    with data.authz.scope_families as scope_families_fixture
 
     result.allowed == true
 }
@@ -296,6 +303,7 @@ test_public_workspace_with_valid_scopes if {
             }
         }
     }
+    with data.authz.scope_families as scope_families_fixture
 
     result.allowed == true
 }
@@ -330,6 +338,7 @@ test_public_workspace_fails_with_invalid_scopes if {
             }
         }
     }
+    with data.authz.scope_families as scope_families_fixture
 
     result.allowed == false
 }
@@ -482,6 +491,7 @@ test_mixed_oidc_and_platform_scopes if {
             }
         }
     }
+    with data.authz.scope_families as scope_families_fixture
 
     result.allowed == true
 }
@@ -508,6 +518,7 @@ test_mixed_scopes_platform_scope_enforced if {
             }
         }
     }
+    with data.authz.scope_families as scope_families_fixture
 
     result.allowed == false
 }
@@ -523,6 +534,7 @@ test_scoped_access_key_cannot_create_access_keys if {
         "path": "/apis/auth/v2/access-keys",
         "scopes": ["intake:read", "intake:write"]
     }
+    with data.authz.scope_families as scope_families_fixture
 
     result.allowed == false
 }
@@ -534,6 +546,7 @@ test_scoped_access_key_cannot_list_access_keys if {
         "path": "/apis/auth/v2/access-keys",
         "scopes": ["intake:read"]
     }
+    with data.authz.scope_families as scope_families_fixture
 
     result.allowed == false
 }
@@ -545,6 +558,7 @@ test_scoped_access_key_cannot_revoke_access_keys if {
         "path": "/apis/auth/v2/access-keys/ak_00000000000000000000000000000000",
         "scopes": ["intake:read", "intake:write"]
     }
+    with data.authz.scope_families as scope_families_fixture
 
     result.allowed == false
 }
@@ -556,6 +570,7 @@ test_scoped_access_key_cannot_rotate_access_keys if {
         "path": "/apis/auth/v2/access-keys/ak_00000000000000000000000000000000/rotate",
         "scopes": ["intake:read", "intake:write"]
     }
+    with data.authz.scope_families as scope_families_fixture
 
     result.allowed == false
 }
@@ -567,6 +582,7 @@ test_access_key_scoped_to_auth_can_create_access_keys if {
         "path": "/apis/auth/v2/access-keys",
         "scopes": ["auth:write"]
     }
+        with data.authz.scope_families as scope_families_fixture
 
     result.allowed == true
 }
@@ -578,6 +594,7 @@ test_access_key_scoped_to_platform_can_create_access_keys if {
         "path": "/apis/auth/v2/access-keys",
         "scopes": ["platform:write"]
     }
+        with data.authz.scope_families as scope_families_fixture
 
     result.allowed == true
 }
@@ -605,6 +622,7 @@ test_platform_admin_scoped_access_key_denied_outside_its_scope if {
         "scopes": ["intake:read", "intake:write"]
     }
     with data.authz.principals as {"admin1": {"workspaces": {"system": ["HelixAdmin"]}}}
+    with data.authz.scope_families as scope_families_fixture
 
     result.allowed == false
 }
@@ -617,6 +635,7 @@ test_platform_admin_scoped_access_key_allowed_within_its_scope if {
         "scopes": ["entities:read"]
     }
     with data.authz.principals as {"admin1": {"workspaces": {"system": ["HelixAdmin"]}}}
+    with data.authz.scope_families as scope_families_fixture
 
     result.allowed == true
 }
@@ -631,4 +650,35 @@ test_platform_admin_without_platform_scope_claims_keeps_full_bypass if {
     with data.authz.principals as {"admin1": {"workspaces": {"system": ["HelixAdmin"]}}}
 
     result.allowed == true
+}
+
+# Test configured_scope_family (O(1) lookup in data.authz.scope_families)
+
+test_configured_scope_family_platform if {
+    configured_scope_family("platform") with data.authz.scope_families as {"platform": true, "models": true}
+}
+
+test_configured_scope_family_non_platform_configured if {
+    configured_scope_family("models") with data.authz.scope_families as {"platform": true, "models": true}
+}
+
+test_configured_scope_family_unknown if {
+    not configured_scope_family("external") with data.authz.scope_families as {"platform": true, "models": true}
+}
+
+test_configured_scope_family_without_data if {
+    not configured_scope_family("platform") with data.authz.scope_families as {}
+}
+
+test_configured_scope_family_ignores_endpoint_scan if {
+    # Families come only from the precomputed lookup, never from scanning endpoints.
+    not configured_scope_family("platform") with data.authz.scope_families as {}
+        with data.authz.endpoints as {"/x": {"get": {"permissions": [], "scopes": ["platform:read"]}}}
+}
+
+test_is_platform_scope_cases if {
+    is_platform_scope("platform:read") with data.authz.scope_families as {"platform": true}
+    not is_platform_scope("external:read") with data.authz.scope_families as {"platform": true}
+    not is_platform_scope("openid") with data.authz.scope_families as {"platform": true}
+    not is_platform_scope("a:b:c") with data.authz.scope_families as {"platform": true}
 }

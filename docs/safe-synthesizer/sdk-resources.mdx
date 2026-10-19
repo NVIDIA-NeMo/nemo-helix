@@ -48,8 +48,10 @@ import time
 
 import pandas as pd
 
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_safe_synthesizer_plugin.sdk.job_builder import SafeSynthesizerJobBuilder
 
+client = NemoClient.from_config()
 df = pd.DataFrame({"text": [f"sample record {i}" for i in range(200)]})
 
 job = (

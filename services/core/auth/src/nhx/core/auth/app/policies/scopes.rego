@@ -55,11 +55,10 @@ is_platform_scope(scope) if {
 	configured_scope_family(family)
 }
 
+# O(1) lookup in `data.authz.scope_families`, derived from the endpoints by app/scope_families.py.
+# Do not scan data.authz.endpoints here: the cost grows with every route.
 configured_scope_family(family) if {
-	some endpoint
-	some method
-	some configured_scope in data.authz.endpoints[endpoint][method].scopes
-	family == scope_family(configured_scope)
+	data.authz.scope_families[family]
 }
 
 # Check if scopes are valid for the request (variant 1: no scopes provided)
