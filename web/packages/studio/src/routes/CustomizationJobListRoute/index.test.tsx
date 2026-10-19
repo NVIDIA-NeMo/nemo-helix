@@ -10,6 +10,14 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
+const flags = vi.hoisted(() => ({ modelDetails: false }));
+vi.mock('@studio/constants/environment', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@studio/constants/environment')>()),
+  get MODEL_DETAILS_ENABLED() {
+    return flags.modelDetails;
+  },
+}));
+
 const MODELS_URL = `${PLATFORM_BASE_URL}/apis/models/v2/workspaces/:workspace/models`;
 const JOBS_URL = `${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs`;
 
@@ -54,6 +62,8 @@ const renderRouteUnderTest = () =>
     history: '/workspaces/ws/fine-tune',
     routes: [
       { path: ROUTES.workspace.customizationJobList, element: <CustomizationJobListRoute /> },
+      { path: ROUTES.workspace.modelDetail, element: <div>model page</div> },
+      { path: ROUTES.workspace.modelAdapterDetail, element: <div>adapter page</div> },
     ],
   });
 
@@ -97,5 +107,34 @@ describe('CustomizationJobListRoute job links', () => {
 
     await waitFor(() => expect(jobLinkHrefs()).toHaveLength(1));
     expect(jobLinkHrefs()[0]).toEqual(expect.stringContaining('sft-job-123'));
+  });
+});
+
+describe('CustomizationJobListRoute with the model details flag', () => {
+  beforeEach(() => {
+    flags.modelDetails = true;
+    server.use(http.get(MODELS_URL, () => HttpResponse.json(modelsPage)));
+  });
+
+  afterEach(() => {
+    flags.modelDetails = false;
+  });
+
+  it('opens the model page instead of the side panel', async () => {
+    const user = userEvent.setup();
+    renderRouteUnderTest();
+
+    await user.click(await screen.findByText(fineTunedBase.name));
+
+    expect(await screen.findByText('model page')).toBeInTheDocument();
+  });
+
+  it('opens the adapter page for an adapter row', async () => {
+    const user = userEvent.setup();
+    renderRouteUnderTest();
+
+    await user.click(await screen.findByText(adapter.name));
+
+    expect(await screen.findByText('adapter page')).toBeInTheDocument();
   });
 });

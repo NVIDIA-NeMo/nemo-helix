@@ -11,6 +11,7 @@ import {
 import {
   getModelEntityChatStatus,
   groupModelsByWorkspace,
+  isBaseModel,
   isServedByBaseModel,
   toInferenceModelEntityId,
   toInferenceModelName,
@@ -366,5 +367,20 @@ describe('isServedByBaseModel', () => {
   // Not a fine-tune: nothing says it is served by anything but itself.
   it('is false when the finetuning type is absent', () => {
     expect(isServedByBaseModel(createModel({ base_model: 'default/qwen3-0.6b' }))).toBe(false);
+  });
+});
+
+describe('isBaseModel', () => {
+  it('is true when base_model is missing', () => {
+    expect(isBaseModel(createModel())).toBe(true);
+  });
+
+  // The API sends null for base models, despite the generated type.
+  it('is true when base_model is null', () => {
+    expect(isBaseModel(createModel({ base_model: null as unknown as string }))).toBe(true);
+  });
+
+  it('is false for a fine-tuned model', () => {
+    expect(isBaseModel(createModel({ base_model: 'default/qwen3-0.6b' }))).toBe(false);
   });
 });
