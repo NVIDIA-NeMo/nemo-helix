@@ -59,6 +59,20 @@ navigation:
                 path: ../../agents/traces-and-insights/insights-from-traces.mdx
           - page: Optimize Agents
             path: ../../agents/optimize-agents.mdx
+          - section: Agent Governance
+            slug: governance
+            path: ../../agents/governance/index.mdx
+            contents:
+              - page: Run a War-Game
+                path: ../../agents/governance/run-a-war-game.mdx
+              - page: Review and Apply Mitigations
+                path: ../../agents/governance/apply-mitigations.mdx
+                slug: apply-mitigations
+              - page: Agent Hardener CLI Reference
+                path: ../../agents/governance/cli-reference.mdx
+                slug: cli-reference
+              - page: Troubleshooting
+                path: ../../agents/governance/troubleshooting.mdx
       - section: Evaluate Agents & Models
         slug: evaluate-models
         path: ../../evals/index.mdx
