@@ -680,6 +680,49 @@ async def test_a_failed_trial_marks_its_root_span_failed() -> None:
     assert status.message == "over budget"
 
 
+async def test_a_gym_rollout_whose_agent_never_ran_publishes_a_failed_root_span(tmp_path: Path) -> None:
+    from nhx_evals_sdk.agent_eval.runtimes.gym import discover_gym_tasks
+    from nhx_evals_sdk.agent_eval.runtimes.gym.dataset import materialize_dataset
+    from nhx_evals_sdk.agent_eval.runtimes.gym.results import trials_from_rollouts
+    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+    from opentelemetry.proto.trace.v1.trace_pb2 import Status
+
+    dataset = tmp_path / "ds.jsonl"
+    dataset.write_text(
+        "\n".join(json.dumps({"responses_create_params": {"input": question}}) for question in ("q0", "q1")) + "\n",
+        encoding="utf-8",
+    )
+    tasks = discover_gym_tasks(dataset)
+    index_map = materialize_dataset(tasks, tmp_path / "gym_input.jsonl")
+    empty = {"output": [], "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}}
+    answered = {
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "B"}]}],
+        "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+    }
+    rollouts = tmp_path / "rollouts.jsonl"
+    rollouts.write_text(
+        json.dumps({"_ng_task_index": 0, "_ng_rollout_index": 0, "response": empty, "reward": 0.0})
+        + "\n"
+        + json.dumps({"_ng_task_index": 1, "_ng_rollout_index": 0, "response": answered, "reward": 1.0})
+        + "\n",
+        encoding="utf-8",
+    )
+    trials = trials_from_rollouts(rollouts, tasks, index_map)
+    intake = InMemoryIntakeService()
+
+    await publish_to_intake(_result(trials, []), client=intake.client(), experiment_id="exp-1", agent_name="a")
+
+    roots = []
+    for request in intake.otlp_requests:
+        sent = ExportTraceServiceRequest()
+        sent.ParseFromString(request["body"])
+        spans = [span for scope in sent.resource_spans[0].scope_spans for span in scope.spans]
+        roots.extend(span for span in spans if not span.parent_span_id)
+    assert sorted(root.status.code for root in roots) == [Status.STATUS_CODE_UNSET, Status.STATUS_CODE_ERROR]
+    (failed,) = (root for root in roots if root.status.code == Status.STATUS_CODE_ERROR)
+    assert "never called" in failed.status.message
+
+
 async def test_a_partly_rejected_otlp_batch_fails_the_trial_instead_of_scoring_it() -> None:
     # Ingest answers 200 with a per-span error list, so a dropped span is invisible unless the
     # body is read -- including when the dropped span is the one the scores reference.

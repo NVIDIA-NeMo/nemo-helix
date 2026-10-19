@@ -63,6 +63,8 @@ logger = logging.getLogger(__name__)
 #: Named for NeMo Gym's documented `ng_trajectory` schema; 0.5.0 writes it as one
 #: `<rollout_id>.capture.jsonl` per rollout rather than as a field on the rollout record.
 NG_TRAJECTORY_EVIDENCE = "ng_trajectory"
+#: ``TrialError.type`` for a rollout whose agent produced no output and never called the model.
+AGENT_NEVER_RAN_ERROR_TYPE = "agent_never_ran"
 #: Trial metadata key holding every diagnostic a failures-sidecar record carries, verbatim.
 GYM_FAILURE_RECORD = "gym_failure_record"
 
@@ -703,12 +705,14 @@ def trials_from_rollouts(
             NG_TASK_INDEX: record.get(NG_TASK_INDEX),
             NG_ROLLOUT_INDEX: raw_rollout_index,
         }
+        error: TrialError | None = None
         if never_ran:
             # Kept alongside the reward Gym reported, so the discarded value is still auditable.
             metadata["gym_failure"] = (
                 "the agent produced no output and consumed no tokens, so the model was never called; "
                 f"the reported score of {reward!r} is not a measurement of this agent"
             )
+            error = TrialError(type=AGENT_NEVER_RAN_ERROR_TYPE, message=metadata["gym_failure"])
         trial_id = _rollout_trial_id(
             task_id, raw_rollout_index, synth_seq, missing_label="noidx", attempt=record.get(NG_ATTEMPT_INDEX)
         )
@@ -725,6 +729,7 @@ def trials_from_rollouts(
                     trial_id=trial_id,
                     capture_dir=capture_dir,
                 ),
+                error=error,
                 measurements=_usage_measurements(record),
                 metadata=metadata,
             )
