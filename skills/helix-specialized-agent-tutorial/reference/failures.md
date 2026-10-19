@@ -10,6 +10,9 @@ Match the error text, open the KNOWN-ISSUES entry and apply its fix. Don't parap
 | `nemo setup` wrote to a remote context | 1 | P2 |
 | Stopping the services hangs | any | P3 |
 | Blank or reasoning-only answer from a Nemotron 3 model | 2, 3, 9 | P4 |
+| Agent returns 503 ending in "the 'deepagents' package is required" | 2, 10 | A8 |
+| Deployment fails within a minute: "Prerequisite '...-puller' failed" or "No such image: my-registry/nhx-api:local" | 8 | S6 |
+| Many unanswered agent rows, "429" in the agent's errors | 10 | E7 |
 | HTTP 401 from a Python script against a remote Helix | 4 to 9 | P5 |
 | Preflight `NVIDIA container runtime  not listed in docker info` | 0 | P6 (blocks steps 7 to 10; don't skip) |
 | `[Errno 17] File exists` on `nemo agents create` | 2, 10 | A1 |

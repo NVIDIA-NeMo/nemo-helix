@@ -230,7 +230,7 @@ footer p{margin:0 0 6px}
     <section class="dish" aria-labelledby="dish-h">
       <div>
         <h2 id="dish-h">What you're making</h2>
-        <p>Meridian Compute is a made-up company that runs GPU clusters. Its incident agent runs on Nemotron 3 Super and works in steps:</p>
+        <p>Meridian Compute is a made-up company that runs GPU clusters. Its incident agent runs on Nemotron 3 Ultra and works in steps:</p>
         <ol class="flow">
           <li>Read the alert, Slack message or ticket.</li>
           <li><mark><code>route_incident</code></mark> picks which of 12 runbooks owns it and which of 4 actions Meridian's policy calls for. This is the step you fine-tune.</li>
@@ -256,7 +256,7 @@ footer p{margin:0 0 6px}
       <div class="watch-grid">
         <div>
           <h2 id="watch-h">Watch it made first</h2>
-          <p>A 4-minute narrated run through the whole recipe. You'll see the install, both agents on this message, the data, training and scoring. Captions are on the way.</p>
+          <p>A 4-minute narrated run through the whole recipe. You'll see the install, both agents on this message, the data, training and scoring.</p>
         </div>
         <video controls preload="metadata" playsinline poster="assets/demo-poster.jpg" width="1280" height="720" aria-label="Narrated demo of the recipe, 4 minutes">
           <source src="assets/demo.mp4" type="video/mp4">
@@ -303,7 +303,7 @@ footer p{margin:0 0 6px}
             <tr class="win"><td>Qwen3.5-4B, fine-tuned in NeMo Helix</td><td class="n">82.0%</td></tr>
           </tbody>
         </table>
-        <p class="after">Inside the running agent the fine-tuned model got 81% on 200 incidents, against 74% for Ultra with the policy. Measured on its own it answers in 301 ms against 670 ms, though a whole agent run takes about the same time either way. <a href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/RESULTS.md">Full results in RESULTS.md</a></p>
+        <p class="after">Inside the running agent, with Ultra running it, the fine-tuned model took the right action on 87% of 68 incidents, against 76% for Ultra with the policy. Measured on its own it answers in 301 ms against 670 ms. <a href="https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/RESULTS.md">Full results in RESULTS.md</a></p>
       </div>
     </section>
 

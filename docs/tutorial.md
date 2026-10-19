@@ -8,9 +8,9 @@ The example is an incident agent at Meridian Compute, a made-up company that run
 
 ## Before you start
 
-**Hardware.** Steps 0 to 5 and the agent baseline run on a laptop, macOS or Linux. Steps 6 to 10 train, serve and use a model and need a Linux x86_64 machine with an NVIDIA GPU and the NVIDIA Container Toolkit. Helix asks for at least 40 GB of GPU memory and CUDA 13; we used one A100 80GB per job.
+**Hardware.** Steps 0 to 5 and the agent baseline run on a laptop, macOS or Linux. Steps 6 to 10 train, serve and use a model and need a Linux x86_64 machine with an NVIDIA GPU and the NVIDIA Container Toolkit. Helix asks for at least 40 GB of GPU memory and CUDA 13. We've run every step on a single A100 40GB with a local Helix: training peaked at 14 GB of GPU memory and serving at 30 GB. Our published results used one A100 80GB per job. Plan for about 120 GB of free disk for the container images.
 
-**Accounts.** An inference provider for the agent's own model and, if you generate data, for the writer and judge models. `nemo setup` supports NVIDIA Build, OpenAI, Anthropic, Google Gemini, Ollama and any OpenAI-compatible endpoint. Base models come from Hugging Face; no token is needed for the two used here.
+**Accounts.** An inference provider for the agent's own model and, if you generate data, for the writer and judge models. `nemo setup` supports NVIDIA Build, OpenAI, Anthropic, Google Gemini, Ollama and any OpenAI-compatible endpoint. Base models come from Hugging Face; no token is needed for the two used here. Step 10 sends about 16,000 prompt tokens per incident to the hosted model, so a free build.nvidia.com key gets rate limited partway through ([E7](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#e7-a-free-buildnvidiacom-key-cant-keep-up-with-the-agent-evaluations)).
 
 **Time and cost.** Times below are from our runs. With the packaged data on one A100 80GB, plan on about 2 to 4 hours end to end plus the image download in step 7a: steps 0 to 6 about 30 minutes, training about 30 minutes, deploying 20 to 45 minutes, evaluations about 15 minutes and the agent comparison 30 minutes for 50 incidents or about 2 hours for all 200. Everything we ran cost about $13 to $40 at public prices, with an A100 80GB at $1.66 to $6.03 an hour (Brev listings, October 2026).
 
@@ -35,6 +35,8 @@ Run every command from the repo root. The commands assume a local Helix at `http
 
 **Goal:** find out what's missing before you spend time on it.
 
+On a fresh machine, clone the repo first with the `git clone` line in step 1 and run this from the repo root. Until step 1 is done, FAILs for the nemo CLI, Helix services, inference provider, script packages and agent tool server are expected.
+
 ```bash
 bash scripts/preflight.sh            # on the GPU machine
 bash scripts/preflight.sh --no-gpu   # on a laptop, for steps 0 to 5
@@ -42,7 +44,7 @@ bash scripts/preflight.sh --no-gpu   # on a laptop, for steps 0 to 5
 
 Add `--model nemotron` to check for Nemotron Nano 9B v2 instead of Qwen3.5-4B. The script only reads; it never prints keys or tokens.
 
-**You should see:** one line per check, then a result. On a ready GPU machine every line says PASS and the last line is `Result: ready (0 warning(s)).` The script exits 0. On a Mac without a GPU, `--no-gpu` skips the GPU checks:
+**You should see:** one line per check, then a result. On a ready GPU machine every line says PASS and the last line is `Result: ready (0 warning(s)).` The script exits 0. On a 40 GB GPU the GPU line is a WARN and the last line is `Result: ready (1 warning(s)).`, which is fine for Qwen3.5-4B. On a Mac without a GPU, `--no-gpu` skips the GPU checks:
 
 ```
 PASS  OS                        Darwin arm64 (fine without a GPU)
@@ -67,7 +69,7 @@ uv pip install -e agent              # the agent's tool server, meridian-ops-too
 nemo setup
 ```
 
-`nemo setup` starts the local services, asks for a provider and key, and picks a default model for agents. Pick a model that can call tools for the default; we used Nemotron 3 Super. Run it from this activated shell so the agent you deploy later finds the same Python.
+`nemo setup` starts the local services, asks for a provider and key, and picks a default model for agents. The agents in this repo run their loop on Nemotron 3 Ultra (`models.default.model` in the agent YAML), so the default `nemo setup` picks doesn't affect them. Run it from this activated shell so the agent you deploy later finds the same Python.
 
 To set up without prompts, with a build.nvidia.com key:
 
@@ -91,7 +93,7 @@ nemo inference providers list -f table
 nemo models list -f table
 ```
 
-**You should see:** `{"status":"ready"}`, your provider with status `READY`, and the models it serves. Write down the model names you'll use: the agent's default model, the baseline (for example `nvidia-nemotron-3-ultra-550b-a55b` on build.nvidia.com) and, for step 3, a writer and a judge.
+**You should see:** `{"status":"ready"}`, your provider with status `READY`, and the models it serves. Check that Nemotron 3 Ultra is in the list (`nvidia-nemotron-3-ultra-550b-a55b` on build.nvidia.com); the agents' loop and the baseline both use it. If your gateway names it differently, use that name in the agent YAML files. For step 3, also note a writer and a judge.
 
 **If it fails:** if an old `nemo` answers, see [P1](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#p1-an-older-nemo-on-your-path-reads-a-different-config). If you have more than one CLI context, see [P2](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#p2-nemo-setup-changed-the-wrong-context). Local services need Docker running.
 
@@ -99,7 +101,7 @@ nemo models list -f table
 
 **Goal:** see the agent work end to end with a general model in its triage step. This is the baseline you'll beat.
 
-The agent is defined in `agent/agent-with-context.yaml`. Nemotron 3 Super (your default model) runs its loop, and its `route_incident` tool asks a second model to triage, with Meridian's notes in the prompt. Set that model to your baseline's name from `nemo models list`:
+The agent is defined in `agent/agent-with-context.yaml`. Nemotron 3 Ultra runs its loop, and its `route_incident` tool asks a model to triage, with Meridian's notes in the prompt. In this baseline that model is Nemotron 3 Ultra too. Set it to the name from `nemo models list`:
 
 ```yaml
 # agent/agent-with-context.yaml, under mcp.servers.meridian-ops.env
@@ -118,7 +120,7 @@ nemo agents invoke -d infra-ops-agent-with-context-deployment --no-progress --in
 
 **You should see:** a runbook ID on the first line, an action on the second, then two to four sentences on what the agent checked and did. In our run, Nemotron 3 Ultra with the notes answered `RB-03` and `page-oncall`. Meridian's policy says `ticket-business-hours` for this one, because nothing is broken for users yet. The agent also shows up in NeMo Studio.
 
-**If it fails:** `[Errno 17] File exists` means a relative path ([A1](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#a1-nemo-agents-create-fails-with-errno-17-file-exists)). `No module named nemo_fabric_adapters` means the services started outside this `.venv` ([A2](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#a2-subprocess-agent-fails-with-no-module-named-nemo_fabric_adapters)). A 409 on redeploy is [A4](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#a4-nemo-agents-redeploy-fails-with-409-deployment-already-exists). A `host_timeout` is [A5](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#a5-host_timeout-when-the-agent-starts). A blank or reasoning-only answer from the router is [P4](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#p4-reasoning-models-return-only-their-reasoning).
+**If it fails:** a 503 that ends in "the 'deepagents' package is required" is [A8](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#a8-the-agent-returns-503-the-deepagents-package-is-required). `[Errno 17] File exists` means a relative path ([A1](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#a1-nemo-agents-create-fails-with-errno-17-file-exists)). `No module named nemo_fabric_adapters` means the services started outside this `.venv` ([A2](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#a2-subprocess-agent-fails-with-no-module-named-nemo_fabric_adapters)). A 409 on redeploy is [A4](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#a4-nemo-agents-redeploy-fails-with-409-deployment-already-exists). A `host_timeout` is [A5](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#a5-host_timeout-when-the-agent-starts). A blank or reasoning-only answer from the router is [P4](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#p4-reasoning-models-return-only-their-reasoning).
 
 ## Step 3: Get the incident history
 
@@ -248,14 +250,14 @@ use in training/job.json as model.name: default/qwen3.5-4b-base
 
 ### 7a. Pull the training images
 
-The Docker job backend runs training in two images, `nhx-customizer-tasks` and `nhx-unsloth-training`. NVIDIA publishes both on `nvcr.io/nvidia/nemo-helix/`, and they pull without an NGC key or `docker login` (checked 2026-10-11 for tags `0.7.0` and `0.7.1`). Use the tag that matches the Helix version step 1 installed.
+The Docker job backend runs training in two images, `nhx-customizer-tasks` and `nhx-unsloth-training`, and deployments use a third, `nhx-api`. NVIDIA publishes all three on `nvcr.io/nvidia/nemo-helix/`, and they pull without an NGC key or `docker login` (checked 2026-10-11 for tags `0.7.0` and `0.7.1`). Use the tag that matches the Helix version step 1 installed.
 
-A pip-installed Helix doesn't look on nvcr.io by itself. In `nemo-helix` 0.7.1 the platform's `image_registry` defaults to `my-registry` and `image_tag` to `local`, so a local Helix looks for `my-registry/nhx-unsloth-training:local`. Pull the published images and tag them with those local names. Step 8 uses the tasks image under its local name to download the adapter. A local Helix doesn't pull images for deployments, so pull the vLLM image here too:
+A pip-installed Helix doesn't look on nvcr.io by itself. In `nemo-helix` 0.7.1 the platform's `image_registry` defaults to `my-registry` and `image_tag` to `local`, so a local Helix looks for `my-registry/nhx-unsloth-training:local`. Pull the published images and tag them with those local names. Step 8 needs two of them under their local names: `nhx-api` downloads the model and `nhx-customizer-tasks` loads the adapter. A local Helix doesn't pull images for deployments, so pull the vLLM image here too:
 
 ```bash
 HELIX_VERSION=$(python -c "import importlib.metadata as m; print(m.version('nemo-helix'))")
 echo "$HELIX_VERSION"   # 0.7.1 in October 2026; the image tag must be the same number
-for img in nhx-customizer-tasks nhx-unsloth-training; do
+for img in nhx-customizer-tasks nhx-unsloth-training nhx-api; do
   docker pull "nvcr.io/nvidia/nemo-helix/$img:$HELIX_VERSION"
   docker tag "nvcr.io/nvidia/nemo-helix/$img:$HELIX_VERSION" "my-registry/$img:local"
 done
@@ -263,7 +265,7 @@ docker pull docker.io/vllm/vllm-openai:v0.22.1   # the serving image step 8 uses
 docker images --format "{{.Repository}}:{{.Tag}}\t{{.Size}}" | grep -E "nhx-|vllm"
 ```
 
-**You should see:** each pull ends `Status: Downloaded newer image`, and the last command lists each `nhx-` image twice (the `nvcr.io` name and the `my-registry/...:local` name share one image ID), plus the vLLM image. The two `nhx-` images are about 21 GB to download for x86_64.
+**You should see:** each pull ends `Status: Downloaded newer image`, and the last command lists each `nhx-` image twice (the `nvcr.io` name and the `my-registry/...:local` name share one image ID), plus the vLLM image. Docker lists `nhx-customizer-tasks` at about 36 GB, `nhx-unsloth-training` at 41 GB, `nhx-api` at 3.6 GB and vLLM at 35 GB.
 
 **If `docker pull` fails** with `manifest unknown` or `not found`, there's no image for your Helix version. Run `echo $HELIX_VERSION` and install a Helix version that has images (`uv pip install "nemo-helix[all]==0.7.1"`), or build the images from source as below.
 
@@ -304,7 +306,9 @@ nemo jobs get-logs <job> --workspace default --all-pages -f raw \
   | grep -o -E "NVIDIA [A-Z0-9-]+\. Num GPUs = [0-9]+|'train_runtime': '[0-9]+'" | sort -u
 ```
 
-**You should see:** `submit` prints the job as JSON, and its `name` (like `unsloth-4bd924999dd1`) is the job ID. The job ends `completed`. In our Qwen run the loss fell from 0.474 at step 10 to 0.103 at step 310, with a validation loss of 0.106. `train_runtime` was 1,303 seconds (22 minutes) on one A100 80GB, and the whole job took 30 minutes. Nemotron Nano jobs took about 41 minutes. At $1.66 to $6.03 an hour, the GPU time for one Qwen job costs about $0.75 to $2.70.
+On a local Helix, `get-logs` returns no lines, because the Docker job backend doesn't keep the training container's output. Read the step times instead: `nemo jobs get-status <job> --workspace default -f json | jq -r '.steps[] | "\(.name)  \(.created_at)  \(.updated_at)"'`.
+
+**You should see:** `submit` prints the job as JSON, and its `name` (like `unsloth-4bd924999dd1`) is the job ID. The job ends `completed`. In our Qwen run the loss fell from 0.474 at step 10 to 0.103 at step 310, with a validation loss of 0.106. `train_runtime` was 1,303 seconds (22 minutes) on one A100 80GB, and the whole job took 30 minutes. On an A100 40GB with a local Helix the job took 27 minutes, with the same loss curve. Nemotron Nano jobs took about 41 minutes. At $1.66 to $6.03 an hour, the GPU time for one Qwen job costs about $0.75 to $2.70.
 
 **If it fails:** an image pull error means the images from 7a aren't on this machine under the names Helix expects; use the override in 7a ([T1](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#t1-the-training-images-werent-public-resolved-2026-10-11) has the history). `out_proj` is incompatible is [T2](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#t2-nemotron-nano-9b-v2-fails-late-with-module-out_proj-is-incompatible-with-mamba-based-models). The `warmup_ratio` warning in the logs is expected ([T4](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#t4-warmup_ratio-is-accepted-and-then-ignored)). If you run out of GPU memory, lower `batch.per_device_train_batch_size` and raise `gradient_accumulation_steps` to keep their product the same.
 
@@ -328,7 +332,7 @@ for m in default/qwen3.5-4b-base default--meridian-router-qwen3.5-4b-seed29; do
 done
 ```
 
-**You should see:** `deploy_model.py` prints `status:` lines for 20 to 30 minutes, then `gateway ready: True`. Ours took 21 minutes for Qwen and 30 for Nemotron. `providers get` prints `READY`, `default/qwen3.5-4b-base` and `default--meridian-router-qwen3.5-4b-seed29`. In our run the base model's top answer was a blank line (about 70%), so it didn't pick an action. The fine-tuned model put about 97% on `" Y"`, a ticket for business hours, which is Meridian's policy.
+**You should see:** `deploy_model.py` prints `status:` lines, then `gateway ready: True`. Ours took 7 minutes for Qwen on a local Helix, and 21 for Qwen and 30 for Nemotron on a cluster. `providers get` prints `READY`, `default/qwen3.5-4b-base` and `default--meridian-router-qwen3.5-4b-seed29`. If it prints only `READY`, wait a minute and run it again; the adapter loads after the gateway is up. In our run the base model's top answer was a blank line (about 70%), so it didn't pick an action. The fine-tuned model put about 97% on `" Y"`, a ticket for business hours, which is Meridian's policy.
 
 A deployment holds its GPU until you delete it. When you're done with steps 9 and 10:
 
@@ -336,7 +340,7 @@ A deployment holds its GPU until you delete it. When you're done with steps 9 an
 nemo inference deployments delete meridian-qwen --workspace default
 ```
 
-**If it fails:** stuck in PENDING with no logs is [S2](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#s2-a-deployment-sits-in-pending-for-20-minutes-or-more-with-no-logs). A 422 or a missing adapter is [S3](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#s3-the-adapter-returns-422-or-doesnt-appear-in-model-lists). `--input-file` errors are [S4](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#s4---input-file-rejects-request-bodies).
+**If it fails:** failing within a minute with "Prerequisite '...-puller' failed" is [S6](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#s6-the-deployment-fails-at-once-with-prerequisite-name-puller-failed). Stuck in PENDING with no logs is [S2](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#s2-a-deployment-sits-in-pending-for-20-minutes-or-more-with-no-logs). A 422 or a missing adapter is [S3](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#s3-the-adapter-returns-422-or-doesnt-appear-in-model-lists). `--input-file` errors are [S4](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#s4---input-file-rejects-request-bodies).
 
 ## Step 9: Evaluate before and after
 
@@ -414,14 +418,14 @@ Score both agents on the same incidents, 50 per job:
 
 ```bash
 BATCHES="1 2 3 4" scripts/run-agent-evals.sh agent-finetuned agent-frontier-with-context
-python eval/analyze_agent.py runs/eval/agent/*.rows.jsonl
+python eval/analyze_agent.py --paired runs/eval/agent/*.rows.jsonl
 ```
 
-**You should see:** the single incident comes back `RB-03` and `ticket-business-hours` in our run. `analyze_agent.py` prints one line per agent. Ours on 200 incidents: fine-tuned `"action_accuracy": 0.81`, Nemotron 3 Ultra with notes `0.74`, both 100% on the runbook. Each 50-incident job took about 14 minutes. Our first 50 incidents tied at 86%, so use all four batches if you want to see a difference.
+**You should see:** the single incident comes back `RB-03` and `ticket-business-hours` in our run. `analyze_agent.py` prints one line per agent. Ours, on the 68 incidents both agents answered: fine-tuned `"action_accuracy": 0.87`, Nemotron 3 Ultra with notes `0.76`, both 100% on the runbook. Our first 50 incidents were close (86% against 84%), so use all four batches to see a difference. How long each 50-incident job takes depends on your provider's rate limits.
 
-A whole agent run takes about the same time with either model (11 to 12 seconds per incident for us). The agent's own loop on Nemotron 3 Super takes most of it ([A7](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#a7-the-agent-adds-a-lot-of-tokens-to-every-call)). The fine-tuned model answers faster measured on its own (step 9), and it costs less per answer when its GPU is busy.
+The agent's own loop on Nemotron 3 Ultra takes most of each run's time, so swapping the triage model saves little end to end ([A7](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#a7-the-agent-adds-a-lot-of-tokens-to-every-call)). The fine-tuned model answers faster measured on its own (step 9), and it costs less per answer when its GPU is busy.
 
-**If it fails:** an evaluation that loses all its rows hit the 1-hour job limit ([E6](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#e6-an-agent-evaluation-hits-the-1-hour-job-limit-and-every-row-is-lost)). Agent deployment errors are the same as step 2.
+**If it fails:** many unanswered rows with "429" in the agent's errors is [E7](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#e7-a-free-buildnvidiacom-key-cant-keep-up-with-the-agent-evaluations). An evaluation that loses all its rows hit the 1-hour job limit ([E6](https://github.com/NVIDIA-NeMo/nemo-helix/blob/gtc-berlin-2026-tutorial/KNOWN-ISSUES.md#e6-an-agent-evaluation-hits-the-1-hour-job-limit-and-every-row-is-lost)). Agent deployment errors are the same as step 2.
 
 When you finish, clean up (see [Clean up](#clean-up)). The deployment from step 8 holds its GPU until you delete it.
 
@@ -495,10 +499,14 @@ The adapter, the base model entity and the filesets (steps 5 to 7). A fileset ca
 nemo models get qwen3.5-4b-base --workspace default
 nemo models adapters delete meridian-router-qwen3.5-4b-seed29 --model-name qwen3.5-4b-base --workspace default
 nemo models delete qwen3.5-4b-base --workspace default
-nemo files filesets list --workspace default -f table
+nemo files filesets list --workspace default --all-pages -f table
 nemo files filesets delete qwen3.5-4b-base --workspace default
 nemo files filesets delete meridian-incidents-train --workspace default
 nemo files filesets delete meridian-incidents-test --workspace default
+for b in 1 2 3 4; do nemo files filesets delete meridian-incidents-test-b$b --workspace default; done   # step 10's batches
+nemo files filesets delete meridian-router-qwen3.5-4b-seed29 --workspace default                          # the adapter's files
+nemo files filesets delete infra-ops-agent-with-context-ethos --workspace default                          # made by nemo agents create
+nemo files filesets delete infra-ops-agent-decision-model-ethos --workspace default
 ```
 
 If you trained Nemotron Nano, use `meridian-nemotron`, `meridian-nemotron-cfg` and `nemotron-nano-9b-v2` in place of the Qwen names.
@@ -513,9 +521,11 @@ Remove the images from step 7a. Check their sizes first:
 
 ```bash
 docker images --format "{{.Repository}}:{{.Tag}}\t{{.Size}}" | grep -E "nhx-|vllm"
-docker rmi my-registry/nhx-unsloth-training:local my-registry/nhx-customizer-tasks:local docker.io/vllm/vllm-openai:v0.22.1
-docker rmi nvcr.io/nvidia/nemo-helix/nhx-unsloth-training:<helix version> nvcr.io/nvidia/nemo-helix/nhx-customizer-tasks:<helix version>
+docker rmi my-registry/nhx-unsloth-training:local my-registry/nhx-customizer-tasks:local my-registry/nhx-api:local docker.io/vllm/vllm-openai:v0.22.1
+docker rmi nvcr.io/nvidia/nemo-helix/nhx-unsloth-training:<helix version> nvcr.io/nvidia/nemo-helix/nhx-customizer-tasks:<helix version> nvcr.io/nvidia/nemo-helix/nhx-api:<helix version>
 ```
+
+The services also pulled `clickhouse/clickhouse-server:26.3` (about 1.2 GB) and deployments pulled `busybox`; remove them with `docker rmi` if nothing else on the machine uses them.
 
 Each image has two names after 7a, and Docker frees the space only once both are removed. Remove any other image the first command listed with `docker rmi <image>`.
 

@@ -66,11 +66,11 @@ harnesses:
 
 models:
   default:
-    # The model that runs the agent loop: any tool-calling model on your Helix
-    # inference gateway (`nemo models list`). The CLI fills in NEMO_DEFAULT_MODEL
-    # from your active context or environment. We used Nemotron 3 Super.
+    # The model that runs the agent loop. Pinned to Nemotron 3 Ultra so every
+    # version of the agent runs the same loop; to use another tool-calling model,
+    # put its name from `nemo models list` here.
     provider: nvidia
-    model: ${NEMO_DEFAULT_MODEL}
+    model: default/nvidia-nemotron-3-ultra-550b-a55b
     api_key_env: NVIDIA_API_KEY
     temperature: 0.0
 

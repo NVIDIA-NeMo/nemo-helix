@@ -128,7 +128,7 @@ The trainer logs that `warmup_ratio` was renamed and ignores it, so the runs hav
 
 ### T5. Training uses 4-bit loading unless you say otherwise
 
-The backend defaults to `load_in_4bit: true`, so these runs were effectively QLoRA. The submitted spec doesn't show it.
+The backend defaults to `load_in_4bit: true`, so these runs were effectively QLoRA. `training/job.json` doesn't set it, but the job that `submit` prints shows `"load_in_4bit": true`.
 
 ### T6. How to train on the answer only
 
@@ -176,6 +176,12 @@ Base models often answer with a newline instead of a letter.
 
 Fix: read the option probabilities, as `eval/analyze_results.py` does.
 
+### S6. The deployment fails at once with "Prerequisite '<name>-puller' failed"
+
+On a local Helix the deployment's model puller runs `my-registry/nhx-api:local`, and Helix doesn't pull it. `nemo services logs` shows `No such image: my-registry/nhx-api:local`.
+
+Fix: pull `nvcr.io/nvidia/nemo-helix/nhx-api:<helix version>` and tag it `my-registry/nhx-api:local` (step 7a does this), delete the failed deployment with `nemo inference deployments delete <name>`, then rerun `deploy_model.py`.
+
 ## Evaluations with the Helix Evals plugin
 
 ### E1. Spec rejected: "mismatched fields: ['name']"
@@ -205,6 +211,12 @@ Fix: `eval/bench_latency.py` measures speed and tokens with direct calls.
 Results are written only at the end, so a timed-out job leaves nothing to download.
 
 Fix: score 50 incidents per job. `scripts/run-agent-evals.sh` splits the test set into batches of 50 for you. Run agent evaluations when the machine is otherwise idle.
+
+### E7. A free build.nvidia.com key can't keep up with the agent evaluations
+
+Each agent run makes 4 to 7 calls to the hosted model, 16,000 to 21,000 prompt tokens in all (A7). On a free build.nvidia.com key, Nemotron 3 Ultra started returning 429 Too Many Requests about 8 minutes into step 10, and stayed throttled for hours at any rate we tried. The agent returns 502, the evaluator retries for about 30 seconds and the row is lost (E3).
+
+Fix: run step 10 on a provider with higher rate limits. The agent specs in `eval/specs-agent/` use `params.parallelism: 1`; run one agent at a time, and check `answered` in `analyze_agent.py`'s output before comparing agents.
 
 ## Agents
 
@@ -244,7 +256,13 @@ Harmless. Delete `agent/mcps/__pycache__` first to quiet them.
 
 ### A7. The agent adds a lot of tokens to every call
 
-The Deep Agents harness adds 12,000 to 16,000 prompt tokens to each call of this three-tool agent. That's why a whole agent run takes about the same time whichever model handles the triage step. The speed and cost numbers in [RESULTS.md](RESULTS.md) are for the triage step's model.
+The Deep Agents harness adds 12,000 to 16,000 prompt tokens to each call of this three-tool agent, and each run makes 4 to 7 calls to the loop model. That's why the agent's loop takes most of each run's time, whichever model handles the triage step. The speed and cost numbers in [RESULTS.md](RESULTS.md) are for the triage step's model.
+
+### A8. The agent returns 503: "the 'deepagents' package is required"
+
+`nemo agents invoke` fails with "Fabric runtime startup failed ... lifecycle_adapter_start_failed". The traceback behind it ends with `RuntimeError: the 'deepagents' package is required for the Deep Agents adapter`. `nemo-helix[all]` 0.7.1 installs the Deep Agents adapter without the harness it drives.
+
+Fix: `uv pip install "nemo-fabric-adapters-deepagents[harness]==0.3.0"` in this repo's `.venv` (`requirements.txt` includes it), then `nemo agents deployments delete <name> -y` and deploy again. The CLI shortens the traceback; `curl` the local address `nemo agents deploy` printed to read all of it.
 
 ## Using a coding agent
 

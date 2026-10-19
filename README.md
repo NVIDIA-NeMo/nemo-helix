@@ -21,17 +21,17 @@ The agent has to decide what happens next. Meridian's policy for a dispatch queu
 | Nemotron 3 Ultra (550B), with Meridian's policy pasted into its prompt | Paged the on-call engineer |
 | Qwen3.5-4B, fine-tuned on Meridian's past incidents | **Opened a ticket for the morning** |
 
-You'll build the second one. The agent itself keeps running on Nemotron 3 Super, and only this one decision moves to the model you train.
+You'll build the second one. The agent itself keeps running on Nemotron 3 Ultra, and only this one decision moves to the model you train.
 
 ## How it turned out
 
 | | Nemotron 3 Ultra 550B, policy in the prompt | Qwen3.5-4B, fine-tuned |
 |---|---|---|
 | Picks the right action | 70% | **82%** |
-| Picks the right action inside the running agent | 74% | **81%** |
+| Picks the right action inside the running agent | 76% | **87%** |
 | Time to answer the decision | 670 ms | **301 ms** |
 
-Training took 22 minutes on one A100. We scored both models on 416 incidents held back from training, and on 200 more inside the running agent. A whole agent run takes about as long either way, because the rest of the agent's work still runs on Nemotron 3 Super. [RESULTS.md](RESULTS.md) has the full numbers.
+Training took 22 minutes on one A100. We scored both models on 416 incidents held back from training, and on 68 more inside the running agent with Nemotron 3 Ultra running it. The decision is one step of each agent run; most of the run's time is the agent's own loop. [RESULTS.md](RESULTS.md) has the full numbers.
 
 ## Watch it first
 

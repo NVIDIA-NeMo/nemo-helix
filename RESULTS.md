@@ -1,6 +1,6 @@
 # Results
 
-What we measured when a small fine-tuned open model took over one decision in the Meridian incident agent: which runbook owns an incident and what action to take. Runs date from 2026-10-07 and 2026-10-08. Every row-level score behind these tables is in [`results/`](results/), so you can recompute them without calling any model.
+What we measured when a small fine-tuned open model took over one decision in the Meridian incident agent: which runbook owns an incident and what action to take. Runs date from 2026-10-07 to 2026-10-19. Every row-level score behind these tables is in [`results/`](results/), so you can recompute them without calling any model.
 
 Meridian Compute is made up and its incident history is synthetic.
 
@@ -53,23 +53,38 @@ python eval/analyze_results.py results/small-models/C-qwen-finetuned.action.rows
 
 ## Inside the agent
 
-We deployed the same Helix agent three times. Nemotron 3 Super runs its loop: triage the incident, check status, then open a ticket or page a team. The only difference between the three is the model behind its `route_incident` tool. The Helix Evals plugin scored each one end to end.
+We deployed the same Helix agent with Nemotron 3 Ultra running its loop: triage the incident, check status, then open a ticket or page a team. The only difference between the versions is the model behind its `route_incident` tool. Both ran on one A100 40GB with a local Helix, scored with the Helix Evals plugin's row format. The hosted Ultra endpoint rate-limited our key ([KNOWN-ISSUES.md](KNOWN-ISSUES.md) E7), so the table counts the 68 incidents both versions answered.
 
 | Model behind the triage step | Incidents | Right runbook | Right action |
 |---|---|---|---|
-| Nemotron 3 Ultra, no Meridian notes | 50 | 100% | 60% |
-| Nemotron 3 Ultra, notes in the prompt | 200 | 100% | 74% |
-| **Qwen3.5-4B, fine-tuned** | **200** | **100%** | **81%** |
+| Nemotron 3 Ultra, notes in the prompt | 68 | 100% | 76% |
+| **Qwen3.5-4B, fine-tuned** | **68** | **100%** | **87%** |
 
-The agent carried out its triage step's choice in 149 of 150 cases we checked, so agent accuracy follows the model-level numbers. On the first 50 incidents alone the two 200-incident agents tied at 86%. Those 50 happen to be easier than average for Ultra, which is why we ran 150 more. Run 200 if you want to see a difference.
+The fine-tuned version answered 100 incidents in all and took the right action on 82% of them. On the first 50 incidents the two were close (86% against 84%), and most of the gap comes from the next 18, so read the size of the gap with care. In every run, the agent called the tool for the action its triage step chose.
 
-Speed inside the agent: a whole agent run took about the same time either way (12.3 s average with the fine-tuned model, 11.4 s with Ultra and the notes, 12.8 s with Ultra alone). The agent's own loop takes most of that time: about 16,000 prompt tokens per incident on Nemotron 3 Super, the same for every version. The triage step itself wasn't faster inside these runs either. Our tool server fetched an auth token and opened a new connection to a remote Helix cluster on every call, and the records can't separate model time from that overhead. The speed numbers below are for the model measured on its own.
+An earlier run on a Helix cluster used a smaller model for the loop, Nemotron 3 Super, and scored all 200 incidents: 81% for the fine-tuned triage against 74% for Ultra with the notes, and 60% for Ultra without notes on 50. With Super running the loop, the agent's reply sometimes said it had opened a ticket or paged a team without calling the tool (36 of 151 runs in our recheck). With Ultra running the loop, that never happened in 168 runs, which is why the agent runs on Ultra.
 
-Recompute the agent table:
+Speed inside the agent: the fine-tuned model made the triage decision in about 0.18 s. The agent's own loop takes most of each run, about 16,000 prompt tokens per incident whichever model triages, so whole runs gain less. Our Ultra-loop run times include retries from rate limiting, so we don't compare them. The speed numbers below are for the model measured on its own.
+
+Recompute the agent tables:
 
 ```bash
-python eval/analyze_agent.py results/agent/*.rows.jsonl.gz
+python eval/analyze_agent.py --paired results/agent-ultra-loop/*.rows.jsonl.gz   # Ultra runs the loop
+python eval/analyze_agent.py results/agent/*.rows.jsonl.gz                       # earlier run, Super runs the loop
 ```
+
+## Rerun on one machine
+
+We reran steps 0 to 10 on a single A100 40GB with a local Helix on 2026-10-19, following [the tutorial](docs/tutorial.md). The model-level results match the published run:
+
+| | A100 40GB, local Helix | Published (A100 80GB, cluster) |
+|---|---|---|
+| Fine-tuned Qwen, right action | 81.5% | 82.0% |
+| Fine-tuned Qwen, right runbook | 100% | 100% |
+| Untuned Qwen, right action | 37.7% | 37.7% |
+| Loss at step 10 and step 310 | 0.478 and 0.101 | 0.474 and 0.103 |
+| Training job | 27 min | 30 min |
+| GPU memory peak, training and serving | 14 GB and 30 GB | not recorded |
 
 ## Speed and size, measured on the model alone
 
@@ -143,7 +158,7 @@ From job records. Our runs used hosted models and a shared Helix cluster, so the
 | Fine-tuning: 6 jobs (2 models × 3 seeds) plus 1 failed job | Qwen about 30 min per job (22 min of training), Nemotron about 41 min per job; 3.21 GPU-hours in all | 1 × A100 80GB per job | $5 to $19 |
 | Serving: 2 vLLM deployments, up only for evaluation | 21 min (Qwen) and 30 min (Nemotron) from create to ready; about 3.2 GPU-hours in use | 1 GPU each | $5 to $19 |
 | Model-level evaluation | Under a minute per small-model job; about 2.5 min per 416-row Ultra job | Serving GPUs, hosted Ultra | $0.63 for Ultra |
-| Agent-level evaluation: 450 agent runs | 14 min per 50-incident job, 68 min in all | Agent on a laptop, hosted Super | about $1 |
+| Agent-level evaluation, first run with Super running the loop: 450 agent runs | 14 min per 50-incident job, 68 min in all | Agent on a laptop, hosted Super | about $1 |
 
 **Everything we ran cost about $13 to $40 at public prices**, depending on the A100 price. Most of that is GPU time. Calendar time was longer (22 hours from first data job to last agent evaluation), mostly debugging, overnight gaps and seed reruns. Idle time on deployments isn't counted: a deployment holds its GPU until you delete it, so tear it down when you finish.
 

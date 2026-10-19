@@ -16,7 +16,7 @@
     "response_path": "$.choices[0].message.content"
   },
   "params": {
-    "parallelism": 2,
+    "parallelism": 1,
     "limit_samples": 50,
     "ignore_request_failure": true,
     "request_timeout": 240,

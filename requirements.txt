@@ -2,6 +2,7 @@
 # the training and deployment scripts import the Helix SDK).
 #   uv venv && source .venv/bin/activate && uv pip install -r requirements.txt
 nemo-helix[all]==0.7.1
+nemo-fabric-adapters-deepagents[harness]==0.3.0   # the Deep Agents harness the agent runs on; nemo-helix[all] 0.7.1 leaves it out
 pandas>=2.2
 httpx>=0.27
 mcp>=1.28.1,<2

@@ -22,7 +22,7 @@ Read the user's message first. Ask only the questions it doesn't answer, all in 
 |---|---|
 | Which machine: Linux x86_64 with an NVIDIA GPU, or a laptop? Picks the path in `reference/paths.md` | None; you need this one |
 | Which Helix, and more than one `nemo` CLI context? | Local Helix at `http://localhost:8080`, one context. For remote, see `reference/paths.md` |
-| Which provider, and the exact model names for the agent's default model and the baseline (plus writer and judge if generating) | None; read them from `nemo models list` after step 1 |
+| Which provider, and whether it serves Nemotron 3 Ultra (the agents' loop and the baseline) under the name in the agent YAML (plus writer and judge if generating) | None; check `nemo models list` after step 1 |
 | Packaged or generated data? | Packaged data in `data/meridian-example/` (step 3) |
 | Budget and time limit | Ask before each step that spends money or holds a GPU (below) |
 
@@ -59,7 +59,7 @@ Running a documented blocking command once is fine: `nemo jobs watch <job>`, or 
 
 ## Step 7a: pull the published images
 
-The training images are public on `nvcr.io/nvidia/nemo-helix/` (anonymous pull, since 2026-10-11). Run step 7a as written: it reads the installed Helix version, pulls `nhx-customizer-tasks` and `nhx-unsloth-training` with that tag and tags them `my-registry/<image>:local`, because a pip-installed Helix (0.7.1) still defaults to those names. Step 8 needs the `my-registry/nhx-customizer-tasks:local` tag too, so don't skip the `docker tag` lines.
+The training images are public on `nvcr.io/nvidia/nemo-helix/` (anonymous pull, since 2026-10-11). Run step 7a as written: it reads the installed Helix version, pulls `nhx-customizer-tasks`, `nhx-unsloth-training` and `nhx-api` with that tag and tags them `my-registry/<image>:local`, because a pip-installed Helix (0.7.1) still defaults to those names. Step 8 needs the `my-registry/nhx-api:local` and `my-registry/nhx-customizer-tasks:local` tags too, so don't skip the `docker tag` lines.
 
 - **Pull fails** (`manifest unknown`, not found): there's no published tag for the installed version. Show the version, and offer the two options in 7a: install a Helix version with images, or the source build fallback (`scripts/gpu-build-images.sh`, 30 to 60 minutes). Let the user choose.
 - **7b still fails pulling `nhx-unsloth-training` or `nhx-customizer-tasks`:** step 7a gives the override (`NHX_UNSLOTH_TRAINING_IMAGE`, `NHX_CUSTOMIZER_TASKS_IMAGE` set to the nvcr.io names, then `nemo services restart`). The restart affects running services, so tell the user and get a yes first. If the override doesn't fix it, stop and ask; don't try other settings.
