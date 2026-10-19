@@ -3,7 +3,12 @@
 
 import { EM_DASH } from '@nemo/common/src/constants';
 import { useLiveSeconds } from '@nemo/common/src/hooks/useLiveSeconds';
-import { formatDurationMs, formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
+import {
+  formatDurationMs,
+  formatTimeInSeconds,
+  getElapsedSeconds,
+  utcToLocalDate,
+} from '@nemo/common/src/utils/date';
 import { Text } from '@nvidia/foundations-react-core';
 import type { FC } from 'react';
 
@@ -40,6 +45,6 @@ export const ElapsedTime: FC<ElapsedTimeProps> = ({ start, end, durationMs, runn
   if (!endDate) {
     return <Text>{EM_DASH}</Text>;
   }
-  const seconds = (endDate.getTime() - startDate.getTime()) / 1000;
+  const seconds = getElapsedSeconds(startDate.getTime(), endDate.getTime());
   return <Text className="tabular-nums">{formatTimeInSeconds(seconds) || '0s'}</Text>;
 };

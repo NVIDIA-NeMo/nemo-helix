@@ -3,12 +3,12 @@
 
 import { useState, useEffect } from 'react';
 
+import { getElapsedSeconds } from '../../utils/date';
+
 interface UseLiveSecondsProps {
   startDate?: Date;
   enabled?: boolean;
 }
-
-const secondsSince = (startMs: number): number => Math.floor((Date.now() - startMs) / 1000);
 
 /**
  * Use this hook to get the live seconds since the start time.
@@ -29,5 +29,5 @@ export const useLiveSeconds = ({ startDate, enabled = true }: UseLiveSecondsProp
     return () => clearInterval(interval);
   }, [startMs]);
 
-  return startMs === undefined ? undefined : secondsSince(startMs);
+  return startMs === undefined ? undefined : getElapsedSeconds(startMs);
 };
