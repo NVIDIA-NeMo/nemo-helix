@@ -77,13 +77,13 @@ The format you choose does not change _what runs_ — all three start on the sam
 
 There are two installs at job start:
 
-1. Gym builds **one venv per server** from that server's `pyproject.toml` or `requirements.txt`, plus `nemo-gym` at the image version and Gym's pinned `ray[default]` and `openai`. A package's `wheels/` directory is offered here as a _candidate pool_ — **a package index is still enabled**, so anything the wheelhouse misses is fetched from it.
-2. The job then installs the package's vendored closure into each agent and resources-server venv with `--no-index`. Fully offline, but only for what `wheels/` already carries, and only after step 1 succeeded.
+1. The job installs the package's vendored closure from `wheels/` into a writable work directory with `--no-index`. Fully offline, but only for what `wheels/` already carries.
+2. Gym then builds **one venv per server** from that server's `pyproject.toml` or `requirements.txt`, plus `nemo-gym` at the image version and Gym's pinned `ray[default]` and `openai`. A package's `wheels/` directory is offered here as a _candidate pool_ — **a package index is still enabled**, so anything the wheelhouse misses is fetched from it.
 
 | Format              | Server dependencies come from                                      | Needs egress at spin-up                   |
 | ------------------- | ------------------------------------------------------------------ | ----------------------------------------- |
 | `native-v1`         | A package index, resolved from the server's `requirements.txt`     | Yes                                       |
-| `wheels-v1`         | The package's `wheels/`, for anything it vendors                   | No, **if the closure also covers step 1** |
+| `wheels-v1`         | The package's `wheels/`, for anything it vendors                   | No, **if the closure also covers step 2** |
 | `adapter-wheels-v1` | The package's `wheels/`, plus the agent harness's own requirements | No, when built by the converter           |
 
 A `wheels-v1` job runs with no egress only when `wheels/` carries all of:
@@ -538,7 +538,7 @@ The jobs controller mounts the larger of this request and the execution profile'
 | `Sandboxed GRPO requires the job-storage PVC claim name`                                   | Operator setting, same section                                                                                                                                                                                                                                          |
 | `has no wheels with a matching platform tag`                                               | The closure was built for the wrong interpreter or architecture — rebuild per [Vendoring a wheel closure](#vendoring-a-wheel-closure)                                                                                                                                   |
 | Spin-up hangs, then fails on a network or resolver error                                   | The environment's venv build cannot reach an index. See [How dependencies are installed](#how-dependencies-are-installed)                                                                                                                                               |
-| `unable to allocate shared memory` or `No space left on device` while staging a checkpoint | `/dev/shm` is smaller than the staged checkpoint. Raise the execution profile `resources.shm_size` above the 64Gi default. See [Shared memory for checkpoint staging](#shared-memory-for-checkpoint-staging) |
+| `unable to allocate shared memory` or `No space left on device` while staging a checkpoint | `/dev/shm` is smaller than the staged checkpoint. Raise the execution profile `resources.shm_size` above the size the job requested: 64Gi for all-weights, 8Gi for LoRA. See [Shared memory for checkpoint staging](#shared-memory-for-checkpoint-staging) |
 
 ### Cluster prerequisites
 

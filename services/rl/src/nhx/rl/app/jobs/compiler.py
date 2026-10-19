@@ -643,6 +643,7 @@ def _build_training_step(
             provider="gpu",
             container=container,
             resources=_gpu_training_resources(
+                num_nodes=1,
                 num_gpus=num_gpus_per_node,
                 lora=job_spec.trains_lora_adapter,
             ),
