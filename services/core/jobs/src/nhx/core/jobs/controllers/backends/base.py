@@ -13,6 +13,7 @@ from typing import Generic, Literal, Optional, TypeVar
 from urllib.parse import SplitResult, quote, urlsplit
 
 import nhx.common.auth.workload_identity as _workload_identity
+from kubernetes.utils import parse_quantity
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.jobs import execution_profiles as _execution_profiles
@@ -210,11 +211,11 @@ def resolve_gpu_job_shm_size(
     profile_resources: ComputeResources | None,
     num_gpus: int,
 ) -> str:
-    """Pick SHM size for GPU workloads: explicit shm_size on executor, then profile, then 1Gi x GPU count."""
-    for res in (executor_resources, profile_resources):
-        if res is not None and res.shm_size:
-            return res.shm_size
-    return f"{max(1, num_gpus)}Gi"
+    """Pick SHM size for GPU workloads: the larger of the executor and profile shm_size, then 8Gi x GPU count."""
+    sizes = [res.shm_size for res in (executor_resources, profile_resources) if res is not None and res.shm_size]
+    if sizes:
+        return max(sizes, key=parse_quantity)
+    return f"{8 * max(1, num_gpus)}Gi"
 
 
 def _split_url(url: str) -> SplitResult | None:

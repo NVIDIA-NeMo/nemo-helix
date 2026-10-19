@@ -1350,13 +1350,13 @@ def test_schedule_docker_gpu(mock_nemo_client, docker_client_mock):
     assert len(job_containers) == 2
 
     assert job_containers[0]["entrypoint"] == ["c1"]
-    assert job_containers[0]["shm_size"] == "2g"
+    assert job_containers[0]["shm_size"] == "16g"
     device_requests_0 = job_containers[0]["device_requests"]
     assert len(device_requests_0) == 1
     assert len(device_requests_0[0]["DeviceIDs"]) == 2
 
     assert job_containers[1]["entrypoint"] == ["c1"]
-    assert job_containers[1]["shm_size"] == "2g"
+    assert job_containers[1]["shm_size"] == "16g"
     device_requests_1 = job_containers[1]["device_requests"]
     assert len(device_requests_1) == 1
     assert len(device_requests_1[0]["DeviceIDs"]) == 2

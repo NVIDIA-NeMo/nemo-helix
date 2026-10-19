@@ -261,16 +261,34 @@ def test_single_node_uses_gpu_executor() -> None:
     assert _container(step)["command"] == ["-m", "nhx.rl.tasks.training"]
     resources = step["executor"]["resources"]
     actual = resources.shm_size if hasattr(resources, "shm_size") else resources["shm_size"]
-    assert actual == "8Gi"
+    assert actual == "64Gi"
 
 
-def test_multi_node_gpu_shm_scales_with_gpus_per_node(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_multi_node_gpu_shm_is_flat(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("nhx.rl.app.jobs.compiler.config.multinode_shared_storage_path", "/shared", raising=False)
     job = _make_job_output(DPOTraining(type="dpo", parallelism=ParallelismParams(num_nodes=2, num_gpus_per_node=2)))
     step = _build_training_step(job, [], trust_remote_code=False, profile=None)
     resources = step["executor"]["resources"]
     actual = resources.shm_size if hasattr(resources, "shm_size") else resources["shm_size"]
-    assert actual == "16Gi"
+    assert actual == "64Gi"
+
+
+def test_grpo_lora_uses_adapter_shm(sandbox_capable: None) -> None:
+    job = RlJobOutput(
+        model="default/base-model",
+        dataset="default/prefs",
+        environment="default/env",
+        training=GRPOTraining(
+            type="grpo",
+            finetuning_type="lora",
+            parallelism=ParallelismParams(num_nodes=1, num_gpus_per_node=1),
+        ),
+        output=OutputResponse(name="my-lora", type=OutputNameType.ADAPTER, fileset="my-lora-fs"),
+    )
+    step = _build_training_step(job, [], trust_remote_code=False, profile=None)
+    resources = step["executor"]["resources"]
+    actual = resources.shm_size if hasattr(resources, "shm_size") else resources["shm_size"]
+    assert actual == "8Gi"
 
 
 def test_multi_node_requires_shared_storage(monkeypatch: pytest.MonkeyPatch) -> None:

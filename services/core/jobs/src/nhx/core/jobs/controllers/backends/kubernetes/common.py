@@ -1250,6 +1250,8 @@ def create_pod_template_spec(
         volumes.extend(vol.to_k8s() for vol in storage_config.additional_volumes)
 
     if num_gpus is not None and num_gpus > 0:
+        step_shm = executor_resources.shm_size if executor_resources is not None else None
+        profile_shm = config.resources.shm_size if config.resources is not None else None
         shm_size = resolve_gpu_job_shm_size(executor_resources, config.resources, num_gpus)
         volume_mounts.append(
             client.V1VolumeMount(name=JOB_DSHM_VOLUME_NAME, mount_path="/dev/shm"),
@@ -1260,8 +1262,8 @@ def create_pod_template_spec(
                 empty_dir=client.V1EmptyDirVolumeSource(medium="Memory", size_limit=shm_size),
             ),
         )
-        logger.debug(
-            "Injected /dev/shm emptyDir for GPU job step",
+        logger.info(
+            f"GPU job /dev/shm sizeLimit={shm_size} (step={step_shm}, profile={profile_shm}, num_gpus={num_gpus}). ",
             extra={"shm_size": shm_size, "num_gpus": num_gpus, "job": step.job, "step": step.name},
         )
 
