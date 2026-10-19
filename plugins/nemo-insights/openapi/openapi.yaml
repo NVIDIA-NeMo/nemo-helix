@@ -831,6 +831,13 @@ components:
           title: Fast Model
           description: Workspace-qualified Model Entity the run used for context summarization.
           default: ''
+        ethos_source:
+          allOf:
+          - $ref: '#/components/schemas/EthosSource'
+          description: 'Where the run''s Ethos came from: `request` (sent with the
+            run), `stored` (the agent''s `<agent>-ethos#ETHOS.md`), `none` (no Ethos
+            stored), or `unavailable` (the stored Ethos could not be read, so the
+            run went ahead without it). Unset on runs recorded before this was tracked.'
         id:
           type: string
           title: Id
@@ -1038,9 +1045,11 @@ components:
             as default_model. Required for the same reason.
         ethos:
           title: Ethos
-          description: 'Optional Ethos Markdown for the agent under test. Sent inline
-            rather than as a reference: the execute job''s Fabric adapter has no Files
-            access.'
+          description: 'Optional Ethos Markdown for the agent under test. When omitted,
+            the run uses the agent''s stored `<agent>-ethos#ETHOS.md`, or runs without
+            an Ethos if none can be read; the run''s `ethos_source` records which.
+            Sent inline rather than as a reference: the execute job''s Fabric adapter
+            has no Files access.'
           type: string
           minLength: 1
         since:
@@ -1119,6 +1128,16 @@ components:
       - fast_model
       title: EnableAnalysisConfigRequest
       description: Model selection captured when periodic analysis is enabled.
+    EthosSource:
+      type: string
+      enum:
+      - request
+      - stored
+      - none
+      - unavailable
+      title: EthosSource
+      description: Where an analysis run's Ethos came from, or why it ran without
+        one.
     HTTPValidationError:
       properties:
         detail:

@@ -27,6 +27,7 @@ from nemo_helix_plugin.entity_client import (
     NemoEntityConflictError,
     NemoEntityNotFoundError,
 )
+from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.jobs.types import HelixJobResponse, ListJobsQueryParams
@@ -69,7 +70,7 @@ class InsightsAnalysisController(NemoController):
     """Submit insights analyzer jobs for enabled agents on a global cadence."""
 
     name: ClassVar[str] = "insights-analysis"
-    dependencies: ClassVar[list[str]] = ["entities", "jobs", "agents", "insights"]
+    dependencies: ClassVar[list[str]] = ["entities", "jobs", "agents", "files", "insights"]
 
     def __init__(self) -> None:
         self._client: AsyncNemoClient | None = None
@@ -323,6 +324,7 @@ class InsightsAnalysisController(NemoController):
             request=request,
             agents_client=AsyncAgentsClient.from_client(self.client),
             models_client=AsyncModelsClient.from_client(self.client),
+            files_client=AsyncFilesClient.from_client(self.client),
             entity_client=self.entities,
             name=job_name,
             profile=self.insights_config.analyst.job_profile,

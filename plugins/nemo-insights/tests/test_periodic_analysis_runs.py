@@ -5,6 +5,7 @@
 
 import json
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -16,7 +17,13 @@ from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_insights_plugin.config import InsightsConfig
 from nemo_insights_plugin.controller import InsightsAnalysisController
-from nemo_insights_plugin.entities import AnalysisConfig, AnalysisConfigStatus, AnalysisRunStatus
+from nemo_insights_plugin.entities import (
+    AnalysisConfig,
+    AnalysisConfigStatus,
+    AnalysisRun,
+    AnalysisRunStatus,
+    EthosSource,
+)
 
 NOW = datetime(2026, 9, 18, 12, tzinfo=timezone.utc)
 PREVIOUS = NOW - timedelta(days=1)
@@ -307,3 +314,27 @@ async def test_empty_config_listing_stops_after_first_page() -> None:
     entities.list.return_value = MagicMock(data=[], pagination=MagicMock(total_pages=0))
     assert await controller.list_objects() == []
     entities.list.assert_awaited_once_with(AnalysisConfig, workspace="-", page=1, page_size=100)
+
+
+@pytest.mark.asyncio
+async def test_scheduled_submission_inlines_the_agents_stored_ethos(monkeypatch) -> None:
+    controller, entities, _ = _controller()
+    entities.create.side_effect = lambda entity: entity
+    models = AsyncMock()
+    models.get_model.return_value = MagicMock(data=lambda: SimpleNamespace(backend_format=None))
+    files = AsyncMock()
+    files.download_file.return_value = MagicMock(read=AsyncMock(return_value=b"# Ethos\n\nBe careful.\n"))
+    agents = AsyncMock()
+    agents.create_execute_job.return_value = MagicMock(data=lambda: {"name": "scheduled"})
+    for name, client in (("AsyncModelsClient", models), ("AsyncFilesClient", files), ("AsyncAgentsClient", agents)):
+        monkeypatch.setattr(
+            f"nemo_insights_plugin.controller.{name}", SimpleNamespace(from_client=lambda _, c=client: c)
+        )
+
+    await controller._submit_analysis_job(_config(), None, NOW)
+
+    files.download_file.assert_awaited_once_with(workspace="default", name="demo-ethos", path="ETHOS.md")
+    run = next(call.args[0] for call in entities.create.await_args_list if isinstance(call.args[0], AnalysisRun))
+    assert run.ethos_source == EthosSource.STORED
+    spec = agents.create_execute_job.await_args.kwargs["body"].spec
+    assert spec["agent"]["config"]["harnesses"]["insights"]["settings"]["ethos"] == "# Ethos\n\nBe careful."
