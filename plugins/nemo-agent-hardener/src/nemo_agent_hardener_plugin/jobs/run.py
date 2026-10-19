@@ -22,6 +22,9 @@ from typing import Any, ClassVar, cast
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
 from nemo_agent_hardener_plugin.jobs import _common, benign_suite
 from nemo_agent_hardener_plugin.jobs.artifacts import (
+    ArtifactCapture,
+    _cleanup_artifact_capture,
+    _prepare_artifact_capture,
     _replay_args,
     _save_composed_guardrails,
     _save_events_fileset,
@@ -174,11 +177,11 @@ def _preflight_message(label: str, choice: ModelChoice, verdict: Any) -> str:
     )
 
 
-def _live_hitlog_fileset(config: dict, sdk: Any, ctx: JobContext) -> str:
+def _live_hitlog_fileset(config: dict, sdk: Any, ctx: JobContext, capture: ArtifactCapture) -> str:
     """Save the hitlog a live attack produced; empty for generation-only and replay runs, which have none."""
     if config.get("stop_after_synth") or config.get("replay_hitlog_fileset"):
         return ""
-    return _save_hitlog_fileset(sdk, ctx, ctx.workspace)
+    return _save_hitlog_fileset(sdk, ctx.workspace, capture)
 
 
 class AgentHardenerRunJob(NemoJob):
@@ -254,12 +257,13 @@ class AgentHardenerRunJob(NemoJob):
         pre-created ``running`` row is finalized to ``failed`` with a cause, never orphaned) and logged,
         then re-surfaced as a ``failed`` result so the process exits non-zero and the platform job errors.
         """
+        artifact_capture = ArtifactCapture()
         try:
-            return self._execute(config, ctx=ctx, sdk=sdk)
+            return self._execute(config, ctx=ctx, sdk=sdk, artifact_capture=artifact_capture)
         except Exception as exc:
             failure = classify_exception(exc)
             logger.exception("agent-hardener war-game failed [%s]: %s", failure.category, failure.message)
-            self._record_failure(ctx, sdk, config, failure)
+            self._record_failure(ctx, sdk, config, failure, artifact_capture)
             return {
                 "status": "failed",
                 "returncode": 1,
@@ -269,8 +273,12 @@ class AgentHardenerRunJob(NemoJob):
                     "remediation": failure.remediation,
                 },
             }
+        finally:
+            _cleanup_artifact_capture(artifact_capture)
 
-    def _record_failure(self, ctx: JobContext, sdk: Any, config: dict, failure: RunFailure) -> None:
+    def _record_failure(
+        self, ctx: JobContext, sdk: Any, config: dict, failure: RunFailure, artifact_capture: ArtifactCapture
+    ) -> None:
         """Finalize the run record as ``failed`` with the classified error, on every channel the user sees.
 
         Reuses the pre-created record (``run_name``) when present so its live view resolves to the failure
@@ -289,7 +297,7 @@ class AgentHardenerRunJob(NemoJob):
             "failed",
             1,
             ctx.job_id or "",
-            _live_hitlog_fileset(config, sdk, ctx),
+            _live_hitlog_fileset(config, sdk, ctx, artifact_capture),
             manifest_id=str(config.get("manifest_id") or ""),
             source_run=str(config.get("source_run") or ""),
             failure=failure,
@@ -300,7 +308,11 @@ class AgentHardenerRunJob(NemoJob):
             _create_run(sdk, workspace=ctx.workspace, data=data)
         self.report_progress(ctx, work_done=0, work_total=1, status="failed", details=failure.as_error_details())
 
-    def _execute(self, config: dict, *, ctx: JobContext, sdk: Any = None) -> dict:
+    def _execute(
+        self, config: dict, *, ctx: JobContext, sdk: Any = None, artifact_capture: ArtifactCapture | None = None
+    ) -> dict:
+        if artifact_capture is None:
+            artifact_capture = ArtifactCapture()
         WarGameSpec.model_validate(config)
         plugin_config = AgentHardenerConfig.get()
         _common.require_provisioned(plugin_config)
@@ -358,13 +370,19 @@ class AgentHardenerRunJob(NemoJob):
         if validate_only:
             _seed_validation_manifest(manifest, config.get("defense_guardrails"), config.get("defense_policy"), ctx)
             rounds = 1
+        # Native Agent Hardener supports an explicit storage.run_id. Use it in a private sibling manifest so
+        # every output path belongs to this invocation, including when local jobs share one project root.
+        invocation_manifest = _prepare_artifact_capture(artifact_capture, manifest)
         # agent-hardener reads victim creds from the project dotenv, so write one from the operator env (which
         # carries the provisioned INFERENCE_API_KEY), the manifest's Secrets-store refs and any --env-file.
         _common.warn_shadowed_operator_env(plugin_config)
         _, env_file = _common.prepare_victim_env(
-            manifest, _build_native_subprocess_env(plugin_config), config.get("env_file"), secret_values
+            invocation_manifest,
+            _build_native_subprocess_env(plugin_config),
+            config.get("env_file"),
+            secret_values,
         )
-        agent_name, port = _manifest_facts(manifest)
+        agent_name, port = _manifest_facts(invocation_manifest)
 
         # Replay mode: skip the live garak attack and replay a recorded hitlog (uploaded, or a prior run's
         # saved hitlog) against the defended victim. The fileset is downloaded here and passed as `--replay <path>`.
@@ -378,7 +396,7 @@ class AgentHardenerRunJob(NemoJob):
         # default one-shot `agent-hardener run` (TTY interview when interactive).
         if config.get("driver") == "service":
             outcome = _run_service_driven(
-                manifest,
+                invocation_manifest,
                 env_file,
                 plugin_config,
                 ctx,
@@ -404,7 +422,7 @@ class AgentHardenerRunJob(NemoJob):
                 benign_suite.write_suite(suite_csv, cached_suite)
                 suite_for_run = str(suite_csv)
             outcome = _run_one_shot(
-                manifest,
+                invocation_manifest,
                 env_file,
                 plugin_config,
                 ctx,
@@ -422,17 +440,17 @@ class AgentHardenerRunJob(NemoJob):
         elif replay_args:
             hitlog_fileset = replay_fileset or ""
         else:
-            hitlog_fileset = _live_hitlog_fileset(config, sdk, ctx)
+            hitlog_fileset = _live_hitlog_fileset(config, sdk, ctx, artifact_capture)
 
         # A validate-only run generates no mitigations (defenders: []); it produces the sanity-check
         # validation.json instead. A normal hardening run produces the mitigations artifact.
         if validate_only:
-            _save_validation(ctx)
+            _save_validation(ctx, artifact_capture)
             # Also persist the exact composed workflow that was validated, so the Harden tab can recover it
             # after a reload and keep "Apply to Agent" enabled without re-running the check.
             _save_composed_guardrails(ctx, config.get("defense_guardrails"))
         elif not config.get("stop_after_synth"):
-            _save_mitigations(ctx)
+            _save_mitigations(ctx, artifact_capture)
 
         events_fileset = _save_events_fileset(sdk, workspace=ctx.workspace, run_name=outcome.record_name or "")
 
