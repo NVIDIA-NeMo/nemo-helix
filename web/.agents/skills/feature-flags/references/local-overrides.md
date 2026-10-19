@@ -31,7 +31,7 @@ When the gate is off the panel is never rendered, and its chunk is never fetched
 
 ## Using the panel
 
-The flag icon in the global header opens a side panel listing every flag with its
+The flag icon in the global header opens a modal listing every flag with its
 type, its deployment default, and its current effective value.
 
 Each control has an explicit **Default** option. That is not the same as setting
@@ -95,5 +95,5 @@ blocked, so a `typeof` guard is not safe — all access funnels through
 
 - `packages/studio/src/constants/featureFlags/overrides.ts` — storage, validation
 - `packages/studio/src/constants/featureFlags/index.ts` — two-pass parse cascade
-- `packages/studio/src/components/FeatureFlagPanel/` — the panel
+- `packages/studio/src/components/FeatureFlagPanel/` — the modal
 - `packages/studio/src/components/Layouts/GlobalNav/index.tsx` — lazy mount behind the gate

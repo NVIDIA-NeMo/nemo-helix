@@ -6,9 +6,9 @@ import {
   Button,
   Divider,
   Flex,
+  Modal,
+  ModalCloseButton,
   Select,
-  SidePanel,
-  SidePanelCloseButton,
   Stack,
   Text,
   TextInput,
@@ -98,7 +98,7 @@ const FeatureFlagRow: FC<FlagRowProps> = ({ row, override, onChange }) => {
           </Text>
         </Stack>
 
-        <Flex align="center" gap="density-xs" className="shrink-0">
+        <Flex align="center" justify="end" gap="density-xs" className="w-64 shrink-0">
           {isFixedChoice(row.typeName) ? (
             <Select
               aria-label={`${row.key} override`}
@@ -118,7 +118,7 @@ const FeatureFlagRow: FC<FlagRowProps> = ({ row, override, onChange }) => {
             <TextInput
               aria-label={`${row.key} override`}
               size="small"
-              className="w-28"
+              className="w-40"
               placeholder={formatValue(row.defaultValue)}
               value={override ?? ''}
               status={invalid ? 'error' : undefined}
@@ -195,12 +195,15 @@ export const FeatureFlagPanel: FC = () => {
   };
 
   return (
-    <SidePanel
-      bordered
+    <Modal
+      // Wide enough that the flag name, its detail line, and the control all sit
+      // on one row across 35 entries. KUI exposes no size prop; the fullscreen
+      // example sets width through className the same way.
+      className="w-[min(960px,92vw)]"
+      // The draft is unsaved work, so a stray backdrop click must not discard it.
       closeOnClickOutside={false}
       slotHeading="Feature flags"
-      className="top-[var(--nv-app-bar-height)] [--side-panel-width:440px]"
-      // The trigger must be the Button itself: SidePanel clones slotTrigger via
+      // The trigger must be the Button itself: the dialog clones slotTrigger via
       // asChild, so wrapping it in a Tooltip hands the trigger props to the
       // tooltip and the click never reaches the dialog. aria-label carries the
       // accessible name instead.
@@ -211,7 +214,7 @@ export const FeatureFlagPanel: FC = () => {
       }
       slotFooter={
         <>
-          <SidePanelCloseButton kind="tertiary">Close</SidePanelCloseButton>
+          <ModalCloseButton kind="tertiary">Close</ModalCloseButton>
           <Flex align="center" gap="density-sm">
             <Button kind="secondary" disabled={count === 0} onClick={() => setDraft({})}>
               Reset all
@@ -255,7 +258,7 @@ export const FeatureFlagPanel: FC = () => {
             No flags match “{filter}”.
           </Text>
         ) : (
-          <Stack gap="density-md">
+          <Stack gap="density-md" className="max-h-[55vh] overflow-y-auto pr-2">
             {visible.map((row) => (
               <FeatureFlagRow
                 key={row.key}
@@ -267,6 +270,6 @@ export const FeatureFlagPanel: FC = () => {
           </Stack>
         )}
       </Stack>
-    </SidePanel>
+    </Modal>
   );
 };
