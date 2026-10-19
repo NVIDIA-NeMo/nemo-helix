@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import pydoc
+from types import FunctionType
 from unittest.mock import AsyncMock, MagicMock, create_autospec
 
 import pytest
@@ -116,6 +117,7 @@ def test_descriptor_carries_endpoint_identity() -> None:
     assert descriptor.__name__ == "delete_deployment"
     assert descriptor.__doc__ == descriptor.endpoint.__doc__
     assert descriptor.__doc__  # the endpoint really does carry one
+    assert isinstance(descriptor.endpoint, FunctionType)
     assert descriptor.endpoint.__name__ == "delete_deployment"
 
 
@@ -138,6 +140,7 @@ def test_async_descriptor_unwraps_to_a_coroutine_function() -> None:
     descriptor = _descriptor("delete_deployment")
 
     assert inspect.iscoroutinefunction(inspect.unwrap(descriptor))
+    assert isinstance(descriptor.endpoint, FunctionType)
     assert descriptor.endpoint.__name__ == "delete_deployment"
 
 

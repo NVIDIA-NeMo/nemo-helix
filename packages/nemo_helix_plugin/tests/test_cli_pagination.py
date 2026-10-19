@@ -47,9 +47,15 @@ def list_logs(*, query_params: dict[str, Any] | None = None) -> Paginated[Item, 
     raise NotImplementedError
 
 
+class _RecordingClient(NemoClient):
+    """A client whose test transport records each page it was asked for in ``calls``."""
+
+    calls: list[int]
+
+
 def _offset_client(
     pages: dict[int, list[str]], *, page_size: int = 2, envelope: dict[str, Any] | None = None
-) -> NemoClient:
+) -> _RecordingClient:
     """Serve ``pages`` (page number -> names) with offset pagination metadata and optional envelope fields."""
     total_results = sum(len(v) for v in pages.values())
     calls: list[int] = []
@@ -73,8 +79,8 @@ def _offset_client(
             },
         )
 
-    client = NemoClient(base_url="http://test", http_client=httpx.Client(transport=httpx.MockTransport(handler)))
-    client.calls = calls  # type: ignore[attr-defined]
+    client = _RecordingClient(base_url="http://test", http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+    client.calls = calls
     return client
 
 

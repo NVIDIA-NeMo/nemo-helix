@@ -262,6 +262,8 @@ def make_middleware_call(config: GuardrailConfig) -> InlineGuardrailsMiddlewareC
     # block (models / rails / prompts), not the entity envelope. The full
     # GuardrailConfig dump silently absorbs envelope fields into model_extra
     # and rails.rails ends up None, so the plugin's input rail gets bypassed.
+    if config.data is None:
+        raise ValueError(f"guardrail config {config.name!r} has no data block to validate")
     payload: dict[str, object] = config.data.model_dump(mode="json", exclude_none=True)
 
     # Thread the config name through as the inline diagnostic label so

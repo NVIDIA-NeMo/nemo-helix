@@ -324,7 +324,9 @@ class TestOutput:
         cli = GarakPluginCLI()
         app = cli.get_cli()
         add_job_commands(app, {"garak.audit": AuditJob}, cli=cli)
-        audit_command = typer.main.get_command(app).commands["audit"]
+        group = typer.main.get_command(app)
+        assert isinstance(group, click.Group)
+        audit_command = group.commands["audit"]
         assert isinstance(audit_command, click.Group)
         assert "explain" in audit_command.commands
         assert "run" not in audit_command.commands

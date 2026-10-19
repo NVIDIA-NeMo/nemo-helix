@@ -50,6 +50,7 @@ def test_roundtrip_preserves_task_fields() -> None:
 
     restored = _roundtrip(entity)
 
+    assert isinstance(restored.spec, EvaluatorTaskDefinition)
     assert restored.spec.intent == "Answer the question."
     assert restored.spec.inputs.instruction == "What is 2+2?"
     assert [(m.key, m.value) for m in restored.metadata] == [("suite", "smoke")]

@@ -87,6 +87,7 @@ async def test_a_pinned_revision_keeps_the_ref_it_was_published_with(service: Ta
     # Selected by content digest, not ordinal: a non-digest fragment is read as a *tag* name, so
     # "1" would be a lookup for a tag called "1".
     revisions = await service.list_revisions("default", "ts-1")
+    assert revisions is not None
     first_digest = next(r.content_hash for r in revisions.data if r.revision == 1)
 
     first = await service.get_taskset("default", "ts-1", revision=first_digest)

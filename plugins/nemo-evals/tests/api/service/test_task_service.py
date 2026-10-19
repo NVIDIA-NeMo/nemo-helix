@@ -437,7 +437,9 @@ async def test_resolve_revision_honours_a_tag_naming_an_older_revision(service: 
     the fragment were ignored entirely.
     """
     await service.create_task("task-1", _task_input(), workspace="default")
-    first = (await service.list_revisions("default", "task-1")).data[0].content_hash
+    revisions = await service.list_revisions("default", "task-1")
+    assert revisions is not None
+    first = revisions.data[0].content_hash
     await service.tag_revision("default", "task-1", "blessed", "latest")
 
     revised = _task_input(intent="Answer differently.")
@@ -453,7 +455,9 @@ async def test_resolve_revision_honours_a_tag_naming_an_older_revision(service: 
 async def test_resolve_revision_round_trips_a_digest_fragment(service: TaskService) -> None:
     """A member submitted already-pinned must resolve to itself rather than to the head."""
     await service.create_task("task-1", _task_input(), workspace="default")
-    first = (await service.list_revisions("default", "task-1")).data[0].content_hash
+    revisions = await service.list_revisions("default", "task-1")
+    assert revisions is not None
+    first = revisions.data[0].content_hash
 
     revised = _task_input(intent="Answer differently.")
     await service.replace_task("task-1", revised, workspace="default")

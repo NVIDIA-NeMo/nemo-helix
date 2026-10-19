@@ -5,11 +5,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import ClassVar
 
 from fastapi import APIRouter
 from nemo_helix_plugin.authz import CallerKind, path_rule
-from nemo_helix_plugin.customization_contributor import CustomizationContributorDiscoveryError
+from nemo_helix_plugin.customization_contributor import (
+    CustomizationContributor,
+    CustomizationContributorDiscoveryError,
+)
 from nemo_helix_plugin.discovery import (
     CUSTOMIZATION_CONTRIBUTORS_GROUP,
     discover_customization_contributors,
@@ -32,7 +36,7 @@ _JOB_TEMPLATE_ROUTER_SPEC = RouterSpec(
 )
 
 
-def merge_router_dependencies(contributors: dict[str, object]) -> list[str]:
+def merge_router_dependencies(contributors: Mapping[str, object]) -> list[str]:
     """Union platform router deps with each contributor's ``dependencies``."""
     deps = set(_ROUTER_BASE_DEPENDENCIES)
     for contributor in contributors.values():
@@ -62,7 +66,7 @@ def _record_router_spec_routes(
                 seen[op] = owner
 
 
-def _assert_no_route_collisions(contributors: dict[str, object]) -> None:
+def _assert_no_route_collisions(contributors: dict[str, CustomizationContributor]) -> None:
     """Catch contributors that would handle the same ``(METHOD, PATH)`` pair.
 
     Contributors are free to share a parent mount prefix — e.g. every backend's

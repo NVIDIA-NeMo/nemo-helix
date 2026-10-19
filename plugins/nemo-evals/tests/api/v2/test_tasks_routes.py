@@ -28,6 +28,7 @@ from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTa
 from nemo_evals.api.v2 import tasks as tasks_routes
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricsDisabledError
 from nemo_helix_plugin.entity_client import NemoEntityConflictError
+from pydantic import BaseModel
 
 
 class _FakeMetricService:
@@ -136,7 +137,7 @@ def test_write_without_a_spec_kind_returns_422(client: TestClient, method: str) 
 
 
 @pytest.mark.parametrize("definition", [EvaluatorTaskDefinition, HarborTaskDefinition])
-def test_published_schema_requires_the_kind_discriminator(definition: type) -> None:
+def test_published_schema_requires_the_kind_discriminator(definition: type[BaseModel]) -> None:
     """The generated spec has to agree with the validator above: a default on ``kind`` would leave
     it out of ``required``, and a client generated from that spec would omit it."""
     assert "kind" in definition.model_json_schema()["required"]

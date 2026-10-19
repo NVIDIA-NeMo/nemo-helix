@@ -12,7 +12,6 @@ set -euo pipefail
 # Counts reflect the violation count at the time of suppression.
 ci_ignored_rules=(
   invalid-argument-type    # 204
-  unresolved-attribute     # 72
   # Re-enable last: while the rules above are ignored, the ty: ignore comments that suppress
   # their (still real) violations would all report as unused.
   unused-ignore-comment    # 14

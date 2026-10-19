@@ -19,6 +19,7 @@ def test_nhx_dynamic_versioning_config_uses_repo_defaults() -> None:
 
     assert config.fallback_version == DEFAULT_DYNAMIC_VERSION
     assert config.vcs.value == "git"
+    assert config.style is not None
     assert config.style.value == "pep440"
     assert config.pattern == "default-unprefixed"
 
