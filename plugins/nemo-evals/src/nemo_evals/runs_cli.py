@@ -190,13 +190,17 @@ def _run_git[T](operation: Coroutine[Any, Any, T]) -> T:
     """Run a Harbor git operation; a failed git command becomes a RuntimeError carrying git's own message.
 
     Raises:
-        RuntimeError: A git command Harbor ran failed (unreachable repo, unknown ref, …).
+        RuntimeError: A git command Harbor ran failed (unreachable repo, unknown ref, …), or git isn't installed.
     """
     try:
         return asyncio.run(operation)
     except subprocess.CalledProcessError as exc:
         stderr = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else str(exc.stderr or "")
         raise RuntimeError(f"{' '.join(exc.cmd[:2])} failed: {stderr.strip() or exc}") from exc
+    except FileNotFoundError as exc:
+        if exc.filename != "git":
+            raise
+        raise RuntimeError("--harbor-git needs git on PATH; install git and retry") from exc
 
 
 def publish_tasks(
