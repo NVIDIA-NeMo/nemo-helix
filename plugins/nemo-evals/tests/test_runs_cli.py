@@ -328,14 +328,22 @@ def test_list_tasks_reads_the_git_repo(git_registry):
     assert git_registry.downloads == []
 
 
-def test_a_failed_git_command_is_an_error_not_a_traceback(monkeypatch):
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (
+            subprocess.CalledProcessError(128, ["git", "ls-remote", TB, "v9"], b"", b"fatal: repository not found\n"),
+            "Error: git ls-remote failed: fatal: repository not found",
+        ),
+        (FileNotFoundError(2, "No such file or directory", "git"), "Error: --harbor-git needs git on PATH"),
+    ],
+)
+def test_a_failed_git_command_is_an_error_not_a_traceback(monkeypatch, error, message):
     from harbor.registry.client import git_repo
 
     class UnreachableRepo(FakeGitRegistry):
         async def get_dataset_metadata(self, name):
-            raise subprocess.CalledProcessError(
-                128, ["git", "ls-remote", TB, "v9"], b"", b"fatal: repository not found\n"
-            )
+            raise error
 
     monkeypatch.setattr(git_repo, "GitRepoRegistryClient", UnreachableRepo)
     client = NemoClient(base_url="http://platform.test", workspace="default")
@@ -343,8 +351,8 @@ def test_a_failed_git_command_is_an_error_not_a_traceback(monkeypatch):
     add_runs_commands(app, lambda: client)
     result = CliRunner().invoke(app, ["runs", "submit", "--harbor-git", f"{TB}@v9", "--list-tasks"])
     assert result.exit_code == 1
-    assert "Error: git ls-remote failed: fatal: repository not found" in result.output
-    assert not isinstance(result.exception, subprocess.CalledProcessError)
+    assert message in result.output
+    assert isinstance(result.exception, SystemExit)  # typer.Exit, not the git error
 
 
 def _runs_app() -> typer.Typer:
