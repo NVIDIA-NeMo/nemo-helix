@@ -149,6 +149,20 @@ describe('readFlagOverrides', () => {
     }
   );
 
+  // The gate decides whether overrides apply at all. A stored `false` would
+  // otherwise reach the second parse, hide the editor via environment.ts, and
+  // leave no in-app way back — see NON_OVERRIDABLE_FLAGS.
+  it('never lets a stored override reach the gate flag', () => {
+    const withGate = {
+      ...definitions,
+      flagOverridesEnabled: booleanFlag('VITE_FF_FLAG_OVERRIDES_ENABLED', true),
+    };
+    setBlob({ flagOverridesEnabled: 'false', alphaEnabled: 'preview' });
+
+    expect(readFlagOverrides(withGate)).toEqual({ VITE_FF_ALPHA_ENABLED: 'preview' });
+    expect(readStoredOverrides(withGate)).toEqual({ alphaEnabled: 'preview' });
+  });
+
   it('returns an empty layer when localStorage access throws', () => {
     withBlockedStorage(() => {
       expect(() => readFlagOverrides(definitions)).not.toThrow();

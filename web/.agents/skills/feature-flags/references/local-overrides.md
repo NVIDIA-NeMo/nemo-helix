@@ -57,9 +57,10 @@ of what the deployment ships, the second stops overriding them at all. String
 and number flags are left alone by the first two, since `true`/`false` is not a
 meaningful value for them.
 
-The gate flag itself is deliberately absent from the list. Since it is read only
-from the build environment, a row for it would render a control that silently
-does nothing.
+The gate flag itself is absent from the list, and a stored override for it is
+discarded on read (`NON_OVERRIDABLE_FLAGS`). Allowing it would be a one-way
+door: turning the gate off via an override keeps the override layer active but
+hides the editor, leaving no in-app way to turn it back on.
 
 ## Storage
 
@@ -95,6 +96,7 @@ overrides persist in a browser indefinitely.
 | Malformed JSON                    | Entire blob ignored, warning logged |
 | Not a JSON object (array, scalar) | Entire blob ignored, warning logged |
 | Unknown or removed flag key       | That entry dropped, warning logged  |
+| An override for the gate flag     | That entry dropped, warning logged  |
 | Non-string value                  | That entry dropped, warning logged  |
 | Value failing the flag's schema   | That entry dropped, warning logged  |
 | localStorage unavailable (throws) | Treated as no overrides             |

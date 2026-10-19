@@ -18,6 +18,7 @@ import {
 import { featureFlags, flagDefaults } from '@studio/constants/featureFlags';
 import { flagDefinitions } from '@studio/constants/featureFlags/featureFlags';
 import {
+  NON_OVERRIDABLE_FLAGS,
   OverrideBlob,
   readStoredOverrides,
   writeStoredOverrides,
@@ -27,11 +28,11 @@ import { Flag } from 'lucide-react';
 import { useMemo, useState, type FC } from 'react';
 
 /**
- * The gate flag is deliberately absent from the list. It is read only from the
- * build environment so the panel cannot self-enable, which means a row for it
- * would render a control that silently does nothing.
+ * The gate flag is absent from the list because an override for it is discarded
+ * on read, so a row would render a control that silently does nothing. Derived
+ * from the storage layer's own rule so the two cannot disagree.
  */
-const HIDDEN_FLAGS = new Set(['flagOverridesEnabled']);
+const HIDDEN_FLAGS = NON_OVERRIDABLE_FLAGS;
 
 /** Sentinel for "no entry in the blob", which is distinct from an explicit false. */
 const USE_DEFAULT = '';

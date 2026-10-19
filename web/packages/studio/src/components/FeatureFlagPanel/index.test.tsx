@@ -208,6 +208,30 @@ describe('FeatureFlagPanel', () => {
     expect(reload).toHaveBeenCalledOnce();
   });
 
+  // A stale gate entry must not be counted or re-written; applying should also
+  // clean it out of storage.
+  it('ignores and clears a stored override for the gate flag', async () => {
+    const reload = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, reload },
+    });
+    // Discarding the gate entry is logged by design.
+    vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    window.localStorage.setItem(
+      FEATURE_FLAG_OVERRIDES_KEY,
+      JSON.stringify({ flagOverridesEnabled: 'false', tourEnabled: 'false' })
+    );
+
+    const user = await openPanel();
+    expect(screen.getByText(/1 override active/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'All off' }));
+    await user.click(screen.getByRole('button', { name: 'Apply and reload' }));
+
+    expect(readBlob()).not.toHaveProperty('flagOverridesEnabled');
+  });
+
   it('reset all clears every pending override', async () => {
     window.localStorage.setItem(
       FEATURE_FLAG_OVERRIDES_KEY,

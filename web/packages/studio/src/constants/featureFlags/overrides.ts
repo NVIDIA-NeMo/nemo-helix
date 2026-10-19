@@ -38,6 +38,25 @@ import { FEATURE_FLAG_OVERRIDES_KEY } from '@studio/util/localStorage';
 export type OverrideBlob = Record<string, string>;
 
 /**
+ * Flags an override must never be able to change.
+ *
+ * The gate decides whether overrides apply at all, so it has to come from the
+ * build environment alone. Two different failures follow from letting it be
+ * overridden, and the second is the easy one to miss:
+ *
+ * - `false` -> `true` is harmless. Where the deployment ships the gate off, the
+ *   override layer is never consulted, so the entry is inert.
+ * - `true` -> `false` strands the user. The cascade decision is made from the
+ *   build value, so overrides keep applying, but `environment.ts` derives
+ *   `FLAG_OVERRIDES_ENABLED` from the *parsed* value and hides the editor. The
+ *   one control that could undo it is gone, leaving only hand-editing storage.
+ *
+ * Filtered here rather than at either call site so the parse cascade and the
+ * panel cannot drift apart on it.
+ */
+export const NON_OVERRIDABLE_FLAGS: ReadonlySet<string> = new Set(['flagOverridesEnabled']);
+
+/**
  * Reach localStorage without assuming it exists or is accessible.
  *
  * Reading `window.localStorage` is itself a throwing operation when storage is
@@ -112,6 +131,10 @@ const validEntries = (
     // aborts flag parsing entirely.
     if (!Object.hasOwn(definitions, key)) {
       logger.warn(`[featureFlags] Ignoring override for unknown flag "${key}".`);
+      continue;
+    }
+    if (NON_OVERRIDABLE_FLAGS.has(key)) {
+      logger.warn(`[featureFlags] Ignoring override for "${key}": this flag cannot be overridden.`);
       continue;
     }
     const descriptor = definitions[key]!;
