@@ -63,6 +63,8 @@ logger = logging.getLogger(__name__)
 #: Named for NeMo Gym's documented `ng_trajectory` schema; 0.5.0 writes it as one
 #: `<rollout_id>.capture.jsonl` per rollout rather than as a field on the rollout record.
 NG_TRAJECTORY_EVIDENCE = "ng_trajectory"
+#: Trial metadata key holding every diagnostic a failures-sidecar record carries, verbatim.
+GYM_FAILURE_RECORD = "gym_failure_record"
 
 
 _TOKEN_USAGE_KEYS = ("total_tokens", "input_tokens", "output_tokens", "prompt_tokens", "completion_tokens")
@@ -772,9 +774,8 @@ def trials_from_rollouts(
                     measurements=_usage_measurements(record),
                     metadata={
                         "reward": None,
-                        # Every diagnostic the record carries, verbatim. The error keeps one type and
-                        # message; this keeps the rest, such as Gym's class, HTTP status and stage.
-                        "gym_failure": {
+                        "gym_failure": next((value for value in map(record.get, _FAILURE_MESSAGE_KEYS) if value), None),
+                        GYM_FAILURE_RECORD: {
                             key: value
                             for key, value in record.items()
                             if key in _FAILURE_MESSAGE_KEYS or key.startswith(_NG_FAILURE_PREFIX)

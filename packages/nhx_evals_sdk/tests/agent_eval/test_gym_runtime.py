@@ -51,6 +51,7 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.records import NG_ATTEMPT_INDEX, NG_R
 from nhx_evals_sdk.agent_eval.runtimes.gym.results import (
     _INPUT_TOKEN_KEYS,
     _TOKEN_USAGE_KEYS,
+    GYM_FAILURE_RECORD,
     _agent_never_ran,
     _aggregate_metrics_path_for,
     _usage_measurements,
@@ -398,7 +399,8 @@ def test_failures_sidecar_yields_failed_trials(tmp_path: Path) -> None:
     assert completed.measurements.total_tokens == 10
     assert failed.measurements.total_tokens == 5
     assert failed.metadata["reward"] is None
-    assert failed.metadata["gym_failure"] == {"error": "boom"}
+    assert failed.metadata["gym_failure"] == "boom"
+    assert failed.metadata[GYM_FAILURE_RECORD] == {"error": "boom"}
 
 
 @pytest.mark.parametrize(
@@ -522,8 +524,8 @@ def test_a_failed_attempt_keeps_its_diagnostic_and_model_calls(
     (trial,) = trials_from_rollouts(bundle, tasks, index_map, capture_dir=captures)
 
     assert trial.error == error
-    # gym_failure keeps every diagnostic verbatim, including what the error drops or is too odd to hold.
-    assert trial.metadata["gym_failure"] == failure
+    # The record keeps every diagnostic verbatim, including what the error drops or is too odd to hold.
+    assert trial.metadata[GYM_FAILURE_RECORD] == failure
     assert trial.evidence is not None
     # No OTLP trace: that would move publication off the ATIF fallback, which records the agent identity.
     assert trial.evidence.descriptors.keys() == {"rollout_failures", "ng_trajectory"}
@@ -1559,7 +1561,7 @@ def test_empty_rollouts_alongside_a_sidecar_failure_do_not_raise(tmp_path: Path)
     assert all(trial.status is AgentEvalTrialStatus.FAILED for trial in trials)
     # The sidecar's own diagnosis survives rather than being replaced by the empty-rollout message.
     sidecar = next(trial for trial in trials if trial.task_id == tasks[1].id)
-    assert sidecar.metadata["gym_failure"] == {"error": "verifier timeout"}
+    assert sidecar.metadata["gym_failure"] == "verifier timeout"
 
 
 def test_some_rollouts_empty_fails_only_those_trials(tmp_path: Path) -> None:
