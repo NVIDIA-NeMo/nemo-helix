@@ -122,100 +122,110 @@ for a config per harness.
 strategies require it.
 </Note>
 
-### Add Custom Python Code
+### Bring Your Own Harness
 
-The harness builds the agent from `agent.yaml`; it does not import your Python modules. Give the
-agent custom Python tools through an MCP server that it starts over stdio, as in this calculator
-agent:
+The built-in harnesses build the agent from `agent.yaml`. To run agent code you wrote yourself, such
+as your own LangGraph or Deep Agents graph, wrap it in a
+[Fabric adapter](https://github.com/NVIDIA/NeMo-Fabric/tree/v0.4.0/docs/adapter-contract): a Python
+runtime that Fabric starts, plus a descriptor that registers it. NeMo Helix then registers, deploys,
+and invokes the agent like any other.
 
-```text
-calculator-agent/
-├── agent.yaml
-├── pyproject.toml
-└── mcps/
-    └── calculator.py
-```
-
-`mcps/calculator.py` defines the tools with the MCP SDK:
+**1. Implement the runtime.** Fabric calls `start` once with the agent's config, `invoke` for each
+request, and `stop` on shutdown. Return the reply text as `output["response"]`.
 
 ```python
-from mcp.server.fastmcp import FastMCP
+from nemo_fabric_adapter_contract.models import (
+    AgentConfig,
+    AgentRunRequest,
+    AgentRunResult,
+    AgentRunStatus,
+    RuntimeContext,
+)
+from nemo_fabric_adapters.common import lifecycle
 
-mcp = FastMCP("calculator")
+from acme_agent.graph import build_agent  # your agent code
 
 
-@mcp.tool()
-def multiply(numbers: list[float]) -> float:
-    """Multiply two or more numbers."""
-    result = 1.0
-    for number in numbers:
-        result *= number
-    return result
+class AcmeRuntime:
+    async def start(self, payload: dict) -> None:
+        config: AgentConfig = payload["config"]
+        model = config.models["default"]
+        self.agent = build_agent(
+            model=model.model,
+            base_url=model.base_url,  # the Inference Gateway, filled in by NeMo Helix
+            system_prompt=config.instructions.system.content,
+        )
+
+    async def invoke(self, request: AgentRunRequest, context: RuntimeContext) -> AgentRunResult:
+        reply = await self.agent.run(request.input)
+        return AgentRunResult(status=AgentRunStatus.SUCCEEDED, output={"response": reply})
+
+    async def stop(self) -> None:
+        self.agent = None
 
 
 def main() -> None:
-    mcp.run(transport="stdio")
+    lifecycle.serve(AcmeRuntime, config_loader=AgentConfig.from_mapping)
 ```
 
-`pyproject.toml` declares the tool's dependencies and installs the server as a command:
+**2. Describe it** in `acme-agent.fabric-adapter.json`. `config.accepts` lists the `agent.yaml` fields
+the runtime applies; Fabric rejects a config that sets anything else. NeMo Helix accepts only adapter
+IDs that start with `nvidia.fabric.`.
+
+```json
+{
+  "contract_version": "fabric.adapter/v1alpha2",
+  "adapter_id": "nvidia.fabric.acme-agent",
+  "adapter_kind": "python",
+  "runner": {"module": "acme_agent.fabric_adapter"},
+  "config": {
+    "accepts": ["models", "models.base_url", "instructions.system"],
+    "system_instruction_modes": ["replace"]
+  }
+}
+```
+
+**3. Package the descriptor with your code,** so Fabric discovers it wherever the package is installed:
 
 ```toml
 [project]
-name = "calculator-agent"
+name = "acme-agent"
 version = "0.1.0"
-dependencies = ["mcp>=1.28.1,<2"]
-
-[project.scripts]
-calculator-server = "mcps.calculator:main"
+dependencies = ["nemo-fabric-adapters-common>=0.4.0,<0.5.0"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["mcps"]
+packages = ["src/acme_agent"]
+
+[tool.hatch.build.targets.wheel.shared-data]
+"acme-agent.fabric-adapter.json" = "share/nemo-fabric/adapters/acme-agent/acme-agent.fabric-adapter.json"
 ```
 
-`agent.yaml` starts that command as an MCP server:
+**4. Select it** in `agent.yaml`:
 
 ```yaml
-mcp:
-  servers:
-    calculator:
-      transport: stdio
-      url: calculator-server
+default_harness: acme
+harnesses:
+  acme:
+    kind: nvidia.fabric.acme-agent
 ```
 
-The command must be installed wherever the agent runs:
+**5. Install the package everywhere the agent is validated or runs:**
 
-- **Subprocess deployments:** install the project into the Python environment that runs NeMo
-  Helix, so `calculator-server` is on the platform's `PATH`:
+- The environment where you run `nemo agents create` and `nemo agents package`, which validate the
+  agent against its adapter.
+- The platform's Python environment, for subprocess deployments.
+- The agent image, for Docker and Kubernetes deployments. Package with `--pyproject` so the image
+  installs your project; the `nemo agents package-agent` platform job cannot.
 
-  ```bash
-  uv pip install -e ./calculator-agent
-  ```
-
-- **Docker and Kubernetes deployments:** package the agent with `--pyproject` so the image installs
-  the project, then deploy that image:
-
-  ```bash
-  nemo agents package \
-    --agent calculator-agent/agent.yaml \
-    --pyproject calculator-agent/pyproject.toml \
-    --tag calculator-agent:local
-  ```
-
-  The `nemo agents package-agent` platform job does not install a project, so package custom code
-  with the CLI.
-
-`nemo agents create` uploads every text file in the agent's directory, so keep virtual environments
-and build output out of it. See the
-[calculator example](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/plugins/nemo-agents/examples/nemo-agent-config/calculator-agent)
-for the complete project.
-
-To run an agent loop you wrote yourself, such as your own LangGraph or Deep Agents graph, serve it
-behind an endpoint and [register a remote endpoint](#register-a-remote-endpoint), or ship it in an
-image with its own server and [register it with a container image](#register-with-a-container-image).
+Automatic trace export and streaming depend on what the descriptor declares; see the
+[adapter contract](https://github.com/NVIDIA/NeMo-Fabric/tree/v0.4.0/docs/adapter-contract). The
+Insights plugin's
+[`nvidia.fabric.insights-analyst`](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/plugins/nemo-insights)
+adapter is a complete example.
 
 ### Model Access
 
