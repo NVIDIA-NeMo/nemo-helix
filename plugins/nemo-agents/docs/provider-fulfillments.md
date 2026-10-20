@@ -9,9 +9,6 @@ and deployment reject them until provisioning and identity restrictions are wire
 See the [driver setup and tests](../../nemo-deployments/src/nemo_deployments_plugin/backends/openshell/credential_driver/README.md).
 This is not yet a working agent-to-service gateway deployment.
 
-Open the [interactive wiring diagram](provider-wiring.html) in a browser to
-explore provisioning, credential injection, revocation, and deployment boundaries.
-
 This follows the [gateway-injected secrets discussion](https://nvidia.slack.com/archives/C0BN91FQ8MU/p1791911827914079):
 reuse EnvironmentSpec's secret references, explicitly bind an injection profile,
 run a credential driver per gateway, and provision providers per sandbox.
