@@ -2872,13 +2872,13 @@ async def test_rerun_job_resets_job_status_for_list_filters(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
 ):
-    job = await _make_job(mock_dispatcher, mock_store, "rerun-me", HelixJobStatus.COMPLETED)
+    job = await _make_job(mock_dispatcher, mock_store, "rerun-me", HelixJobStatus.ERROR)
 
     await mock_dispatcher.rerun_job(job.name, DEFAULT_WORKSPACE)
 
     jobs, total = await mock_dispatcher.list_jobs(
         parsed=ParsedFilter(
-            operation=ComparisonOperation(field="data.status", operator=FilterOperator.EQ, value="completed")
+            operation=ComparisonOperation(field="data.status", operator=FilterOperator.EQ, value="error")
         ),
         workspace=DEFAULT_WORKSPACE,
     )

@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal, cast
 
 import typer
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobResultCreateRequest
 from nemo_helix_plugin.jobs.telemetry import merge_job_telemetry_custom_fields
@@ -1000,7 +1001,8 @@ def rerun_jobs(
         return
 
     _, jobs_client = _jobs_client_from_state(state)
-    result = jobs_client.rerun_job(job=name, workspace=workspace).data()
+    # Sent once: a retry after a lost response would find the new attempt and fail with 409.
+    result = jobs_client.with_retry(RetryPolicy(max_retries=0)).rerun_job(job=name, workspace=workspace).data()
 
     format_output(
         result,

@@ -1477,7 +1477,9 @@ def job_route_factory(
         ) -> TypedJobResponse:
             f"""Rerun a failed job by name for the {service_name} microservice."""
 
-            job_resp = (await AsyncJobsClient.from_client(async_client).rerun_job(job=name, workspace=workspace)).data()
+            # Sent once: a retry after a lost response would find the new attempt and fail with 409.
+            jobs_client = AsyncJobsClient.from_client(async_client).with_retry(RetryPolicy(max_retries=0))
+            job_resp = (await jobs_client.rerun_job(job=name, workspace=workspace)).data()
             return from_response(job_resp)
 
         _stamp(rerun_job, perm="rerun", write=True)

@@ -20,6 +20,7 @@ from nemo_helix_plugin.client.errors import (
 from nemo_helix_plugin.client.errors import (
     NotFoundError as ClientNotFoundError,
 )
+from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
@@ -1955,6 +1956,17 @@ class TestSDKExceptionHandling:
 
         assert response.status_code == 409
         assert response.json()["detail"] == error_detail
+
+    def test_rerun_is_sent_once(self, mock_service_with_job_routes):
+        """A retried rerun would find the attempt the first one created, and fail with 409."""
+        app, mock_jobs = mock_service_with_job_routes
+        client = TestClient(app, raise_server_exceptions=False)
+        mock_jobs.rerun_job = AsyncMock(side_effect=_client_error(ClientConflictError, 409, "conflict"))
+
+        client.post("/v2/workspaces/default/test/jobs/my-job/rerun")
+
+        mock_jobs.with_retry.assert_called_once_with(RetryPolicy(max_retries=0))
+        mock_jobs.rerun_job.assert_awaited_once()
 
     def test_resume_job_returns_clean_error(self, mock_service_with_job_routes):
         app, mock_jobs = mock_service_with_job_routes
