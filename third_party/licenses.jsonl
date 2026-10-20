@@ -230,6 +230,7 @@
 {"name": "mypy-extensions", "license": "MIT", "compatible": true}
 {"name": "narwhals", "license": "MIT", "compatible": true}
 {"name": "nemo-anonymizer", "license": "APACHE-2.0", "compatible": true}
+{"name": "nemo-compass", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-adapter-catalog", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-adapter-contract", "license": "APACHE-2.0", "compatible": true}

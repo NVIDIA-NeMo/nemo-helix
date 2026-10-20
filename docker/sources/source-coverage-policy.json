@@ -7,8 +7,6 @@
       {"name": "nhx-*", "reason": "NeMo Helix workspace packages"},
       {"name": "ngcsdk", "reason": "NVIDIA NGC SDK"},
       {"name": "openshell", "reason": "NVIDIA OpenShell"},
-      {"name": "trace-ingest", "reason": "NVIDIA NeMo labs package"},
-      {"name": "insight-agent", "reason": "NVIDIA NeMo labs package"},
       {"name": "data-designer-nemo", "reason": "NeMo Helix workspace package"},
       {"name": "sandboxed-gym", "reason": "NeMo Helix workspace package"}
     ],

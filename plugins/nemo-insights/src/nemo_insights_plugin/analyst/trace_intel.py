@@ -13,13 +13,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from insight_agent.compass_signals.anomaly_and_patterns.signal import AnomalyAndPatternsArtifacts
-from insight_agent.compass_signals.builtins import registered_builtin_signals
-from insight_agent.compass_signals.compass_signals import CompassSignalResult
-from insight_agent.compass_signals.tool_issues.signal import ToolIssueEvidenceArtifacts
-from insight_agent.config import CompassSignalsConfig
-from insight_agent.insight import Insight, resolve_trace_links
-from insight_agent.insights_generation.insight_compilation import InsightCompilation
+from compass.compass_signals.anomaly_and_patterns.signal import AnomalyAndPatternsArtifacts
+from compass.compass_signals.builtins import registered_builtin_signals
+from compass.compass_signals.compass_signals import CompassSignalResult
+from compass.compass_signals.tool_issues.signal import ToolIssueEvidenceArtifacts
+from compass.config import CompassSignalsConfig
+from compass.insight import Insight, resolve_trace_links
+from compass.insights_generation.insight_compilation import InsightCompilation
 from nemo_helix_plugin.nooa_model_client import ConfiguredModelClients
 from nemo_insights_plugin.analyst.analyst_backend import AnalystBackend
 from nemo_insights_plugin.analyst.result import AnalystResult, InsightUpdate, NewInsight
