@@ -170,11 +170,11 @@ target = garak.targets.create(
     workspace="default",
     name="nemotron-3.5-lightning-30b",
     type="nim.NVOpenAIChat",
-    model="nvidia/nvidia/nemotron-3.5-lightning-30b-a3b",
+    model="nvidia/nemotron-3.5-lightning-30b-a3b",
     options={
         "nim": {
             "nhx_uri_spec": {
-                "inference_gateway": {"workspace": "default", "provider": "nvidia-inference-api"},
+                "inference_gateway": {"workspace": "default", "provider": "nvidia-build"},
             },
         },
     },

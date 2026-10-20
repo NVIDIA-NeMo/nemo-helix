@@ -27,13 +27,16 @@ See [Target Schema](/documentation/vulnerability-scanning/targets/schema) for th
 Audit a NIM (or any OpenAI-compatible chat endpoint) routed through a NeMo Helix provider:
 
 ```python
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient.from_config()
+
 # List providers registered in your deployment and pick one.
-providers = client.inference.providers.list(workspace="default")
-for provider in providers.data:
+for provider in client.models.list_providers(workspace="default").items():
     print(provider.name, provider.host_url)
 ```
 
-Use a `provider` name from this output in the target below. The model identifier format depends on the provider — check the provider's API documentation or served-model list if unsure.
+Use a `provider` name from this output in the target below. This example uses NVIDIA Build's `nvidia-build` provider and its model ID `nvidia/nemotron-3.5-lightning-30b-a3b`. Model IDs and credentials are provider-specific; verify completion access with the preflight in [Run an Audit Locally](/documentation/vulnerability-scanning/tutorials/run-an-audit-locally).
 
 ```python
 from nemo_garak.sdk import GarakPluginResource
@@ -44,14 +47,14 @@ target = garak.targets.create(
     workspace="default",
     name="nemotron-3.5-lightning-30b",
     type="nim.NVOpenAIChat",
-    model="nvidia/nvidia/nemotron-3.5-lightning-30b-a3b",
+    model="nvidia/nemotron-3.5-lightning-30b-a3b",
     options={
         "nim": {
             "max_tokens": 1024,
             "nhx_uri_spec": {
                 "inference_gateway": {
                     "workspace": "default",
-                    "provider": "nvidia-inference-api",
+                    "provider": "nvidia-build",
                 },
             },
         },
@@ -126,12 +129,12 @@ updated = garak.targets.update(
     workspace="default",
     name="nemotron-3.5-lightning-30b",
     type="nim.NVOpenAIChat",
-    model="nvidia/meta/llama-3.3-70b-instruct",
+    model="meta/llama-3.3-70b-instruct",
     options={
         "nim": {
             "max_tokens": 2048,
             "nhx_uri_spec": {
-                "inference_gateway": {"workspace": "default", "provider": "nvidia-inference-api"},
+                "inference_gateway": {"workspace": "default", "provider": "nvidia-build"},
             },
         },
     },
