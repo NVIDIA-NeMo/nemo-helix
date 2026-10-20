@@ -1138,6 +1138,19 @@ def test_reproduce_returns_safe_rerun_request_and_command() -> None:
     assert any("Secret material is not exported" in note for note in body["notes"])
 
 
+def test_reproduce_omits_legacy_credential_ids_and_says_so() -> None:
+    credentials = {"openai": "team-a/openai-key", "anthropic": "cred_legacy"}
+    _override_conn(_conn_with_fetchone(_eval_row(status="failed", credentials=credentials)))
+
+    response = client.get("/v1/evaluations/ev_test123/reproduce")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["request"]["credentials"] == {"openai": "team-a/openai-key"}
+    assert "cred_legacy" not in response.text
+    assert any("--credential anthropic=workspace/name" in note for note in body["notes"])
+
+
 def test_reproduce_404_when_missing() -> None:
     _override_conn(_conn_with_fetchone(None))
     response = client.get("/v1/evaluations/ev_nope/reproduce")

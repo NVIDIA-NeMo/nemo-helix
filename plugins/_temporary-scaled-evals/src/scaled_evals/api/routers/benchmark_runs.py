@@ -30,7 +30,13 @@ from scaled_evals.api.schemas.benchmark_runs import (
     CreateBenchmarkRunRequest,
     ReproduceBenchmarkRunResponse,
 )
-from scaled_evals.api.schemas.common import DeleteResponse, ListEnvelope, page_from_rows
+from scaled_evals.api.schemas.common import (
+    DeleteResponse,
+    ListEnvelope,
+    page_from_rows,
+    split_stored_credentials,
+    stale_credentials_note,
+)
 from scaled_evals.api.schemas.evaluations import Evaluation
 from scaled_evals.api.schemas.runnability import RunnabilityReport
 from scaled_evals.api.utils import make_id
@@ -83,7 +89,7 @@ def _reproduce_request(run: Mapping[str, Any], member: Mapping[str, Any]) -> Cre
         framework_profile_id=run.get("framework_profile_id"),
         member_framework_profile_ids=dict(runner_metadata.get("member_framework_profile_ids") or {}),
         intake_profile_id=run.get("intake_profile_id"),
-        credentials=dict(run.get("credentials") or {}),
+        credentials=split_stored_credentials(run.get("credentials"))[0],
         agent_bundle_id=_agent_bundle_id(runner_metadata),
         extra_skill_object_keys=list(member.get("extra_skill_object_keys") or []),
         instruction_prefix=member.get("instruction_prefix"),
@@ -327,6 +333,7 @@ def reproduce_benchmark_run(run_id: str, db: Db) -> ReproduceBenchmarkRunRespons
         )
     body = _reproduce_request(row, source)
     view = derive_run_view(row, members)
+    stale = split_stored_credentials(row.get("credentials"))[1]
     return ReproduceBenchmarkRunResponse(
         benchmark_run_id=run_id,
         source_status=view["status"],
@@ -337,6 +344,7 @@ def reproduce_benchmark_run(run_id: str, db: Db) -> ReproduceBenchmarkRunRespons
             "The rerun uses the frozen benchmark revision and member execution settings.",
             "The rerun will fail validation if referenced credentials, profiles, benchmark "
             "revision, agent bundle, or runtime backend are unavailable.",
+            *([stale_credentials_note(stale)] if stale else []),
         ],
     )
 

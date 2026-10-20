@@ -27,6 +27,8 @@ from scaled_evals.api.schemas.common import (
     encode_cursor,
     page_from_rows,
     qualified_secret_ref,
+    split_stored_credentials,
+    stale_credentials_note,
 )
 from scaled_evals.api.schemas.evaluations import (
     BuildArchiveRequest,
@@ -210,7 +212,7 @@ def _reproduce_request(row: Mapping[str, Any]) -> CreateEvaluationRequest:
         framework_version=row.get("framework_version"),
         framework_profile_id=row.get("framework_profile_id"),
         intake_profile_id=row.get("intake_profile_id"),
-        credentials=dict(row.get("credentials") or {}),
+        credentials=split_stored_credentials(row.get("credentials"))[0],
         agent_bundle_id=agent_bundle_id,
         extra_skill_object_keys=list(row.get("extra_skill_object_keys") or []),
         instruction_prefix=row.get("instruction_prefix"),
@@ -300,6 +302,8 @@ def _reproduce_notes(row: Mapping[str, Any], body: CreateEvaluationRequest) -> l
     if body.credentials:
         providers = ", ".join(sorted(body.credentials))
         notes.append(f"Readable credential secrets required for providers: {providers}.")
+    if stale := split_stored_credentials(row.get("credentials"))[1]:
+        notes.append(stale_credentials_note(stale))
     return notes
 
 

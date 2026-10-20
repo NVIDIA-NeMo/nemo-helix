@@ -35,6 +35,30 @@ def qualified_secret_ref(value: str) -> str:
 CredentialRefs = dict[CredentialProvider, Annotated[str, AfterValidator(qualified_secret_ref)]]
 
 
+def split_stored_credentials(stored: dict[str, str] | None) -> tuple[dict[str, str], list[str]]:
+    """Split stored credentials into secret references and the providers whose value is not one.
+
+    Records created before credentials became platform Secret references hold ``cred_*`` ids.
+    """
+    refs: dict[str, str] = {}
+    stale: list[str] = []
+    for provider, value in (stored or {}).items():
+        try:
+            refs[provider] = qualified_secret_ref(value)
+        except ValueError:
+            stale.append(provider)
+    return refs, sorted(stale)
+
+
+def stale_credentials_note(providers: list[str]) -> str:
+    """Tell a reproduce caller which providers need a new secret reference."""
+    flags = " ".join(f"--credential {provider}=workspace/name" for provider in providers)
+    return (
+        f"Stored credentials for {', '.join(providers)} are not platform secret references and were "
+        f"omitted; supply them with {flags}."
+    )
+
+
 def validate_scoped_egress_config(config: dict[str, Any]) -> None:
     """Require explicit public CIDR destinations for user-scoped sandbox egress."""
     if set(config) != {"egress"}:
