@@ -153,11 +153,11 @@ class AgentHardenerConfig(NemoConfig):
         ),
     )
     spec: str = Field(
-        default="nvidia-agent-hardener>=0.0.16",
+        default="nvidia-agent-hardener>=0.0.17",
         description=(
             "Package spec `nemo agent-hardener setup` installs into the venv (e.g. 'agent-hardener', "
             "'agent-hardener==0.0.1', or a local path/VCS URL for development). The floor is the release "
-            "that uploads sandbox files after creation, which OpenShell 0.1.4 requires."
+            "whose guardrail judge reads its own endpoint and key (AGENT_HARDENER_SAFETY_BASE_URL / _API_KEY)."
         ),
     )
     index_url: str | None = Field(

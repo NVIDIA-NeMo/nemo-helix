@@ -2618,10 +2618,13 @@ components:
           $ref: '#/components/schemas/ModelGroupDefault'
         analysis:
           $ref: '#/components/schemas/ModelGroupDefault'
+        safety:
+          $ref: '#/components/schemas/ModelGroupDefault'
       type: object
       required:
       - attack
       - analysis
+      - safety
       title: ModelConfigDefaults
       description: Defaults surfaced to the UI so pickers pre-fill without hardcoding
         agent-hardener's literals.
@@ -3157,9 +3160,8 @@ components:
         safety:
           allOf:
           - $ref: '#/components/schemas/ModelChoice'
-          description: "Guardrail middleware LLM (agent-hardener's `safety_llm`);\
-            \ unset copies the victim's own LLM. Only `model` applies \u2014 agent-hardener\
-            \ pins this LLM's endpoint and key when it writes the guardrail."
+          description: Guardrail judge LLM that runs inside the victim (agent-hardener's
+            `safety_llm`); an unset field falls back to the analysis group's.
       type: object
       title: WarGameModels
       description: The three model groups for a war-game. An unset group uses agent-hardener's

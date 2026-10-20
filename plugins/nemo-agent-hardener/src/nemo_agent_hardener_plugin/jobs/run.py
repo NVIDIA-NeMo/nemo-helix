@@ -62,8 +62,10 @@ from nemo_agent_hardener_plugin.jobs.spec import WarGameSpec
 from nemo_agent_hardener_plugin.model_config import (
     ANALYSIS_DEFAULT_BASE_URL,
     ATTACK_DEFAULT_BASE_URL,
+    SAFETY_DEFAULT_BASE_URL,
     ModelChoice,
     WarGameModels,
+    effective_safety,
 )
 from nemo_agent_hardener_plugin.model_preflight import validate_choice
 from nemo_helix_plugin.entity_client import NemoEntitiesClient
@@ -132,18 +134,16 @@ def _preflight_models(models: WarGameModels | None, *, sdk: Any, workspace: str,
     raise a classified :class:`AgentHardenerRunError` whose message lists the models those credentials *can*
     reach, so the user can correct the choice instead of guessing.
 
-    The guardrail ("safety") group is probed against :data:`ATTACK_DEFAULT_BASE_URL` because that is the
-    endpoint agent-hardener's ``guardrails_defender_v2.nodes.yaml_writer._ensure_safety_llm`` hardcodes when it
-    writes ``llms.safety_llm`` — with ``${INFERENCE_API_KEY}``, the same provisioned key ``default_key`` holds.
-    Worth probing precisely because its failure is silent: an unreachable safety model does not error, it
-    hangs the guardrails defender until its 300s timeout, which reads as "ran, proposed no change".
+    The guardrail ("safety") group is probed with the analysis endpoint and key filling whatever it leaves
+    unset, as agent-hardener's judge does. Worth probing precisely because its failure is silent: an
+    unreachable judge does not error, the guardrail fails open, which reads as "ran, proposed no change".
     """
     if models is None:
         return
     groups = (
         ("attack", models.attack, ATTACK_DEFAULT_BASE_URL),
         ("analysis", models.analysis, ANALYSIS_DEFAULT_BASE_URL),
-        ("safety", models.safety, ATTACK_DEFAULT_BASE_URL),
+        ("safety", effective_safety(models.safety, models.analysis), SAFETY_DEFAULT_BASE_URL),
     )
     for label, choice, default_base_url in groups:
         if choice is None or not (choice.model or choice.base_url):
