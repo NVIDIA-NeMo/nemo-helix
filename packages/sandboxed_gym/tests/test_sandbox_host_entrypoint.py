@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import importlib.util
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -148,10 +149,18 @@ def _fake_host(tmp_path: Path) -> dict[str, Path]:
     (gym_tree / "nemo_gym").mkdir(parents=True)
     (gym_tree / "nemo_gym" / "__init__.py").write_text("", encoding="utf-8")
 
-    venv_python = tmp_path / "venv" / "bin" / "python"
-    venv_python.parent.mkdir(parents=True)
+    venv_bin = tmp_path / "venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    venv_python = venv_bin / "python"
     venv_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     venv_python.chmod(0o755)
+    # ray start returns once the daemons are up; the stub records the argv the script passed.
+    venv_ray = venv_bin / "ray"
+    venv_ray.write_text(
+        '#!/bin/sh\nif [ -n "${RAY_LOG:-}" ]; then printf \'%s\\n\' "$*" >> "$RAY_LOG"; fi\nexit 0\n',
+        encoding="utf-8",
+    )
+    venv_ray.chmod(0o755)
 
     runtime = tmp_path / "runtime.py"
     runtime.write_text("", encoding="utf-8")
@@ -204,6 +213,56 @@ def test_the_staged_path_is_published_for_search_root_discovery(tmp_path: Path) 
 
     assert result.returncode == 0, result.stderr
     assert recorded.read_text(encoding="utf-8") == f"{gym_rw}\n"
+
+
+def test_ray_head_starts_in_the_background_and_is_published(tmp_path: Path) -> None:
+    """The head must return so the host can start, and Gym must be told to join it.
+
+    `--block` never returns, so the runtime would not start. The head is also the worker
+    (`ray start --head` without `--num-cpus=0`). Gym reads `ray_head_node_address` from
+    `NHX_GYM_GLOBAL_CONFIG`, which the orchestrator strips before the sandbox is created.
+    """
+    paths = _fake_host(tmp_path)
+    ray_log = tmp_path / "ray-args"
+    config_log = tmp_path / "config"
+    python = paths["venv"] / "bin" / "python"
+    python.write_text(
+        '#!/bin/sh\nprintf \'%s\' "$NHX_GYM_GLOBAL_CONFIG" > "$CONFIG_LOG"\nexit 0\n',
+        encoding="utf-8",
+    )
+    python.chmod(0o755)
+
+    result = subprocess.run(
+        [
+            "/bin/sh",
+            str(gym_host_script_path(git_root=str(paths["root"]))),
+            str(paths["venv"]),
+            str(paths["root"]),
+            str(tmp_path / "gym-src" / "Gym"),
+            str(paths["runtime"]),
+        ],
+        env={
+            **os.environ,
+            "SANDBOXED_GYM_TREE": str(paths["tree"]),
+            "RAY_LOG": str(ray_log),
+            "CONFIG_LOG": str(config_log),
+            "NHX_GYM_GLOBAL_CONFIG": '{"policy_model_name":"qwen"}',
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, result.stderr
+    args = ray_log.read_text(encoding="utf-8")
+    assert args.startswith("start --head ")
+    assert "--block" not in args
+    assert "--num-cpus=0" not in args
+    assert "--node-ip-address=127.0.0.1" in args
+    assert "--port=6379" in args
+    published = json.loads(config_log.read_text(encoding="utf-8"))
+    assert published["policy_model_name"] == "qwen"
+    assert published["ray_head_node_address"] == "127.0.0.1:6379"
 
 
 def test_the_gym_tree_is_staged_where_pythonpath_expects_it(tmp_path: Path) -> None:

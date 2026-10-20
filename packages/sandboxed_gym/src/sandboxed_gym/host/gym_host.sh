@@ -37,21 +37,38 @@ fi
 # Pin the single-node in-sandbox Ray to loopback; the routable node IP it picks is dropped by the deny-default sandbox egress.
 export RAY_ENABLE_WINDOWS_OR_OSX_CLUSTER=0
 
+# One node that is both head and worker. `ray start --head` runs GCS and the raylet
+if [ -x "$venv/bin/ray" ]; then
+    ray_bin=$venv/bin/ray
+else
+    ray_bin=ray
+fi
+ray_head_address=127.0.0.1:6379
+"$ray_bin" start --head \
+    --disable-usage-stats \
+    --include-dashboard=false \
+    --node-ip-address=127.0.0.1 \
+    --port=6379
+
+# Gym connects only when this key is in the global config. The orchestrator strips it on the way
+# in, so publish the loopback head here, after this sandbox's own cluster is up.
+export RAY_HEAD_NODE_ADDRESS="$ray_head_address"
+NHX_GYM_GLOBAL_CONFIG=$(python3 -c '
+import json, os
+raw = os.environ.get("NHX_GYM_GLOBAL_CONFIG", "").strip()
+cfg = json.loads(raw) if raw else {}
+if not isinstance(cfg, dict):
+    raise SystemExit("NHX_GYM_GLOBAL_CONFIG must be a JSON object")
+cfg["ray_head_node_address"] = os.environ["RAY_HEAD_NODE_ADDRESS"]
+print(json.dumps(cfg))
+')
+export NHX_GYM_GLOBAL_CONFIG
+
 # The runtime discovers built-in servers from this variable. The third argument
 # stages the checkout but does not otherwise reach that process.
 export SANDBOXED_GYM_SRC_DIR="$gym_rw"
 export PYTHONPATH="$gym_rw:$root${PYTHONPATH:+:$PYTHONPATH}"
 cd "$root"
 echo "gym-host: starting gym_host_runtime (gym src $gym_rw)" >&2
+"$venv/bin/python" "$runtime"
 
-# DEBUG: on a non-zero exit, hold the container alive so the sandbox can be inspected
-# (Ray session logs under /tmp/ray) before the orchestrator tears it down. Set
-# SANDBOXED_GYM_DEBUG_HOLD_S=0 to disable. Remove before merge.
-hold_s=${SANDBOXED_GYM_DEBUG_HOLD_S:-1800}
-rc=0
-"$venv/bin/python" "$runtime" || rc=$?
-if [ "$rc" -ne 0 ] && [ "$hold_s" -gt 0 ]; then
-	echo "gym-host: runtime exited $rc; holding ${hold_s}s for debug" >&2
-	sleep "$hold_s"
-fi
-exit "$rc"
