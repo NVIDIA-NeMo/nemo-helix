@@ -275,6 +275,8 @@ class InMemoryRunnerBackend(RunnerBackend):
     def reserve_socket(self) -> Generator[socket.socket, None, None]:
         """Reserve a listening loopback socket until context exit for handoff to a child."""
         for candidate in self._port_candidates():
+            if self._has_wildcard_listener(candidate):
+                continue
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 try:
@@ -309,10 +311,27 @@ class InMemoryRunnerBackend(RunnerBackend):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
+                if InMemoryRunnerBackend._has_wildcard_listener(port):
+                    return False
                 sock.bind(("127.0.0.1", port))
                 return True
             except OSError:
                 return False
+
+    @staticmethod
+    def _has_wildcard_listener(port: int) -> bool:
+        """Return ``True`` if a wildcard listener, such as a Docker publisher, holds *port*."""
+        # macOS lets a SO_REUSEADDR loopback bind succeed beside a wildcard listener; a
+        # SO_REUSEADDR wildcard bind still fails there but tolerates TIME_WAIT.
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                sock.bind(("0.0.0.0", port))
+            except OSError as exc:
+                if exc.errno == errno.EADDRINUSE:
+                    return True
+                raise
+        return False
 
     async def create_deployment(
         self,

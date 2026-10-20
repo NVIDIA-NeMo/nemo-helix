@@ -61,6 +61,14 @@ def test_is_port_free_tracks_socket_lifetime() -> None:
     assert InMemoryRunnerBackend._is_port_free(port)
 
 
+def test_is_port_free_rejects_wildcard_listener() -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as wildcard:
+        wildcard.bind(("0.0.0.0", 0))
+        wildcard.listen()
+        port = wildcard.getsockname()[1]
+        assert not InMemoryRunnerBackend._is_port_free(port)
+
+
 # ---------------------------------------------------------------------------
 # allocate_port — scanning and wrap-around behaviour (mocked _is_port_free)
 # ---------------------------------------------------------------------------
@@ -122,6 +130,17 @@ def test_reservation_skips_occupied_port_when_revisited() -> None:
             second_port = second.getsockname()[1]
             assert second_port != first_port
             assert backend._next_port == (second_port + 1 if second_port < 65535 else 49152)
+
+
+def test_reservation_skips_port_held_by_wildcard_listener() -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as wildcard:
+        wildcard.bind(("0.0.0.0", 0))
+        wildcard.listen()
+        port = wildcard.getsockname()[1]
+        backend = _backend(start=port, end=port)
+        with pytest.raises(RuntimeError, match="No free port available"):
+            with backend.reserve_socket():
+                pytest.fail("Reserved a port a wildcard listener already holds")
 
 
 def test_reservation_closes_on_caller_error() -> None:
