@@ -43,6 +43,7 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
     job_artifact_base_path,
 )
 from nhx.core.jobs.app.constants import (
+    ERROR_CAUSE,
     IMAGE_DIGEST_AT_SAVE,
     IMAGE_DIGEST_STEP,
     JOB_TASK_CLEANUP_PENDING_KEY,
@@ -191,6 +192,17 @@ def _reject_pause_ttl_over_maximum(pause_ttl_seconds: int | None) -> None:
     maximum = jobs_config.storage.maximum_pause_ttl_seconds
     if pause_ttl_seconds > maximum:
         raise PauseTTLLimitError(f"pause_ttl_seconds cannot exceed the platform maximum of {maximum} seconds.")
+
+
+def _keep_reported_cause(reported: dict[str, Any] | None, update: dict[str, Any]) -> dict[str, Any]:
+    """Return the error details after ``update`` arrives for an error already ``reported``.
+
+    A task that classified its own failure reports a ``cause``. A later error for the same failure, such as
+    the controller's when the process exits, only sees the exit, so it adds keys without replacing the cause.
+    """
+    if (reported or {}).get(ERROR_CAUSE):
+        return {**update, **(reported or {})}
+    return update
 
 
 def create_platform_job_response(job: HelixJob, attempt: HelixJobAttempt) -> HelixJobResponse:
@@ -1227,6 +1239,8 @@ class JobDispatcher:
     ) -> tuple[HelixJobStep, HelixJobAttempt]:
         """Update a job from a step while holding the per-job mutation lock."""
         step_to_save = await self.store.get_by_id(HelixJobStep, step.id)
+        if status == HelixJobStatus.ERROR:
+            error_details = await self._with_task_cause(step_to_save, error_details)
         saved_step: HelixJobStep | None = None
         requested_details = status_details
         for attempt in range(2):
@@ -1432,6 +1446,13 @@ class JobDispatcher:
 
         operations_counter.add(1, attributes={"operation": "update_job_status_from_step"})
         return saved_step, attempt
+
+    async def _with_task_cause(self, step: HelixJobStep, error_details: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Return the step's error details, led by the cause a failed task reported for itself, if any."""
+        for task in await self.list_tasks(step.id, step.workspace):
+            if task.status == HelixJobStatus.ERROR and (task.error_details or {}).get(ERROR_CAUSE):
+                return _keep_reported_cause(task.error_details, error_details or step.error_details or {})
+        return error_details
 
     async def _save_attempt_status(
         self,
@@ -1962,7 +1983,7 @@ class JobDispatcher:
                 task.status = new_status
 
             if task_update.error_details:
-                task.error_details = task_update.error_details
+                task.error_details = _keep_reported_cause(task.error_details, task_update.error_details)
             if task_update.status_details:
                 task.status_details = self._update_status_details_object(
                     task.status_details, task_update.status_details

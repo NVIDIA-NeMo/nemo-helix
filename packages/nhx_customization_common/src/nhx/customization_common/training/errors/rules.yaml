@@ -1,0 +1,621 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Rules that classify customization training failures (Automodel, NeMo-RL, Unsloth). See README.md.
+#
+# Each rule:
+#   id            stable cause id, reported as error_details.cause. Never reuse or rename one.
+#   rerunnable    whether a rerun of the same job could succeed. false for deterministic failures (bad
+#                 dataset or config, running out of memory or disk); a rerun of one returns a warning.
+#   symptom       true when the failure usually follows another one (a peer's collective timing out
+#                 after a rank died). A failure is classified by its cause when one matched.
+#   exception     user-facing error class, from exceptions.py.
+#   error_details user-facing message. Without one, the class's message plus the original error.
+#   <matcher>     exactly one matcher (see nhx.common.errors.RulesLoader): exact, regex, contains,
+#                 starts_with, ends_with, type, type_name, all_keywords, any_keywords, and, or, not.
+#
+# Matchers see one exception line, "TypeName: message", or a log line that names a failure (type
+# LogMessage). Rules are tried in order and the first match wins, so specific rules come first.
+
+rules:
+  # ===========================================================================
+  # TIME LIMIT
+  # ===========================================================================
+
+  - id: training_timeout
+    rerunnable: true  # A rerun gets a new time limit and continues from the newest checkpoint.
+    or:
+      - type: TimeoutExpired  # raised in the runner process
+      - type_name: TimeoutExpired  # printed by a subprocess
+    exception: TrainingTimeoutError
+    error_details: "Training exceeded the maximum allowed time limit. A rerun continues from the newest checkpoint. To shorten training: reduce max_steps or epochs, use a smaller dataset or model, or use LoRA instead of all-weights fine-tuning. Contact your administrator if you need a longer time limit."
+
+  # ===========================================================================
+  # NODE RESOURCES: host memory, shared memory, disk
+  # Before the GPU and NCCL rules: Ray's host-memory error is also named OutOfMemoryError, and NCCL
+  # reports a full /dev/shm as an NCCL error.
+  # ===========================================================================
+
+  - id: host_out_of_memory
+    rerunnable: false
+    or:
+      - contains: "running low on memory"
+      - contains: "OOM killer"
+      - contains: "DefaultCPUAllocator: can't allocate memory"
+      - type_name: MemoryError
+    exception: NodeResourceError
+    error_details: "The training node ran out of host (CPU) memory, and a process was killed. A rerun with the same settings would run out again. Reduce batch_size, max_seq_length, or the dataset size, or contact your administrator about the node's memory limit."
+
+  - id: shared_memory_exhausted
+    rerunnable: false
+    or:
+      - contains: "unable to allocate shared memory"
+      - contains: "out of shared memory"
+      - contains: "Error while creating shared memory segment"
+      - regex: "unable to (write to|open) file </torch_"
+      - type_name: ObjectStoreFullError
+    exception: NodeResourceError
+    error_details: "The training pod ran out of shared memory (/dev/shm). Saving all-weights checkpoints and moving data between processes use it, and a rerun with the same settings would run out again. Contact your administrator about the pod's shared memory size, or use LoRA, which needs much less."
+
+  - id: disk_full
+    rerunnable: false
+    or:
+      - contains: "No space left on device"
+      - contains: "Disk quota exceeded"
+    exception: NodeResourceError
+    error_details: "The job ran out of disk space, usually while writing checkpoints to job storage. A rerun with the same storage would run out again. Contact your administrator to free or enlarge job storage, or save fewer or smaller checkpoints (for example, use LoRA)."
+
+  # ===========================================================================
+  # GPU MEMORY
+  # ===========================================================================
+
+  - id: gpu_out_of_memory
+    rerunnable: false
+    or:
+      - contains: "CUDA out of memory"
+      - contains: "CUDA error: out of memory"
+      - contains: "Cuda failure 'out of memory'"
+      - type_name: OutOfMemoryError  # torch.OutOfMemoryError; Ray's host-memory one matched above
+    exception: GpuOutOfMemoryError
+    error_details: "A GPU ran out of memory. A rerun with the same settings would run out again. To reduce memory use: lower batch_size or micro_batch_size, lower max_seq_length, use LoRA instead of all-weights fine-tuning, or increase tensor_parallel_size to spread the model across more GPUs."
+
+  - id: vllm_kv_cache_too_small
+    rerunnable: false
+    or:
+      - contains: "larger than the available KV cache memory"
+      - contains: "No available memory for the cache blocks"
+      - contains: "is less than desired GPU memory utilization"
+    exception: GpuOutOfMemoryError
+    error_details: "vLLM, which generates responses during DPO and GRPO training, did not have enough GPU memory for its KV cache at this sequence length. Lower max_seq_length, or raise the vLLM GPU memory utilization."
+
+  # ===========================================================================
+  # DATASET
+  # ===========================================================================
+
+  # Our dataset discovery and validation, which runs before training.
+  - id: invalid_dataset
+    rerunnable: false
+    or:
+      - type_name: DatasetFormatError
+      - contains: "Dataset Schema Validation failed"
+    exception: DatasetFormatError
+
+  - id: unsupported_chat_role
+    rerunnable: false
+    contains: "Unsupported role in messages:"
+    exception: DatasetFormatError
+    error_details: "Your dataset contains chat messages with an invalid role. Each message must have a 'role' of 'system', 'user', 'assistant', or 'tool'."
+
+  - id: invalid_chat_dataset
+    rerunnable: false
+    or:
+      - contains: "Each sample must contain a `messages` list"
+      - contains: "At least one assistant message is required"
+      - contains: "System role appeared in multiple messages"
+      - contains: "tool_call_id must be a non-empty string"
+      - starts_with: "assistant message `"
+      - regex: "^`tools` (is a string but not valid JSON|must be a list)"
+      - type_name: DatasetGenerationError
+    exception: DatasetFormatError
+
+  - id: invalid_column_dataset
+    rerunnable: false
+    or:
+      - contains: "Expected at least two columns"
+      - contains: "Expected prompt to be non-empty"
+    exception: DatasetFormatError
+
+  - id: answer_tokens_truncated
+    rerunnable: false
+    contains: "produced labels that are entirely -100"
+    exception: DatasetFormatError
+    error_details: "Every sample's prompt fills the whole sequence, so no answer tokens are left to train on. Increase max_seq_length, or shorten the prompts in your dataset."
+
+  - id: invalid_preference_dataset
+    rerunnable: false
+    or:
+      - exact: "Ties are not supported yet."
+      - contains: "RM/DPO training supports only two completions"
+    exception: DatasetFormatError
+    error_details: "Your preference dataset has a sample that is not a single chosen and rejected pair (for example, a tie or more than two completions). Each DPO sample needs exactly one chosen and one rejected response."
+
+  - id: invalid_retrieval_dataset
+    rerunnable: false
+    or:
+      - contains: "Inline retrieval record must include"
+      - contains: "pos_doc cannot be empty"
+      - contains: "neg_doc must contain at least"
+      - contains: "No records found in JSONL file"
+      - contains: "requires a retrieval dataset, but the dataset"
+      - contains: "Dataset is in retrieval format (query/pos_doc/neg_doc), but the selected"
+    exception: DatasetFormatError
+
+  # ===========================================================================
+  # CHAT TEMPLATE
+  # ===========================================================================
+
+  - id: chat_template_missing
+    rerunnable: false
+    or:
+      - contains: "ChatDataset requires a tokenizer with chat template support"
+      - contains: "Tokenizer lacks a usable chat template"
+      - contains: "tokenizer.chat_template is not set"
+      - contains: "default chat template is no longer allowed"
+    exception: TrainingConfigError
+    error_details: "The model's tokenizer has no chat template, which chat-format datasets need. Use a model that has a chat template, or provide one."
+
+  - id: chat_template_error
+    rerunnable: false
+    or:
+      - type_name: TemplateError
+      - type_name: TemplateSyntaxError
+      - type_name: UndefinedError
+      - contains: "Cannot build an answer-only loss mask from conversation prefixes"
+    exception: TrainingConfigError
+
+  # ===========================================================================
+  # MODEL
+  # ===========================================================================
+
+  - id: model_not_found
+    rerunnable: false
+    or:
+      - regex: "^Model path .+ does not exist"
+      - contains: "does not appear to have a file named"
+      - contains: "is not a valid model identifier"
+      - contains: "You are trying to access a gated repo"
+      - contains: "401 Client Error"
+    exception: ModelNotFoundError
+    error_details: "The model, or a file it needs, could not be found or accessed. Check that the model was downloaded completely, and that any Hugging Face repository it refers to is accessible."
+
+  - id: unsupported_model_architecture
+    rerunnable: false
+    or:
+      - contains: "does not recognize this architecture"
+      - contains: "contains custom code which must be executed"
+      - contains: "No tensor-parallel plan is registered"
+      - regex: "^Unsupported configuration for \\S+:"
+    exception: ModelLoadError
+
+  - id: model_weights_mismatch
+    rerunnable: false
+    or:
+      - contains: "_apply(): Couldn't swap"
+      - contains: "Size mismatch between saved"
+      - regex: "contains none of the \\d+ requested model keys"
+      - regex: "has \\d+ keys absent from the built model"
+    exception: ModelLoadError
+    error_details: "The model weights do not match the model architecture. The checkpoint may be incomplete, or saved for a different model or version."
+
+  - id: tokenizer_error
+    rerunnable: false
+    contains: "piece id is out of range"
+    exception: ModelLoadError
+    error_details: "The model's tokenizer produced a token id it does not have. The tokenizer and model may not match."
+
+  - id: training_libraries_missing
+    rerunnable: false
+    or:
+      - contains: "vLLM is not installed"
+      - contains: "triton is not installed"
+      - contains: "Flash Attention is not available"
+    exception: ModelLoadError
+    error_details: "A library this training needs is missing from the training image. Contact your administrator."
+
+  # ===========================================================================
+  # TRAINING CONFIGURATION
+  # ===========================================================================
+
+  - id: no_trainable_parameters
+    rerunnable: false
+    contains: "optimizer received no trainable parameters"
+    exception: TrainingConfigError
+    error_details: "No model parameters are trainable. With LoRA, the target modules match no layers of this model; check the LoRA target modules."
+
+  - id: pipeline_parallel_config
+    rerunnable: false
+    or:
+      - contains: "is not compatible with pipeline parallelism"
+      - regex: "pp_batch_size \\d+ // pp_microbatch_size \\d+ must be >= pp_size \\d+"
+      - regex: "Number of stages \\(\\d+\\) cannot exceed number of layers"
+      - contains: "local_batch_size must be divisible by microbatch_size"
+    exception: TrainingConfigError
+    error_details: "The pipeline parallelism settings do not fit this model or batch size. The model may not support pipeline parallelism (tied embeddings or encoder-decoder), or batch_size must be at least pipeline_parallel_size and a multiple of micro_batch_size. Lower pipeline_parallel_size or change the batch settings."
+
+  - id: tensor_parallel_config
+    rerunnable: false
+    or:
+      - regex: "must be divisible by TP size"
+      - regex: "^World size \\(\\d+\\) (is insufficient for|must be divisible by PP \\* CP \\* TP)"
+    exception: TrainingConfigError
+    error_details: "The parallelism settings do not fit this model or GPU count. The number of attention heads must be divisible by tensor_parallel_size, and the GPU count must be a multiple of tensor * pipeline * context parallel sizes."
+
+  - id: context_parallel_config
+    rerunnable: false
+    or:
+      - contains: "Model does not support SDPA required for context parallelism"
+      - regex: "Context parallelism \\(cp_size=\\d+\\) with packed sequences is not supported"
+      - contains: "Packed sequence is only supported with CP size 1"
+      - contains: "Context parallel is not supported for"
+      - contains: "Context parallel is yet not supported for VLM models"
+      - contains: "batching_strategy='sequence_packing' is not supported with context_parallel_size"
+      - contains: "does not support MTP with context parallelism"
+      - contains: "MTP with context and pipeline parallelism is not supported"
+    exception: TrainingConfigError
+    error_details: "Context parallelism is not supported for this model or with these settings (for example, with sequence packing). Set context_parallel_size to 1, or turn off sequence packing."
+
+  - id: moe_parallel_config
+    rerunnable: false
+    or:
+      - contains: "is not supported for MoE models"
+      - contains: "Multi-GPU MoE training requires expert_parallel_size > 1"
+      - regex: "must be divisible by expert_parallel_degree"
+      - contains: "Number of experts must be divisible by ep_size"
+      - exact: "We only support 1D mesh for MoE"
+      - contains: "has unsupported DTensor placement"
+    exception: ParallelismConfigError
+    error_details: "The parallelism settings are not supported for this Mixture-of-Experts model. Use expert parallelism (expert_parallel_size > 1, dividing the number of experts) without tensor parallelism."
+
+  - id: sequence_packing_config
+    rerunnable: false
+    or:
+      - contains: "Please increase `packed_sequence_size`"
+      - contains: "No packs were produced"
+      - regex: "^Cannot create \\d+ bins with only \\d+ sequences"
+      - regex: "^Sequence length \\d+ exceeds bin capacity \\d+$"
+      - regex: "train_mb_tokens \\(\\d+\\) is below max_seq_length"
+    exception: TrainingConfigError
+    error_details: "Sequence packing could not pack this dataset: a sample is longer than the pack size, or there are too few samples to pack. Increase the pack size or max_seq_length, add samples, or turn off sequence packing."
+
+  - id: max_model_len_too_long
+    rerunnable: false
+    contains: "is greater than the derived max_model_len"
+    exception: TrainingConfigError
+    error_details: "max_seq_length is longer than the model supports. Lower max_seq_length to at most the model's maximum context length."
+
+  - id: grpo_sampling_config
+    rerunnable: false
+    contains: "Top k is not supported in the sampling params in NeMo-Gym path"
+    exception: TrainingConfigError
+    error_details: "GRPO with a NeMo-Gym environment does not support top_k sampling. Remove top_k from the generation settings."
+
+  - id: knowledge_distillation_config
+    rerunnable: false
+    or:
+      - contains: "Knowledge distillation is not supported by the"
+      - contains: "Knowledge distillation requires matching vocabularies"
+      - contains: "Knowledge distillation requires training.kd.teacher"
+      - contains: "Student and teacher tokenizers have different"
+    exception: TrainingConfigError
+
+  - id: unsupported_training_option
+    rerunnable: false
+    or:
+      - starts_with: "Unsupported optimizer_name"
+      - contains: "does not support training type"
+      - contains: "No training driver available for training type"
+      - contains: "Unsloth backend only supports training_type"
+      - contains: "retrieval_config is required for retrieval dataset configuration"
+    exception: TrainingConfigError
+
+  - id: grpo_dynamic_sampling_exhausted
+    rerunnable: false
+    or:
+      - contains: "Dynamic sampling has reached the maximum allowed number of batches"
+      - contains: "Dynamic sampling found no prompt group with non-zero reward standard deviation"
+    exception: TrainingConfigError
+    error_details: "Dynamic sampling discarded every prompt group, because all generations for each prompt earned the same reward, so there was nothing to learn from. Check the reward function, make the prompts harder or more varied, raise the sampling temperature, or turn off dynamic sampling."
+
+  # Our compiled NeMo-RL config no longer matches what NeMo-RL accepts.
+  - id: nemo_rl_config_rejected
+    rerunnable: false
+    contains: "validation error for MasterConfig"
+    exception: InternalError
+    error_details: "NeMo-RL rejected the training configuration the platform generated. This is a platform bug; contact your administrator with the job ID."
+
+  # ===========================================================================
+  # GRPO ENVIRONMENT (NeMo-Gym)
+  # ===========================================================================
+
+  - id: invalid_environment_package
+    rerunnable: false
+    or:
+      - type_name: EnvironmentPackageValidationError
+      - contains: "Gym environment package is missing required manifest"
+      - contains: "invalid Gym environment package at"
+      - regex: "^Environment package root .+ is not a directory"
+      - contains: "Installing the environment package into"
+    exception: TrainingEnvironmentError
+
+  - id: invalid_gym_config
+    rerunnable: false
+    or:
+      - type_name: ConfigPathNotFoundError
+      - type_name: NoServerInstancesError
+      - type_name: ServerRefNotFoundError
+      - type_name: AlmostServerError
+      - type_name: ConfigMissingValuesError
+      - contains: "Rows reference agents not present in the running config"
+      - contains: "Cannot resolve task_source to an agent"
+      - contains: "Rows would be scored by a verifier that does not accept the agent"
+      - contains: "rollout rows have no agent_ref"
+    exception: TrainingEnvironmentError
+
+  # Platform settings an administrator sets.
+  - id: gym_not_configured
+    rerunnable: false
+    or:
+      - contains: "GRPO jobs require gym configuration"
+      - contains: "Sandboxed GRPO requires a Gym runtime image"
+      - contains: "Sandboxed GRPO requires the job-storage PVC claim name"
+      - contains: "is not on the image allowlist"
+      - type_name: PolicyCredentialRejected
+    exception: TrainingEnvironmentError
+    error_details: "The platform is not configured for GRPO environments (the Gym runtime image, sandbox storage, or image allowlist). Contact your administrator."
+
+  - id: gym_host_failed
+    rerunnable: false
+    or:
+      - type_name: GymHostBootstrapFailed
+      - type_name: RolloutDataFailure
+      - contains: "rollout request exceeds max_request_bytes"
+    exception: TrainingEnvironmentError
+
+  # Transient: a rollout server, sandbox, or request failed and can succeed on a retry.
+  - id: gym_rollout_unavailable
+    rerunnable: true
+    or:
+      - type_name: GymTransportError
+      - type_name: RolloutTransportError
+      - type_name: EpisodeBackendError
+      - regex: "^job host .+ did not become ready within"
+      - contains: "sandbox was OOMKilled or evicted"
+      - contains: "model endpoint(s) never answered within"
+    exception: TrainingEnvironmentError
+    error_details: "A GRPO environment server or sandbox failed or stopped answering during rollouts. This is usually transient; rerun the job. If it repeats, check the environment's resources server."
+
+  - id: gym_process_exited
+    rerunnable: true
+    symptom: true
+    or:
+      - regex: "Process `.+` finished unexpectedly!"
+      - contains: "Head server finished unexpectedly!"
+    exception: TrainingEnvironmentError
+    error_details: "A GRPO environment server exited unexpectedly. Check the environment's logs for the cause."
+
+  # ===========================================================================
+  # CHECKPOINTS
+  # ===========================================================================
+
+  # Our check that training saved a checkpoint to publish.
+  - id: no_checkpoint_saved
+    rerunnable: false
+    or:
+      - exact: "Training finished without saving a checkpoint."
+      - contains: "No best checkpoint found"
+      - regex: "^No .*checkpoint directories found in"
+    exception: CheckpointError
+    error_details: "Training finished without saving any checkpoint, so there is no model to publish. This usually means the dataset was too small for a single training step (for example, fewer rows than the batch size), or validation never ran. Add samples, lower batch_size, or check the validation settings."
+
+  - id: checkpoint_already_published
+    rerunnable: false
+    regex: "Checkpoint directory .+ already holds a published checkpoint"
+    exception: CheckpointError
+    error_details: "A checkpoint this run would save already exists in job storage, written by an earlier run of this job. A rerun would collide with it again. Create a new job."
+
+  - id: checkpoint_incompatible
+    rerunnable: false
+    or:
+      - exact: "Failed to validate global plan"
+      - starts_with: "Missing key in checkpoint state_dict:"
+      - contains: "Expert weights missing from checkpoint"
+      - contains: "Safe custom-MoE tensor parallelism requires a complete base checkpoint"
+      - contains: "Optimizer checkpoint parts do not match the current pipeline layout"
+      - contains: "Cannot resume optimizer master weights"
+      - contains: "which an interrupted save left incomplete"
+    exception: CheckpointError
+    error_details: "A checkpoint is incomplete or does not match the current model or parallelism settings, so it cannot be loaded. If you changed the configuration, keep it the same as when the checkpoint was saved, or create a new job."
+
+  - id: checkpoint_publish_failed
+    rerunnable: false
+    or:
+      - contains: "Best checkpoint not found at"
+      - contains: "Model directory not found in checkpoint"
+      - contains: "LoRA adapter publication was selected but adapter_config.json was not found"
+      - contains: "No HuggingFace safetensors or DCP .metadata under"
+      - contains: "Cannot publish Automodel rank shards"
+      - contains: "Safetensors consolidation failed"
+    exception: CheckpointError
+
+  # Wrappers that hide the storage error printed before them (often a full disk).
+  - id: checkpoint_storage_failed
+    rerunnable: true
+    symptom: true
+    or:
+      - regex: "^Failed to (prepare checkpoint directory|publish checkpoint|prune old checkpoints|update the LOWEST_VAL pointer)"
+      - contains: "Background checkpoint finalization failed"
+      - contains: "Failed to synchronize safetensors consolidation status"
+      - type_name: CheckpointException
+    exception: CheckpointError
+    error_details: "Saving a checkpoint to job storage failed. If the storage was briefly unavailable, a rerun continues from the newest checkpoint."
+
+  # ===========================================================================
+  # GENERATION (vLLM, DPO and GRPO)
+  # ===========================================================================
+
+  - id: generation_refit_failed
+    rerunnable: true
+    or:
+      - contains: "Updating weights for the generation policy failed during refit"
+      - type_name: RefitAborted
+    exception: GenerationError
+    error_details: "Copying the updated policy weights into vLLM failed. This is usually transient; rerun the job, which continues from the newest checkpoint."
+
+  - id: generation_logprobs_nan
+    rerunnable: true
+    contains: "Generation logprobs contain NaN"
+    exception: GenerationError
+    error_details: "vLLM returned NaN log probabilities, usually because training diverged. A rerun continues from the newest checkpoint; if it repeats, lower the learning rate."
+
+  - id: generation_placement_failed
+    rerunnable: true
+    or:
+      - exact: "No placement groups available in the cluster"
+      - exact: "Placement group contains no bundles"
+      - contains: "Failed to retrieve bundle/node mapping from placement group"
+      - regex: "^No output received for request"
+    exception: GenerationError
+
+  - id: generation_internal_error
+    rerunnable: false
+    or:
+      - regex: "^Missing required keys for (GenerationOutputSpec|ScoreOutputSpec)"
+      - contains: "cannot be used with async_engine=True"
+      - contains: "NeMo-Gym completed without producing a final prompt group"
+      - contains: "Unable to allocate any worker groups with the available resources"
+    exception: InternalError
+
+  # vLLM wrappers that point at the root cause printed before them.
+  - id: generation_engine_failed
+    rerunnable: true
+    symptom: true
+    or:
+      - contains: "Engine core initialization failed"
+      - type_name: EngineDeadError
+    exception: GenerationError
+    error_details: "The vLLM generation engine failed. Check the job logs for the cause printed before this error."
+
+  # ===========================================================================
+  # CUDA (other than running out of memory)
+  # ===========================================================================
+
+  - id: cuda_device_assert
+    rerunnable: false
+    contains: "device-side assert triggered"
+    exception: CudaError
+    error_details: "A GPU operation hit a device-side assert, usually a token or label id outside the model's vocabulary. Check that the tokenizer and model match, and that the dataset has no invalid token ids."
+
+  - id: cuda_error
+    rerunnable: true
+    or:
+      - regex: "CUDA error: (?!out of memory)"
+      - contains: "an illegal memory access was encountered"
+      - contains: "uncorrectable ECC error"
+      - regex: "CUBLAS_STATUS_|CUDNN_STATUS_|CUDA driver error"
+    exception: CudaError
+
+  # ===========================================================================
+  # CLUSTER AND DISTRIBUTED COMMUNICATION
+  # Mostly symptoms: a peer times out or loses its connection after another rank fails.
+  # ===========================================================================
+
+  - id: cluster_resources_unavailable
+    rerunnable: true
+    or:
+      - contains: "Maximum number of retries reached"
+      - contains: "Timed out waiting for placement groups to be ready"
+      - contains: "No valid placement groups found"
+      - contains: "Timed out waiting for all workers to connect"
+      - contains: "Failed to start Ray head node"
+    exception: DistributedError
+    error_details: "The training cluster could not be assembled: not every node or GPU became available in time. This is usually transient; rerun the job."
+
+  - id: ray_node_failed
+    rerunnable: true
+    or:
+      - contains: "its node has died"
+      - type_name: WorkerCrashedError
+      - type_name: ActorUnavailableError
+      - type_name: RaySystemError
+    exception: DistributedError
+    error_details: "A training node or worker process failed. This is usually transient (a node was lost or restarted); rerun the job, which continues from the newest checkpoint."
+
+  - id: ray_actor_died
+    rerunnable: true
+    symptom: true
+    or:
+      - type_name: ActorDiedError
+      - type_name: GetTimeoutError
+    exception: DistributedError
+    error_details: "A training worker process died. Check the job logs for the cause printed before this error."
+
+  - id: nccl_error
+    rerunnable: true
+    symptom: true
+    any_keywords: ["NCCL", "nccl"]
+    exception: DistributedError
+    error_details: "GPU-to-GPU communication (NCCL) failed. This often follows another rank failing; otherwise it is usually a transient network fault, and a rerun continues from the newest checkpoint."
+
+  - id: distributed_connection_failed
+    rerunnable: true
+    symptom: true
+    or:
+      - contains: "c10d"
+      - type_name: DistNetworkError
+      - type_name: DistStoreError
+      - type_name: DistBackendError
+    exception: DistributedError
+    error_details: "Distributed training processes lost contact with each other. This usually follows another process failing; otherwise it is transient, and a rerun continues from the newest checkpoint."
+
+  - id: distributed_timeout
+    rerunnable: true
+    symptom: true
+    or:
+      - contains: "Watchdog caught collective operation timeout"
+      - contains: "Timeout waiting for coordinator at barrier"
+      - contains: "Timeout at barrier"
+      - contains: "ENDED file detected during worker wait"
+      - contains: "Coordinator may not have written it yet"
+      - type_name: TimeoutError
+    exception: DistributedError
+    error_details: "A training process timed out waiting for the others. This usually follows another process failing; otherwise it is transient, and a rerun continues from the newest checkpoint."
+
+  - id: process_killed
+    rerunnable: true
+    symptom: true
+    regex: "exitcode: -9|Signal 9 \\(SIGKILL\\)|exit code:? -9"
+    exception: DistributedError
+    error_details: "A training process was killed (SIGKILL), usually because the node ran out of host memory or the pod was evicted. If it repeats, reduce batch_size or max_seq_length."
+
+  # ===========================================================================
+  # INTERNAL ERRORS
+  # ===========================================================================
+
+  - id: internal_tensor_error
+    rerunnable: false
+    or:
+      - exact: "You must provide either input_ids or inputs_embeds"
+      - exact: "inputs_embeds must be provided for pipeline stages without embed_tokens"
+      - regex: "^tensors for .+ must have same number of dimensions"
+      - contains: "expected consistent types but got:"
+      - contains: "expected tensors on the same device but got:"
+      - contains: "Incompatible X and LoRA A dimensions"
+    exception: InternalError
+
+  # Our fallback message when the process printed no exception.
+  - id: training_exit_code
+    rerunnable: true
+    symptom: true
+    regex: "^Training failed with exit code:? -?\\d+"
+    exception: InternalError
+    error_details: "The training process exited with an error, but printed no exception that identifies the cause. Check the job logs. A rerun continues from the newest checkpoint."
