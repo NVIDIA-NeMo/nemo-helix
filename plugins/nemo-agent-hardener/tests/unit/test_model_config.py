@@ -56,12 +56,20 @@ def test_build_model_env_maps_attack_and_analysis_groups() -> None:
     assert env["INFERENCE_API_KEY"] == "NK"
 
 
-def test_build_model_env_skips_unset_fields_and_safety_group() -> None:
-    # Only a model name for analysis; no base_url/secret. Safety is never an env knob — it travels in
-    # the manifest, as the guardrails defender entry's `config`.
+def test_build_model_env_skips_unset_fields_and_safety_model() -> None:
+    # Only a model name for analysis; no base_url/secret. The safety *model* is never an env knob — it
+    # travels in the manifest, as the guardrails defender entry's `config`.
     models = WarGameModels(analysis=ModelChoice(model="ana/model"), safety=ModelChoice(model="guard/model"))
     env = _common.build_model_env(models, sdk=_sdk({}), workspace="default")
     assert env == {"AGENT_HARDENER_MODEL": "ana/model"}
+
+
+def test_build_model_env_maps_the_safety_endpoint_and_key() -> None:
+    models = WarGameModels(
+        safety=ModelChoice(model="guard/model", base_url="http://10.0.0.5:8000/v1", api_key_secret="safety-key")
+    )
+    env = _common.build_model_env(models, sdk=_sdk({"safety-key": "SK"}), workspace="default")
+    assert env == {"AGENT_HARDENER_SAFETY_BASE_URL": "http://10.0.0.5:8000/v1", "AGENT_HARDENER_SAFETY_API_KEY": "SK"}
 
 
 def test_build_model_env_none_is_empty() -> None:
@@ -102,7 +110,7 @@ def test_preflight_probes_the_safety_group(monkeypatch: Any) -> None:
     """An unreachable safety model hangs the guardrails defender to its timeout, so fail fast instead."""
     import pytest
     from nemo_agent_hardener_plugin.jobs.errors import AgentHardenerRunError
-    from nemo_agent_hardener_plugin.model_config import ATTACK_DEFAULT_BASE_URL
+    from nemo_agent_hardener_plugin.model_config import SAFETY_DEFAULT_BASE_URL
 
     probed: list[tuple[str | None, str | None]] = []
 
@@ -116,8 +124,45 @@ def test_preflight_probes_the_safety_group(monkeypatch: Any) -> None:
     with pytest.raises(AgentHardenerRunError, match="safety model"):
         run_module._preflight_models(models, sdk=None, workspace="default", default_key="k")
 
-    # Probed against the endpoint agent-hardener pins for the guardrail LLM, not a made-up one.
-    assert probed == [("bad/model", ATTACK_DEFAULT_BASE_URL)]
+    assert probed == [("bad/model", SAFETY_DEFAULT_BASE_URL)]
+
+
+def test_preflight_probes_safety_where_the_judge_will_go(monkeypatch: Any) -> None:
+    """Unset safety fields fall back to the analysis endpoint and key, as agent-hardener's judge does."""
+    probed: list[tuple[str | None, str | None, str | None]] = []
+
+    def _validate(model: str | None, base_url: str | None, key: str | None) -> Any:
+        probed.append((model, base_url, key))
+        return SimpleNamespace(ok=True)
+
+    monkeypatch.setattr(run_module, "validate_choice", _validate)
+    monkeypatch.setattr(run_module._common, "_resolve_secret", lambda _sdk, name, _ws: f"value-of-{name}")
+    models = WarGameModels(
+        analysis=ModelChoice(base_url="http://10.0.0.9/v1", api_key_secret="analysis-key"),
+        safety=ModelChoice(model="guard/model"),
+    )
+
+    run_module._preflight_models(models, sdk=None, workspace="default", default_key="k")
+
+    assert ("guard/model", "http://10.0.0.9/v1", "value-of-analysis-key") in probed
+
+
+def test_preflight_checks_the_built_in_judge_when_only_its_endpoint_is_set(monkeypatch: Any) -> None:
+    """With no safety model the judge runs agent-hardener's default, so that is the model to probe."""
+    from nemo_agent_hardener_plugin.model_config import SAFETY_DEFAULT_MODEL
+
+    probed: list[tuple[str | None, str | None]] = []
+
+    def _validate(model: str | None, base_url: str | None, key: str | None) -> Any:
+        probed.append((model, base_url))
+        return SimpleNamespace(ok=True)
+
+    monkeypatch.setattr(run_module, "validate_choice", _validate)
+    models = WarGameModels(safety=ModelChoice(base_url="http://10.0.0.5/v1"))
+
+    run_module._preflight_models(models, sdk=None, workspace="default", default_key="k")
+
+    assert probed == [(SAFETY_DEFAULT_MODEL, "http://10.0.0.5/v1")]
 
 
 class _Secrets:
