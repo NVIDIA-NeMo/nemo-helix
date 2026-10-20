@@ -722,6 +722,7 @@ platform = "nhx.common.client_factory:HelixNemoClientProvider"
 agents-deployment = "nemo_agents_plugin.runner.controller:AgentDeploymentController"
 insights-analysis = "nemo_insights_plugin.controller:InsightsAnalysisController"
 deployments = "nemo_deployments_plugin.controller:DeploymentsController"
+evals-taskset-runs = "nemo_evals.taskset_runs.controller:EvaluatorRunController"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.customization.contributors"]

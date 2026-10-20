@@ -1,12 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Pin the public name algorithm, scope separation and random byte budget."""
+"""Pin the public name algorithm and scope separation."""
 
 from hashlib import sha256
 
-import pytest
-from nemo_evals.taskset_runs.identifiers import derive_run_id, member_name, random_run_id, task_job_name
+from nemo_evals.taskset_runs.identifiers import derive_run_id, member_name, task_job_name
 
 
 def test_identifiers_and_scope() -> None:
@@ -31,21 +30,3 @@ def test_identifiers_and_scope() -> None:
         ("a", "bc", "d"),
     ]
     assert len({derive_run_id(*scope) for scope in scopes}) == len(scopes)
-
-
-def test_random_identifiers(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Use monkeypatch to make entropy deterministic and verify keyless name generation.
-
-    Both random entry points must return the supplied token with a run prefix and
-    request eight bytes, protecting the random-name format and entropy budget.
-    """
-    requests = []
-
-    def token_hex(size: int) -> str:
-        requests.append(size)
-        return "0123456789abcdef"
-
-    monkeypatch.setattr("nemo_evals.taskset_runs.identifiers.secrets.token_hex", token_hex)
-    assert random_run_id() == "run-0123456789abcdef"
-    assert derive_run_id("default", "user:alice", None) == "run-0123456789abcdef"
-    assert requests == [8, 8]

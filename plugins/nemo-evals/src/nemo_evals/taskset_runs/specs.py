@@ -3,16 +3,13 @@
 
 """Resolved execution plan stored as digest-verified bytes in Files."""
 
-from typing import Literal
+from datetime import datetime, timezone
+from typing import Self
 
+from nemo_evals.harbor.remote.images import PreparedHarborEnvironment
+from nemo_evals.harbor.remote.profile import PINNED_IMAGE_REF_PATTERN, ResolvedHarborSandboxPolicy
 from nemo_evals.jobs.agent_spec import AgentEvalSpec
-from pydantic import BaseModel, ConfigDict, Field
-
-MissingPrebuiltImagePolicy = Literal["fail", "build"]
-"""What to do when a task's pinned prebuilt image is gone: fail the task, or build it from its Dockerfile.
-
-Shared by the submit request and the frozen plan so the two cannot drift.
-"""
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class TasksetRunPlan(BaseModel):
@@ -28,16 +25,13 @@ class TasksetRunPlan(BaseModel):
     ref as ``plan_ref`` and the SHA-256 of its bytes as ``plan_digest``.
 
     Inputs are a run ID and workspace, pinned taskset revision, resolved agent
-    evaluation spec, missing-image policy, and explicit concurrency/failure caps.
-    Each cap must be supplied even when None denotes no limit; percentages must
-    already have been resolved into a nonnegative failure count.
-
-    This is the intentional M1 subset: ``sandbox_policy``, ``dispatcher_profile``
-    and ``dispatcher_image`` depend on M2's operator configuration. M2 Story 3
-    resolves the sandbox policy, validates the dispatcher profile and adds all
-    three as required fields before execution is enabled. Earlier development
-    runs are deleted when the schema changes; their plans are never filled from
-    operator defaults or migrated into executable runs.
+    evaluation spec, an explicit concurrency cap (None denotes no limit), the sandbox
+    policy, dispatcher image and dispatcher profile resolved from operator
+    configuration, and each task's prepared images.
+    Task Jobs read only the plan, so a config change, a moved image tag or a newer
+    build between a partial submit and its retry can't give sibling Jobs different
+    images, lifetimes or egress.
+    Development runs from before these fields existed are deleted, not migrated.
 
     Top-level fields are frozen, but nested spec models remain mutable;
     each verified storage read reconstructs independent models for its consumer.
@@ -64,20 +58,62 @@ class TasksetRunPlan(BaseModel):
             "A member's task_index is its position in spec.tasks."
         )
     )
-    missing_prebuilt_image: MissingPrebuiltImagePolicy = Field(
-        description=(
-            "Copied from the request: when a task's pinned prebuilt image is gone from the registry, "
-            "'fail' fails that task and 'build' builds it from the task's Dockerfile instead."
-        )
-    )
     max_concurrent_task_jobs: int | None = Field(
         ge=1,
         description="Maximum task Jobs of this run running at once; None relies only on Jobs Service admission limits.",
     )
-    max_failed_tasks: int | None = Field(
-        ge=0,
-        description=(
-            "Failed tasks the run tolerates before it fails and cancels remaining task Jobs. "
-            "Always a count: submit resolves a request percent (10% of 100 tasks -> 10). None means no limit."
-        ),
+    sandbox_policy: ResolvedHarborSandboxPolicy = Field(
+        description="The operator sandbox profile execution.sandbox_policy named, frozen at submit."
     )
+    dispatcher_image: str = Field(
+        pattern=PINNED_IMAGE_REF_PATTERN, description="Task Job image, pinned by digest, from evals.runs.harbor."
+    )
+    dispatcher_profile: str = Field(
+        min_length=1, description="Jobs execution profile every task Job of this run uses (CPU class)."
+    )
+    task_environments: list[PreparedHarborEnvironment] = Field(
+        description="Each task's images, pinned by digest at submit; task_environments[i] belongs to spec.tasks[i]."
+    )
+
+    @model_validator(mode="after")
+    def _one_environment_per_task(self) -> Self:
+        if len(self.task_environments) != len(self.spec.tasks):
+            raise ValueError(
+                f"task_environments has {len(self.task_environments)} entries for {len(self.spec.tasks)} tasks"
+            )
+        return self
+
+
+class AcceptedTaskOutput(BaseModel):
+    """One task Job whose result the run's bundle includes (MVP slice of M5 story 7).
+
+    TODO(M5 story 7): add ``manifest_ref`` and ``attempt_id`` once task Jobs write output manifests.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    task_index: int = Field(ge=0, description="Position of the task in the plan's spec.tasks.")
+    job: str = Field(min_length=1, description="The task Job, <run_id>-task-<index>.")
+    bundle_ref: str = Field(
+        min_length=1, description="The task Job's agent-eval-results artifact: workspace/fileset#path."
+    )
+
+
+class TasksetBundleSpec(BaseModel):
+    """The bundle Job's whole input: which task bundles to merge into the run's one bundle."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    run_id: str
+    workspace: str
+    plan_ref: str
+    plan_digest: str
+    accepted: list[AcceptedTaskOutput] = Field(min_length=1, description="Sorted by task_index.")
+    started_at: datetime = Field(description="The run's accepted_at.")
+    finished_at: datetime = Field(description="When the newest accepted task Job last changed.")
+
+    @field_validator("started_at", "finished_at")
+    @classmethod
+    def _utc(cls, value: datetime) -> datetime:
+        """Read a naive time as UTC: the Jobs API returns naive timestamps."""
+        return value if value.utcoffset() is not None else value.replace(tzinfo=timezone.utc)
