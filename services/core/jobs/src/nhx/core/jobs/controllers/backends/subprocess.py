@@ -589,7 +589,9 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             status, message, error_details = describe_paused_exit(
                 exit_code, paused_message=f"Job paused with exit code {exit_code}"
             )
-            return status, {"message": message, **status_details}, error_details, ""
+            if status == HelixJobStatus.ERROR:
+                error_stack = self._tail_log_file(metadata.log_path)
+            return status, {"message": message, **status_details}, error_details, error_stack
         if step.status == HelixJobStatus.CANCELLING:
             return (
                 HelixJobStatus.CANCELLED,

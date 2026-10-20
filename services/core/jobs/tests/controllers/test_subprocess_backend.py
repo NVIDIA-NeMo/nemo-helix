@@ -642,8 +642,9 @@ def test_sync_pausing_does_not_terminate_a_running_process(
 def test_sync_pausing_nonzero_exit_is_error(
     mock_nemo_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_pending
 ):
+    """The task fails with the step and keeps the log tail, as any other failed exit does."""
     backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
-    step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "exit 1"])
+    step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "echo out of memory; exit 1"])
     mock_jobs_client.list_job_step_tasks.return_value = data_response(SimpleNamespace(data=[]))
     _schedule_without_otel_export(backend, step)
     key = SubprocessProcessKey(step.workspace, step.job, str(step.attempt_id), step.name)
@@ -655,6 +656,9 @@ def test_sync_pausing_nonzero_exit_is_error(
     update = backend.sync(step)
 
     assert update.status == HelixJobStatus.ERROR
+    task_update = mock_jobs_client.update_job_step_task.call_args.kwargs["body"]
+    assert task_update.status == HelixJobStatus.ERROR
+    assert "out of memory" in task_update.error_stack
 
 
 def test_sync_pausing_exit_75_is_paused(mock_nemo_client, tmp_path, mock_platform_config, test_step_pending):

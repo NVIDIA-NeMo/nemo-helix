@@ -340,6 +340,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/automodel/jobs/{name}/rerun:
+    post:
+      tags:
+      - Automodel Jobs
+      summary: Rerun Job
+      operationId: rerun_job_apis_customization_v2_workspaces__workspace__automodel_jobs__name__rerun_post
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomodelJobsJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/customization/v2/workspaces/{workspace}/automodel/jobs/{name}/results:
     get:
       tags:
@@ -908,6 +940,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/rl/jobs/{name}/rerun:
+    post:
+      tags:
+      - Rl Jobs
+      summary: Rerun Job
+      operationId: rerun_job_apis_customization_v2_workspaces__workspace__rl_jobs__name__rerun_post
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RlJobsJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/customization/v2/workspaces/{workspace}/rl/jobs/{name}/results:
     get:
       tags:
@@ -1288,6 +1352,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HelixJobLogPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/unsloth/jobs/{name}/rerun:
+    post:
+      tags:
+      - Unsloth Jobs
+      summary: Rerun Job
+      operationId: rerun_job_apis_customization_v2_workspaces__workspace__unsloth_jobs__name__rerun_post
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnslothJobsJob'
         '422':
           description: Validation Error
           content:

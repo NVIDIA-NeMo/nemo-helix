@@ -1643,3 +1643,36 @@ def update_all_tasks(
         logger.info(f"updated task '{pod_status.task_id}'")
 
     return has_errors
+
+
+def update_tasks_with_pause_outcome(
+    nemo_client: NemoClient,
+    core_v1: client.CoreV1Api,
+    namespace: str,
+    step: HelixJobStepWithContext,
+    pods: list[V1Pod],
+    status: HelixJobStatus,
+    error_details: dict[str, str],
+) -> None:
+    """Give every task of a pausing step the step's outcome.
+
+    ``update_all_tasks`` maps a pod by its phase, and a pod that exits 75 for a pause ends
+    Failed, which reads as an error. Each pod's details keep its own exit code: in a
+    multi-node pause the leader exits 75 and a worker can exit 0.
+    """
+    for pod in pods:
+        pod_status = map_pod_to_pod_status(pod)
+        pod_details, _, error_stack = get_pod_details(core_v1, namespace, pod_status.name)
+        JobsClient.from_client(nemo_client).update_job_step_task(
+            name=pod_status.task_id,
+            workspace=step.workspace,
+            job=step.job,
+            step=step.name,
+            body=HelixJobTaskUpdate(
+                status=status,
+                status_details={"pod": pod_details},
+                error_details=error_details,
+                error_stack=error_stack if status == HelixJobStatus.ERROR else "",
+            ),
+        )
+        logger.info(f"updated task '{pod_status.task_id}'")

@@ -1943,6 +1943,8 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 status_details: dict = {"message": message}
                 if status != HelixJobStatus.PAUSED:
                     status_details["exit_code"] = exit_code
+                error_stack = self._error_log_tail(container) if status == HelixJobStatus.ERROR else ""
+                self._update_container_task(step, container, status, status_details, error_details, error_stack)
                 return JobUpdate(status=status, status_details=status_details, error_details=error_details or None)
         if pause_deadline_exceeded(step):
             return self._kill_container_with_error(step, container, "Pause deadline exceeded")
@@ -1950,10 +1952,23 @@ chmod -R 777 {job_vol}/{storage_subpath}
 
     def create_step_update(self, step: HelixJobStepWithContext, container: Container) -> JobUpdate:
         status, status_details, error_stack = self.map_docker_container_status_to_platform_status(step, container)
-        task_id = self.get_label_from_container(container, JOB_TASK_ID_LABEL)
         error_details = {}
         if status == HelixJobStatus.ERROR:
             error_details["message"] = status_details.get("message", "Job encountered an error")
+        self._update_container_task(step, container, status, status_details, error_details, error_stack)
+        return JobUpdate(status=status, status_details=status_details, error_details=error_details)
+
+    def _update_container_task(
+        self,
+        step: HelixJobStepWithContext,
+        container: Container,
+        status: HelixJobStatus,
+        status_details: dict,
+        error_details: dict,
+        error_stack: str,
+    ) -> None:
+        """Record the container's status on its task, and revoke its delegation once it is terminal."""
+        task_id = self.get_label_from_container(container, JOB_TASK_ID_LABEL)
         if status in HelixJobStatus.terminals() and self._should_enable_workload_identity_for_step(step):
             self._try_revoke_workload_delegation(
                 self._workload_delegation_name_for_step(step),
@@ -1987,7 +2002,14 @@ chmod -R 777 {job_vol}/{storage_subpath}
             ),
         )
         logger.info("Updated task", extra={"task_id": task_id, "status": status})
-        return JobUpdate(status=status, status_details=status_details, error_details=error_details)
+
+    def _error_log_tail(self, container: Container) -> str:
+        """Return the last 80 lines of the container's logs, up to 2048 characters."""
+        try:
+            return container.logs(tail=80).decode("utf-8", errors="ignore")[-2048:]
+        except DockerException as exc:
+            logger.error("Failed to get logs for container %s: %s", container.name, exc)
+            return ""
 
     def map_docker_container_status_to_platform_status(
         self, step: HelixJobStepWithContext, container: Container
@@ -2031,23 +2053,13 @@ chmod -R 777 {job_vol}/{storage_subpath}
                         error_stack,
                     )
             else:
-                # Get logs for error stack
-                try:
-                    # Get last 80 lines of logs and up to 2048 characters
-                    logs = container.logs(tail=80).decode("utf-8", errors="ignore")
-                    error_stack = logs
-                    if len(error_stack) > 2048:
-                        error_stack = error_stack[-2048:]
-                except DockerException as exc:
-                    logger.error("Failed to get logs for container %s: %s", container.name, exc)
-
                 return (
                     HelixJobStatus.ERROR,
                     {
                         "message": f"Job exited with non-zero code {exit_code}, check logs for details.",
                         "exit_code": exit_code,
                     },
-                    error_stack,
+                    self._error_log_tail(container),
                 )
         elif container.status in ("created"):
             return HelixJobStatus.PENDING, {"message": "Job is pending"}, error_stack

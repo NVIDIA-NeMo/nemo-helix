@@ -581,6 +581,7 @@ def test_docker_job_sync_pausing_exit_code(docker_job, docker_client_mock, test_
     container_mock = MagicMock()
     container_mock.status = "exited"
     container_mock.attrs = {"State": {"ExitCode": exit_code}}
+    container_mock.logs.return_value = b""
     docker_client_mock.containers.get.side_effect = None
     docker_client_mock.containers.get.return_value = container_mock
 
@@ -588,6 +589,34 @@ def test_docker_job_sync_pausing_exit_code(docker_job, docker_client_mock, test_
 
     assert update.status == expected
     container_mock.kill.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "exit_code,expected",
+    [(75, HelixJobStatus.PAUSED), (0, HelixJobStatus.COMPLETED), (1, HelixJobStatus.ERROR)],
+)
+def test_docker_job_sync_pausing_exit_updates_the_task(
+    docker_job, docker_client_mock, mock_jobs_client, test_job_step, exit_code, expected
+):
+    """The exited container's task gets the step's outcome, with the log tail when it failed."""
+    step = _docker_pausing_step(test_job_step)
+    container_mock = MagicMock()
+    container_mock.status = "exited"
+    container_mock.attrs = {"State": {"ExitCode": exit_code}}
+    container_mock.labels = owned_container_labels({JOB_TASK_ID_LABEL: "task-1"})
+    container_mock.logs.return_value = b"Traceback: out of memory"
+    docker_client_mock.containers.get.side_effect = None
+    docker_client_mock.containers.get.return_value = container_mock
+
+    update = docker_job.sync(step)
+
+    task_update = mock_jobs_client.update_job_step_task.call_args.kwargs
+    assert task_update["name"] == "task-1"
+    assert task_update["body"].status == expected
+    assert task_update["body"].status_details == update.status_details
+    assert task_update["body"].error_details == (update.error_details or {})
+    expected_stack = "Traceback: out of memory" if expected == HelixJobStatus.ERROR else ""
+    assert task_update["body"].error_stack == expected_stack
 
 
 def test_docker_job_sync_pausing_deadline_kills_container(
