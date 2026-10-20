@@ -1,10 +1,15 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import sys
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+if sys.version_info >= (3, 14):
+    pytest.skip("nemo-compass requires Python 3.12 or 3.13", allow_module_level=True)
+
 from compass.compass_signals.anomaly_and_patterns.signal import (
     AnomalyAndPatternsAnalysis,
     AnomalyAndPatternsArtifacts,
