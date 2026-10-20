@@ -1344,11 +1344,14 @@ class JobDispatcher:
         # same way create does, so the rerun runs as the person who requested it.
         job_entity.current_attempt_id = next_attempt.id
         job_entity.status = next_attempt.status
-        if auth_context is not None:
-            job_entity.with_auth_context(auth_context)
+        if auth_context is None:
+            # The caller's reads strip the stored auth context, and an update replaces the
+            # job's data, so without a caller's context, write back the job's own.
+            stored = await self.store.as_service("jobs", internal=True).get_by_id(HelixJob, job_entity.id)
+            auth_context = stored.auth_context
+        job_entity.with_auth_context(auth_context)
         job_entity = await self.store.update(job_entity)
-        if auth_context is not None:
-            job_entity.with_auth_context(auth_context)
+        job_entity.with_auth_context(auth_context)
         await self._start_attempt(job_entity, next_attempt)
         operations_counter.add(1, attributes={"operation": "rerun_job"})
         return create_platform_job_response(job_entity, next_attempt)

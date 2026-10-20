@@ -3289,3 +3289,40 @@ async def test_rerun_saves_the_callers_auth_context(
 
     assert rerun is not None
     assert saved_auth == [caller]
+
+
+@pytest.mark.asyncio
+async def test_rerun_without_a_caller_keeps_the_jobs_auth_context(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """The job is read with auth_context stripped. Without a caller's, rerun saves back the job's own."""
+    owner = AuthContext(principal_id="owner@example.com", principal_email="owner@example.com")
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE, auth_context=owner)
+    step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
+    assert step is not None
+    await mock_dispatcher.update_job_status_from_step(step, HelixJobStatus.ERROR, error_details={"message": "boom"})
+    original_get = mock_store.get
+    original_update = mock_store.update
+    saved_auth: list[AuthContext | None] = []
+
+    async def caller_scoped_get(*args, **kwargs):
+        entity = await original_get(*args, **kwargs)
+        if isinstance(entity, HelixJob):
+            entity.with_auth_context(None)
+        return entity
+
+    async def record_job_auth(entity):
+        if isinstance(entity, HelixJob):
+            saved_auth.append(entity.auth_context)
+        return await original_update(entity)
+
+    with (
+        patch.object(mock_store, "get", side_effect=caller_scoped_get),
+        patch.object(mock_store, "update", side_effect=record_job_auth),
+    ):
+        rerun = await mock_dispatcher.rerun_job(job.name, DEFAULT_WORKSPACE)
+
+    assert rerun is not None
+    assert saved_auth == [owner]
