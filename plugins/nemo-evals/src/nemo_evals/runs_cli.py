@@ -422,9 +422,14 @@ def _select_from_spec(
     evaluator: Evaluator, spec_file: Path, tokens: str | None, workspace: str
 ) -> tuple[list[str], int, str]:
     """The pinned refs of ``--spec-file``'s taskset, narrowed by ``--tasks``; tasks are not re-uploaded."""
-    request = TasksetRunInput.model_validate(json.loads(spec_file.read_text(encoding="utf-8")))
-    assert isinstance(request.spec.tasks, TasksetRef)
-    ref = request.spec.tasks.root
+    # Only spec.tasks matters here: run_request applies --experiment before the whole file is validated.
+    raw = json.loads(spec_file.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or not isinstance(raw.get("spec"), dict):
+        raise ValueError(f"{spec_file}: expected a TasksetRunInput JSON object with an object 'spec'")
+    spec = AgentEvalInputSpec.model_validate(raw["spec"])
+    if not isinstance(spec.tasks, TasksetRef):
+        raise ValueError(f"{spec_file}: spec.tasks must name a taskset (workspace/name#revision)")
+    ref = spec.tasks.root
     head, _, fragment = ref.partition("#")
     taskset_workspace, _, name = head.rpartition("/")
     taskset = evaluator.tasksets.retrieve(name, revision=fragment or None, workspace=taskset_workspace or workspace)

@@ -21,6 +21,7 @@ from nemo_evals.runs_cli import (
     SelectionError,
     TaskJobView,
     _results_table,
+    _select_from_spec,
     _status_table,
     _view_json,
     _workspace_flag,
@@ -273,6 +274,32 @@ def test_an_explicit_idempotency_key_wins(tmp_path, spec_key):
     assert explicit.idempotency_key == "k-123"
     default = run_request(ref, spec_file=spec, agent="", sandbox_policy="", dispatcher_profile=None)
     assert default.idempotency_key == (spec_key or default.idempotency_key) and default.idempotency_key
+
+
+def test_spec_selection_ignores_a_publication_that_experiment_replaces(tmp_path):
+    spec = tmp_path / "run.json"
+    body = {
+        "spec": {"tasks": "default/suite#" + "e" * 64, "target": {"kind": "harbor"}},
+        "execution": {"sandbox_policy": "p"},
+        "publication": {"intake": {"experiment": ""}},  # invalid on its own; --experiment replaces it
+    }
+    spec.write_text(json.dumps(body))
+    member = "default/a#" + "1" * 64
+    tasks = SimpleNamespace(
+        retrieve=lambda name, revision, workspace: SimpleNamespace(revision=1, spec=SimpleNamespace())
+    )
+    tasksets = SimpleNamespace(retrieve=lambda name, revision, workspace: SimpleNamespace(tasks=[member]))
+    evaluator = cast(Evaluator, SimpleNamespace(tasks=tasks, tasksets=tasksets))
+    assert _select_from_spec(evaluator, spec, None, "default") == ([member], 1, "suite")
+
+
+def test_spec_selection_needs_a_taskset(tmp_path):
+    spec = tmp_path / "run.json"
+    spec.write_text(
+        json.dumps({"spec": {"tasks": ["default/a#" + "1" * 64], "target": {"kind": "harbor"}}, "execution": {}})
+    )
+    with pytest.raises(ValueError, match="must name a taskset"):
+        _select_from_spec(cast(Evaluator, SimpleNamespace()), spec, None, "default")
 
 
 # --- runs status / runs results ----------------------------------------------------------------------------
