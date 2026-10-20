@@ -593,7 +593,8 @@ test-deployments-openshell: ## Run OpenShell deployment backend unit tests with 
 	# wheel), so the shared unit-test job skips these. Install it just here and
 	# run the backend's tests for real (mirrors the nemo-guardrails --extra bench job).
 	$(UV) run --frozen --package nemo-deployments-plugin --extra openshell \
-		pytest -v plugins/nemo-deployments/tests/unit/backends/openshell/
+		pytest -v plugins/nemo-deployments/tests/unit/backends/openshell/ \
+		plugins/nemo-deployments/tests/unit/test_credential_driver.py
 
 .PHONY: test-jobs-openshell
 test-jobs-openshell: ## Run OpenShell job backend unit + integration tests with the platform-restricted [openshell] extra installed

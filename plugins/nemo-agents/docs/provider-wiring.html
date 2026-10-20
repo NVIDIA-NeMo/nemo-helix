@@ -1,0 +1,249 @@
+<!doctype html>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NeMo Helix · Secret injection wiring</title>
+<style>
+:root { color-scheme: light dark; --bg:#f5f7f8; --panel:#fff; --ink:#162e3b; --muted:#536976; --line:#d3dde2; --blue:#1264a3; --green:#146a51; --amber:#885500; --soft:#e9f1f6; --highlight:#e0f1ea; }
+@media(prefers-color-scheme:dark) { :root { --bg:#111a20; --panel:#1a272f; --ink:#e2edf3; --muted:#aec1cb; --line:#3d535f; --blue:#8bc8f6; --green:#8bdfbc; --amber:#f6c76e; --soft:#263d4b; --highlight:#21483e; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui,-apple-system,sans-serif; }
+main { max-width:1520px; margin:auto; padding:32px; }
+h1 { font-size:clamp(26px,3vw,40px); line-height:1.15; margin:8px 0 12px; font-weight:650; letter-spacing:-.03em; }
+h2 { font-size:20px; margin:0 0 8px; } h3 { font-size:16px; margin:0 0 8px; }
+p { margin:8px 0; } a { color:var(--blue); } small,.muted { color:var(--muted); }
+.eyebrow { text-transform:uppercase; letter-spacing:.12em; font-size:12px; font-weight:650; color:var(--green); }
+.intro { max-width:800px; font-size:17px; }
+.status { display:inline-block; padding:6px 11px; border-radius:6px; background:var(--soft); margin:12px 0; }
+.nav { display:flex; flex-wrap:wrap; gap:8px; margin:20px 0 12px; }
+button { font:inherit; color:inherit; border:1px solid var(--line); background:var(--panel); border-radius:7px; padding:9px 14px; cursor:pointer; }
+button:hover { background:var(--soft); } button[aria-pressed=true] { background:var(--ink); color:var(--bg); border-color:var(--ink); }
+button:focus-visible, a:focus-visible { outline:3px solid var(--blue); outline-offset:3px; }
+button:disabled { opacity:.4; cursor:default; }
+.legend { display:flex; flex-wrap:wrap; gap:18px; font-size:13px; margin:12px 0 20px; color:var(--muted); }
+.key { display:inline-block; width:24px; margin-right:6px; vertical-align:middle; border-top:2px solid var(--green); }
+.key.native { border-color:var(--blue); } .key.todo { border-color:var(--amber); border-top-style:dashed; }
+.flow { display:grid; grid-template-columns:minmax(0,1fr) 285px; gap:20px; align-items:start; }
+.diagram { min-width:0; background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:auto; }
+svg { display:block; min-width:1050px; width:100%; }
+.controls { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; }
+.controls span { font-variant-numeric:tabular-nums; }
+.detail { padding:18px; background:var(--panel); border:1px solid var(--line); border-radius:10px; min-height:235px; }
+.tag { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--green); margin-bottom:9px; }
+.tag.native { color:var(--blue); } .tag.todo { color:var(--amber); }
+.step-list { display:grid; gap:6px; margin-top:12px; }
+.step-list button { text-align:left; padding:7px 10px; font-size:13px; }
+.note { padding:12px 0; margin-top:14px; border-top:1px solid var(--line); font-size:14px; color:var(--muted); }
+.columns { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:20px; margin:20px 0; }
+.box { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:20px; min-width:0; }
+.box p { color:var(--muted); } .arrow { color:var(--blue); font-size:22px; margin:10px 0; }
+.boundary { border:2px dashed var(--amber); padding:16px; border-radius:8px; margin-top:16px; }
+code { font:13px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace; overflow-wrap:anywhere; }
+pre { padding:16px; background:var(--soft); border-radius:8px; white-space:pre-wrap; overflow-wrap:anywhere; margin:12px 0 0; }
+details { margin:18px 0; } summary { cursor:pointer; color:var(--blue); font-weight:600; padding:8px 0; }
+table { width:100%; border-collapse:collapse; } td,th { padding:12px 10px; text-align:left; border-bottom:1px solid var(--line); vertical-align:top; } th { font-size:13px; color:var(--muted); }
+footer { margin-top:24px; padding-top:16px; border-top:1px solid var(--line); color:var(--muted); font-size:13px; }
+[hidden] { display:none !important; }
+@media(max-width:1100px) { .flow { grid-template-columns:1fr; } .detail { min-height:0; } .step-list { grid-template-columns:repeat(3,minmax(0,1fr)); } .columns { grid-template-columns:1fr; } }
+@media(max-width:600px) { main { padding:18px; } .step-list { grid-template-columns:1fr 1fr; } .nav button { flex:1 1 40%; } .legend { gap:9px; } }
+@media print { :root { color-scheme:light; } .nav,.controls,.step-list { display:none; } .flow { display:block; } .diagram { overflow:visible; } svg { min-width:0; } main { padding:0; } }
+</style>
+</head>
+<body>
+<main>
+<div class="eyebrow">NeMo Helix × OpenShell · design &amp; implementation</div>
+<h1>How a secret reaches the service</h1>
+<p class="intro">NeMo stores the credential. A gateway-side driver resolves it. OpenShell injects it outside the agent’s sandbox.</p>
+<div class="status"><strong>Current status:</strong> driver implemented and tested; agent launches with these bindings remain gated.</div>
+<nav class="nav" aria-label="Flow stage">
+<button type="button" data-phase="provision" aria-pressed="true">1 · Provision</button>
+<button type="button" data-phase="request" aria-pressed="false">2 · Resolve &amp; use</button>
+<button type="button" data-phase="revoke" aria-pressed="false">3 · Revoke</button>
+<button type="button" data-phase="deployment" aria-pressed="false">Where it runs</button>
+</nav>
+<div class="legend"><span><i class="key"></i>Implemented in Helix driver</span><span><i class="key native"></i>Existing OpenShell / service behavior</span><span><i class="key todo"></i>Integration needed / unverified</span></div>
+<section id="sequence">
+<h2 id="phase-title"></h2><p id="phase-subtitle" class="muted"></p>
+<div class="flow">
+<div class="diagram" aria-label="Sequence diagram; scroll horizontally on smaller screens">
+<svg id="chart" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="chart-title chart-desc"></svg>
+</div>
+<aside>
+<div class="controls"><button id="previous" type="button" aria-label="Previous step">←</button><span id="counter"></span><button id="next" type="button" aria-label="Next step">→</button></div>
+<div class="detail" aria-live="polite"><div id="detail-status" class="tag"></div><h3 id="detail-title"></h3><p id="detail-text"></p><p class="note" id="detail-payload"></p></div>
+<div id="steps" class="step-list" aria-label="Choose a step"></div>
+</aside>
+</div>
+<p id="phase-note" class="note"></p>
+</section>
+<section id="deployment" hidden>
+<h2>Trusted control plane and runtime. Isolated agent.</h2>
+<p class="muted">The driver runs beside the gateway. The trusted proxy/supervisor may run with the sandbox runtime, but outside the agent’s isolation boundary.</p>
+<div class="columns">
+<section class="box"><div class="eyebrow">Helix control plane</div><h3>Provisioning controller</h3><p>Authorize the user, job, secret reference and approved profile. Mint a short-lived registration ticket.</p><p><strong>Remaining integration:</strong> provider creation, attachment, cleanup and permission-change propagation.</p><div class="arrow">↓ existing metadata / access API</div><h3>NeMo Secrets</h3><p>Persistent credential storage. The real value stays here until a trusted driver resolves it.</p></section>
+<section class="box"><div class="eyebrow">Trusted gateway host</div><h3>OpenShell gateway</h3><p>Owns provider records and attachment policy.</p><div class="arrow">↓ private Unix socket · gRPC</div><h3>NeMo credential driver</h3><p><code>StoreCredential</code> → register reference<br><code>ResolveCredentials</code> → HTTPS to NeMo<br><code>DeleteCredential</code> → delete binding</p><div class="arrow">↓ SQLAlchemy ORM</div><h3>Local SQLite registry</h3><p>Binding scope, ticket digest, opaque handle, job revocations and gateway identity. No credential values.</p></section>
+<section class="box"><div class="eyebrow">Sandbox runtime</div><h3>Trusted OpenShell proxy</h3><p>Enforces network rules and injects real credentials. Static values can be cached in memory.</p><div class="arrow">↑ request with placeholder</div><div class="boundary"><h3>Agent sandbox</h3><p>Only placeholder credentials for provider-bound secrets. No driver socket, signing key or driver service token.</p><p><strong>Required:</strong> restrict the job’s platform identity so the agent cannot retrieve secrets through another API.</p></div></section>
+</div>
+<details open><summary>Who configures what?</summary>
+<table><thead><tr><th>Owner</th><th>Configuration</th><th>Status</th></tr></thead><tbody>
+<tr><td>User</td><td><code>EnvironmentSpec.providers</code>: secret alias + approved profile</td><td>Schema and compiler implemented; launch blocked</td></tr>
+<tr><td>Helix</td><td>Signed tickets, generated provider names, sandbox provider list</td><td>Ticket API implemented; orchestration remains</td></tr>
+<tr><td>Operator</td><td>Driver process, private socket, signing key, service identity and gateway config</td><td>Manual experimental setup documented</td></tr>
+<tr><td>OpenShell</td><td>Endpoint policy, provider attachment enforcement, injection and runtime credential cache</td><td>Existing mechanisms; end-to-end behavior needs acceptance tests</td></tr>
+</tbody></table></details>
+<div class="columns">
+<section class="box"><h3>User’s environment</h3><pre><code>name: service-access
+env:
+  SERVICE_URL: https://service.example
+secrets:
+  SERVICE_SECRET: team/service-token
+providers:
+  service:
+    profile: service-read
+    credentials:
+      API_TOKEN: SERVICE_SECRET</code></pre><p>Provider-bound entries are excluded from environment secret injection. Unbound secrets retain existing behavior.</p></section>
+<section class="box"><h3>Operator’s gateway config</h3><pre><code>[openshell.gateway]
+credential_drivers = ["nemo"]
+
+[openshell.credential_drivers.nemo]
+transport = "uds"
+socket_path = "/run/nemo-credential-driver/driver.sock"</code></pre><p>One active credential driver per gateway. Start this reference-only adapter on a dedicated experimental gateway.</p></section>
+<section class="box"><h3>Local storage or entity store?</h3><p><strong>Entity store is possible.</strong> Gateway location does not prevent an authenticated remote client.</p><p>Local SQLAlchemy + SQLite keeps replay checks and revocation metadata transactional without another remote request. It adds a persistent volume and single-host constraint.</p><p>A remote design needs equivalent atomic registration, restricted service access and explicit outage behavior.</p></section>
+</div>
+</section>
+<details><summary>Hard boundaries to keep in view</summary>
+<ul>
+<li>A placeholder is a lookup hint, not authorization. OpenShell must enforce sandbox-to-provider attachment.</li>
+<li>The driver contract carries provider identity, not sandbox identity. Helix must create and restrict the right attachment.</li>
+<li>Tickets last at most 5 minutes; bindings at most 1 hour. Resolution advertises a 30-second lifetime by default. That does not prove proxy eviction or refresh.</li>
+<li>Deleting a binding stops future driver resolutions. It cannot erase a value already cached by OpenShell.</li>
+<li>Secret permission changes need controller integration; the driver currently reads with its own service identity.</li>
+</ul>
+</details>
+<footer>Implementation snapshot · October 20, 2026 · OpenShell v0.1.2 contract.
+<a href="https://github.com/NVIDIA/OpenShell/blob/v0.1.2/proto/credential_driver.proto">Driver protocol</a> ·
+<a href="https://github.com/NVIDIA/OpenShell/blob/v0.1.2/tasks/scripts/generate_python_proto.py">SDK generation</a>.
+This page makes no network calls. All examples use fictitious services.</footer>
+</main>
+<script>
+const flows = {
+ provision: {
+  title:"Register a reference, then attach it to a sandbox",
+  subtitle:"No real credential moves during StoreCredential. Choose a step to inspect the boundary.",
+  lanes:["User","Helix controller","OpenShell gateway","NeMo driver","NeMo Secrets","Sandbox agent"],
+  note:"The controller flow is still to be wired. The implemented ticket and driver APIs do not yet enable agent launches.",
+  events:[
+   [0,1,"Choose secret + profile","todo","Environment binding","The user picks an existing NeMo secret and an approved injection profile. Agent behavior stays in agent.yaml.","Reference only: team/service-token."],
+   [1,4,"Check secret metadata","done","Authorize before signing","The ticket issuer checks metadata using the requesting user’s client. The controller must also authorize the job and profile; delegated auth needs an explicit effective-user secrets.read check.","No secret value is fetched."],
+   [1,1,"Mint signed ticket","done","Short-lived registration","Bind gateway, provider name, credential slot, NeMo reference, job and expiry. This helper exists; the provisioning call site remains to be added.","Ticket ≤ 5 minutes; binding ≤ 1 hour."],
+   [1,2,"CreateProvider(ticket)","todo","Normal provider creation","Helix passes the signed ticket in the credential value field. OpenShell allocates its provider UUID.","Never send this ticket into the agent or a user-visible job spec."],
+   [2,3,"StoreCredential(ticket, scope)","done","Validate and register","The driver verifies the ticket and binds it to the gateway-supplied provider identity. A ticket cannot be reused for a different provider UUID.","Private Unix socket. This is the tested driver contract."],
+   [3,3,"Persist binding metadata","done","Typed ORM registry","SQLAlchemy persists the reference, owner scope, ticket digest, handle and revocation state. Transaction locking preserves retry identity.","No credential bytes or raw tickets are stored."],
+   [3,2,"Return opaque handle","done","OpenShell retains a handle","Later resolution must present this handle and the matching provider name, UUID, workspace and slot.","The handle is not the sandbox placeholder."],
+   [1,2,"Attach provider to sandbox","todo","Enforce the attachment","Helix must create and attach an authorized provider for this sandbox, then reconcile failures and cleanup. OpenShell must prevent unauthorized attachment.","A unique provider name alone is insufficient."],
+   [2,5,"Start with placeholder","todo","Agent gets no real credential","Provisioning must supply the supported placeholder and restrict job API authority. The agent must not be able to obtain the secret through NeMo APIs.","Launch remains gated until these checks are wired."]
+  ]
+ },
+ request:{
+  title:"Resolve outside the sandbox; inject at the trusted proxy",
+  subtitle:"Resolution is shown when OpenShell asks for a credential—not on every HTTP request.",
+  lanes:["Sandbox agent","Trusted proxy","OpenShell gateway","NeMo driver","NeMo Secrets","External service"],
+  note:"Static credentials may already be cached by OpenShell. The driver fetches on each ResolveCredentials call, but the supervisor’s expiry and refresh behavior still needs a live acceptance test.",
+  events:[
+   [0,1,"Request + placeholder","native","Agent makes a service call","The agent supplies the configured placeholder. The trusted OpenShell proxy enforces the endpoint policy and attached provider scope.","Placeholder contains no real service token."],
+   [2,3,"ResolveCredentials(handle)","done","Trusted credential resolution","When OpenShell requests credentials, it supplies provider identity and the opaque handle. The driver cannot infer sandbox identity from this RPC.","This may happen before or separately from the service request."],
+   [3,3,"Check binding + revocation","done","Deny before reading","Validate owner, handle, binding expiry and job revocation for every item in the batch before making any secret API call.","No agent-controlled secret path is accepted."],
+   [3,4,"Access existing NeMo secret","done","Retrieve with driver identity","The driver uses its scoped service client over HTTPS. Permission/backend failures are returned without leaking credential details.","The service identity and its token must stay outside the sandbox."],
+   [4,3,"Return real credential","done","Transient secret value","The driver receives the value and checks binding validity again, so revocation during the remote read can win.","The driver has no credential-value cache."],
+   [3,2,"Value + expiration_time","done","Bound the advertised lifetime","Return the credential with expiry at the earlier of binding expiry and now + 30 seconds by default.","TTL metadata is not proof of runtime invalidation."],
+   [2,1,"Deliver resolved credentials","native","Trusted runtime cache","OpenShell supplies credentials to its trusted runtime. Static values can be retained in memory.","End-to-end refresh and expiry enforcement are unverified here."],
+   [1,5,"Policy check + inject credential","native","Authenticate outside the sandbox","The proxy sends the allowed service request with the actual credential. The sandbox never receives the injected request header.","The issuer defines the token’s service permissions."],
+   [5,1,"Service response","native","Service returns through proxy","The authenticated service response comes back to the trusted proxy.","The injected request header is not sent to the agent."],
+   [1,0,"Forward response to agent","native","Normal service response","The proxy delivers the response to the agent. Credential handling does not protect against a service deliberately echoing a token.","Use approved destinations and profiles."]
+  ]
+ },
+ revoke:{
+  title:"Stop future resolution—and account for cached credentials",
+  subtitle:"Revoking a NeMo binding and revoking the credential at its issuer are different actions.",
+  lanes:["User","Helix controller","NeMo driver","OpenShell gateway","Trusted proxy","External service"],
+  note:"The driver’s revoke_job method is currently a trusted local operation. The controller transport, attachment cleanup and runtime invalidation paths remain to be implemented and tested.",
+  events:[
+   [0,1,"Revoke job / change access","todo","Permission lifecycle","A job deletion or permission change must trigger a controller action. The current driver service identity does not automatically recheck the original user’s permissions.","NeMo permission changes alone do not clear OpenShell caches."],
+   [1,2,"Revoke binding / job","todo","Wire the control path","The controller needs an authenticated way to revoke the affected bindings and reconcile failure. There is no public revoke_job endpoint in this slice.","Local registry operation exists; orchestration does not."],
+   [2,2,"Persist revocation","done","Keep the denial across restarts","A job tombstone prevents existing bindings from resolving and pending tickets from creating new bindings for that job.","Deleting a binding never deletes the user’s NeMo secret."],
+   [3,2,"Later ResolveCredentials","done","Next resolution checks state","Any later resolution of a revoked binding fails before reading NeMo Secrets.","Already-returned values are outside the driver’s control."],
+   [2,3,"Deny resolution","done","Fail closed at the driver","The driver reports a generic permission denial. It does not return the old credential.","A cached value in the proxy is a separate concern."],
+   [1,3,"Detach / delete provider","todo","Reconcile OpenShell state","Provisioning cleanup must detach or delete the relevant provider and handle retries or outages.","Do not remove a shared provider used by unrelated jobs."],
+   [3,4,"Invalidate / enforce expiry","todo","Runtime acceptance gate","Verify that the deployed gateway and supervisor stop using stale credentials, refresh safely and fail closed on expiry.","A 30-second driver TTL is not yet a 30-second revocation guarantee."],
+   [0,5,"Revoke at credential issuer","native","Invalidate the credential itself","Separately, revoke the actual credential at the external service. Rejection timing depends on that service’s authentication semantics.","Affects every copy of that credential, not only this binding."]
+  ]
+ }
+};
+const labels={done:"Implemented · Helix driver",native:"Existing · OpenShell / service",todo:"Integration needed / unverified"};
+const colors={done:"var(--green)",native:"var(--blue)",todo:"var(--amber)"};
+let phase="provision",selected=0;
+const byId=id=>document.getElementById(id);
+function svgNode(tag,attrs,text){
+ const node=document.createElementNS("http://www.w3.org/2000/svg",tag);
+ for(const [key,value] of Object.entries(attrs)) node.setAttribute(key,value);
+ if(text!==undefined) node.textContent=text;
+ return node;
+}
+function draw(){
+ const flow=flows[phase], chart=byId("chart"), height=110+flow.events.length*64;
+ chart.replaceChildren(); chart.setAttribute("viewBox",`0 0 1200 ${height}`);
+ chart.append(svgNode("title",{id:"chart-title"},flow.title),svgNode("desc",{id:"chart-desc"},"Time flows downward. Solid lines show implemented driver or existing OpenShell behavior. Dashed lines need integration or verification. The step buttons provide details."));
+ const defs=svgNode("defs",{});
+ for(const [kind,color] of Object.entries(colors)){
+  const marker=svgNode("marker",{id:`arrow-${kind}`,viewBox:"0 0 10 10",refX:9,refY:5,markerWidth:7,markerHeight:7,orient:"auto-start-reverse"});
+  marker.append(svgNode("path",{d:"M 0 0 L 10 5 L 0 10 z",fill:color})); defs.append(marker);
+ }
+ chart.append(defs);
+ const x=i=>100+i*200;
+ flow.lanes.forEach((name,i)=>{
+  chart.append(svgNode("line",{x1:x(i),y1:65,x2:x(i),y2:height-20,stroke:"var(--line)","stroke-width":1}));
+  chart.append(svgNode("rect",{x:x(i)-91,y:15,width:182,height:42,rx:7,fill:"var(--soft)"}));
+  chart.append(svgNode("text",{x:x(i),y:41,"text-anchor":"middle",fill:"var(--ink)","font-size":15,"font-weight":600},name));
+ });
+ flow.events.forEach((event,i)=>{
+  const [from,to,label,kind]=event,y=103+i*64,a=x(from),b=x(to),color=colors[kind];
+  if(i===selected) chart.append(svgNode("rect",{x:8,y:y-29,width:1184,height:56,rx:6,fill:"var(--highlight)"}));
+  chart.append(svgNode("text",{x:20,y:y+5,fill:"var(--muted)","font-size":13},String(i+1).padStart(2,"0")));
+  const attrs={stroke:color,"stroke-width":i===selected?2.5:1.5,fill:"none","marker-end":`url(#arrow-${kind})`};
+  if(kind==="todo") attrs["stroke-dasharray"]="6 4";
+  if(from===to){
+   chart.append(svgNode("path",{...attrs,d:`M ${a} ${y-7} h 45 v 23 h -45`}));
+   chart.append(svgNode("text",{x:a+58,y:y+7,fill:"var(--ink)","font-size":14},label));
+  }else{
+   chart.append(svgNode("line",{...attrs,x1:a,y1:y+10,x2:b,y2:y+10}));
+   const center=(a+b)/2;
+   chart.append(svgNode("text",{x:center,y:y-4,"text-anchor":"middle",fill:"var(--ink)","font-size":14},label));
+  }
+ });
+ const event=flow.events[selected];
+ byId("counter").textContent=`${selected+1} / ${flow.events.length}`;
+ byId("detail-status").className=`tag ${event[3]}`; byId("detail-status").textContent=labels[event[3]];
+ byId("detail-title").textContent=event[4]; byId("detail-text").textContent=event[5]; byId("detail-payload").textContent=event[6];
+ byId("previous").disabled=selected===0; byId("next").disabled=selected===flow.events.length-1;
+ [...byId("steps").children].forEach((button,i)=>button.setAttribute("aria-pressed",String(i===selected)));
+}
+function show(name){
+ phase=name; selected=0;
+ document.querySelectorAll("[data-phase]").forEach(button=>button.setAttribute("aria-pressed",String(button.dataset.phase===name)));
+ byId("sequence").hidden=name==="deployment"; byId("deployment").hidden=name!=="deployment";
+ if(name==="deployment") return;
+ const flow=flows[name]; byId("phase-title").textContent=flow.title; byId("phase-subtitle").textContent=flow.subtitle; byId("phase-note").textContent=flow.note;
+ byId("steps").replaceChildren();
+ flow.events.forEach((event,i)=>{const button=document.createElement("button");button.type="button";button.textContent=`${i+1}. ${event[2]}`;button.addEventListener("click",()=>{selected=i;draw();});byId("steps").append(button);});
+ draw();
+}
+document.querySelectorAll("[data-phase]").forEach(button=>button.addEventListener("click",()=>show(button.dataset.phase)));
+byId("previous").addEventListener("click",()=>{selected=Math.max(0,selected-1);draw();});
+byId("next").addEventListener("click",()=>{selected=Math.min(flows[phase].events.length-1,selected+1);draw();});
+show("provision");
+</script>
+</body>
+</html>

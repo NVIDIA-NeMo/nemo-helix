@@ -147,7 +147,7 @@ async def create_deployment(
     resolved_environment = await _resolve_deployment_environment(
         body.environment, workspace=workspace, entity_client=entity_client
     )
-    merged = _merge_environment(resolved_config, resolved_environment.environment_spec)
+    merged = _merge_environment(resolved_config, resolved_environment.environment_spec, workspace=workspace)
 
     # 5. Only a Fabric agent stages a spec fileset; a same-named one would mislead.
     spec = SpecRevision()
@@ -213,9 +213,13 @@ async def _resolve_deployment_environment(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-def _merge_environment(config: dict[str, Any], env_spec: EnvironmentSpecInline | None) -> MergedEnvironment:
+def _merge_environment(
+    config: dict[str, Any], env_spec: EnvironmentSpecInline | None, *, workspace: str
+) -> MergedEnvironment:
     try:
-        return merge_environment_spec_into_agent_config(config, env_spec)
+        merged = merge_environment_spec_into_agent_config(config, env_spec, workspace=workspace)
+        merged.require_runtime_support()
+        return merged
     except EnvironmentResolutionError as exc:
         # 422: e.g. a secret env var bound to conflicting references.
         raise HTTPException(status_code=422, detail=str(exc)) from exc

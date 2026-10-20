@@ -12,6 +12,7 @@ dependencies = [
     "nemo-helix-plugin",
     "pydantic>=2.10.6",
     "pyyaml>=6.0",
+    "sqlalchemy>=2.0.0",
 ]
 version = "0.0.0"
 

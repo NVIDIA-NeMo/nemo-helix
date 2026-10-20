@@ -2743,7 +2743,21 @@ components:
             type: string
           type: object
           title: Secrets
-          description: ENV_VAR_NAME -> Secrets-service/plugin ref.
+          description: ENV_VAR_NAME -> Secrets-service/plugin ref. Entries consumed
+            by providers are reserved for external injection; only unconsumed entries
+            become secret-backed process env vars.
+        providers:
+          patternProperties:
+            ^\S+$:
+              $ref: '#/components/schemas/ProviderFulfillment'
+          propertyNames:
+            minLength: 1
+          type: object
+          title: Providers
+          description: Named provider fulfillments. Consumed secret entries are reserved
+            for external credential injection, never process-env injection. Execution
+            and deployment support is not yet available.
+          additionalProperties: true
         model_provider_override:
           allOf:
           - $ref: '#/components/schemas/ModelProviderOverride'
@@ -3264,7 +3278,21 @@ components:
             type: string
           type: object
           title: Secrets
-          description: ENV_VAR_NAME -> Secrets-service/plugin ref.
+          description: ENV_VAR_NAME -> Secrets-service/plugin ref. Entries consumed
+            by providers are reserved for external injection; only unconsumed entries
+            become secret-backed process env vars.
+        providers:
+          patternProperties:
+            ^\S+$:
+              $ref: '#/components/schemas/ProviderFulfillment'
+          propertyNames:
+            minLength: 1
+          type: object
+          title: Providers
+          description: Named provider fulfillments. Consumed secret entries are reserved
+            for external credential injection, never process-env injection. Execution
+            and deployment support is not yet available.
+          additionalProperties: true
         model_provider_override:
           allOf:
           - $ref: '#/components/schemas/ModelProviderOverride'
@@ -3479,7 +3507,21 @@ components:
             type: string
           type: object
           title: Secrets
-          description: ENV_VAR_NAME -> Secrets-service/plugin ref.
+          description: ENV_VAR_NAME -> Secrets-service/plugin ref. Entries consumed
+            by providers are reserved for external injection; only unconsumed entries
+            become secret-backed process env vars.
+        providers:
+          patternProperties:
+            ^\S+$:
+              $ref: '#/components/schemas/ProviderFulfillment'
+          propertyNames:
+            minLength: 1
+          type: object
+          title: Providers
+          description: Named provider fulfillments. Consumed secret entries are reserved
+            for external credential injection, never process-env injection. Execution
+            and deployment support is not yet available.
+          additionalProperties: true
         model_provider_override:
           allOf:
           - $ref: '#/components/schemas/ModelProviderOverride'
@@ -4903,6 +4945,38 @@ components:
       - total_pages
       - total_results
       title: PaginationData
+    ProviderFulfillment:
+      properties:
+        profile:
+          type: string
+          minLength: 1
+          pattern: ^\S+$
+          title: Profile
+          description: Operator-approved credential injection profile identifier.
+        credentials:
+          patternProperties:
+            ^[A-Za-z_][A-Za-z0-9_]*$:
+              type: string
+              pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+          type: object
+          minProperties: 1
+          title: Credentials
+          description: Profile credential slot -> key in this EnvironmentSpec's secrets
+            map, not a secret value.
+          additionalProperties: true
+      additionalProperties: false
+      type: object
+      required:
+      - profile
+      - credentials
+      title: ProviderFulfillment
+      description: 'Bind an approved injection profile to existing environment secret
+        entries.
+
+
+        This describes intent only. Runtime support must be checked before launching
+
+        an agent; storing a fulfillment does not grant access to its credentials.'
     ResolvedAgentConfig:
       properties:
         name:
