@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RlGRPOTrainingFinetuningType } from '@nemo/sdk/generated/customizer/schema';
-import { customizationJob1, customizationJob3 } from '@studio/mocks/customizer/customization-jobs';
+import {
+  customizationJob1,
+  customizationJob3,
+  grpoCustomizationJob,
+} from '@studio/mocks/customizer/customization-jobs';
 import {
   FORM_DEFAULTS,
   RL_DPO_TRAINING_DEFAULTS,
@@ -509,11 +513,30 @@ describe('jobToFormFields', () => {
     expect(fields.automodel.optimizer?.learning_rate).toBeUndefined();
   });
 
-  it('drops the stored spec’s backend, which the automodel submit schema forbids', () => {
+  // A stored spec is the backend's output shape, and every backend's submit forbids extras.
+  it.each([
+    ['automodel', customizationJob1],
+    ['unsloth', customizationJob3],
+    ['rl', grpoCustomizationJob],
+  ] as const)('drops fields the %s submit schema does not accept', (backend, source) => {
+    const job = {
+      ...source,
+      spec: {
+        ...source.spec,
+        backend,
+        training: { ...source.spec.training, not_a_field: 1 },
+      },
+    } as unknown as typeof source;
+    const arm = jobToFormFields(job)[backend];
+    expect(arm).not.toHaveProperty('backend');
+    expect(arm.training).not.toHaveProperty('not_a_field');
+  });
+
+  it('still drops unknown top-level fields from a spec that fails to parse', () => {
     const job = {
       ...customizationJob1,
-      spec: { ...customizationJob1.spec, backend: 'automodel' },
-    } as typeof customizationJob1;
+      spec: { ...customizationJob1.spec, backend: 'automodel', parallelism: 'invalid' },
+    } as unknown as typeof customizationJob1;
     const body = formToAutomodelCreate(jobToFormFields(job));
     expect(body.spec).not.toHaveProperty('backend');
   });

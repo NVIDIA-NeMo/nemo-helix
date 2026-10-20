@@ -600,14 +600,41 @@ export interface ReplayableJob {
   backend?: CustomizationBackend;
 }
 
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** `value` restricted to the keys `known` also has, so nothing is added, only dropped. */
+const keepKnownKeys = (value: unknown, known: unknown): unknown => {
+  if (Array.isArray(value) && Array.isArray(known)) {
+    return value.map((item, i) => keepKnownKeys(item, known[i]));
+  }
+  if (!isPlainRecord(value) || !isPlainRecord(known)) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => key in known)
+      .map(([key, v]) => [key, keepKnownKeys(v, known[key])])
+  );
+};
+
+/**
+ * A stored spec is the backend's output shape, which has fields its submit forbids (e.g.
+ * `backend`). The generated schemas aren't strict, so parsing drops them at every level, but
+ * it also fills defaults, and the backend treats an unset field differently from one at its
+ * default. So the parse only says which keys to keep. A spec that fails to parse still loses
+ * its unknown top-level keys, and the form reports the rest.
+ */
+const toSubmittableSpec = <T>(schema: z.AnyZodObject, spec: unknown): T => {
+  const cleaned = stripNulls(spec) as Record<string, unknown>;
+  const parsed = schema.safeParse(cleaned);
+  if (parsed.success) return keepKnownKeys(cleaned, parsed.data) as T;
+  return Object.fromEntries(Object.entries(cleaned).filter(([key]) => key in schema.shape)) as T;
+};
+
 export const jobToFormFields = (job: ReplayableJob): CustomizationFormFields => {
   const backend = job.backend ?? getCustomizationBackend(job.spec);
 
   if (backend === CustomizationBackend.automodel) {
-    // The stored spec carries `backend`, which the submit schema forbids, so a clone or a
-    // template saved from a job would otherwise be rejected on submit.
-    const spec = stripNulls(job.spec) as AutomodelJobInput & { backend?: string };
-    delete spec.backend;
+    const spec = toSubmittableSpec<AutomodelJobInput>(automodelBodySpec, job.spec);
     // A job submitted outside Studio can ask to merge either way round. Both merge, and
     // the form only shows `finetuning_type`, so a job carrying `lora.merge` has to come
     // back as lora_merged or it would replay as an unmerged adapter.
@@ -624,7 +651,7 @@ export const jobToFormFields = (job: ReplayableJob): CustomizationFormFields => 
     };
   }
   if (backend === CustomizationBackend.rl) {
-    const spec = stripNulls(job.spec) as RlJobInput;
+    const spec = toSubmittableSpec<RlJobInput>(rlBodySpec, job.spec);
     // GRPO-only hyperparameters live in the `grpo` namespace, not on spec.training,
     // so replaying the spec alone would present a cloned GRPO job as a default DPO one.
     const grpo = spec.training.type === 'grpo' ? spec.training : undefined;
@@ -692,7 +719,7 @@ export const jobToFormFields = (job: ReplayableJob): CustomizationFormFields => 
     outputName: generateDefaultName(),
     description: job.description ?? '',
     backend: 'unsloth',
-    unsloth: stripNulls(job.spec) as UnslothJobInput,
+    unsloth: toSubmittableSpec<UnslothJobInput>(unslothBodySpec, job.spec),
   };
 };
 
