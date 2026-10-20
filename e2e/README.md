@@ -332,7 +332,7 @@ What it proves:
 
 This creates a local profile named `minikube-auth` by default, enables ingress, exposes it on `http://localhost:30080`, and creates the minimal placeholder secrets the chart expects (`ngc-api`, `nvcrimagepullsecret`).
 
-Set `MINIKUBE_CNI=calico` when creating the profile to enforce NetworkPolicy. minikube's default CNI accepts NetworkPolicy resources but does not enforce them.
+Set `MINIKUBE_CNI=cilium` when creating the profile to enforce NetworkPolicy. minikube's default CNI accepts NetworkPolicy resources but does not enforce them.
 
 ### 2. Build local images into minikube
 

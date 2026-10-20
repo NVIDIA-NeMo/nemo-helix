@@ -14,6 +14,7 @@ import httpx
 import pytest
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.deployment import DeploymentParams, ToolCallParams
+from nemo_helix_plugin.jobs.providers import DistributedGPUExecutionProvider, GPUExecutionProvider
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.models.types import ModelEntity
 from nhx.automodel.adapter import automodel_spec_to_compiler_output

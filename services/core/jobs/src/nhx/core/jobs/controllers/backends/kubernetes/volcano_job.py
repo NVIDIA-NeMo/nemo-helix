@@ -389,19 +389,6 @@ class VolcanoJobBackend(
                 plural="jobs",
                 body=volcano_job,
             )
-            logger.info(
-                "Scheduled job step with Volcano job", extra={"job_name": job_name, "namespace": self.namespace}
-            )
-            uid = created.get("metadata", {}).get("uid") if isinstance(created, dict) else None
-            if network_policy_name and uid:
-                adopt_step_network_policy(
-                    self._networking_v1,
-                    self.namespace,
-                    network_policy_name,
-                    client.V1OwnerReference(
-                        api_version="batch.volcano.sh/v1alpha1", kind="Job", name=job_name, uid=uid
-                    ),
-                )
         except ApiException as e:
             if e.status == 404:
                 # Volcano CRD not found - Volcano is not installed in the cluster
@@ -420,8 +407,7 @@ class VolcanoJobBackend(
                     namespace=self.namespace,
                     name=configmap_name,
                 )
-                if network_policy_name:
-                    delete_step_network_policy(self._networking_v1, self.namespace, network_policy_name)
+                self._delete_step_network_policy(network_policy_name)
                 return JobUpdate(
                     status=HelixJobStatus.ERROR,
                     error_details={
@@ -429,15 +415,25 @@ class VolcanoJobBackend(
                         "reason": "VolcanoNotInstalled",
                     },
                 )
-            else:
-                logger.exception(
-                    "Failed to create Volcano Job",
-                    extra={"job_name": job_name, "namespace": self.namespace, "error_message": e.reason},
-                )
-                raise
+            logger.exception(
+                "Failed to create Volcano Job",
+                extra={"job_name": job_name, "namespace": self.namespace, "error_message": e.reason},
+            )
+            self._delete_step_network_policy(network_policy_name)
+            raise
         except Exception:
             logger.exception("Failed to create Volcano Job", extra={"job_name": job_name, "namespace": self.namespace})
+            self._delete_step_network_policy(network_policy_name)
             raise
+        logger.info("Scheduled job step with Volcano job", extra={"job_name": job_name, "namespace": self.namespace})
+        uid = created.get("metadata", {}).get("uid") if isinstance(created, dict) else None
+        if network_policy_name and uid:
+            adopt_step_network_policy(
+                self._networking_v1,
+                self.namespace,
+                network_policy_name,
+                client.V1OwnerReference(api_version="batch.volcano.sh/v1alpha1", kind="Job", name=job_name, uid=uid),
+            )
         return JobUpdate(
             status=HelixJobStatus.PENDING, status_details={"message": "Job scheduled with Volcano backend"}
         )

@@ -70,5 +70,5 @@ export SANDBOXED_GYM_SRC_DIR="$gym_rw"
 export PYTHONPATH="$gym_rw:$root${PYTHONPATH:+:$PYTHONPATH}"
 cd "$root"
 echo "gym-host: starting gym_host_runtime (gym src $gym_rw)" >&2
-"$venv/bin/python" "$runtime"
+exec "$venv/bin/python" "$runtime"
 

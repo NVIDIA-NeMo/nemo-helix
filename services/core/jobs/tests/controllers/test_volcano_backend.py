@@ -1996,6 +1996,7 @@ def test_schedule_creates_network_policy_before_volcano_job_and_hands_it_to_the_
     assert (owner["apiVersion"], owner["kind"], owner["uid"]) == ("batch.volcano.sh/v1alpha1", "Job", "vcjob-uid")
     assert owner["controller"] is True
     assert owner["blockOwnerDeletion"] is True
+    calls.networking.delete_namespaced_network_policy.assert_not_called()
 
 
 def test_schedule_removes_network_policy_when_volcano_is_missing(
@@ -2010,6 +2011,23 @@ def test_schedule_removes_network_policy_when_volcano_is_missing(
     update = volcano_job.schedule(distributed_gpu_execution_provider, _step_with_network(test_step_pending))
 
     assert update.status == HelixJobStatus.ERROR
+    volcano_job._networking_v1.delete_namespaced_network_policy.assert_called_once()
+
+
+@pytest.mark.parametrize("error", [ApiException(status=500), RuntimeError("boom")])
+def test_schedule_removes_network_policy_when_volcano_job_creation_fails(
+    volcano_job: VolcanoJobBackend,
+    distributed_gpu_execution_provider: DistributedGPUExecutionProvider,
+    test_step_pending: HelixJobStepWithContext,
+    error: Exception,
+):
+    volcano_job._execution_profile_config.step_network_policies_enabled = True
+    volcano_job._networking_v1 = MagicMock()
+    volcano_job._custom_v1.create_namespaced_custom_object.side_effect = error  # ty: ignore[unresolved-attribute]
+
+    with pytest.raises(type(error)):
+        volcano_job.schedule(distributed_gpu_execution_provider, _step_with_network(test_step_pending))
+
     volcano_job._networking_v1.delete_namespaced_network_policy.assert_called_once()
 
 

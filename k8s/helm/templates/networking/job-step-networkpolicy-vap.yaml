@@ -37,7 +37,11 @@ spec:
       expression: string(variables.sel['nhx.nvidia.com/job_id'])
   validations:
     - expression: >-
-        request.operation == 'CREATE' || oldObject.metadata.labels['nhx.nvidia.com/managed_by'] == 'jobs-controller'
+        request.operation == 'CREATE' ||
+        (oldObject.metadata.labels['nhx.nvidia.com/managed_by'] == 'jobs-controller' &&
+        oldObject.spec.podSelector.matchLabels['nhx.nvidia.com/managed_by'] == 'jobs-controller' &&
+        oldObject.spec.podSelector.matchLabels['nhx.nvidia.com/job_id'] != '' &&
+        oldObject.spec.podSelector.matchLabels['nhx.nvidia.com/job_step_id'] != '')
       message: The jobs controller may only modify or delete NetworkPolicies it manages.
     - expression: >-
         request.operation == 'DELETE' ||

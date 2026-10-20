@@ -292,26 +292,22 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         )
 
         try:
-            # Create the job in Kubernetes
             created = self._batch_v1.create_namespaced_job(namespace=self.namespace, body=k8s_job)
-            logger.info(
-                "Scheduled job step with Kubernetes job", extra={"job_name": job_name, "namespace": self.namespace}
-            )
-            if network_policy_name and created.metadata and created.metadata.uid:
-                adopt_step_network_policy(
-                    self._networking_v1,
-                    self.namespace,
-                    network_policy_name,
-                    client.V1OwnerReference(
-                        api_version="batch/v1", kind="Job", name=job_name, uid=created.metadata.uid
-                    ),
-                )
-            self._ensure_initial_workload_delegation(step, k8s_job)
         except ApiException:
             logger.exception(
                 "Failed to create Kubernetes job", extra={"job_name": job_name, "namespace": self.namespace}
             )
+            self._delete_step_network_policy(network_policy_name)
             raise
+        logger.info("Scheduled job step with Kubernetes job", extra={"job_name": job_name, "namespace": self.namespace})
+        if network_policy_name and created.metadata and created.metadata.uid:
+            adopt_step_network_policy(
+                self._networking_v1,
+                self.namespace,
+                network_policy_name,
+                client.V1OwnerReference(api_version="batch/v1", kind="Job", name=job_name, uid=created.metadata.uid),
+            )
+        self._ensure_initial_workload_delegation(step, k8s_job)
 
         return JobUpdate(
             status=HelixJobStatus.PENDING,

@@ -3491,6 +3491,22 @@ def test_schedule_creates_network_policy_before_job_and_hands_it_to_the_job(
     assert (owner["apiVersion"], owner["kind"], owner["uid"]) == ("batch/v1", "Job", "job-uid")
     assert owner["controller"] is True
     assert owner["blockOwnerDeletion"] is True
+    calls.networking.delete_namespaced_network_policy.assert_not_called()
+
+
+def test_schedule_removes_network_policy_when_kubernetes_job_creation_fails(
+    kubernetes_job, cpu_execution_provider, test_step_pending
+):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = True
+    kubernetes_job._networking_v1 = MagicMock()
+    kubernetes_job._batch_v1.create_namespaced_job.side_effect = ApiException(status=500)
+
+    with pytest.raises(ApiException):
+        kubernetes_job.schedule(cpu_execution_provider, _step_with_network(test_step_pending))
+
+    kubernetes_job._networking_v1.delete_namespaced_network_policy.assert_called_once_with(
+        name=name_for_step(test_step_pending), namespace="test-namespace"
+    )
 
 
 def test_schedule_fails_closed_when_network_policy_cannot_be_created(
