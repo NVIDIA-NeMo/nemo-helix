@@ -69,12 +69,10 @@ export const DetailsTab: FC<DetailsTabProps> = ({ model, adapter, lineage, jobRe
       />
 
       {adapter && (
-        <Grid asChild colMinWidth="220px" gap="density-lg" aria-label="Adapter">
-          <section>
-            {getAdapterTiles(adapter).map((tile) => (
-              <StatTile key={tile.label} {...tile} />
-            ))}
-          </section>
+        <Grid colMinWidth="220px" gap="density-lg">
+          {getAdapterTiles(adapter).map((tile) => (
+            <StatTile key={tile.label} {...tile} />
+          ))}
         </Grid>
       )}
 

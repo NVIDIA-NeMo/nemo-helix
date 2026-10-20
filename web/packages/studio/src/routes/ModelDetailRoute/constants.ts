@@ -8,8 +8,3 @@ export enum ModelDetailTab {
   Training = 'training',
   Logs = 'logs',
 }
-
-export const MODEL_DETAIL_DEFAULT_TAB = ModelDetailTab.Details;
-
-export const isModelDetailTab = (value: string | undefined): value is ModelDetailTab =>
-  Object.values(ModelDetailTab).includes(value as ModelDetailTab);

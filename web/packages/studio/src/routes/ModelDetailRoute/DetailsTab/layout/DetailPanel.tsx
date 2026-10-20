@@ -9,7 +9,7 @@ import {
   hasDetailValue,
 } from '@studio/routes/ModelDetailRoute/DetailsTab/fields';
 import { FieldGrid } from '@studio/routes/ModelDetailRoute/DetailsTab/layout/FieldGrid';
-import { type FC, useId } from 'react';
+import type { FC } from 'react';
 
 export interface DetailPanelProps {
   heading: string;
@@ -20,14 +20,13 @@ export interface DetailPanelProps {
 
 /** A raised panel: headline numbers as stat tiles above the remaining fields. */
 export const DetailPanel: FC<DetailPanelProps> = ({ heading, description, tiles, fields }) => {
-  const headingId = useId();
   const hasFields = fields.some((field) => hasDetailValue(field.value));
   return (
-    <Panel elevation="high" className="h-full" aria-labelledby={headingId}>
+    <Panel elevation="high" className="h-full">
       <Stack gap="density-xl">
         <Stack gap="density-xs">
           <Text kind="label/bold/lg" asChild>
-            <h2 id={headingId}>{heading}</h2>
+            <h2>{heading}</h2>
           </Text>
           {description && (
             <Text kind="body/regular/sm" className="text-secondary">

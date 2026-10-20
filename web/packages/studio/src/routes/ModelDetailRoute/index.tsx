@@ -19,11 +19,7 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { LogsTab } from '@studio/routes/CustomizationJobDetailsRoute/LogsTab';
-import {
-  isModelDetailTab,
-  MODEL_DETAIL_DEFAULT_TAB,
-  ModelDetailTab,
-} from '@studio/routes/ModelDetailRoute/constants';
+import { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
 import { DetailsTab } from '@studio/routes/ModelDetailRoute/DetailsTab';
 import {
   getCustomizationJobListRoute,
@@ -72,11 +68,8 @@ export const ModelDetailRoute: FC = () => {
       : []),
   ];
 
-  const tabFromUrl = getQueryParam(QUERY_PARAMETERS.tab) || undefined;
-  const selectedTab =
-    isModelDetailTab(tabFromUrl) && tabs.some((tab) => tab.value === tabFromUrl)
-      ? tabFromUrl
-      : MODEL_DETAIL_DEFAULT_TAB;
+  const tabFromUrl = getQueryParam(QUERY_PARAMETERS.tab);
+  const selectedTab = tabs.find((tab) => tab.value === tabFromUrl)?.value ?? ModelDetailTab.Details;
 
   const isJobTab = selectedTab === ModelDetailTab.Training || selectedTab === ModelDetailTab.Logs;
 
@@ -116,20 +109,21 @@ export const ModelDetailRoute: FC = () => {
         <TabsRoot
           className="flex min-h-0 flex-1 flex-col gap-density-xl"
           value={selectedTab}
-          onValueChange={(value) => {
-            if (isModelDetailTab(value)) setQueryParam(QUERY_PARAMETERS.tab, value);
-          }}
+          onValueChange={(value) => setQueryParam(QUERY_PARAMETERS.tab, value)}
         >
           <DetailPageHeader
             heading={name}
             slotStatus={
               <DeploymentStatusBadge state={lineage.deployment} isAdapter={Boolean(adapter)} />
             }
-            slotTags={tags.map((tag) => (
-              <Badge key={tag} kind="outline" color="gray">
-                {tag}
-              </Badge>
-            ))}
+            slotTags={
+              tags.length > 0 &&
+              tags.map((tag) => (
+                <Badge key={tag} kind="outline" color="gray">
+                  {tag}
+                </Badge>
+              ))
+            }
             description={(adapter ?? model).description}
             tabs={tabs}
             slotActions={

@@ -66,45 +66,43 @@ export const LineageSection: FC<LineageSectionProps> = ({
   const deploymentCard = getDeploymentCard(deployment);
 
   return (
-    <Grid asChild colMinWidth="220px" gap="density-lg" aria-label="Lineage">
-      <section>
-        {base && <LineageCard label="Base Model" value={base.name} to={base.to} note={base.note} />}
+    <Grid colMinWidth="220px" gap="density-lg">
+      {base && <LineageCard label="Base Model" value={base.name} to={base.to} note={base.note} />}
 
-        {job && (
-          <LineageCard
-            label="Training Job"
-            loading={job.isLoading}
-            value={job.jobName ?? 'Not found'}
-            to={job.jobName ? job.to : undefined}
-            badge={job.status && <StatusBadge status={job.status} />}
-            note={
-              job.jobName
-                ? job.createdAt && formatAbsoluteTimestamp(job.createdAt)
-                : 'No job lists this model as its output'
-            }
-          />
-        )}
-
+      {job && (
         <LineageCard
-          label="Files"
-          value={fileset?.name ?? 'None'}
-          to={
-            fileset
-              ? getFilesetRoute(fileset.workspace, `${fileset.workspace}/${fileset.name}`)
-              : undefined
+          label="Training Job"
+          loading={job.isLoading}
+          value={job.jobName ?? 'Not found'}
+          to={job.jobName ? job.to : undefined}
+          badge={job.status && <StatusBadge status={job.status} />}
+          note={
+            job.jobName
+              ? job.createdAt && formatAbsoluteTimestamp(job.createdAt)
+              : 'No job lists this model as its output'
           }
-          note={fileset ? `Fileset in ${fileset.workspace}` : 'No fileset'}
         />
+      )}
 
-        <LineageCard
-          label="Deployment"
-          loading={deployment.kind === 'loading'}
-          value={deploymentCard.value}
-          to={deploymentCard.to}
-          badge={<DeploymentStatusBadge state={deployment} isAdapter={isAdapter} />}
-          note={deploymentCard.note}
-        />
-      </section>
+      <LineageCard
+        label="Files"
+        value={fileset?.name ?? 'None'}
+        to={
+          fileset
+            ? getFilesetRoute(fileset.workspace, `${fileset.workspace}/${fileset.name}`)
+            : undefined
+        }
+        note={fileset ? `Fileset in ${fileset.workspace}` : 'No fileset'}
+      />
+
+      <LineageCard
+        label="Deployment"
+        loading={deployment.kind === 'loading'}
+        value={deploymentCard.value}
+        to={deploymentCard.to}
+        badge={<DeploymentStatusBadge state={deployment} isAdapter={isAdapter} />}
+        note={deploymentCard.note}
+      />
     </Grid>
   );
 };

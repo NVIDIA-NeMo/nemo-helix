@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Stack, Text } from '@nvidia/foundations-react-core';
-import { type FC, type ReactNode, useId } from 'react';
+import type { FC, ReactNode } from 'react';
 
 export interface DetailSectionProps {
   heading: string;
@@ -11,13 +11,12 @@ export interface DetailSectionProps {
 }
 
 export const DetailSection: FC<DetailSectionProps> = ({ heading, description, children }) => {
-  const headingId = useId();
   return (
     <Stack asChild gap="density-lg" className="w-full">
-      <section aria-labelledby={headingId}>
+      <section>
         <Stack gap="density-xs">
           <Text kind="label/bold/lg" asChild>
-            <h2 id={headingId}>{heading}</h2>
+            <h2>{heading}</h2>
           </Text>
           {description && (
             <Text kind="body/regular/sm" className="text-secondary">
