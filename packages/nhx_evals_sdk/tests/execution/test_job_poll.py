@@ -35,7 +35,11 @@ class TestAsyncPollUntilTerminal:
         mocker: MockerFixture,
     ) -> None:
         """Every poll attempt should emit a JSON info log with the current status."""
-        mocker.patch("nhx_evals_sdk.execution.job_poll.monotonic", return_value=0.0)
+        # Advance the polling clock without changing asyncio's monotonic clock.
+        mocker.patch(
+            "nhx_evals_sdk.execution.job_poll.monotonic",
+            side_effect=[0.0, 0.1, 0.1, 0.2, 0.2, 0.3, 0.3, 0.4, 0.4],
+        )
 
         with caplog.at_level(logging.INFO, logger="nhx_evals_sdk.execution.job_poll"):
             result = await async_poll_until_terminal(
@@ -52,8 +56,8 @@ class TestAsyncPollUntilTerminal:
         payloads = [json.loads(record.getMessage()) for record in caplog.records]
         assert payloads == [
             {"job_name": "metric job 'abc'", "status": "running", "elapsed_s": 0.0, "poll_interval_s": 0.0},
-            {"job_name": "metric job 'abc'", "status": "active", "elapsed_s": 0.0, "poll_interval_s": 0.0},
-            {"job_name": "metric job 'abc'", "status": "completed", "elapsed_s": 0.0, "poll_interval_s": 0.0},
+            {"job_name": "metric job 'abc'", "status": "active", "elapsed_s": 0.2, "poll_interval_s": 0.0},
+            {"job_name": "metric job 'abc'", "status": "completed", "elapsed_s": 0.4, "poll_interval_s": 0.0},
         ]
         assert all("pending_elapsed_s" not in payload for payload in payloads)
 
