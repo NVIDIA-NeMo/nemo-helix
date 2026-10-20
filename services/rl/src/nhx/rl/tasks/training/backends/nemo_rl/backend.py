@@ -147,8 +147,6 @@ class NemoRLBackend(TrainingBackend):
             "BASE_LOG_DIR": str(workspace_dir),
             "GPUS_PER_NODE": str(customizer_config.parallelism.num_gpus_per_node),
         }
-        if customizer_config.parallelism.num_nodes > 1:
-            env_overrides.update(get_nccl_ib_env())
         # MLflow integration (if configured)
         if customizer_config.integrations and customizer_config.integrations.mlflow:
             mlflow_config = customizer_config.integrations.mlflow
@@ -175,6 +173,9 @@ class NemoRLBackend(TrainingBackend):
 
         bootstrap = create_bootstrap_from_env()
         bootstrap.progress = progress
+        if customizer_config.parallelism.num_nodes > 1:
+            # Each pod has its own RDMA devices, so each node's ray start gets this pod's list.
+            bootstrap.node_env = get_nccl_ib_env()
 
         # Set up signal handler for cleanup — terminate the driver subprocess
         # explicitly so it doesn't become orphaned, then let SystemExit propagate

@@ -189,6 +189,14 @@ class RayClusterBootstrap:
     Example: "/opt/venv/lib/python3.12/site-packages:/other/path"
     """
 
+    node_env: dict[str, str] = field(default_factory=dict)
+    """Environment for this node's ``ray start`` only, such as the RDMA devices this pod can use.
+
+    Ray workers inherit it from the node's raylet. It is kept out of the driver, because NeMo-RL
+    copies the driver's environment to every worker on every node, which would replace each
+    node's own value with the head's.
+    """
+
     # Internal state
     # Driver wall clock. None when the cluster is started without a driver.
     progress: JobsServiceProgressReporter | None = field(default=None, repr=False)
@@ -219,6 +227,10 @@ class RayClusterBootstrap:
 
         # Disable proxy environment variables for local pod communication
         self._unset_proxy_env()
+
+    def _ray_start_env(self) -> dict[str, str] | None:
+        """The environment for ``ray start``: this process's plus ``node_env``, or None to inherit it unchanged."""
+        return {**os.environ, **self.node_env} if self.node_env else None
 
     def _unset_proxy_env(self) -> None:
         """Unset proxy environment variables for local pod communication."""
@@ -482,7 +494,7 @@ class RayClusterBootstrap:
         logger.info(f"Starting head: {' '.join(cmd)}")
         print(f"[ray_bootstrap] Starting head: {' '.join(cmd)}", flush=True)
         try:
-            result = subprocess.run(cmd, check=False, timeout=RAY_START_TIMEOUT_SECONDS)
+            result = subprocess.run(cmd, check=False, timeout=RAY_START_TIMEOUT_SECONDS, env=self._ray_start_env())
         except subprocess.TimeoutExpired:
             logger.warning(f"Ray head start timed out after {RAY_START_TIMEOUT_SECONDS}s")
             print(f"[ray_bootstrap] Ray head start timed out after {RAY_START_TIMEOUT_SECONDS}s", flush=True)
@@ -522,7 +534,7 @@ class RayClusterBootstrap:
         logger.info(f"Starting worker: {' '.join(cmd)}")
         print(f"[ray_bootstrap] Starting worker: {' '.join(cmd)}", flush=True)
         try:
-            result = subprocess.run(cmd, check=False, timeout=RAY_START_TIMEOUT_SECONDS)
+            result = subprocess.run(cmd, check=False, timeout=RAY_START_TIMEOUT_SECONDS, env=self._ray_start_env())
         except subprocess.TimeoutExpired:
             logger.warning(f"Ray worker start timed out after {RAY_START_TIMEOUT_SECONDS}s")
             print(f"[ray_bootstrap] Ray worker start timed out after {RAY_START_TIMEOUT_SECONDS}s", flush=True)
