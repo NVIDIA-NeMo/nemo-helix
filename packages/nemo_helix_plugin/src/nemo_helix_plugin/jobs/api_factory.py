@@ -13,7 +13,7 @@ from datetime import datetime
 from enum import StrEnum, auto
 from functools import partial
 from pathlib import Path
-from types import UnionType
+from types import SimpleNamespace, UnionType
 from typing import (
     Annotated,
     Any,
@@ -28,6 +28,7 @@ from typing import (
     get_origin,
     overload,
 )
+from urllib.parse import quote
 
 from anyio import open_file, to_thread
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
@@ -38,9 +39,11 @@ from nemo_helix_plugin.authz import GENERATED_ROUTE_CALLERS, AuthzScope, path_ru
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError
 from nemo_helix_plugin.client.types import RetryPolicy
-from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client
+from nemo_helix_plugin.client_provider import get_async_nemo_client
+from nemo_helix_plugin.dependencies import RequestAuthorizer, get_entity_client, get_nemo_client, get_request_authorizer
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.in_memory_filter import InMemoryFilterRepository
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.docker import validate_gpu_available_for_docker
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError, HelixJobDependencyUnavailableError
@@ -871,6 +874,7 @@ def job_route_factory(
     generate_job_name: JobNameGenerator | None = None,
     authz: AuthzScope | None = None,
     jobs_list_filter: type[BaseJobsListFilter] | None = None,
+    job_collection_filter: FilterOperation | None = None,
 ) -> APIRouter:
     """Create a job router with standard CRUD operations.
 
@@ -890,6 +894,11 @@ def job_route_factory(
             job_name is None when no name was provided and no generator exists.
         route_options: Which routes to enable (defaults to CORE).
         job_result_routes: Custom result download routes.
+        job_collection_filter: Server-owned predicate partitioning a service's jobs, applied before
+            pagination and every named route (including attempts/updates). Use predicates supported
+            identically by core Jobs and InMemoryFilterRepository, such as top-level spec $hasKey.
+            Matching historical records remain visible. This is typed-route isolation, not an atomic
+            core mutation precondition; direct core update access can still change job definitions.
         job_output: The job output schema (what gets stored and returned).
             If not provided, defaults to job_input (same type for input/output).
         input_to_output: Transforms job input to job output.
@@ -952,6 +961,49 @@ def job_route_factory(
         route_options = [JobRouteOption.CORE]
 
     router = APIRouter()
+
+    def _matches_collection(job: Any) -> bool:
+        return job.source == service_name and (
+            job_collection_filter is None or bool(job_collection_filter.apply(InMemoryFilterRepository(job)))
+        )
+
+    def _validate_collection_spec(spec: Any) -> None:
+        if job_collection_filter is not None and not _matches_collection(
+            SimpleNamespace(source=service_name, spec=spec)
+        ):
+            raise HTTPException(status_code=422, detail="Compiled spec does not belong to this job collection.")
+
+    if job_collection_filter is not None:
+
+        async def _guard_collection(
+            request: Request,
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
+            authorize: RequestAuthorizer = Depends(get_request_authorizer),
+        ) -> None:
+            # Result routes use {job} for the parent and {name} for the result.
+            name = request.path_params.get("job") or request.path_params.get("name")
+            if name is None:
+                return
+            workspace = request.path_params["workspace"]
+            if request.method in ("DELETE", "PATCH", "POST"):
+                # Authorize before privileged lookup: do not add jobs.read to write-only roles
+                # or leak inventory to callers who lack the underlying mutation permission.
+                suffix = ""
+                if request.method == "POST":
+                    suffix = "/" + request.url.path.rstrip("/").rsplit("/", 1)[-1]
+                await authorize(
+                    request.method,
+                    f"/apis/jobs/v2/workspaces/{quote(workspace, safe='')}/jobs/{quote(name, safe='')}{suffix}",
+                )
+                async with get_async_nemo_client(as_service=service_name, internal=True, workspace=workspace) as client:
+                    job = (await AsyncJobsClient.from_client(client).get_job(name=name, workspace=workspace)).data()
+            else:
+                job = (await AsyncJobsClient.from_client(async_client).get_job(name=name, workspace=workspace)).data()
+            if not _matches_collection(job):
+                raise HTTPException(status_code=404, detail="Job not found in this collection.")
+
+        # Install before registering routes: includes custom downloads and all attempt routes.
+        router.dependencies.append(Depends(_guard_collection))
     service_name = service_name.lower()
 
     def _stamp(endpoint: Callable[..., Any], *, perm: str, write: bool) -> Callable[..., Any]:
@@ -1019,6 +1071,8 @@ def job_route_factory(
     TypedJobsSortField = _make_jobs_sort_field(job_type)
 
     def from_response(job_resp: HelixJob) -> TypedJobResponse:
+        if job_collection_filter is not None and not _matches_collection(job_resp):
+            raise HTTPException(status_code=502, detail="Jobs service returned a job outside this collection.")
         # Use job_output for deserialization (what's stored and returned)
         return TypedJobResponse(
             id=job_resp.id,
@@ -1079,6 +1133,7 @@ def job_route_factory(
                 service_name,
                 async_client,
             )
+            _validate_collection_spec(job_spec.model_dump(mode="json") if isinstance(job_spec, BaseModel) else job_spec)
             platform_spec = await _compile_platform_spec(
                 platform_job_config_compiler,
                 workspace,
@@ -1175,6 +1230,8 @@ def job_route_factory(
             # when the user filter has a logical root ($or/$and/$not), since the
             # downstream parser short-circuits on the first logical operator.
             parsed.and_with(ComparisonOperation(operator=FilterOperator.EQ, field="source", value=service_name))
+            if job_collection_filter is not None:
+                parsed.and_with(job_collection_filter)
             # Fields a plugin adds on top of BaseJobsListFilter, with a default,
             # are the spec values that identify that plugin, or other default filters.
             # i.e. ``backend: Literal["rl"] = "rl"`` becomes ``spec.backend == "rl"``.
@@ -1258,6 +1315,9 @@ def job_route_factory(
                     name,
                     service_name,
                     async_client,
+                )
+                _validate_collection_spec(
+                    job_spec.model_dump(mode="json") if isinstance(job_spec, BaseModel) else job_spec
                 )
                 platform_spec = await _compile_platform_spec(
                     platform_job_config_compiler,

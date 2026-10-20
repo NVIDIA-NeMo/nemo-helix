@@ -382,6 +382,21 @@ uv run nemo agent-hardener sanity-check --manifest-id react-agent \
 
 ---
 
+### Job history collections
+
+War-game and benign-synthesis job collections are separate, even though both use
+`source=agent-hardener`. Historical canonical jobs remain visible in their matching
+collection, including failed jobs: membership uses the persisted spec's
+`stop_after_synth` (war-game) or `interview` (synthesis) key, not the job name or
+status. No migration or new marker is required. Ambiguous or incomplete records
+with both or neither key remain accessible through core Jobs rather than being
+guessed into a typed collection.
+
+This partition also applies to attempt reads, updates, lifecycle operations, logs,
+and results. It does not replace core Jobs authorization. Callers with direct core
+update access can change definitions; collection checks and mutations are not an
+atomic core precondition.
+
 ## Troubleshooting
 
 **Agent Hardening missing from the Studio side nav.** The UI ships with the plugin, so this means
