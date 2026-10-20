@@ -154,17 +154,36 @@ Commands below assume `nemo` and `openshell` are on your PATH. In a repo checkou
    direct-egress path.
 
 3. **Packaging and backend dependencies present.** Step 2 (`nemo agents package`) needs
-   `python-on-whales` (the agents plugin `container` extra), and the OpenShell backend
+   `python-on-whales` (shipped with the agents plugin), and the OpenShell backend
    needs the `openshell` SDK (the deployments plugin ships it in its `openshell` extra):
 
    ```bash
-   .venv/bin/python -c "import python_on_whales, openshell" && echo DEPS_OK || echo DEPS_MISSING
+   .venv/bin/python -c "import python_on_whales, openshell, nhx.core.models" && echo DEPS_OK || echo DEPS_MISSING
    ```
 
-   If `DEPS_MISSING`, install the backend extra: `uv sync --package
-   nemo-deployments-plugin --extra openshell`. Base `make bootstrap-python` does not
-   install the platform-restricted `openshell` wheel, so it needs this step. The
-   packaging dependencies ship with `nemo-agents-plugin` itself and need nothing extra.
+   If `DEPS_MISSING`, have the user run this from the repository root, after
+   `make bootstrap-python` (see `SETUP.md`):
+
+   ```bash
+   uv sync --frozen --all-packages --extra openshell
+   .venv/bin/python -c "import python_on_whales, openshell, nhx.core.models" && echo DEPS_OK
+   ```
+
+   Keep `--all-packages`: syncing only the deployments package can prune platform
+   service dependencies from the shared workspace environment. This extends the
+   bootstrap's frozen workspace sync with the optional backend SDK; it does not
+   change the default bootstrap or enable unrelated extras. The locked OpenShell
+   SDK wheel is platform-independent, but this deployment flow remains Linux-only
+   as described in Compatibility; do not treat installing the SDK as verification
+   of Docker, Landlock, or the gateway on another platform. If installation or the
+   import check fails, stop and report the error rather than retrying with fewer
+   workspace packages.
+
+   Base `make bootstrap-python` does not select the `openshell` extra. Re-run the
+   command above after bootstrap or another sync without that extra removes it.
+   Use `.venv/bin/nemo` and `.venv/bin/openshell` for the steps below to avoid an
+   implicit `uv run` sync dropping the extra. Packaging dependencies ship with
+   `nemo-agents-plugin` itself and need no separate extra.
 
 Convenience variable for the curl steps:
 
@@ -357,8 +376,8 @@ docker compose -f plugins/nemo-deployments/examples/openshell/docker-compose.yml
 | Invoke returns 503 `inference service unavailable` (in the response or the serve log) | The `inference.local` route resolved, but the gateway's upstream hop to the platform failed | Almost always a platform bound to `127.0.0.1`; restart it with `--host 0.0.0.0`. Confirm the address the sandbox actually dials with `openshell sandbox exec --name <nhx-hash> -- cat /etc/hosts` (look for `host.openshell.internal`) and check the platform answers there (`curl -sf http://<that-ip>:8080/health/ready`). A clean `openshell inference set` does NOT rule this out: it validates from the host |
 | Invoke returns empty/error `value`, or serve log shows connection refused to `inference.local` | `inference.local` route not wired, or model misbehaved | Confirm `openshell inference get` shows the `nemo-igw` provider + your model; re-run Step 1's `provider create` / `inference set`; try a gpt-4o-mini-class model |
 | `example.com` reachable in Step 7 | Egress policy not applied | Confirm executor is `openshell-local` and the generated default-deny policy is attached to the sandbox |
-| `ModuleNotFoundError: openshell` at deploy | workspace extra not installed | `uv sync --package nemo-deployments-plugin --extra openshell` |
-| `python-on-whales` missing at package | stale env predating the move of the packaging deps into `nemo-agents-plugin` | `uv sync` |
+| `ModuleNotFoundError: openshell` at deploy | workspace extra not installed | From the repo root: `uv sync --frozen --all-packages --extra openshell`, then repeat the Pre-flight step 3 import check |
+| `python-on-whales` missing at package | stale or pruned workspace env | Repeat the workspace-preserving sync and import check in Pre-flight step 3 |
 
 Do not claim the deployment succeeded until Step 6 prints a non-empty `value`.
 
