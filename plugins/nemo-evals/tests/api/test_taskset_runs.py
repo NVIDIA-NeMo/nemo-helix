@@ -337,6 +337,20 @@ async def test_an_unavailable_build_service_is_a_retryable_503(run_client, servi
     assert response.json() == {"detail": str(error)} and "x-idempotency-key" not in response.headers
 
 
+async def test_keyless_evaluation_failure_names_the_generated_key(
+    run_client, published, request_body, fake_evaluations, fake_task_jobs
+):
+    body = request_body | {"idempotency_key": None, "publication": {"intake": {"experiment": "swe-agent-tuning"}}}
+    fake_evaluations.fail = {"create"}
+    response = await run_client.post(PATH, json=body)
+    assert response.status_code == 503 and response.headers["x-should-retry"] == "false"
+    key = response.headers["x-idempotency-key"]
+    assert "creating its Intake Evaluation failed" in response.json()["detail"] and not fake_task_jobs.created
+    fake_evaluations.fail = set()
+    retry = await run_client.post(PATH, json=body | {"idempotency_key": key})
+    assert retry.status_code == 200 and len(fake_evaluations.created) == len(fake_task_jobs.created) == 1
+
+
 async def test_keyless_submits_get_distinct_generated_keys(run_client, published, request_body):
     first, second = [await run_client.post(PATH, json=request_body | {"idempotency_key": None}) for _ in range(2)]
     assert first.status_code == second.status_code == 201

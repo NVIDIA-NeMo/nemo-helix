@@ -22,6 +22,7 @@ from nemo_evals.runs_cli import (
     TaskJobView,
     _results_table,
     _status_table,
+    _view_json,
     _workspace_flag,
     add_runs_commands,
     build_images,
@@ -329,7 +330,8 @@ def page(items):
 @pytest.fixture
 def platform():
     jobs = {
-        "run-0123456789abcdef-task-0": job("run-0123456789abcdef-task-0", "completed", "hello/greet-universe"),
+        "run-0123456789abcdef-task-0": job("run-0123456789abcdef-task-0", "completed", "hello/greet-universe")
+        | {"status_details": {"publication": {"status": "completed", "evaluation_id": "e", "trial_count": 2}}},
         "run-0123456789abcdef-task-1": job("run-0123456789abcdef-task-1", "active", "hello/sum-three"),
     }
     results = {  # keyed and filtered by the Job's name, as the platform stores them
@@ -393,6 +395,16 @@ def test_rollup_weights_task_means_by_count():
     rollup = {s.name: s for s in rollup_scores([first, second])}
     assert rollup["harbor_reward.reward"] == ScoreRollup("harbor_reward.reward", 0.75, 4, 1, 2)
     assert rollup["harbor_reward.extra"].tasks == 1
+
+
+def test_status_shows_what_each_task_published(platform):
+    views = run_task_jobs(platform, RUN, workspace="default")
+    assert views[0].publication == {"status": "completed", "evaluation_id": "e", "trial_count": 2}
+    failed = TaskJobView(1, "j1", "b", "completed", publication={"status": "error", "error": "intake 503"})
+    lines = _status_table(RUN, [views[0], failed, views[2]])
+    assert lines[-5].endswith("published")
+    assert lines[-4].endswith("✓ 2 trials") and lines[-3].endswith("✗ intake 503") and lines[-2].endswith("  -")
+    assert _view_json(failed)["publication"] == {"status": "error", "error": "intake 503"}
 
 
 def test_status_counts_done_and_failed():

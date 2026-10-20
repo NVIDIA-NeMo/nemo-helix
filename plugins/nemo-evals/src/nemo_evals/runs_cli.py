@@ -32,6 +32,7 @@ from nemo_evals.api.taskset_run_schemas import TasksetRunInput
 from nemo_evals.image_builds.models import TERMINAL_BUILD_STATUSES, ImageBuild
 from nemo_evals.jobs.agent_evaluate import DEFAULT_RESULT_NAME, SUMMARY_FILE_NAME
 from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, HarborBuiltinAgentSource, HarborRunnerTarget
+from nemo_evals.jobs.run_outcome import PUBLICATION_STATUS_KEY
 from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.taskset_runs.controller import MAX_BUNDLE_ATTEMPTS
 from nemo_evals.taskset_runs.identifiers import bundle_job_name, task_job_name
@@ -471,6 +472,16 @@ class TaskJobView:
     status: str  # Jobs status, or "missing" when submit hasn't created the Job yet
     job_id: str | None = None
     result: AgentEvalResult | None = None
+    publication: dict[str, Any] | None = None  # the task's Intake publish outcome, once it published
+
+
+def _published(view: TaskJobView) -> str:
+    """The ``published`` cell: what the task's Job published to Intake."""
+    if view.publication is None:
+        return "-"
+    if view.publication.get("status") == "completed":
+        return f"✓ {view.publication.get('trial_count', 0)} trials"
+    return f"✗ {view.publication.get('error') or 'failed'}"
 
 
 def get_run(client: NemoClient, workspace: str, run_id: str) -> dict[str, Any]:
@@ -566,7 +577,8 @@ def run_task_jobs(
             # Result records carry the Job's name as job_id (NEMO_JOB_ID), not its platform id.
             found = evaluator.agent_eval_results.list(workspace=workspace, job_id=job_name, page_size=1).data
             result = found[0] if found else None
-        views.append(TaskJobView(index, job_name, tasks[0].get("id"), status, job.id, result))
+        publication = (job.status_details or {}).get(PUBLICATION_STATUS_KEY)
+        views.append(TaskJobView(index, job_name, tasks[0].get("id"), status, job.id, result, publication))
     return views
 
 
@@ -686,8 +698,17 @@ def _status_table(
         lines.append(f"  completed tasks' scores: nemo evals runs results {run['run_id']}{workspace_flag}")
     lines.append("")
     width = max([4, *(len(v.task or "") for v in views)])
-    lines.append(f"{'#':>3}  {'task':<{width}}  {'Job':<{len(views[0].job) if views else 3}}  status")
-    lines += [f"{v.index:>3}  {(v.task or '-'):<{width}}  {v.job}  {v.status}" for v in views]
+    job_width = len(views[0].job) if views else 3
+    if any(v.publication is not None for v in views):
+        status_width = max(6, *(len(v.status) for v in views))
+        lines.append(f"{'#':>3}  {'task':<{width}}  {'Job':<{job_width}}  {'status':<{status_width}}  published")
+        lines += [
+            f"{v.index:>3}  {(v.task or '-'):<{width}}  {v.job}  {v.status:<{status_width}}  {_published(v)}"
+            for v in views
+        ]
+    else:
+        lines.append(f"{'#':>3}  {'task':<{width}}  {'Job':<{job_width}}  status")
+        lines += [f"{v.index:>3}  {(v.task or '-'):<{width}}  {v.job}  {v.status}" for v in views]
     done = [v for v in views if v.status in _TERMINAL]
     failed = [v for v in done if v.status != "completed"]
     lines.append(f"{len(done)}/{len(views)} done ({len(done) - len(failed)} completed, {len(failed)} failed)")
@@ -889,6 +910,8 @@ def add_progress_commands(runs: typer.Typer, client_factory: Callable[[], NemoCl
 
 def _view_json(view: TaskJobView) -> dict[str, Any]:
     data: dict[str, Any] = {"index": view.index, "job": view.job, "task": view.task, "status": view.status}
+    if view.publication is not None:
+        data["publication"] = view.publication
     if view.result is not None:
         data["result"] = view.result.model_dump(mode="json", include={"name", "scores", "summary", "bundle_ref"})
     return data

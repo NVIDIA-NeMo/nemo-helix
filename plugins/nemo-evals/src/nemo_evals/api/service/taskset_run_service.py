@@ -4,6 +4,7 @@
 """Caller-scoped run acceptance and stored-record reads without execution joins."""
 
 import asyncio
+import dataclasses
 import logging
 from collections.abc import Callable, Coroutine, Iterable
 from dataclasses import dataclass
@@ -50,7 +51,7 @@ from nemo_evals.taskset_runs.run_evaluation import (
 from nemo_evals.taskset_runs.specs import RunIntakePublication, TasksetRunPlan
 from nemo_evals.taskset_runs.store import PlanStorageError, RunAcceptance, RunRequestConflict, TasksetRunStore
 from nemo_evals.taskset_runs.submission import check_timeout, resolve_deadlines
-from nemo_evals.taskset_runs.task_jobs import JobsServiceTaskJobs, TaskJobs, create_task_jobs
+from nemo_evals.taskset_runs.task_jobs import JobsServiceTaskJobs, TaskJobs, TaskJobsIncompleteError, create_task_jobs
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import AuthenticationError, NemoClientError, PermissionDeniedError
 from nemo_helix_plugin.config import NemoHelixConfig
@@ -317,6 +318,8 @@ class TasksetRunService:
         timeout = check_timeout(req.timeout_seconds, self._config.runs)
         harbor, policy, dispatcher_profile = await self._check_execution(req)
         await self._authorize(req, workspace)
+        if req.publication is not None:
+            await self._authorize_publication(workspace)
         digest = request_digest(req)
         if req.idempotency_key is None:
             raise ValueError("submit needs an idempotency_key; the route generates one when the caller omits it")
@@ -324,7 +327,7 @@ class TasksetRunService:
         replay = await self._store.replay(workspace, run_id, digest)
         if replay is not None:
             # A retry completes the task Jobs an earlier attempt didn't create.
-            warnings = await self._start_task_jobs(replay, keyed=True)
+            warnings = await self._start_task_jobs(replay)
             status = TasksetRunSubmitResponse(**to_status(replay).model_dump(), warnings=warnings)
             return SubmitOutcome(status, created=False)
 
@@ -377,7 +380,7 @@ class TasksetRunService:
             raise
 
         warnings = await self._duplicate_warnings(result.run, caller) if result.created else []
-        warnings += await self._start_task_jobs(result.run, keyed=True)
+        warnings += await self._start_task_jobs(result.run)
         status = TasksetRunSubmitResponse(**to_status(result.run).model_dump(), warnings=warnings)
         return SubmitOutcome(status, created=result.created)
 
@@ -495,38 +498,45 @@ class TasksetRunService:
             dataset_version=requested.dataset_version or taskset_digest,
         )
 
-    async def _ensure_run_evaluation(self, run: TasksetRunEntity, plan: TasksetRunPlan, *, keyed: bool) -> list[str]:
+    async def _authorize_publication(self, workspace: str) -> None:
+        """Check, before accepting, that the caller may create the run's Intake Evaluation.
+
+        A run that asked to be published shouldn't start unpublished. This runs before the replay lookup too,
+        so a caller who has since lost the permission gets the 403 instead of their existing run.
+
+        Raises:
+            HTTPException: 403 when the caller may not create Intake Evaluations in ``workspace``.
+        """
+        try:
+            await self._authorizer("POST", f"/apis/intake/v2/workspaces/{quote(workspace, safe='')}/evaluations")
+        except HTTPException as exc:
+            if exc.status_code != 403:
+                raise
+            raise HTTPException(
+                status_code=403, detail=f"you may not create Intake Evaluations in workspace {workspace}"
+            ) from exc
+
+    async def _ensure_run_evaluation(self, run: TasksetRunEntity, plan: TasksetRunPlan) -> list[str]:
         """Create (or adopt) the run's Intake Evaluation before any task Job can publish to it.
 
         Returns:
             Notices for the submit response.
 
         Raises:
-            RunEvaluationError: The Evaluation isn't the run's, or Intake failed and a retry with the
-                same idempotency_key can create it. A keyless run, or one the caller may not create
-                Evaluations for, goes on without it: its task Jobs' publishes then fail without failing the Jobs.
+            RunEvaluationError: The Evaluation isn't the run's, or Intake refused or failed to create it.
+                No task Job has started; a retry with the run's idempotency_key creates it and then the Jobs.
         """
         assert plan.intake is not None
         try:
             await ensure_run_evaluation(self._evaluations, run, plan)
         except ForeignEvaluationError as exc:
             raise RunEvaluationError(run.name, str(exc)) from exc
-        except (AuthenticationError, PermissionDeniedError):
-            # A retry would be denied again, and refusing now would strand an accepted run with no Jobs:
-            # run it unpublished, keyed or not, and say so.
-            logger.warning("Run %s: not allowed to create its Intake Evaluation", run.name, exc_info=True)
-            return [
-                f"Intake: you can't create Evaluations in workspace {run.workspace}; "
-                f"run {run.name} goes ahead, but its trials won't be published"
-            ]
         except NemoClientError as exc:
-            if keyed:
-                raise RunEvaluationError(run.name, f"creating its Intake Evaluation failed: {exc}") from exc
-            logger.warning("Run %s: creating its Intake Evaluation failed", run.name, exc_info=True)
-            return [f"Intake: creating Evaluation {run.name} failed ({type(exc).__name__}); trials won't be published"]
+            # Includes a 403: submit checked the permission before accepting, so it was revoked since.
+            raise RunEvaluationError(run.name, f"creating its Intake Evaluation failed: {exc}") from exc
         return [f"Intake: Evaluation {run.name} in Experiment {plan.intake.experiment}"]
 
-    async def _start_task_jobs(self, run: TasksetRunEntity, *, keyed: bool) -> list[str]:
+    async def _start_task_jobs(self, run: TasksetRunEntity) -> list[str]:
         """Create or adopt every task Job of ``run`` from its stored plan; one notice per task Job.
 
         Images come from the plan, never prepared again: a retry must give each Job the images it was accepted with.
@@ -544,8 +554,11 @@ class TasksetRunService:
             raise TasksetRunResolutionError(
                 f"run {run.name}'s dispatcher_profile {plan.dispatcher_profile!r} is no longer allowed"
             )
-        notices = await self._ensure_run_evaluation(run, plan, keyed=keyed) if plan.intake is not None else []
-        names = await create_task_jobs(self._task_jobs, plan, run, plan.task_environments)
+        notices = await self._ensure_run_evaluation(run, plan) if plan.intake is not None else []
+        try:
+            names = await create_task_jobs(self._task_jobs, plan, run, plan.task_environments)
+        except TaskJobsIncompleteError as exc:
+            raise dataclasses.replace(exc, notices=(*exc.notices, *notices)) from None
         return [
             *(f"task {i} ({task.id}): Job {name}" for i, (task, name) in enumerate(zip(plan.spec.tasks, names))),
             *notices,

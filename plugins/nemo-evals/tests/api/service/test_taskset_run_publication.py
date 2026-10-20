@@ -4,6 +4,7 @@
 """Submit with publication.intake: one Intake Evaluation per run, created before any task Job."""
 
 import pytest
+from fastapi import HTTPException
 from nemo_evals.api.service.taskset_run_service import RunEvaluationError, TasksetRunResolutionError
 from nemo_evals.api.taskset_run_schemas import TasksetRunInput
 from nemo_evals.jobs.harbor_task_spec import HarborTaskJobSpec
@@ -131,23 +132,34 @@ async def test_a_keyed_submit_whose_evaluation_failed_starts_no_jobs_and_a_retry
     assert len(fake_evaluations.created) == 1 and len(fake_task_jobs.created) == 1
 
 
-async def test_a_keyless_submit_whose_evaluation_failed_still_runs(
+async def test_a_caller_who_may_not_create_evaluations_is_refused_before_acceptance(
+    service, publishing, authorizer, entity_store, fake_task_jobs
+):
+    async def check(method: str, path: str) -> None:
+        if path == "/apis/intake/v2/workspaces/default/evaluations":
+            raise HTTPException(status_code=403, detail="denied")
+
+    authorizer.side_effect = check
+    with pytest.raises(HTTPException) as exc:
+        await submit(service, publishing)
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "you may not create Intake Evaluations in workspace default"
+    assert not await runs(entity_store) and not fake_task_jobs.created
+
+
+async def test_an_evaluation_create_denied_after_acceptance_starts_no_jobs(
     service, publishing, fake_evaluations, fake_task_jobs
 ):
-    del publishing["idempotency_key"]
-    fake_evaluations.fail = {"create"}
-    outcome = await submit(service, publishing)
-    assert len(fake_task_jobs.created) == 1
-    assert "trials won't be published" in outcome.status.warnings[-1]
-
-
-@pytest.mark.parametrize("keyed", [True, False])
-async def test_a_denied_evaluation_create_runs_unpublished_instead_of_retrying(
-    service, publishing, fake_evaluations, fake_task_jobs, keyed
-):
-    if not keyed:
-        del publishing["idempotency_key"]
+    """Submit checked the permission first, so a 403 here means it was revoked since: a 503, not an unpublished run."""
     fake_evaluations.fail = {"create-denied"}
-    outcome = await submit(service, publishing)  # no RunEvaluationError: a 503 would be retried and denied again
-    assert len(fake_task_jobs.created) == 1 and not fake_evaluations.created
-    assert "trials won't be published" in outcome.status.warnings[-1]
+    with pytest.raises(RunEvaluationError, match="creating its Intake Evaluation failed"):
+        await submit(service, publishing)
+    assert not fake_task_jobs.created
+
+
+async def test_a_task_job_failure_keeps_the_intake_notice(service, publishing, fake_task_jobs):
+    fake_task_jobs.refuse = {f"{RUN}-task-0"}
+    with pytest.raises(TaskJobsIncompleteError) as exc:
+        await submit(service, publishing)
+    assert exc.value.notices == (f"Intake: Evaluation {RUN} in Experiment swe-agent-tuning",)
+    assert str(exc.value).endswith(f"; Intake: Evaluation {RUN} in Experiment swe-agent-tuning")

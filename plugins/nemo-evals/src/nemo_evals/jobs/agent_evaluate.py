@@ -65,7 +65,13 @@ from nemo_evals.jobs.registered_agent_resolution import (
     upgrade_registered_agent_config,
 )
 from nemo_evals.jobs.result_persistence import persist_agent_eval_result
-from nemo_evals.jobs.run_outcome import STATUS_DETAILS_KEY, agent_eval_outcome, report_run_outcome
+from nemo_evals.jobs.run_outcome import (
+    PUBLICATION_STATUS_KEY,
+    STATUS_DETAILS_KEY,
+    agent_eval_outcome,
+    report_run_outcome,
+    report_status_details,
+)
 from nemo_evals.jobs.secret_env import JobEnvSecretSource
 from nemo_evals.jobs.token_usage import capture_agent_evaluation_usage, capture_evaluator_request_logs
 from nemo_evals.jobs.utils import async_client_from_sync_client, require_platform_client
@@ -646,6 +652,12 @@ class _AgentEvalJobBase(NemoJob):
                 record_durations=self.record_publication_durations,
             )
             output["publication"] = publication_outcome.model_dump(exclude_none=True)
+            # The job output isn't persisted; status details are, so `runs status` can say what was published.
+            report_status_details(
+                {PUBLICATION_STATUS_KEY: publication_outcome.model_dump(mode="json", exclude_none=True)},
+                ctx=ctx,
+                async_client=async_client,
+            )
 
         # The run is complete and its bundle durable; the files snapshot taken at submit has served its
         # purpose (the staged copy stays on job storage). A failed run keeps it for the retry.

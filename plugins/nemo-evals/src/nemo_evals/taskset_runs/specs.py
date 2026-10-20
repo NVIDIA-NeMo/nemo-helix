@@ -16,8 +16,8 @@ class RunIntakePublication(BaseModel):
     """Where the run publishes its trials: one Intake Evaluation, named after the run, in this Experiment.
 
     Frozen at submit with the Experiment resolved to its id and the agent identity resolved from the
-    target, so task Jobs and the controller never resolve them again. The Evaluation's name is not
-    stored: a keyless run's id can change during acceptance, so it is always the run record's name.
+    target, so task Jobs and the controller never resolve them again. The Evaluation's name is the
+    run record's name, so it isn't stored again here.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
