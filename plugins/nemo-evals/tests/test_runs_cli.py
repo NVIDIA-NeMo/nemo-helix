@@ -283,22 +283,20 @@ def test_an_explicit_idempotency_key_wins(tmp_path, spec_key):
     ref = "default/t#" + "a" * 64
     assert (
         run_request(
-            ref, spec_file=None, agent="oracle", sandbox_policy="p", dispatcher_profile=None, idempotency_key="k-123"
+            ref, spec_file=None, agent="oracle", dispatcher_profile=None, idempotency_key="k-123"
         ).idempotency_key
         == "k-123"
     )
     spec = tmp_path / "run.json"
     body = {
         "spec": {"tasks": "default/full", "target": {"kind": "harbor"}},
-        "execution": {"sandbox_policy": "p"},
+        "execution": {},
         "idempotency_key": spec_key,
     }
     spec.write_text(json.dumps(body))
-    explicit = run_request(
-        ref, spec_file=spec, agent="", sandbox_policy="", dispatcher_profile=None, idempotency_key="k-123"
-    )
+    explicit = run_request(ref, spec_file=spec, agent="", dispatcher_profile=None, idempotency_key="k-123")
     assert explicit.idempotency_key == "k-123"
-    default = run_request(ref, spec_file=spec, agent="", sandbox_policy="", dispatcher_profile=None)
+    default = run_request(ref, spec_file=spec, agent="", dispatcher_profile=None)
     assert default.idempotency_key == (spec_key or default.idempotency_key) and default.idempotency_key
 
 

@@ -14,6 +14,7 @@ from urllib.parse import quote
 
 from fastapi import HTTPException
 from nemo_evals.api.fields import TasksetRef, parse_subentity_ref
+from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.api.taskset_run_schemas import (
     TasksetRunInput,
     TasksetRunStatus,
@@ -32,6 +33,7 @@ from nemo_evals.harbor.remote.preparation import (
     prepare_task_images,
 )
 from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy
+from nemo_evals.harbor.remote.resources import defaulted_resources_notice
 from nemo_evals.harbor.remote.sandbox_policy import SandboxPolicyError, resolve_sandbox_policy
 from nemo_evals.image_builds.service import ImageBuildService, JobsServiceBuildJobs, builder_authorizer
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
@@ -567,6 +569,9 @@ class TasksetRunService:
                 f"run {run.name}'s dispatcher_profile {plan.dispatcher_profile!r} is no longer allowed"
             )
         notices = await self._ensure_run_evaluation(run, plan) if plan.intake is not None else []
+        configs = [(t.id, t.spec.config) for t in plan.spec.tasks if isinstance(t.spec, ResolvedHarborTaskDefinition)]
+        if (resources := defaulted_resources_notice(configs, plan.sandbox_policy)) is not None:
+            notices.append(resources)
         try:
             names = await create_task_jobs(self._task_jobs, plan, run, plan.task_environments)
         except TaskJobsIncompleteError as exc:

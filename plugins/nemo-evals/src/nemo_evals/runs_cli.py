@@ -319,13 +319,13 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         ),
         dispatcher_profile: str | None = typer.Option(None, "--dispatcher-profile", help="Jobs profile for task Jobs."),
         cpus: int | None = typer.Option(
-            None, "--cpus", min=1, help="CPUs for every task sandbox, over task.toml (without --spec-file)."
+            None, "--cpus", min=1, help="CPUs for every task's agent sandbox, over task.toml (without --spec-file)."
         ),
         memory_mb: int | None = typer.Option(
-            None, "--memory-mb", min=1, help="Memory in MB for every task sandbox (without --spec-file)."
+            None, "--memory-mb", min=1, help="Memory in MB for every task's agent sandbox (without --spec-file)."
         ),
         storage_mb: int | None = typer.Option(
-            None, "--storage-mb", min=1, help="Disk in MB for every task sandbox (without --spec-file)."
+            None, "--storage-mb", min=1, help="Disk in MB for every task's agent sandbox (without --spec-file)."
         ),
         no_build_images: bool = typer.Option(
             False,

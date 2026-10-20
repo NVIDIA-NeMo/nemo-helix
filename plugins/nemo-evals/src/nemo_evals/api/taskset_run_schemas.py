@@ -65,11 +65,12 @@ class HarborTaskJobsExecutionInput(BaseModel):
     sandbox: SandboxSelection | None = Field(
         default=None,
         description=(
-            "Sandbox for every task, agent and verifier alike. profile names an operator sandbox profile: "
-            "isolation, egress and resource ceilings; omitted uses the operator's default. cpus, memory_mb "
-            "and storage_mb beat the task's task.toml [environment]; each must stay within the profile's "
-            "ceilings, or submit fails with 422. Omit the whole object for the default profile and each "
-            "task's own resources."
+            "Sandbox for every task. profile names an operator sandbox profile: isolation, egress and "
+            "resource ceilings; omitted uses the operator's default. cpus, memory_mb and storage_mb size each "
+            "task's agent sandbox, over its task.toml [environment]; a separate verifier keeps task.toml's "
+            "resources. Unset cpus and memory_mb default to 1 CPU and 2048 MB, capped by the ceilings. Every "
+            "sandbox's values must stay within the profile's ceilings, or submit fails with 422. Omit the "
+            "whole object for the default profile and each task's own resources."
         ),
         examples=[{"cpus": 4, "memory_mb": 8192, "storage_mb": 20480}, {"profile": "harbor-open", "memory_mb": 4096}],
     )

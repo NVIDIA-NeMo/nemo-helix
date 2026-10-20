@@ -165,6 +165,49 @@ async def test_a_cold_submit_starts_the_first_build_and_asks_to_resubmit(
     assert len(build_jobs.created) == 1 and not await runs(entity_store)
 
 
+async def test_a_task_over_the_profiles_ceiling_is_rejected_before_any_build(
+    service, request_body, entity_store, harbor_config, monkeypatch
+):
+    """The real preparer: task-1's task.toml asks for 1024 MB, over the profile's max_memory_mb."""
+    profiles = dict(harbor_config.sandbox_profiles)
+    profiles["harbor-standard"] = profiles["harbor-standard"].model_copy(update={"max_memory_mb": 512})
+    service._config.runs.harbor = harbor_config.model_copy(update={"sandbox_profiles": profiles})
+    monkeypatch.setattr(service, "_image_builds", lambda workspace: pytest.fail("no build may start"))
+    service._preparer = prepare_task_images
+    with pytest.raises(
+        TasksetRunResolutionError,
+        match=r"task-1: resources_exceed_policy: agent sandbox memory_mb=1024 \(task.toml\) exceeds sandbox profile "
+        r"'harbor-standard''s max_memory_mb=512",
+    ):
+        await submit(service, request_body)
+    assert not await runs(entity_store)
+
+
+async def test_the_default_resources_notice_survives_a_replay(
+    service, request_body, fake_task_jobs, harbor_config, monkeypatch
+):
+    """task-1 sets no resources: the notice comes from the stored plan, so a keyed retry says it too."""
+    request = TasksetRunInput.model_validate(request_body)
+    pinned, spec = await service._resolve(request, "default")
+    spec.tasks[0].spec.config = {"environment": {}}
+    monkeypatch.setattr(service, "_resolve", AsyncMock(return_value=(pinned, spec)))
+    profiles = dict(harbor_config.sandbox_profiles)
+    profiles["harbor-standard"] = profiles["harbor-standard"].model_copy(update={"max_memory_mb": 1024})
+    service._config.runs.harbor = harbor_config.model_copy(update={"sandbox_profiles": profiles})
+    notice = (
+        "1 task relies on default sandbox resources: task-1 agent cpus=1 memory_mb=1024. "
+        "Set them in task.toml or pass --cpus/--memory-mb."
+    )
+
+    fake_task_jobs.refuse = {"run-11f77762178b0e05-task-0"}
+    with pytest.raises(TaskJobsIncompleteError) as exc:
+        await submit(service, request_body)
+    assert exc.value.notices == (notice,)
+    fake_task_jobs.refuse = set()
+    replay = await submit(service, request_body)
+    assert replay.created is False and replay.status.warnings[-1] == notice
+
+
 @pytest.mark.parametrize("rejected", [0, 1], ids=["first-rejected", "second-rejected"])
 async def test_a_rejected_task_stops_every_preparation(service, two_task_body, run_preparer, rejected):
     """Every task is checked before any is prepared, so a rejected task never leaves builds behind for the rest."""

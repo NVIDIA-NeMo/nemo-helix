@@ -1,14 +1,23 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Freeze an operator sandbox profile into a run's plan (M2 story 3's resolver, trimmed for M2 story 0).
+"""Freeze an operator sandbox profile into a run's plan, and check each task's sandboxes against its ceilings.
 
 The MVP picks a profile by the request's ``execution.sandbox.profile`` name, or the operator's
 ``default_sandbox_profile`` when it names none, and freezes the request's ``execution.sandbox`` resource
-overrides once they pass the profile's ceilings. Egress overrides and
-per-task resource checks against task.toml come with M2 story 3 and M3.
+overrides once they pass the profile's ceilings. ``task_resources_violation`` then checks every task:
+its agent sandbox (overrides, else task.toml, else the defaults) and a separate verifier (task.toml, else
+the defaults).
+
+- ``max_cpus``, ``max_memory_mb`` and ``max_storage_mb`` bound the requested values; storage is checked
+  before any disk clamp.
+- ``max_disk_mb`` (with ``enforce_disk_limit``) clamps task.toml's storage, and rejects only an override
+  above it, so the sandbox never gets less disk than the run asked for.
+
+TODO(M2 story 3): egress overrides.
 """
 
+from harbor.models.task.config import TaskConfig
 from nemo_evals.config import HarborSandboxProfileConfig, HarborTaskJobsConfig
 from nemo_evals.harbor.remote.profile import (
     OpenSandboxConnection,
@@ -16,6 +25,7 @@ from nemo_evals.harbor.remote.profile import (
     ResourceOverrides,
     SandboxSelection,
 )
+from nemo_evals.harbor.remote.resources import task_sandboxes
 from nemo_helix_plugin.config import NemoHelixConfig
 
 
@@ -83,3 +93,17 @@ def _check_overrides(overrides: ResourceOverrides, profile: HarborSandboxProfile
             raise SandboxPolicyError(
                 f"execution.sandbox.{field}={value} exceeds sandbox profile {profile_name!r}'s {name}={limit}"
             )
+
+
+def task_resources_violation(task_config: TaskConfig, policy: ResolvedHarborSandboxPolicy) -> str | None:
+    """Why one of the task's sandboxes would exceed the profile's ceilings, or None."""
+    ceilings = {"cpus": policy.max_cpus, "memory_mb": policy.max_memory_mb, "storage_mb": policy.max_storage_mb}
+    for sandbox in task_sandboxes(task_config, policy):
+        for field, source in sandbox.sources.items():
+            value, limit = getattr(sandbox.config, field), ceilings[field]
+            if limit is not None and value > limit:
+                return (
+                    f"{sandbox.role} sandbox {field}={value} ({source}) exceeds sandbox profile "
+                    f"{policy.profile!r}'s max_{field}={limit}"
+                )
+    return None
