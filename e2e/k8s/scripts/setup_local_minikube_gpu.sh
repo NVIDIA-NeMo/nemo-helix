@@ -10,7 +10,7 @@
 #   NGC_API_KEY (required) - NVIDIA NGC API key for pulling GPU images
 #   HF_TOKEN (optional) - HuggingFace token for model downloads
 #   MINIKUBE_PROFILE (optional) - Minikube profile name (defaults to minikube)
-#   MINIKUBE_CNI (optional) - minikube --cni value, e.g. calico to enforce NetworkPolicy (defaults to minikube's own choice)
+#   MINIKUBE_CNI (optional) - minikube --cni value, e.g. cilium to enforce NetworkPolicy (defaults to minikube's own choice)
 
 set -euo pipefail
 

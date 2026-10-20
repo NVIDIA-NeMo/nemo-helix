@@ -112,7 +112,7 @@ Review the [NeMo Helix Helm Chart reference](/documentation/kubernetes-deploymen
 | `minikube` or `kind`      | Use for single-node smoke testing. Provide a StorageClass or static PersistentVolume that can satisfy the chart's shared PVC. Use port-forwarding or a local ingress addon to reach the API.                         |
 | EKS                       | Use an RWX storage backend such as Amazon EFS for `core.storage`, a PostgreSQL-ready StorageClass such as `gp3` for embedded PostgreSQL, and IRSA or Kubernetes secrets for S3 credentials if you store files in S3. |
 | AKS, GKE, OKE, or on-prem | Provide an RWX-capable StorageClass for shared jobs storage, configure an ingress or Gateway API route, and install the GPU and network operators required by your node pool.                                        |
-| OpenShift                 | Add the OpenShift security context overrides from [OpenShift](/documentation/kubernetes-deployment/setup/helm/openshift).                                                                                          |
+| OpenShift                 | Add the OpenShift security context overrides from [OpenShift](/documentation/kubernetes-deployment/setup/helm/openshift).                                                                                            |
 
 ### Local single-node clusters
 
@@ -160,13 +160,15 @@ For local API access without ingress, use port-forwarding after the release is r
 kubectl -n "$NHX_NAMESPACE" port-forward svc/nemo-helix-api 8080:8080
 ```
 
-`networkPolicies.*` values only take effect on a cluster whose CNI enforces NetworkPolicy. minikube's default CNI with the Docker driver accepts NetworkPolicy resources but does not enforce them, so create the cluster with Calico (`--cni` cannot be changed on an existing profile):
+`networkPolicies.*` values only take effect on a cluster whose CNI enforces NetworkPolicy. minikube's default CNI with the Docker driver accepts NetworkPolicy resources but does not enforce them, so create the cluster with Cilium (`--cni` cannot be changed on an existing profile):
 
 ```sh
-minikube start --driver docker --cni calico
+minikube start --driver docker --cni cilium
 ```
 
-The `e2e/k8s/scripts/setup_local_minikube_*.sh` scripts keep minikube's default CNI unless you set `MINIKUBE_CNI=calico`.
+Cilium is the tested enforcing CNI on the Docker driver. Calico wedges its own CNI there — its pods stay in `ContainerCreating` because the Calico plugin cannot complete pod sandbox setup — so avoid `--cni calico` with this driver.
+
+The `e2e/k8s/scripts/setup_local_minikube_*.sh` scripts keep minikube's default CNI unless you set `MINIKUBE_CNI=cilium`.
 
 For Kind, see [NetworkPolicy smoke test](/documentation/kubernetes-deployment/setup/helm/network-policy-smoke-test).
 

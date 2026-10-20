@@ -5,7 +5,7 @@
 # Script: setup_local_minikube_cpu.sh
 # Description: Sets up a local minikube cluster for CPU-only auth Helm/E2E validation.
 # Environment Variables:
-#   MINIKUBE_CNI (optional) - minikube --cni value, e.g. calico to enforce NetworkPolicy (defaults to minikube's own choice)
+#   MINIKUBE_CNI (optional) - minikube --cni value, e.g. cilium to enforce NetworkPolicy (defaults to minikube's own choice)
 
 set -euo pipefail
 
