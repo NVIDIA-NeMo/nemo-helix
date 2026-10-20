@@ -10,28 +10,39 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from nemo_agents_plugin.jobs.evaluate_agent import EvaluateAgentJob, EvaluateAgentSpec
 from nemo_agents_plugin.refs import AgentRef
 from nemo_helix_plugin.agents import validation
+from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client
 from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.routes import add_job_routes
 from nemo_helix_plugin.refs import EndpointURL, FilesetRef
 
 
-@pytest.mark.asyncio
-async def test_to_spec_rejects_a_registered_agent_without_config(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_submit_rejects_a_registered_agent_without_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = FastAPI()
+    app.include_router(add_job_routes(EvaluateAgentJob), prefix="/apis/agents/v2/workspaces/{workspace}")
+    app.dependency_overrides[get_entity_client] = lambda: AsyncMock()
+    app.dependency_overrides[get_nemo_client] = lambda: MagicMock()
+
     response = MagicMock()
     response.data.return_value.config = {}
     client = MagicMock(get_agent=AsyncMock(return_value=response))
     monkeypatch.setattr(validation, "client_from_platform", lambda *_: client)
 
-    with pytest.raises(ValueError, match="Agent 'default/calc' has no configuration"):
-        await EvaluateAgentJob.to_spec(
-            EvaluateAgentSpec(agent=AgentRef("calc"), eval_config="config.yml"),
-            workspace="default",
-            entity_client=None,
-            async_sdk=MagicMock(),
-            is_local=False,
+    jobs_client = MagicMock(create_job=AsyncMock(side_effect=AssertionError("Evaluation must not be submitted")))
+    with patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=jobs_client):
+        result = TestClient(app).post(
+            "/apis/agents/v2/workspaces/default/jobs/evaluate",
+            json={"name": "eval-1", "spec": {"agent": "calc", "eval_config": "config.yml"}},
         )
+
+    assert result.status_code == 422
+    assert "Agent 'default/calc' has no configuration" in result.json()["detail"]
+    client.get_agent.assert_awaited_once_with(workspace="default", name="calc")
+    jobs_client.create_job.assert_not_awaited()
 
 
 @pytest.mark.asyncio

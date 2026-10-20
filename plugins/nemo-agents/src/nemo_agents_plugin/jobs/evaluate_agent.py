@@ -152,6 +152,7 @@ class EvaluateAgentJob(NemoJob):
     description: ClassVar[str] = "Evaluate an agent workflow against a dataset as a scheduled platform job."
     container: ClassVar[str] = "cpu-tasks"
     spec_schema: ClassVar[type[BaseModel]] = EvaluateAgentSpec
+    input_spec_schema: ClassVar[type[BaseModel]] = EvaluateAgentSpec
 
     @classmethod
     async def to_spec(
