@@ -34,6 +34,9 @@ if [ ! -d "$gym_rw/nemo_gym" ]; then
     mv "$gym_rw.tmp" "$gym_rw"
 fi
 
+# Pin the single-node in-sandbox Ray to loopback; the routable node IP it picks is dropped by the deny-default sandbox egress.
+export RAY_ENABLE_WINDOWS_OR_OSX_CLUSTER=0
+
 # The runtime discovers built-in servers from this variable. The third argument
 # stages the checkout but does not otherwise reach that process.
 export SANDBOXED_GYM_SRC_DIR="$gym_rw"
