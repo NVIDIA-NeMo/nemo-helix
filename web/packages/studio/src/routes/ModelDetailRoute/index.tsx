@@ -135,7 +135,7 @@ export const ModelDetailRoute: FC = () => {
             slotActions={
               isJobTab &&
               job.jobName && (
-                <Button kind="secondary" size="small" asChild>
+                <Button color="brand" asChild>
                   <Link to={getWorkspaceCustomizationJobDetailsRoute(job.workspace, job.jobName)}>
                     Open Job
                   </Link>
