@@ -8,7 +8,8 @@ RBAC cannot restrict NetworkPolicy writes by content. This admits only the shape
 (services/core/jobs/.../backends/kubernetes/common.py); keep the two in sync. A missing field or label is an
 evaluation error, which failurePolicy: Fail turns into a denial.
 */ -}}
-{{- if and .Values.core.enabled (include "nemo-helix.jobStepNetworkPoliciesEnabled" .) }}
+{{- /* Installed only when the calculated platform config enables step_network_policies_enabled. */ -}}
+{{- if and .Values.core.enabled (include "nemo-helix.stepNetworkPoliciesConfigured" .) }}
 {{- $name := printf "%s-%s-job-step-networkpolicies" (include "nemo-helix.fullname" .) .Release.Namespace }}
 {{- $apiVersion := include "nemo-helix.validatingAdmissionPolicyApiVersion" . }}
 apiVersion: {{ $apiVersion }}
@@ -52,6 +53,14 @@ spec:
         (peer.podSelector.matchLabels == {'nhx.nvidia.com/managed_by': 'jobs-controller', 'nhx.nvidia.com/job_id': variables.jobId} ||
         (peer.podSelector.matchLabels.size() == 1 && peer.podSelector.matchLabels.all(k, peer.podSelector.matchLabels[k] == variables.jobId)))))
       message: Ingress peers may only be same-namespace pods labelled with the target job's id.
+    - expression: >-
+        request.operation == 'DELETE' || !has(object.spec.ingress) ||
+        object.spec.ingress.all(rule, has(rule.ports) ?
+        rule.ports.all(p, (!has(p.protocol) || p.protocol == 'TCP') && (
+        (!has(p.endPort) && p.port in {{ .Values.networkPolicies.jobSteps.allowedIngressTcpPorts | toJson }}) ||
+        {{ .Values.networkPolicies.jobSteps.allowedIngressTcpPortRanges | toJson }}.exists(r, p.port >= r.low && (has(p.endPort) ? p.endPort >= p.port && p.endPort < r.high : p.port < r.high)))) :
+        rule.from.all(peer, peer.podSelector.matchLabels == {'nhx.nvidia.com/managed_by': 'jobs-controller', 'nhx.nvidia.com/job_id': variables.jobId}))
+      message: Only the job's own pods may reach every port; other workloads may reach only the allowed TCP ports.
 ---
 apiVersion: {{ $apiVersion }}
 kind: ValidatingAdmissionPolicyBinding

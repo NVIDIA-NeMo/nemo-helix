@@ -584,13 +584,25 @@ true
 {{- end -}}
 
 {{/*
-Determine if the jobs controller creates per-step ingress NetworkPolicies.
-Returns "true" when enabled, empty string otherwise. Fails when the cluster cannot run the
-ValidatingAdmissionPolicy that restricts what the controller may write.
+Whether the chart's base platform config asks the jobs controller to create per-step ingress
+NetworkPolicies. The resolved flag, after platformConfig overrides, is stepNetworkPoliciesConfigured.
 */}}
 {{- define "nemo-helix.jobStepNetworkPoliciesEnabled" -}}
 {{- if and .Values.networkPolicies.enabled .Values.networkPolicies.jobSteps.enabled -}}
-{{- $_ := include "nemo-helix.validatingAdmissionPolicyApiVersion" . -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
+Whether the calculated platform config enables per-step ingress NetworkPolicies on either executor.
+Reads jobs.executor_defaults.{kubernetes_job,volcano_job}.step_network_policies_enabled, so a
+platformConfig override turns the controller, its NetworkPolicy RBAC, and the ValidatingAdmissionPolicy
+on or off together.
+*/}}
+{{- define "nemo-helix.stepNetworkPoliciesConfigured" -}}
+{{- $config := include "nemo-helix.calculatedConfig" . | fromYaml -}}
+{{- $defaults := dig "jobs" "executor_defaults" dict $config -}}
+{{- if or (dig "kubernetes_job" "step_network_policies_enabled" false $defaults) (dig "volcano_job" "step_network_policies_enabled" false $defaults) -}}
 true
 {{- end -}}
 {{- end -}}
@@ -606,7 +618,7 @@ admissionregistration.k8s.io/v1
 {{- else if .Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1beta1/ValidatingAdmissionPolicy" -}}
 admissionregistration.k8s.io/v1beta1
 {{- else -}}
-{{- fail "networkPolicies.jobSteps.enabled requires ValidatingAdmissionPolicy: admissionregistration.k8s.io/v1 (Kubernetes 1.30+) or v1beta1 (Kubernetes 1.28+ with the feature enabled). Set networkPolicies.jobSteps.enabled=false, or for offline rendering pass --api-versions admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy." -}}
+{{- fail "jobs.executor_defaults step_network_policies_enabled requires ValidatingAdmissionPolicy: admissionregistration.k8s.io/v1 (Kubernetes 1.30+) or v1beta1 (Kubernetes 1.28+ with the feature enabled). Set networkPolicies.jobSteps.enabled=false, or override step_network_policies_enabled to false in platformConfig, or for offline rendering pass --api-versions admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy." -}}
 {{- end -}}
 {{- end -}}
 

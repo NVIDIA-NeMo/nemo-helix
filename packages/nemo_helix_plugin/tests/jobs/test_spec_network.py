@@ -3,7 +3,7 @@
 
 import pytest
 from nemo_helix_plugin.jobs.providers import ContainerSpec, CPUExecutionProvider
-from nemo_helix_plugin.jobs.spec import HelixJobStepSpec, StepIngressRule, StepNetwork
+from nemo_helix_plugin.jobs.spec import HelixJobStepSpec, StepIngressRule, StepNetwork, TcpPortRange
 from pydantic import ValidationError
 
 
@@ -13,8 +13,21 @@ def test_step_network_defaults_to_unset():
 
 
 def test_step_network_round_trips():
-    network = StepNetwork(ingress=[StepIngressRule(job_id_label="nemo-rl-job-id", tcp_ports=[8000, 51234])])
+    network = StepNetwork(
+        ingress=[
+            StepIngressRule(
+                job_id_label="nemo-rl-job-id",
+                tcp_ports=[51234],
+                tcp_port_ranges=[TcpPortRange(low=3000, high=4998)],
+            )
+        ]
+    )
     assert StepNetwork.model_validate(network.model_dump(mode="json")) == network
+
+
+def test_tcp_port_range_rejects_an_inverted_span():
+    with pytest.raises(ValidationError):
+        TcpPortRange(low=4000, high=3000)
 
 
 @pytest.mark.parametrize(

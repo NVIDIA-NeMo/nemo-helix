@@ -43,7 +43,7 @@ rules:
   # before delete. Without get, delete_deployment fails with 403 and the
   # Deployment is stuck in DELETING. Mirrors the configmaps verb set.
   verbs: ["get", "list", "create", "delete"]
-{{- if include "nemo-helix.jobStepNetworkPoliciesEnabled" . }}
+{{- if include "nemo-helix.stepNetworkPoliciesConfigured" . }}
 # Restricted to job-step policies by networking/job-step-networkpolicy-vap.yaml.
 - apiGroups: ["networking.k8s.io"]
   resources: ["networkpolicies"]

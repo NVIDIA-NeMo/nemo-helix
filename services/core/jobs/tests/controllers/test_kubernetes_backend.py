@@ -10,7 +10,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from kubernetes import client
 from kubernetes.client.rest import ApiException
-from nemo_helix_plugin.jobs.spec import StepIngressRule, StepNetwork
+from nemo_helix_plugin.jobs.spec import StepIngressRule, StepNetwork, TcpPortRange
 from nhx.common.auth import (
     KUBERNETES_POD_UID_REFERENCE_NAME,
     NHX_PRINCIPAL_ENVVAR,
@@ -3452,7 +3452,18 @@ def test_build_step_network_policy_limits_peers_to_declared_ports(test_step_pend
     }
     assert sandboxes._from[0].pod_selector.match_labels == {"nemo-rl-job-id": "test-job-id"}
     assert sandboxes._from[0].namespace_selector is None
-    assert [(p.protocol, p.port) for p in sandboxes.ports] == [("TCP", 8000), ("TCP", 51234)]
+    ranged = _step_with_network(test_step_pending)
+    ranged.step_spec.network.ingress[0].tcp_port_ranges = [TcpPortRange(low=3000, high=4998)]
+    ranged_policy = build_step_network_policy(ranged)
+    assert [(p.protocol, p.port, p.end_port) for p in ranged_policy.spec.ingress[1].ports] == [
+        ("TCP", 8000, None),
+        ("TCP", 51234, None),
+        ("TCP", 3000, 4998),
+    ]
+    assert [(p.protocol, p.port, p.end_port) for p in sandboxes.ports] == [
+        ("TCP", 8000, None),
+        ("TCP", 51234, None),
+    ]
 
 
 def test_schedule_creates_network_policy_before_job_and_hands_it_to_the_job(

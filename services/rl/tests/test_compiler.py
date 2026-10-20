@@ -335,7 +335,8 @@ def test_grpo_training_step_admits_sandboxes_only_on_vllm_and_broker(sandbox_cap
     assert step.network is not None
     (rule,) = step.network.ingress
     assert rule.job_id_label == JOB_ID_METADATA_KEY
-    assert rule.tcp_ports == [8000, 51234]
+    assert rule.tcp_ports == [51234]
+    assert [(span.low, span.high) for span in rule.tcp_port_ranges] == [(3000, 4998)]
     env = {e.name: e.value for e in step.environment or []}
     assert env[NHX_VLLM_PORT_ENVVAR] == "8000"
     assert env[NHX_BROKER_PORT_ENVVAR] == "51234"

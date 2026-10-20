@@ -773,7 +773,7 @@ def build_step_network_policy(step: HelixJobStepWithContext) -> client.V1Network
     """Build the ingress NetworkPolicy for a step that declares ``network``, else ``None``.
 
     The step's pods accept ingress from pods of the same job on any port, and from pods matching each
-    declared rule on that rule's TCP ports. NetworkPolicy allows are additive across policies, so this only
+    declared rule on that rule's TCP ports and port ranges. NetworkPolicy allows are additive across policies, so this only
     isolates the step when no other policy in the namespace selects its pods with a broader allow.
 
     The Helm chart's ValidatingAdmissionPolicy (``job-step-networkpolicy-vap.yaml``) only admits this exact
@@ -800,7 +800,13 @@ def build_step_network_policy(step: HelixJobStepWithContext) -> client.V1Network
                         pod_selector=client.V1LabelSelector(match_labels={rule.job_id_label: step.job})
                     )
                 ],
-                ports=[client.V1NetworkPolicyPort(protocol="TCP", port=port) for port in rule.tcp_ports],
+                ports=[
+                    *[client.V1NetworkPolicyPort(protocol="TCP", port=port) for port in rule.tcp_ports],
+                    *[
+                        client.V1NetworkPolicyPort(protocol="TCP", port=span.low, end_port=span.high)
+                        for span in rule.tcp_port_ranges
+                    ],
+                ],
             )
         )
     return client.V1NetworkPolicy(

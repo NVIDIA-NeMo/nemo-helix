@@ -22,6 +22,7 @@ from nemo_helix_plugin.jobs._mapping_access import JobSpecModel
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.providers import Provider
 from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 
 class HelixJobSecretEnvironmentVariableRef(JobSpecModel):
@@ -84,6 +85,19 @@ class StepLifecycle(JobSpecModel):
 _K8S_LABEL_KEY_PATTERN = r"^([a-z0-9]([-a-z0-9.]*[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$"
 
 
+class TcpPortRange(JobSpecModel):
+    """Inclusive TCP span. ``high`` is the last port, matching a NetworkPolicy ``endPort``."""
+
+    low: Annotated[int, Field(ge=1, le=65535)]
+    high: Annotated[int, Field(ge=1, le=65535)]
+
+    @model_validator(mode="after")
+    def _high_follows_low(self) -> Self:
+        if self.high < self.low:
+            raise ValueError("tcp port range high must be greater than or equal to low")
+        return self
+
+
 class StepIngressRule(JobSpecModel):
     """Ingress into the step's pods from peer pods that carry this job's ID under ``job_id_label``."""
 
@@ -94,6 +108,8 @@ class StepIngressRule(JobSpecModel):
     tcp_ports: list[Annotated[int, Field(ge=1, le=65535)]] = Field(
         min_length=1, description="TCP ports on the step's pods that matching peers may reach."
     )
+    # The controller turns these into NetworkPolicy endPorts. Kept out of the HTTP schema.
+    tcp_port_ranges: SkipJsonSchema[list[TcpPortRange]] = Field(default_factory=list)
 
 
 class StepNetwork(JobSpecModel):

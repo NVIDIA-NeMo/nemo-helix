@@ -321,8 +321,14 @@ networkPolicies:
   # -- Per-step ingress NetworkPolicies created by the jobs controller for steps that declare `network`, such as sandboxed GRPO training.
   # @default -- This object has the following default values for per-step ingress isolation.
   jobSteps:
-    # -- Let the jobs controller create and delete per-step ingress NetworkPolicies. Also installs a cluster-scoped ValidatingAdmissionPolicy that limits the controller to those policies, so it needs Kubernetes 1.30+ (or 1.28+ with the ValidatingAdmissionPolicy feature and v1beta1 API enabled) and permission to create cluster-scoped admission resources.
+    # -- Set jobs.executor_defaults step_network_policies_enabled in the platform config, which lets the jobs controller create and delete per-step ingress NetworkPolicies. The ValidatingAdmissionPolicy that limits the controller to those policies is installed from that resolved flag, including a platformConfig override, so it needs Kubernetes 1.30+ (or 1.28+ with the ValidatingAdmissionPolicy feature and v1beta1 API enabled) and permission to create cluster-scoped admission resources.
     enabled: true
+    # -- TCP ports a job step may open to pods outside its own job, besides the generation range. The episode broker. Must include DEFAULT_BROKER_PORT.
+    allowedIngressTcpPorts: [51234]
+    # -- Half-open TCP ranges a job step may open to pods outside its own job. vLLM picks each generation server's port from the first span. Must include NeMo-RL DEFAULT_GENERATION_PORT_RANGE_LOW/HIGH.
+    allowedIngressTcpPortRanges:
+      - low: 3000
+        high: 4999
 
 # -- NCCL chart test (`helm test`): multi-node allreduce check. Templates use helm.sh/hook: test — they are not created on install/upgrade, only when you run helm test.
 # Requires nodes labeled with gpuNodeLabelKey/gpuNodeLabelValue (default NFD / GPU operator style).

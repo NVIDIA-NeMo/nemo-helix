@@ -41,7 +41,7 @@ from nemo_helix_plugin.jobs.api_factory import (
     ResourcesSpec,
 )
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
-from nemo_helix_plugin.jobs.spec import StepIngressRule, StepNetwork
+from nemo_helix_plugin.jobs.spec import StepIngressRule, StepNetwork, TcpPortRange
 from nemo_helix_plugin.models.types import ModelDeploymentConfig, ModelEntity
 from nhx.common.auth import auth_client_context
 from nhx.common.entities.utils import parse_entity_ref
@@ -72,6 +72,8 @@ from nhx.rl.app.constants import (
     DEFAULT_MODEL_PATH,
     DEFAULT_OUTPUT_MODEL_PATH,
     DEFAULT_VLLM_PORT,
+    DEFAULT_VLLM_PORT_RANGE_HIGH,
+    DEFAULT_VLLM_PORT_RANGE_LOW,
     NHX_BROKER_HOST_ENVVAR,
     NHX_BROKER_PORT_ENVVAR,
     NHX_JOB_STORAGE_PVC_ENVVAR,
@@ -617,10 +619,17 @@ def _build_training_step(
             (NHX_BROKER_PORT_ENVVAR, str(DEFAULT_BROKER_PORT)),
         ):
             environment.append(EnvironmentVariable(name=name, value=value))
-        # Sandboxes reach the training pods only on vLLM and the broker, never on Ray.
+        # Sandboxes reach the training pods on the broker and on the port range vLLM picks a
+        # generation server from, never on Ray. The range is half-open; endPort is inclusive.
         network = StepNetwork(
             ingress=[
-                StepIngressRule(job_id_label=SANDBOX_JOB_ID_LABEL, tcp_ports=[DEFAULT_VLLM_PORT, DEFAULT_BROKER_PORT])
+                StepIngressRule(
+                    job_id_label=SANDBOX_JOB_ID_LABEL,
+                    tcp_ports=[DEFAULT_BROKER_PORT],
+                    tcp_port_ranges=[
+                        TcpPortRange(low=DEFAULT_VLLM_PORT_RANGE_LOW, high=DEFAULT_VLLM_PORT_RANGE_HIGH - 1)
+                    ],
+                )
             ]
         )
         if config.job_storage_pvc_claim:
