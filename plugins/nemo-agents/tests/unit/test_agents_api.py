@@ -135,6 +135,28 @@ def client(test_app: FastAPI) -> TestClient:
 
 
 class TestRegisterAgent:
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {},
+            {"name": "calc", "config": None},
+            {"name": "calc", "config": []},
+            {"name": "calc", "config": {"config_format": None}},
+            {
+                "name": "calc",
+                "config": {"config_format": NEMO_AGENTS_SPEC_CONFIG_FORMAT},
+                "config_format": NAT_WORKFLOW_CONFIG_FORMAT,
+            },
+        ],
+    )
+    def test_register_invalid_request_returns_422(
+        self, client: TestClient, mock_entity_client: AsyncMock, body: dict[str, Any]
+    ) -> None:
+        resp = client.post("/apis/agents/v2/workspaces/default/agents", json=body)
+
+        assert resp.status_code == 422
+        mock_entity_client.create.assert_not_called()
+
     def test_register_returns_201(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
         saved = _make_agent("calc", description="calculator", config={"llms": {}})
         mock_entity_client.create = AsyncMock(return_value=saved)
@@ -183,7 +205,10 @@ class TestRegisterAgent:
         assert created_entity.name == "calc"
         assert created_entity.workspace == "default"
 
-    def test_register_validates_platform_agent_config(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
+    @pytest.mark.parametrize("explicit_format", [False, True])
+    def test_register_validates_platform_agent_config(
+        self, client: TestClient, mock_entity_client: AsyncMock, explicit_format: bool
+    ) -> None:
         async def _save_agent(agent: Agent) -> Agent:
             agent._id = f"agent-{agent.name}-id"
             agent._created_at = NOW
@@ -191,15 +216,13 @@ class TestRegisterAgent:
 
         mock_entity_client.create = AsyncMock(side_effect=_save_agent)
         config = _fabric_agent_config()
+        body = {"name": "fabric-agent", "description": "Fabric-backed agent", "config": config}
+        if explicit_format:
+            body["config_format"] = NEMO_AGENTS_SPEC_CONFIG_FORMAT
 
         resp = client.post(
             "/apis/agents/v2/workspaces/default/agents",
-            json={
-                "name": "fabric-agent",
-                "description": "Fabric-backed agent",
-                "config": config,
-                "config_format": NEMO_AGENTS_SPEC_CONFIG_FORMAT,
-            },
+            json=body,
         )
 
         assert resp.status_code == 201
@@ -220,7 +243,6 @@ class TestRegisterAgent:
             json={
                 "name": "fabric-agent",
                 "config": config,
-                "config_format": NEMO_AGENTS_SPEC_CONFIG_FORMAT,
             },
         )
 
@@ -274,19 +296,26 @@ class TestRegisterAgent:
 
         assert resp.status_code == 500
 
-    def test_register_name_only_returns_201(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
-        mock_entity_client.create.return_value = _make_agent("calc", config_format=NEMO_AGENTS_SPEC_CONFIG_FORMAT)
+    @pytest.mark.parametrize(
+        "fields",
+        [{}, {"config": {}}, {"config": {}, "config_format": NAT_WORKFLOW_CONFIG_FORMAT}],
+    )
+    def test_register_name_only_returns_201(
+        self, client: TestClient, mock_entity_client: AsyncMock, fields: dict[str, Any]
+    ) -> None:
+        config_format = fields.get("config_format", NEMO_AGENTS_SPEC_CONFIG_FORMAT)
+        mock_entity_client.create.return_value = _make_agent("calc", config_format=config_format)
 
         resp = client.post(
             "/apis/agents/v2/workspaces/default/agents",
-            json={"name": "calc"},
+            json={"name": "calc", **fields},
         )
         assert resp.status_code == 201
         agent = mock_entity_client.create.call_args[0][0]
         assert agent.config == {}
-        assert agent.config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT
+        assert agent.config_format == config_format
         assert resp.json()["config"] == {}
-        assert resp.json()["config_format"] == NEMO_AGENTS_SPEC_CONFIG_FORMAT
+        assert resp.json()["config_format"] == config_format
 
     def test_register_preserves_workspace_from_path(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
         saved = _make_agent("calc", workspace="prod")

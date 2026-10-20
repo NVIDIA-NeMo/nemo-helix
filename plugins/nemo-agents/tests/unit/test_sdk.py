@@ -85,6 +85,15 @@ def test_register_rejects_unresolved_default_model_placeholder() -> None:
         client.register(name="calc", config=config)
 
 
+def test_register_rejects_conflicting_formats() -> None:
+    def handler(_req: httpx.Request) -> httpx.Response:
+        raise AssertionError("should not POST conflicting config formats")
+
+    client = AgentsResource(_client(handler))
+    with pytest.raises(ValueError, match="config_format must match config.config_format"):
+        client.register(name="calc", config={"config_format": "nemo-agents-spec-v1"}, config_format="nat-workflow-v1")
+
+
 def test_agents_resource_uses_default_workspace_when_platform_workspace_is_unset() -> None:
     paths: list[str] = []
 

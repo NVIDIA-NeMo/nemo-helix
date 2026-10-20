@@ -4895,8 +4895,9 @@ components:
         config_format:
           type: string
           title: Config Format
-          description: Config format identifier. Defaults to nemo-agents-spec-v1 for
-            an empty config, otherwise nat-workflow-v1.
+          description: Config format identifier. Uses config.config_format when present;
+            otherwise defaults to nemo-agents-spec-v1 for an empty config or nat-workflow-v1
+            for a nonempty config. An explicit value must match config.config_format.
       type: object
       required:
       - name

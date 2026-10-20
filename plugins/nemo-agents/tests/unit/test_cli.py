@@ -305,11 +305,20 @@ def test_agents_cli_has_no_create_command() -> None:
     assert "No such command 'create'" in result.output
 
 
-def test_register_name_only() -> None:
+@pytest.mark.parametrize("config_text", [None, "{}"])
+def test_register_name_only(tmp_path: Path, config_text: str | None) -> None:
+    args = ["register", "--name", "calc", "--workspace", "team-a"]
+    expected: dict[str, Any] = {"name": "calc"}
+    if config_text is not None:
+        config = tmp_path / "agent.yaml"
+        config.write_text(config_text)
+        args += ["--agent-config", str(config)]
+        expected.update(config={}, config_format="nemo-agents-spec-v1")
+
     def handler(req: httpx.Request) -> httpx.Response:
         assert req.method == "POST"
         assert req.url.path == "/apis/agents/v2/workspaces/team-a/agents"
-        assert json.loads(req.content) == {"name": "calc"}
+        assert json.loads(req.content) == expected
         return httpx.Response(201, json={"name": "calc"})
 
     with (
@@ -317,7 +326,7 @@ def test_register_name_only() -> None:
         patch("nemo_agents_plugin.cli._upload_ethos_fileset") as upload,
         patch("nemo_agents_plugin.utils.inject_default_model") as resolve_model,
     ):
-        result = CliRunner().invoke(AgentsCLI().get_cli(), ["register", "--name", "calc", "--workspace", "team-a"])
+        result = CliRunner().invoke(AgentsCLI().get_cli(), args)
 
     assert result.exit_code == 0, result.output
     upload.assert_not_called()
@@ -357,20 +366,30 @@ def test_register_resolves_default_model_placeholder(tmp_path, placeholder: str)
     assert sent["config_format"] == "nat-workflow-v1"
 
 
-def test_register_reports_malformed_agent_config_yaml_without_traceback(tmp_path) -> None:
+@pytest.mark.parametrize(
+    ("config_text", "error"),
+    [
+        ("llms:\n  - [unterminated\n", "invalid YAML in agent config"),
+        ("", "root must be a YAML mapping"),
+        ("null", "root must be a YAML mapping"),
+        ("[]", "root must be a YAML mapping"),
+        ("false", "root must be a YAML mapping"),
+        ("config_format: []", "Input should be a valid string"),
+    ],
+)
+def test_register_reports_invalid_agent_config_without_traceback(tmp_path, config_text: str, error: str) -> None:
     config = tmp_path / "agent.yaml"
-    config.write_text("llms:\n  - [unterminated\n", encoding="utf-8")
+    config.write_text(config_text, encoding="utf-8")
 
     def handler(req: httpx.Request) -> httpx.Response:
-        raise AssertionError("malformed YAML should fail before any API request")
+        raise AssertionError("invalid config should fail before any API request")
 
     app = AgentsCLI().get_cli()
     with _install_mock_transport(handler):
         result = CliRunner().invoke(app, ["register", "--name", "calc", "--agent-config", str(config)])
 
     assert result.exit_code == 1
-    assert "invalid YAML in agent config" in result.stderr
-    assert "line" in result.stderr
+    assert error in result.stderr
     assert "Traceback" not in result.stderr
     assert ".venv" not in result.stderr
 

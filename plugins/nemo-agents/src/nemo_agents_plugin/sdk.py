@@ -202,8 +202,9 @@ class AgentsResource:
             name: Unique agent name within the workspace.
             config: Optional agent config dict.
             description: Optional human-readable description.
-            config_format: Config format identifier. Defaults to Fabric for an
-                empty config, or NAT for a supplied config.
+            config_format: Config format identifier. Uses the config's format
+                when present; otherwise defaults to Fabric for an empty config
+                or NAT for a nonempty config. Conflicting formats are rejected.
             workspace: Target workspace. Defaults to the workspace configured
                 on the platform client, or ``"default"`` when the client has no
                 workspace.

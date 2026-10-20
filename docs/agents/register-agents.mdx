@@ -97,6 +97,11 @@ Deployments and evaluations stage that fileset beside `agent.yaml`, so relative 
 working. The Python SDK registers the config only; use the CLI or Studio when the agent has other
 files.
 
+Config files must contain a YAML mapping; `{}` is accepted as an empty config.
+API and SDK registration use `config.config_format` when the outer `config_format`
+is omitted. If both are supplied, they must match. Nonempty configs without a
+format retain the legacy `nat-workflow-v1` default.
+
 ### `agent.yaml` Reference
 
 | Field | Purpose |

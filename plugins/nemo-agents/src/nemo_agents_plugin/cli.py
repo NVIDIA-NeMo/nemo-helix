@@ -3031,7 +3031,17 @@ def _validate_agent_config_for_register(agent_config: Path | None, *, name: str)
         return {}, NEMO_AGENTS_SPEC_CONFIG_FORMAT
 
     config_dict = _load_yaml(agent_config)
-    config_format = config_dict.get("config_format", NAT_WORKFLOW_CONFIG_FORMAT)
+    if not isinstance(config_dict, dict):
+        typer.echo(f"Error: agent config {agent_config} root must be a YAML mapping.", err=True)
+        raise typer.Exit(code=1)
+    try:
+        request = RegisterAgentRequest(name=name, config=config_dict)
+    except ValidationError as error:
+        typer.echo(f"Error: invalid agent config {agent_config}: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    config_dict, config_format = request.config, request.config_format
+    if not config_dict:
+        return config_dict, config_format
     if config_format in {NEMO_AGENTS_SPEC_CONFIG_FORMAT, NAT_WORKFLOW_CONFIG_FORMAT}:
         # Resolve ${NEMO_DEFAULT_MODEL} client-side — the agents service has
         # no user context at deploy time.
@@ -3082,7 +3092,7 @@ def _register_agent_from_validated_config(
             client.register_agent(workspace=workspace, body=RegisterAgentRequest.model_validate(payload))
         ),
     )
-    if agent_config is not None and config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT:
+    if agent_config is not None and config_dict and config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT:
         try:
             _upload_ethos_fileset(
                 agent_name=name,
