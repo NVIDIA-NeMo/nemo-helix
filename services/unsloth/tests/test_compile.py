@@ -88,3 +88,13 @@ def test_the_training_step_can_pause_and_keeps_checkpoints_out_of_the_model() ->
     assert step.lifecycle.pause_deadline_seconds == config.training_pause_deadline_seconds > 0
     assert step.config["checkpoint_path"] == DEFAULT_CHECKPOINT_PATH
     assert step.config["output_path"] == DEFAULT_OUTPUT_MODEL_PATH
+
+
+@pytest.mark.parametrize("profile", [None, "default"])
+def test_the_training_step_sends_its_provider(profile: str | None) -> None:
+    """The client sends only set fields, and the Jobs API picks the executor type by ``provider``."""
+    from nhx.unsloth.app.jobs.training.compiler import compile_training_step
+
+    step = compile_training_step(_canonical_spec(), base_env=[], profile=profile)
+
+    assert step.model_dump(mode="json", exclude_unset=True)["executor"]["provider"] == "gpu"

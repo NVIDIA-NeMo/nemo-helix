@@ -71,6 +71,8 @@ def compile_training_step(
     )
 
     executor = GPUExecutionProviderSpec(
+        # Set explicitly: the request omits unset fields, and the Jobs API needs this tag.
+        provider="gpu",
         container=ContainerSpec(
             image=get_training_image(),
             entrypoint=UNSLOTH_PYTHON_ENTRYPOINT,
