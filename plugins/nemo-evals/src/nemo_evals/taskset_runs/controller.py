@@ -182,6 +182,9 @@ async def _expire(
 
     Cancels first, so a run never ends with Jobs left running. If the state write then fails, the next
     pass sees only finished Jobs and ends the run ``failed`` (or bundles what completed) instead.
+
+    TODO(M4 story 8): delete the run's sandboxes by their ``nemo-run`` label. A dispatcher that is
+    cancelled, OOM-killed or evicted leaves its sandboxes until OpenSandbox's ``max_sandbox_lifetime_s`` TTL.
     """
     unfinished = 0
     for job in task_jobs:
