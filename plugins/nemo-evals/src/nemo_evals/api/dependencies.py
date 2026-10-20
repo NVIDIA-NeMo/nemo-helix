@@ -9,14 +9,14 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from urllib.parse import quote
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends
 from nemo_evals.api.service.metric_service import MetricService
 from nemo_evals.api.service.result_service import ResultService
 from nemo_evals.api.service.task_service import TaskService
 from nemo_evals.api.service.taskset_run_service import TasksetRunService, normalize_run_caller
 from nemo_evals.api.service.taskset_service import TasksetService
 from nemo_evals.config import get_config
-from nemo_evals.image_builds.service import ImageBuildForbiddenError, ImageBuildService, JobsServiceBuildJobs
+from nemo_evals.image_builds.service import ImageBuildService, JobsServiceBuildJobs, builder_authorizer
 from nemo_evals.taskset_runs.store import TasksetRunStore
 from nemo_helix_plugin.auth import current_auth_context
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -110,25 +110,11 @@ def get_image_build_service(
     async_client: AsyncNemoClient = Depends(get_nemo_client),
     authorize: RequestAuthorizer = Depends(get_request_authorizer),
 ) -> ImageBuildService:
-    """Provide an ImageBuildService whose task-builder Jobs are created as the caller.
-
-    Builder admits the task-builder Job on evals' own permissions, so the caller's permission to build is checked here.
-    """
-
-    async def authorize_builds(build_workspace: str) -> None:
-        try:
-            await authorize("POST", f"/apis/builder/v2/workspaces/{quote(build_workspace, safe='')}/builds")
-        except HTTPException as e:
-            if e.status_code != status.HTTP_403_FORBIDDEN:
-                raise
-            raise ImageBuildForbiddenError(
-                f"You may not submit container image builds in workspace {build_workspace}"
-            ) from e
-
+    """Provide an ImageBuildService whose task-builder Jobs are created as the caller."""
     return ImageBuildService(
         entity_client,
         JobsServiceBuildJobs(AsyncJobsClient.from_client(async_client), workspace=workspace),
-        authorize_builds,
+        builder_authorizer(authorize),
     )
 
 

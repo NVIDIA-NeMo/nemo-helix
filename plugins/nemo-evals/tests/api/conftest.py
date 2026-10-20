@@ -55,8 +55,34 @@ def authorizer():
 
 
 @pytest.fixture
-def service(run_store, entity_store, async_client, authorizer):
-    return TasksetRunService(run_store, entity_store, async_client, authorizer, EvaluatorConfig(), clock=lambda: NOW)
+def run_config(harbor_config):
+    """Operator config with Kubernetes taskset runs enabled."""
+    config = EvaluatorConfig()
+    return config.model_copy(update={"runs": config.runs.model_copy(update={"harbor": harbor_config})})
+
+
+@pytest.fixture
+def run_preparer(fake_preparer):
+    """Every task gets prebuilt images at once, as the MVP preparer does for ready builds."""
+    fake_preparer.ready_at_once = True
+    return fake_preparer
+
+
+@pytest.fixture
+def service(
+    run_store, entity_store, async_client, authorizer, run_config, run_preparer, fake_task_jobs, sandbox_platform
+):
+    return TasksetRunService(
+        run_store,
+        entity_store,
+        async_client,
+        authorizer,
+        run_config,
+        clock=lambda: NOW,
+        platform=sandbox_platform,
+        preparer=run_preparer,
+        task_jobs=fake_task_jobs,
+    )
 
 
 @pytest.fixture

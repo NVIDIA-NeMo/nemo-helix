@@ -27,6 +27,7 @@ from nhx_evals_sdk.agent_eval.metrics import AgentPhaseSuccessMetric
 from nhx_evals_sdk.agent_eval.results import AgentEvalSummary
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import (
     HarborAgentTaskRunner,
+    HarborEnvironmentConfig,
     HarborRewardMetric,
     HarborRuntimeConfig,
     HarborTasksetLoader,
@@ -65,6 +66,34 @@ _FIXTURES = Path(__file__).parent / "fixtures"
 _HARBOR_ERROR_RESULT = _FIXTURES / "harbor_error_result.json"
 _EXPECTED_MAX_TRACEBACK_CHARS = 8192
 _MISSING = object()
+
+
+@pytest.mark.asyncio
+async def test_custom_environment_reaches_native_harbor_job(tmp_path, monkeypatch):
+    captured = []
+
+    async def create(job_config):
+        captured.append(job_config)
+        return _FakeJob()
+
+    _stub_harbor(monkeypatch, create)
+
+    class EnvironmentJobConfig(_DriftConfig):
+        environment: dict[str, Any]
+
+    monkeypatch.setattr(sys.modules["harbor.job"], "JobConfig", EnvironmentJobConfig)
+    environment = HarborEnvironmentConfig(
+        import_path="custom.environment:Environment", kwargs={"use_server_proxy": True}
+    )
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", environment=environment)
+    _, run_job = _build_native_job(config, tmp_path / "dataset", None, env_templates={})
+    await run_job()
+    assert captured[0].environment == environment.model_dump()
+
+
+def test_custom_environment_rejects_persisted_api_key():
+    with pytest.raises(ValidationError, match="environment.kwargs"):
+        HarborEnvironmentConfig(import_path="custom:Environment", kwargs={"api_key": "do-not-persist-this"})
 
 
 @pytest.mark.parametrize("directory", ["omitted", "none", "path"])
@@ -910,6 +939,24 @@ async def test_run_refuses_credentials_injected_after_validation(tmp_path: Path)
         await run_job()
 
     # The guard runs before `force_rerun` clears the job dir: refusing must not cost completed trials.
+    assert (completed / "result.json").exists()
+
+
+async def test_run_refuses_environment_credentials_injected_after_validation(tmp_path: Path) -> None:
+    """``environment.kwargs`` gets the same run-time guard: Harbor persists them just like ``agent_kwargs``."""
+    environment = HarborEnvironmentConfig(import_path="custom:Environment")
+    environment.kwargs["api_key"] = "nvapi-not-a-real-key"  # mutated after its validator ran
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", job_name="j").model_copy(
+        update={"environment": environment, "force_rerun": True}
+    )
+
+    completed = tmp_path / "jobs" / "j" / "trial"
+    completed.mkdir(parents=True)
+    (completed / "result.json").write_text("{}", encoding="utf-8")
+    _, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="j", env_templates={})
+
+    with pytest.raises(ValueError, match="environment.kwargs"):
+        await run_job()
     assert (completed / "result.json").exists()
 
 
