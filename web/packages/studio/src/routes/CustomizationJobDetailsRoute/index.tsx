@@ -61,7 +61,7 @@ export const CustomizationJobDetailsRoute: FC = () => {
         slotLabel: 'Customizations',
       },
       {
-        slotLabel: job?.name || '',
+        slotLabel: job?.name || customizationJobName,
       },
     ],
   });
