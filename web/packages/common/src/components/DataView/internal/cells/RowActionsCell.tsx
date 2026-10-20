@@ -12,7 +12,7 @@ export interface RowActionsCellProps<TData> extends Omit<DropdownProps, 'items'>
   ctx: CellContext<TData, unknown>;
   /**
    * A function that returns the items to render in the dropdown. For conditional row actions,
-   * return a falsey value to render nothing.
+   * return an empty array, only dividers, or a falsey value to render nothing.
    */
   rowActions?: (
     row: TData,
@@ -33,7 +33,7 @@ export function RowActionsCell<TData>({
   const { isDataViewLoadingState, isDataViewEmptyState, isDataViewErrorState } =
     useInnerDataViewContext();
   const items = rowActions?.(ctx.row.original, ctx);
-  return items ? (
+  return items && items.some((item) => typeof item === 'string' || item.kind !== 'divider') ? (
     <Dropdown
       aria-label="Row Actions"
       className="-mx-[var(--table-cell-inline-padding)] -my-[var(--table-cell-block-padding)]"

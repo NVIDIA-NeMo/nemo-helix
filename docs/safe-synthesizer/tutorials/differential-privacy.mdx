@@ -111,11 +111,13 @@ else:
 # Load sample dataset
 import kagglehub  # type: ignore[import-not-found]
 
-path = kagglehub.dataset_download("nicapotato/womens-ecommerce-clothing-reviews")
-df = pd.read_csv(f"{path}/Womens Clothing E-Commerce Reviews.csv", index_col=0)
+path = kagglehub.dataset_download("sobhanmoosavi/us-accidents")
+df = pd.read_csv(f"{path}/US_Accidents_March23.csv", index_col=0)
+recommended_delta = 1 / len(df) ** 2
+df = df.sample(n=26250, random_state=318)
 
 print(f"Dataset size: {len(df)} records")
-print(f"Recommended delta: {1 / (len(df) ** 1.2):.2e}")
+print(f"Recommended delta: {recommended_delta:.2e}")
 ```
 
 ---
@@ -137,6 +139,8 @@ builder_baseline = (
     .with_data_source(df)
     .with_classify_model_provider(provider_name)
     .with_replace_pii()
+    .with_train(batch_size=4, gradient_accumulation_steps=32)
+    .with_generate(structured_generation={"enabled": True})
     .synthesize()
 )
 
@@ -174,7 +178,9 @@ builder_moderate = (
     .with_data_source(df)
     .with_classify_model_provider(provider_name)
     .with_replace_pii()
-    .with_differential_privacy(dp_enabled=True, epsilon=6.0, delta=1e-5)
+    .with_differential_privacy(dp_enabled=True, epsilon=6.0, delta=recommended_delta)
+    .with_train(batch_size=4, gradient_accumulation_steps=32)
+    .with_generate(structured_generation={"enabled": True})
     .synthesize()
 )
 
@@ -206,7 +212,9 @@ builder_strong = (
     .with_data_source(df)
     .with_classify_model_provider(provider_name)
     .with_replace_pii()
-    .with_differential_privacy(dp_enabled=True, epsilon=1.0, delta=1e-5)
+    .with_differential_privacy(dp_enabled=True, epsilon=1.0, delta=recommended_delta)
+    .with_train(batch_size=4, gradient_accumulation_steps=32)
+    .with_generate(structured_generation={"enabled": True})
     .synthesize()
 )
 
@@ -309,6 +317,8 @@ builder_custom = (
     .with_classify_model_provider(provider_name)
     .with_replace_pii()
     .with_differential_privacy(config=privacy_config)
+    .with_train(batch_size=4, gradient_accumulation_steps=32)
+    .with_generate(structured_generation={"enabled": True})
     .synthesize()
 )
 ```
@@ -320,16 +330,18 @@ For datasets where multiple records belong to the same entity (e.g., a patient w
 {/* @nemo-docs: skip-python-type-check */}
 ```python
 # Group-level privacy for repeated records in this tutorial's sample dataset.
-# For patient data, replace "Clothing ID" with your patient identifier column.
+# Here a street is a group; for patient data, use your patient identifier column.
 builder_grouped = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
     .with_data(
-        group_training_examples_by="Clothing ID"
+        group_training_examples_by="Street"
     )
     .with_classify_model_provider(provider_name)
     .with_replace_pii()
     .with_differential_privacy(dp_enabled=True, epsilon=8.0)
+    .with_train(batch_size=4, gradient_accumulation_steps=32)
+    .with_generate(structured_generation={"enabled": True})
     .synthesize()
 )
 ```
@@ -447,8 +459,8 @@ builder_optimized = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
     .with_train(
-        batch_size=256,  # Larger batch sizes benefit DP
-        num_input_records_to_sample=len(df) * 10,  # Approximately ten passes over the input
+        batch_size=4,
+        gradient_accumulation_steps=32,  # Effective batch size of 128
     )
     .with_classify_model_provider(provider_name)
     .with_replace_pii()
@@ -458,6 +470,7 @@ builder_optimized = (
         delta="auto",
         per_sample_max_grad_norm=1.0,
     )
+    .with_generate(structured_generation={"enabled": True})
     .synthesize()
 )
 ```
@@ -465,7 +478,7 @@ builder_optimized = (
 **Training Tips:**
 1. **Use larger batch sizes** - DP benefits from larger batches (reduces noise variance)
     - Default batch size may be too small for optimal DP training
-    - Try batch_size=256 or 512 if GPU memory allows
+    - Start with batch_size=4 and gradient_accumulation_steps=32, as in the upstream DP tutorial
     - If memory errors occur, reduce batch size gradually
 
 2. **Monitor convergence** - DP training may converge differently
@@ -506,16 +519,18 @@ builder_improved = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
     .with_train(
-        num_input_records_to_sample=len(df) * 10  # Approximately ten passes over the input
+        batch_size=4,
+        gradient_accumulation_steps=32,
     )
     .with_classify_model_provider(provider_name)
     .with_replace_pii()
     .with_differential_privacy(
         dp_enabled=True,
         epsilon=6.0,  # Slightly higher
-        delta=1e-5,
+        delta=recommended_delta,
         per_sample_max_grad_norm=1.5,  # Less aggressive clipping
     )
+    .with_generate(structured_generation={"enabled": True})
     .synthesize()
 )
 ```

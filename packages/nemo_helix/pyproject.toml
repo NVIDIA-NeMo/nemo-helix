@@ -643,6 +643,7 @@ services = [
   "nhx-common",
   "pyleak>=0.1.0",
   "rich>=14.1.0",
+  "docker>=7.0.0",
   "nemo-helix[unsloth-service]",
   "nemo-helix[rl-service]",
   "nemo-helix[automodel-service]",

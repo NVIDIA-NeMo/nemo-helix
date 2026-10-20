@@ -9209,7 +9209,7 @@ interface RowActionsCellProps<TData> extends Omit<DropdownProps, 'items'> {
   ctx: CellContext<TData, unknown>;
   /**
    * A function that returns the items to render in the dropdown. For conditional row actions,
-   * return a falsey value to render nothing.
+   * return an empty array, only dividers, or a falsey value to render nothing.
    */
   rowActions?: (row: TData, ctx: CellContext<TData, unknown>) => DropdownProps['items'] | false | null | undefined;
 }
@@ -9222,7 +9222,7 @@ declare function RowActionsCell<TData>({ children, ctx, rowActions, ...props }: 
 //#region src/components/DataView/internal/hooks/useMakeColumns.d.ts
 declare const PREBUILT_COLUMN_IDS: string[];
 declare function rowActionsColumn<TData>(options?: Partial<DisplayColumnDef<TData>> & {
-  cellProps?: Partial<DropdownProps>;
+  cellProps?: Partial<Omit<DropdownProps, 'items'>>;
   rowActions?: RowActionsCellProps<TData>['rowActions'];
 }): DisplayColumnDef<TData>;
 declare function rowExpansionColumn<TData>(options?: Partial<DisplayColumnDef<TData>> & {

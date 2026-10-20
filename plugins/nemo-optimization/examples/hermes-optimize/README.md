@@ -20,7 +20,7 @@ bundle portable when the platform sees only the files you staged into a fileset.
 | **MCP** | Tunes temperature / top_p on a phishing agent that calls the email-phishing-analyzer MCP server, scoring accuracy, exactly-one tool call, and verbatim tool input | [`optimize-mcp.yaml`](optimize-mcp.yaml) | [`dataset-mcp.json`](dataset-mcp.json), `PHISHING_MCP_BIN` |
 | **MCP, mock analyzer** | The same study against a bundled fixture that replays recorded analyzer results; needs no checkout or analyzer credential | [`optimize-mcp-mock.yaml`](optimize-mcp-mock.yaml) | [`phishing_analyzer_mcp/`](phishing_analyzer_mcp/) |
 
-Official docs: [Optimize Agents](../../../../docs/agents/optimization.mdx).
+Official docs: [Optimize Agents](../../../../docs/agents/optimize-agents.mdx).
 
 ---
 
@@ -323,9 +323,14 @@ read them back from.
 profile when the platform registers one, and otherwise to the `cpu` profile
 (docker or `kubernetes_job`, whichever the deployment registered) using the
 `nhx-tasks` image. Either way the fileset is the only input, so both
-backends see the same tree. See
-[Operator notes](../../../../docs/agents/optimization.mdx) for what each backend
-needs installed.
+backends see the same tree.
+
+- `subprocess` runs in the platform host's Python environment, which needs the
+  optimization plugins and the agent's Fabric harness installed, plus the Docker
+  socket if trials use it.
+- `cpu` runs in the `nhx-tasks` image, which includes the optimization plugins and
+  the Claude Code, Codex, and DeepAgents harnesses but not Hermes. Run these
+  Hermes studies under `subprocess`, or build a task image that includes Hermes.
 
 ---
 

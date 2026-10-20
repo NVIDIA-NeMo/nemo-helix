@@ -327,6 +327,11 @@ def infer_permissions(path: str, method: str) -> List[str]:
     if path.endswith("/workspaces") and method == "post":
         return ["workspaces.create"]
 
+    # Deletion status is system-scoped. The path is not under /workspaces/{name}
+    # because delete already removed that workspace's role bindings.
+    if path.startswith("/apis/entities/v2/workspace-deletions/") and method == "get":
+        return ["workspaces.deletion.read"]
+
     # Special case for workspace members (permission lives under workspaces.* regardless
     # of which API area exposes the route, e.g. /apis/entities/v2/workspaces/{ws}/members)
     if "/workspaces/" in path and "/members" in path:
@@ -392,6 +397,9 @@ def infer_scopes(path: str, method: str) -> List[str]:
     # Special case for workspace creation (normal write scopes despite no workspace in path)
     if path.endswith("/workspaces") and method == "post":
         return ["entities:write", "platform:write"]
+
+    if path.startswith("/apis/entities/v2/workspace-deletions/") and method == "get":
+        return ["entities:read", "platform:read"]
 
     # Determine read/write based on method
     is_write = method in ["post", "put", "patch", "delete"]

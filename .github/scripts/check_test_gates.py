@@ -29,6 +29,10 @@ from pathlib import Path
 #: Gates CI is not expected to satisfy, each because the suite behind it needs a credential or a live
 #: external service. Keep this short and justified: every entry is coverage CI does not have.
 ALLOWED_UNSET = {
+    "RUN_LOCAL_FABRIC_NETWORK_E2E": (
+        "needs an isolated live Linux Helix platform with Docker, Harbor and Intake; "
+        "manual command in plugins/nemo-evals/tests/integration/test_local_fabric_network.py"
+    ),
     "RUN_EXTERNAL_STORAGE_TESTS": "needs real NGC storage credentials",
     "NVIDIA_API_KEY": "needs a real build.nvidia.com key",
     "NHX_INSIGHTS_E2E": "needs a live Insights deployment",

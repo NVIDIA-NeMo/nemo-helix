@@ -420,6 +420,20 @@ entities_workspace_object_path(base_path, method) if {
 	lower(method) in ["get", "post", "put", "patch", "delete", "head"]
 }
 
+# Deletion status is system-scoped. It is not under /workspaces/{name} because
+# delete already removed that workspace's role bindings. static-authz gates the
+# GET with workspaces.deletion.read; the handler still limits it to the creator,
+# a platform admin, or a service principal.
+entities_workspace_object_path(base_path, method) if {
+	parts := [p | p := split(base_path, "/")[_]; p != ""]
+	count(parts) == 5
+	parts[0] == "apis"
+	parts[1] == "entities"
+	parts[2] == "v2"
+	parts[3] == "workspace-deletions"
+	lower(method) == "get"
+}
+
 # Health check endpoints - always allow (must match middleware auth exclusions)
 allow_request if {
 	path := extract_path

@@ -8,7 +8,7 @@ description: "Train a model with GRPO against a NeMo Gym reward environment."
 
 GRPO (Group Relative Policy Optimization) trains a model against a **reward environment** instead of labeled completions. For each prompt the platform samples a group of responses, the environment scores them, and the policy is updated toward the responses that scored better than the others in their group.
 
-That last part is why GRPO behaves differently from every other customization method here: the learning signal is the *spread* of rewards inside a group. If every response to a prompt earns the same score, that prompt contributes nothing.
+That last part is why GRPO behaves differently from every other customization method here: the learning signal is the _spread_ of rewards inside a group. If every response to a prompt earns the same score, that prompt contributes nothing.
 
 GRPO runs on the `rl` backend, the same one that runs DPO, and requires a NeMo Helix deployment configured with `platform.runtime: kubernetes` — it provisions a Ray cluster and has no local Docker fallback.
 
@@ -16,26 +16,28 @@ GRPO runs on the `rl` backend, the same one that runs DPO, and requires a NeMo H
 
 Unlike SFT or DPO, GRPO takes **two** FileSets:
 
-| FileSet | `purpose` | Holds |
-| --- | --- | --- |
-| Environment | `environment` | Code and config that runs a rollout and returns a reward |
-| Dataset | `dataset` | `training.jsonl` (required) and `validation.jsonl` (optional) — prompt rows |
+| FileSet     | `purpose`     | Holds                                                                       |
+| ----------- | ------------- | --------------------------------------------------------------------------- |
+| Environment | `environment` | Code and config that runs a rollout and returns a reward                    |
+| Dataset     | `dataset`     | `training.jsonl` (required) and `validation.jsonl` (optional) — prompt rows |
 
 Plus a registered model entity, exactly as for the other backends.
 
 <Note>
-Prompt JSONL must **not** live inside the environment package. Schema validation rejects any `.jsonl` in the environment FileSet, so keep the two FileSets separate.
+  Prompt JSONL must **not** live inside the environment package. Schema
+  validation rejects any `.jsonl` in the environment FileSet, so keep the two
+  FileSets separate.
 </Note>
 
 ## Choose an environment format
 
 The environment package declares its format in a `nemo-environment.yaml` manifest at its root. Three formats are supported.
 
-| You have | Format | Ships wheels | `config_paths` live under |
-| --- | --- | --- | --- |
-| A Gym server tree whose dependencies are already resolvable at spin-up | `native-v1` | No | `responses_api_agents/`, `resources_servers/`, `responses_api_models/` |
-| Any `verifiers` environment installable as a wheel like a Prime Intellect hub environment | `adapter-wheels-v1` | Yes | `configs/` |
-| Any other environment code, including a Gym server tree whose dependencies you want vendored | `wheels-v1` | Yes | Anywhere in the package |
+| You have                                                                                     | Format              | Ships wheels | `config_paths` live under                                              |
+| -------------------------------------------------------------------------------------------- | ------------------- | ------------ | ---------------------------------------------------------------------- |
+| A Gym server tree whose dependencies are already resolvable at spin-up                       | `native-v1`         | No           | `responses_api_agents/`, `resources_servers/`, `responses_api_models/` |
+| Any `verifiers` environment installable as a wheel like a Prime Intellect hub environment    | `adapter-wheels-v1` | Yes          | `configs/`                                                             |
+| Any other environment code, including a Gym server tree whose dependencies you want vendored | `wheels-v1`         | Yes          | Anywhere in the package                                                |
 
 All three formats run on the same Gym runtime and are supported equally. The format decides two things only: where a package's dependencies come from, and where its `config_paths` may live.
 
@@ -44,12 +46,12 @@ All three formats run on the same Gym runtime and are supported equally. The for
 Every package declares itself in `nemo-environment.yaml` at its root. The shape is the same in all three formats:
 
 ```yaml
-format: wheels-v1              # or native-v1, adapter-wheels-v1
-config_paths:                  # at least one, relative to the package root
+format: wheels-v1 # or native-v1, adapter-wheels-v1
+config_paths: # at least one, relative to the package root
   - configs/policy_model.yaml
   - configs/my_env.yaml
 metadata:
-  name: my-env                 # required
+  name: my-env # required
   description: Custom reward environment
 ```
 
@@ -57,7 +59,7 @@ metadata:
 
 ```yaml
 adapter:
-  agent: verifiers_agent       # the only harness built into the image
+  agent: verifiers_agent # the only harness built into the image
   agent_type: responses_api_agents
 ```
 
@@ -71,25 +73,25 @@ Rules that apply to every format:
 
 ## How dependencies are installed
 
-The format you choose does not change *what runs* — all three start on the same Gym runtime. It changes where dependencies come from, and that is what usually decides whether a job starts at all.
+The format you choose does not change _what runs_ — all three start on the same Gym runtime. It changes where dependencies come from, and that is what usually decides whether a job starts at all.
 
 There are two installs at job start:
 
-1. Gym builds **one venv per server** from that server's `pyproject.toml` or `requirements.txt`, plus `nemo-gym` at the image version and Gym's pinned `ray[default]` and `openai`. A package's `wheels/` directory is offered here as a *candidate pool* — **a package index is still enabled**, so anything the wheelhouse misses is fetched from it.
-2. The job then installs the package's vendored closure into each agent and resources-server venv with `--no-index`. Fully offline, but only for what `wheels/` already carries, and only after step 1 succeeded.
+1. The job installs the package's vendored closure from `wheels/` into a writable work directory with `--no-index`. Fully offline, but only for what `wheels/` already carries.
+2. Gym then builds **one venv per server** from that server's `pyproject.toml` or `requirements.txt`, plus `nemo-gym` at the image version and Gym's pinned `ray[default]` and `openai`. A package's `wheels/` directory is offered here as a _candidate pool_ — **a package index is still enabled**, so anything the wheelhouse misses is fetched from it.
 
-| Format | Server dependencies come from | Needs egress at spin-up |
-| --- | --- | --- |
-| `native-v1` | A package index, resolved from the server's `requirements.txt` | Yes |
-| `wheels-v1` | The package's `wheels/`, for anything it vendors | No, **if the closure also covers step 1** |
-| `adapter-wheels-v1` | The package's `wheels/`, plus the agent harness's own requirements | No, when built by the converter |
+| Format              | Server dependencies come from                                      | Needs egress at spin-up                   |
+| ------------------- | ------------------------------------------------------------------ | ----------------------------------------- |
+| `native-v1`         | A package index, resolved from the server's `requirements.txt`     | Yes                                       |
+| `wheels-v1`         | The package's `wheels/`, for anything it vendors                   | No, **if the closure also covers step 2** |
+| `adapter-wheels-v1` | The package's `wheels/`, plus the agent harness's own requirements | No, when built by the converter           |
 
 A `wheels-v1` job runs with no egress only when `wheels/` carries all of:
 
 - the server's own requirement closure;
 - `nemo-gym` at exactly the training-image version;
 - `ray[default]` and `openai` at the versions the image pins, which Gym appends to every install;
-- **`pip`** — `uv venv --seed` installs it into each new virtualenv *before* any dependency install, resolving it like any other package.
+- **`pip`** — `uv venv --seed` installs it into each new virtualenv _before_ any dependency install, resolving it like any other package.
 
 The virtualenv is created empty, so nothing carries over from the image. Completeness of `wheels/` is what makes an offline run work, not the format name. Full detail: [GRPO Environment Packages](/documentation/customizer-reference/tutorials/grpo-environment-packages#dependencies).
 
@@ -154,7 +156,9 @@ metadata:
 ```
 
 <Warning>
-Gym's own configs point `datasets[].jsonl_fpath` at a file inside the server directory. That file cannot ship in the environment package. Remove the data directory and supply prompts through the dataset FileSet instead.
+  Gym's own configs point `datasets[].jsonl_fpath` at a file inside the server
+  directory. That file cannot ship in the environment package. Remove the data
+  directory and supply prompts through the dataset FileSet instead.
 </Warning>
 
 `native-v1` ships no wheels, so its server's dependencies resolve from a package index at spin-up and the job needs egress. If that is not available on your cluster, package the same server tree as `wheels-v1` instead and vendor the closure — see [How dependencies are installed](#how-dependencies-are-installed).
@@ -180,7 +184,9 @@ UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --package nhx-rl --extra convers
 ```
 
 <Note>
-Pin `--hub-version`. Left unset, the converter takes whatever the index offers at that moment; a later release can narrow `Requires-Python` and fail the download, or install but not run on the training image's Python.
+  Pin `--hub-version`. Left unset, the converter takes whatever the index offers
+  at that moment; a later release can narrow `Requires-Python` and fail the
+  download, or install but not run on the training image's Python.
 </Note>
 
 The converter writes:
@@ -200,7 +206,7 @@ Add `--upload` to create both FileSets and upload them in the same command. The 
 
 ### Every package needs a `policy_model` server
 
-Gym server configs reference the model they roll out against by name, conventionally `policy_model`, and Gym resolves every reference when it merges configs — long before any rollout. If nothing in your `config_paths` *defines* that server, spin-up fails with `ServerRefNotFoundError: ... Available responses_api_models: (none)`.
+Gym server configs reference the model they roll out against by name, conventionally `policy_model`, and Gym resolves every reference when it merges configs — long before any rollout. If nothing in your `config_paths` _defines_ that server, spin-up fails with `ServerRefNotFoundError: ... Available responses_api_models: (none)`.
 
 The converter writes this file for you. Hand-built packages must add it, in every format:
 
@@ -218,17 +224,19 @@ policy_model:
 
 The three interpolations resolve to the job’s vLLM endpoint. List this file first in `config_paths`.
 
-| Format | Path |
-| --- | --- |
-| `adapter-wheels-v1`, `wheels-v1` | `configs/policy_model.yaml` |
-| `native-v1` | `responses_api_models/vllm_model/configs/policy_model.yaml` |
+| Format                           | Path                                                        |
+| -------------------------------- | ----------------------------------------------------------- |
+| `adapter-wheels-v1`, `wheels-v1` | `configs/policy_model.yaml`                                 |
+| `native-v1`                      | `responses_api_models/vllm_model/configs/policy_model.yaml` |
 
 For `native-v1` only the server-type prefix is checked, so `responses_api_models/policy_model/configs/policy_model.yaml` works too — Gym runs the directory named in the YAML body, not the one the config file sits in.
 
 Custom implementations need `{server_type}/{implementation}/` (with `app.py` and `requirements.txt`) in the FileSet for `native-v1` and `wheels-v1`. YAML under `configs/` does not replace that directory, and a directory without `requirements.txt` or `pyproject.toml` is not recognised as a server at all. Details: [GRPO Environment Packages](/documentation/customizer-reference/tutorials/grpo-environment-packages).
 
 <Note>
-`pi-to-gym-conversion` currently only vendors wheels for `x86_64` today. On an `arm64` cluster, build the closure yourself with the `pip download` command above and pass it via `--wheels-dir`.
+  `pi-to-gym-conversion` currently only vendors wheels for `x86_64` today. On an
+  `arm64` cluster, build the closure yourself with the `pip download` command
+  above and pass it via `--wheels-dir`.
 </Note>
 
 ### Validate before uploading, whichever format you built
@@ -247,8 +255,10 @@ GRPO rows are **rollout rows**, not prompt/completion pairs and not preference t
 {
   "task_idx": 0,
   "vf_env_id": "ascii-tree",
-  "responses_create_params": {"input": [{"role": "user", "content": "Draw a binary tree of depth 3."}]},
-  "agent_ref": {"type": "responses_api_agents", "name": "verifiers_agent"},
+  "responses_create_params": {
+    "input": [{ "role": "user", "content": "Draw a binary tree of depth 3." }]
+  },
+  "agent_ref": { "type": "responses_api_agents", "name": "verifiers_agent" },
   "question": "Draw a binary tree of depth 3.",
   "answer": "",
   "task": "ascii-tree",
@@ -257,21 +267,24 @@ GRPO rows are **rollout rows**, not prompt/completion pairs and not preference t
 }
 ```
 
-| Field | Required | Meaning |
-| --- | --- | --- |
-| `responses_create_params` | Yes | The prompt. Messages go under `input`. |
-| `agent_ref` | Yes | Object routing the row to an agent. `name` is the Gym **instance** in the environment YAML (converter: `verifiers_agent`). |
-| `vf_env_id` | verifiers environments | Passed to `verifiers.load_environment()`. Set it to the manifest's `metadata.vf_env_id`. |
-| `task_idx` | verifiers environments | Row index. |
-| `answer`, `task`, `example_id`, `info`, `question` | No | Passed through to the environment. |
+| Field                                              | Required               | Meaning                                                                                                                    |
+| -------------------------------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `responses_create_params`                          | Yes                    | The prompt. Messages go under `input`.                                                                                     |
+| `agent_ref`                                        | Yes                    | Object routing the row to an agent. `name` is the Gym **instance** in the environment YAML (converter: `verifiers_agent`). |
+| `vf_env_id`                                        | verifiers environments | Passed to `verifiers.load_environment()`. Set it to the manifest's `metadata.vf_env_id`.                                   |
+| `task_idx`                                         | verifiers environments | Row index.                                                                                                                 |
+| `answer`, `task`, `example_id`, `info`, `question` | No                     | Passed through to the environment.                                                                                         |
 
 Extra keys are allowed and forwarded to the environment. Only the agent-agnostic fields are schema-checked, so `vf_env_id` and `task_idx` are not rejected when missing or mismatched — a wrong `vf_env_id` surfaces as the environment failing to load, not as a validation error.
 
 <Note>
-Row shapes are checked inside the training container, not at submit. Submitting only verifies that the dataset FileSet contains `training.jsonl` and that the environment package's manifest is valid, so a malformed row costs a job start. Validate rows locally before uploading.
+  Row shapes are checked inside the training container, not at submit.
+  Submitting only verifies that the dataset FileSet contains `training.jsonl`
+  and that the environment package's manifest is valid, so a malformed row costs
+  a job start. Validate rows locally before uploading.
 </Note>
 
-Validation runs exactly one rollout per row of `validation.jsonl` — there is no validation counterpart to `num_generations_per_prompt`. To score a prompt *k* times, repeat its row *k* times.
+Validation runs exactly one rollout per row of `validation.jsonl` — there is no validation counterpart to `num_generations_per_prompt`. To score a prompt _k_ times, repeat its row _k_ times.
 
 ## Upload both FileSets
 
@@ -288,7 +301,7 @@ nemo files filesets create "$DATA" --workspace default --purpose dataset --exist
 nemo files upload ./ascii-tree-data/ "$DATA" --workspace default
 ```
 
-The trailing slash on the local path matters — it selects the directory's *contents* rather than the directory itself. Without it everything nests one level deeper under the directory's basename, which leaves the manifest off the FileSet root. Confirm with `nemo files list` before submitting.
+The trailing slash on the local path matters — it selects the directory's _contents_ rather than the directory itself. Without it everything nests one level deeper under the directory's basename, which leaves the manifest off the FileSet root. Confirm with `nemo files list` before submitting.
 
 `--purpose environment` is enforced, not cosmetic: submit rejects an environment FileSet whose purpose is anything other than `environment` or `generic`.
 
@@ -349,30 +362,34 @@ GRPO trains every weight by default. Set `finetuning_type` to train a LoRA adapt
 }
 ```
 
-| `finetuning_type` | Trains | Produces |
-| --- | --- | --- |
-| `all_weights` (default) | Every weight | A model entity, which needs its own deployment |
-| `lora` | An adapter | An HF PEFT adapter entity, registered against the base model |
-| `lora_merged` | — | Rejected. GRPO does not merge adapters at export. |
+| `finetuning_type`       | Trains       | Produces                                                     |
+| ----------------------- | ------------ | ------------------------------------------------------------ |
+| `all_weights` (default) | Every weight | A model entity, which needs its own deployment               |
+| `lora`                  | An adapter   | An HF PEFT adapter entity, registered against the base model |
+| `lora_merged`           | —            | Rejected. GRPO does not merge adapters at export.            |
 
 <Note>
-You do not set the output type. It is inferred from `finetuning_type`, so `output` carries only `name` either way.
+  You do not set the output type. It is inferred from `finetuning_type`, so
+  `output` carries only `name` either way.
 </Note>
-
 
 ### LoRA fields
 
-| Field | Default | Description |
-| --- | --- | --- |
-| `rank` | `16` | LoRA rank. |
-| `alpha` | `32` | Scaling factor. The effective learning-rate multiplier on the adapter is `alpha / rank`, so changing `rank` alone also changes the effective learning rate. |
-| `dropout` | `0.0` | Dropout applied after the adapter. |
-| `target_modules` | `null` | Module names to adapt. |
-| `exclude_modules` | `null` | Module name patterns to skip. |
-| `use_triton` | unset → compiler picks | Triton LoRA kernels: `true` at `tensor_parallel_size` 1, `false` above. Leave it unset. Setting it `true` with `tensor_parallel_size` above 1 is rejected at submit, because the kernels cannot accept the sharded adapter weights tensor parallelism produces. |
+| Field             | Default                | Description                                                                                                                                                                                                                                                     |
+| ----------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rank`            | `16`                   | LoRA rank.                                                                                                                                                                                                                                                      |
+| `alpha`           | `32`                   | Scaling factor. The effective learning-rate multiplier on the adapter is `alpha / rank`, so changing `rank` alone also changes the effective learning rate.                                                                                                     |
+| `dropout`         | `0.0`                  | Dropout applied after the adapter.                                                                                                                                                                                                                              |
+| `target_modules`  | `null`                 | Module names to adapt.                                                                                                                                                                                                                                          |
+| `exclude_modules` | `null`                 | Module name patterns to skip.                                                                                                                                                                                                                                   |
+| `use_triton`      | unset → compiler picks | Triton LoRA kernels: `true` at `tensor_parallel_size` 1, `false` above. Leave it unset. Setting it `true` with `tensor_parallel_size` above 1 is rejected at submit, because the kernels cannot accept the sharded adapter weights tensor parallelism produces. |
 
 <Warning>
-Module selection is either/or. Leaving both `target_modules` and `exclude_modules` unset adapts **every** linear layer. Setting either list turns that behavior off, so `exclude_modules` on its own does not mean "all linear layers except these." Use `target_modules` when you want a specific set, and neither field when you want all of them.
+  Module selection is either/or. Leaving both `target_modules` and
+  `exclude_modules` unset adapts **every** linear layer. Setting either list
+  turns that behavior off, so `exclude_modules` on its own does not mean "all
+  linear layers except these." Use `target_modules` when you want a specific
+  set, and neither field when you want all of them.
 </Warning>
 
 Omitting the `lora` block while setting `finetuning_type: "lora"` is fine — defaults are filled in. Supplying a `lora` block alongside `all_weights` is rejected.
@@ -410,16 +427,16 @@ Or an object to have one created inline. It deploys with vLLM, the recommended e
 }
 ```
 
-| Field | Default | Description |
-| --- | --- | --- |
-| `engine` | `vllm` | `vllm` or `nim`. |
-| `gpu` | `1` | GPUs the deployment requests. |
-| `lora_enabled` | `true` | Whether the deployment can load LoRA adapters. |
-| `image_name` | platform default for the engine | Container image. For vLLM, the default is `docker.io/vllm/vllm-openai`; for NIM, the multi-LLM NIM, `nvcr.io/nim/nvidia/llm-nim`. |
-| `image_tag` | platform default for the engine | Container image tag. For NIM, the default is `latest`. |
-| `disk_size` | unset | Disk size for the deployment. |
-| `additional_envs` | unset | Extra environment variables. |
-| `tool_call_config` | unset | Tool-calling overrides. Requires NIM: setting it without `engine` deploys with NIM, and it is rejected with `"engine": "vllm"`. Setting `tool_call_plugin` requires the `models.tool-call-plugin.set` permission. |
+| Field              | Default                         | Description                                                                                                                                                                                                       |
+| ------------------ | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `engine`           | `vllm`                          | `vllm` or `nim`.                                                                                                                                                                                                  |
+| `gpu`              | `1`                             | GPUs the deployment requests.                                                                                                                                                                                     |
+| `lora_enabled`     | `true`                          | Whether the deployment can load LoRA adapters.                                                                                                                                                                    |
+| `image_name`       | platform default for the engine | Container image. For vLLM, the default is `docker.io/vllm/vllm-openai`; for NIM, the multi-LLM NIM, `nvcr.io/nim/nvidia/llm-nim`.                                                                                 |
+| `image_tag`        | platform default for the engine | Container image tag. For NIM, the default is `latest`.                                                                                                                                                            |
+| `disk_size`        | unset                           | Disk size for the deployment.                                                                                                                                                                                     |
+| `additional_envs`  | unset                           | Extra environment variables.                                                                                                                                                                                      |
+| `tool_call_config` | unset                           | Tool-calling overrides. Requires NIM: setting it without `engine` deploys with NIM, and it is rejected with `"engine": "vllm"`. Setting `tool_call_plugin` requires the `models.tool-call-plugin.set` permission. |
 
 vLLM loads LoRA adapters up to rank 16. To serve a higher `rank`, reference a deployment config that sets `"additional_args": ["--max-lora-rank", "<rank>"]` in its `executor_config`.
 
@@ -429,7 +446,7 @@ Bad configurations fail before training starts, not after the run. These are rej
 
 - A string reference that does not resolve to a deployment config.
 - On a LoRA job, a referenced config with `lora_enabled: false`.
-- On a full-weight job, a referenced config that names a *different* model. The output entity does not have to exist yet — a config may point forward at the model the run will produce — but a config built for some other model cannot serve it.
+- On a full-weight job, a referenced config that names a _different_ model. The output entity does not have to exist yet — a config may point forward at the model the run will produce — but a config built for some other model cannot serve it.
 
 A deployment config that names no model — neither `model_entity_id` nor `model_spec.model_name` — is an **unbound template**. It carries only engine and executor settings, so it is accepted by any job: the trained model is stamped onto a copy of it at deploy time, leaving the template reusable for the next run. This is the only way to share engine/executor settings across full-weight jobs, whose output model does not exist when the job is submitted.
 
@@ -437,26 +454,30 @@ A deployment config that names no model — neither `model_entity_id` nor `model
 
 All GRPO knobs live under `training`, including `policy_backend` (a sibling of `parallelism`, not a field on it).
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `num_generations_per_prompt` | `8` | Group size. The spread of rewards within a group is the entire learning signal. |
-| `num_prompts_per_step` | Derived | From `batch_size / num_generations_per_prompt`. Their product must be a multiple of `batch_size`, so prefer a value that divides `batch_size` evenly. |
-| `temperature` | `1.0` | Must be greater than 0. Greedy sampling makes every response in a group identical and the run a no-op. |
-| `max_rollout_turns` | `1` | Multi-turn rollouts. Most single-step environments use `1`. |
-| `overlong_filtering` | `false` | Zero the loss contribution of responses truncated at the generation cap. |
-| `ref_policy_kl_penalty` | `0.0` | KL coefficient against the reference policy. |
-| `val_at_start` | `false` | Run validation before the first step, so baseline and result come from one job. |
-| `policy_backend` | Follows `finetuning_type` | The NeMo-RL worker that trains the model. Set it on `training`, not under `training.parallelism`. **`lora` requires `automodel`**. **`all_weights` defaults to `dtensor`** and may be set to `automodel` for a consolidated HuggingFace export. MoE models that use expert parallelism also require `automodel`, because `dtensor` does not support `expert_parallel_size` above 1. Leave it unset to get the default. `automodel` needs Transformer Engine (Hopper or newer) and supports `automodel_kwargs`; `dtensor` runs stock HuggingFace on PyTorch FSDP2 and is the pre-Hopper option. `dtensor` plus LoRA, expert parallelism, or `automodel_kwargs` is rejected at submit, every conflict at once. |
-| `v4_compatible` | `true` | `GRPOTraining.v4_compatible`. On Automodel full-weight export, keep the base transformers-v4 `config.json` so the platform's vLLM can load the published model; the v5 config is written beside it as `config.v5.json`. Set `false` to export the v5 `config.json` instead. If the base checkpoint already uses transformers v5, the job logs warn you to set this to `false`. No effect on `dtensor` or LoRA jobs. |
-| `batching_strategy` | `dynamic` | How rollouts are grouped into training micro-batches. `dynamic` fills each micro-batch to a token budget, so short rollouts share a batch instead of each paying for a full-length pad. `static` puts one rollout per slot. `sequence_packing` concatenates rollouts, and is rejected for VLM, multimodal, and context-parallel runs. |
-| `train_mb_tokens` | Derived | Token budget per micro-batch, read by `dynamic` and `sequence_packing`. Defaults to `max_seq_length × micro_batch_size`. |
-| `sequence_length_round` | `64` | Round bucketed sequence lengths up to a multiple of this. Read only by `dynamic`. |
-| `router_aux_loss_coef` | Unset | MoE router auxiliary-loss coefficient, applied as a **top-level** HuggingFace config override. Set `0.0` to drop the load-balancing term during RL. |
-| `hf_config_overrides` | Unset | Passed to NeMo-RL verbatim and forwarded to the training model as config kwargs and to vLLM as `hf_overrides`. Nested keys are preserved, so use this for models that namespace their config — Qwen3.5 reads `router_aux_loss_coef` under `text_config`. |
-| `automodel_kwargs` | Unset | Passed through to Automodel. `{"force_hf": true}` loads stock HuggingFace modules when a model's custom backbone is not compatible with the parallelizer. Requires `policy_backend: automodel`. |
+| Field                        | Default                   | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `num_generations_per_prompt` | `8`                       | Group size. The spread of rewards within a group is the entire learning signal.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `num_prompts_per_step`       | Derived                   | From `batch_size / num_generations_per_prompt`. Their product must be a multiple of `batch_size`, so prefer a value that divides `batch_size` evenly.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `temperature`                | `1.0`                     | Must be greater than 0. Greedy sampling makes every response in a group identical and the run a no-op.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `max_rollout_turns`          | `1`                       | Multi-turn rollouts. Most single-step environments use `1`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `overlong_filtering`         | `false`                   | Zero the loss contribution of responses truncated at the generation cap.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `ref_policy_kl_penalty`      | `0.0`                     | KL coefficient against the reference policy.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `val_at_start`               | `false`                   | Run validation before the first step, so baseline and result come from one job.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `policy_backend`             | Follows `finetuning_type` | The NeMo-RL worker that trains the model. Set it on `training`, not under `training.parallelism`. **`lora` requires `automodel`**. **`all_weights` defaults to `dtensor`** and may be set to `automodel` for a consolidated HuggingFace export. MoE models that use expert parallelism also require `automodel`, because `dtensor` does not support `expert_parallel_size` above 1. Leave it unset to get the default. `automodel` needs Transformer Engine (Hopper or newer) and supports `automodel_kwargs`; `dtensor` runs stock HuggingFace on PyTorch FSDP2 and is the pre-Hopper option. `dtensor` plus LoRA, expert parallelism, or `automodel_kwargs` is rejected at submit, every conflict at once. |
+| `v4_compatible`              | `true`                    | `GRPOTraining.v4_compatible`. On Automodel full-weight export, keep the base transformers-v4 `config.json` so the platform's vLLM can load the published model; the v5 config is written beside it as `config.v5.json`. Set `false` to export the v5 `config.json` instead. If the base checkpoint already uses transformers v5, the job logs warn you to set this to `false`. No effect on `dtensor` or LoRA jobs.                                                                                                                                                                                                                                                                                          |
+| `batching_strategy`          | `dynamic`                 | How rollouts are grouped into training micro-batches. `dynamic` fills each micro-batch to a token budget, so short rollouts share a batch instead of each paying for a full-length pad. `static` puts one rollout per slot. `sequence_packing` concatenates rollouts, and is rejected for VLM, multimodal, and context-parallel runs.                                                                                                                                                                                                                                                                                                                                                                        |
+| `train_mb_tokens`            | Derived                   | Token budget per micro-batch, read by `dynamic` and `sequence_packing`. Defaults to `max_seq_length × micro_batch_size`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `sequence_length_round`      | `64`                      | Round bucketed sequence lengths up to a multiple of this. Read only by `dynamic`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `router_aux_loss_coef`       | Unset                     | MoE router auxiliary-loss coefficient, applied as a **top-level** HuggingFace config override. Set `0.0` to drop the load-balancing term during RL.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `hf_config_overrides`        | Unset                     | Passed to NeMo-RL verbatim and forwarded to the training model as config kwargs and to vLLM as `hf_overrides`. Nested keys are preserved, so use this for models that namespace their config — Qwen3.5 reads `router_aux_loss_coef` under `text_config`.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `automodel_kwargs`           | Unset                     | Passed through to Automodel. `{"force_hf": true}` loads stock HuggingFace modules when a model's custom backbone is not compatible with the parallelizer. Requires `policy_backend: automodel`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 <Warning>
-Setting `router_aux_loss_coef` **and** a `router_aux_loss_coef` key inside `hf_config_overrides` is rejected — they write the same top-level key. Keep one. Use `hf_config_overrides` when the model nests it, because a top-level key the model does not read is absorbed silently and the aux loss stays on, surfacing only as degraded accuracy many steps in.
+  Setting `router_aux_loss_coef` **and** a `router_aux_loss_coef` key inside
+  `hf_config_overrides` is rejected — they write the same top-level key. Keep
+  one. Use `hf_config_overrides` when the model nests it, because a top-level
+  key the model does not read is absorbed silently and the aux loss stays on,
+  surfacing only as degraded accuracy many steps in.
 </Warning>
 
 Advanced clipping and advantage-estimation settings (`ratio_clip_c`, `advantage_clip_low` / `advantage_clip_high`, `normalize_rewards`, `use_leave_one_out_baseline`, `top_k`) are documented in [Training Configuration](/documentation/customizer-reference/manage-customization-jobs/training-configuration).
@@ -465,55 +486,70 @@ Advanced clipping and advantage-estimation settings (`ratio_clip_c`, `advantage_
 
 Monitor GRPO on **reward**, not loss. The GRPO surrogate loss oscillates near zero and carries no signal about run quality.
 
-| Metric | Read it for |
-| --- | --- |
-| `train_reward` | Mean reward over the step's rollouts. The headline. |
-| `val_accuracy` | The validation pass's mean reward. NeMo-RL names it `accuracy`; it is not an accuracy in the classifier sense, and there is no `val_reward`. |
-| `train_truncation_rate` | Rising truncation is a common reason reward stops improving |
-| `train_baseline_reward/pct_mixed` | Share of prompt groups whose responses disagreed. Falling toward zero means there is no gradient left to learn from |
-| `train_approx_entropy` | Entropy collapse — responses degenerate while reward still looks acceptable |
-| `train_token_mult_prob_error`, `train_sampling_importance_ratio` | Drift between the sampling policy and the training policy. Both sit near 1 on a healthy run. |
-| `train_timing/total_step_time` | Wall clock per training step, in seconds |
+| Metric                                                           | Read it for                                                                                                                                  |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `train_reward`                                                   | Mean reward over the step's rollouts. The headline.                                                                                          |
+| `val_accuracy`                                                   | The validation pass's mean reward. NeMo-RL names it `accuracy`; it is not an accuracy in the classifier sense, and there is no `val_reward`. |
+| `train_truncation_rate`                                          | Rising truncation is a common reason reward stops improving                                                                                  |
+| `train_baseline_reward/pct_mixed`                                | Share of prompt groups whose responses disagreed. Falling toward zero means there is no gradient left to learn from                          |
+| `train_approx_entropy`                                           | Entropy collapse — responses degenerate while reward still looks acceptable                                                                  |
+| `train_token_mult_prob_error`, `train_sampling_importance_ratio` | Drift between the sampling policy and the training policy. Both sit near 1 on a healthy run.                                                 |
+| `train_timing/total_step_time`                                   | Wall clock per training step, in seconds                                                                                                     |
 
 `status_details` also carries two constants stated once when training starts: `training_type` (`grpo` or `dpo` — `backend` is `nemo_rl` for both) and `rollouts_per_step`, so the rollouts generated so far is `step × rollouts_per_step`.
 
 <Warning>
-`train_total_reward/stddev`, `/p25` and `/p75` describe reward spread, but they are close to uninformative when the environment returns a binary 0/1 reward — which most verifier environments do. On a Bernoulli reward, `stddev` is a deterministic function of the mean and adds nothing to `train_reward`, and the quartiles collapse to three states: `[0, 0]` below mean reward 0.25, `[0, 1]` between 0.25 and 0.75, `[1, 1]` above. A `p25` pinned at 0 for a whole run is correct, not a bug. Use `baseline_reward/pct_0` / `pct_1` / `pct_mixed` as the spread for binary rewards; keep the dispersion series for continuous or multi-component rewards.
+  `train_total_reward/stddev`, `/p25` and `/p75` describe reward spread, but
+  they are close to uninformative when the environment returns a binary 0/1
+  reward — which most verifier environments do. On a Bernoulli reward, `stddev`
+  is a deterministic function of the mean and adds nothing to `train_reward`,
+  and the quartiles collapse to three states: `[0, 0]` below mean reward 0.25,
+  `[0, 1]` between 0.25 and 0.75, `[1, 1]` above. A `p25` pinned at 0 for a
+  whole run is correct, not a bug. Use `baseline_reward/pct_0` / `pct_1` /
+  `pct_mixed` as the spread for binary rewards; keep the dispersion series for
+  continuous or multi-component rewards.
 </Warning>
+
+## Shared memory for checkpoint staging
+
+All-weights training stages each checkpoint's model and optimizer state in a memory-backed `/dev/shm`, which it shares with Ray's object store. All-weights training steps request 64Gi, the size NeMo-RL recommends. LoRA stages only the adapter and requests 8Gi.
+
+The jobs controller mounts the larger of this request and the execution profile's `resources.shm_size`. For large all-weights models, set the profile value under `jobs.executor_defaults.kubernetes_job.resources.shm_size` (and `volcano_job` for multi-node). Raising `num_gpus_per_node` does not change the size.
 
 ## Troubleshooting
 
-| Message | Fix |
-| --- | --- |
-| `Missing nemo-environment.yaml at environment root` | Place the manifest at the FileSet root, not in a subdirectory |
-| `config_paths reference files that are not in the package` | Re-upload preserving relative paths |
-| `Prompt JSONL must not live in the environment package` | Move rows to the dataset FileSet |
-| `native-v1 config_paths must be under (...)` | Move the config under a Gym server directory, or switch format |
-| `adapter-wheels-v1 config_paths should live under configs/` | Move the config under `configs/` |
-| `must carry a non-empty wheels/ directory` | Vendor the dependency closure |
-| `adapter.agent ... is not built into the training image` | Use a supported harness, or switch format |
-| `ServerRefNotFoundError: ... Available responses_api_models: (none)` | A config references a model server nothing defines — include `configs/policy_model.yaml` |
-| `Environment fileset ... has purpose 'dataset'; expected purpose='environment'` | Recreate the fileset with `--purpose environment` |
-| `AlmostServerError`, after an "Almost-Servers Detected" banner | A server block failed validation — most often a `domain` that is missing, empty, or not in the closed set. Set a valid `domain` on every `resources_servers` block |
-| `Missing pyproject.toml or requirements.txt for uv venv setup in server dir` | A custom implementation directory has no install marker. Add `requirements.txt` |
-| The job runs but scores an environment you did not ship | Same missing install marker, on a directory whose name matches a Gym built-in — the built-in was used instead. Add `requirements.txt`, or rename the implementation |
-| `ModuleNotFoundError` at the first rollout | The server's venv is missing an import: an empty or incomplete `requirements.txt`, or a wheelhouse that did not cover the venv build |
-| `your requirements are unsatisfiable` | `wheels/` vendors two versions of one project; clear it and rebuild the closure |
-| `OpenSandbox is not yet available on this cluster` | Operator setting. The cluster has not enabled sandboxed Gym — see [Cluster prerequisites](#cluster-prerequisites) |
-| `Sandboxed GRPO requires the job-storage PVC claim name` | Operator setting, same section |
-| `has no wheels with a matching platform tag` | The closure was built for the wrong interpreter or architecture — rebuild per [Vendoring a wheel closure](#vendoring-a-wheel-closure) |
-| Spin-up hangs, then fails on a network or resolver error | The environment's venv build cannot reach an index. See [How dependencies are installed](#how-dependencies-are-installed) |
+| Message                                                                                    | Fix                                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Missing nemo-environment.yaml at environment root`                                        | Place the manifest at the FileSet root, not in a subdirectory                                                                                                                                                                                                           |
+| `config_paths reference files that are not in the package`                                 | Re-upload preserving relative paths                                                                                                                                                                                                                                     |
+| `Prompt JSONL must not live in the environment package`                                    | Move rows to the dataset FileSet                                                                                                                                                                                                                                        |
+| `native-v1 config_paths must be under (...)`                                               | Move the config under a Gym server directory, or switch format                                                                                                                                                                                                          |
+| `adapter-wheels-v1 config_paths should live under configs/`                                | Move the config under `configs/`                                                                                                                                                                                                                                        |
+| `must carry a non-empty wheels/ directory`                                                 | Vendor the dependency closure                                                                                                                                                                                                                                           |
+| `adapter.agent ... is not built into the training image`                                   | Use a supported harness, or switch format                                                                                                                                                                                                                               |
+| `ServerRefNotFoundError: ... Available responses_api_models: (none)`                       | A config references a model server nothing defines — include `configs/policy_model.yaml`                                                                                                                                                                                |
+| `Environment fileset ... has purpose 'dataset'; expected purpose='environment'`            | Recreate the fileset with `--purpose environment`                                                                                                                                                                                                                       |
+| `AlmostServerError`, after an "Almost-Servers Detected" banner                             | A server block failed validation — most often a `domain` that is missing, empty, or not in the closed set. Set a valid `domain` on every `resources_servers` block                                                                                                      |
+| `Missing pyproject.toml or requirements.txt for uv venv setup in server dir`               | A custom implementation directory has no install marker. Add `requirements.txt`                                                                                                                                                                                         |
+| The job runs but scores an environment you did not ship                                    | Same missing install marker, on a directory whose name matches a Gym built-in — the built-in was used instead. Add `requirements.txt`, or rename the implementation                                                                                                     |
+| `ModuleNotFoundError` at the first rollout                                                 | The server's venv is missing an import: an empty or incomplete `requirements.txt`, or a wheelhouse that did not cover the venv build                                                                                                                                    |
+| `your requirements are unsatisfiable`                                                      | `wheels/` vendors two versions of one project; clear it and rebuild the closure                                                                                                                                                                                         |
+| `OpenSandbox is not yet available on this cluster`                                         | Operator setting. The cluster has not enabled sandboxed Gym — see [Cluster prerequisites](#cluster-prerequisites)                                                                                                                                                       |
+| `Sandboxed GRPO requires the job-storage PVC claim name`                                   | Operator setting, same section                                                                                                                                                                                                                                          |
+| `has no wheels with a matching platform tag`                                               | The closure was built for the wrong interpreter or architecture — rebuild per [Vendoring a wheel closure](#vendoring-a-wheel-closure)                                                                                                                                   |
+| Spin-up hangs, then fails on a network or resolver error                                   | The environment's venv build cannot reach an index. See [How dependencies are installed](#how-dependencies-are-installed)                                                                                                                                               |
+| `unable to allocate shared memory` or `No space left on device` while staging a checkpoint | `/dev/shm` is smaller than the staged checkpoint. Raise the execution profile `resources.shm_size` above the size the job requested: 64Gi for all-weights, 8Gi for LoRA. See [Shared memory for checkpoint staging](#shared-memory-for-checkpoint-staging) |
 
 ### Cluster prerequisites
 
 GRPO fails at submit, before any GPU is claimed, unless the platform operator has configured sandboxed Gym. Both settings live on the platform, not in the job JSON:
 
-| Setting | Why |
-| --- | --- |
-| `NHX_SANDBOX_CLUSTER_CAPABLE=true` (Helm: `sandboxClusterCapable`) | Declares that OpenSandbox is installed. The platform chart does **not** install it. GRPO defaults to sandboxed Gym (`NHX_RL_SANDBOXED_GYM_DEFAULT`) and fails closed without this |
-| `NHX_RL_JOB_STORAGE_PVC_CLAIM` | The Gym sandbox mounts the job-storage claim itself to read the downloaded environment and dataset, and only learns the claim by name |
-| `NHX_RL_SANDBOX_ALLOW_INTERNET` | Needed whenever an environment's venv build has to reach a package index — every `native-v1` package and any wheels package whose closure is incomplete. Converter-built `adapter-wheels-v1` packages do not need it at job start. |
-| `NHX_RL_SANDBOX_PUBLIC_DNS_ALLOW` | Extra hosts, consulted only when the above is on. The built-in allowance covers `*.com` and `*.org`, so a host on another TLD (for example `hub.primeintellect.ai`) must be named |
+| Setting                                                            | Why                                                                                                                                                                                                                                |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NHX_SANDBOX_CLUSTER_CAPABLE=true` (Helm: `sandboxClusterCapable`) | Declares that OpenSandbox is installed. The platform chart does **not** install it. GRPO defaults to sandboxed Gym (`NHX_RL_SANDBOXED_GYM_DEFAULT`) and fails closed without this                                                  |
+| `NHX_RL_JOB_STORAGE_PVC_CLAIM`                                     | The Gym sandbox mounts the job-storage claim itself to read the downloaded environment and dataset, and only learns the claim by name                                                                                              |
+| `NHX_RL_SANDBOX_ALLOW_INTERNET`                                    | Needed whenever an environment's venv build has to reach a package index — every `native-v1` package and any wheels package whose closure is incomplete. Converter-built `adapter-wheels-v1` packages do not need it at job start. |
+| `NHX_RL_SANDBOX_PUBLIC_DNS_ALLOW`                                  | Extra hosts, consulted only when the above is on. The built-in allowance covers `*.com` and `*.org`, so a host on another TLD (for example `hub.primeintellect.ai`) must be named                                                  |
 
 If a submit fails on either of the first two, that is a platform configuration gap, not a problem with your package. Neither is settable per job.
 
