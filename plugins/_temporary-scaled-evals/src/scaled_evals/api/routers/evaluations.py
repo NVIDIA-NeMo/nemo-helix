@@ -26,6 +26,7 @@ from scaled_evals.api.schemas.common import (
     ListEnvelope,
     encode_cursor,
     page_from_rows,
+    qualified_secret_ref,
 )
 from scaled_evals.api.schemas.evaluations import (
     BuildArchiveRequest,
@@ -775,23 +776,38 @@ def reproduce_evaluation(evaluation_id: str, db: Db) -> ReproduceEvaluationRespo
 
 
 @router.post("/{evaluation_id}/retry", status_code=202, response_model=EvaluationResponse)
-def retry_evaluation(evaluation_id: str, db: Db) -> EvaluationResponse:
+def retry_evaluation(evaluation_id: str, db: Db, secrets: Secrets) -> EvaluationResponse:
     """Queue another execution of a failed evaluation.
 
     The evaluation id and benchmark_run_id remain unchanged, so retrying a
     benchmark member updates that benchmark run's derived aggregate. Detailed
-    result and artifact paths are reused for the newest execution.
+    result and artifact paths are reused for the newest execution. The caller
+    must be able to read every referenced credential secret (422 `invalid_reference`).
     """
+    existing = db.evaluations.get(evaluation_id)
+    for provider, ref in sorted(((existing or {}).get("credentials") or {}).items()):
+        try:
+            qualified_secret_ref(ref)
+        except ValueError:
+            raise _http_error(
+                422,
+                "invalid_reference",
+                f"credential for {provider} is not a platform secret reference 'workspace/name'; "
+                "create a new evaluation that references a platform secret",
+            ) from None
+        if not secrets(ref):
+            raise _http_error(
+                422, "invalid_reference", f"credential secret for {provider} not found or not readable: {ref}"
+            )
     row = db.evaluations.retry_failed(evaluation_id)
     if row is None:
-        current = db.evaluations.get(evaluation_id)
-        if current is None:
+        if existing is None:
             raise _http_error(404, "not_found", "evaluation not found")
-        if current["status"] != "failed":
+        if existing["status"] != "failed":
             raise _http_error(
                 409,
                 "evaluation_not_failed",
-                f"evaluation status is '{current['status']}', must be 'failed'",
+                f"evaluation status is '{existing['status']}', must be 'failed'",
             )
         block_reason = db.evaluations.retry_block_reason(evaluation_id)
         if block_reason == "terminal_artifacts_finalizing":

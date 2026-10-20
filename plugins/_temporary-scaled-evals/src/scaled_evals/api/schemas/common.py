@@ -21,7 +21,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 CredentialProvider = Literal["openai", "anthropic", "nvidia", "nhx", "openshift"]
 
 
-def _qualified_secret_ref(value: str) -> str:
+def qualified_secret_ref(value: str) -> str:
     # An unqualified name would resolve in the service's Jobs workspace, which holds operator secrets.
     # The message omits the value: callers who paste a raw API key here must not see it echoed.
     try:
@@ -32,7 +32,7 @@ def _qualified_secret_ref(value: str) -> str:
 
 
 # provider -> platform Secret reference, e.g. {"anthropic": "my-team/anthropic-key"}.
-CredentialRefs = dict[CredentialProvider, Annotated[str, AfterValidator(_qualified_secret_ref)]]
+CredentialRefs = dict[CredentialProvider, Annotated[str, AfterValidator(qualified_secret_ref)]]
 
 
 def validate_scoped_egress_config(config: dict[str, Any]) -> None:

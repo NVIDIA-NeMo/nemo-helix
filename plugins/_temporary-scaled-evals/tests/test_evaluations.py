@@ -1155,7 +1155,7 @@ def test_retry_queues_next_execution_on_same_benchmark_member() -> None:
         current_execution=2,
         max_executions=3,
     )
-    conn = _conn_with_fetchone(row)
+    conn = _conn_with_fetchone(_eval_row(status="failed", benchmark_run_id="bmr_1"), row)
     _override_conn(conn)
 
     response = client.post("/v1/evaluations/ev_test123/retry")
@@ -1168,18 +1168,18 @@ def test_retry_queues_next_execution_on_same_benchmark_member() -> None:
     assert body["current_execution"] == 2
     assert body["links"]["retry"] == "/evaluations/ev_test123/retry"
     cur = conn.cursor.return_value.__enter__.return_value
-    retry_sql = cur.execute.call_args_list[0].args[0]
+    retry_sql = cur.execute.call_args_list[1].args[0]
     assert "UPDATE evaluations" in retry_sql
     assert "status = 'failed'" in retry_sql
     assert "current_execution = current_execution + 1" in retry_sql
     assert "INSERT INTO evaluations" not in retry_sql
-    event_call = cur.execute.call_args_list[1]
+    event_call = cur.execute.call_args_list[2]
     assert event_call.args[1][1:3] == ("retry", "queued")
     conn.commit.assert_called_once()
 
 
 def test_retry_rejects_non_failed_evaluation() -> None:
-    conn = _conn_with_fetchone(None, _eval_row(status="running"))
+    conn = _conn_with_fetchone(_eval_row(status="running"), None)
     _override_conn(conn)
 
     response = client.post("/v1/evaluations/ev_test123/retry")
@@ -1190,8 +1190,8 @@ def test_retry_rejects_non_failed_evaluation() -> None:
 
 def test_retry_reports_terminal_artifact_finalization() -> None:
     conn = _conn_with_fetchone(
-        None,
         _eval_row(status="failed"),
+        None,
         {"reason": "terminal_artifacts_finalizing"},
     )
     _override_conn(conn)
@@ -1206,8 +1206,8 @@ def test_retry_reports_terminal_artifact_finalization() -> None:
 
 def test_retry_reports_unavailable_benchmark() -> None:
     conn = _conn_with_fetchone(
-        None,
         _eval_row(status="failed", benchmark_run_id="bmr_cancelled"),
+        None,
         {"reason": "benchmark_unavailable"},
     )
     _override_conn(conn)
@@ -1218,6 +1218,32 @@ def test_retry_reports_unavailable_benchmark() -> None:
     error = response.json()["detail"]["error"]
     assert error["code"] == "evaluation_not_retryable"
     assert "benchmark run is cancelled or unavailable" in error["message"]
+
+
+def test_retry_rejects_unusable_credentials_before_requeueing() -> None:
+    legacy = _conn_with_fetchone(_eval_row(status="failed", credentials={"openai": "cred_legacy"}))
+    _override_conn(legacy)
+    response = client.post("/v1/evaluations/ev_test123/retry")
+    assert response.status_code == 422
+    assert response.json()["detail"]["error"]["code"] == "invalid_reference"
+    assert "workspace/name" in response.text
+    assert "cred_legacy" not in response.text
+
+    checked: list[str] = []
+    previous = v1.dependency_overrides[caller_secret_readable]
+    v1.dependency_overrides[caller_secret_readable] = lambda: lambda ref: checked.append(ref) and False
+    try:
+        unreadable = _conn_with_fetchone(_eval_row(status="failed", credentials={"openai": "team-b/key"}))
+        _override_conn(unreadable)
+        response = client.post("/v1/evaluations/ev_test123/retry")
+    finally:
+        v1.dependency_overrides[caller_secret_readable] = previous
+    assert response.status_code == 422
+    assert checked == ["team-b/key"]
+    for conn in (legacy, unreadable):
+        cur = conn.cursor.return_value.__enter__.return_value
+        assert not any("UPDATE evaluations" in c.args[0] for c in cur.execute.call_args_list)
+        conn.commit.assert_not_called()
 
 
 def test_retry_404_when_missing() -> None:
