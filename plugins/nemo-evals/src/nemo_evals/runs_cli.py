@@ -172,9 +172,10 @@ def download_git_tasks(source: str, names: str | None, output_dir: Path) -> tupl
     result = _run_git(client._task_client.download_tasks(task_ids=chosen, output_dir=output_dir, export=True))
     # Not the ids' git_commit_id: for an annotated tag that's the tag object's SHA, not its commit.
     commits = {r.resolved_git_commit_id for r in result.results}
-    if len(commits) != 1 or None in commits:
+    commit = next(iter(commits)) if len(commits) == 1 else None
+    if commit is None:
         raise RuntimeError(f"Harbor resolved {source} to {sorted(map(str, commits))}, not one commit")
-    return f"{repo.org}/{repo.name}", commits.pop(), list(result.paths), len(ids)
+    return f"{repo.org}/{repo.name}", commit, list(result.paths), len(ids)
 
 
 def list_git_tasks(source: str) -> list[str]:
