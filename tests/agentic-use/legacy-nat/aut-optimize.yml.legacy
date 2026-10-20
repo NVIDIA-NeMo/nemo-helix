@@ -1,0 +1,52 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# UNSUPPORTED LEGACY NAT INPUT — historical reference only, not a runnable bundle.
+# Fabric config-tuning rejects llms/per-LLM search spaces; --agent does not
+# translate them. Dataset paths below retain their old parent-directory context.
+# The trajectory runtime evaluator is not a deterministic verifier/token gate.
+# See ../README.md for the separate supported Fabric example and limitations.
+
+llms:
+  llm:
+    _type: openai
+    model_name: nvidia-nemotron-3-5-lightning-30b-a3b
+    temperature: 0.0
+    optimizable_params:
+      - temperature
+      - top_p
+    search_space:
+      temperature:
+        low: 0.0
+        high: 0.8
+        step: 0.2
+      top_p:
+        low: 0.5
+        high: 1.0
+        step: 0.1
+
+eval:
+  general:
+    max_concurrency: 2
+    output_dir: eval/agentic-use-aut
+    dataset:
+      _type: json
+      file_path: aut-eval-data.json
+  evaluators:
+    runtime:
+      _type: trajectory
+      direction: maximize
+
+optimizer:
+  output_path: optimizer_results/agentic-use-aut
+  numeric:
+    enabled: true
+    n_trials: 8
+  prompt:
+    enabled: false
+  reps_per_param_set: 2
+  eval_metrics:
+    runtime:
+      evaluator_name: runtime
+      direction: maximize
+      weight: 1.0
