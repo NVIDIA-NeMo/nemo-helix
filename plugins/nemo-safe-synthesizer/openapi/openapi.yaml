@@ -732,6 +732,14 @@ components:
           title: mia_enabled
           description: Enable membership inference attack evaluation for privacy assessment.
           default: true
+        mia_excluded_columns:
+          title: mia_excluded_columns
+          description: Columns to leave out of the membership inference attack. Useful
+            when identifiers were already replaced outside Safe Synthesizer, or are
+            expected to repeat verbatim in the synthetic data.
+          items:
+            type: string
+          type: array
         aia_enabled:
           type: boolean
           title: aia_enabled
