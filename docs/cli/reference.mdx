@@ -10281,65 +10281,135 @@ nemo safe-synthesizer [OPTIONS] COMMAND [ARGS]...
 
 *Jobs:*
 
-* `generate`: Plugin job command 'generate' is unavailable due to...
+* `generate`: Generate synthetic data using Safe Synthesizer.
 
 #### nemo safe-synthesizer generate
 
-Plugin job command 'generate' is unavailable due to import error.
+Generate synthetic data using Safe Synthesizer.
 
 **Usage:**
 
 ```shell
-nemo safe-synthesizer generate [OPTIONS] [_ARGS]... [COMMAND] [ARGS]...
+nemo safe-synthesizer generate [OPTIONS] [COMMAND] [ARGS]...
 ```
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Job Spec:**
+
+* `--data-source`: The data source for the job.
+* `--config.data.group-training-examples-by`: Column to group training examples by. This is useful when you want the model to learn inter-record correlations for a given grouping of records.
+* `--config.data.order-training-examples-by`: Column to order training examples by. This is useful when you want the model to learn sequential relationships for a given ordering of records. If you provide this parameter, you must also provide ``group_training_examples_by``.
+* `--config.data.max-sequences-per-example <INTEGER>`: If specified, adds at most this number of sequences per example. Supports 'auto', which resolves to 1 when differential privacy is enabled, None for time-series mode (each example fills the context window), and 10 otherwise. If set to None, fills up the context window. Required for DP to limit contribution of each example. This flag accepts the integer form only; use --spec or --spec-file for the other union form(s).
+* `--config.data.holdout <FLOAT>`: Amount of records to hold out for evaluation. If this is a float between 0 and 1, that ratio of records is held out. If an integer greater than 1, that number of records is held out. If the value is equal to zero, no holdout will be performed. Must be >= 0.
+* `--config.data.max-holdout <INTEGER>`: Maximum number of records to hold out. Overrides any behavior set by ``holdout``. Must be >= 0.
+* `--config.data.random-state <INTEGER>`: Random state for holdout split to ensure reproducibility.
+* `--config.evaluation.mia-enabled`: Enable membership inference attack evaluation for privacy assessment.
+* `--config.evaluation.aia-enabled`: Enable attribute inference attack evaluation for privacy assessment.
+* `--config.evaluation.sqs-report-columns <INTEGER>`: Number of columns to include in statistical quality reports.
+* `--config.evaluation.sqs-report-rows <INTEGER>`: Number of rows to include in statistical quality reports.
+* `--config.evaluation.mandatory-columns <INTEGER>`: Number of mandatory columns that must be used in evaluation.
+* `--config.evaluation.enabled`: Enable or disable evaluation.
+* `--config.evaluation.quasi-identifier-count <INTEGER>`: Number of quasi-identifiers to sample for privacy attacks.
+* `--config.evaluation.pii-replay-enabled`: Enable PII Replay detection.
+* `--config.training.num-input-records-to-sample <INTEGER>`: Number of records the model will see during training. This parameter is a proxy for training time. For example, if its value is the same size as the input dataset, this is like training for a single epoch. If its value is larger, this is like training for multiple (possibly fractional) epochs. If its value is smaller, this is like training for a fraction of an epoch. Supports 'auto' where a reasonable value is chosen based on other config params and data. This flag accepts the integer form only; use --spec or --spec-file for the other union form(s).
+* `--config.training.batch-size <INTEGER>`: The batch size per device for training. Must be >= 1.
+* `--config.training.gradient-accumulation-steps <INTEGER>`: Number of update steps to accumulate the gradients for, before performing a backward/update pass. This technique increases the effective batch size that will fit into GPU memory. Must be >= 1.
+* `--config.training.weight-decay <FLOAT>`: The weight decay to apply to all layers except all bias and LayerNorm weights in the AdamW optimizer. Must be in (0, 1).
+* `--config.training.warmup-steps <FLOAT>`: Linear warmup from 0 to the learning rate. A whole number of 1 or more sets the exact number of warmup steps; a float in (0, 1) is treated as a ratio of total training steps; 0 disables warmup. Must be finite and >= 0, and cannot be fractional at or above 1.
+* `--config.training.warmup-ratio <FLOAT>`: Deprecated. Use warmup_steps instead.
+* `--config.training.lr-scheduler`: The scheduler type to use. See the HuggingFace documentation of ``SchedulerType`` for all possible values.
+* `--config.training.learning-rate <FLOAT>`: The initial learning rate for `AdamW` optimizer. Must be in (0, 1). Setting to 'auto' uses a model-specific default if one exists. This flag accepts the number form only; use --spec or --spec-file for the other union form(s).
+* `--config.training.lora-r <INTEGER>`: The rank of the LoRA update matrices. Lower rank results in smaller update matrices with fewer trainable parameters. Must be > 0.
+* `--config.training.lora-alpha-over-r <FLOAT>`: The ratio of the LoRA scaling factor (alpha) to the LoRA rank. Empirically, this parameter works well when set to 0.5, 1, or 2. Must be in [0.5, 3].
+* `--config.training.rope-scaling-factor <INTEGER>`: Scale the base LLM's context length by this factor using RoPE scaling. Must be >= 1 or 'auto'. This flag accepts the integer form only; use --spec or --spec-file for the other union form(s).
+* `--config.training.validation-ratio <FLOAT>`: The fraction of the training data used for validation. Must be in [0, 1]. If set to 0, no validation will be performed. If set larger than 0, validation loss will be computed and reported throughout training.
+* `--config.training.validation-steps <INTEGER>`: The number of steps between validation checks for the HF Trainer arguments. Must be > 0.
+* `--config.training.pretrained-model`: Pretrained model to use for fine-tuning. Defaults to SmolLM3. May be a Hugging Face model ID (loaded from the Hugging Face Hub or cache) or a local path. See security note in docs before using untrusted sources.
+* `--config.training.quantize-model`: Whether to quantize the model during training. This can reduce memory usage and potentially speed up training, but may also impact model accuracy.
+* `--config.training.quantization-scheme`: Quantization scheme to use when ``quantize_model=True``. Accepts ``bnb-4bit``, ``bnb-8bit``, ``fp8``, ``nvfp4``, or ``mxfp4``. If unset, falls back to ``quantization_bits`` for backward compatibility. Non-bitsandbytes schemes are incompatible with ``peft_implementation='loftq'``.
+* `--config.training.peft-implementation`: The PEFT (Parameter-Efficient Fine-Tuning) implementation to use. Options: 'lora' for Low-Rank Adaptation, 'QLORA' for Quantized LoRA.
+* `--config.training.max-vram-fraction <FLOAT>`: The fraction of the total VRAM to use for training. Modify this to allow longer sequences. Must be in [0, 1].
+* `--config.training.attn-implementation`: The attention implementation to use for model loading. Default uses 'sdpa' (PyTorch scaled dot product attention) for broad compatibility. Other common values: 'flash_attention_2' (requires flash-attn pip package), 'flash_attention_3' (requires flash-attn-3 support), 'eager' (standard PyTorch). Custom HuggingFace Kernels Hub paths (e.g. 'kernels-community/flash-attn2') are also supported.
+* `--config.generation.num-records <INTEGER>`: Number of records to generate.
+* `--config.generation.temperature <FLOAT>`: Sampling temperature for controlling randomness (higher = more random).
+* `--config.generation.repetition-penalty <FLOAT>`: The value used to control the likelihood of the model repeating the same token. Must be > 0.
+* `--config.generation.top-p <FLOAT>`: Nucleus sampling probability for token selection. Must be in (0, 1].
+* `--config.generation.patience <INTEGER>`: Number of consecutive generations where the ``invalid_fraction_threshold`` is reached before stopping generation. Must be >= 1.
+* `--config.generation.invalid-fraction-threshold <FLOAT>`: The fraction of invalid records that will stop generation after the ``patience`` limit is reached. Must be in [0, 1].
+* `--config.generation.max-tokens-multiplier <FLOAT>`: Multiplier on the longest training example when sizing per-sample max_tokens. Must be a finite value > 0. Default 1.2.
+* `--config.generation.structured-generation.enabled`: Whether to use structured generation for better format control.
+* `--config.generation.structured-generation.use-single-sequence`: Whether to use a regex that matches exactly one sequence or record if ``max_sequences_per_example`` is 1.
+* `--config.generation.structured-generation.max-records-per-sequence <INTEGER>`: Max records per grouped sequence under structured generation. None uses the largest training group size. Must be None or >= 1.
+* `--config.generation.enforce-timeseries-fidelity`: Enforce time-series fidelity by enforcing order, intervals, start and end times of the records.
+* `--config.generation.validation.group-by-accept-no-delineator`: Whether to accept completions without both beginning and end of sequence delineators as a single sequence.
+* `--config.generation.validation.group-by-ignore-invalid-records`: Whether to ignore invalid records in a sequence and proceed with the valid records.
+* `--config.generation.validation.group-by-fix-non-unique-value`: Whether to automatically fix non-unique group-by values in a sequence by using the first unique value for all records.
+* `--config.generation.validation.group-by-fix-unordered-records`: Whether to automatically fix unordered records in a sequence by sorting the records.
+* `--config.generation.validation.enforce-numeric-range`: When True, reject floats outside the training-observed min/max. Set False to skip float range checks (integers/enums still enforced).
+* `--config.generation.attention-backend`: The attention backend for the vLLM engine. Common values: 'FLASHINFER', 'FLASH_ATTN', 'TRITON_ATTN', 'FLEX_ATTENTION'. If ``None`` or 'auto', vLLM will auto-select the best available backend.
+* `--config.privacy.dp-enabled`: Enable differentially-private training with DP-SGD.
+* `--config.privacy.epsilon <FLOAT>`: Target privacy budget -- lower values provide stronger privacy. Must be > 0.
+* `--config.privacy.delta <FLOAT>`: Probability of accidentally leaking information. Should be much smaller than 1/n where n is the number of training records. Setting to 'auto' uses delta of 1/n^1.2. Must be in [0, 1) or 'auto'. This flag accepts the number form only; use --spec or --spec-file for the other union form(s).
+* `--config.privacy.per-sample-max-grad-norm <FLOAT>`: Maximum L2 norm for per-sample gradient clipping. Must be > 0.
+* `--config.time-series.is-timeseries`: Whether to treat the dataset as time series. When enabled, either ``timestamp_column`` or ``timestamp_interval_seconds`` is required. For grouped time series, ``group_training_examples_by`` needs to be set.
+* `--config.time-series.timestamp-column`: Name of the column containing timestamps used to order records when ``is_timeseries`` is ``True``. Required only when ``is_timeseries`` is ``True`` and ``timestamp_interval_seconds`` is not provided.
+* `--config.time-series.timestamp-interval-seconds <INTEGER>`: Positive whole-number interval in seconds between timestamps. If not provided, the timestamp column will be used to infer the interval.
+* `--config.time-series.timestamp-format`: Format of the timestamp column. Accepts either: (1) Python strftime format codes for string timestamps (e.g., '%Y-%m-%d %H:%M:%S', '%m/%d/%Y'), or (2) 'elapsed_seconds' for numeric (int/float) timestamps representing seconds as an increasing counter (e.g., 0, 60, 120 for 1-minute intervals). If not provided, the format will be inferred from the data.
+* `--config.replace-pii.globals.seed <INTEGER>`: Optional random seed.
+* `--config.replace-pii.globals.classify.enable-classify`: Enable column classification.
+* `--config.replace-pii.globals.classify.num-samples <INTEGER>`: Number of column values to sample for classification.
+* `--config.replace-pii.globals.classify.classify-model-provider`: Name of the model provider in the Inference Gateway for column classification. The job compiler will resolve this to the appropriate endpoint URL.
+* `--config.replace-pii.globals.ner.ner-threshold <FLOAT>`: NER model threshold.
+* `--config.replace-pii.globals.ner.enable-regexps`: Enable NER regular expressions (experimental).
+* `--config.replace-pii.globals.ner.gliner.enable-gliner`: Enable GLiNER NER module.
+* `--config.replace-pii.globals.ner.gliner.enable-batch-mode`: Enable GLiNER batch mode.
+* `--config.replace-pii.globals.ner.gliner.batch-size <INTEGER>`: GLiNER batch size.
+* `--config.replace-pii.globals.ner.gliner.chunk-length <INTEGER>`: GLiNER batch chunk length in characters.
+* `--config.replace-pii.globals.ner.gliner.gliner-model`: GLiNER model name.
+* `--config.emit-telemetry`: Whether to emit anonymous Safe Synthesizer telemetry events. Defaults from NEMO_TELEMETRY_ENABLED when unset.
+* `--config.enable-synthesis`: Whether to run LLM training and generation phases. When false the task only performs PII replacement and returns the processed data.
+* `--config.enable-replace-pii`: Whether to run the default PII replacement pipeline before synthesis.
+* `--hf-token-secret`: Name of platform secret containing the HuggingFace token. Must exist in the same workspace as the job.
+* `--pretrained-model-job`: Optional previous NSS job whose stored adapter artifact is reused for generation-only synthesis. Accepts either '\<job>' in the current workspace or '\<workspace>/\<job>'. The plugin resolves the prior job's 'adapter' result from Files.
+* `--enable-synthesis`: Whether to run LLM training and generation phases. When False the task only performs PII replacement and returns the processed data.
+
+**Spec Source:**
+
+* `--spec`: Spec as a JSON string. [default: \{}]
+* `--spec-file <PATH>`: Path to a YAML or JSON spec file (used as base; per-flag values override).
+
+**Submission:**
+
+* `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
+* `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
+* `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+Job Spec flags are generated from the SafeSynthesizerJobConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
+
+Some spec fields cannot be represented as CLI flags: `config.data.max_sequences_per_example (other union forms)`, `config.evaluation.pii_replay_entities`, `config.evaluation.pii_replay_columns`, `config.training.num_input_records_to_sample (other union forms)`, `config.training.learning_rate (other union forms)`, `config.training.lora_target_modules`, `config.training.rope_scaling_factor (other union forms)`, `config.training.quantization_bits`, `config.generation.structured_generation.backend`, `config.generation.structured_generation.schema_method`, `config.privacy.delta (other union forms)`, `config.time_series.start_timestamp`, `config.time_series.stop_timestamp`, `config.replace_pii.globals.locales`, `config.replace_pii.globals.classify.entities`, `config.replace_pii.globals.ner.ner_entities`, `config.replace_pii.globals.lock_columns`, `config.replace_pii.steps`, `config.preflight.disabled_checks`, `config.unknown_fields`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
+​
 
 **Commands:**
 
-* `run`: Unavailable due to import error.
-* `submit`: Unavailable due to import error.
-* `explain`: Unavailable due to import error.
-
-##### nemo safe-synthesizer generate run
-
-Unavailable due to import error.
-
-**Usage:**
-
-```shell
-nemo safe-synthesizer generate run [OPTIONS] [_ARGS]...
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-##### nemo safe-synthesizer generate submit
-
-Unavailable due to import error.
-
-**Usage:**
-
-```shell
-nemo safe-synthesizer generate submit [OPTIONS] [_ARGS]...
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
+* `explain`: Show input/output schemas.
 
 ##### nemo safe-synthesizer generate explain
 
-Unavailable due to import error.
+Show input/output schemas.
 
 **Usage:**
 
 ```shell
-nemo safe-synthesizer generate explain [OPTIONS] [_ARGS]...
+nemo safe-synthesizer generate explain [OPTIONS]
 ```
+
+**Options:**
+
+* `--profile`: Annotate the bundle with this profile.
 
 **Help:**
 
