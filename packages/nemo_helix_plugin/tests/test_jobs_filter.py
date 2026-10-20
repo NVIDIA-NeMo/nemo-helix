@@ -531,6 +531,7 @@ class _CreateCapturingSdk:
                 error_details=None,
                 ownership=None,
                 custom_fields=None,
+                control=None,
             )
             return SimpleNamespace(data=lambda: job_resp)
 

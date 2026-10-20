@@ -1517,13 +1517,13 @@ class JobDispatcher:
         identifier: str,
         workspace: str,
         update: JobControl,
-        auth_context: AuthContext | None = None,
     ) -> HelixJobResponse | None:
         """Change mutable job behavior without rewriting the attempt spec.
 
         Only the values set in ``update`` change. An omitted or null value keeps the
         job's current value. The pause window is measured from the paused step's
-        ``stopped_at``, so a new value does not move the start.
+        ``stopped_at``, so a new value does not move the start. The job keeps the
+        identity it runs as: a settings change by another user does not replace it.
         """
         changes = update.model_dump(exclude_none=True)
         _reject_pause_ttl_over_maximum(changes.get("pause_ttl_seconds"))
@@ -1537,13 +1537,11 @@ class JobDispatcher:
             raise JobOperationConflictError(f"Cannot update control for job '{job.name}': it has no current attempt.")
 
         job.control = job.control.model_copy(update=changes)
-        # Restore auth context around the write. The store can sanitize it for
-        # non-service principals, and the next run still needs the caller.
-        if auth_context is not None:
-            job.with_auth_context(auth_context)
+        # The caller's reads strip the stored auth context, and an update replaces the
+        # job's data, so read the context as the jobs service and write it back unchanged.
+        stored = await self.store.as_service("jobs", internal=True).get_by_id(HelixJob, job.id)
+        job.with_auth_context(stored.auth_context)
         job = await self.store.update(job)
-        if auth_context is not None:
-            job.with_auth_context(auth_context)
         operations_counter.add(1, attributes={"operation": "update_job_control"})
         return create_platform_job_response(job, attempt)
 

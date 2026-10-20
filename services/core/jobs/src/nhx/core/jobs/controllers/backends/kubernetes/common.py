@@ -14,6 +14,7 @@ from kubernetes.client.models import V1Pod
 from kubernetes.client.rest import ApiException
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.constants import PAUSE_EXIT_CODE
 from nemo_helix_plugin.jobs.constants import job_storage_subpath as build_job_storage_subpath
 from nemo_helix_plugin.jobs.execution_profiles import (
     BaseKubernetesExecutionProfileConfig as PluginBaseKubernetesExecutionProfileConfig,
@@ -484,6 +485,80 @@ def list_pods_by_labels(core_v1: client.CoreV1Api, namespace: str, labels: dict[
 
 def list_pod_status(core_v1: client.CoreV1Api, namespace: str, labels: dict[str, str]) -> list[PodStatus]:
     return [map_pod_to_pod_status(pod) for pod in list_pods_by_labels(core_v1, namespace, labels)]
+
+
+def classify_task_containers(pods: list[V1Pod]) -> tuple[bool, int | None]:
+    """Classify task containers while a step is pausing.
+
+    Returns ``(still_running, exit_code)``:
+
+    - ``(True, None)`` while any task container has not exited.
+    - ``(False, 0)`` when every task exited 0.
+    - ``(False, 75)`` when every task exited 0 or 75, and at least one exited 75.
+    - ``(False, code)`` for the first other exit code, which wins over 0 and 75.
+    - ``(False, None)`` when there are no pods, so no exit code is readable.
+
+    Only the task container is read, by name. Injected sidecars can keep running
+    after the task exits, and their exit codes say nothing about the pause. A
+    finished pod with no readable task status counts by its phase: a succeeded pod
+    as exit 0, and a failed pod as exit 1, because nothing confirms that its task
+    saved a checkpoint.
+    """
+    if not pods:
+        return False, None
+    saw_pause = False
+    other: int | None = None
+    for pod in pods:
+        statuses: list[client.V1ContainerStatus] = []
+        if pod.status is not None and pod.status.container_statuses:
+            statuses = [
+                status for status in pod.status.container_statuses if status.name == NEMO_JOB_TASK_CONTAINER_NAME
+            ]
+        codes: list[int] = []
+        if not statuses:
+            phase = pod.status.phase if pod.status is not None else None
+            if phase == "Succeeded":
+                codes.append(0)
+            elif phase == "Failed":
+                codes.append(1)
+            else:
+                return True, None
+        for container in statuses:
+            terminated = container.state.terminated if container.state is not None else None
+            if terminated is None:
+                return True, None
+            codes.append(terminated.exit_code if isinstance(terminated.exit_code, int) else 1)
+        for code in codes:
+            if code == PAUSE_EXIT_CODE:
+                saw_pause = True
+            elif code != 0 and other is None:
+                other = code
+    if other is not None:
+        return False, other
+    if saw_pause:
+        return False, PAUSE_EXIT_CODE
+    return False, 0
+
+
+def last_task_exit_time(pods: list[V1Pod]) -> datetime.datetime | None:
+    """Return when the last task container exited.
+
+    ``None`` when there are no pods, or when any pod has no readable exit time for
+    its task container, so the caller cannot tell when the task finished.
+    """
+    exit_times: list[datetime.datetime] = []
+    for pod in pods:
+        container_statuses = pod.status.container_statuses if pod.status is not None else None
+        statuses = [status for status in container_statuses or [] if status.name == NEMO_JOB_TASK_CONTAINER_NAME]
+        if not statuses:
+            return None
+        for status in statuses:
+            terminated = status.state.terminated if status.state is not None else None
+            finished_at = terminated.finished_at if terminated is not None else None
+            if not isinstance(finished_at, datetime.datetime):
+                return None
+            exit_times.append(finished_at)
+    return max(exit_times, default=None)
 
 
 def get_pod_details(core_v1: client.CoreV1Api, namespace: str, name: str) -> tuple[dict[str, Any], dict[str, str], str]:

@@ -163,6 +163,7 @@ class BaseJob(BaseModel, Generic[JobConfigT]):
     error_details: dict[str, object] | None = None
     ownership: dict[str, object] | None = None
     custom_fields: dict[str, object] | None = None
+    control: JobControl | None = None
 
 
 class BaseJobsListFilter(Filter):
@@ -968,6 +969,7 @@ def job_route_factory(
             error_details=job_resp.error_details,
             ownership=job_resp.ownership,
             custom_fields=job_resp.custom_fields,
+            control=job_resp.control,
         )
 
     # Core job routes

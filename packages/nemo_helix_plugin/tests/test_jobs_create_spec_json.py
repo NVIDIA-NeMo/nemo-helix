@@ -92,6 +92,7 @@ def _mock_create_response(spec: dict[str, object]) -> MagicMock:
         error_details=None,
         ownership=None,
         custom_fields=None,
+        control=None,
     )
     response = MagicMock()
     response.data.return_value = job
