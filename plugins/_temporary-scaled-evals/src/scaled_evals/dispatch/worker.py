@@ -502,9 +502,10 @@ class Dispatcher:
     def build_evidence(self, evaluation_id: str) -> None:
         """Generate terminal evidence and upload it before the archive is built."""
         execution_number: int | None = None
+        row: dict[str, Any] | None = None
         try:
             with self.connect() as conn:
-                row: dict[str, Any] | None = EvaluationRepository(conn).load_for_dispatch(evaluation_id)
+                row = EvaluationRepository(conn).load_for_dispatch(evaluation_id)
                 if row is None:
                     raise RuntimeError(f"evaluation not found: {evaluation_id}")
                 if row.get("status") not in _DB_TERMINAL_STATUSES:
@@ -564,7 +565,6 @@ class Dispatcher:
                     evaluation_id,
                     expected_execution_number=execution_number,
                 )
-            self._record_analytics(row)
         except Exception as exc:  # noqa: BLE001 — durable queue retries up to its limit
             LOG.warning("evidence generation failed for %s: %s", evaluation_id, exc)
             with self.connect() as conn:
@@ -573,6 +573,11 @@ class Dispatcher:
                     str(exc),
                     expected_execution_number=execution_number,
                 )
+        finally:
+            # Evidence can fail permanently; the outcome still belongs in analytics.
+            # Each attempt re-emits the same span id and reads keep one per evaluation.
+            if row is not None and row.get("status") in _DB_TERMINAL_STATUSES:
+                self._record_analytics(row)
 
     def _record_analytics(self, row: dict[str, Any]) -> None:
         """Record the terminal evaluation in Intake; analytics never block evidence."""
@@ -581,7 +586,7 @@ class Dispatcher:
                 usage = ResourceUsageRepository(conn).totals_for_evaluation(str(row["id"]))
         except Exception:  # noqa: BLE001 — analytics are best-effort
             LOG.warning("could not read resource usage for %s", row["id"], exc_info=True)
-            return
+            usage = {}
         emit_execution_span(row, usage, workspace=settings.platform_jobs_workspace)
 
     def build_archive(self, evaluation_id: str) -> None:

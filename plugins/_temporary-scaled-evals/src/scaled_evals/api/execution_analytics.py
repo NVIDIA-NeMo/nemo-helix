@@ -58,7 +58,7 @@ def failure_category(*, code: str | None, category: str | None, detail: str | No
     def has(pattern: str) -> bool:
         return re.search(pattern, text) is not None
 
-    if has(r"(http[^0-9]*)?504|gateway timeout"):
+    if has(r"(^|[^0-9])504([^0-9]|$)|gateway timeout"):
         return "inference_http_504"
     if has(r"ratelimiterror|rate[ -]?limit|(^|[^0-9])429([^0-9]|$)"):
         return "inference_rate_limit"

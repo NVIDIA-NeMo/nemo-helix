@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import logging
 from datetime import UTC, datetime, time, timedelta
 from typing import Annotated
 
@@ -21,6 +22,7 @@ from scaled_evals.api.schemas.common import (
 from scaled_evals.api.schemas.evaluations import Evaluation
 from scaled_evals.api.settings import settings
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
 Db = Annotated[Database, Depends(get_db)]
 FromTime = Annotated[datetime | None, Query(alias="from")]
@@ -109,9 +111,14 @@ def _admin_window(
 
 
 def _records(window_start: datetime, window_end: datetime) -> list[dict]:
-    return execution_analytics.load_records(
-        workspace=settings.platform_jobs_workspace, window_start=window_start, window_end=window_end
-    )
+    # An empty result would read as "no usage" or "no failures"; say Intake is down instead.
+    try:
+        return execution_analytics.load_records(
+            workspace=settings.platform_jobs_workspace, window_start=window_start, window_end=window_end
+        )
+    except Exception as exc:
+        logger.warning("could not read analytics spans from Intake", exc_info=True)
+        raise HTTPException(status_code=503, detail="analytics are unavailable: Intake could not be read") from exc
 
 
 @router.get("/usage", response_model=AdminUsageSummaryResponse)

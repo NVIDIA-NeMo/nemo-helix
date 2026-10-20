@@ -14,6 +14,8 @@ from api_test_fixture import client, v1
 from scaled_evals.api import execution_analytics
 from scaled_evals.api.db import get_db
 from scaled_evals.api.execution_analytics import ANALYTICS_SOURCE, emit_execution_span, failure_category
+from scaled_evals.dispatch import worker as worker_module
+from scaled_evals.dispatch.worker import Dispatcher
 
 
 class _FakeIntake:
@@ -122,3 +124,38 @@ def test_terminal_spans_round_trip_into_admin_views(monkeypatch: pytest.MonkeyPa
         "evaluation_timeout"
     )
     assert failure_category(code="weird", category=None, detail=None, exception_counts=None) == "other"
+    assert failure_category(
+        code=None, category=None, detail="artifacts: uploaded 1504 files", exception_counts=None
+    ) == ("other")
+
+    def _intake_down(**_kwargs):
+        raise ConnectionError("intake down")
+
+    monkeypatch.setattr(intake, "list_spans", _intake_down)
+    response = client.get("/v1/admin/failures")
+    assert response.status_code == 503
+    assert "Intake" in response.text
+
+
+def test_failed_evidence_still_records_the_terminal_span(monkeypatch: pytest.MonkeyPatch) -> None:
+    intake = _FakeIntake()
+    monkeypatch.setattr(execution_analytics, "_intake", lambda: intake)
+    rows = {
+        "ev_bad": _row("ev_bad", "failed", datetime.now(UTC), execution_snapshot={"not": "valid"}),
+        "ev_live": _row("ev_live", "running", datetime.now(UTC)),
+    }
+    repo = MagicMock()
+    repo.load_for_dispatch.side_effect = rows.get
+    usage_repo = MagicMock()
+    usage_repo.totals_for_evaluation.side_effect = ConnectionError("db down")
+    monkeypatch.setattr(worker_module, "EvaluationRepository", lambda conn: repo)
+    monkeypatch.setattr(worker_module, "ResourceUsageRepository", lambda conn: usage_repo)
+    worker = Dispatcher(connect=MagicMock())
+
+    worker.build_evidence("ev_bad")
+    worker.build_evidence("ev_live")
+
+    assert repo.mark_evidence_failed.call_count == 2
+    repo.mark_evidence_ready.assert_not_called()
+    assert [span.attributes["scaled_evals.evaluation_id"] for span in intake.spans] == ["ev_bad"]
+    assert intake.spans[0].attributes["scaled_evals.cpu_samples"] is None
