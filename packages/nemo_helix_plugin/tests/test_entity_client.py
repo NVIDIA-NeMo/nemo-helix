@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import typing
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock
 
@@ -15,6 +16,7 @@ from nemo_helix_plugin.entities import (
     SyncEntityClient,
     _convert_filter_obj_to_filter_str,
 )
+from nemo_helix_plugin.entities import base as entity_base
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient, EntitiesClient
 from nemo_helix_plugin.entities.types import Entity
 from pydantic import PrivateAttr, computed_field
@@ -238,6 +240,24 @@ def _stored_entity_with_auth_context() -> Entity:
         created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
     )
+
+
+def test_converting_entities_resolves_type_hints_once_per_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    entity_base._stored_private_attr_types.cache_clear()
+    type_hints_spy = Mock(wraps=typing.get_type_hints)
+    monkeypatch.setattr(entity_base, "get_type_hints", type_hints_spy)
+    client = SyncEntityClient(EntitiesClient(base_url="http://testserver"))
+
+    try:
+        results = [
+            client._convert_api_entity_to_model(_stored_entity_with_auth_context(), _EntityWithAuthContext)
+            for _ in range(3)
+        ]
+    finally:
+        client.close()
+
+    assert [result.source for result in results] == ["test-source"] * 3
+    type_hints_spy.assert_called_once_with(_EntityWithAuthContext)
 
 
 def test_sync_entity_client_auth_context_uses_typed_default_headers() -> None:

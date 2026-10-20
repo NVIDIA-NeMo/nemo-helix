@@ -12,7 +12,10 @@ from types import UnionType
 from typing import Annotated, Any, ClassVar, Union, get_args, get_origin
 
 import typer
+from nemo_evals.runs_cli import add_runs_commands
 from nemo_helix_plugin.cli import NemoCLI
+from nemo_helix_plugin.cli_state import shared_cli_client
+from nemo_helix_plugin.client.client import NemoClient
 from nhx_evals_sdk.metrics.types import MetricVariants
 from nhx_evals_sdk.values.metrics import _RAGASBase
 from pydantic import BaseModel
@@ -130,4 +133,5 @@ class EvaluatorPluginCLI(NemoCLI):
                 raise typer.Exit(code=1)
             _echo_json(model_cls.model_json_schema())
 
+        add_runs_commands(app, lambda: shared_cli_client(NemoClient))
         return app

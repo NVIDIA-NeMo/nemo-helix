@@ -108,6 +108,7 @@ def _harbor_target(runner: HarborAgentTaskRunner) -> HarborRunnerTarget:
         "timeout_multiplier": None,
         "verifier_timeout_multiplier": None,
         "environment_build_timeout_multiplier": None,
+        "environment": None,  # the platform picks the sandbox environment (a taskset run's task Job)
     }
     for field, default in required_defaults.items():
         if getattr(config, field) != default:

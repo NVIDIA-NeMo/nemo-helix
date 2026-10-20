@@ -7,8 +7,72 @@ from __future__ import annotations
 
 from typing import Any, ClassVar, Literal, Self
 
+from nemo_evals.harbor.remote.profile import (
+    PINNED_IMAGE_REF_PATTERN,
+    OpenSandboxClientSettings,
+    ResourceClass,
+    ResourceClassPolicy,
+)
 from nemo_helix_plugin.config import NemoConfig, get_platform_config
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class HarborSandboxProfileConfig(BaseModel):
+    """One named OpenSandbox profile for Harbor task Jobs (M2 story 3, trimmed for M2 story 0).
+
+    The server address and API key come from the platform's ``sandbox_*`` settings, not from here:
+    a profile only tunes the client and sets templates, egress and lifetimes.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    connection: OpenSandboxClientSettings = Field(default_factory=OpenSandboxClientSettings)
+    resource_classes: dict[ResourceClass, ResourceClassPolicy] = Field(
+        description="Sandbox template and task-Job profile per resource class; `cpu` is required."
+    )
+    root_template: str | None = Field(default=None, description="Template for images that must run as root.")
+    egress_allow: tuple[str, ...] = Field(
+        default=(),
+        description="Hostnames, IPs or CIDRs every sandbox may reach; no port. Everything else is denied.",
+    )
+    agent_channel: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Hosts a no-network task's sandbox may still reach (e.g. the inference gateway), so an agent "
+            "running in the sandbox can call its model. Empty keeps no-network tasks fully closed."
+        ),
+    )
+    egress_verification: Literal["default_action", "strict"] = "strict"
+    max_sandbox_lifetime_s: int = Field(
+        default=8 * 3600 + 30 * 60, ge=1, description="OpenSandbox TTL backstop: longest trial plus margin."
+    )
+    scoring_reserve_s: int = Field(default=600, ge=0)
+    unschedulable_after_s: int = Field(default=600, ge=1)
+    stale_attempt_cleanup_timeout_s: int = Field(default=300, ge=1)
+    image_reference_mode: Literal["digest", "tag"] = "digest"
+
+    @model_validator(mode="after")
+    def _cpu_class_required(self) -> Self:
+        if "cpu" not in self.resource_classes:
+            raise ValueError("resource_classes must include 'cpu'")
+        return self
+
+
+class HarborTaskJobsConfig(BaseModel):
+    """Operator settings that enable Kubernetes taskset runs (``evals.runs.harbor``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dispatcher_image: str = Field(
+        pattern=PINNED_IMAGE_REF_PATTERN,
+        description="Task Job image, pinned by digest: nemo-evals plus the Harbor OpenSandbox environment.",
+    )
+    dispatcher_profiles: tuple[str, ...] = Field(
+        min_length=1, description="Jobs execution profiles a request may name as execution.dispatcher_profile."
+    )
+    sandbox_profiles: dict[str, HarborSandboxProfileConfig] = Field(
+        min_length=1, description="Named sandbox profiles; a request picks one with execution.sandbox_policy."
+    )
 
 
 class TasksetRunsConfig(BaseModel):
@@ -36,6 +100,9 @@ class TasksetRunsConfig(BaseModel):
         default=600,
         gt=0,
         description="Time after the execution deadline to finish scoring and bundling (10 min).",
+    )
+    harbor: HarborTaskJobsConfig | None = Field(
+        default=None, description="Kubernetes taskset runs; None leaves them off in this deployment."
     )
 
     @model_validator(mode="after")
