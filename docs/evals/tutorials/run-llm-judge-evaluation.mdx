@@ -149,9 +149,13 @@ Local runs resolve `Model(api_key_secret=SecretRef(root="NVIDIA_API_KEY"))` from
 
 Import the evals SDK types and configure judge models for local and remote execution. The judge is the LLM that evaluates responses.
 
-This tutorial uses `nvidia/nemotron-3.5-lightning-30b-a3b` from NVIDIA Build.
+This tutorial defaults to `nvidia/nemotron-3.5-lightning-30b-a3b` from NVIDIA Build. Set `NVIDIA_MODEL` to the exact model ID served by another endpoint; model IDs and credentials are service-specific.
+Set `NVIDIA_BASE_URL` to override the full OpenAI-compatible API base URL (including `/v1`),
+for example `https://inference-api.nvidia.com/v1`. The default remains `https://integrate.api.nvidia.com/v1`.
 
 ```python
+import os
+
 from nhx_evals_sdk import RunConfig, LLMJudgeMetric
 from nhx_evals_sdk.values import (
     InferenceParams,
@@ -162,8 +166,8 @@ from nhx_evals_sdk.values import (
 )
 from nemo_evals.sdk import FilesetRef
 
-JUDGE_MODEL_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-JUDGE_MODEL_NAME = "nvidia/nemotron-3.5-lightning-30b-a3b"
+JUDGE_MODEL_URL = os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/") + "/chat/completions"
+JUDGE_MODEL_NAME = os.environ.get("NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
 
 # `nhx_evals_sdk.Evaluator` resolves this name from your local environment.
 LOCAL_JUDGE_MODEL = Model(

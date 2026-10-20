@@ -545,12 +545,17 @@ Topic Adherence is a multi-turn metric: it scores a complete conversation suppli
 
 <Tab title="Offline Scoring">
 
+Set `NVIDIA_BASE_URL` to override the full OpenAI-compatible API base URL (including `/v1`),
+for example `https://inference-api.nvidia.com/v1`. The default remains `https://integrate.api.nvidia.com/v1`.
+
 ```python
+import os
+
 from nhx_evals_sdk import InferenceParams, Model, SecretRef
 from nhx_evals_sdk.metrics.ragas import TopicAdherenceMetric
 
 judge_model = Model(
-    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    url=os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/") + "/chat/completions",
     name="nvidia/nemotron-3.5-lightning-30b-a3b",
     api_key_secret=SecretRef(root="nvidia-api-key"),
 )
@@ -587,11 +592,13 @@ print(result.aggregate_scores)
 <Tab title="Submit Job">
 
 ```python
+import os
+
 from nhx_evals_sdk import InferenceParams, RunConfig, Model, SecretRef
 from nhx_evals_sdk.metrics.ragas import TopicAdherenceMetric
 
 judge_model = Model(
-    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    url=os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/") + "/chat/completions",
     name="nvidia/nemotron-3.5-lightning-30b-a3b",
     api_key_secret=SecretRef(root="nvidia-api-key"),
 )
@@ -712,11 +719,13 @@ Compare the agent's outcome against a known reference:
 <Tab title="Offline Scoring">
 
 ```python
+import os
+
 from nhx_evals_sdk import Model, SecretRef
 from nhx_evals_sdk.metrics.ragas import AgentGoalAccuracyMetric
 
 judge_model = Model(
-    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    url=os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/") + "/chat/completions",
     name="nvidia/nemotron-3.5-lightning-30b-a3b",
     api_key_secret=SecretRef(root="nvidia-api-key"),
 )
@@ -752,11 +761,13 @@ print(result.aggregate_scores)
 <Tab title="Submit Job">
 
 ```python
+import os
+
 from nhx_evals_sdk import RunConfig, Model, SecretRef
 from nhx_evals_sdk.metrics.ragas import AgentGoalAccuracyMetric
 
 judge_model = Model(
-    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    url=os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/") + "/chat/completions",
     name="nvidia/nemotron-3.5-lightning-30b-a3b",
     api_key_secret=SecretRef(root="nvidia-api-key"),
 )
@@ -861,11 +872,13 @@ The judge LLM infers the goal from the conversation context:
 <Tab title="Offline Scoring">
 
 ```python
+import os
+
 from nhx_evals_sdk import Model, SecretRef
 from nhx_evals_sdk.metrics.ragas import AgentGoalAccuracyMetric
 
 judge_model = Model(
-    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    url=os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/") + "/chat/completions",
     name="nvidia/nemotron-3.5-lightning-30b-a3b",
     api_key_secret=SecretRef(root="nvidia-api-key"),
 )
@@ -909,11 +922,13 @@ print(result.aggregate_scores)
 <Tab title="Submit Job">
 
 ```python
+import os
+
 from nhx_evals_sdk import RunConfig, Model, SecretRef
 from nhx_evals_sdk.metrics.ragas import AgentGoalAccuracyMetric
 
 judge_model = Model(
-    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    url=os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/") + "/chat/completions",
     name="nvidia/nemotron-3.5-lightning-30b-a3b",
     api_key_secret=SecretRef(root="nvidia-api-key"),
 )
@@ -978,11 +993,13 @@ Evaluates the factual correctness of an agent's answer by comparing it against a
 <Tab title="Offline Scoring">
 
 ```python
+import os
+
 from nhx_evals_sdk import Model, SecretRef
 from nhx_evals_sdk.metrics.ragas import AnswerAccuracyMetric
 
 judge_model = Model(
-    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    url=os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/") + "/chat/completions",
     name="nvidia/nemotron-3.5-lightning-30b-a3b",
     api_key_secret=SecretRef(root="nvidia-api-key"),
 )
@@ -1007,11 +1024,13 @@ print(result.aggregate_scores)
 <Tab title="Submit Job">
 
 ```python
+import os
+
 from nhx_evals_sdk import RunConfig, Model, SecretRef
 from nhx_evals_sdk.metrics.ragas import AnswerAccuracyMetric
 
 judge_model = Model(
-    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    url=os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/") + "/chat/completions",
     name="nvidia/nemotron-3.5-lightning-30b-a3b",
     api_key_secret=SecretRef(root="nvidia-api-key"),
 )
@@ -1037,16 +1056,18 @@ print(result.aggregate_scores)
 <Tab title="Online Target Generation">
 
 ```python
+import os
+
 from nhx_evals_sdk import RunConfigOnlineModel, InferenceParams, Model, SecretRef
 from nhx_evals_sdk.metrics.ragas import AnswerAccuracyMetric
 
 judge_model = Model(
-    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    url=os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/") + "/chat/completions",
     name="nvidia/nemotron-3.5-lightning-30b-a3b",
     api_key_secret=SecretRef(root="nvidia-api-key"),
 )
 target_model = Model(
-    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    url=os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/") + "/chat/completions",
     name="nvidia/nemotron-3.5-lightning-30b-a3b",
     api_key_secret=SecretRef(root="nvidia-api-key"),
 )
@@ -1180,10 +1201,12 @@ Each data entry must follow the [NeMo Agent Toolkit](https://docs.nvidia.com/nem
 Most agentic metrics require a judge LLM. Configure the judge model in the metric definition:
 
 ```python
+import os
+
 from nhx_evals_sdk import Model, SecretRef
 
 judge_model = Model(
-    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    url=os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/") + "/chat/completions",
     name="nvidia/nemotron-3.5-lightning-30b-a3b",
     api_key_secret=SecretRef(root="nvidia-api-key"),
 )
@@ -1199,10 +1222,12 @@ judge_model = Model(
 For models that support extended reasoning, such as `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`, add system prompt and reasoning parameters to online model generation:
 
 ```python
+import os
+
 from nhx_evals_sdk import RunConfigOnlineModel, InferenceParams, Model, ReasoningParams, SecretRef
 
 judge_model = Model(
-    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    url=os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/") + "/chat/completions",
     name="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
     api_key_secret=SecretRef(root="nvidia-api-key"),
 )
@@ -1219,6 +1244,8 @@ config = RunConfigOnlineModel(
 If your judge endpoint requires an API key, store it as a secret:
 
 ```python
+import os
+
 from pydantic import SecretStr
 from nhx_evals_sdk import Model, SecretRef
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
@@ -1231,7 +1258,7 @@ client.secrets.create_secret(
 )
 
 judge_model = Model(
-    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    url=os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/") + "/chat/completions",
     name="nvidia/nemotron-3.5-lightning-30b-a3b",
     api_key_secret=SecretRef(root="nvidia-api-key"),
 )

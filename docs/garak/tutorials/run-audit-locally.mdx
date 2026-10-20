@@ -106,20 +106,23 @@ for provider in providers.items():
     print(provider.name, provider.host_url)
 ```
 
-Use a `provider` name from this output in the target below. This example pairs `nvidia-build` with the Build model ID `nvidia/nemotron-3.5-lightning-30b-a3b`. Do not add a second `nvidia/` prefix or reuse this ID with `nvidia-inference-api`: that provider has a different catalog and requires its own credentials.
+Use a `provider` name from this output in the target below. This example defaults to `nvidia-build` with the Build model ID `nvidia/nemotron-3.5-lightning-30b-a3b`. Set `NVIDIA_MODEL` to use another service's exact catalog ID. Do not infer IDs by adding or removing prefixes: the endpoint, model ID, and credentials must match.
 
 Before creating the target, send one chat completion through the same provider route that garak will use. A READY provider or a model listed in its catalog does not guarantee that your API key has completion access:
 
 ```python
+import os
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.inference_gateway.types import JsonBody
+
+MODEL_ID = os.environ.get("NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
 
 completion = InferenceGatewayClient.from_client(client).provider_post(
     workspace="system",
     name="nvidia-build",
     trailing_uri="v1/chat/completions",
     body=JsonBody({
-        "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+        "model": MODEL_ID,
         "messages": [{"role": "user", "content": "Reply with hello."}],
         "max_tokens": 1024,
     }),
@@ -139,7 +142,7 @@ target = garak.targets.create(
     workspace="default",
     name="nemotron-3.5-lightning-30b",
     type="nim.NVOpenAIChat",
-    model="nvidia/nemotron-3.5-lightning-30b-a3b",
+    model=MODEL_ID,
     options={
         "nim": {
             "max_tokens": 1024,

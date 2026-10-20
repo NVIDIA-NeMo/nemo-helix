@@ -41,6 +41,7 @@ from nemo_anonymizer_plugin.sdk.resources import AnonymizerResource
 from nemo_helix_plugin.client.client import NemoClient
 
 MODEL_PROVIDER = os.environ.get("NHX_ANON_PROVIDER", "nvidia-build")
+GENERAL_MODEL = os.environ.get("NHX_ANON_GENERAL_MODEL", "openai/gpt-oss-20b")
 
 config = AnonymizerConfig(
     replace=Redact(format_template="[REDACTED_{label}]"),
@@ -50,8 +51,8 @@ model_configs = [
     # The Anonymizer plugin manages a default PII entity detector, so it is not
     # configured here (you may override it with a ModelConfig, but that is
     # optional). These entries cover the remaining LLM roles.
-    ModelConfig(alias="gpt-oss-120b", provider=MODEL_PROVIDER, model="openai/gpt-oss-120b"),
-    ModelConfig(alias="nemotron-30b-thinking", provider=MODEL_PROVIDER, model="nvidia/nemotron-3.5-lightning-30b-a3b"),
+    ModelConfig(alias="gpt-oss-120b", provider=MODEL_PROVIDER, model=GENERAL_MODEL),
+    ModelConfig(alias="nemotron-30b-thinking", provider=MODEL_PROVIDER, model=os.environ.get("NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")),
 ]
 
 client = NemoClient.from_config()
