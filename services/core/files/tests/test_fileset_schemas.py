@@ -5,7 +5,7 @@
 
 import pytest
 from nhx.common.api.filter import ComparisonOperation, FilterOperator
-from nhx.core.files.api.v2.filesets.schemas import FilesetFilter, fileset_output_from_entity
+from nhx.core.files.api.v2.filesets.schemas import FilesetFilter, FilesetOutput, fileset_output_from_entity
 from nhx.core.files.entities import Fileset
 
 
@@ -30,6 +30,13 @@ def test_fileset_output_carries_creator_and_updater(principal: str | None, expec
 
     assert output.created_by == expected
     assert output.updated_by == expected
+
+
+@pytest.mark.parametrize("field", ["created_by", "updated_by"])
+def test_fileset_output_principal_fields_are_nullable_in_schema(field: str):
+    schema = FilesetOutput.model_json_schema(mode="serialization")
+
+    assert schema["properties"][field]["nullable"] is True
 
 
 @pytest.mark.parametrize("field", ["created_by", "updated_by"])

@@ -13567,6 +13567,7 @@ components:
         created_by:
           title: Created By
           description: Principal id for the fileset creator.
+          nullable: true
           type: string
         updated_at:
           type: string
@@ -13574,6 +13575,7 @@ components:
         updated_by:
           title: Updated By
           description: Principal id for the last fileset update.
+          nullable: true
           type: string
       type: object
       required:
