@@ -309,7 +309,10 @@ async def test_retry_after_execution_policy_change_starts_no_jobs(
     elif revoke == "sandbox_profile":
         frozen = harbor_config.default_sandbox_profile  # the request names none
         sandboxes = {k: v for k, v in harbor_config.sandbox_profiles.items() if k != frozen}
-        service._config.runs.harbor = harbor_config.model_copy(update={"sandbox_profiles": sandboxes})
+        # The retry passes submit's check on the new default; only the plan still names the removed profile.
+        service._config.runs.harbor = harbor_config.model_copy(
+            update={"sandbox_profiles": sandboxes, "default_sandbox_profile": next(iter(sandboxes))}
+        )
     else:
         service._config.runs.harbor = None
     with pytest.raises(TasksetRunResolutionError):

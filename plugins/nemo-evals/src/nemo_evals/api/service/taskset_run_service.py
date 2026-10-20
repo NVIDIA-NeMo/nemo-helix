@@ -568,6 +568,11 @@ class TasksetRunService:
             raise TasksetRunResolutionError(
                 f"run {run.name}'s dispatcher_profile {plan.dispatcher_profile!r} is no longer allowed"
             )
+        if plan.sandbox_policy.profile not in harbor.sandbox_profiles:
+            # Likewise for a request that omits execution.sandbox: it passes on today's default profile.
+            raise TasksetRunResolutionError(
+                f"run {run.name}'s sandbox profile {plan.sandbox_policy.profile!r} is no longer offered"
+            )
         notices = await self._ensure_run_evaluation(run, plan) if plan.intake is not None else []
         configs = [(t.id, t.spec.config) for t in plan.spec.tasks if isinstance(t.spec, ResolvedHarborTaskDefinition)]
         if (resources := defaulted_resources_notice(configs, plan.sandbox_policy)) is not None:
