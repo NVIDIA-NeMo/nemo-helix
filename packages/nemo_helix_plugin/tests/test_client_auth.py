@@ -590,6 +590,35 @@ class TestOIDCTokenProvider:
         assert result == new_id_token
         assert provider.tokens.refresh_token == "rotated-refresh"
 
+    @pytest.mark.parametrize("token_source", ["access_token", "id_token"])
+    def test_broker_refresh_consumes_canonical_bearer_and_persists_two_rotations(self, token_source):
+        expired_token = _make_jwt(exp=time.time() - 100)
+        new_token = _make_jwt(exp=time.time() + 3600)
+        persisted = []
+        provider = OIDCTokenProvider(
+            token_endpoint="https://nemo.example.com/apis/auth/v2/token",
+            client_id="client",
+            tokens=TokenSet(access_token=expired_token, refresh_token="handle-0", expires_at=time.time() - 100),
+            bearer_token_source=token_source,
+            refresh_kind="broker",
+            on_tokens_refreshed=persisted.append,
+        )
+
+        with patch("nemo_helix_plugin.client.oidc.refresh_token_grant") as mock_grant:
+            for rotation in (1, 2):
+                # Broker has selected the provider token already; no id_token field exists.
+                mock_grant.return_value = {
+                    "access_token": new_token,
+                    "refresh_token": f"handle-{rotation}",
+                    "expires_in": 3600,
+                }
+                assert provider.force_refresh() == new_token
+                assert mock_grant.call_args.kwargs["refresh_token"] == f"handle-{rotation - 1}"
+                assert mock_grant.call_args.kwargs["refresh_kind"] == "broker"
+                assert provider.tokens.refresh_token == f"handle-{rotation}"
+                assert persisted[-1].refresh_token == f"handle-{rotation}"
+        assert len(persisted) == 2
+
     def test_refresh_requires_configured_id_token(self):
         expired_token = _make_jwt(exp=time.time() - 100)
         provider = OIDCTokenProvider(
