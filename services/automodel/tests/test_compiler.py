@@ -174,7 +174,6 @@ def test_compile_training_step_sets_shm_by_finetuning_type(
         training=SFTTraining(peft=peft, learning_rate=1e-4, batch_size=4, micro_batch_size=1, max_seq_length=2048),
         output=_output(output_type=output_type),
     )
-    from nemo_helix_plugin.jobs.providers import DistributedGPUExecutionProvider, GPUExecutionProvider
 
     step = compile_training_step(job_output, base_env=[], me=_make_mock_model_entity())
     executor = step.executor
