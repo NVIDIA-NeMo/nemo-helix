@@ -29,6 +29,7 @@ from nemo_agents_plugin.entities import (
     ComputeSpecInline,
     EnvironmentSpecInline,
     McpFulfillment,
+    ProviderFulfillment,
 )
 from nemo_agents_plugin.fabric.runtime import FabricRuntimeResult
 from nemo_agents_plugin.jobs import gateway_proxy
@@ -824,6 +825,35 @@ async def test_to_spec_mcp_secret_indirection_through_environment() -> None:
     # Secret ref collected for injection, NOT written into the server config.
     assert step_config.secrets == {"SEARCH_TOKEN": "default/search-token"}
     assert "SEARCH_TOKEN" not in server.get("env", {})
+
+
+@pytest.mark.asyncio
+async def test_to_spec_rejects_provider_credentials_before_workdir_access() -> None:
+    entity_client = AsyncMock()
+    entity_client.get.return_value = _agent()
+    client = _sdk_with_files()
+    environment = AgentEnvironmentInline(
+        environment_spec=EnvironmentSpecInline(
+            secrets={"SERVICE_SECRET": "default/service-token"},
+            providers={
+                "service": ProviderFulfillment(profile="service-read", credentials={"API_TOKEN": "SERVICE_SECRET"})
+            },
+        )
+    )
+    with pytest.raises(ValueError, match="Provider fulfillments are not yet supported"):
+        await ExecuteAgentJob.to_spec(
+            ExecuteAgentJobConfig(
+                agent="calc",
+                input="hello",
+                environment=environment,
+                workdir=AgentWorkdir(base_workdir="default/files"),
+            ),
+            workspace="default",
+            entity_client=entity_client,
+            async_sdk=client,
+            is_local=False,
+        )
+    client.files.list_files.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -4560,6 +4560,7 @@ dependencies = [
     { name = "nemo-helix-plugin" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "sqlalchemy" },
 ]
 
 [package.optional-dependencies]
@@ -4597,6 +4598,7 @@ requires-dist = [
     { name = "protobuf", marker = "extra == 'openshell'", specifier = ">=6.31.1" },
     { name = "pydantic", specifier = ">=2.10.6" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "sqlalchemy", specifier = ">=2.0.0" },
 ]
 provides-extras = ["docker", "k8s", "openshell"]
 

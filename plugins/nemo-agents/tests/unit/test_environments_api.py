@@ -96,6 +96,35 @@ class TestComputeSpecRoutes:
 
 
 class TestEnvironmentSpecRoutes:
+    def test_create_preserves_provider_binding_in_entity_and_response(self) -> None:
+        entity_client = AsyncMock()
+        entity_client.create.side_effect = _stamp
+        providers = {"service": {"profile": "service-read", "credentials": {"API_TOKEN": "SERVICE_SECRET"}}}
+        resp = _test_client(entity_client).post(
+            "/apis/agents/v2/workspaces/default/environment-specs",
+            json={
+                "name": "service-access",
+                "secrets": {"SERVICE_SECRET": "default/service-token"},
+                "providers": providers,
+            },
+        )
+        assert resp.status_code == 201
+        assert resp.json()["providers"] == providers
+        created = entity_client.create.call_args[0][0]
+        assert created.providers["service"].credentials == {"API_TOKEN": "SERVICE_SECRET"}
+
+    def test_create_rejects_unknown_provider_secret_alias(self) -> None:
+        entity_client = AsyncMock()
+        resp = _test_client(entity_client).post(
+            "/apis/agents/v2/workspaces/default/environment-specs",
+            json={
+                "name": "service-access",
+                "providers": {"service": {"profile": "service-read", "credentials": {"API_TOKEN": "MISSING"}}},
+            },
+        )
+        assert resp.status_code == 422
+        entity_client.create.assert_not_awaited()
+
     def test_create(self) -> None:
         client_mock = AsyncMock()
         client_mock.create = AsyncMock(side_effect=lambda e: _stamp(e))

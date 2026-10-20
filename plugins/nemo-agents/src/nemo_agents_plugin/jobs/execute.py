@@ -368,7 +368,10 @@ class ExecuteAgentJob(NemoJob):
             resolved_env = await resolve_environment(
                 request.environment, workspace=workspace, entity_client=typed_entity_client
             )
-            merged = merge_environment_spec_into_agent_config(resolved_agent_config, resolved_env.environment_spec)
+            merged = merge_environment_spec_into_agent_config(
+                resolved_agent_config, resolved_env.environment_spec, workspace=workspace
+            )
+            merged.require_runtime_support()
         except EnvironmentResolutionError as exc:
             raise ValueError(str(exc)) from exc
 

@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal, NotRequired, Self, TypeAlias, TypedDict
+from typing import Annotated, Any, Literal, NotRequired, Self, TypeAlias, TypedDict
 
 from nemo_helix_plugin.images import normalize_reference
 from nemo_helix_plugin.jobs.schemas import (
@@ -18,7 +18,7 @@ from nemo_helix_plugin.jobs.schemas import (
 )
 from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, FilesetRef
 from nemo_helix_plugin.schema import Page
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 JsonMap: TypeAlias = dict[str, Any]
 JsonObject: TypeAlias = JsonMap
@@ -166,6 +166,26 @@ class McpFulfillment(BaseModel):
     )
 
 
+CredentialSlot = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
+ProviderBindingName = Annotated[str, StringConstraints(min_length=1, pattern=r"^\S+$")]
+
+
+class ProviderFulfillment(BaseModel):
+    """Bind an approved injection profile to existing environment secret entries.
+
+    This describes intent only. Runtime support must be checked before launching
+    an agent; storing a fulfillment does not grant access to its credentials.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile: ProviderBindingName = Field(description="Operator-approved credential injection profile identifier.")
+    credentials: dict[CredentialSlot, CredentialSlot] = Field(
+        min_length=1,
+        description="Profile credential slot -> key in this EnvironmentSpec's secrets map, not a secret value.",
+    )
+
+
 class EnvironmentSpecInline(BaseModel):
     """Inline environment spec - the dependencies and configuration an agent reaches.
 
@@ -177,7 +197,20 @@ class EnvironmentSpecInline(BaseModel):
 
     description: str = Field(default="", description="Human-readable description.")
     env: StringMap = Field(default_factory=dict, description="Plaintext, non-secret env vars.")
-    secrets: StringMap = Field(default_factory=dict, description="ENV_VAR_NAME -> Secrets-service/plugin ref.")
+    secrets: StringMap = Field(
+        default_factory=dict,
+        description=(
+            "ENV_VAR_NAME -> Secrets-service/plugin ref. Entries consumed by providers are reserved "
+            "for external injection; only unconsumed entries become secret-backed process env vars."
+        ),
+    )
+    providers: dict[ProviderBindingName, ProviderFulfillment] = Field(
+        default_factory=dict,
+        description=(
+            "Named provider fulfillments. Consumed secret entries are reserved for external credential injection, "
+            "never process-env injection. Execution and deployment support is not yet available."
+        ),
+    )
     model_provider_override: ModelProviderOverride | None = Field(
         default=None,
         description="Set only to point at a non-IGW external model provider.",
@@ -197,6 +230,22 @@ class EnvironmentSpecInline(BaseModel):
         default_factory=dict,
         description="server-name -> fulfillment (url/env/secrets) for an Agent-declared MCP dependency.",
     )
+
+    @model_validator(mode="after")
+    def validate_provider_credentials(self) -> Self:
+        slots: set[str] = set()
+        for name, provider in self.providers.items():
+            missing = sorted(set(provider.credentials.values()) - self.secrets.keys())
+            if missing:
+                raise ValueError(f"Provider {name!r} references unknown secret entries: {', '.join(missing)}.")
+            duplicates = slots.intersection(provider.credentials)
+            if duplicates:
+                raise ValueError(f"Providers declare duplicate credential slots: {', '.join(sorted(duplicates))}.")
+            slots.update(provider.credentials)
+            for alias in provider.credentials.values():
+                if not self.secrets[alias].strip():
+                    raise ValueError(f"Provider {name!r} references empty secret entry {alias!r}.")
+        return self
 
 
 class AgentEnvironmentInline(BaseModel):

@@ -9,6 +9,10 @@ as first-class managed resources.
 See [MIGRATION.md](MIGRATION.md) for SDK migration notes, including the
 `AgentsResource` move from the legacy `NeMoHelix` SDK object to `NemoClient`.
 
+See [provider fulfillments](docs/provider-fulfillments.md) for the initial
+EnvironmentSpec credential-binding contract and remaining gateway integration
+work. Execution with provider fulfillments is not yet supported.
+
 The plugin supports two agent flows:
 
 - **Platform-backed agents** use the Platform-managed `nemo-agents-spec-v1`
