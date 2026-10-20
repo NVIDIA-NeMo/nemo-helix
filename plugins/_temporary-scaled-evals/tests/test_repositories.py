@@ -18,7 +18,6 @@ try:
     from scaled_evals.api.repositories.benchmark_repository import BenchmarkRepository
     from scaled_evals.api.repositories.benchmark_run_repository import BenchmarkRunRepository
     from scaled_evals.api.repositories.config_profile_repository import ConfigProfileRepository
-    from scaled_evals.api.repositories.credential_repository import CredentialRepository
     from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
     from scaled_evals.api.repositories.execution_cleanup_repository import (
         ExecutionCleanupRepository,
@@ -207,39 +206,6 @@ def test_config_profile_create_parameterizes_name() -> None:
     assert params[1] == MALICIOUS
 
 
-def test_credential_create_parameterizes_name() -> None:
-    conn, cur = _conn()
-
-    CredentialRepository(conn).create(
-        "cred_safe",
-        name=MALICIOUS,
-        provider="openai",
-        payload_kind="key",
-        encrypted_payload=b"encrypted",
-        fingerprint="fp",
-        owner_id="user_safe",
-    )
-
-    sql, params = _executed_sql_and_params(cur)
-    assert MALICIOUS not in sql
-    assert params[1] == "user_safe"
-    assert params[2] == MALICIOUS
-
-
-def test_credential_dispatch_load_can_be_owner_scoped() -> None:
-    conn, cur = _conn()
-
-    CredentialRepository(conn).load_for_dispatch(
-        ["cred_safe"],
-        owner_id="user_safe",
-        include_unowned=False,
-    )
-
-    sql, params = _executed_sql_and_params(cur)
-    assert "owner_id = %s" in sql
-    assert params == [["cred_safe"], "user_safe", False]
-
-
 def test_evaluation_list_parameterizes_filters_and_cursor() -> None:
     conn, cur = _conn()
     created_at = datetime(2026, 6, 23, tzinfo=UTC)
@@ -276,15 +242,6 @@ def test_evaluation_list_parameterizes_filters_and_cursor() -> None:
             "benchmark_id ILIKE %s",
         ),
         (
-            CredentialRepository,
-            {
-                "provider": None,
-                "owner_id": "user_safe",
-                "include_unowned": False,
-            },
-            "provider::text ILIKE %s",
-        ),
-        (
             ConfigProfileRepository,
             {"type": None, "owner_id": None},
             "type::text ILIKE %s",
@@ -308,27 +265,6 @@ def test_resource_list_search_is_parameterized(  # noqa: ANN001
     assert MALICIOUS not in sql
     assert expected_sql in sql
     assert substring_search_pattern(MALICIOUS) in params
-
-
-def test_credential_search_is_case_insensitive_across_visible_metadata() -> None:
-    conn, cur = _conn()
-
-    CredentialRepository(conn).list(
-        provider=None,
-        limit=20,
-        cursor=None,
-        order="desc",
-        owner_id="user_safe",
-        include_unowned=False,
-        q="ANTHROPIC",
-    )
-
-    sql, params = _executed_sql_and_params(cur)
-    assert "name ILIKE %s" in sql
-    assert "provider::text ILIKE %s" in sql
-    assert "payload_kind::text ILIKE %s" in sql
-    assert "fingerprint ILIKE %s" in sql
-    assert params.count("%ANTHROPIC%") == 5
 
 
 def test_benchmark_run_search_includes_case_insensitive_derived_status() -> None:
@@ -993,15 +929,6 @@ def test_evaluation_snapshot_locks_and_captures_mutable_inputs() -> None:
                 "updated_at": None,
             }
         ],
-        [
-            {
-                "id": "cred_safe",
-                "provider": "openai",
-                "payload_kind": "key",
-                "fingerprint": "sha256:actual",
-                "updated_at": None,
-            }
-        ],
     ]
 
     snapshot = EvaluationRepository._capture_execution_snapshot(
@@ -1010,11 +937,11 @@ def test_evaluation_snapshot_locks_and_captures_mutable_inputs() -> None:
         task_id="task_safe",
         task_revision=1,
         profile_ids={"harbor": "cfg_safe"},
-        credentials={"openai": "cred_safe"},
+        credentials={"openai": "team-a/openai-key"},
     )
 
     assert snapshot["profiles"]["harbor"]["config"] == {"env": {"SAFE": "1"}}
-    assert snapshot["credentials"]["openai"]["fingerprint"] == "sha256:actual"
+    assert snapshot["credentials"] == {"openai": "team-a/openai-key"}
     assert snapshot["task"]["build_payload"] == {"source_ref": "abc123"}
     assert all("FOR KEY SHARE" in call.args[0] for call in cur.execute.call_args_list)
 

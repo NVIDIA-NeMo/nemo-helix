@@ -85,7 +85,8 @@ async def test_controller_submits_deterministic_reference_only_jobs(monkeypatch:
     assert evaluation_request.name == "scaled-evals-evaluation-eval_1-e3"
     assert evaluation_request.spec["evaluation_id"] == "eval_1"
     assert evaluation_request.spec["execution_number"] == 3
-    assert "credentials" not in evaluation_request.spec
+    # References only; the Job resolves values from platform Secrets.
+    assert evaluation_request.spec["credentials"] == {}
     # The launch inputs are stored before the Job that reads them exists.
     write_inputs.assert_called_once_with("eval_1", 3, evaluation_request.name)
     assert evaluation_request.spec["inputs_workspace"] == settings.entity_store_private_workspace

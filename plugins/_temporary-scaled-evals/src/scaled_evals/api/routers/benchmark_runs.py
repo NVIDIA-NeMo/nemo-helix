@@ -16,7 +16,12 @@ from scaled_evals.api.db import Database, get_db, get_stream_database_factory
 from scaled_evals.api.repositories.base_repository import Conflict, NotFound
 from scaled_evals.api.repositories.benchmark_run_repository import derive_run_view
 from scaled_evals.api.routers.evaluations import teardown_cancelled_evaluation
-from scaled_evals.api.runnability import BlockedPreflight, preflight_benchmark_run
+from scaled_evals.api.runnability import (
+    BlockedPreflight,
+    SecretReadable,
+    caller_secret_readable,
+    preflight_benchmark_run,
+)
 from scaled_evals.api.schemas.benchmark_archives import BenchmarkArchiveRequest, BenchmarkArchiveResponse
 from scaled_evals.api.schemas.benchmark_runs import (
     BenchmarkRun,
@@ -25,7 +30,13 @@ from scaled_evals.api.schemas.benchmark_runs import (
     CreateBenchmarkRunRequest,
     ReproduceBenchmarkRunResponse,
 )
-from scaled_evals.api.schemas.common import DeleteResponse, ListEnvelope, page_from_rows
+from scaled_evals.api.schemas.common import (
+    DeleteResponse,
+    ListEnvelope,
+    page_from_rows,
+    split_stored_credentials,
+    stale_credentials_note,
+)
 from scaled_evals.api.schemas.evaluations import Evaluation
 from scaled_evals.api.schemas.runnability import RunnabilityReport
 from scaled_evals.api.utils import make_id
@@ -35,6 +46,7 @@ router = APIRouter(prefix="/benchmark-runs", tags=["benchmark-runs"])
 Db = Annotated[Database, Depends(get_db)]
 StreamDatabaseFactory = Annotated[Callable[[], AbstractContextManager[Database]], Depends(get_stream_database_factory)]
 Principal = Annotated[CurrentPrincipal, Depends(current_principal)]
+Secrets = Annotated[SecretReadable, Depends(caller_secret_readable)]
 
 
 def _http_error(status: int, code: str, message: str) -> HTTPException:
@@ -77,7 +89,7 @@ def _reproduce_request(run: Mapping[str, Any], member: Mapping[str, Any]) -> Cre
         framework_profile_id=run.get("framework_profile_id"),
         member_framework_profile_ids=dict(runner_metadata.get("member_framework_profile_ids") or {}),
         intake_profile_id=run.get("intake_profile_id"),
-        credentials=dict(run.get("credentials") or {}),
+        credentials=split_stored_credentials(run.get("credentials"))[0],
         agent_bundle_id=_agent_bundle_id(runner_metadata),
         extra_skill_object_keys=list(member.get("extra_skill_object_keys") or []),
         instruction_prefix=member.get("instruction_prefix"),
@@ -135,8 +147,8 @@ def _create_command(body: CreateBenchmarkRunRequest) -> list[str]:
             command.extend([option, value])
     for task_id, profile_id in sorted(body.member_framework_profile_ids.items()):
         command.extend(["--member-framework-profile", f"{task_id}={profile_id}"])
-    for role, credential_id in sorted(body.credentials.items()):
-        command.extend(["--credential", f"{role}={credential_id}"])
+    for provider, secret_ref in sorted(body.credentials.items()):
+        command.extend(["--credential", f"{provider}={secret_ref}"])
     for object_key in body.extra_skill_object_keys:
         command.extend(["--extra-skill-object-key", object_key])
     if body.instruction_prefix is not None:
@@ -162,6 +174,7 @@ def preflight_benchmark_run_request(
     body: CreateBenchmarkRunRequest,
     db: Db,
     current: Principal,
+    secrets: Secrets,
 ) -> RunnabilityReport:
     """Check whether a benchmark-run request is runnable without creating it."""
     result = preflight_benchmark_run(
@@ -170,12 +183,15 @@ def preflight_benchmark_run_request(
         current,
         object_exists=artifacts.object_exists,
         resolve_bundle=accessible_bundle_for_run,
+        secret_readable=secrets,
     )
     return result.report
 
 
 @router.post("", status_code=202, response_model=BenchmarkRunResponse)
-def create_benchmark_run(body: CreateBenchmarkRunRequest, db: Db, current: Principal) -> BenchmarkRunResponse:
+def create_benchmark_run(
+    body: CreateBenchmarkRunRequest, db: Db, current: Principal, secrets: Secrets
+) -> BenchmarkRunResponse:
     """Run a benchmark by aggregating one evaluation per member task.
 
     Resolves the benchmark revision (defaulting to current), confirms it has
@@ -192,6 +208,7 @@ def create_benchmark_run(body: CreateBenchmarkRunRequest, db: Db, current: Princ
         current,
         object_exists=artifacts.object_exists,
         resolve_bundle=accessible_bundle_for_run,
+        secret_readable=secrets,
     )
     if isinstance(preflight, BlockedPreflight):
         raise _http_error(
@@ -234,7 +251,7 @@ def create_benchmark_run(body: CreateBenchmarkRunRequest, db: Db, current: Princ
         framework_profile_id=body.framework_profile_id,
         harbor_profile_id=body.harbor_profile_id,
         intake_profile_id=body.intake_profile_id,
-        credentials=body.credentials,
+        credentials={provider: ref for provider, ref in body.credentials.items()},
         extra_skill_object_keys=body.extra_skill_object_keys,
         instruction_prefix=body.instruction_prefix,
         instruction_postfix=body.instruction_postfix,
@@ -316,16 +333,18 @@ def reproduce_benchmark_run(run_id: str, db: Db) -> ReproduceBenchmarkRunRespons
         )
     body = _reproduce_request(row, source)
     view = derive_run_view(row, members)
+    stale = split_stored_credentials(row.get("credentials"))[1]
     return ReproduceBenchmarkRunResponse(
         benchmark_run_id=run_id,
         source_status=view["status"],
         request=body,
         cli_command=_create_command(body),
         notes=[
-            "Secret material is not exported; credential values remain credential ids.",
+            "Secret material is not exported; credentials remain platform secret references.",
             "The rerun uses the frozen benchmark revision and member execution settings.",
             "The rerun will fail validation if referenced credentials, profiles, benchmark "
             "revision, agent bundle, or runtime backend are unavailable.",
+            *([stale_credentials_note(stale)] if stale else []),
         ],
     )
 

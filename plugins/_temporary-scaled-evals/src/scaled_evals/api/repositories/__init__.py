@@ -7,7 +7,6 @@ from scaled_evals.api.repositories.benchmark_repository import BenchmarkReposito
 from scaled_evals.api.repositories.benchmark_run_repository import BenchmarkRunRepository
 from scaled_evals.api.repositories.build_repository import TaskBuildRepository
 from scaled_evals.api.repositories.config_profile_repository import ConfigProfileRepository
-from scaled_evals.api.repositories.credential_repository import CredentialRepository
 from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
 from scaled_evals.api.repositories.execution_cleanup_repository import (
     ExecutionCleanupRepository,
@@ -29,7 +28,6 @@ __all__ = [
     "BenchmarkRunRepository",
     "TaskBuildRepository",
     "ConfigProfileRepository",
-    "CredentialRepository",
     "EvaluationRepository",
     "ExecutionCleanupRepository",
     "ExecutionTelemetryRepository",

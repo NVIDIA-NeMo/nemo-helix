@@ -65,7 +65,7 @@ from scaled_evals.api.repositories.resource_usage_repository import ResourceUsag
 from scaled_evals.api.settings import settings
 from scaled_evals.benchmark_archive import build_benchmark_archive
 from scaled_evals.benchmark_archive_cleanup import cleanup_benchmark_archives as cleanup_archive_objects
-from scaled_evals.dispatch.credentials import materialize_credential_env
+from scaled_evals.dispatch.credentials import injected_credential_env
 from scaled_evals.dispatch.harbor_dataset_images import (
     dataset_configs,
     effective_image_mode,
@@ -90,7 +90,6 @@ from scaled_evals.intake.experiments import ExperimentRequest, build_experiment_
 from scaled_evals.intake.upload import upload_job_atif_warn
 from scaled_evals.models.evaluations import EvaluationResultWrite
 from scaled_evals.models.execution_snapshot import (
-    snapshot_credential_expectations,
     snapshot_profile_config,
     validate_execution_snapshot,
 )
@@ -753,7 +752,6 @@ class Dispatcher:
 
             try:
                 snapshot = validate_execution_snapshot(row.get("execution_snapshot"))
-                expected_credentials = {} if snapshot is None else snapshot_credential_expectations(snapshot)
             except Exception as exc:  # noqa: BLE001 — record invalid execution snapshot
                 self._write_provenance_warn(row, status="failed", artifact_root=artifact_root)
                 self._sync_artifacts_warn(
@@ -788,11 +786,7 @@ class Dispatcher:
                 if row.get("framework") == "harbor" and not framework_config:
                     framework_config = harbor_config
                 intake_config = self._load_intake_config(conn, row)
-                credential_env = materialize_credential_env(
-                    conn,
-                    row["credentials"] or {},
-                    expected=expected_credentials,
-                )
+                credential_env = injected_credential_env(row["credentials"] or {})
             except Exception as exc:  # noqa: BLE001 — record profile load/validation failure
                 self._write_provenance_warn(row, status="failed", artifact_root=artifact_root)
                 self._sync_artifacts_warn(

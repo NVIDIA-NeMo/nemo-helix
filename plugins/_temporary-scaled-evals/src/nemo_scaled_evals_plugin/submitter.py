@@ -96,6 +96,7 @@ class EvaluationSubmitter:
             evaluation_id=claimed_id,
             execution_number=execution_number,
             runtime=str(current["runtime"]),
+            credentials=dict(current.get("credentials") or {}),
             deadline_seconds=max(
                 1,
                 math.ceil(
