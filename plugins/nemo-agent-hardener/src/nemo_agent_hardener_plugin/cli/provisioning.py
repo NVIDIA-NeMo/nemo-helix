@@ -56,13 +56,14 @@ def provision_venv(config: AgentHardenerConfig, *, force: bool) -> None:
         typer.secho("uv not found — install it (https://docs.astral.sh/uv/) then re-run setup.", fg="red")
         raise typer.Exit(code=1)
 
-    if config.agent_hardener_bin.exists() and not force:
-        typer.echo(f"agent-hardener venv already present at {config.venv_path} (use --force to recreate).")
-        return
-
     config.venv_path.parent.mkdir(parents=True, exist_ok=True)
-    typer.echo(f"Creating agent-hardener venv at {config.venv_path} ...")
-    run_subprocess(["uv", "venv", "--python", "3.12", str(config.venv_path)], "create venv")
+    if force or not config.agent_hardener_bin.exists():
+        typer.echo(f"Creating agent-hardener venv at {config.venv_path} ...")
+        run_subprocess(["uv", "venv", "--python", "3.12", str(config.venv_path)], "create venv")
+    else:
+        # An existing binary can predate the configured dependency floor. Let uv check the
+        # requirement without recreating the environment or upgrading an already-satisfying install.
+        typer.echo(f"Checking agent-hardener package in the existing venv at {config.venv_path} ...")
 
     typer.echo(f"Installing {config.spec} into the venv ...")
     # Remove prerelease allowance once agent-hardener pins a final nemo-relay release.
