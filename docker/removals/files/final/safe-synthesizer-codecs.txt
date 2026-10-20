@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM pulls in PyNvVideoCodec for optional video decoding. Safe Synthesizer
+# does not use that backend; remove the package and its bundled FFmpeg libraries.
+/opt/venv/lib/python3.*/site-packages/PyNvVideoCodec
+/opt/venv/lib/python3.*/site-packages/pynvvideocodec-*.dist-info
+/opt/venv/lib/python3.*/site-packages/pynvvideocodec-*.data
