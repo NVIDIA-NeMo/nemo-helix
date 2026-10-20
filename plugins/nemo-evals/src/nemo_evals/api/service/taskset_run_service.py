@@ -135,6 +135,10 @@ class RunEvaluationError(RuntimeError):
         self.run_id = run_id
 
 
+class RunEvaluationDeniedError(RunEvaluationError):
+    """Intake refused the caller the run's Evaluation; a retry fails the same way until the caller may create it."""
+
+
 async def pin_taskset_ref(entity_client: EntityClient, ref: TasksetRef, workspace: str) -> TasksetRef:
     """Resolve a taskset selector to its verified, fully qualified content digest.
 
@@ -537,7 +541,8 @@ class TasksetRunService:
             Notices for the submit response.
 
         Raises:
-            RunEvaluationError: The Evaluation isn't the run's, or Intake refused or failed to create it.
+            RunEvaluationDeniedError: Intake refused the caller the Evaluation. No task Job has started.
+            RunEvaluationError: The Evaluation isn't the run's, or Intake failed to create it.
                 No task Job has started; a retry with the run's idempotency_key creates it and then the Jobs.
         """
         assert plan.intake is not None
@@ -545,8 +550,10 @@ class TasksetRunService:
             await ensure_run_evaluation(self._evaluations, run, plan)
         except ForeignEvaluationError as exc:
             raise RunEvaluationError(run.name, str(exc)) from exc
+        except PermissionDeniedError as exc:
+            # Submit checked the permission before accepting, so it was revoked since; retrying can't help.
+            raise RunEvaluationDeniedError(run.name, "Intake refused to create its Evaluation") from exc
         except NemoClientError as exc:
-            # Includes a 403: submit checked the permission before accepting, so it was revoked since.
             raise RunEvaluationError(run.name, f"creating its Intake Evaluation failed: {exc}") from exc
         return [f"Intake: Evaluation {run.name} in Experiment {plan.intake.experiment}"]
 

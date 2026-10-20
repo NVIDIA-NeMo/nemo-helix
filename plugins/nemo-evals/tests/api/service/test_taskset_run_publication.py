@@ -5,7 +5,11 @@
 
 import pytest
 from fastapi import HTTPException
-from nemo_evals.api.service.taskset_run_service import RunEvaluationError, TasksetRunResolutionError
+from nemo_evals.api.service.taskset_run_service import (
+    RunEvaluationDeniedError,
+    RunEvaluationError,
+    TasksetRunResolutionError,
+)
 from nemo_evals.api.taskset_run_schemas import TasksetRunInput
 from nemo_evals.jobs.harbor_task_spec import HarborTaskJobSpec
 from nemo_evals.taskset_runs.entities import TasksetRunEntity
@@ -169,9 +173,9 @@ async def test_a_caller_who_may_not_read_the_experiment_is_refused_before_the_lo
 async def test_an_evaluation_create_denied_after_acceptance_starts_no_jobs(
     service, publishing, fake_evaluations, fake_task_jobs
 ):
-    """Submit checked the permission first, so a 403 here means it was revoked since: a 503, not an unpublished run."""
+    """Submit checked the permission first, so a 403 here means it was revoked since: no unpublished run."""
     fake_evaluations.fail = {"create-denied"}
-    with pytest.raises(RunEvaluationError, match="creating its Intake Evaluation failed"):
+    with pytest.raises(RunEvaluationDeniedError, match=f"run {RUN}: Intake refused to create its Evaluation"):
         await submit(service, publishing)
     assert not fake_task_jobs.created
 

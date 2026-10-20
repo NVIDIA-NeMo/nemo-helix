@@ -300,6 +300,25 @@ async def test_intake_failing_before_acceptance_is_a_retryable_503(
     assert (await run_client.post(PATH, json=body)).status_code == 201
 
 
+@pytest.mark.parametrize("key", ["ci-run", None], ids=["keyed", "keyless"])
+async def test_an_evaluation_denied_after_acceptance_is_a_nonretryable_403_naming_the_run(
+    run_client, published, request_body, fake_evaluations, fake_task_jobs, key
+):
+    body = request_body | {"idempotency_key": key, "publication": {"intake": {"experiment": "swe-agent-tuning"}}}
+    fake_evaluations.fail = {"create-denied"}
+    response = await run_client.post(PATH, json=body)
+    assert response.status_code == 403, response.text
+    assert response.headers["x-should-retry"] == "false"
+    used = key or response.headers["x-idempotency-key"]
+    detail = response.json()["detail"]
+    assert detail.startswith("run run-") and detail.endswith(f"resubmit with idempotency_key={used}")
+    assert not fake_task_jobs.created
+    fake_evaluations.fail = set()
+    retry = await run_client.post(PATH, json=body | {"idempotency_key": used})
+    assert retry.status_code == 200, retry.text
+    assert detail.startswith(f"run {retry.json()['run_id']}:") and len(fake_task_jobs.created) == 1
+
+
 async def test_an_unreadable_experiment_is_403(run_client, published, request_body, fake_evaluations):
     fake_evaluations.deny_experiments = True
     body = request_body | {"publication": {"intake": {"experiment": "swe-agent-tuning"}}}

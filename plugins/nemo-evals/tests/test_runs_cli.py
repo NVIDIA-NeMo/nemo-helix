@@ -5,7 +5,9 @@
 
 import io
 import json
+import subprocess
 import tarfile
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
@@ -28,6 +30,8 @@ from nemo_evals.runs_cli import (
     _workspace_flag,
     add_runs_commands,
     build_images,
+    check_git_source,
+    download_git_tasks,
     job_error,
     newest_bundle_job,
     rollup_scores,
@@ -247,6 +251,152 @@ def test_sandbox_flags_are_rejected_with_a_spec_file(tmp_path, flag, value):
     result = CliRunner().invoke(app, ["runs", "submit", "--spec-file", str(spec), flag, value])
     assert result.exit_code == 2
     assert "don't apply with --spec-file" in " ".join(result.output.replace("│", " ").split())
+
+
+TB = "https://github.com/harbor-framework/terminal-bench.git"
+SHA = "2b0442c3" + "0" * 32  # what Harbor's ls-remote gives an annotated tag: the tag object
+COMMIT = "9f1e7a55" + "0" * 32  # the commit the download checks out
+
+
+class FakeGitRegistry:
+    """Harbor's ``GitRepoRegistryClient``: three tasks under ``tasks/`` at ``SHA``; records what it downloads."""
+
+    downloads: list[list[str]] = []
+    commits: list[str | None] | None = None  # per selected task; default COMMIT for each
+
+    repos: list = []
+
+    def __init__(self, repo):
+        self.repo = repo
+        self._task_client = self
+        FakeGitRegistry.repos.append(repo)
+
+    async def get_dataset_metadata(self, name):
+        from harbor.models.task.id import GitTaskId
+
+        names = ["sum-three", "bun-sourcemap-leak", "greet-universe"]
+        return SimpleNamespace(
+            task_ids=[GitTaskId(git_url=self.repo.git_url, git_commit_id=SHA, path=Path("tasks") / n) for n in names]
+        )
+
+    async def download_tasks(self, task_ids, output_dir, export):
+        FakeGitRegistry.downloads.append([t.get_name() for t in task_ids])
+        paths = [output_dir / t.get_name() for t in task_ids]
+        commits = FakeGitRegistry.commits or [COMMIT] * len(paths)
+        results = [SimpleNamespace(path=p, resolved_git_commit_id=c) for p, c in zip(paths, commits, strict=True)]
+        return SimpleNamespace(paths=paths, results=results)
+
+
+@pytest.fixture
+def git_registry(monkeypatch):
+    from harbor.registry.client import git_repo
+
+    FakeGitRegistry.downloads = []
+    FakeGitRegistry.repos = []
+    FakeGitRegistry.commits = None
+    monkeypatch.setattr(git_repo, "GitRepoRegistryClient", FakeGitRegistry)
+    return FakeGitRegistry
+
+
+def test_git_source_downloads_only_the_selected_tasks(git_registry, tmp_path):
+    name, sha, dirs, total = download_git_tasks(f"{TB}@v3.0.0", "sum-three,0", tmp_path)
+    # The checked-out commit, not the tag object an annotated tag's ls-remote gives.
+    assert (name, sha, total) == ("harbor-framework/terminal-bench", COMMIT, 3)
+    assert dirs == [tmp_path / "sum-three", tmp_path / "bun-sourcemap-leak"]  # name order: index 0 is bun-…
+    assert git_registry.downloads == [["sum-three", "bun-sourcemap-leak"]]
+
+
+@pytest.mark.parametrize("second", ["a" * 40, None], ids=["another-commit", "unresolved"])
+def test_git_source_needs_one_commit_for_every_task(git_registry, tmp_path, second):
+    git_registry.commits = [COMMIT, second]
+    with pytest.raises(RuntimeError, match="not one commit"):
+        download_git_tasks(f"{TB}@v3.0.0", "sum-three,0", tmp_path)
+
+
+def test_git_source_needs_a_ref():
+    check_git_source(f"{TB}@v3.0.0")
+    check_git_source("https://github.com/harbor-framework/terminal-bench/tree/2b0442c3/tasks")
+    with pytest.raises(ValueError, match="names no tag or commit"):
+        check_git_source(TB)
+    result = CliRunner().invoke(_runs_app(), ["runs", "submit", "--harbor-git", TB])
+    assert result.exit_code == 2
+    assert "names no tag or commit" in " ".join(result.output.replace("│", " ").split())
+
+
+@pytest.mark.parametrize(
+    ("other", "flags"),
+    [
+        (["--harbor-dir", "."], "--harbor-dir and --harbor-git"),
+        (["--harbor-hub", "a/b@1"], "--harbor-hub and --harbor-git"),
+    ],
+)
+def test_git_source_excludes_the_other_sources(other, flags):
+    result = CliRunner().invoke(_runs_app(), ["runs", "submit", *other, "--harbor-git", f"{TB}@v3.0.0"])
+    assert result.exit_code == 2
+    assert f"not {flags}" in " ".join(result.output.replace("│", " ").split())
+
+
+def test_list_tasks_reads_the_git_repo(git_registry):
+    client = NemoClient(base_url="http://platform.test", workspace="default")
+    app = typer.Typer()
+    add_runs_commands(app, lambda: client)
+    result = CliRunner().invoke(app, ["runs", "submit", "--harbor-git", f"{TB}@v3.0.0", "--list-tasks"])
+    assert result.exit_code == 0, result.output
+    assert result.output.split("\n")[1:4] == ["  0  bun-sourcemap-leak", "  1  greet-universe", "  2  sum-three"]
+    assert git_registry.downloads == []
+
+
+def test_a_tree_url_reads_tasks_from_its_directory(git_registry):
+    result = CliRunner().invoke(
+        _listing_app(),
+        ["runs", "submit", "--harbor-git", "https://github.com/acme/evals/tree/v2/suites/smoke", "--list-tasks"],
+    )
+    assert result.exit_code == 0, result.output
+    (repo,) = git_registry.repos
+    assert (repo.git_url, repo.ref, repo.subdir) == ("https://github.com/acme/evals", "v2", "suites/smoke")
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (
+            subprocess.CalledProcessError(128, ["git", "ls-remote", TB, "v9"], b"", b"fatal: repository not found\n"),
+            "Error: git ls-remote failed: fatal: repository not found",
+        ),
+        (FileNotFoundError(2, "No such file or directory", "git"), "Error: --harbor-git needs git on PATH"),
+    ],
+)
+def test_a_failed_git_command_is_an_error_not_a_traceback(monkeypatch, error, message):
+    from harbor.registry.client import git_repo
+
+    class UnreachableRepo(FakeGitRegistry):
+        async def get_dataset_metadata(self, name):
+            raise error
+
+    monkeypatch.setattr(git_repo, "GitRepoRegistryClient", UnreachableRepo)
+    client = NemoClient(base_url="http://platform.test", workspace="default")
+    app = typer.Typer()
+    add_runs_commands(app, lambda: client)
+    result = CliRunner().invoke(app, ["runs", "submit", "--harbor-git", f"{TB}@v9", "--list-tasks"])
+    assert result.exit_code == 1
+    assert message in result.output
+    assert isinstance(result.exception, SystemExit)  # typer.Exit, not the git error
+
+
+def _listing_app() -> typer.Typer:
+    client = NemoClient(base_url="http://platform.test", workspace="default")
+    app = typer.Typer()
+    add_runs_commands(app, lambda: client)
+    return app
+
+
+def _runs_app() -> typer.Typer:
+    def no_client() -> NemoClient:
+        raise AssertionError("no request is made")
+
+    app = typer.Typer()
+    add_runs_commands(app, no_client)
+    return app
 
 
 def test_submit_retries_a_503_with_the_same_body():
