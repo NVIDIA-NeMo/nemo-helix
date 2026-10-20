@@ -428,11 +428,12 @@ def test_job_error_prefers_the_failed_process_over_the_retry_summary(status_deta
     assert job_error(HelixJobResponse.model_validate(failed)) == expected
 
 
-def test_newest_bundle_job_is_the_last_attempt_with_its_error():
-    jobs = {
-        "run-x-bundle-1": job("run-x-bundle-1", "error", "t"),
-        "run-x-bundle-2": job("run-x-bundle-2", "error", "t") | {"status_details": FAILED_POD},
-    }
+@pytest.mark.parametrize("first", ["error", None], ids=["failed", "unreadable"])
+def test_newest_bundle_job_is_the_last_attempt_with_its_error(first):
+    """The controller skips a name its create left unreadable (404), so the search goes on past it."""
+    jobs = {"run-x-bundle-2": job("run-x-bundle-2", "error", "t") | {"status_details": FAILED_POD}}
+    if first is not None:
+        jobs["run-x-bundle-1"] = job("run-x-bundle-1", first, "t")
 
     def handler(request: httpx.Request) -> httpx.Response:
         name = request.url.path.rsplit("/", 1)[1]

@@ -571,14 +571,17 @@ class BundleJobView:
 
 
 def newest_bundle_job(client: NemoClient, run_id: str, *, workspace: str) -> BundleJobView | None:
-    """The run's newest bundle Job, or None before the controller created one."""
+    """The run's newest bundle Job, or None before the controller created one.
+
+    A missing name doesn't end the search: the controller skips a name whose create left it unreadable.
+    """
     jobs = JobsClient.from_client(client)
     newest = None
     for attempt in range(1, MAX_BUNDLE_ATTEMPTS + 1):
         try:
             job = jobs.get_job(workspace=workspace, name=bundle_job_name(run_id, attempt)).data()
         except NotFoundError:
-            break
+            continue
         status = job.status.value if hasattr(job.status, "value") else str(job.status)
         newest = BundleJobView(job.name, attempt, status, job_error(job) if status in _FAILED else None)
     return newest
