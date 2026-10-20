@@ -4,8 +4,8 @@
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import { useAgentsListDeployments } from '@nemo/sdk/generated/agents/agent-deployments';
 import { useAgentsGetAgent, useAgentsListAgents } from '@nemo/sdk/generated/agents/agents';
+import { useCompassListInsights } from '@nemo/sdk/generated/compass/compass-insights';
 import { useEvalsListEvaluateJobs } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
-import { useInsightsListInsights } from '@nemo/sdk/generated/insights/insights-insights';
 import { useListExperiments } from '@nemo/sdk/generated/platform/experiments';
 import { useModelsListModels } from '@nemo/sdk/generated/platform/models';
 import { ROUTES } from '@studio/constants/routes';
@@ -32,9 +32,9 @@ vi.mock('@nemo/sdk/generated/agents/agent-deployments', async (importOriginal) =
   ...(await importOriginal<typeof import('@nemo/sdk/generated/agents/agent-deployments')>()),
   useAgentsListDeployments: vi.fn(),
 }));
-vi.mock('@nemo/sdk/generated/insights/insights-insights', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@nemo/sdk/generated/insights/insights-insights')>()),
-  useInsightsListInsights: vi.fn(),
+vi.mock('@nemo/sdk/generated/compass/compass-insights', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@nemo/sdk/generated/compass/compass-insights')>()),
+  useCompassListInsights: vi.fn(),
 }));
 vi.mock('@nemo/sdk/generated/evals/evals-plugin-jobs-routes', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@nemo/sdk/generated/evals/evals-plugin-jobs-routes')>()),
@@ -85,7 +85,7 @@ describe('WorkspaceDashboardHomeRoute', () => {
     vi.clearAllMocks();
     window.localStorage.clear();
     vi.mocked(useAgentsListAgents).mockReturnValue(queryResult(1));
-    vi.mocked(useInsightsListInsights).mockReturnValue(queryResult(4));
+    vi.mocked(useCompassListInsights).mockReturnValue(queryResult(4));
     vi.mocked(useEvalsListEvaluateJobs).mockReturnValue(queryResult(120));
     vi.mocked(useListExperiments).mockReturnValue(queryResult(1));
     vi.mocked(useModelsListModels).mockReturnValue(queryResult(0));

@@ -90,19 +90,17 @@ def test_bundled_shared_data_is_carried_into_the_wrapper_wheel() -> None:
             assert path.is_file()
 
 
-def test_insights_analyst_fabric_descriptor_ships_in_the_wrapper_wheel() -> None:
-    """Fabric resolves ``nvidia.fabric.insights-analyst`` from the install prefix."""
+def test_compass_fabric_descriptor_ships_in_the_wrapper_wheel() -> None:
+    """Fabric resolves ``nvidia.fabric.compass`` from the install prefix."""
     pyproject_path = ROOT / "packages/nemo_helix/pyproject.toml"
     with open(pyproject_path, "rb") as pyproject:
-        bundle = tomllib.load(pyproject)["tool"]["bundle-package"]["nemo-insights-plugin"]
+        bundle = tomllib.load(pyproject)["tool"]["bundle-package"]["nemo-compass-plugin"]
 
     source = (pyproject_path.parent / bundle["source"]).resolve()
     shared_data = {(source / key).resolve(): value for key, value in bundle["shared_data"].items()}
 
-    descriptor = (ROOT / "plugins/nemo-insights/insights-analyst.fabric-adapter.json").resolve()
-    assert shared_data[descriptor] == (
-        "share/nemo-fabric/adapters/insights-analyst/insights-analyst.fabric-adapter.json"
-    )
+    descriptor = (ROOT / "plugins/nemo-compass/compass.fabric-adapter.json").resolve()
+    assert shared_data[descriptor] == "share/nemo-fabric/adapters/compass/compass.fabric-adapter.json"
 
 
 def _owning_pyproject(source: Path) -> Path | None:
