@@ -735,8 +735,8 @@ baseHelixConfig: |
     job_storage_pvc_claim: {{ (include "nhx-core.persistentVolumeClaim" . ) }}
     # Gym sandbox pod size.
     sandbox_resources:
-      cpu: "2"
-      memory: 4Gi
+      cpu: "4"
+      memory: 8Gi
 
   # -- safe_synthesizer is the configuration specific to the Safe Synthesizer service
   safe_synthesizer:
