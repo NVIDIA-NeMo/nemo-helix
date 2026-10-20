@@ -992,12 +992,16 @@ def test_subprocess_execution_provider_requires_command():
 
 
 def test_resolve_gpu_job_shm_size_defaults_and_override():
-    assert resolve_gpu_job_shm_size(None, None, 2) == "2Gi"
+    assert resolve_gpu_job_shm_size(None, None, 2) == "16Gi"
     executor = ComputeResources(shm_size="4Gi")
     assert resolve_gpu_job_shm_size(executor, None, 2) == "4Gi"
     profile = ComputeResources(shm_size="8Gi")
     assert resolve_gpu_job_shm_size(None, profile, 1) == "8Gi"
-    assert resolve_gpu_job_shm_size(executor, profile, 1) == "4Gi"
+    # The larger of the step floor and the operator profile is mounted.
+    assert resolve_gpu_job_shm_size(executor, profile, 1) == "8Gi"
+    assert resolve_gpu_job_shm_size(ComputeResources(shm_size="64Gi"), profile, 1) == "64Gi"
+    assert resolve_gpu_job_shm_size(ComputeResources(shm_size="512Mi"), ComputeResources(shm_size="2Gi"), 1) == "2Gi"
+    assert resolve_gpu_job_shm_size(ComputeResources(shm_size="32Gi"), ComputeResources(shm_size="32Gi"), 1) == "32Gi"
 
 
 def test_k8s_shm_quantity_to_docker():

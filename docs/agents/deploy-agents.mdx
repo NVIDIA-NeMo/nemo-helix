@@ -3,320 +3,60 @@
 # SPDX-License-Identifier: Apache-2.0
 
 title: "Deploy Agents"
-description: ""
+description: "Run a registered agent as a subprocess, Docker container, or Kubernetes Deployment, and build and publish agent images."
 ---
+
 <a id="deploy-agents"></a>
 
-Deploy a registered agent as a running service and invoke it through the
-Agents gateway. An agent can run as a local subprocess (the default), a durable
-container on Docker or Kubernetes, or an OpenShell sandbox.
-
-<Note>
-
-Resource names for agents and deployments must contain only letters (a-z,
-A-Z), digits (0-9), underscores, hyphens, and dots. For example:
-`calculator-agent`, `my-agent`, `react-agent`.
-
-</Note>
+A deployment runs a [registered agent](/documentation/agents/register-agents) as a long-running
+service. Clients reach every deployment the same way, through the Agents gateway, whatever runtime
+it uses.
 
 <Markdown src="/snippets/_snippets/tutorials/cli-sdk-setup.mdx" />
 
-The Python SDK examples on this page build the agents plugin resource from that client and use these imports:
+## Runtimes
+
+Select a runtime with `nemo agents deploy --mode`:
+
+| Mode | Runs as | Survives a platform restart | Requires |
+|---|---|---|---|
+| `subprocess` (default) | A process on the platform host | No | The agent's harness installed in the platform environment |
+| `docker` | A Docker container | Yes | An agent image and a Docker executor |
+| `k8s` | A Kubernetes Deployment and ClusterIP Service | Yes | An image the cluster can pull and a Kubernetes executor |
+| `openshell` | An OpenShell sandbox whose network policy denies everything except the platform; see [Sandboxed Deployments](/documentation/agents/deploy-agents/sandboxed-deployments) | Yes | An image packaged with `--sandbox-runtime openshell` and an OpenShell executor |
+
+Every mode except `subprocess` runs through the deployments plugin. For when the platform itself
+needs Docker, see [Local Docker and Executors](/documentation/get-started/local-docker-and-executors).
+
+`--mode openshell` uses `agents.deployments.openshell_executor` with either gateway compute driver.
+
+### Subprocess
+
+The platform starts the agent on its own host, assigns a port, and watches its health. No image or
+executor configuration is needed.
+
+<Tabs>
+
+<Tab title="CLI">
+
+```bash
+nemo agents deploy --agent calculator-agent --name calculator-agent-deployment
+
+nemo agents invoke --agent calculator-agent --input "What is 12 multiplied by 8?"
+```
+
+</Tab>
+<Tab title="Python SDK">
 
 ```python
-import os
-
-from pydantic import SecretStr
-
 from nemo_agents_plugin.sdk import AgentsResource
-from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
-
-agents = AgentsResource(client)
-```
----
-
-## Deployment Modes
-
-`nemo agents deploy --mode <mode>` selects the runtime backend for a
-deployment. The default is `subprocess`; `docker`, `k8s`, and `openshell` run the
-agent through the deployments plugin.
-
-| Mode | Runs as | Survives a control plane restart | Requires |
-| ------ | --------- | ----------------------------- | ---------- |
-| `subprocess` (default) | A local FastAPI server on the control plane host | No | Nothing extra for the agent process |
-| `docker` | A Docker container | Yes | A container image and a configured `docker` executor |
-| `k8s` | A Kubernetes Deployment + Service | Yes | A container image and a configured `k8s` executor |
-| `openshell` | A policy-governed OpenShell sandbox | Yes | An image packaged for OpenShell, a reachable gateway, and an `openshell` executor |
-
-`--mode openshell` uses `agents.deployments.openshell_executor` with either
-gateway compute driver. See [Sandboxed Deployments](/documentation/agents/sandboxed-deployments)
-for deployment and network policy examples.
-
-<Note>
-
-Subprocess agent deploy does not mean the control plane can start without Docker. Default local startup still starts the deployments controller with a Docker-backed executor for model deployments on the control plane. Agent deploys use an executor that matches their mode: `--mode docker` requires a Docker-backed executor, and `--mode k8s` requires a `k8s` executor. See [Local Docker and Executors](/documentation/get-started/local-docker-and-executors).
-
-</Note>
-
-In every mode the agent is reached the same way — through the Agents gateway,
-which resolves the agent's active deployment and proxies the request, so
-clients do not need to know which mode the agent runs in.
-
----
-
-## Agent Environments
-
-An agent config declares what an agent needs (MCP servers, environment
-variables, and the names of the credentials it reads) without pinning any of it
-to a place to run. An **agent environment** supplies those specifics for a given
-context. This allows one agent to be reused across different contexts. For instance,
-a single agent can run with dev credentials and full tool access in one
-environment, and with more restricted credentials, read-only tools, and a larger compute box in
-another environment.
-
-An environment is built from three resources:
-
-| Resource | Holds |
-| ---------- | ------- |
-| `environment-spec` | Per-server secret refs, environment variables, and tool settings merged into the agent config. |
-| `compute-spec` | The CPU/memory request. Referenced by name, or provided inline when you create the `environment`. |
-| `environment` | Binds an `environment-spec` and an optional `compute-spec` into one named handle you deploy against. |
-
-Secrets are referenced by name (`workspace/secret-name`) and resolved from the
-platform [Secrets service](/documentation/get-started/core-concepts/manage-secrets)
-at run time, so credential values never live in the agent config or the
-environment spec.
-
-### Example
-
-#### Define the Agent
-
-The agent config declares a `github` MCP server and the env var it reads its
-credential from. It holds no secret and names no environment. See
-[Agent Definition](/documentation/agents#agent-definition) for the full
-`agent.yaml` reference.
-
-```yaml
-config_format: nemo-agents-spec-v1
-name: research-agent
-description: Researches a GitHub repo and summarizes its dependencies and risks.
-
-instructions:
-  system:
-    content: |
-      You are a repository research assistant. Use the github tools to read the
-      repo and summarize what it does, its main dependencies, and any risks.
-
-default_harness: deepagents
-harnesses:
-  deepagents:
-    kind: deepagents
-    settings:
-      deepagents: {}
-
-models:
-  default:
-    provider: nvidia
-    model: nvidia-nemotron-3-5-lightning-30b-a3b
-    api_key_env: NVIDIA_API_KEY
-
-mcp:
-  servers:
-    github:
-      transport: stdio
-      url: docker
-      args: ["run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server"]
-```
-
-Register it:
-
-<Tabs>
-
-<Tab title="CLI">
-
-```bash
-nemo agents create --name research-agent --agent-config research-agent/agent.yaml
-```
-
-</Tab>
-<Tab title="Python SDK">
-
-```python
-import yaml
-
-with open("research-agent/agent.yaml") as f:
-    config = yaml.safe_load(f)
-agents.create(
-    name="research-agent",
-    config=config,
-    config_format=config["config_format"],
-)
-```
-
-</Tab>
-
-</Tabs>
-
-#### Create an Environment
-
-The environment fulfills the agent's `github` server with a stored secret and a
-tool scope, and provides an inline compute size. Create the secret first, then
-the `environment-spec`, then the `environment` that references it.
-
-<Tabs>
-
-<Tab title="CLI">
-
-```bash
-printf '%s' "$GITHUB_PAT" | nemo secrets create research-github-pat --from-file -
-
-nemo agents environment-specs create research \
-  --spec '{"provider":"local","env":{"LOG_LEVEL":"debug"},"mcp":{"github":{"url":"docker","env":{"GITHUB_TOOLSETS":"repos,issues"},"secrets":{"GITHUB_PERSONAL_ACCESS_TOKEN":"default/research-github-pat"}}}}'
-
-nemo agents environments create research \
-  --environment-spec default/research \
-  --spec '{"compute_spec":{"resources":{"limits":{"cpu":"2","memory":"4Gi"}}}}'
-```
-
-</Tab>
-<Tab title="Python SDK">
-
-```python
-client.secrets.create_secret(
-    body=HelixSecretCreateRequest(name="research-github-pat", value=SecretStr(os.environ["GITHUB_PAT"])),
-)
-
-agents.environment_specs.create(
-    name="research",
-    spec={
-        "provider": "local",
-        "env": {"LOG_LEVEL": "debug"},
-        "mcp": {
-            "github": {
-                "url": "docker",
-                "env": {"GITHUB_TOOLSETS": "repos,issues"},
-                "secrets": {"GITHUB_PERSONAL_ACCESS_TOKEN": "default/research-github-pat"},
-            }
-        },
-    },
-)
-
-agents.environments.create(
-    name="research",
-    environment_spec="default/research",
-    compute_spec={"resources": {"limits": {"cpu": "2", "memory": "4Gi"}}},
-)
-```
-
-</Tab>
-
-</Tabs>
-
-#### Reference the Environment in an AgentDeployment
-
-Deploy the agent under the environment. Its spec is merged into the agent
-config, and its secret refs and compute are snapshotted onto the deployment.
-Where both set the same field, the environment-spec's value wins.
-
-<Tabs>
-
-<Tab title="CLI">
-
-```bash
-nemo agents deploy \
-  --agent research-agent \
-  --name research-deployment \
-  --environment default/research
-
-nemo agents deployments get research-deployment
-```
-
-</Tab>
-<Tab title="Python SDK">
-
-```python
-agents.deployments.create(
-    agent="research-agent",
-    name="research-deployment",
-    environment="default/research",
-)
-
-agents.deployments.get("research-deployment")
-```
-
-</Tab>
-
-</Tabs>
-
----
-
-## Subprocess Mode (Default)
-
-The simplest path: the platform launches a FastAPI server for the
-agent on its own host, assigns a port, watches its health, and tears it down
-on `nemo agents undeploy`. No image or executor configuration is required.
-
-<Tabs>
-
-<Tab title="CLI">
-
-```bash
-# Confirm that the Platform instance is ready
-# (export NHX_BASE_URL first if your CLI context points at a remote deployment)
-: "${NHX_BASE_URL:=http://localhost:8080}"
-
-curl -fsS --connect-timeout 2 --max-time 5 \
-  "$NHX_BASE_URL/health/ready" >/dev/null || {
-  echo "NeMo Helix is not ready at $NHX_BASE_URL"
-  exit 1
-}
-
-# Register the calculator agent from agent.yaml
-nemo agents create \
-  --name calculator-agent \
-  --agent-config plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml
-
-# Deploy as a local subprocess (waits for "running" by default)
-nemo agents deploy \
-  --agent calculator-agent \
-  --name calculator-agent-deployment \
-  --mode subprocess
-
-# Invoke through the Agents gateway
-nemo agents invoke \
-  --agent-deployment calculator-agent-deployment \
-  --input "What is 12 multiplied by 8?"
-```
-
-</Tab>
-<Tab title="Python SDK">
-
-```python
-import yaml
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_agents_plugin.sdk import AgentsResource
 
-client = NemoClient.from_config()
-agents = AgentsResource(client)
+agents = AgentsResource(NemoClient.from_config())
 
-# Register the agent from an agent.yaml
-with open(
-    "plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml"
-) as f:
-    config = yaml.safe_load(f)
-agents.create(
-    name="calculator-agent",
-    config=config,
-    config_format=config["config_format"],
-)
+agents.deployments.create(agent="calculator-agent", name="calculator-agent-deployment")
 
-# Deploy as a local subprocess
-agents.deployments.create(
-    agent="calculator-agent",
-    name="calculator-agent-deployment",
-)
-
-# Invoke through the Agents gateway
+# Once agents.deployments.get("calculator-agent-deployment")["status"] is "running":
 response = agents.invoke(
     deployment="calculator-agent-deployment",
     input="What is 12 multiplied by 8?",
@@ -327,383 +67,53 @@ response = agents.invoke(
 
 </Tabs>
 
----
+`nemo agents deploy` waits until the deployment is `running` or `failed` and exits non-zero on
+failure. Pass `--no-wait` to return immediately.
 
-## Container Modes (Docker / Kubernetes)
+### Docker
 
-Container modes give an agent a durable deployment that survives a platform
-restart. Instead of a local process, the platform compiles the agent into a
-generic deployment and hands it to the **deployments plugin**, which runs it on
-the configured executor (Docker or Kubernetes) and projects the running
-container's address back onto the agent deployment. The Agents gateway then
-routes to that projected address.
-
-### Prerequisites
-
-**1. A container image for the agent.** Container modes run a packaged agent
-runtime with the selected harness adapters and the agent's dependencies. Build
-one with `nemo agents package`; the command detects `nemo-agents-spec-v1` and
-selects the Platform agent image pipeline automatically. Image building
-requires the `container` extra. Install it with:
-
-```bash
-uv sync --package nemo-agents-plugin --extra container
-```
-
-The generated image installs the harness selected by `default_harness`; other
-configured harnesses are not included. Claude, Codex, and DeepAgents use their
-corresponding `nemo-helix` extras. Hermes is installed from its pinned source
-in a fixed Python 3.12 environment so its dependencies do not conflict with the
-Platform runtime. The Hermes Python version is not currently configurable.
-
-The examples below use the calculator agent that ships with the source
-checkout. Run them from the repository root. Its config is located at
-`plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml`.
-Build a wheel from the checkout and select it for packaging:
-
-```bash
-uv build --package nemo-helix --wheel --out-dir dist
-export NEMO_AGENTS_WHEEL=LATEST
-```
-
-`LATEST` selects the newest `nemo_helix-*.whl` file in `dist`. You can instead
-set `NEMO_AGENTS_WHEEL` to an absolute wheel path.
+The bundled local configuration defines a `local-docker` executor and makes it the default, so
+`--mode docker` works without extra configuration. Deploy with an
+[agent image](#build-and-publish-agent-images):
 
 <Tabs>
 
 <Tab title="CLI">
 
 ```bash
-# Build the calculator agent image and tag it locally
-nemo agents package \
-  --agent plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml \
-  --tag calculator-agent:local
-
-# For k8s, publish to a registry your cluster can pull from
-nemo agents package \
-  --agent plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml \
-  --tag calculator-agent:1.0.0 \
-  --publish \
-  --registry <your-registry>
-```
-
-The Docker host running the command must already be authenticated to the
-registry.
-
-</Tab>
-
-</Tabs>
-<Note>
-
-`--mode docker` needs an image the platform's Docker daemon can run.
-`--mode k8s` needs an image the cluster nodes can pull (a registry image, or an
-image pre-loaded onto the nodes) — the k8s backend does not use image pull
-secrets. Pass the image with `--image`, or set
-`agents.deployments.default_image` in the platform configuration.
-
-For hand-built images that already contain an agent server, pass
-`--use-image-entrypoint` so the deployment preserves the image ENTRYPOINT/CMD
-instead of injecting the platform-packaged agent server command.
-The image must bind `0.0.0.0:$PORT`, serve `/health`, and read config from
-`AGENT_CONFIG_PATH` for Fabric or `NAT_CONFIG_PATH` for NAT.
-
-</Note>
-
-**2. A configured deployments executor.** The platform operator defines named
-executors in the platform configuration and points the agents plugin at them.
-A minimal Docker + Kubernetes configuration:
-
-```yaml
-agents:
-  deployments:
-    # Names below must match deployments.executors[].name
-    docker_executor: local-docker
-    k8s_executor: k8s-local
-    # Optional: the image used when --image is omitted
-    default_image: ""
-    # Container port the packaged agent runtime binds (and the readiness probe target)
-    container_port: 8000
-    # Optional: readiness probe settings
-    # Restart the platform and redeploy agents to apply changes.
-    readiness_probe_timeout_seconds: 1
-    readiness_probe_failure_threshold: 12
-
-deployments:
-  default_executor: local-docker
-  executors:
-    - name: local-docker
-      backend: docker
-      config:
-        # Set false when running locally-built (not registry) images
-        pull_images: false
-    - name: k8s-local
-      backend: k8s
-      config:
-        # Omit kubeconfig_path to use in-cluster ServiceAccount auth
-        default_namespace: default
-```
-
-<Note>
-
-The Kubernetes backend requires the `kubernetes` Python client in the platform
-image and a ServiceAccount with permission to manage Deployments, Services,
-ConfigMaps, and Pods in the target namespace. In the packaged Helm chart these
-run in the core controller, whose Role already grants those permissions.
-
-</Note>
-
-### Readiness and startup timeouts
-
-Agent containers expose `/health` for readiness checks. Configure
-`agents.deployments.readiness_probe_timeout_seconds` (default `1`) and
-`agents.deployments.readiness_probe_failure_threshold` (default `12`) to tune
-probe behavior. Both settings require positive integers. Restart the platform
-and redeploy agents after changing them; existing containers are not updated.
-
-Starting with v0.7.2, the deployments controller measures the startup timeout
-from the beginning of the current uninterrupted `STARTING` period. A deployment
-that loses readiness after being `READY` gets a fresh timeout window instead of
-being failed immediately because its original startup happened long ago.
-Status-message updates while it remains `STARTING` do not reset that window.
-If readiness recovers, the period ends; a later readiness loss starts a new one.
-
-The overall timeout is configured separately with
-`deployments.controller.starting_timeout_seconds`; `0` disables it. Increasing
-probe tolerances does not extend that overall timeout.
-
-### Deploy on Docker
-
-<Tabs>
-
-<Tab title="CLI">
-
-```bash
-# Run from the repository root (see Prerequisites)
-nemo agents create \
-  --name calculator-agent \
-  --agent-config plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml
-
-# --mode docker compiles to the deployments plugin's docker executor
 nemo agents deploy \
   --agent calculator-agent \
   --name calculator-agent-docker \
   --mode docker \
   --image calculator-agent:local
-
-# Reached through the Agents gateway, exactly like subprocess mode
-nemo agents invoke \
-  --agent-deployment calculator-agent-docker \
-  --input "What is 12 multiplied by 8?"
 ```
 
 </Tab>
 <Tab title="Python SDK">
 
 ```python
-import yaml
-from nemo_helix_plugin.client.client import NemoClient
-from nemo_agents_plugin.sdk import AgentsResource
-
-client = NemoClient.from_config()
-agents = AgentsResource(client)
-
-with open(
-    "plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml"
-) as f:
-    config = yaml.safe_load(f)
-agents.create(
-    name="calculator-agent",
-    config=config,
-    config_format=config["config_format"],
-)
-
 agents.deployments.create(
     agent="calculator-agent",
     name="calculator-agent-docker",
     deployment_mode="docker",
     image="calculator-agent:local",
 )
-
-response = agents.invoke(
-    deployment="calculator-agent-docker",
-    input="What is 12 multiplied by 8?",
-)
 ```
 
 </Tab>
 
 </Tabs>
 
-### Deploy on Kubernetes
-
-Deployment is identical apart from `--mode k8s`. The deployments plugin creates
-a Kubernetes Deployment and a ClusterIP Service, and projects the Service's
-in-cluster DNS address (`<service>.<namespace>.svc.cluster.local:<port>`) onto
-the agent deployment. Because the Agents gateway runs in-cluster, it routes to
-that address directly.
-
-<Tabs>
-
-<Tab title="CLI">
-
-```bash
-# Run from the repository root (see Prerequisites)
-nemo agents create \
-  --name calculator-agent \
-  --agent-config plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml
-
-nemo agents deploy \
-  --agent calculator-agent \
-  --name calculator-agent-k8s \
-  --mode k8s \
-  --image <registry>/calculator-agent:1.0.0
-
-nemo agents invoke \
-  --agent-deployment calculator-agent-k8s \
-  --input "What is 12 multiplied by 8?"
-```
-
-</Tab>
-<Tab title="Python SDK">
-
-```python
-import yaml
-from nemo_helix_plugin.client.client import NemoClient
-from nemo_agents_plugin.sdk import AgentsResource
-
-client = NemoClient.from_config()
-agents = AgentsResource(client)
-
-with open(
-    "plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml"
-) as f:
-    config = yaml.safe_load(f)
-agents.create(
-    name="calculator-agent",
-    config=config,
-    config_format=config["config_format"],
-)
-
-agents.deployments.create(
-    agent="calculator-agent",
-    name="calculator-agent-k8s",
-    deployment_mode="k8s",
-    image="<registry>/calculator-agent:1.0.0",
-)
-
-response = agents.invoke(
-    deployment="calculator-agent-k8s",
-    input="What is 12 multiplied by 8?",
-)
-```
-
-</Tab>
-
-</Tabs>
----
-
-## Interact with a Deployed Agent
-
-Start an interactive, multi-turn session with a running deployment:
-
-```bash
-nemo agents chat \
-  --agent-deployment calculator-agent-k8s \
-  --session-name calculator-chat
-```
-
-Leaving the chat does not close the session. Resume or manage it with:
-
-```bash
-nemo agents chat --session calculator-chat
-nemo agents sessions list --agent-deployment calculator-agent-k8s
-nemo agents sessions get calculator-chat
-nemo agents sessions close calculator-chat
-```
-
-## Model Access from a Deployed Agent
-
-Regardless of mode, model traffic from inside the agent routes back through the
-[Inference Gateway](/documentation/models-and-inference). The platform injects
-the gateway URL when it deploys the agent, and the gateway resolves model
-entity names to upstream providers and supplies their credentials. Two
-conventions apply to `agent.yaml`:
-
-- **Set `models.default.model` to the Inference Gateway entity name.** The
-  models controller creates these names by replacing slashes and dots with
-  hyphens (`nvidia/nemotron-3.5-lightning-30b-a3b` becomes
-  `nvidia-nemotron-3-5-lightning-30b-a3b`). The bundled calculator config uses
-  `${NEMO_DEFAULT_MODEL}`; the CLI resolves it from the active context or the
-  environment before creating the agent.
-- **Leave `base_url` unset for a Platform-routed model.** When `provider` is
-  `nvidia`, `openai`, or `openai-compatible`, the deployment supplies the
-  Inference Gateway URL. `api_key_env` names the environment variable expected
-  by the selected harness; it does not contain a credential.
-
-The calculator agent uses:
-
-```yaml
-models:
-  default:
-    provider: nvidia
-    model: ${NEMO_DEFAULT_MODEL}
-    api_key_env: NVIDIA_API_KEY
-```
-
-To make an external model available to the agent, register a provider first —
-see [Deploy Models](/documentation/models-and-inference/deploy-models#add-external-providers)
-for NVIDIA Build, OpenAI, and Anthropic examples.
+To use another executor, add it to `deployments.executors` and set
+`agents.deployments.docker_executor` to its name. A `deployments.executors` list in your configuration
+replaces the default list, so keep the executors you already use. Set
+`agents.deployments.default_image` to deploy without `--image`.
 
 <Note>
 
-A deployed agent needs to reach the platform from **inside its container**. The
-deployment handles this automatically for both Docker and Kubernetes, so you
-normally don't need to configure anything. If an agent can't reach the platform,
-set `agents.deployments.gateway_url_override` to a URL that is reachable from
-inside the container.
-
-</Note>
-
-### Auth-Enabled Container Deployments
-
-On an auth-enabled platform, `nemo agents deploy --mode docker` and
-`--mode k8s` also handle platform credentials automatically. The Agents service
-creates the underlying `DeploymentConfig` with an `auth-proxy` sidecar request,
-rewrites Platform and Inference Gateway URLs in the agent config to the proxy's
-loopback URL (`http://127.0.0.1:8090` by default), and, when workload token
-exchange is enabled, requests workload identity for the deployment. Deploy with
-an authenticated CLI or SDK client so the platform can capture the creator auth
-context; otherwise token-exchange deployments are rejected instead of falling
-back to an unscoped service principal.
-
-The auth-proxy sidecar image is the platform API image by default
-(`deployments.auth_proxy_image_name: nhx-api`, qualified with the configured
-platform registry and tag). If your environment cannot resolve that image name,
-set `deployments.auth_proxy_image` to a fully qualified image that contains the
-`nemo` CLI and can run `nemo services run --sidecars auth-proxy`; do not leave a
-placeholder image value in production configuration.
-
-The proxy forwards to `platform.base_url` (with host-loopback rewriting for
-Docker), not `agents.deployments.gateway_url_override`. Ensure that upstream
-is reachable from the sidecar. In workload token-exchange mode, use HTTPS for
-a remote upstream; HTTP is allowed only for loopback development endpoints.
-
-If you create a deployments-plugin `DeploymentConfig` directly instead of
-using `nemo agents deploy`, the auth wiring is not automatic: request
-`authProxySidecar: true` with `authProxySidecarIdentity: agents`, point the
-agent's Platform and Inference Gateway URLs at the proxy loopback address,
-and configure workload identity and creator auth context when token exchange
-is enabled. In trusted-header mode (token exchange disabled), set
-`authProxySidecarOnBehalfOf` to the creator principal to avoid running with an
-unscoped service identity. Prefer `nemo agents deploy` to have the Agents
-service generate this wiring.
-
-#### Docker mode on Linux
-
-On **Linux**, `host.docker.internal` doesn't resolve inside containers, so agent
-invokes can fail with `openai.APIConnectionError`. Point the deployment at the
-Docker bridge address (`172.17.0.1` by default) in `config.yaml`, then start the
-platform bound to all interfaces:
+On Linux, `host.docker.internal` does not resolve inside containers, so model calls from the agent
+can fail with `APIConnectionError`. Point agents at the Docker bridge and start the platform on all
+interfaces:
 
 ```yaml
 agents:
@@ -715,109 +125,214 @@ agents:
 nemo services run --host 0.0.0.0 --port 8080
 ```
 
-If your Docker bridge uses a non-default subnet, substitute its gateway address
-(`docker network inspect bridge --format '{{ (index .IPAM.Config 0).Gateway }}'`).
+If your Docker bridge uses a different subnet, use its gateway address instead:
 
----
+```bash
+docker network inspect bridge --format '{{ (index .IPAM.Config 0).Gateway }}'
+```
+
+</Note>
+
+### Kubernetes
+
+Helm installs define a `local-k8s` executor in the release namespace and make it the default, so
+`--mode k8s` works there without extra configuration. Elsewhere, add a `k8s` executor and point the
+Agents plugin at it. A `deployments.executors` list replaces the default list, so keep the executors
+you already use:
+
+```yaml
+agents:
+  deployments:
+    k8s_executor: k8s-local
+
+deployments:
+  executors:
+    - name: local-docker               # keep existing executors
+      backend: docker
+      config:
+        pull_images: false
+    - name: k8s-local
+      backend: k8s
+      config:
+        default_namespace: default     # omit kubeconfig_path to use in-cluster auth
+```
+
+```bash
+nemo agents deploy \
+  --agent calculator-agent \
+  --name calculator-agent-k8s \
+  --mode k8s \
+  --image <registry>/calculator-agent:1.0.0
+```
+
+The deployments plugin creates a Deployment and a ClusterIP Service, and the Agents gateway routes to
+the Service's in-cluster address. Cluster nodes must be able to pull the image: the `k8s` backend
+does not use image pull secrets. The platform needs a ServiceAccount that can manage Deployments,
+Services, ConfigMaps, and Pods in the namespace; the Helm chart's core controller already has one.
+
+### Auth-Enabled Platforms
+
+On a platform with authentication enabled, `docker` and `k8s` deployments get an `auth-proxy`
+sidecar that authenticates the agent's calls to the platform and the Inference Gateway. Deploy from
+an authenticated CLI or SDK client so the deployment can act on your behalf. The sidecar uses the
+platform API image by default; set `deployments.auth_proxy_image` if that image name does not
+resolve in your environment.
+
+The sidecar forwards to `platform.base_url`, not to `agents.deployments.gateway_url_override`, so that
+URL must be reachable from inside the agent container. On macOS, Docker deployments rewrite a loopback
+`platform.base_url` to `host.docker.internal`; on Linux, set it to an address the container can reach,
+such as the Docker bridge. With workload token exchange enabled, a remote `platform.base_url` must use
+HTTPS; plain HTTP is accepted only for loopback.
+
+### Readiness and Startup Timeouts
+
+`docker` and `k8s` agent containers serve `/health` on `agents.deployments.container_port` (default
+`8000`). For agents that start slowly, raise `agents.deployments.readiness_probe_timeout_seconds`
+(default `1`) and `agents.deployments.readiness_probe_failure_threshold` (default `12`), then restart
+the platform and redeploy; existing containers keep their old settings. A deployment that stays in
+`STARTING` longer than `deployments.controller.starting_timeout_seconds` (default `3600`, `0`
+disables it) is marked failed.
+
+The controller measures this timeout from the start of the current uninterrupted `STARTING`
+period. A deployment that loses readiness after being `READY` gets a fresh timeout window.
+Status-message updates while it remains `STARTING` do not reset the window; recovering readiness
+ends it.
+
+## Build and Publish Agent Images
+
+`nemo agents package` builds an image from an `agent.yaml` and the files beside it. It runs locally
+and needs a running Docker daemon:
+
+| Command | Result |
+|---|---|
+| `nemo agents package --agent <agent.yaml> --no-build` | A `Dockerfile` and `.dockerignore` beside `agent.yaml` |
+| `nemo agents package --agent <agent.yaml> --tag <tag>` | A local image |
+| `nemo agents package --agent <agent.yaml> --tag <tag> --publish --registry <registry>` | A local image, pushed to the registry |
+
+```bash
+nemo agents package \
+  --agent plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml \
+  --tag calculator-agent:1.0.0 \
+  --publish \
+  --registry nvcr.io/my-org
+```
+
+The image installs only the `default_harness`, runs as a non-root `agent` user, and serves the agent
+on port 8000. Authenticate Docker to the registry before you publish. Pass `--pyproject` to install
+the agent's Python project into the image.
+
+<Note>
+
+The image pins the installed `nemo-helix` version, which a source checkout cannot resolve from a
+package index. From a checkout, build a wheel first and point packaging at it:
+
+```bash
+uv build --package nemo-helix --wheel --out-dir dist
+export NEMO_AGENTS_WHEEL=LATEST   # newest wheel in dist/
+```
+
+</Note>
+
+To build an agent that is already registered, run the build as a platform job:
+
+```bash
+nemo agents package-agent --agent calculator-agent --tag calculator-agent:1.0.0 --registry nvcr.io/my-org
+```
+
+The job builds from the agent's stored config and `<name>-ethos` fileset on the platform host, so it
+needs a `subprocess` execution profile and, to push, a host that is logged in to the registry. Images are
+tagged `nemo-agents/<workspace>/<tag>`; read the final reference from the job's `package_result`
+result.
+
+## Agent Environments
+
+An agent config declares what it needs (MCP servers, environment variables, the names of the
+credentials it reads) without binding them to one place. An **agent environment** supplies those
+values, so the same agent can run with different credentials, tools, or compute.
+
+| Resource | Holds |
+|---|---|
+| `environment-spec` | Environment variables, secret references, and MCP server settings merged into the agent config |
+| `compute-spec` | CPU and memory requests and limits for `docker` and `k8s` deployments |
+| `environment` | An `environment-spec` plus an optional `compute-spec`, deployed against by name |
+
+Secrets are referenced as `workspace/secret-name` and resolved from the
+[Secrets service](/documentation/get-started/core-concepts/manage-secrets), so credential values never
+appear in the agent config.
+
+For an agent that declares a `github` MCP server:
+
+```bash
+printf '%s' "$GITHUB_PAT" | nemo secrets create research-github-pat --from-file -
+
+nemo agents environment-specs create research \
+  --spec '{"mcp":{"github":{"url":"docker","env":{"GITHUB_TOOLSETS":"repos,issues"},"secrets":{"GITHUB_PERSONAL_ACCESS_TOKEN":"default/research-github-pat"}}}}'
+
+nemo agents environments create research \
+  --environment-spec default/research \
+  --spec '{"compute_spec":{"resources":{"limits":{"cpu":"2","memory":"4Gi"}}}}'
+
+nemo agents deploy --agent research-agent --environment default/research
+```
+
+The environment is merged into the agent config and snapshotted onto the deployment when it is
+created. Where both set the same field, the environment wins. The same environments work for
+[execute-agent jobs](/documentation/agents/execute-agents-as-jobs).
+
+## Interact with a Deployment
+
+```bash
+# One request, routed to the agent's active deployment
+nemo agents invoke --agent calculator-agent --input "What is 2 to the 10th power?"
+
+# A multi-turn session that you can resume later
+nemo agents chat --agent-deployment calculator-agent-deployment --session-name calc
+nemo agents sessions list --agent-deployment calculator-agent-deployment
+```
+
+Any OpenAI-compatible client can call the gateway directly:
+
+```bash
+curl -s "${NHX_BASE_URL:-http://localhost:8080}/apis/agents/v2/workspaces/default/agents/calculator-agent/-/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "What is 12 multiplied by 8?"}]}'
+```
+
+Replace `agents/<agent>` with `deployments/<deployment>` to target one deployment. The example
+defaults to a local platform at `http://localhost:8080`. If your CLI context points at a remote
+deployment, export its URL as `NHX_BASE_URL` first, and for an authenticated deployment add
+`-H "Authorization: Bearer $(nemo auth token)"`.
 
 ## Inspect a Deployment
 
-<Tabs>
-
-<Tab title="CLI">
-
 ```bash
-# Block until the deployment is running or failed
-nemo agents deployments wait --agent calculator-agent
-
-# List / inspect deployments
 nemo agents deployments list
 nemo agents deployments get calculator-agent-deployment
+nemo agents deployments wait --agent calculator-agent
+nemo agents logs --agent calculator-agent --follow
 ```
 
-</Tab>
-<Tab title="Python SDK">
+`nemo agents logs` reads subprocess logs from the platform host, so run it there. For other modes,
+use the agent's **Logs** tab in [NeMo Studio](/documentation/studio/agents). For `nemo-agents-spec-v1`
+agents, the subprocess log holds the agent server's startup, validation, and request output. The
+harness's own output is saved per invocation under the deployment's `artifacts/.fabric/` directory on
+the platform host.
 
-```python
-from nemo_helix_plugin.client.client import NemoClient
-from nemo_agents_plugin.sdk import AgentsResource
+## Update a Deployed Agent
 
-client = NemoClient.from_config()
-agents = AgentsResource(client)
-
-deployment = agents.deployments.get("calculator-agent-deployment")
-print(deployment["deployment_mode"], deployment["status"], deployment["endpoints"])
-```
-
-</Tab>
-
-</Tabs>
-
-For a container-mode deployment, the deployment reports `deployment_mode`
-(`docker` or `k8s`), a `status` of `running` once ready, and an `endpoints`
-list carrying the container's routable address. Subprocess deployments carry a
-loopback `endpoint` instead. The Agents gateway uses whichever the deployment's
-mode provides, so invocation is identical across modes.
-
----
-
-## Iterate on a Deployed Agent
-
-When you change an agent's config and want to push the new version to the same
-agent name, use `nemo agents redeploy` instead of running undeploy, delete,
-create, and deploy by hand:
+Agent configs are immutable, so `redeploy` replaces the agent in one step: it validates the new config,
+undeploys, recreates the agent from the new config, and deploys it again with the previous runtime
+flags:
 
 ```bash
-nemo agents redeploy --agent calculator-agent --agent-config ./calculator/agent.yaml
+nemo agents redeploy --agent calculator-agent --agent-config ./calculator-agent/agent.yaml
 ```
 
-The agent entity is immutable by name (`create` returns 409 on a duplicate) and
-there is no in-place update route, so `redeploy` orchestrates the full teardown
-and rebuild in one command: it undeploys every live deployment, deletes the
-agent entity (preserving the durable `{agent}-ethos` fileset), recreates the
-agent from `--agent-config`, and deploys it again.
+An invalid config leaves everything untouched. If a later step fails, re-run the command to finish.
 
-Runtime flags (`--mode`, `--image`, `--use-image-entrypoint`, `--environment`)
-are auto-detected from the agent's existing deployment when omitted; pass them
-explicitly to override. `--wait`/`--timeout` behave as they do for `deploy`.
-
-**Safety contract.** The new config is validated client-side *before* any
-teardown, so a bad config is a safe no-op — nothing is torn down. Once teardown
-begins the operation is **not atomic**: if a later step fails, the agent may be
-left undeployed. Each step is check-first, so `redeploy` is safe to re-run to
-finish; on a post-delete failure it prints the exact re-run command.
-
-## Deployment Cleanup
-
-<Tabs>
-
-<Tab title="CLI">
+## Clean Up
 
 ```bash
-# Stop the running deployment (removes the process/container/k8s objects)
-nemo agents undeploy calculator-agent-deployment
-
-# Remove the agent entity
+nemo agents undeploy calculator-agent-deployment   # or --agent calculator-agent for all of its deployments
 nemo agents delete calculator-agent
 ```
-
-</Tab>
-<Tab title="Python SDK">
-
-```python
-from nemo_helix_plugin.client.client import NemoClient
-from nemo_agents_plugin.sdk import AgentsResource
-
-client = NemoClient.from_config()
-agents = AgentsResource(client)
-
-# Stop the running deployment (removes the process/container/k8s objects)
-agents.deployments.delete("calculator-agent-deployment")
-
-# Remove the agent entity
-agents.delete("calculator-agent")
-```
-
-</Tab>
-
-</Tabs>

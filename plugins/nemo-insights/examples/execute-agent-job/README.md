@@ -204,7 +204,7 @@ client = NemoClient.from_config()
 insights = InsightsPluginResource(client)
 page = insights.insights.list_insights(workspace="default", agent="demo-agent")
 for insight in page.data:
-    print(f"[{insight.status}] {insight.title} ({len(insight.trace_refs)} traces)")
+    print(f"[{insight.status}] {insight.title} ({len(insight.evidence)} traces)")
 ```
 
 `list_insights` also accepts `status` (`open`, `resolved`, or `deleted`),

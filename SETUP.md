@@ -177,6 +177,14 @@ uv run nemo services run \
   --controllers models
 ```
 
+On native Linux with a local Docker runtime, a loopback-bound platform also
+listens on the local Docker bridge address at the same port. The platform owns
+both listeners and closes them together; host clients continue using localhost,
+while Docker agents use `host.docker.internal` with the host-gateway mapping.
+Docker Desktop retains its existing host routing. Explicit non-loopback binds,
+non-Docker runtimes and remote Docker daemons do not add this listener. A bridge
+address outside the platform's network namespace is not bound automatically.
+
 ### Starting the platform with Switchyard middleware
 
 `make bootstrap-python` and bare `uv sync` install the `nemo-switchyard-plugin` distribution from `plugins/nemo-switchyard` through the root workspace's `enabled-plugins` group. The plugin pins `nemo-switchyard==0.3.0`, which provides the native `switchyard_rust` bindings. Start with debug logging to see routing decisions:

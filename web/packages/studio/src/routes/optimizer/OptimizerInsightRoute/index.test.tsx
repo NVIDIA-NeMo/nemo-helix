@@ -34,7 +34,7 @@ const insight: Insight = {
   description: 'The agent responds too slowly.',
   agent: 'research-agent',
   status: 'open',
-  trace_refs: [],
+  evidence: [],
   created_at: '2026-07-19T12:00:00Z',
   created_by: 'user@example.com',
   updated_at: '2026-07-19T12:00:00Z',

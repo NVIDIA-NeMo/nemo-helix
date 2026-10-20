@@ -409,6 +409,16 @@ def _should_resolve_conflict(response: httpx.Response, request: PreparedRequest)
             "get_on_conflict resolver, so the existing entity cannot be retrieved "
             "on conflict. Add get_on_conflict=<resolver> to the @post endpoint."
         )
+    # A name reserved by in-progress cleanup is not an entity GET can return.
+    detail = ""
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict) and isinstance(payload.get("detail"), str):
+        detail = payload["detail"]
+    if " is still being deleted" in detail:
+        return False
     return True
 
 

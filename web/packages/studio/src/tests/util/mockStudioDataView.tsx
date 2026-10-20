@@ -40,14 +40,14 @@ interface MockColumn {
 
 interface BuildColumnsResult {
   columns: MockColumn[];
-  rowActions?: (row: unknown) => unknown[];
+  rowActions?: MockRowActions;
 }
 
 function buildColumns(
   makeColumns: (helper: AnyObject, prebuilt: AnyObject) => unknown[]
 ): BuildColumnsResult {
   const captured: MockColumn[] = [];
-  let rowActions: ((row: unknown) => unknown[]) | undefined;
+  let rowActions: MockRowActions | undefined;
 
   const mockHelper: AnyObject = {
     accessor: (
@@ -69,7 +69,7 @@ function buildColumns(
 
   const mockPrebuilt: AnyObject = {
     rowSelectionColumn: () => ({ id: 'row-selection' }),
-    rowActionsColumn: (opts: { rowActions?: (row: unknown) => unknown[] } = {}) => {
+    rowActionsColumn: (opts: { rowActions?: MockRowActions } = {}) => {
       if (typeof opts.rowActions === 'function') {
         rowActions = opts.rowActions;
       }
@@ -90,15 +90,21 @@ interface RowMenuItem {
   disabled?: boolean;
 }
 
+type MockRowActions = (row: unknown) => RowMenuItem[] | false | null | undefined;
+
 function MockRowActionsCell<DataType>({
   row,
   rowActions,
 }: {
   row: DataType;
-  rowActions: (row: unknown) => unknown[];
+  rowActions: MockRowActions;
 }) {
   const [open, setOpen] = useState(false);
-  const items = rowActions(row) as RowMenuItem[];
+  const items = rowActions(row);
+
+  if (!items || !items.some((item) => item.kind !== 'divider')) {
+    return null;
+  }
 
   return (
     <>
