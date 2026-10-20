@@ -43,4 +43,15 @@ export SANDBOXED_GYM_SRC_DIR="$gym_rw"
 export PYTHONPATH="$gym_rw:$root${PYTHONPATH:+:$PYTHONPATH}"
 cd "$root"
 echo "gym-host: starting gym_host_runtime (gym src $gym_rw)" >&2
-exec "$venv/bin/python" "$runtime"
+
+# DEBUG: on a non-zero exit, hold the container alive so the sandbox can be inspected
+# (Ray session logs under /tmp/ray) before the orchestrator tears it down. Set
+# SANDBOXED_GYM_DEBUG_HOLD_S=0 to disable. Remove before merge.
+hold_s=${SANDBOXED_GYM_DEBUG_HOLD_S:-1800}
+rc=0
+"$venv/bin/python" "$runtime" || rc=$?
+if [ "$rc" -ne 0 ] && [ "$hold_s" -gt 0 ]; then
+	echo "gym-host: runtime exited $rc; holding ${hold_s}s for debug" >&2
+	sleep "$hold_s"
+fi
+exit "$rc"
