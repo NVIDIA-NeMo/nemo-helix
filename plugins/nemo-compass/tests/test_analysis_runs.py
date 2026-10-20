@@ -262,7 +262,7 @@ def test_execute_job_config_validates_against_the_real_job_schema() -> None:
     config = ExecuteAgentJobConfig.model_validate(spec)
 
     assert config.extension is not None
-    assert config.extension.kind == "compass.analysis"
+    assert config.extension.kind == "insights.analysis"
 
 
 def test_the_extension_is_scoped_to_the_agent_and_workspace() -> None:

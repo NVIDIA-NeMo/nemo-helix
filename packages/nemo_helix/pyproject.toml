@@ -691,7 +691,7 @@ nemo_agents_files_telemetry = "nemo_agents_plugin.telemetry.files_service_export
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.agents.execute_extensions"]
-"compass.analysis" = "nemo_compass_plugin.execute_extensions:CompassAnalysisExtension"
+"insights.analysis" = "nemo_compass_plugin.execute_extensions:CompassAnalysisExtension"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.cli"]

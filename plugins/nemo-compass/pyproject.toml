@@ -34,7 +34,7 @@ compass = "nemo_compass_plugin.service:CompassService"
 compass-analysis = "nemo_compass_plugin.controller:CompassAnalysisController"
 
 [project.entry-points."nemo.agents.execute_extensions"]
-"compass.analysis" = "nemo_compass_plugin.execute_extensions:CompassAnalysisExtension"
+"insights.analysis" = "nemo_compass_plugin.execute_extensions:CompassAnalysisExtension"
 
 [project.entry-points."nemo.sdk"]
 compass = "nemo_compass_plugin.sdk:compass_sdk_resources"

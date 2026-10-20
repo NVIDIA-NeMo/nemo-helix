@@ -22,11 +22,12 @@ The plugin now uses Compass names throughout its public interfaces:
 | `/apis/insights/v2` | `/apis/compass/v2` |
 | `insights.analyst` configuration | `compass.analysis` configuration |
 | `NEMO_INSIGHTS_ANALYST_*` | `NEMO_COMPASS_ANALYSIS_*` |
-| `nvidia.fabric.insights-analyst` | `nvidia.fabric.compass` |
 
 Update callers and deployment configuration together. Stored insights, analysis runs,
 and schedules keep their identities. Existing `insights.*` permission grants and
 `insights:read` / `insights:write` OAuth scopes also remain valid.
+The internal job identifiers `insights.analysis` and `nvidia.fabric.insights-analyst`
+stay unchanged so already-submitted jobs can still resolve them.
 The observability opt-out is now `NEMO_COMPASS_OBSERVABILITY=false`.
 
 ## Prerequisites

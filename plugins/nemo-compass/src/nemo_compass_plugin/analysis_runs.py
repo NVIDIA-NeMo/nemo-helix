@@ -47,7 +47,7 @@ from pydantic import TypeAdapter
 
 logger = logging.getLogger(__name__)
 
-COMPASS_ANALYSIS_EXTENSION_KIND = "compass.analysis"
+COMPASS_ANALYSIS_EXTENSION_KIND = "insights.analysis"
 ANALYSIS_RUN_NAME_PREFIX = "compass-run-"
 
 router = APIRouter(tags=["Compass Analysis Runs"])

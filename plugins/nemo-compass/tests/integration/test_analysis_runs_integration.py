@@ -149,7 +149,7 @@ def test_the_submitted_job_carries_the_compass_config_the_facade_built(
 
     spec = _backing_job(agents, created.run.name)["spec"]
 
-    assert spec["extension"]["kind"] == "compass.analysis"
+    assert spec["extension"]["kind"] == "insights.analysis"
     assert spec["extension"]["config"]["agent"] == "scoped-agent"
     settings = spec["agent"]["config"]["harnesses"]["compass"]["settings"]
     assert settings["agent"] == "scoped-agent"

@@ -76,29 +76,29 @@ def test_an_unregistered_kind_is_an_error(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_the_installed_compass_extension_resolves() -> None:
-    """Guards the real environment: compass.analysis is declared twice on disk."""
-    resolved = resolve_execute_agent_extension("compass.analysis")
+    """Guards the real environment: insights.analysis is declared twice on disk."""
+    resolved = resolve_execute_agent_extension("insights.analysis")
 
     assert resolved.__name__ == "CompassAnalysisExtension"
 
 
 def test_a_valid_extension_config_is_accepted() -> None:
-    validate_execute_agent_extension_config("compass.analysis", {"agent": "demo-agent", "workspace": "default"})
+    validate_execute_agent_extension_config("insights.analysis", {"agent": "demo-agent", "workspace": "default"})
 
 
 def test_an_unknown_extension_config_key_is_rejected() -> None:
     """``extra="forbid"`` catches a renamed or typo'd key on the create request."""
     with pytest.raises(ValueError) as excinfo:
-        validate_execute_agent_extension_config("compass.analysis", {"agent": "demo", "workspac": "default"})
+        validate_execute_agent_extension_config("insights.analysis", {"agent": "demo", "workspac": "default"})
 
     message = str(excinfo.value)
-    assert "compass.analysis" in message, "the caller supplied a kind, so the error should name it"
+    assert "insights.analysis" in message, "the caller supplied a kind, so the error should name it"
     assert "workspac" in message
 
 
 def test_a_wrongly_typed_extension_config_value_is_rejected() -> None:
     with pytest.raises(ValueError):
-        validate_execute_agent_extension_config("compass.analysis", {"local_only": "yes-please"})
+        validate_execute_agent_extension_config("insights.analysis", {"local_only": "yes-please"})
 
 
 def test_the_noop_extension_accepts_an_empty_config() -> None:
