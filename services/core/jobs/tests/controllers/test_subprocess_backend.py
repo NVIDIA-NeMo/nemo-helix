@@ -672,6 +672,24 @@ def test_sync_pausing_exit_75_is_paused(mock_nemo_client, tmp_path, mock_platfor
     assert update.status == HelixJobStatus.PAUSED
 
 
+def test_sync_pausing_exit_75_seen_after_the_deadline_is_paused(
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending
+):
+    """A process that already exited stopped on its own, so its exit code decides, even past the deadline."""
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "exit 75"])
+    _schedule_without_otel_export(backend, step)
+    key = SubprocessProcessKey(step.workspace, step.job, str(step.attempt_id), step.name)
+    metadata = backend._process_registry.get(key)
+    assert metadata is not None
+    assert metadata.process.wait(timeout=5) == 75
+
+    _mark_pausing(step, ago_seconds=120, deadline_seconds=60)
+    update = backend.sync(step)
+
+    assert update.status == HelixJobStatus.PAUSED
+
+
 def test_sync_pausing_deadline_kills_the_process(
     mock_nemo_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_pending
 ):
@@ -688,6 +706,8 @@ def test_sync_pausing_deadline_kills_the_process(
 
         assert update.status == HelixJobStatus.ERROR
         assert metadata.process.wait(timeout=5) is not None
+        assert metadata.closed_logs
+        assert mock_jobs_client.update_job_step_task.call_args.kwargs["body"].status == HelixJobStatus.ERROR
     finally:
         if metadata.process.poll() is None:
             metadata.process.kill()

@@ -310,10 +310,21 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         if step.status == HelixJobStatus.CANCELLING and metadata.process.poll() is None:
             self._terminate_process(metadata)
 
-        if step.status == HelixJobStatus.PAUSING and pause_deadline_exceeded(step):
-            if metadata.process.poll() is None:
-                self._terminate_process(metadata, force=True)
+        # A process still running at the pause deadline is stopped and fails the step. One that
+        # already exited stopped on its own: this backend sees an exit within one tick, so its
+        # exit code decides below, as it would have a tick earlier.
+        if step.status == HelixJobStatus.PAUSING and pause_deadline_exceeded(step) and metadata.process.poll() is None:
             message = "Pause deadline exceeded"
+            self._terminate_process(metadata, force=True)
+            self._finish_logs(metadata)
+            self._update_task(
+                step,
+                metadata,
+                HelixJobStatus.ERROR,
+                {"message": message, **self._task_status_details(metadata)},
+                {"message": message},
+                self._tail_log_file(metadata.log_path),
+            )
             return JobUpdate(
                 status=HelixJobStatus.ERROR,
                 status_details={"message": message},

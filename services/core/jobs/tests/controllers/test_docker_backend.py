@@ -590,10 +590,14 @@ def test_docker_job_sync_pausing_exit_code(docker_job, docker_client_mock, test_
     container_mock.kill.assert_not_called()
 
 
-def test_docker_job_sync_pausing_deadline_kills_container(docker_job, docker_client_mock, test_job_step):
+def test_docker_job_sync_pausing_deadline_kills_container(
+    docker_job, docker_client_mock, mock_jobs_client, test_job_step
+):
+    """The deadline kills an owned container and fails its task as well as the step."""
     step = _docker_pausing_step(test_job_step, requested_ago_seconds=120, deadline_seconds=60)
     container_mock = MagicMock()
     container_mock.status = "running"
+    container_mock.labels = owned_container_labels({JOB_TASK_ID_LABEL: "task-1"})
     docker_client_mock.containers.get.side_effect = None
     docker_client_mock.containers.get.return_value = container_mock
 
@@ -601,6 +605,9 @@ def test_docker_job_sync_pausing_deadline_kills_container(docker_job, docker_cli
 
     assert update.status == HelixJobStatus.ERROR
     container_mock.kill.assert_called_once()
+    task_update = mock_jobs_client.update_job_step_task.call_args.kwargs
+    assert task_update["name"] == "task-1"
+    assert task_update["body"].status == HelixJobStatus.ERROR
 
 
 def test_docker_job_sync_pausing_without_a_container_is_paused(docker_job, docker_client_mock, test_job_step):
@@ -665,24 +672,62 @@ def test_docker_job_sync_pausing_leaves_running_container(docker_job, docker_cli
     container_mock.kill.assert_not_called()
 
 
-def test_docker_schedule_removes_stopped_container_before_creating(docker_job, docker_client_mock, test_job_step):
+def _stopped_container(docker_client_mock, *, owned: bool) -> MagicMock:
     stopped = MagicMock()
     stopped.status = "exited"
     stopped.name = "job-test-job-id-test-step"
+    labels = {JOB_WORKSPACE_ID_LABEL: "default", JOB_ID_LABEL: "test-job-id", JOB_TASK_ID_LABEL: "old-task"}
+    stopped.labels = owned_container_labels(labels) if owned else labels
+    stopped.remove.side_effect = lambda **_: setattr(stopped, "status", "removed")
     original = docker_client_mock.containers.get.side_effect
 
     def get_container(name):
         if name == "docker123":
             return original(name)
+        if stopped.status == "removed":
+            raise NotFound("Container not found")
         return stopped
 
     docker_client_mock.containers.get.side_effect = get_container
+    return stopped
+
+
+def test_docker_schedule_removes_stopped_container_before_creating(docker_job, docker_client_mock, test_job_step):
+    """The stopped container and its task volumes are removed before the same-name container is created."""
+    stopped = _stopped_container(docker_client_mock, owned=True)
+
     docker_job.schedule(test_job_step.step_spec.executor, test_job_step)
     docker_job._container_run_threadpool.shutdown(wait=True)
     docker_job._container_run_threadpool = MagicMock()
 
     stopped.remove.assert_called_once_with(force=True)
+    removed_volumes = [volume_call.args[0] for volume_call in docker_client_mock.volumes.get.call_args_list]
+    assert "task-storage-default-test-job-id-old-task" in removed_volumes
     assert docker_client_mock.containers.create.call_count == 2
+
+
+def test_docker_schedule_defers_when_the_stopped_container_cannot_be_removed(
+    docker_job, docker_client_mock, test_job_step
+):
+    """A failed removal is retried on a later tick instead of failing the create with a name conflict."""
+    stopped = _stopped_container(docker_client_mock, owned=True)
+    stopped.remove.side_effect = APIError("removal failed")
+
+    with pytest.raises(SchedulingDeferred):
+        docker_job.schedule(test_job_step.step_spec.executor, test_job_step)
+
+    docker_client_mock.containers.create.assert_not_called()
+
+
+def test_docker_schedule_does_not_remove_another_controllers_container(docker_job, docker_client_mock, test_job_step):
+    """A same-name container from another jobs controller is left alone and the step cannot start."""
+    stopped = _stopped_container(docker_client_mock, owned=False)
+
+    with pytest.raises(FailedToScheduleError, match="another jobs controller"):
+        docker_job.schedule(test_job_step.step_spec.executor, test_job_step)
+
+    stopped.remove.assert_not_called()
+    docker_client_mock.containers.create.assert_not_called()
 
 
 def test_docker_job_sync_cancelling_sigterm(docker_job, docker_client_mock, test_job_step):

@@ -856,6 +856,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
         executor_config: ProviderT,
         step: HelixJobStepWithContext,
     ) -> JobUpdate:
+        self._remove_stopped_container_before_scheduling(step)
         step_spec = self._require_step_spec(step)
         platform_config = get_platform_config()
 
@@ -1358,6 +1359,23 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 error_details={"message": f"Failed to create container: {e}"},
             ) from e
 
+    def _remove_stopped_container_before_scheduling(self, step: HelixJobStepWithContext) -> None:
+        """Remove a stopped container left with this step's name, with its task volumes.
+
+        Resume and rerun create a container with the same name. A failed removal defers
+        scheduling to a later tick. A container owned by another jobs controller is never
+        removed, so the step cannot start again.
+        """
+        container = self.get_container(step)
+        if container is None or container.status not in ("exited", "dead"):
+            return
+        if not self._is_container_owned_by_this_controller(container):
+            raise FailedToScheduleError(
+                f"Container '{container.name}' belongs to another jobs controller, so the step cannot start again"
+            )
+        if not self._remove_container_before_resource_release(step, container, reason="reschedule"):
+            raise SchedulingDeferred(f"Waiting to remove the previous container '{container.name}'")
+
     def _remove_container_before_resource_release(
         self, step: HelixJobStepWithContext, container: Container, *, reason: str
     ) -> bool:
@@ -1463,18 +1481,10 @@ chmod -R 777 {job_vol}/{storage_subpath}
             },
         )
         if container is not None and container.status in ("exited", "dead"):
-            logger.info(
-                "Removing stopped container before scheduling the step again",
-                extra={"container_name": container.name},
-            )
-            try:
-                container.remove(force=True)
-            except (APIError, NotFound):
-                logger.warning(
-                    "Failed to remove stopped container before rescheduling",
-                    extra={"container_name": container.name},
-                    exc_info=True,
-                )
+            # schedule_single_container removes a stopped container before submitting, so this
+            # only sees one that stopped since. Creating over it would fail on the name.
+            if not self._remove_container_before_resource_release(step, container, reason="reschedule"):
+                raise FailedToScheduleError(f"Could not remove the previous container '{container.name}'")
             container = None
         if container is not None:
             logger.info("Container already exists, not creating a new one", extra={"container_name": container.name})
@@ -1935,17 +1945,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
                     status_details["exit_code"] = exit_code
                 return JobUpdate(status=status, status_details=status_details, error_details=error_details or None)
         if pause_deadline_exceeded(step):
-            if not exited:
-                try:
-                    container.kill()
-                except (APIError, NotFound):
-                    logger.warning("Failed to kill container after pause deadline", extra={"container": container.name})
-            message = "Pause deadline exceeded"
-            return JobUpdate(
-                status=HelixJobStatus.ERROR,
-                status_details={"message": message},
-                error_details={"message": message},
-            )
+            return self._kill_container_with_error(step, container, "Pause deadline exceeded")
         return JobUpdate(status=HelixJobStatus.PAUSING, status_details={"message": "Job is being paused"})
 
     def create_step_update(self, step: HelixJobStepWithContext, container: Container) -> JobUpdate:
