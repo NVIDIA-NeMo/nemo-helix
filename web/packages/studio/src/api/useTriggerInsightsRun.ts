@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getCompassListAnalysisRunsQueryKey } from '@nemo/sdk/generated/compass/compass-analysis-runs';
-import { getCompassListInsightsQueryKey } from '@nemo/sdk/generated/compass/compass-insights';
+import { getInsightsListAnalysisRunsQueryKey } from '@nemo/sdk/generated/insights/insights-analysis-runs';
+import { getInsightsListInsightsQueryKey } from '@nemo/sdk/generated/insights/insights-insights';
 import {
   type AnalysisRunOptions,
   type InsightsModelOverrides,
@@ -29,9 +29,9 @@ export const useTriggerInsightsRun = (
       if (status !== 'started') return;
       await Promise.all([
         queryClient.invalidateQueries({
-          queryKey: getCompassListAnalysisRunsQueryKey(workspace),
+          queryKey: getInsightsListAnalysisRunsQueryKey(workspace),
         }),
-        queryClient.invalidateQueries({ queryKey: getCompassListInsightsQueryKey(workspace) }),
+        queryClient.invalidateQueries({ queryKey: getInsightsListInsightsQueryKey(workspace) }),
       ]);
     },
   });

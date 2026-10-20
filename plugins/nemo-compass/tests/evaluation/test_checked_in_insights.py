@@ -32,7 +32,7 @@ def test_checked_in_insights_match_current_compass_and_state_pins() -> None:
     for name in names:
         insights_path = insights_dir / f"{name}.yaml"
         assert snapshots[name] == {
-            "compass_sha256": cli._compass_sha256(),
+            "analyst_sha256": cli._compass_sha256(),
             "insights_sha256": hashlib.sha256(insights_path.read_bytes()).hexdigest(),
             "state": release.pinned_ref(subjects[name]),
         }

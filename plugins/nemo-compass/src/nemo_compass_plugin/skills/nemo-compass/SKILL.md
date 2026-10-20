@@ -23,7 +23,7 @@ not-for:
   - nemo-experiments-upload (use to upload traces and evaluation results into Intake; this skill reads them back out)
   - nemo-evals (use to author evaluations and metrics; this skill analyzes production behavior)
 compatibility: >-
-  nemo-helix >= 0.1.0; requires Compass plugin, a reachable platform
+  nemo-helix >= 0.1.0; requires the Insights plugin, a reachable platform
   with Intake telemetry for the target agent, and a model the platform can call
   on Compass's behalf. Requires Jobs and a configured agents.execute runtime.
 maturity: beta
@@ -76,7 +76,7 @@ worth more than ten vague ones, so a run that files nothing is a valid outcome.
 Replace the quoted placeholders below with the target agent and workspace.
 
 ```bash
-nemo compass analysis-runs create --agent "<agent-name>" --workspace "<workspace>" --wait
+nemo insights analysis-runs create --agent "<agent-name>" --workspace "<workspace>" --wait
 ```
 
 Add `--ethos ETHOS.md` to supply the agent's intended behavior, `--since` for
@@ -89,7 +89,7 @@ they are missing, or pass `--default-model` and `--fast-model` explicitly.
 
 ## Where Insights are stored
 
-Compass plugin creates and updates insights in NeMo Helix after analysis.
+The Insights plugin creates and updates insights in NeMo Helix after analysis.
 Stored insights appear in Studio's optimizer view for the workspace.
 
 ## Verify
@@ -97,7 +97,7 @@ Stored insights appear in Studio's optimizer view for the workspace.
 Replace the quoted placeholders with the submitted run name and workspace:
 
 ```bash
-nemo compass analysis-runs get "<run-name>" --workspace "<workspace>"
+nemo insights analysis-runs get "<run-name>" --workspace "<workspace>"
 ```
 
 Confirm the job completed and inspect its analysis report. A completed run may
@@ -107,7 +107,7 @@ Listing all insights for the agent can include earlier runs.
 
 ```bash
 curl --fail-with-body \
-  "$NHX_BASE_URL/apis/compass/v2/workspaces/<workspace>/insights/<insight-id>"
+  "$NHX_BASE_URL/apis/insights/v2/workspaces/<workspace>/insights/<insight-id>"
 ```
 
 On an authenticated platform pass the token through curl's config, not argv.

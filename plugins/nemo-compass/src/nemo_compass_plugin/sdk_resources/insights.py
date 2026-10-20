@@ -3,7 +3,7 @@
 
 """SDK sub-resources for ``Insight`` CRUD.
 
-Mounted as ``client.compass.insights`` (sync) and on the async client.
+Mounted as ``client.insights.insights`` (sync) and on the async client.
 Each method maps 1:1 onto the FastAPI routes in
 :mod:`nemo_compass_plugin.service`.
 """
@@ -12,7 +12,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Protocol, TypeAlias, TypedDict
 
-from nemo_compass_plugin.client import AsyncCompassClient, CompassClient
+from nemo_compass_plugin.client import AsyncInsightsClient, InsightsClient
 from nemo_compass_plugin.entities import Insight, InsightRating, InsightStatus
 from nemo_compass_plugin.evidence import TraceEvidence
 from nemo_compass_plugin.schema import (
@@ -62,17 +62,17 @@ def _page_from_response(data: dict[str, object]) -> InsightPage:
 class _ResourceParent(Protocol):
     """The slice of the insights SDK namespace these sub-resources rely on.
 
-    Both the sync and async ``CompassPluginResource`` satisfy this — typing
+    Both the sync and async ``InsightsPluginResource`` satisfy this — typing
     against it (rather than importing the concrete classes from
     :mod:`nemo_compass_plugin.sdk`) avoids an import cycle, since ``sdk``
     imports the resource classes defined here.
     """
 
-    _client: CompassClient
+    _client: InsightsClient
 
 
 class _AsyncResourceParent(Protocol):
-    _client: AsyncCompassClient
+    _client: AsyncInsightsClient
 
 
 def _build_create_body(
@@ -236,7 +236,7 @@ class _InsightResource:
             self._client.delete_insight(workspace=workspace, insight_id=insight_id).data()
 
     @property
-    def _client(self) -> CompassClient:
+    def _client(self) -> InsightsClient:
         return self._parent._client
 
 
@@ -333,7 +333,7 @@ class _AsyncInsightResource:
             (await self._client.delete_insight(workspace=workspace, insight_id=insight_id)).data()
 
     @property
-    def _client(self) -> AsyncCompassClient:
+    def _client(self) -> AsyncInsightsClient:
         return self._parent._client
 
 

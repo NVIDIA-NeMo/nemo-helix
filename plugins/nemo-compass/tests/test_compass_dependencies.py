@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Compass dependency errors remain actionable even without Compass installed."""
+"""Analyst dependency errors remain actionable even without Compass installed."""
 
 import subprocess
 import sys
@@ -11,7 +11,7 @@ import pytest
 
 @pytest.mark.parametrize("missing_dependency", ["compass", "trace_ingest", "unexpected_dependency"])
 def test_missing_compass_dependencies(missing_dependency: str) -> None:
-    # A fresh process exercises adapter imports without cached compass dependencies.
+    # A fresh process exercises adapter imports without cached analyst dependencies.
     script = """
 import asyncio
 import importlib.abc
@@ -44,7 +44,7 @@ async def check():
             for text in ("nemo-compass==0.1.0", "Python 3.12 or 3.13", "nemo-helix[all]"):
                 assert text in message
     else:
-        raise AssertionError("Missing dependency did not fail compass execution")
+        raise AssertionError("Missing dependency did not fail analyst execution")
     client.close.assert_awaited_once()
 
 asyncio.run(check())

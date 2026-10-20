@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { compassGetAnalysisConfig } from '@nemo/sdk/generated/compass/compass-analysis-configs';
-import { compassCreateAnalysisRun } from '@nemo/sdk/generated/compass/compass-analysis-runs';
+import { insightsGetAnalysisConfig } from '@nemo/sdk/generated/insights/insights-analysis-configs';
+import { insightsCreateAnalysisRun } from '@nemo/sdk/generated/insights/insights-analysis-runs';
 import type {
   AnalysisConfig,
   AnalysisRunResponseJob,
   CreateAnalysisRunRequest,
-} from '@nemo/sdk/generated/compass/schema';
+} from '@nemo/sdk/generated/insights/schema';
 import { type AtifIngestRequest, HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { readAgentEthos } from '@studio/api/agents/agentEthos';
 import { AxiosError } from 'axios';
@@ -82,7 +82,7 @@ const messageOf = (error: unknown): string => {
 };
 
 /**
- * Queues one Compass run per agent.
+ * Queues one insights analyst run per agent.
  *
  * The analysis run needs the default/fast model pair, which only exists on the
  * agent's AnalysisConfig — so an agent that has never been enabled reports
@@ -107,13 +107,13 @@ export const triggerInsightsRun = async (
 
   let config;
   try {
-    config = storedConfig ?? (await compassGetAnalysisConfig(workspace, agent));
+    config = storedConfig ?? (await insightsGetAnalysisConfig(workspace, agent));
   } catch (error) {
     if (statusOf(error) === 404) {
       return {
         agent,
         status: 'not-enabled',
-        message: `Insights analysis is not enabled for "${agent}". Run: nemo compass analysis enable --agent ${agent}`,
+        message: `Insights analysis is not enabled for "${agent}". Run: nemo insights analysis enable --agent ${agent}`,
       };
     }
     return { agent, status: 'error', message: messageOf(error) };
@@ -126,7 +126,7 @@ export const triggerInsightsRun = async (
     return {
       agent,
       status: 'not-enabled',
-      message: `The analysis config for "${agent}" has no model pair. Re-run: nemo compass analysis enable --agent ${agent}`,
+      message: `The analysis config for "${agent}" has no model pair. Re-run: nemo insights analysis enable --agent ${agent}`,
     };
   }
 
@@ -142,7 +142,7 @@ export const triggerInsightsRun = async (
   const ethos = await readAgentEthos(workspace, agent);
 
   try {
-    const response = await compassCreateAnalysisRun(workspace, {
+    const response = await insightsCreateAnalysisRun(workspace, {
       agent,
       default_model: defaultModel,
       fast_model: fastModel,

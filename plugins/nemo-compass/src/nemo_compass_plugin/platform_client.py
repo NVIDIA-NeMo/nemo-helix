@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared typed platform client construction for Compass read methods."""
+"""Shared typed platform client construction for analyst read methods."""
 
 from urllib.parse import urlparse
 

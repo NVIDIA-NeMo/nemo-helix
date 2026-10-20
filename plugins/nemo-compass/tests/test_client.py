@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
-from nemo_compass_plugin.client import AsyncCompassClient
+from nemo_compass_plugin.client import AsyncInsightsClient
 from nemo_compass_plugin.platform_client import make_client
 from nemo_compass_plugin.schema import CreateAnalysisRunRequest
 
@@ -19,7 +19,7 @@ async def test_async_client_submits_analysis_run() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
-        assert request.url.path == "/apis/compass/v2/workspaces/default/analysis-runs"
+        assert request.url.path == "/apis/insights/v2/workspaces/default/analysis-runs"
         payload = json.loads(request.content)
         assert payload["agent"] == body.agent
         assert payload["default_model"] == body.default_model
@@ -34,7 +34,7 @@ async def test_async_client_submits_analysis_run() -> None:
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
-        client = AsyncCompassClient(base_url=REMOTE_URL, http_client=http_client)
+        client = AsyncInsightsClient(base_url=REMOTE_URL, http_client=http_client)
         response = (await client.create_analysis_run(workspace="default", body=body)).data()
     assert response.run.name == "analysis-run"
     assert response.job_status == "created"

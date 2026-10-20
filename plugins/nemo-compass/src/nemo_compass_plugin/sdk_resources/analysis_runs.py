@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""SDK sub-resources for on-demand Compass analysis runs.
+"""SDK sub-resources for on-demand Insights analysis runs.
 
-Mounted as ``client.compass.analysis_runs``. Each method maps 1:1 onto the
+Mounted as ``client.insights.analysis_runs``. Each method maps 1:1 onto the
 FastAPI routes in :mod:`nemo_compass_plugin.analysis_runs`, plus one
 convenience verb — :meth:`_AnalysisRunResource.wait` — that polls ``get``
 until the backing job reaches a terminal state. Waiting belongs here rather
@@ -34,7 +34,7 @@ DEFAULT_POLL_INTERVAL = 5.0
 class AnalysisRunNotSubmittedError(RuntimeError):
     """No job exists under the run's name, so waiting on it would never end.
 
-    Compass names a run before submitting its job and the job takes that same
+    Insights names a run before submitting its job and the job takes that same
     name, so a missing job is proof the submission never landed — a resubmit
     case, not a slow one.
     """

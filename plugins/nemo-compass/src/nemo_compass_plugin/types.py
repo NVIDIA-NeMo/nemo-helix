@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Typed request/response DTOs for Compass plugin HTTP client."""
+"""Typed request/response DTOs for the Insights plugin HTTP client."""
 
 from __future__ import annotations
 

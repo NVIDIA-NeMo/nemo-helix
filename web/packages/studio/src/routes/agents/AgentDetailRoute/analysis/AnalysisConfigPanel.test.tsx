@@ -4,10 +4,10 @@
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { createToastMock } from '@nemo/common/src/providers/toast/useToastMock';
 import {
-  getCompassGetAnalysisConfigQueryKey,
-  useCompassGetAnalysisConfig,
-} from '@nemo/sdk/generated/compass/compass-analysis-configs';
-import type { AnalysisConfig } from '@nemo/sdk/generated/compass/schema';
+  getInsightsGetAnalysisConfigQueryKey,
+  useInsightsGetAnalysisConfig,
+} from '@nemo/sdk/generated/insights/insights-analysis-configs';
+import type { AnalysisConfig } from '@nemo/sdk/generated/insights/schema';
 import { ThemeProvider } from '@nvidia/foundations-react-core';
 import type { InsightsTriggerResult } from '@studio/api/insightsAnalysis';
 import { queryClient } from '@studio/api/queryClient';
@@ -24,9 +24,9 @@ import { MemoryRouter } from 'react-router';
 
 vi.mock('@nemo/common/src/providers/toast/useToast');
 
-vi.mock('@nemo/sdk/generated/compass/compass-analysis-configs', () => ({
-  useCompassGetAnalysisConfig: vi.fn(),
-  getCompassGetAnalysisConfigQueryKey: vi.fn((workspace: string, agent: string) => [
+vi.mock('@nemo/sdk/generated/insights/insights-analysis-configs', () => ({
+  useInsightsGetAnalysisConfig: vi.fn(),
+  getInsightsGetAnalysisConfigQueryKey: vi.fn((workspace: string, agent: string) => [
     'analysis-config',
     workspace,
     agent,
@@ -87,7 +87,7 @@ vi.mock('@nemo/common/src/components/ModelSelectV2', () => ({
   ),
 }));
 
-const useConfig = vi.mocked(useCompassGetAnalysisConfig);
+const useConfig = vi.mocked(useInsightsGetAnalysisConfig);
 const save = vi.mocked(saveAnalysisConfig);
 const invalidateQueries = vi.mocked(queryClient.invalidateQueries);
 const mutateRun = vi.fn();
@@ -141,7 +141,7 @@ const config = (overrides: Partial<AnalysisConfig> = {}): AnalysisConfig => ({
   ...overrides,
 });
 
-type ConfigQueryResult = ReturnType<typeof useCompassGetAnalysisConfig>;
+type ConfigQueryResult = ReturnType<typeof useInsightsGetAnalysisConfig>;
 
 const queryResult = (data: AnalysisConfig | undefined): ConfigQueryResult =>
   ({
@@ -188,7 +188,7 @@ describe('AnalysisConfigPanel', () => {
     expect(vi.mocked(toast.error).mock.calls[0][0]).toContain('may still be enabled');
     expect(toast.success).not.toHaveBeenCalled();
 
-    expect(getCompassGetAnalysisConfigQueryKey).toHaveBeenCalledWith(
+    expect(getInsightsGetAnalysisConfigQueryKey).toHaveBeenCalledWith(
       'demo-epa',
       'email-security-triage'
     );

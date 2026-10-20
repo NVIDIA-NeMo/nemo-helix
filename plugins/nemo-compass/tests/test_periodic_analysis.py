@@ -27,12 +27,12 @@ from nemo_compass_plugin.analysis.backend import (
 from nemo_compass_plugin.analysis.result import CompassResult, InsightUpdate, NewInsight
 from nemo_compass_plugin.analysis_runs import mint_analysis_run_name
 from nemo_compass_plugin.config import (
-    CompassConfig,
     CompassSchedulerConfig,
     Frequency,
+    InsightsConfig,
     Weekday,
 )
-from nemo_compass_plugin.controller import CompassAnalysisController
+from nemo_compass_plugin.controller import InsightsAnalysisController
 from nemo_compass_plugin.entities import (
     AnalysisConfig,
     AnalysisRun,
@@ -220,7 +220,7 @@ async def _remote_backend_with_mirror(
     insights: _RecordingInsights | None = None,
 ) -> AsyncGenerator[tuple[RemoteCompassBackend, _RecordingInsights], None]:
     async with _async_platform() as sdk:
-        insights_resource = sdk.compass.insights
+        insights_resource = sdk.insights.insights
         recording = insights or _RecordingInsights()
         monkeypatch.setattr(insights_resource, "create", recording.create)
         monkeypatch.setattr(insights_resource, "get", recording.get)
@@ -320,7 +320,7 @@ async def test_mirror_write_failure_warns_without_failing_the_run(
 
 
 @pytest.mark.asyncio
-async def test_make_backend_always_writes_to_the_platform(tmp_path: Path) -> None:
+async def test_make_compass_backend_always_writes_to_the_platform(tmp_path: Path) -> None:
     """An output path adds a mirror; it never diverts writes off the platform."""
     async with _async_platform() as client:
         plain = make_backend(client=client, insights_output=None)
@@ -463,12 +463,12 @@ async def test_remote_persistence_merges_evidence_and_preserves_newer_date():
             updated_date=date,
         )
     )
-    backend.client.compass.insights.update = AsyncMock()
+    backend.client.insights.insights.update = AsyncMock()
     await backend._add_evidence(
         workspace="test", agent="target", insight_id="id", evidence=[TraceEvidence(trace_id="c")]
     )
-    assert backend.client.compass.insights.update.await_args is not None
-    args = backend.client.compass.insights.update.await_args.kwargs
+    assert backend.client.insights.insights.update.await_args is not None
+    args = backend.client.insights.insights.update.await_args.kwargs
     assert args["updated_date"] == date
     assert [item.trace_id for item in args["evidence"]] == ["a", "b", "c"]
 
@@ -500,9 +500,9 @@ async def test_persistence_preserves_optional_ratings(tmp_path, severity, confid
     assert record["severity"] == severity
     assert record["confidence"] == confidence
     remote = RemoteCompassBackend(MagicMock())
-    remote.client.compass.insights.create = AsyncMock(return_value=Insight.model_validate(record))
+    remote.client.insights.insights.create = AsyncMock(return_value=Insight.model_validate(record))
     await remote.persist_result(workspace="test", agent="target", result=result)
-    call = remote.client.compass.insights.create.await_args
+    call = remote.client.insights.insights.create.await_args
     assert call is not None
     kwargs = call.kwargs
     assert kwargs["severity"] == severity
@@ -932,10 +932,10 @@ async def _controller(
     *,
     jobs: list[HelixJobResponse] | None = None,
     run_status: AnalysisRunStatus | None = None,
-) -> AsyncGenerator[tuple[CompassAnalysisController, _RecordingJobs], None]:
-    controller = CompassAnalysisController()
-    controller._config = CompassConfig(
-        analysis=CompassSchedulerConfig(
+) -> AsyncGenerator[tuple[InsightsAnalysisController, _RecordingJobs], None]:
+    controller = InsightsAnalysisController()
+    controller._config = InsightsConfig(
+        analyst=CompassSchedulerConfig(
             frequency=Frequency.DAILY,
             run_at_hour=0,
             job_profile="test-profile",
@@ -1009,7 +1009,7 @@ async def test_controller_defers_legacy_config_without_persisted_models(
 
     assert jobs.runs == []
     assert "has no model selection" in caplog.text
-    assert "nemo compass analysis enable" in caplog.text
+    assert "nemo insights analysis enable" in caplog.text
 
 
 @pytest.mark.asyncio

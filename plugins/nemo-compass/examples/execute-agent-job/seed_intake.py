@@ -16,7 +16,7 @@ feedback, so each failing scenario carries negative ``feedback`` annotations and
 a low ``helpfulness`` label.
 
 ``gen_ai.agent.name`` is stamped on every span — that attribute is what the
-Compass's ``agent_name`` span filter matches on, so it must equal the target
+Analyst's ``agent_name`` span filter matches on, so it must equal the target
 agent name. Feedback is attached at session level (no ``span_id``), which is
 both the realistic shape for an end-user thumbs-down and the id Compass
 correlates back to spans with.

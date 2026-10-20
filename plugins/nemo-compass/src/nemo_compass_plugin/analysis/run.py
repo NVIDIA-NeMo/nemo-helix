@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Reusable Compass run orchestration."""
+"""Reusable insights analyst run orchestration."""
 
 import os
 import sys
@@ -43,11 +43,11 @@ async def run_compass(
     verbose: bool = False,
     since: datetime | None = None,
     evaluation_id: str | None = None,
-    compass_evaluation: CompassEvaluationContext | None = None,
+    analyst_evaluation: CompassEvaluationContext | None = None,
     enable_observability: bool = True,
     model_refs: ConfiguredModelRefs | None = None,
 ) -> str:
-    """Build and run Compass agent against an agent's telemetry.
+    """Build and run Compass against an agent's telemetry.
 
     The trace-volume floor for scheduled runs lives in the periodic controller,
     which decides whether a run is worth launching; this entry point just runs.
@@ -66,7 +66,7 @@ async def run_compass(
         verbose: Whether to stream model/tool events to stderr.
         since: Optional incremental lower bound enforced on trace/span reads.
         evaluation_id: Optional run scope; AND-pinned onto every span read.
-        compass_evaluation: Optional Evaluation and test-case
+        analyst_evaluation: Optional Evaluation and test-case
             identity attached to Compass's own OTLP trace.
         enable_observability: Whether this run may export Compass's own
             OTLP trace. The environment variable can still disable export.
@@ -85,7 +85,7 @@ async def run_compass(
             verbose=verbose,
             since=since,
             evaluation_id=evaluation_id,
-            compass_evaluation=compass_evaluation,
+            analyst_evaluation=analyst_evaluation,
             enable_observability=enable_observability,
             model_refs=model_refs,
         )
@@ -106,12 +106,12 @@ async def run_compass_change_set(
     verbose: bool = False,
     since: datetime | None = None,
     evaluation_id: str | None = None,
-    compass_evaluation: CompassEvaluationContext | None = None,
+    analyst_evaluation: CompassEvaluationContext | None = None,
     enable_observability: bool = True,
     relay_scope_name: str | None = None,
     model_refs: ConfiguredModelRefs | None = None,
 ) -> tuple[CompassResult, CompassBackend]:
-    """Build and run Compass agent without persisting its change-set.
+    """Build and run Compass without persisting its change-set.
 
     The caller owns *client* and is responsible for closing it; this function
     never does.
@@ -128,7 +128,7 @@ async def run_compass_change_set(
         if exc.name not in {"compass", "trace_ingest"}:
             raise
         raise RuntimeError(
-            "Compass analysis requires nemo-compass==0.1.0 on Python 3.12 or 3.13. "
+            "The Insights analyst requires Compass (nemo-compass==0.1.0) on Python 3.12 or 3.13. "
             "Reinstall nemo-helix[all] in the environment running Compass to restore its dependencies."
         ) from exc
 
@@ -148,7 +148,7 @@ async def run_compass_change_set(
                 base_url=base_url,
                 workspace=workspace,
                 target_agent=agent,
-                evaluation_context=compass_evaluation,
+                evaluation_context=analyst_evaluation,
             )
         with activate_model_clients(model_clients):
             existing = await load_existing_insights(backend, workspace=workspace, agent=agent)

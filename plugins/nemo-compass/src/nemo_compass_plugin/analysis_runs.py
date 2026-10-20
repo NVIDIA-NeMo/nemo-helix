@@ -1,11 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""High-level Compass analysis-run request helpers.
+"""High-level Insights analysis-run request helpers.
 
 This module is a thin facade over the generic ``agents.execute`` job.
 
-Compass persists one :class:`~nemo_compass_plugin.entities.AnalysisRun` per
+Insights persists one :class:`~nemo_compass_plugin.entities.AnalysisRun` per
 run, holding only what the Jobs layer cannot know: that a job was an analysis
 run, and over which agent and scope. Execution state is *not* copied — it is
 read back from the job on demand.
@@ -27,7 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_compass_plugin._perms import AnalysisRunPerms
 from nemo_compass_plugin.analysis.agent_config import AGENT_CONFIG_FORMAT, build_compass_agent_config
 from nemo_compass_plugin.authz import scope
-from nemo_compass_plugin.config import CompassConfig
+from nemo_compass_plugin.config import InsightsConfig
 from nemo_compass_plugin.entities import AnalysisRun
 from nemo_compass_plugin.schema import AnalysisRunPage, AnalysisRunResponse, CreateAnalysisRunRequest
 from nemo_helix_plugin.agents.client import AsyncAgentsClient
@@ -47,10 +47,10 @@ from pydantic import TypeAdapter
 
 logger = logging.getLogger(__name__)
 
-COMPASS_ANALYSIS_EXTENSION_KIND = "compass.analysis"
-ANALYSIS_RUN_NAME_PREFIX = "compass-run-"
+INSIGHTS_ANALYSIS_EXTENSION_KIND = "insights.analysis"
+ANALYSIS_RUN_NAME_PREFIX = "insights-run-"
 
-router = APIRouter(tags=["Compass Analysis Runs"])
+router = APIRouter(tags=["Insights Analysis Runs"])
 _JSON_OBJECT_ADAPTER = TypeAdapter(JsonObject)
 
 
@@ -73,7 +73,7 @@ def _json_object(value: object) -> JsonObject:
 def mint_analysis_run_name() -> str:
     """Mint the name shared by an analysis run and its backing job.
 
-    Minted by Compass rather than assigned by the Jobs service so the run can
+    Minted by Insights rather than assigned by the Jobs service so the run can
     be persisted *before* the job is submitted. Uniqueness comes from the uuid,
     not from the agent — an earlier version derived the name from the agent and
     collided on the second run.
@@ -90,15 +90,15 @@ async def create_analysis_run(
     client: AsyncNemoClient = Depends(get_nemo_client),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AnalysisRunResponse:
-    """Create an Compass analysis run backed by the generic ``agents.execute`` job."""
-    config = get_nemo_config(CompassConfig)
+    """Create an Insights analysis run backed by the generic ``agents.execute`` job."""
+    config = get_nemo_config(InsightsConfig)
     return await submit_analysis_run(
         workspace=workspace,
         request=request,
         agents_client=AsyncAgentsClient.from_client(client),
         models_client=AsyncModelsClient.from_client(client),
         entity_client=entity_client,
-        profile=config.analysis.job_profile,
+        profile=config.analyst.job_profile,
     )
 
 
@@ -113,7 +113,7 @@ async def submit_analysis_run(
     profile: str | None = None,
     base_url: str | None = None,
 ) -> AnalysisRunResponse:
-    """Shared submission path for the API and the Compass scheduler.
+    """Shared submission path for the API and the Insights scheduler.
 
     The scheduler supplies a name so a persisted intent remains discoverable
     even if submission or the subsequent scheduler-status write fails.
@@ -149,7 +149,6 @@ async def submit_analysis_run(
                     spec=spec,
                     name=saved.name,
                     profile=profile,
-                    # Preserve the stored job tag so the scheduler can recognize runs created before the rename.
                     custom_fields={"insights_analysis_agent": request.agent},
                 ),
             )
@@ -321,7 +320,7 @@ async def _resolve_model_ref(client: ModelLookupClient, ref: str, *, field: str,
 def build_execute_agent_job_config(
     request: CreateAnalysisRunRequest, *, workspace: str, run_name: str, base_url: str | None = None
 ) -> JsonObject:
-    """Translate a high-level Compass request into a generic execute-agent job config."""
+    """Translate a high-level Insights request into a generic execute-agent job config."""
     extension_config: JsonObject = {
         "agent": request.agent,
         "workspace": workspace,
@@ -331,7 +330,7 @@ def build_execute_agent_job_config(
             "agent": _inline_compass(request, workspace=workspace, base_url=base_url),
             "input": _analysis_prompt(request.agent),
             "extension": {
-                "kind": COMPASS_ANALYSIS_EXTENSION_KIND,
+                "kind": INSIGHTS_ANALYSIS_EXTENSION_KIND,
                 "config": extension_config,
             },
         }
@@ -347,7 +346,7 @@ def _inline_compass(request: CreateAnalysisRunRequest, *, workspace: str, base_u
 
     Compass has no Agent entity: its config is composed here from the
     request's model pair and read scope. ``ExecuteAgentJobConfig.agent`` also
-    accepts an entity ref, so pointing a run at a stored Compass is a small
+    accepts an entity ref, so pointing a run at a stored Analyst is a small
     change if a use case appears.
     """
     return _json_object(

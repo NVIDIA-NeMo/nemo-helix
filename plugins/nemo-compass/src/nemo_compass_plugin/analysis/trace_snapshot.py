@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Load Compass's canonical snapshot through authenticated Platform clients."""
+"""Load trace-intel's canonical snapshot through authenticated Platform clients."""
 
 from datetime import datetime, timezone
 
@@ -27,7 +27,7 @@ async def load_trace_snapshot(
 ) -> TraceSnapshot:
     """Select complete traces, retaining SDK authentication and token refresh.
 
-    Compass trace_ingest normalizer owns the conversion to canonical
+    The Compass trace_ingest normalizer owns the conversion to canonical
     traces. Platform owns HTTP access because its clients refresh credentials
     and support evaluation IDs in addition to the package's name-based query.
     Time bounds select traces; child spans are loaded in full.

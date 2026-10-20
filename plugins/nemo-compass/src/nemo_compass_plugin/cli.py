@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Compass scheduling and AnalysisRun CLI."""
+"""Insights scheduling and AnalysisRun CLI."""
 
 from collections.abc import Callable
 from datetime import datetime
@@ -11,7 +11,7 @@ from typing import Any, ClassVar
 
 import click
 import typer
-from nemo_compass_plugin.client import CompassClient
+from nemo_compass_plugin.client import InsightsClient
 from nemo_compass_plugin.schema import AnalysisRunResponse, EnableAnalysisConfigRequest
 from nemo_compass_plugin.sdk_resources.analysis_configs import _list_params as _config_list_params
 from nemo_compass_plugin.sdk_resources.analysis_runs import (
@@ -53,10 +53,10 @@ _CONFIG_COLUMNS = [
 ]
 
 
-class CompassCLI(NemoCLI):
-    """``nemo compass ...`` subcommands."""
+class InsightsCLI(NemoCLI):
+    """``nemo insights ...`` subcommands."""
 
-    name: ClassVar[str] = "compass"
+    name: ClassVar[str] = "insights"
     description: ClassVar[str] = "Analyze agent telemetry and act on insights."
 
     def get_cli(self) -> typer.Typer:
@@ -105,9 +105,9 @@ class CompassCLI(NemoCLI):
                 "agent": agent,
                 "body": EnableAnalysisConfigRequest(default_model=default_model, fast_model=fast_model),
             }
-            if handle_code_generation(CompassClient, "enable_analysis_config", kwargs, resolved_output_format, state):
+            if handle_code_generation(InsightsClient, "enable_analysis_config", kwargs, resolved_output_format, state):
                 return
-            response = state.typed_client(CompassClient).enable_analysis_config(**kwargs)
+            response = state.typed_client(InsightsClient).enable_analysis_config(**kwargs)
             format_output(response, output_format=resolved_output_format)
 
         @analysis_app.command("disable")
@@ -131,9 +131,9 @@ class CompassCLI(NemoCLI):
             state = cli_state(ctx)
             resolved_output_format = resolve_output_format(ctx, output_format)
             kwargs = {"workspace": resolve_cli_workspace(ctx, workspace), "agent": agent}
-            if handle_code_generation(CompassClient, "disable_analysis_config", kwargs, resolved_output_format, state):
+            if handle_code_generation(InsightsClient, "disable_analysis_config", kwargs, resolved_output_format, state):
                 return
-            response = state.typed_client(CompassClient).disable_analysis_config(**kwargs)
+            response = state.typed_client(InsightsClient).disable_analysis_config(**kwargs)
             format_output(response, output_format=resolved_output_format)
 
         @analysis_app.command("status")
@@ -164,9 +164,9 @@ class CompassCLI(NemoCLI):
             workspace = resolve_cli_workspace(ctx, workspace)
             if agent:
                 kwargs: dict[str, Any] = {"workspace": workspace, "agent": agent}
-                if handle_code_generation(CompassClient, "get_analysis_config", kwargs, resolved_output_format, state):
+                if handle_code_generation(InsightsClient, "get_analysis_config", kwargs, resolved_output_format, state):
                     return
-                response = state.typed_client(CompassClient).get_analysis_config(**kwargs)
+                response = state.typed_client(InsightsClient).get_analysis_config(**kwargs)
                 format_output(response, output_format=resolved_output_format)
                 return
 
@@ -176,7 +176,7 @@ class CompassCLI(NemoCLI):
                 "query_params": _config_list_params(page=page, page_size=page_size, sort="-created_at", enabled=None),
             }
             if handle_code_generation(
-                CompassClient,
+                InsightsClient,
                 "list_analysis_configs",
                 kwargs,
                 resolved_output_format,
@@ -184,7 +184,7 @@ class CompassCLI(NemoCLI):
                 result="all-pages" if all_pages else "list",
             ):
                 return
-            response = state.typed_client(CompassClient).list_analysis_configs(**kwargs)
+            response = state.typed_client(InsightsClient).list_analysis_configs(**kwargs)
             _print_list(
                 state,
                 collect_offset_pages(response, all_pages=all_pages),
@@ -226,7 +226,7 @@ class CompassCLI(NemoCLI):
             since: str | None = typer.Option(
                 None,
                 "--since",
-                help="ISO-8601 lower bound enforced on Compass's trace/span reads.",
+                help="ISO-8601 lower bound enforced on the analyst's trace/span reads.",
             ),
             ethos: Path | None = typer.Option(
                 None,
@@ -282,9 +282,9 @@ class CompassCLI(NemoCLI):
                     timeout_seconds=timeout_seconds,
                 ),
             }
-            if handle_code_generation(CompassClient, "create_analysis_run", kwargs, resolved_output_format, state):
+            if handle_code_generation(InsightsClient, "create_analysis_run", kwargs, resolved_output_format, state):
                 return
-            client = state.typed_client(CompassClient)
+            client = state.typed_client(InsightsClient)
             response = client.create_analysis_run(**kwargs).data()
             if not wait:
                 format_output(response, output_format=resolved_output_format)
@@ -335,7 +335,7 @@ class CompassCLI(NemoCLI):
                 "query_params": _run_list_params(page=page, page_size=page_size, sort=sort, agent=agent),
             }
             if handle_code_generation(
-                CompassClient,
+                InsightsClient,
                 "list_analysis_runs",
                 kwargs,
                 resolved_output_format,
@@ -343,7 +343,7 @@ class CompassCLI(NemoCLI):
                 result="all-pages" if all_pages else "list",
             ):
                 return
-            response = state.typed_client(CompassClient).list_analysis_runs(**kwargs)
+            response = state.typed_client(InsightsClient).list_analysis_runs(**kwargs)
             _print_list(
                 state,
                 collect_offset_pages(response, all_pages=all_pages),
@@ -392,9 +392,9 @@ class CompassCLI(NemoCLI):
             _reject_wait_with_code(wait, resolved_output_format)
             workspace = resolve_cli_workspace(ctx, workspace)
             kwargs = {"workspace": workspace, "name": name}
-            if handle_code_generation(CompassClient, "get_analysis_run", kwargs, resolved_output_format, state):
+            if handle_code_generation(InsightsClient, "get_analysis_run", kwargs, resolved_output_format, state):
                 return
-            client = state.typed_client(CompassClient)
+            client = state.typed_client(InsightsClient)
             if not wait:
                 format_output(client.get_analysis_run(**kwargs), output_format=resolved_output_format)
                 return
@@ -407,7 +407,7 @@ class CompassCLI(NemoCLI):
                 output_format=resolved_output_format,
             )
 
-        for entry_point in sorted(entry_points(group="nemo.compass.commands"), key=lambda item: item.name):
+        for entry_point in sorted(entry_points(group="nemo.insights.commands"), key=lambda item: item.name):
             app.add_typer(entry_point.load()(), name=entry_point.name)
         return app
 
@@ -445,7 +445,7 @@ def _reject_wait_with_code(wait: bool, output_format: ListOutputFormat) -> None:
 
 
 def _print_waited_run(
-    client: CompassClient,
+    client: InsightsClient,
     *,
     workspace: str,
     name: str,

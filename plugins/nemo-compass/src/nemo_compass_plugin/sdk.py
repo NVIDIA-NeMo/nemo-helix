@@ -1,29 +1,29 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""SDK resources for Compass plugin.
+"""SDK resources for the insights plugin.
 
-Mounted on :class:`~nemo_helix_plugin.client.client.NemoClient` as ``client.compass`` via
+Mounted on :class:`~nemo_helix_plugin.client.client.NemoClient` as ``client.insights`` via
 the ``nemo.sdk`` entry-point in :file:`pyproject.toml`. Exposes:
 
-- ``client.compass.analysis_configs.{enable,disable,list_configs,get,update}``
+- ``client.insights.analysis_configs.{enable,disable,list_configs,get,update}``
   — :class:`~nemo_compass_plugin.entities.AnalysisConfig` CRUD/control for
   periodic analysis opt-in state.
-- ``client.compass.analysis_runs.{create,list_runs,get,wait}`` —
+- ``client.insights.analysis_runs.{create,list_runs,get,wait}`` —
   :class:`~nemo_compass_plugin.entities.AnalysisRun` submission and read-back
-  for on-demand Compass runs, each backed by an ``agents.execute`` job.
-- ``client.compass.analysis_run_statuses.{list_statuses,get,update}``
+  for on-demand Analyst runs, each backed by an ``agents.execute`` job.
+- ``client.insights.analysis_run_statuses.{list_statuses,get,update}``
   — :class:`~nemo_compass_plugin.entities.AnalysisRunStatus` state written by
   analyzer jobs.
-- ``client.compass.insights.{create,list_insights,get,update,delete}`` —
+- ``client.insights.insights.{create,list_insights,get,update,delete}`` —
   :class:`~nemo_compass_plugin.entities.Insight` CRUD against the FastAPI
-  routes mounted under ``/apis/compass/v2/workspaces/{workspace}/``.
+  routes mounted under ``/apis/insights/v2/workspaces/{workspace}/``.
 
 Modeled on ``nemo_garak.sdk`` — same shape, same hand-written CRUD-only
 resource pattern.
 """
 
-from nemo_compass_plugin.client import AsyncCompassClient, CompassClient
+from nemo_compass_plugin.client import AsyncInsightsClient, InsightsClient
 from nemo_compass_plugin.sdk_resources.analysis_configs import (
     _AnalysisConfigResource,
     _AnalysisRunStatusResource,
@@ -42,12 +42,12 @@ from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.sdk import NemoPluginSDKResources
 
 
-class CompassPluginResource:
-    """Sync SDK namespace mounted as ``client.compass``."""
+class InsightsPluginResource:
+    """Sync SDK namespace mounted as ``client.insights``."""
 
     def __init__(self, platform: NemoClient) -> None:
         self._platform = platform
-        self._client = CompassClient.from_client(platform)
+        self._client = InsightsClient.from_client(platform)
         self._insights: _InsightResource | None = None
         self._analysis_configs: _AnalysisConfigResource | None = None
         self._analysis_runs: _AnalysisRunResource | None = None
@@ -78,12 +78,12 @@ class CompassPluginResource:
         return self._analysis_run_statuses
 
 
-class AsyncCompassPluginResource:
-    """Async SDK namespace mounted as ``client.compass``."""
+class AsyncInsightsPluginResource:
+    """Async SDK namespace mounted as ``client.insights``."""
 
     def __init__(self, platform: AsyncNemoClient) -> None:
         self._platform = platform
-        self._client = AsyncCompassClient.from_client(platform)
+        self._client = AsyncInsightsClient.from_client(platform)
         self._insights: _AsyncInsightResource | None = None
         self._analysis_configs: _AsyncAnalysisConfigResource | None = None
         self._analysis_runs: _AsyncAnalysisRunResource | None = None
@@ -114,7 +114,7 @@ class AsyncCompassPluginResource:
         return self._analysis_run_statuses
 
 
-compass_sdk_resources = NemoPluginSDKResources(
-    sync_resource=CompassPluginResource,
-    async_resource=AsyncCompassPluginResource,
+insights_sdk_resources = NemoPluginSDKResources(
+    sync_resource=InsightsPluginResource,
+    async_resource=AsyncInsightsPluginResource,
 )

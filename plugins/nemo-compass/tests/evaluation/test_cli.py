@@ -199,7 +199,7 @@ def test_analyze_unknown_subject_exits(monkeypatch):
 
 
 def test_analyze_does_not_require_plugin_inference_key(monkeypatch, tmp_path, capsys):
-    # Compass credentials belong to the configured Platform Model provider, not
+    # Analyst credentials belong to the configured Platform Model provider, not
     # a plugin-owned environment variable.
     monkeypatch.setattr(cli, "_load_dotenv", lambda *a, **k: None)
     monkeypatch.delenv("INFERENCE_API_KEY", raising=False)
@@ -236,7 +236,7 @@ def test_analyze_live_happy_path(monkeypatch, tmp_path, capsys):
 def test_analyze_registers_and_tags_compass_run_by_default(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(cli, "TMP", tmp_path)
     monkeypatch.setattr(cli, "_register_analysis_evaluation", _REAL_REGISTER_ANALYSIS_EVALUATION)
-    monkeypatch.setattr(cli, "mint_agent_id", lambda _base: "nemo-compass-run-1")
+    monkeypatch.setattr(cli, "mint_agent_id", lambda _base: "nemo-insights-run-1")
     calls: dict[str, object] = {}
 
     def fake_ensure_experiment_group(base_url, workspace, name):
@@ -247,7 +247,7 @@ def test_analyze_registers_and_tags_compass_run_by_default(monkeypatch, tmp_path
         calls["evaluation"] = (base_url, workspace, kwargs)
 
     async def fake_analyze(self, *, record, since, verbose, out_path):
-        calls["observability"] = self.compass_evaluation
+        calls["observability"] = self.analyst_evaluation
         return "REPORT-OK"
 
     monkeypatch.setattr(cli, "ensure_experiment_group", fake_ensure_experiment_group)
@@ -276,15 +276,15 @@ def test_analyze_registers_and_tags_compass_run_by_default(monkeypatch, tmp_path
     assert calls["experiment"] == (
         "http://localhost:8080",
         "default",
-        "nemo-compass",
+        "nemo-insights",
     )
     assert calls["evaluation"] == (
         "http://localhost:8080",
         "default",
         {
-            "name": "nemo-compass-run-1",
+            "name": "nemo-insights-run-1",
             "experiment_group_id": "experiment-1",
-            "dataset_name": "nemo-compass:smoke-agent",
+            "dataset_name": "nemo-insights:smoke-agent",
             "dataset_version": "live",
             "metadata": {
                 "subject": "nvq",
@@ -296,9 +296,9 @@ def test_analyze_registers_and_tags_compass_run_by_default(monkeypatch, tmp_path
     )
     context = calls["observability"]
     assert isinstance(context, CompassEvaluationContext)
-    assert context.evaluation_name == "nemo-compass-run-1"
+    assert context.evaluation_name == "nemo-insights-run-1"
     assert context.test_case_name == "nvq"
-    assert "Experiment 'nemo-compass', Evaluation 'nemo-compass-run-1'" in capsys.readouterr().out
+    assert "Experiment 'nemo-insights', Evaluation 'nemo-insights-run-1'" in capsys.readouterr().out
 
 
 def test_register_analysis_evaluation_leaves_custom_intake_auth_unchanged(monkeypatch):
@@ -341,7 +341,7 @@ def test_analyze_checks_in_insights_with_spdx_and_provenance_by_default(
         monkeypatch.setattr(cli, "_check_in_insights", isolate_checked_in_insights["check_in"])
     if isolate_checked_in_insights["write_manifest"] is not None:
         monkeypatch.setattr(cli, "_write_insights_manifest", isolate_checked_in_insights["write_manifest"])
-    monkeypatch.setattr(cli, "_compass_sha256", lambda: "compass-digest", raising=False)
+    monkeypatch.setattr(cli, "_compass_sha256", lambda: "analyst-digest", raising=False)
     monkeypatch.setattr(sys, "argv", ["evaluation", "analyze", "nvq", "--live"])
 
     async def fake_analyze(self, *, record, since, verbose, out_path):
@@ -362,7 +362,7 @@ def test_analyze_checks_in_insights_with_spdx_and_provenance_by_default(
     assert manifest == {
         "snapshots": {
             "nvq": {
-                "compass_sha256": "compass-digest",
+                "analyst_sha256": "analyst-digest",
                 "insights_sha256": hashlib.sha256(contents.encode()).hexdigest(),
                 "state": "live",
             }
@@ -379,7 +379,7 @@ def test_analyze_checks_in_insights_and_merges_existing_manifest(
     checked_in = tmp_path / "insights"
     checked_in.mkdir()
     prior = {
-        "compass_sha256": "old-compass",
+        "analyst_sha256": "old-analyst",
         "insights_sha256": "old-insights",
         "state": "state-v1",
     }
@@ -395,7 +395,7 @@ def test_analyze_checks_in_insights_and_merges_existing_manifest(
         monkeypatch.setattr(cli, "_check_in_insights", isolate_checked_in_insights["check_in"])
     if isolate_checked_in_insights["write_manifest"] is not None:
         monkeypatch.setattr(cli, "_write_insights_manifest", isolate_checked_in_insights["write_manifest"])
-    monkeypatch.setattr(cli, "_compass_sha256", lambda: "new-compass", raising=False)
+    monkeypatch.setattr(cli, "_compass_sha256", lambda: "new-analyst", raising=False)
     monkeypatch.setattr(sys, "argv", ["evaluation", "analyze", "nvq", "--live"])
 
     async def fake_analyze(self, *, record, since, verbose, out_path):
@@ -486,7 +486,7 @@ def test_analyze_no_baseline_update_leaves_checked_in_files_untouched(monkeypatc
     assert manifest_path.read_text(encoding="utf-8") == "old manifest\n"
 
 
-def _write_compass_lock(
+def _write_analyst_lock(
     path: Path,
     *,
     unrelated_version: str = "1",
@@ -527,15 +527,15 @@ version = "{litellm_version}"
 
 def test_compass_hash_tracks_complete_plugin_source(tmp_path):
     plugin_root = tmp_path / "nemo_compass_plugin"
-    compass_root = plugin_root / "compass"
-    compass_root.mkdir(parents=True)
-    (compass_root / "agent.py").write_text("AGENT = 1\n", encoding="utf-8")
+    analyst_root = plugin_root / "analyst"
+    analyst_root.mkdir(parents=True)
+    (analyst_root / "agent.py").write_text("AGENT = 1\n", encoding="utf-8")
     entities = plugin_root / "entities.py"
     schema = plugin_root / "schema.py"
     entities.write_text("ENTITY = 1\n", encoding="utf-8")
     schema.write_text("SCHEMA = 1\n", encoding="utf-8")
     lockfile = tmp_path / "uv.lock"
-    _write_compass_lock(lockfile)
+    _write_analyst_lock(lockfile)
 
     initial = cli._compass_sha256(plugin_root, lockfile)
     entities.write_text("ENTITY = 2\n", encoding="utf-8")
@@ -551,17 +551,17 @@ def test_compass_hash_tracks_resolved_dependency_closure(tmp_path):
     plugin_root.mkdir()
     (plugin_root / "agent.py").write_text("VALUE = 1\n", encoding="utf-8")
     lockfile = tmp_path / "uv.lock"
-    _write_compass_lock(lockfile)
+    _write_analyst_lock(lockfile)
     initial = cli._compass_sha256(plugin_root, lockfile)
 
-    _write_compass_lock(lockfile, unrelated_version="changed")
+    _write_analyst_lock(lockfile, unrelated_version="changed")
     assert cli._compass_sha256(plugin_root, lockfile) == initial
 
-    _write_compass_lock(lockfile, unrelated_version="changed", transitive_version="changed")
+    _write_analyst_lock(lockfile, unrelated_version="changed", transitive_version="changed")
     transitive_changed = cli._compass_sha256(plugin_root, lockfile)
     assert transitive_changed != initial
 
-    _write_compass_lock(
+    _write_analyst_lock(
         lockfile,
         unrelated_version="changed",
         transitive_version="changed",
@@ -815,7 +815,7 @@ def test_analyze_all_successfully_swaps_complete_set_and_removes_stale_yaml(
     monkeypatch.setattr(cli, "load_registry", lambda _path: _analyze_all_subjects())
     monkeypatch.setattr(cli, "_check_in_insights", isolate_checked_in_insights["check_in"])
     monkeypatch.setattr(cli, "_write_insights_manifest", isolate_checked_in_insights["write_manifest"])
-    monkeypatch.setattr(cli, "_compass_sha256", lambda: "compass-digest")
+    monkeypatch.setattr(cli, "_compass_sha256", lambda: "analyst-digest")
 
     def fake_run(command, *, check):
         name = command[command.index("analyze") + 1]
@@ -835,12 +835,12 @@ def test_analyze_all_successfully_swaps_complete_set_and_removes_stale_yaml(
     snapshots = yaml.safe_load((checked_in / "manifest.yaml").read_text(encoding="utf-8"))["snapshots"]
     assert snapshots == {
         "alpha": {
-            "compass_sha256": "compass-digest",
+            "analyst_sha256": "analyst-digest",
             "insights_sha256": hashlib.sha256((checked_in / "alpha.yaml").read_bytes()).hexdigest(),
             "state": "state-alpha",
         },
         "zeta": {
-            "compass_sha256": "compass-digest",
+            "analyst_sha256": "analyst-digest",
             "insights_sha256": hashlib.sha256((checked_in / "zeta.yaml").read_bytes()).hexdigest(),
             "state": "state-zeta",
         },
@@ -863,7 +863,7 @@ def test_analyze_all_swap_failure_rolls_back_old_directory(
     monkeypatch.setattr(cli, "load_registry", lambda _path: _analyze_all_subjects())
     monkeypatch.setattr(cli, "_check_in_insights", isolate_checked_in_insights["check_in"])
     monkeypatch.setattr(cli, "_write_insights_manifest", isolate_checked_in_insights["write_manifest"])
-    monkeypatch.setattr(cli, "_compass_sha256", lambda: "compass-digest")
+    monkeypatch.setattr(cli, "_compass_sha256", lambda: "analyst-digest")
 
     def fake_run(command, *, check):
         name = command[command.index("analyze") + 1]
@@ -1218,11 +1218,11 @@ def test_analyze_glamr_live_base_preserves_remote_auth(monkeypatch, tmp_path):
     def capture_build_adapter(
         subject: Subject,
         *,
-        compass_evaluation: CompassEvaluationContext | None = None,
+        analyst_evaluation: CompassEvaluationContext | None = None,
     ) -> EvaluationAdapter:
         built.update(subject.config)
-        built["compass_evaluation"] = compass_evaluation
-        return real_build_adapter(subject, compass_evaluation=compass_evaluation)
+        built["analyst_evaluation"] = analyst_evaluation
+        return real_build_adapter(subject, analyst_evaluation=analyst_evaluation)
 
     async def fake_analyze(
         self: IntakeAdapter,
@@ -1244,7 +1244,7 @@ def test_analyze_glamr_live_base_preserves_remote_auth(monkeypatch, tmp_path):
 
     cli.main()
 
-    assert built["compass_evaluation"] is None
+    assert built["analyst_evaluation"] is None
 
     assert built["base_url"] == "https://override.example"
     assert {key: built[key] for key in cli._REMOTE_AUTH_KEYS} == {

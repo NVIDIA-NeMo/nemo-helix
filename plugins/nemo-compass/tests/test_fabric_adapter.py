@@ -137,7 +137,7 @@ async def test_fabric_adapter_returns_unpersisted_compass_result(monkeypatch) ->
     assert result.status is contract.AgentRunStatus.SUCCEEDED
     assert result.output == {
         "response": "No high-impact failures found.",
-        "compass_result": {
+        "analyst_result": {
             "summary": "No high-impact failures found.",
             "new_insights": [],
             "updated_insights": [],
@@ -149,7 +149,7 @@ async def test_fabric_adapter_returns_unpersisted_compass_result(monkeypatch) ->
     assert seen["workspace"] == "workspace"
     assert seen["base_url"] == "http://platform"
     assert seen["client"] is clients[0]
-    assert clients[0].service == "compass"
+    assert clients[0].service == "insights"
     assert seen["since"].isoformat() == "2026-08-21T12:00:00+00:00"
     assert seen["evaluation_id"] == "eval-123"
     assert seen["model_refs"].default == "default/gpt-5"
@@ -187,7 +187,7 @@ async def test_fabric_adapter_reports_configuration_failure() -> None:
 
     assert result.status is contract.AgentRunStatus.FAILED
     assert result.error is not None
-    assert result.error.code == "compass_failed"
+    assert result.error.code == "insights_analyst_failed"
     assert "harness.settings.agent is required" in result.error.message
 
 
@@ -211,8 +211,8 @@ async def test_fabric_adapter_logs_the_failure_with_its_traceback(monkeypatch, c
 
     assert result.status is contract.AgentRunStatus.FAILED
     assert result.error is not None
-    assert result.error.code == "compass_failed"
-    assert "Compass run failed." in caplog.text
+    assert result.error.code == "insights_analyst_failed"
+    assert "Insights analyst run failed." in caplog.text
     assert "gateway returned 502" in caplog.text
     assert "Traceback (most recent call last)" in caplog.text
 
@@ -270,7 +270,7 @@ async def test_relay_activates_fabrics_config_and_scopes_the_agent(
                                     "version": 4,
                                     "atif": {
                                         "enabled": True,
-                                        "agent_name": "compass",
+                                        "agent_name": "insights-analyst",
                                         "storage": [
                                             {
                                                 "type": "http",
@@ -338,7 +338,7 @@ async def test_relay_refuses_an_ambient_user_plugin_file(
         yield _clean_activation()
 
     async def fail_if_called(**kwargs: Any) -> tuple[CompassResult, object]:
-        raise AssertionError("compass ran")
+        raise AssertionError("analyst ran")
 
     monkeypatch.setattr(fabric_adapter, "run_compass_change_set", fail_if_called)
     monkeypatch.setattr(fabric_adapter.relay_plugin, "activate", fake_activate)
@@ -378,7 +378,7 @@ async def test_relay_refuses_plugin_config_inherited_during_activation(
         yield inherited
 
     async def fail_if_called(**kwargs: Any) -> tuple[CompassResult, object]:
-        raise AssertionError("compass ran")
+        raise AssertionError("analyst ran")
 
     monkeypatch.setattr(fabric_adapter, "run_compass_change_set", fail_if_called)
     monkeypatch.setattr(fabric_adapter.relay_plugin, "activate", fake_activate)

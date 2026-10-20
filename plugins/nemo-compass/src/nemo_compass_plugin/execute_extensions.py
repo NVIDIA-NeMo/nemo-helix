@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Compass extensions for generic ``agents.execute`` jobs."""
+"""Insights extensions for generic ``agents.execute`` jobs."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ REPORT_RESULT_NAME = "analysis-report"
 REPORT_FILE_NAME = "analysis-report.txt"
 
 
-class CompassAnalysisExtensionConfig(BaseModel):
+class InsightsAnalysisExtensionConfig(BaseModel):
     """Configuration for persisting an ``CompassResult`` emitted by Fabric."""
 
     model_config = ConfigDict(extra="forbid")
@@ -31,14 +31,14 @@ class CompassAnalysisExtensionConfig(BaseModel):
     local_only: bool = Field(default=False, description="Persist only to the local YAML mirror.")
 
 
-class CompassAnalysisExtension:
-    """Persist the storage-agnostic Compass change-set returned by Fabric."""
+class InsightsAnalysisExtension:
+    """Persist the storage-agnostic Analyst change-set returned by Fabric."""
 
     # ``after_invoke`` parses through this same attribute, so a config the
     # create request accepted is one this extension can actually run. Annotated
     # narrowly rather than as ``type[BaseModel]`` so the parsed config keeps its
     # concrete type at the use sites below.
-    config_model: ClassVar[type[CompassAnalysisExtensionConfig]] = CompassAnalysisExtensionConfig
+    config_model: ClassVar[type[InsightsAnalysisExtensionConfig]] = InsightsAnalysisExtensionConfig
 
     def after_invoke(self, context: ExecuteAgentAfterInvokeContext) -> None:
         config = self.config_model.model_validate(context.config)
@@ -63,14 +63,14 @@ class CompassAnalysisExtension:
 
 def _compass_result_from_fabric_output(output: Any) -> CompassResult:
     if not isinstance(output, dict):
-        raise ValueError("Compass analysis extension expected Fabric output to be a mapping.")
-    if "compass_result" not in output:
+        raise ValueError("Insights analysis extension expected Fabric output to be a mapping.")
+    if "analyst_result" not in output:
         # Validating the whole output instead would report missing CompassResult
         # fields, describing the shape we wanted rather than the key we lacked.
         raise ValueError(
-            f"Compass analysis extension expected Fabric output to contain 'compass_result'; got keys: {list(output)}."
+            f"Insights analysis extension expected Fabric output to contain 'analyst_result'; got keys: {list(output)}."
         )
-    return CompassResult.model_validate(output["compass_result"])
+    return CompassResult.model_validate(output["analyst_result"])
 
 
 async def _persist_result(
@@ -81,7 +81,7 @@ async def _persist_result(
     insights_output: str | None,
     local_only: bool,
 ) -> str:
-    client = get_async_task_nemo_client("compass")
+    client = get_async_task_nemo_client("insights")
     try:
         backend = make_backend(client=client, insights_output=insights_output, local_only=local_only)
         return await backend.persist_result(workspace=workspace, agent=agent, result=result)

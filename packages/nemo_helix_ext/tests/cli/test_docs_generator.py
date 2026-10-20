@@ -47,7 +47,7 @@ def test_cli_docs_use_supported_plugins_regardless_of_environment(monkeypatch):
         "evals",
         "experiments",
         "guardrail",
-        "compass",
+        "insights",
         "intake",
         "safe-synthesizer",
     )

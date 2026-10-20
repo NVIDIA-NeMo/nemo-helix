@@ -1,11 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Request/response schemas for Compass plugin HTTP API.
+"""Request/response schemas for the insights plugin HTTP API.
 
 These live here rather than beside their routes so the SDK resources can share
 them: importing :mod:`nemo_compass_plugin.analysis_runs` from an SDK client
-would drag FastAPI and the whole Compass agent stack in with it.
+would drag FastAPI and the whole Analyst agent stack in with it.
 """
 
 from datetime import datetime

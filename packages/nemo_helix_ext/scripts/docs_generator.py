@@ -698,7 +698,7 @@ _DOCUMENTED_PLUGIN_CLIS = (
     "evals",
     "experiments",
     "guardrail",
-    "compass",
+    "insights",
     "intake",
     "safe-synthesizer",
 )

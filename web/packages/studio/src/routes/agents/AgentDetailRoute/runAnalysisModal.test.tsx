@@ -5,12 +5,12 @@ vi.hoisted(() => {
   vi.stubEnv('VITE_FF_AGENT_OVERVIEW_ENABLED', 'true');
 });
 
-import { getCompassGetAnalysisConfigQueryKey } from '@nemo/sdk/generated/compass/compass-analysis-configs';
-import { getCompassGetStatusesAnalysisRunStatusQueryKey } from '@nemo/sdk/generated/compass/compass-analysis-run-statuses';
+import { getInsightsGetAnalysisConfigQueryKey } from '@nemo/sdk/generated/insights/insights-analysis-configs';
+import { getInsightsGetStatusesAnalysisRunStatusQueryKey } from '@nemo/sdk/generated/insights/insights-analysis-run-statuses';
 import type {
   AnalysisRunResponse,
   CreateAnalysisRunRequest,
-} from '@nemo/sdk/generated/compass/schema';
+} from '@nemo/sdk/generated/insights/schema';
 import { queryClientConfig } from '@studio/api/queryClient';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
@@ -173,7 +173,7 @@ describe('Run analysis modal', () => {
 
     server.use(
       http.get(
-        mockApiUrl(getCompassGetStatusesAnalysisRunStatusQueryKey, ':workspace', ':agent'),
+        mockApiUrl(getInsightsGetStatusesAnalysisRunStatusQueryKey, ':workspace', ':agent'),
         () => HttpResponse.json({ detail: 'Unavailable' }, { status: 503 })
       )
     );
@@ -204,7 +204,7 @@ describe('Run analysis modal', () => {
     });
     server.use(
       http.get(
-        mockApiUrl(getCompassGetStatusesAnalysisRunStatusQueryKey, ':workspace', ':agent'),
+        mockApiUrl(getInsightsGetStatusesAnalysisRunStatusQueryKey, ':workspace', ':agent'),
         async () => {
           await statusGate;
           return HttpResponse.json({
@@ -287,7 +287,7 @@ describe('Run analysis modal', () => {
 
   it('explains why it cannot run when the stored config has no fast model', async () => {
     server.use(
-      http.get(mockApiUrl(getCompassGetAnalysisConfigQueryKey, ':workspace', ':agent'), () =>
+      http.get(mockApiUrl(getInsightsGetAnalysisConfigQueryKey, ':workspace', ':agent'), () =>
         HttpResponse.json({ ...mockAnalysisConfig, fast_model: undefined })
       )
     );

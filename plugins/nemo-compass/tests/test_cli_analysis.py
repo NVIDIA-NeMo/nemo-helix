@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``nemo compass analysis`` — periodic analysis opt-in state."""
+"""``nemo insights analysis`` — periodic analysis opt-in state."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from nemo_compass_plugin import cli
 from nemo_compass_plugin.testing.cli import (
     CONFIGURED_DEFAULT,
     CONFIGURED_FAST,
-    FakeCompassAPI,
+    FakeInsightsAPI,
     config_json,
     page_json,
 )
@@ -27,11 +27,11 @@ CONFIG = "/analysis-configs/demo-agent"
 
 
 def _invoke(app: typer.Typer, *args: str) -> Result:
-    return runner.invoke(app, ["compass", "analysis", *args])
+    return runner.invoke(app, ["insights", "analysis", *args])
 
 
 @pytest.mark.usefixtures("configured_models")
-def test_enable_sends_the_locally_configured_models(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_enable_sends_the_locally_configured_models(app: typer.Typer, api: FakeInsightsAPI) -> None:
     """The Platform process cannot read the operator's config, so the CLI supplies it."""
     api.on("POST", f"{CONFIG}/enable", config_json())
 
@@ -44,7 +44,7 @@ def test_enable_sends_the_locally_configured_models(app: typer.Typer, api: FakeC
 
 
 def test_enable_checks_local_models_before_sending(
-    app: typer.Typer, api: FakeCompassAPI, monkeypatch: pytest.MonkeyPatch
+    app: typer.Typer, api: FakeInsightsAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def missing() -> None:
         raise ValueError("No default model is configured. Run `nemo setup` and select agent models.")
@@ -61,7 +61,7 @@ def test_enable_checks_local_models_before_sending(
 
 
 def test_enable_uses_explicit_model_refs_without_reading_config(
-    app: typer.Typer, api: FakeCompassAPI, monkeypatch: pytest.MonkeyPatch
+    app: typer.Typer, api: FakeInsightsAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def missing() -> None:
         raise ValueError("No default model is configured. Run `nemo setup` and select agent models.")
@@ -78,7 +78,7 @@ def test_enable_uses_explicit_model_refs_without_reading_config(
 
 
 @pytest.mark.usefixtures("configured_models")
-def test_enable_code_prints_the_typed_client_call(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_enable_code_prints_the_typed_client_call(app: typer.Typer, api: FakeInsightsAPI) -> None:
     result = _invoke(app, "enable", "--agent", "demo-agent", "-f", "code")
 
     assert result.exit_code == 0, result.output
@@ -87,7 +87,7 @@ def test_enable_code_prints_the_typed_client_call(app: typer.Typer, api: FakeCom
     assert "EnableAnalysisConfigRequest(" in result.stdout
 
 
-def test_disable_posts_to_the_disable_route(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_disable_posts_to_the_disable_route(app: typer.Typer, api: FakeInsightsAPI) -> None:
     api.on("POST", f"{CONFIG}/disable", config_json(enabled=False))
 
     result = _invoke(app, "disable", "--agent", "demo-agent", "-f", "yaml")
@@ -97,7 +97,7 @@ def test_disable_posts_to_the_disable_route(app: typer.Typer, api: FakeCompassAP
     assert "enabled: false" in result.stdout
 
 
-def test_status_for_one_agent_reads_its_config(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_status_for_one_agent_reads_its_config(app: typer.Typer, api: FakeInsightsAPI) -> None:
     api.on("GET", CONFIG, config_json())
 
     result = _invoke(app, "status", "--agent", "demo-agent")
@@ -106,7 +106,7 @@ def test_status_for_one_agent_reads_its_config(app: typer.Typer, api: FakeCompas
     assert json.loads(result.stdout)["agent"] == "demo-agent"
 
 
-def test_status_without_an_agent_lists_every_config(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_status_without_an_agent_lists_every_config(app: typer.Typer, api: FakeInsightsAPI) -> None:
     api.on("GET", CONFIGS, page_json([config_json()], page_size=100))
 
     result = _invoke(app, "status", "-f", "table", "--no-truncate")

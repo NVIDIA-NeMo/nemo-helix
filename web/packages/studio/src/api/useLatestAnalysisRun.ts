@@ -6,14 +6,14 @@ import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { getJobRefetchInterval } from '@nemo/common/src/utils/query';
 import {
-  useCompassGetAnalysisRun,
-  useCompassListAnalysisRuns,
-} from '@nemo/sdk/generated/compass/compass-analysis-runs';
+  useInsightsGetAnalysisRun,
+  useInsightsListAnalysisRuns,
+} from '@nemo/sdk/generated/insights/insights-analysis-runs';
 import {
-  getCompassListInsightsQueryKey,
-  compassListInsights,
-} from '@nemo/sdk/generated/compass/compass-insights';
-import type { AnalysisRunResponse } from '@nemo/sdk/generated/compass/schema';
+  getInsightsListInsightsQueryKey,
+  insightsListInsights,
+} from '@nemo/sdk/generated/insights/insights-insights';
+import type { AnalysisRunResponse } from '@nemo/sdk/generated/insights/schema';
 import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { analysisJobStatus } from '@studio/api/insightsAnalysis';
 import { useQueryClient } from '@tanstack/react-query';
@@ -63,7 +63,7 @@ const countInsightsSince = async (
   since: string
 ): Promise<number | undefined> => {
   try {
-    const { data } = await compassListInsights(workspace, {
+    const { data } = await insightsListInsights(workspace, {
       agent,
       page_size: NEW_FINDINGS_PAGE_SIZE,
       sort: '-created_at',
@@ -90,14 +90,14 @@ export const useLatestAnalysisRun = (
   const toast = useToast();
   const watchedName = useRef<string | null>(null);
 
-  const { data: runs } = useCompassListAnalysisRuns(
+  const { data: runs } = useInsightsListAnalysisRuns(
     workspace,
     { agent, page_size: 1, sort: '-created_at' },
     { query: { enabled: !!agent, refetchInterval: LIST_POLL_MS } }
   );
   const name = runs?.data[0]?.name;
 
-  const { data: detail, isPending: detailPending } = useCompassGetAnalysisRun(
+  const { data: detail, isPending: detailPending } = useInsightsGetAnalysisRun(
     workspace,
     name ?? '',
     {
@@ -126,7 +126,7 @@ export const useLatestAnalysisRun = (
     if (status === HelixJobStatus.completed) {
       void (async () => {
         await queryClient.invalidateQueries({
-          queryKey: getCompassListInsightsQueryKey(workspace),
+          queryKey: getInsightsListInsightsQueryKey(workspace),
         });
         toast.success(completionMessage(await countInsightsSince(workspace, agent, requestedAt)));
       })();

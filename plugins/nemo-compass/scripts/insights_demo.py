@@ -2,11 +2,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Seed or clean a local NeMo Compass Studio demo through public HTTP APIs.
+"""Seed or clean a local NeMo Insights Studio demo through public HTTP APIs.
 
 From the repository root::
 
-    uv sync --group compass
+    uv sync --group insights
     services/intake/scripts/spans/run_clickhouse.sh
     cd web && VITE_FF_OPTIMIZER_ENABLED=preview pnpm --filter nemo-studio-ui build:fastapi && cd ..
     NHX_INTAKE_CLICKHOUSE_URL=http://localhost:8123 uv run nemo services run \
@@ -40,7 +40,7 @@ CLICKHOUSE_RECOVERY_COMMAND = (
     "services/intake/scripts/spans/run_clickhouse.sh, then restart the platform with "
     "NHX_INTAKE_CLICKHOUSE_URL=http://localhost:8123"
 )
-COMPASS_INSTALL_COMMAND = "uv sync --group compass"
+INSIGHTS_INSTALL_COMMAND = "uv sync --group insights"
 _BASE_TIME = datetime(2026, 7, 20, 12, 0, tzinfo=timezone.utc)
 _SOURCE_URL = "https://github.com/NVIDIA-NeMo/nemo-helix/commit"
 _SUPPORT_AGENT = ("support-agent", "nvidia/nemotron-mini")
@@ -274,9 +274,9 @@ class DemoAPI:
         self._request("GET", "/health/ready")
         openapi = self._request("GET", "/openapi.json").json()
         paths = openapi.get("paths", {})
-        if "/apis/compass/v2/workspaces/{workspace}/insights" not in paths:
+        if "/apis/insights/v2/workspaces/{workspace}/insights" not in paths:
             raise DemoError(
-                f"Compass service is unavailable. Install the optional plugin with: {COMPASS_INSTALL_COMMAND}"
+                f"Insights service is unavailable. Install the optional plugin with: {INSIGHTS_INSTALL_COMMAND}"
             )
         response = self._request(
             "GET",
@@ -309,7 +309,7 @@ class DemoAPI:
                 expected=(200, 201, 409),
                 json={
                     "name": DEMO_WORKSPACE,
-                    "description": "Deterministic local NeMo Compass Studio demo.",
+                    "description": "Deterministic local NeMo Insights Studio demo.",
                 },
             )
             if response.status_code != 409:
@@ -320,7 +320,7 @@ class DemoAPI:
     def create_insight(self, insight: InsightSpec) -> str:
         response = self._request(
             "POST",
-            _workspace_path("compass", "/insights"),
+            _workspace_path("insights", "/insights"),
             expected=(201,),
             json={
                 "title": insight.title,
@@ -335,7 +335,7 @@ class DemoAPI:
     def update_insight_traces(self, insight_id: str, trace_refs: tuple[str, ...]) -> None:
         self._request(
             "PATCH",
-            _workspace_path("compass", f"/insights/{insight_id}"),
+            _workspace_path("insights", f"/insights/{insight_id}"),
             json={"evidence": [{"trace_id": ref} for ref in trace_refs]},
         )
 

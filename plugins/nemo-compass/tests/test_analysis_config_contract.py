@@ -13,13 +13,13 @@ from nemo_compass_plugin.sdk_resources.analysis_configs import (
     _build_status_update_body,
     _build_update_body,
 )
-from nemo_compass_plugin.service import CompassService
+from nemo_compass_plugin.service import InsightsService
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError, get_entity_client
 
 
 def _app(entity_client: AsyncMock) -> FastAPI:
     app = FastAPI()
-    for spec in CompassService().get_routers():
+    for spec in InsightsService().get_routers():
         app.include_router(spec.router, prefix=spec.prefix)
     app.dependency_overrides[get_entity_client] = lambda: entity_client
     return app

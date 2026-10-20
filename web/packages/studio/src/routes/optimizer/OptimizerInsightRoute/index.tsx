@@ -8,12 +8,12 @@ import { KVPair } from '@nemo/common/src/components/KVPair';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import {
-  getCompassGetInsightQueryKey,
-  getCompassListInsightsQueryKey,
-  useCompassGetInsight,
-  useCompassUpdateInsight,
-} from '@nemo/sdk/generated/compass/compass-insights';
-import type { InsightStatus } from '@nemo/sdk/generated/compass/schema';
+  getInsightsGetInsightQueryKey,
+  getInsightsListInsightsQueryKey,
+  useInsightsGetInsight,
+  useInsightsUpdateInsight,
+} from '@nemo/sdk/generated/insights/insights-insights';
+import type { InsightStatus } from '@nemo/sdk/generated/insights/schema';
 import {
   Anchor,
   Button,
@@ -44,16 +44,21 @@ export const OptimizerInsightRoute: FC = () => {
   const queryClient = useQueryClient();
   const toast = useToast();
 
-  const { data: insight, isLoading, isError, refetch } = useCompassGetInsight(workspace, insightId);
+  const {
+    data: insight,
+    isLoading,
+    isError,
+    refetch,
+  } = useInsightsGetInsight(workspace, insightId);
 
-  const { mutate: updateInsight, isPending: isUpdating } = useCompassUpdateInsight({
+  const { mutate: updateInsight, isPending: isUpdating } = useInsightsUpdateInsight({
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({
-          queryKey: getCompassGetInsightQueryKey(workspace, insightId),
+          queryKey: getInsightsGetInsightQueryKey(workspace, insightId),
         });
         queryClient.invalidateQueries({
-          queryKey: getCompassListInsightsQueryKey(workspace),
+          queryKey: getInsightsListInsightsQueryKey(workspace),
         });
       },
       onError: () => toast.error('Failed to update insight.'),

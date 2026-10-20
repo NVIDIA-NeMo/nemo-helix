@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Compass evaluation (maintainer tooling)
+# Insights analyst evaluation (maintainer tooling)
 
 Evaluates Compass against registered telemetry **subjects** and
 emits Insights for comparison. This maintainer tooling calls the shared Python
@@ -73,7 +73,7 @@ Every deviation is one explicit flag:
 Each `evaluation/insights/manifest.yaml` snapshot records:
 
 - `state` — the exact subject pin or explicit/live source label.
-- `compass_sha256` — all Python source under
+- `analyst_sha256` — all Python source under
   `plugins/nemo-compass/src/nemo_compass_plugin`, plus the canonical resolved
   dependency closure rooted at `nemo-compass-plugin` in the root `uv.lock`.
 - `insights_sha256` — the checked-in YAML bytes after the SPDX header is added.
@@ -107,8 +107,6 @@ state_s3_endpoint = "https://pdx.s8k.io"
 state_s3_region = "us-east-1"
 state_s3_bucket = "insights-analyst-evaluation-dataset"
 ```
-
-The bucket keeps its original name so existing fixture pins remain usable.
 
 Each subject's `state = "state-vN"` key in `evaluations.toml` pins the exact object
 that bare `analyze <subject>` downloads. The corresponding object key is
@@ -213,7 +211,7 @@ filter (which AND-pins every span read to that run) — that is what scopes the
 analysis. The matching **Experiment** entity registered on the `-oracle` workspace
 is metadata for the UI (run-picker + leaderboard), not the scoping mechanism.
 For standard Platform subjects, every `analyze` also creates a separate
-Evaluation under the `nemo-compass` Experiment and associates Compass's own
+Evaluation under the `nemo-insights` Experiment and associates Compass's own
 OTLP trace with that Evaluation and the subject-derived test case. The source
 Evaluation ID scopes what Compass reads; Compass Evaluation ID tags what
 Compass emits. Workspaces therefore stop accumulating while each source run
@@ -299,4 +297,4 @@ committed pin for one run with `analyze <subject> --state state-vN`.
 
 - Run `uv run python -m evaluation doctor` to check the configured subjects.
 - Edit [`evaluations.toml`](evaluations.toml) to add a subject or update a state pin.
-- See the [NeMo Compass README](../README.md) for the product Compass CLI and plugin architecture.
+- See the [NeMo Insights README](../README.md) for the product Analyst CLI and plugin architecture.

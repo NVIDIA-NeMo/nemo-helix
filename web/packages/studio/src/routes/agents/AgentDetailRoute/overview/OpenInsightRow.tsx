@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
-import type { InsightListItem } from '@nemo/sdk/generated/compass/schema';
+import type { InsightListItem } from '@nemo/sdk/generated/insights/schema';
 import { Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import type { FC } from 'react';
 

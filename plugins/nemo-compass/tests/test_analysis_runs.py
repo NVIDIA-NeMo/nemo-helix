@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The Compass analysis-runs facade over the generic ``agents.execute`` job."""
+"""The Insights analysis-runs facade over the generic ``agents.execute`` job."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from nemo_compass_plugin.analysis_runs import (
     mint_analysis_run_name,
     submit_analysis_run,
 )
-from nemo_compass_plugin.config import CompassConfig
+from nemo_compass_plugin.config import InsightsConfig
 from nemo_compass_plugin.entities import AnalysisRun
 from nemo_compass_plugin.schema import AnalysisRunPage
 from nemo_helix_plugin.agents.types import CreateExecuteJobRequest
@@ -41,7 +41,7 @@ from pydantic import ValidationError
 
 DEFAULT_MODEL = "default/big"
 FAST_MODEL = "default/small"
-RUN_NAME = "compass-run-0123456789abcdef0123456789abcdef"
+RUN_NAME = "insights-run-0123456789abcdef0123456789abcdef"
 DECLARED_SORT_DEFAULT = "-created_at"
 
 
@@ -262,7 +262,7 @@ def test_execute_job_config_validates_against_the_real_job_schema() -> None:
     config = ExecuteAgentJobConfig.model_validate(spec)
 
     assert config.extension is not None
-    assert config.extension.kind == "compass.analysis"
+    assert config.extension.kind == "insights.analysis"
 
 
 def test_the_extension_is_scoped_to_the_agent_and_workspace() -> None:
@@ -279,7 +279,7 @@ def test_the_extension_is_scoped_to_the_agent_and_workspace() -> None:
 
 
 def test_compass_is_submitted_inline_with_the_requested_models() -> None:
-    """There is no Compass Agent entity; the request composes one per run."""
+    """There is no Analyst Agent entity; the request composes one per run."""
     spec = build_execute_agent_job_config(_request(), workspace="team-a", run_name=RUN_NAME)
 
     config = ExecuteAgentJobConfig.model_validate(spec)
@@ -287,7 +287,7 @@ def test_compass_is_submitted_inline_with_the_requested_models() -> None:
     assert isinstance(config.agent, AgentInline)
     assert config.agent.config["models"]["default"]["model"] == DEFAULT_MODEL
     assert config.agent.config["models"]["fast"]["model"] == FAST_MODEL
-    assert config.agent.config["harnesses"]["compass"]["settings"]["agent"] == "demo-agent"
+    assert config.agent.config["harnesses"]["insights"]["settings"]["agent"] == "demo-agent"
 
 
 def test_read_scope_reaches_the_inline_compass_settings() -> None:
@@ -298,7 +298,7 @@ def test_read_scope_reaches_the_inline_compass_settings() -> None:
     )
 
     assert isinstance(config.agent, AgentInline)
-    settings = config.agent.config["harnesses"]["compass"]["settings"]
+    settings = config.agent.config["harnesses"]["insights"]["settings"]
     assert settings["since"] == "2026-08-01T00:00:00+00:00"
     assert settings["evaluation_id"] == "eval-123"
 
@@ -312,7 +312,7 @@ def test_ethos_is_inlined_into_the_compass_harness_settings() -> None:
     )
 
     assert isinstance(config.agent, AgentInline)
-    assert config.agent.config["harnesses"]["compass"]["settings"]["ethos"] == "# Ethos\n\nBe careful."
+    assert config.agent.config["harnesses"]["insights"]["settings"]["ethos"] == "# Ethos\n\nBe careful."
 
 
 def test_ethos_is_omitted_when_unset() -> None:
@@ -321,7 +321,7 @@ def test_ethos_is_omitted_when_unset() -> None:
     )
 
     assert isinstance(config.agent, AgentInline)
-    assert "ethos" not in config.agent.config["harnesses"]["compass"]["settings"]
+    assert "ethos" not in config.agent.config["harnesses"]["insights"]["settings"]
 
 
 @pytest.mark.parametrize("field", ["agent", "evaluation_id", "ethos", "default_model", "fast_model"])
@@ -342,7 +342,7 @@ def test_surrounding_whitespace_is_trimmed_before_it_reaches_the_inline_compass(
     )
 
     assert isinstance(config.agent, AgentInline)
-    settings = config.agent.config["harnesses"]["compass"]["settings"]
+    settings = config.agent.config["harnesses"]["insights"]["settings"]
     assert settings["agent"] == "demo-agent"
     assert settings["evaluation_id"] == "eval-123"
     assert settings["ethos"] == "# Ethos"
@@ -398,8 +398,8 @@ async def test_the_job_takes_the_run_name_so_the_link_needs_no_write_back() -> N
 
 @pytest.mark.parametrize("profile", ["default", "cpu-cluster"])
 async def test_on_demand_submission_uses_configured_job_profile(profile: str) -> None:
-    config = CompassConfig()
-    config.analysis.job_profile = profile
+    config = InsightsConfig()
+    config.analyst.job_profile = profile
     set_nemo_config_override(config)
     try:
         jobs = _StubExecuteJobs()
@@ -407,7 +407,7 @@ async def test_on_demand_submission_uses_configured_job_profile(profile: str) ->
         assert response.job is not None
         assert jobs.requests[0].profile == profile
     finally:
-        clear_nemo_config_override(CompassConfig)
+        clear_nemo_config_override(InsightsConfig)
 
 
 async def test_scheduler_submission_preserves_name_profile_and_platform_url() -> None:

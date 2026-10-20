@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Compass extensions for generic execute-agent jobs."""
+"""Insights extensions for generic execute-agent jobs."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from nemo_compass_plugin.execute_extensions import REPORT_RESULT_NAME, CompassAnalysisExtension
+from nemo_compass_plugin.execute_extensions import REPORT_RESULT_NAME, InsightsAnalysisExtension
 from nemo_helix_plugin.agents.execute_extensions import (
     ExecuteAgentAfterInvokeContext,
     FabricRuntimeResult,
@@ -48,7 +48,7 @@ class FakeBackend:
         return "Persisted analysis report"
 
 
-def test_compass_extension_persists_compass_result_and_saves_report(
+def test_insights_extension_persists_compass_result_and_saves_report(
     ctx: JobContext,
     monkeypatch,
 ) -> None:
@@ -58,17 +58,17 @@ def test_compass_extension_persists_compass_result_and_saves_report(
     monkeypatch.setattr("nemo_compass_plugin.execute_extensions.get_async_task_nemo_client", lambda service: client)
     monkeypatch.setattr("nemo_compass_plugin.execute_extensions.make_backend", lambda **_kwargs: backend)
 
-    extension = CompassAnalysisExtension()
+    extension = InsightsAnalysisExtension()
     extension.after_invoke(
         ExecuteAgentAfterInvokeContext(
             ctx=ctx,
             config={"agent": "research-agent"},
-            agent_name="compass",
+            agent_name="analyst",
             fabric_result=FabricRuntimeResult(
                 status="succeeded",
                 output={
                     "response": "summary",
-                    "compass_result": {
+                    "analyst_result": {
                         "summary": "summary",
                         "new_insights": [],
                         "updated_insights": [],
@@ -85,20 +85,20 @@ def test_compass_extension_persists_compass_result_and_saves_report(
     assert report_path.read_text() == "Persisted analysis report"
 
 
-def test_compass_extension_names_the_missing_compass_result_key(ctx: JobContext) -> None:
+def test_insights_extension_names_the_missing_compass_result_key(ctx: JobContext) -> None:
     """An output without the key is a wiring problem, not a malformed CompassResult."""
-    extension = CompassAnalysisExtension()
+    extension = InsightsAnalysisExtension()
 
     with pytest.raises(ValueError) as excinfo:
         extension.after_invoke(
             ExecuteAgentAfterInvokeContext(
                 ctx=ctx,
                 config={"agent": "research-agent"},
-                agent_name="compass",
+                agent_name="analyst",
                 fabric_result=FabricRuntimeResult(status="succeeded", output={"response": "summary"}),
             )
         )
 
     message = str(excinfo.value)
-    assert "compass_result" in message
+    assert "analyst_result" in message
     assert "'response'" in message, "the message should show what the output actually carried"

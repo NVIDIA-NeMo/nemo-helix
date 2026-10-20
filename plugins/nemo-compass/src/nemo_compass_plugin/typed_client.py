@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Typed HTTP client for Compass plugin APIs used outside the plugin."""
+"""Typed HTTP client for the Insights plugin APIs used outside the plugin."""
 
 from __future__ import annotations
 
@@ -13,28 +13,28 @@ from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.endpoint import get
 from nemo_helix_plugin.client.method import method
 
-_COMPASS_BASE = "/apis/compass/v2/workspaces/{workspace}"
+_INSIGHTS_BASE = "/apis/insights/v2/workspaces/{workspace}"
 
 
-@get(f"{_COMPASS_BASE}/insights/{{insight_id}}")
+@get(f"{_INSIGHTS_BASE}/insights/{{insight_id}}")
 @abstractmethod
 def get_insight_endpoint(*, workspace: str | None = None, insight_id: str) -> Insight: ...
 
 
-class _CompassMethods:
+class _InsightsMethods:
     get_insight_response = method(get_insight_endpoint)
 
 
-class CompassClient(_CompassMethods, NemoClient):
-    """Sync client for the Compass API."""
+class InsightsClient(_InsightsMethods, NemoClient):
+    """Sync client for the Insights API."""
 
     def get_insight(self, *, workspace: str | None = None, insight_id: str) -> Insight:
         response = self.get_insight_response(workspace=workspace, insight_id=insight_id)
         return entity_from_response(Insight, response.http_response.json())
 
 
-class AsyncCompassClient(_CompassMethods, AsyncNemoClient):
-    """Async client for the Compass API."""
+class AsyncInsightsClient(_InsightsMethods, AsyncNemoClient):
+    """Async client for the Insights API."""
 
     async def get_insight(self, *, workspace: str | None = None, insight_id: str) -> Insight:
         response = await self.get_insight_response(workspace=workspace, insight_id=insight_id)

@@ -26,7 +26,7 @@ failing a run whose platform writes already succeeded.
 :class:`LocalCompassBackend` never touches the plugin API, listing from and
 persisting to the file alone. It is **maintainer tooling, not a user-facing
 mode**: the insights evaluation treats the YAML as the artifact under test and runs
-against subjects that expose Intake but not Compass plugin (see
+against subjects that expose Intake but not the Insights plugin (see
 ``evaluation/README.md``). There is no CLI flag for it; only ``make_backend``'s
 ``local_only`` argument selects it.
 
@@ -139,7 +139,7 @@ def _merge_eval_filter(filter_obj: FilterParam | None, *, evaluation_id: str | N
     """AND-pin the run scope onto a span filter.
 
     Mirrors ``_merge_since_filter``: a set ``evaluation_id`` is forced onto every
-    read (overwriting any model-supplied value), so a run-scoped Compass backend never
+    read (overwriting any model-supplied value), so a run-scoped analyst never
     reads across runs that share a workspace. ``None`` is a no-op.
     """
     if evaluation_id is None:
@@ -307,7 +307,7 @@ class CompassBackend(ABC):
     ) -> InsightPage:
         """List existing insights so Compass can dedupe its findings.
 
-        The remote backend lists from Compass plugin API; the local
+        The remote backend lists from the Insights plugin API; the local
         backend lists from its YAML file, since the target deployment may not
         have the plugin installed.
         """
@@ -385,7 +385,7 @@ class InsightsFileStore:
 
     Shared by the local backend (as its store) and the remote backend (as its
     mirror). Writes preserve any other top-level keys the document carries, so
-    a hand-maintained file keeps its own metadata across Compass runs.
+    a hand-maintained file keeps its own metadata across analyst runs.
     """
 
     def __init__(self, path: Path) -> None:
@@ -421,7 +421,7 @@ class InsightsFileStore:
 
 
 class RemoteCompassBackend(CompassBackend):
-    """Persist insights via Compass plugin API, optionally mirroring to a file.
+    """Persist insights via the Insights plugin API, optionally mirroring to a file.
 
     Translates the SDK's HTTP 404 on an update into the backend-neutral
     not-found error so the persistence logic doesn't depend on ``httpx``
@@ -434,7 +434,7 @@ class RemoteCompassBackend(CompassBackend):
 
     @property
     def _insights(self):
-        return self.client.compass.insights
+        return self.client.insights.insights
 
     async def list_insights(
         self,
@@ -591,7 +591,7 @@ class LocalCompassBackend(CompassBackend):
     Maintainer tooling for the insights evaluation, not a user-facing mode — no CLI
     flag reaches it. The evaluation treats the YAML as the artifact under test
     (checked in, hashed, diffed across runs) and analyzes subjects that expose
-    Intake but not Compass plugin, so its runs must neither require nor
+    Intake but not the Insights plugin, so its runs must neither require nor
     touch platform Insight rows.
 
     Reads of traces/spans/annotations still hit the live platform, but insights
@@ -667,7 +667,7 @@ class LocalCompassBackend(CompassBackend):
         lines.extend(result.notes)
 
         self.store.write_records(records)
-        return f"{result.summary}\n\nWrote compass result to {self.path}\n" + "\n".join(lines)
+        return f"{result.summary}\n\nWrote analyst result to {self.path}\n" + "\n".join(lines)
 
     async def list_insights(
         self,
@@ -709,7 +709,7 @@ def make_backend(
 ) -> CompassBackend:
     """Select Compass backend.
 
-    Results are written through Compass plugin API on *client*, and
+    Results are written through the Insights plugin API on *client*, and
     *insights_output* (when set) additionally receives a mirror of what the
     platform stored. *local_only* is reserved for the insights evaluation: it skips
     the platform and makes *insights_output* the sole store, so a path is

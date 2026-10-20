@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Compass Fabric adapter descriptor and the config built for it.
+"""The Insights analyst Fabric adapter descriptor and the config built for it.
 
 These exercise the real Fabric planner rather than a hand-rolled schema copy,
 so an invalid ``config.accepts`` key or an untranslatable harness kind fails
@@ -88,8 +88,8 @@ def test_installed_descriptor_matches_the_source() -> None:
 def test_built_config_is_a_valid_agent_config() -> None:
     config = _compass_config()
 
-    assert config.name == "compass"
-    assert config.default_harness == "compass"
+    assert config.name == "insights-analyst"
+    assert config.default_harness == "insights"
     assert config.environment.provider == "local"
 
 
@@ -123,7 +123,7 @@ def test_compass_adapter_resolves_the_forwarded_pair() -> None:
 
 
 def test_optional_read_settings_are_omitted_when_unset() -> None:
-    settings = _built_config()["harnesses"]["compass"]["settings"]
+    settings = _built_config()["harnesses"]["insights"]["settings"]
 
     assert set(settings) == {"agent", "workspace"}
 
@@ -134,7 +134,7 @@ def test_optional_read_settings_are_carried_when_set() -> None:
         evaluation_id="eval-123",
         base_url="http://platform:8080",
         enable_observability=False,
-    )["harnesses"]["compass"]["settings"]
+    )["harnesses"]["insights"]["settings"]
 
     assert settings["since"] == "2026-08-01T00:00:00+00:00"
     assert settings["evaluation_id"] == "eval-123"
@@ -170,7 +170,7 @@ def test_fabric_plans_a_config_carrying_an_ethos(tmp_path: Path) -> None:
     _require_installed_descriptor()
 
     config = _compass_config(ethos="# Ethos\n\nBe careful.")
-    assert config.harnesses["compass"].settings["ethos"] == "# Ethos\n\nBe careful."
+    assert config.harnesses["insights"].settings["ethos"] == "# Ethos\n\nBe careful."
 
     assert fabric.Fabric().plan(translate_agent_config(config), base_dir=tmp_path) is not None
 

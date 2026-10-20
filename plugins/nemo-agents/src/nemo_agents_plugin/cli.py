@@ -210,7 +210,7 @@ class _LazyAgentCliGroup(NhxGroup):
     ``discover_agent_cli()`` (``nemo_helix_plugin.discovery``) fully imports
     every ``nemo.cli.agents`` entry point up front, which makes plain ``nemo
     agents -h`` pay the import cost of every contributing plugin (e.g. the
-    nemo-compass analysis stack) even though none of them is being invoked.
+    nemo-compass analyst stack) even though none of them is being invoked.
     This group instead lists subcommand names from cheap entry-point metadata
     and only imports/builds a given plugin's Typer app when that specific
     subcommand name is resolved by Click — including when rendering its own

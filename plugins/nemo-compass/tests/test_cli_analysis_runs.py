@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``nemo compass analysis-runs`` — submit and inspect analysis runs."""
+"""``nemo insights analysis-runs`` — submit and inspect analysis runs."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from nemo_compass_plugin.testing.cli import (
     CONFIGURED_DEFAULT,
     CONFIGURED_FAST,
     RUN_NAME,
-    FakeCompassAPI,
+    FakeInsightsAPI,
     WireState,
     app_with_state,
     page_json,
@@ -33,11 +33,11 @@ pytestmark = pytest.mark.usefixtures("configured_models")
 
 
 def _invoke(app: typer.Typer, *args: str) -> Result:
-    return runner.invoke(app, ["compass", "analysis-runs", *args])
+    return runner.invoke(app, ["insights", "analysis-runs", *args])
 
 
 def _create(app: typer.Typer, *args: str) -> Result:
-    return runner.invoke(app, ["compass", "analysis-runs", "create", "--agent", "demo-agent", *args])
+    return runner.invoke(app, ["insights", "analysis-runs", "create", "--agent", "demo-agent", *args])
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ def _create(app: typer.Typer, *args: str) -> Result:
 # ---------------------------------------------------------------------------
 
 
-def test_create_submits_a_run_and_prints_it_as_json(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_create_submits_a_run_and_prints_it_as_json(app: typer.Typer, api: FakeInsightsAPI) -> None:
     api.on("POST", RUNS, run_response_json())
 
     result = _create(app)
@@ -59,7 +59,7 @@ def test_create_submits_a_run_and_prints_it_as_json(app: typer.Typer, api: FakeC
     assert printed["run"]["created_at"] == "2026-09-01T12:00:00Z"
 
 
-def test_create_falls_back_to_the_configured_model_pair(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_create_falls_back_to_the_configured_model_pair(app: typer.Typer, api: FakeInsightsAPI) -> None:
     """The Platform process cannot read the operator's config, so the CLI supplies it."""
     api.on("POST", RUNS, run_response_json())
 
@@ -70,7 +70,7 @@ def test_create_falls_back_to_the_configured_model_pair(app: typer.Typer, api: F
     assert api.requests[0].body["fast_model"] == CONFIGURED_FAST
 
 
-def test_explicit_model_refs_win_over_the_configured_pair(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_explicit_model_refs_win_over_the_configured_pair(app: typer.Typer, api: FakeInsightsAPI) -> None:
     api.on("POST", RUNS, run_response_json())
 
     result = _create(app, "--default-model", "default/big", "--fast-model", "default/small")
@@ -86,7 +86,7 @@ def test_explicit_model_refs_win_over_the_configured_pair(app: typer.Typer, api:
 )
 def test_default_model_flag_needs_no_configured_default(
     app: typer.Typer,
-    api: FakeCompassAPI,
+    api: FakeInsightsAPI,
     monkeypatch: pytest.MonkeyPatch,
     configured_fast: str | None,
     expected_fast: str,
@@ -107,7 +107,7 @@ def test_default_model_flag_needs_no_configured_default(
     assert api.requests[0].body["fast_model"] == expected_fast
 
 
-def test_create_passes_the_requested_read_scope(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_create_passes_the_requested_read_scope(app: typer.Typer, api: FakeInsightsAPI) -> None:
     api.on("POST", RUNS, run_response_json())
 
     result = _create(
@@ -122,9 +122,9 @@ def test_create_passes_the_requested_read_scope(app: typer.Typer, api: FakeCompa
 
 
 def test_create_reads_the_ethos_file_and_sends_its_contents(
-    app: typer.Typer, api: FakeCompassAPI, tmp_path: Path
+    app: typer.Typer, api: FakeInsightsAPI, tmp_path: Path
 ) -> None:
-    """``--ethos`` takes a path like ``nemo compass analyze``; the API wants the Markdown."""
+    """``--ethos`` takes a path like ``nemo insights analyze``; the API wants the Markdown."""
     api.on("POST", RUNS, run_response_json())
     ethos = tmp_path / "ETHOS.md"
     ethos.write_text("# Ethos\n\nBe careful.\n", encoding="utf-8")
@@ -135,7 +135,7 @@ def test_create_reads_the_ethos_file_and_sends_its_contents(
     assert api.requests[0].body["ethos"] == "# Ethos\n\nBe careful."
 
 
-def test_create_without_an_ethos_omits_it(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_create_without_an_ethos_omits_it(app: typer.Typer, api: FakeInsightsAPI) -> None:
     api.on("POST", RUNS, run_response_json())
 
     result = _create(app)
@@ -145,7 +145,7 @@ def test_create_without_an_ethos_omits_it(app: typer.Typer, api: FakeCompassAPI)
 
 
 def test_an_unreadable_ethos_fails_before_anything_is_submitted(
-    app: typer.Typer, api: FakeCompassAPI, tmp_path: Path
+    app: typer.Typer, api: FakeInsightsAPI, tmp_path: Path
 ) -> None:
     """Submitting without it would analyze the agent against no contract at all."""
     result = _create(app, "--ethos", str(tmp_path / "missing.md"))
@@ -156,7 +156,7 @@ def test_an_unreadable_ethos_fails_before_anything_is_submitted(
 
 
 def test_an_empty_ethos_file_fails_before_anything_is_submitted(
-    app: typer.Typer, api: FakeCompassAPI, tmp_path: Path
+    app: typer.Typer, api: FakeInsightsAPI, tmp_path: Path
 ) -> None:
     ethos = tmp_path / "ETHOS.md"
     ethos.write_text("   \n", encoding="utf-8")
@@ -167,7 +167,7 @@ def test_an_empty_ethos_file_fails_before_anything_is_submitted(
     assert api.requests == []
 
 
-def test_a_malformed_since_fails_before_anything_is_submitted(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_a_malformed_since_fails_before_anything_is_submitted(app: typer.Typer, api: FakeInsightsAPI) -> None:
     result = _create(app, "--since", "last tuesday")
 
     assert result.exit_code == 2
@@ -176,7 +176,7 @@ def test_a_malformed_since_fails_before_anything_is_submitted(app: typer.Typer, 
 
 
 def test_missing_configured_models_fail_before_anything_is_submitted(
-    app: typer.Typer, api: FakeCompassAPI, monkeypatch: pytest.MonkeyPatch
+    app: typer.Typer, api: FakeInsightsAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from nemo_compass_plugin import cli
 
@@ -192,7 +192,7 @@ def test_missing_configured_models_fail_before_anything_is_submitted(
     assert api.requests == []
 
 
-def test_create_without_wait_does_not_poll(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_create_without_wait_does_not_poll(app: typer.Typer, api: FakeInsightsAPI) -> None:
     api.on("POST", RUNS, run_response_json())
 
     result = _create(app)
@@ -201,7 +201,7 @@ def test_create_without_wait_does_not_poll(app: typer.Typer, api: FakeCompassAPI
     assert [request.method for request in api.requests] == ["POST"]
 
 
-def test_create_with_wait_polls_the_run_it_just_created(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_create_with_wait_polls_the_run_it_just_created(app: typer.Typer, api: FakeInsightsAPI) -> None:
     api.on("POST", RUNS, run_response_json())
     api.on("GET", RUN, run_response_json("running"), run_response_json("completed"))
 
@@ -217,7 +217,7 @@ def test_create_with_wait_polls_the_run_it_just_created(app: typer.Typer, api: F
     assert "status: running" in result.stderr
 
 
-def test_wait_exits_non_zero_when_the_job_fails(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_wait_exits_non_zero_when_the_job_fails(app: typer.Typer, api: FakeInsightsAPI) -> None:
     """A finished-but-failed job still prints; only the exit code carries the verdict."""
     api.on("POST", RUNS, run_response_json())
     api.on("GET", RUN, run_response_json("error"))
@@ -228,7 +228,7 @@ def test_wait_exits_non_zero_when_the_job_fails(app: typer.Typer, api: FakeCompa
     assert json.loads(result.stdout)["job"]["status"] == "error"
 
 
-def test_wait_timeout_is_reported_as_an_error(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_wait_timeout_is_reported_as_an_error(app: typer.Typer, api: FakeInsightsAPI) -> None:
     api.on("POST", RUNS, run_response_json())
     api.on("GET", RUN, run_response_json("running"))
 
@@ -238,7 +238,7 @@ def test_wait_timeout_is_reported_as_an_error(app: typer.Typer, api: FakeCompass
     assert "did not finish" in " ".join(result.output.split())
 
 
-def test_waiting_on_a_run_whose_job_never_landed_fails_fast(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_waiting_on_a_run_whose_job_never_landed_fails_fast(app: typer.Typer, api: FakeInsightsAPI) -> None:
     api.on("GET", RUN, run_response_json(None))
 
     result = _invoke(app, "get", RUN_NAME, "--wait", "--poll-interval", "0")
@@ -248,17 +248,17 @@ def test_waiting_on_a_run_whose_job_never_landed_fails_fast(app: typer.Typer, ap
     assert len(api.requests) == 1
 
 
-def test_create_code_prints_the_typed_client_call_without_sending(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_create_code_prints_the_typed_client_call_without_sending(app: typer.Typer, api: FakeInsightsAPI) -> None:
     result = _create(app, "-f", "code")
 
     assert result.exit_code == 0, result.output
     assert api.requests == []
-    assert "from nemo_compass_plugin.client import CompassClient" in result.stdout
+    assert "from nemo_compass_plugin.client import InsightsClient" in result.stdout
     assert "client.create_analysis_run(" in result.stdout
     assert f'default_model="{CONFIGURED_DEFAULT}"' in result.stdout
 
 
-def test_wait_cannot_be_rendered_as_code(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_wait_cannot_be_rendered_as_code(app: typer.Typer, api: FakeInsightsAPI) -> None:
     result = _create(app, "--wait", "-f", "code")
 
     assert result.exit_code == 2
@@ -271,7 +271,7 @@ def test_wait_cannot_be_rendered_as_code(app: typer.Typer, api: FakeCompassAPI) 
 # ---------------------------------------------------------------------------
 
 
-def test_list_sends_the_filters_and_prints_a_page_of_runs(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_list_sends_the_filters_and_prints_a_page_of_runs(app: typer.Typer, api: FakeInsightsAPI) -> None:
     api.on("GET", RUNS, page_json([run_json()]))
 
     result = _invoke(app, "list", "--agent", "demo-agent", "--page", "2", "--page-size", "5")
@@ -284,7 +284,7 @@ def test_list_sends_the_filters_and_prints_a_page_of_runs(app: typer.Typer, api:
     assert printed["data"][0]["created_at"] == "2026-09-01T12:00:00Z"
 
 
-def test_list_forwards_an_explicit_sort(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_list_forwards_an_explicit_sort(app: typer.Typer, api: FakeInsightsAPI) -> None:
     """The route accepts a sort, so the CLI has to be able to reach it."""
     api.on("GET", RUNS, page_json([run_json()]))
 
@@ -295,7 +295,7 @@ def test_list_forwards_an_explicit_sort(app: typer.Typer, api: FakeCompassAPI) -
 
 
 @pytest.mark.parametrize("flag", ["--output-format", "--output", "-f"])
-def test_list_accepts_the_standard_output_format_flags(app: typer.Typer, api: FakeCompassAPI, flag: str) -> None:
+def test_list_accepts_the_standard_output_format_flags(app: typer.Typer, api: FakeInsightsAPI, flag: str) -> None:
     api.on("GET", RUNS, page_json([run_json()]))
 
     result = _invoke(app, "list", flag, "yaml")
@@ -304,7 +304,7 @@ def test_list_accepts_the_standard_output_format_flags(app: typer.Typer, api: Fa
     assert f"name: {RUN_NAME}" in result.stdout
 
 
-def test_list_renders_a_table_with_the_default_columns(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_list_renders_a_table_with_the_default_columns(app: typer.Typer, api: FakeInsightsAPI) -> None:
     api.on("GET", RUNS, page_json([run_json()]))
 
     result = _invoke(app, "list", "-f", "table", "--no-truncate")
@@ -317,16 +317,16 @@ def test_list_renders_a_table_with_the_default_columns(app: typer.Typer, api: Fa
     assert "2026-09-01" in result.stdout
 
 
-def test_list_uses_the_global_output_format_preference(api: FakeCompassAPI) -> None:
+def test_list_uses_the_global_output_format_preference(api: FakeInsightsAPI) -> None:
     api.on("GET", RUNS, page_json([run_json()]))
 
-    result = runner.invoke(app_with_state(WireState(api, output_format="csv")), ["compass", "analysis-runs", "list"])
+    result = runner.invoke(app_with_state(WireState(api, output_format="csv")), ["insights", "analysis-runs", "list"])
 
     assert result.exit_code == 0, result.output
     assert result.stdout.splitlines()[0] == "name,agent,evaluation_id,created_at"
 
 
-def test_list_warns_when_more_pages_exist(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_list_warns_when_more_pages_exist(app: typer.Typer, api: FakeInsightsAPI) -> None:
     api.on("GET", RUNS, page_json([run_json()], total_pages=2))
 
     result = _invoke(app, "list")
@@ -335,7 +335,7 @@ def test_list_warns_when_more_pages_exist(app: typer.Typer, api: FakeCompassAPI)
     assert "--all-pages" in result.stderr
 
 
-def test_list_all_pages_fetches_every_page(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_list_all_pages_fetches_every_page(app: typer.Typer, api: FakeInsightsAPI) -> None:
     api.on(
         "GET",
         RUNS,
@@ -350,7 +350,7 @@ def test_list_all_pages_fetches_every_page(app: typer.Typer, api: FakeCompassAPI
     assert [run["name"] for run in json.loads(result.stdout)["data"]] == ["run-a", "run-b"]
 
 
-def test_list_code_prints_the_typed_client_call_without_sending(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_list_code_prints_the_typed_client_call_without_sending(app: typer.Typer, api: FakeInsightsAPI) -> None:
     result = _invoke(app, "list", "--agent", "demo-agent", "-f", "code")
 
     assert result.exit_code == 0, result.output
@@ -364,7 +364,7 @@ def test_list_code_prints_the_typed_client_call_without_sending(app: typer.Typer
 # ---------------------------------------------------------------------------
 
 
-def test_get_prints_the_run_and_its_job(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_get_prints_the_run_and_its_job(app: typer.Typer, api: FakeInsightsAPI) -> None:
     api.on("GET", RUN, run_response_json("completed"))
 
     result = _invoke(app, "get", RUN_NAME)
@@ -374,7 +374,7 @@ def test_get_prints_the_run_and_its_job(app: typer.Typer, api: FakeCompassAPI) -
     assert json.loads(result.stdout)["job"]["status"] == "completed"
 
 
-def test_get_reports_a_run_whose_job_never_landed(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_get_reports_a_run_whose_job_never_landed(app: typer.Typer, api: FakeInsightsAPI) -> None:
     api.on("GET", RUN, run_response_json(None))
 
     result = _invoke(app, "get", RUN_NAME)
@@ -383,7 +383,7 @@ def test_get_reports_a_run_whose_job_never_landed(app: typer.Typer, api: FakeCom
     assert json.loads(result.stdout)["job"] is None
 
 
-def test_get_with_wait_polls_until_the_job_is_terminal(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_get_with_wait_polls_until_the_job_is_terminal(app: typer.Typer, api: FakeInsightsAPI) -> None:
     api.on("GET", RUN, run_response_json("running"), run_response_json("completed"))
 
     result = _invoke(app, "get", RUN_NAME, "--wait", "--poll-interval", "0")
@@ -393,7 +393,7 @@ def test_get_with_wait_polls_until_the_job_is_terminal(app: typer.Typer, api: Fa
     assert json.loads(result.stdout)["job"]["status"] == "completed"
 
 
-def test_get_missing_run_is_a_not_found_error(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_get_missing_run_is_a_not_found_error(app: typer.Typer, api: FakeInsightsAPI) -> None:
     api.on("GET", RUN, {"detail": "Analysis run not found"}, status=404)
 
     result = _invoke(app, "get", RUN_NAME)
@@ -402,7 +402,7 @@ def test_get_missing_run_is_a_not_found_error(app: typer.Typer, api: FakeCompass
     assert "not found" in result.output.lower()
 
 
-def test_get_code_prints_the_typed_client_call_without_sending(app: typer.Typer, api: FakeCompassAPI) -> None:
+def test_get_code_prints_the_typed_client_call_without_sending(app: typer.Typer, api: FakeInsightsAPI) -> None:
     result = _invoke(app, "get", RUN_NAME, "-f", "code")
 
     assert result.exit_code == 0, result.output

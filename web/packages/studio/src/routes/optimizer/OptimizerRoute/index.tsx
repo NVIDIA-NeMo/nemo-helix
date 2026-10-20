@@ -9,8 +9,8 @@ import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { useCompassListInsights } from '@nemo/sdk/generated/compass/compass-insights';
-import type { InsightListItem } from '@nemo/sdk/generated/compass/schema';
+import { useInsightsListInsights } from '@nemo/sdk/generated/insights/insights-insights';
+import type { InsightListItem } from '@nemo/sdk/generated/insights/schema';
 import { Flex, PageHeader, Stack, Tag, Text } from '@nvidia/foundations-react-core';
 import { FeatureFlagBadge } from '@studio/components/FeatureFlagBadge';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -36,7 +36,7 @@ export const OptimizerRoute: FC = () => {
   const sortState = dataViewState.sorting.state[0];
   const sortParam = sortState ? `${sortState.desc ? '-' : ''}${sortState.id}` : '-created_at';
 
-  const { data, isFetching, error } = useCompassListInsights(
+  const { data, isFetching, error } = useInsightsListInsights(
     workspace,
     {
       page: dataViewState.pagination.state.pageIndex + 1,

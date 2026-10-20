@@ -39,7 +39,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.sync_insights == "true":
-        subprocess.run(["uv", "sync", "--group", "compass"], check=True, cwd=PLATFORM_ROOT)
+        subprocess.run(["uv", "sync", "--group", "insights"], check=True, cwd=PLATFORM_ROOT)
 
     config = TAU2_ROOT / "src/tau2/config.py"
     text, count = repoint_judge(config.read_text(encoding="utf-8"), os.environ["TAU2_JUDGE_LLM"])

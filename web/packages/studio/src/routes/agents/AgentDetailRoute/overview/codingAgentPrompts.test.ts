@@ -10,7 +10,7 @@ describe('traceImportPrompt', () => {
     const prompt = traceImportPrompt({ ...params, agent: 'email-triage' });
 
     expect(prompt).toContain('## Then turn the traces into insights');
-    expect(prompt).toContain('nemo compass analysis enable');
+    expect(prompt).toContain('nemo insights analysis enable');
     expect(prompt).toContain('export AGENT_NAME=email-triage');
   });
 
@@ -18,7 +18,7 @@ describe('traceImportPrompt', () => {
     const prompt = traceImportPrompt(params);
 
     expect(prompt).not.toContain('## Then turn the traces into insights');
-    expect(prompt).not.toContain('nemo compass analysis enable');
+    expect(prompt).not.toContain('nemo insights analysis enable');
     expect(prompt).toContain('export AGENT_NAME=<agent-name>');
   });
 });

@@ -7,8 +7,8 @@ vi.hoisted(() => {
 });
 
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
-import { getCompassListInsightsQueryKey } from '@nemo/sdk/generated/compass/compass-insights';
-import type { AnalysisRunResponse, InsightListItem } from '@nemo/sdk/generated/compass/schema';
+import { getInsightsListInsightsQueryKey } from '@nemo/sdk/generated/insights/insights-insights';
+import type { AnalysisRunResponse, InsightListItem } from '@nemo/sdk/generated/insights/schema';
 import { LIST_POLL_MS } from '@studio/api/useLatestAnalysisRun';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
@@ -67,7 +67,7 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
     findings = mockInsights;
     server.use(
       ...analysisRunHandlers(() => (latest ? [latest] : [])),
-      http.get(mockApiUrl(getCompassListInsightsQueryKey, ':workspace'), () =>
+      http.get(mockApiUrl(getInsightsListInsightsQueryKey, ':workspace'), () =>
         HttpResponse.json({
           data: findings,
           pagination: {

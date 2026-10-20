@@ -7,7 +7,7 @@ vi.hoisted(() => {
   vi.stubEnv('VITE_FF_OPTIMIZER_ENABLED', 'true');
 });
 
-import { getCompassListInsightsQueryKey } from '@nemo/sdk/generated/compass/compass-insights';
+import { getInsightsListInsightsQueryKey } from '@nemo/sdk/generated/insights/insights-insights';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
@@ -20,7 +20,7 @@ import { http, HttpResponse } from 'msw';
 
 const agentName = 'react-agent';
 const workspace = workspace1.workspace;
-const INSIGHTS_URL = mockApiUrl(getCompassListInsightsQueryKey, ':workspace');
+const INSIGHTS_URL = mockApiUrl(getInsightsListInsightsQueryKey, ':workspace');
 
 const renderDetail = () =>
   renderRoute(undefined, {
