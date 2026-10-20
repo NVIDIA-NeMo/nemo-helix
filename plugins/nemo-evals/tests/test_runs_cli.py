@@ -175,7 +175,7 @@ def test_experiment_publishes_the_run_to_intake(tmp_path):
     selected = run_request(
         "default/t#" + "a" * 64, spec_file=no_tasks, agent="", sandbox_policy="", dispatcher_profile=None
     )
-    assert selected.spec.tasks.root == "default/t#" + "a" * 64
+    assert isinstance(selected.spec.tasks, TasksetRef) and selected.spec.tasks.root == "default/t#" + "a" * 64
     # --experiment replaces the file's publication before validation, so an invalid one doesn't block it.
     no_tasks.write_text(
         json.dumps(

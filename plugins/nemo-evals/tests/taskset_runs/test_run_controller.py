@@ -5,6 +5,7 @@
 
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import httpx
 import pytest
@@ -46,6 +47,7 @@ class FakeRunJobs:
         self.records: list[AgentEvalResultEntity] = []
         self.cancelled: list[str] = []
         self.stepless: set[str] = set()
+        self.evaluations: Any = None  # a FakeRunEvaluations, for runs that publish to Intake
 
     def put(self, request: CreateHelixJobRequest, status: str) -> None:
         assert request.name is not None

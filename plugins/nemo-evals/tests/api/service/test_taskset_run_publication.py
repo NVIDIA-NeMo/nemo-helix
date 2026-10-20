@@ -78,8 +78,9 @@ async def test_acceptance_creates_the_runs_evaluation_before_any_task_job(
     assert (plan.intake.experiment_id, plan.intake.agent_name) == ("exp-1", "oracle")
     assert outcome.status.warnings[-1] == f"Intake: Evaluation {RUN} in Experiment swe-agent-tuning"
     (job,) = fake_task_jobs.created
-    intake = HarborTaskJobSpec.model_validate(job.spec).spec.publication.intake
-    assert (intake.evaluation_id, intake.required) == (RUN, False)
+    publication = HarborTaskJobSpec.model_validate(job.spec).spec.publication
+    assert publication is not None and publication.intake is not None
+    assert (publication.intake.evaluation_id, publication.intake.required) == (RUN, False)
 
 
 async def test_a_requested_dataset_names_the_evaluations_dataset(service, publishing, fake_evaluations):
