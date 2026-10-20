@@ -28,15 +28,15 @@ from nemo_relay import plugin as relay_plugin
 
 logger = logging.getLogger(__name__)
 
-COMPASS_RELAY_SCOPE = "insights-analyst"
+COMPASS_RELAY_SCOPE = "compass"
 
 
 class CompassAdapterConfigError(ValueError):
-    """The Fabric-projected analyst adapter configuration is invalid."""
+    """The Fabric-projected Compass adapter configuration is invalid."""
 
 
 class CompassRuntime:
-    """Adapter-owned runtime for one Fabric-managed analyst process."""
+    """Adapter-owned runtime for one Fabric-managed Compass process."""
 
     def __init__(self) -> None:
         self._settings: dict[str, Any] = {}
@@ -57,12 +57,12 @@ class CompassRuntime:
         except Exception as error:
             # Log the full exception so it reaches this process's stderr, which
             # is where the job reads a failed run's diagnostics from.
-            logger.exception("Insights analyst run failed.")
+            logger.exception("Compass run failed.")
             return contract.AgentRunResult(
                 status=contract.AgentRunStatus.FAILED,
                 output={"response": str(error)},
                 error=contract.AgentRunError(
-                    code="insights_analyst_failed",
+                    code="compass_failed",
                     message=str(error),
                     retryable=False,
                 ),
@@ -72,7 +72,7 @@ class CompassRuntime:
             status=contract.AgentRunStatus.SUCCEEDED,
             output={
                 "response": result.summary,
-                "analyst_result": result.model_dump(mode="json"),
+                "compass_result": result.model_dump(mode="json"),
             },
         )
 
@@ -129,7 +129,7 @@ class CompassRuntime:
             default=_default_model_ref(self._settings, self._models),
             fast=_fast_model_ref(self._settings, self._models),
         )
-        async with get_async_task_nemo_client("insights") as client:
+        async with get_async_task_nemo_client("compass") as client:
             result, _backend = await run_compass_change_set(
                 agent=target_agent,
                 ethos=ethos,

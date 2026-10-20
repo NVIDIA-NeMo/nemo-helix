@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { insightsGetAnalysisConfig } from '@nemo/sdk/generated/insights/insights-analysis-configs';
-import { insightsCreateAnalysisRun } from '@nemo/sdk/generated/insights/insights-analysis-runs';
+import { compassGetAnalysisConfig } from '@nemo/sdk/generated/compass/compass-analysis-configs';
+import { compassCreateAnalysisRun } from '@nemo/sdk/generated/compass/compass-analysis-runs';
 import type { AtifIngestRequest } from '@nemo/sdk/generated/platform/schema';
 import { readAgentEthos } from '@studio/api/agents/agentEthos';
 import {
@@ -13,16 +13,16 @@ import {
 } from '@studio/api/insightsAnalysis';
 import { AxiosError, AxiosHeaders } from 'axios';
 
-vi.mock('@nemo/sdk/generated/insights/insights-analysis-configs', async (importOriginal) => ({
+vi.mock('@nemo/sdk/generated/compass/compass-analysis-configs', async (importOriginal) => ({
   ...(await importOriginal<
-    typeof import('@nemo/sdk/generated/insights/insights-analysis-configs')
+    typeof import('@nemo/sdk/generated/compass/compass-analysis-configs')
   >()),
-  insightsGetAnalysisConfig: vi.fn(),
+  compassGetAnalysisConfig: vi.fn(),
 }));
 
-vi.mock('@nemo/sdk/generated/insights/insights-analysis-runs', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@nemo/sdk/generated/insights/insights-analysis-runs')>()),
-  insightsCreateAnalysisRun: vi.fn(),
+vi.mock('@nemo/sdk/generated/compass/compass-analysis-runs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@nemo/sdk/generated/compass/compass-analysis-runs')>()),
+  compassCreateAnalysisRun: vi.fn(),
 }));
 
 vi.mock('@studio/api/agents/agentEthos', async (importOriginal) => ({
@@ -30,9 +30,9 @@ vi.mock('@studio/api/agents/agentEthos', async (importOriginal) => ({
   readAgentEthos: vi.fn(),
 }));
 
-const getConfig = vi.mocked(insightsGetAnalysisConfig);
+const getConfig = vi.mocked(compassGetAnalysisConfig);
 const readEthos = vi.mocked(readAgentEthos);
-const createRun = vi.mocked(insightsCreateAnalysisRun);
+const createRun = vi.mocked(compassCreateAnalysisRun);
 
 const config = (overrides: Record<string, unknown> = {}) => ({
   name: 'email-security-triage',
@@ -132,7 +132,7 @@ describe('triggerInsightsRun', () => {
     const result = await triggerInsightsRun('default', 'recipe-agent');
 
     expect(result.status).toBe('not-enabled');
-    expect(result.message).toContain('nemo insights analysis enable --agent recipe-agent');
+    expect(result.message).toContain('nemo compass analysis enable --agent recipe-agent');
     expect(createRun).not.toHaveBeenCalled();
   });
 

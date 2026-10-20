@@ -7,16 +7,31 @@ NeMo Helix plugin for analyzing agent telemetry and persisting actionable insigh
 
 Analysis uses [NeMo Compass](https://github.com/NVIDIA-NeMo/nemo-compass).
 NeMo Helix supplies authenticated trace and model access and stores the resulting insights.
+Compass names the service; an Insight is a finding it produces.
 
-The package is `nemo-compass-plugin`, with Python imports under
-`nemo_compass_plugin` and analysis code in `nemo_compass_plugin.analysis`.
-It continues to expose the Insights service: `nemo insights`, `client.insights`,
-and `/apis/insights/v2`. Existing `insights.analyst` settings, environment
-variables, permissions, and Fabric adapter IDs remain unchanged.
+## Updating existing integrations
+
+The plugin now uses Compass names throughout its public interfaces:
+
+| Before | Now |
+|---|---|
+| `nemo-insights-plugin` package / extra | `nemo-compass-plugin` |
+| `nemo insights` | `nemo compass` |
+| `nemo_insights_plugin` | `nemo_compass_plugin` |
+| `client.insights` | `client.compass` |
+| `/apis/insights/v2` | `/apis/compass/v2` |
+| `insights.analyst` configuration | `compass.analysis` configuration |
+| `NEMO_INSIGHTS_ANALYST_*` | `NEMO_COMPASS_ANALYSIS_*` |
+| `nvidia.fabric.insights-analyst` | `nvidia.fabric.compass` |
+
+Update callers and deployment configuration together. Stored insights, analysis runs,
+and schedules keep their identities. Existing `insights.*` permission grants and
+`insights:read` / `insights:write` OAuth scopes also remain valid.
+The observability opt-out is now `NEMO_COMPASS_OBSERVABILITY=false`.
 
 ## Prerequisites
 
-Use a running NeMo Helix with Intake, Insights, Jobs, and a configured
+Use a running NeMo Helix with Intake, Compass, Jobs, and a configured
 `agents.execute` runtime. The target agent must already have traces in Intake.
 Run `nemo setup` to select default and fast Platform models, or supply
 `--default-model` and `--fast-model` when submitting analysis.
@@ -45,12 +60,12 @@ Submit analysis through NeMo Helix. Replace `<run-name>` with the name
 returned by `create`:
 
 ```bash
-uv run nemo insights analysis-runs create --agent research-agent --workspace default --wait
-uv run nemo insights analysis-runs list --agent research-agent
-uv run nemo insights analysis-runs get "<run-name>"
+uv run nemo compass analysis-runs create --agent research-agent --workspace default --wait
+uv run nemo compass analysis-runs list --agent research-agent
+uv run nemo compass analysis-runs get "<run-name>"
 ```
 
-AnalysisRuns execute through `agents.execute`; the Insights plugin stores the
+AnalysisRuns execute through `agents.execute`; the Compass plugin stores the
 resulting insights in NeMo Helix. `--wait` exits non-zero unless the job
 completes successfully. A run and its backing job share one name.
 
@@ -88,9 +103,9 @@ any Compass Signals that were skipped, with their reason:
 ### Periodic analysis
 
 ```bash
-uv run nemo insights analysis enable --agent research-agent
-uv run nemo insights analysis status
-uv run nemo insights analysis disable --agent research-agent
+uv run nemo compass analysis enable --agent research-agent
+uv run nemo compass analysis status
+uv run nemo compass analysis disable --agent research-agent
 ```
 
 `analysis enable` stores the effective default/fast model pair for scheduled
@@ -103,59 +118,59 @@ to override it. Re-run `enable` after changing the pair.
 The service is mounted under:
 
 ```text
-/apis/insights/v2/workspaces/{workspace}
+/apis/compass/v2/workspaces/{workspace}
 ```
 
-The plugin SDK is available as `client.insights`, including:
+The plugin SDK is available as `client.compass`, including:
 
-- `client.insights.insights`
-- `client.insights.analysis_configs`
-- `client.insights.analysis_runs` — `create`, `list_runs`, `get`, and `wait`
+- `client.compass.insights`
+- `client.compass.analysis_configs`
+- `client.compass.analysis_runs` — `create`, `list_runs`, `get`, and `wait`
   (polls a run until its backing job is terminal)
-- `client.insights.analysis_run_statuses`
+- `client.compass.analysis_run_statuses`
 
 ## Configuration
 
 Periodic analysis is a *deployment* setting, not a per-run one. Like every other
-NeMo plugin it is a `NemoConfig`, so it can be set either in the `insights:`
+NeMo plugin it is a `NemoConfig`, so it can be set either in the `compass:`
 section of the platform config file or through the environment, and the
-environment wins. All settings live under `analyst`, with the
-`NEMO_INSIGHTS_` environment prefix.
+environment wins. All settings live under `analysis`, with the
+`NEMO_COMPASS_` environment prefix.
 
 | Variable | Config key | Default | Meaning |
 |---|---|---|---|
-| `NEMO_INSIGHTS_ANALYST_ENABLED` | `analyst.enabled` | `true` | Whether the periodic analysis controller runs at all. |
-| `NEMO_INSIGHTS_ANALYST_FREQUENCY` | `analyst.frequency` | `daily` | Cadence for each opted-in agent: `daily` or `weekly`. |
-| `NEMO_INSIGHTS_ANALYST_TIMEZONE` | `analyst.timezone` | `UTC` | IANA name (e.g. `America/Denver`) the schedule is interpreted in. Converted to the server clock at evaluation time, so runs hold their local hour across DST. An unknown name fails validation. |
-| — (see below) | `analyst.run_at_hour` | `0` | Local hour-of-day, 0–23, that scheduled runs fire. |
-| — (see below) | `analyst.run_on_weekday` | `monday` | Day scheduled runs fire. Used only when frequency is `weekly`. |
-| — (see below) | `analyst.job_profile` | `default` | Jobs execution profile for scheduled analyst jobs. |
-| — (see below) | `analyst.base_url` | unset | NeMo Helix base URL passed to analyst jobs. When unset, jobs use their active platform context. |
+| `NEMO_COMPASS_ANALYSIS_ENABLED` | `analysis.enabled` | `true` | Whether the periodic analysis controller runs at all. |
+| `NEMO_COMPASS_ANALYSIS_FREQUENCY` | `analysis.frequency` | `daily` | Cadence for each opted-in agent: `daily` or `weekly`. |
+| `NEMO_COMPASS_ANALYSIS_TIMEZONE` | `analysis.timezone` | `UTC` | IANA name (e.g. `America/Denver`) the schedule is interpreted in. Converted to the server clock at evaluation time, so runs hold their local hour across DST. An unknown name fails validation. |
+| — (see below) | `analysis.run_at_hour` | `0` | Local hour-of-day, 0–23, that scheduled runs fire. |
+| — (see below) | `analysis.run_on_weekday` | `monday` | Day scheduled runs fire. Used only when frequency is `weekly`. |
+| — (see below) | `analysis.job_profile` | `default` | Jobs execution profile for scheduled Compass jobs. |
+| — (see below) | `analysis.base_url` | unset | NeMo Helix base URL passed to Compass jobs. When unset, jobs use their active platform context. |
 
 ```bash
-export NEMO_INSIGHTS_ANALYST_FREQUENCY=weekly
-export NEMO_INSIGHTS_ANALYST_TIMEZONE=America/Denver
+export NEMO_COMPASS_ANALYSIS_FREQUENCY=weekly
+export NEMO_COMPASS_ANALYSIS_TIMEZONE=America/Denver
 ```
 
 ### Setting the underscored fields
 
 Only single-word fields — `enabled`, `frequency`, `timezone` — have a working
 flat environment variable. The plugin sets `env_nested_delimiter="_"`, so a
-name like `NEMO_INSIGHTS_ANALYST_RUN_AT_HOUR` is parsed as the nested path
-`analyst.run.at.hour`, which does not exist. **The variable is ignored
+name like `NEMO_COMPASS_ANALYSIS_RUN_AT_HOUR` is parsed as the nested path
+`analysis.run.at.hour`, which does not exist. **The variable is ignored
 silently: no error, and the default stays in effect.** Prefer the config file
-for these. To set them from the environment anyway, assign the whole `analyst`
+for these. To set them from the environment anyway, assign the whole `analysis`
 object as JSON — unlisted keys keep their defaults:
 
 ```bash
-export NEMO_INSIGHTS_ANALYST='{"run_at_hour": 17, "run_on_weekday": "friday", "job_profile": "gpu"}'
+export NEMO_COMPASS_ANALYSIS='{"run_at_hour": 17, "run_on_weekday": "friday", "job_profile": "gpu"}'
 ```
 
 ### NeMo Compass self-observability
 
 Whenever a platform base URL is available, NeMo Compass exports its own traces
 to Intake's workspace-scoped OTLP endpoint. No opt-in flag or environment
-variable is required. Set `NEMO_INSIGHTS_ANALYST_OBSERVABILITY=false` to opt
+variable is required. Set `NEMO_COMPASS_OBSERVABILITY=false` to opt
 out. The endpoint must be HTTPS unless it is loopback.
 
 ## Development

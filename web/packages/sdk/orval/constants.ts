@@ -61,8 +61,8 @@ export const serviceConfigs: Record<string, ServiceConfig> = {
     apiEnvKeys: ['VITE_PLATFORM_BASE_URL'],
     zod: true,
   },
-  insights: {
-    path: 'insights',
+  compass: {
+    path: 'compass',
     url: `../../../../plugins/nemo-compass/openapi/openapi.yaml`,
     apiEnvKeys: ['VITE_PLATFORM_BASE_URL'],
     zod: true,

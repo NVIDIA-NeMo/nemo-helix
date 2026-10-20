@@ -2,25 +2,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  insightsDisableAnalysisConfig,
-  insightsEnableAnalysisConfig,
-} from '@nemo/sdk/generated/insights/insights-analysis-configs';
-import type { AnalysisConfig } from '@nemo/sdk/generated/insights/schema';
+  compassDisableAnalysisConfig,
+  compassEnableAnalysisConfig,
+} from '@nemo/sdk/generated/compass/compass-analysis-configs';
+import type { AnalysisConfig } from '@nemo/sdk/generated/compass/schema';
 import {
   AnalysisConfigPartialSaveError,
   saveAnalysisConfig,
 } from '@studio/routes/agents/AgentDetailRoute/analysis/saveAnalysisConfig';
 
-vi.mock('@nemo/sdk/generated/insights/insights-analysis-configs', async (importOriginal) => ({
+vi.mock('@nemo/sdk/generated/compass/compass-analysis-configs', async (importOriginal) => ({
   ...(await importOriginal<
-    typeof import('@nemo/sdk/generated/insights/insights-analysis-configs')
+    typeof import('@nemo/sdk/generated/compass/compass-analysis-configs')
   >()),
-  insightsEnableAnalysisConfig: vi.fn(),
-  insightsDisableAnalysisConfig: vi.fn(),
+  compassEnableAnalysisConfig: vi.fn(),
+  compassDisableAnalysisConfig: vi.fn(),
 }));
 
-const enable = vi.mocked(insightsEnableAnalysisConfig);
-const disable = vi.mocked(insightsDisableAnalysisConfig);
+const enable = vi.mocked(compassEnableAnalysisConfig);
+const disable = vi.mocked(compassDisableAnalysisConfig);
 
 const stored = (overrides: Partial<AnalysisConfig> = {}): AnalysisConfig => ({
   id: 'insights-analysis-config-1',

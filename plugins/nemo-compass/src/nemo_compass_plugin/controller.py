@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Periodic Insights analysis scheduler.
+"""Periodic Compass analysis scheduler.
 
 Execution belongs to AnalysisRuns/agents.execute; only cadence, overlap checks,
 and the incremental success cursor remain owned by this controller.
@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 from nemo_compass_plugin.analysis.backend import make_backend
 from nemo_compass_plugin.analysis_runs import mint_analysis_run_name, submit_analysis_run
-from nemo_compass_plugin.config import InsightsConfig
+from nemo_compass_plugin.config import CompassConfig
 from nemo_compass_plugin.entities import AnalysisConfig, AnalysisConfigStatus, AnalysisRunStatus
 from nemo_compass_plugin.schedule import is_due
 from nemo_compass_plugin.schema import CreateAnalysisRunRequest
@@ -61,21 +61,21 @@ _T = TypeVar("_T")
 def _require(value: _T | None, attr: str) -> _T:
     """Return *value* or raise if the controller was used before startup."""
     if value is None:
-        raise RuntimeError(f"InsightsAnalysisController.{attr} accessed before startup")
+        raise RuntimeError(f"CompassAnalysisController.{attr} accessed before startup")
     return value
 
 
-class InsightsAnalysisController(NemoController):
+class CompassAnalysisController(NemoController):
     """Submit insights analyzer jobs for enabled agents on a global cadence."""
 
-    name: ClassVar[str] = "insights-analysis"
-    dependencies: ClassVar[list[str]] = ["entities", "jobs", "agents", "insights"]
+    name: ClassVar[str] = "compass-analysis"
+    dependencies: ClassVar[list[str]] = ["entities", "jobs", "agents", "compass"]
 
     def __init__(self) -> None:
         self._client: AsyncNemoClient | None = None
         self._entities: NemoEntitiesClient | None = None
         self._jobs: AsyncJobsClient | None = None
-        self._config: InsightsConfig | None = None
+        self._config: CompassConfig | None = None
 
     @property
     def client(self) -> AsyncNemoClient:
@@ -90,8 +90,8 @@ class InsightsAnalysisController(NemoController):
         return _require(self._jobs, "jobs")
 
     @property
-    def insights_config(self) -> InsightsConfig:
-        return _require(self._config, "insights_config")
+    def compass_config(self) -> CompassConfig:
+        return _require(self._config, "compass_config")
 
     @property
     def interval_seconds(self) -> float:
@@ -101,18 +101,18 @@ class InsightsAnalysisController(NemoController):
 
     async def on_startup(self) -> None:
         """Initialise the service-principal client and typed clients."""
-        self._config = get_nemo_config(InsightsConfig)
-        self._client = get_async_nemo_client(as_service="insights", internal=True)
+        self._config = get_nemo_config(CompassConfig)
+        self._client = get_async_nemo_client(as_service="compass", internal=True)
         self._entities = NemoEntitiesClient(AsyncEntitiesClient.from_client(self._client))
         self._jobs = AsyncJobsClient.from_client(self._client)
-        logger.info("InsightsAnalysisController started.")
+        logger.info("CompassAnalysisController started.")
 
     async def on_shutdown(self) -> None:
-        logger.info("InsightsAnalysisController shut down.")
+        logger.info("CompassAnalysisController shut down.")
 
     async def list_objects(self) -> list[AnalysisConfig]:
         """Include disabled configs so in-flight runs still get reconciled."""
-        if not self.insights_config.analyst.enabled:
+        if not self.compass_config.analysis.enabled:
             return []
         try:
             configs: list[AnalysisConfig] = []
@@ -149,7 +149,7 @@ class InsightsAnalysisController(NemoController):
         if not config.default_model:
             logger.error(
                 "Analysis config for agent '%s' in workspace '%s' has no model selection; "
-                "run `nemo insights analysis enable --agent %s --workspace %s` again",
+                "run `nemo compass analysis enable --agent %s --workspace %s` again",
                 config.agent,
                 config.workspace,
                 config.agent,
@@ -278,15 +278,15 @@ class InsightsAnalysisController(NemoController):
         return False
 
     def _is_due(self, status: AnalysisRunStatus | None, now: datetime) -> bool:
-        analyst = self.insights_config.analyst
+        compass = self.compass_config.analysis
         anchor = status.last_successful_run_at if status is not None else None
         return is_due(
             now,
             anchor,
-            frequency=analyst.frequency,
-            run_at_hour=analyst.run_at_hour,
-            run_on_weekday=int(analyst.run_on_weekday),
-            tz=ZoneInfo(analyst.timezone),
+            frequency=compass.frequency,
+            run_at_hour=compass.run_at_hour,
+            run_on_weekday=int(compass.run_on_weekday),
+            tz=ZoneInfo(compass.timezone),
         )
 
     async def _submit_analysis_job(
@@ -325,8 +325,8 @@ class InsightsAnalysisController(NemoController):
             models_client=AsyncModelsClient.from_client(self.client),
             entity_client=self.entities,
             name=job_name,
-            profile=self.insights_config.analyst.job_profile,
-            base_url=self.insights_config.analyst.base_url,
+            profile=self.compass_config.analysis.job_profile,
+            base_url=self.compass_config.analysis.base_url,
         )
         logger.info(
             "Submitted insights analysis job '%s' for agent '%s' in workspace '%s'",

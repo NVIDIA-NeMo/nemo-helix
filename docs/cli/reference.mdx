@@ -9915,14 +9915,14 @@ nemo customization unsloth.jobs explain [OPTIONS]
 
 * `--help, -h`: Show this message and exit.
 
-### nemo insights
+### nemo compass
 
-Plugin commands for insights.
+Plugin commands for compass.
 
 **Usage:**
 
 ```shell
-nemo insights [OPTIONS] COMMAND [ARGS]...
+nemo compass [OPTIONS] COMMAND [ARGS]...
 ```
 
 **Help:**
@@ -9934,14 +9934,14 @@ nemo insights [OPTIONS] COMMAND [ARGS]...
 * `analysis`: Manage periodic agent analysis opt-in state.
 * `analysis-runs`: Submit and inspect on-demand analysis runs.
 
-#### nemo insights analysis
+#### nemo compass analysis
 
 Manage periodic agent analysis opt-in state.
 
 **Usage:**
 
 ```shell
-nemo insights analysis [OPTIONS] COMMAND [ARGS]...
+nemo compass analysis [OPTIONS] COMMAND [ARGS]...
 ```
 
 **Help:**
@@ -9954,14 +9954,14 @@ nemo insights analysis [OPTIONS] COMMAND [ARGS]...
 * `disable`: Disable periodic analysis for an agent.
 * `status`: Show periodic analysis opt-in state.
 
-##### nemo insights analysis enable
+##### nemo compass analysis enable
 
 Enable periodic analysis for an agent.
 
 **Usage:**
 
 ```shell
-nemo insights analysis enable [OPTIONS]
+nemo compass analysis enable [OPTIONS]
 ```
 
 **Options:**
@@ -9979,14 +9979,14 @@ nemo insights analysis enable [OPTIONS]
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-##### nemo insights analysis disable
+##### nemo compass analysis disable
 
 Disable periodic analysis for an agent.
 
 **Usage:**
 
 ```shell
-nemo insights analysis disable [OPTIONS]
+nemo compass analysis disable [OPTIONS]
 ```
 
 **Options:**
@@ -10002,14 +10002,14 @@ nemo insights analysis disable [OPTIONS]
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-##### nemo insights analysis status
+##### nemo compass analysis status
 
 Show periodic analysis opt-in state.
 
 **Usage:**
 
 ```shell
-nemo insights analysis status [OPTIONS]
+nemo compass analysis status [OPTIONS]
 ```
 
 **Options:**
@@ -10033,14 +10033,14 @@ nemo insights analysis status [OPTIONS]
 
 * `--all-pages`: Fetch all pages
 
-#### nemo insights analysis-runs
+#### nemo compass analysis-runs
 
 Submit and inspect on-demand analysis runs.
 
 **Usage:**
 
 ```shell
-nemo insights analysis-runs [OPTIONS] COMMAND [ARGS]...
+nemo compass analysis-runs [OPTIONS] COMMAND [ARGS]...
 ```
 
 **Help:**
@@ -10053,7 +10053,7 @@ nemo insights analysis-runs [OPTIONS] COMMAND [ARGS]...
 * `list`: List analysis runs.
 * `get`: Get one analysis run, joined with the live state of its...
 
-##### nemo insights analysis-runs create
+##### nemo compass analysis-runs create
 
 Submit an analysis run for an agent.
 
@@ -10063,7 +10063,7 @@ With --wait, exits non-zero if that job does not complete.
 **Usage:**
 
 ```shell
-nemo insights analysis-runs create [OPTIONS]
+nemo compass analysis-runs create [OPTIONS]
 ```
 
 **Options:**
@@ -10072,7 +10072,7 @@ nemo insights analysis-runs create [OPTIONS]
 * `--workspace, -w`: Workspace the agent belongs to. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--default-model`: Model Entity ref for analysis work. Default: the configured default model.
 * `--fast-model`: Model Entity ref for context summarization. Default: the configured fast model.
-* `--since`: ISO-8601 lower bound enforced on the analyst's trace/span reads.
+* `--since`: ISO-8601 lower bound enforced on Compass's trace/span reads.
 * `--ethos <PATH>`: Path to the agent's Ethos Markdown. Its contents are sent with the run.
 * `--evaluation-id`: Restrict the run to spans from one evaluation.
 * `--timeout-seconds <FLOAT>`: Timeout applied to the backing execute-agent job.
@@ -10088,14 +10088,14 @@ nemo insights analysis-runs create [OPTIONS]
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-##### nemo insights analysis-runs list
+##### nemo compass analysis-runs list
 
 List analysis runs. Job state is not joined — read one run to get it.
 
 **Usage:**
 
 ```shell
-nemo insights analysis-runs list [OPTIONS]
+nemo compass analysis-runs list [OPTIONS]
 ```
 
 **Options:**
@@ -10120,7 +10120,7 @@ nemo insights analysis-runs list [OPTIONS]
 
 * `--all-pages`: Fetch all pages
 
-##### nemo insights analysis-runs get
+##### nemo compass analysis-runs get
 
 Get one analysis run, joined with the live state of its backing job.
 
@@ -10130,7 +10130,7 @@ run's name, and the run can be resubmitted.
 **Usage:**
 
 ```shell
-nemo insights analysis-runs get [OPTIONS] NAME
+nemo compass analysis-runs get [OPTIONS] NAME
 ```
 
 **Arguments:**

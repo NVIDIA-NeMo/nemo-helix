@@ -16,9 +16,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-COMPASS_AGENT_NAME = "insights-analyst"
-COMPASS_ADAPTER_ID = "nvidia.fabric.insights-analyst"
-COMPASS_HARNESS_NAME = "insights"
+COMPASS_AGENT_NAME = "compass"
+COMPASS_ADAPTER_ID = "nvidia.fabric.compass"
+COMPASS_HARNESS_NAME = "compass"
 AGENT_CONFIG_FORMAT = "nemo-agents-spec-v1"
 
 # `provider` is required by the agent config schema but unused by this adapter:

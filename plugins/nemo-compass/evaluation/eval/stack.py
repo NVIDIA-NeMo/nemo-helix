@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Self-contained Analyst stack (ClickHouse + Platform model routing on :8080).
+"""Self-contained Compass stack (ClickHouse + Platform model routing on :8080).
 
 State lives under $RUNNER_TEMP/state.
 `--verify` only re-checks both health endpoints and writes the summary line.

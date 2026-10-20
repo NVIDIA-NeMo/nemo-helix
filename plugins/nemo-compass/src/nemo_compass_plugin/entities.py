@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Insights plugin entity definitions — stored in the NeMo Helix entity store."""
+"""Compass plugin entity definitions — stored in the NeMo Helix entity store."""
 
 from datetime import datetime
 from enum import StrEnum
@@ -35,6 +35,7 @@ class AnalysisConfigStatus(StrEnum):
     ERROR = "error"
 
 
+# Keep entity_type identifiers stable so existing insights, runs, and schedules remain readable.
 class Insight(NemoEntity, EvidenceCompatibility, entity_type="insights_insight"):
     """A persistent problem, theme, or category of issues in the agent under test."""
 
@@ -82,10 +83,10 @@ class Insight(NemoEntity, EvidenceCompatibility, entity_type="insights_insight")
 
 
 class AnalysisRun(NemoEntity, entity_type="insights_analysis_run"):
-    """One Insights analysis run — what was asked for, not how it went.
+    """One Compass analysis run — what was asked for, not how it went.
 
     The record's ``name`` is also the name of the backing ``agents.execute``
-    job. Insights mints that name before submitting, so the link between a run
+    job. Compass mints that name before submitting, so the link between a run
     and its job is *derivable* rather than written back after the fact. That
     removes the dual write, and with it the failure mode where a job exists
     that no run points at: a run whose job name 404s simply never landed. There
@@ -94,7 +95,7 @@ class AnalysisRun(NemoEntity, entity_type="insights_analysis_run"):
 
     Progress is deliberately absent. Status, logs, and results belong to the
     Job and are read from it; mirroring them here would go stale immediately.
-    Insights owns only what no lower layer knows: that this job was an analysis
+    Compass owns only what no lower layer knows: that this job was an analysis
     run, over which agent and scope.
     """
 

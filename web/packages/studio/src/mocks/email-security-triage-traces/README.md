@@ -10,14 +10,14 @@ and configure its default/fast model pair before importing. Trace import itself 
 require an analysis config.
 
 ```bash
-uv run nemo insights analysis enable --agent email-security-triage
+uv run nemo compass analysis enable --agent email-security-triage
 ```
 
 Without a model pair from `nemo setup`, name one explicitly (any Model Entity refs the
 platform can serve), or set it from the agent's **Details** tab in Studio:
 
 ```bash
-uv run nemo insights analysis enable --agent email-security-triage \
+uv run nemo compass analysis enable --agent email-security-triage \
   --default-model default/<model> --fast-model default/<model>
 ```
 
@@ -30,23 +30,23 @@ unset, the default model does both.
 Eighteen hand-written ATIF trajectories for the `email-security-triage` agent, one file per
 trace. They exercise all three of the agent's capabilities and carry three deliberate failure
 clusters, so an evaluation run has something to pass _and_ something to fail on — and so the
-Insights analyst has enough repeated evidence to file a recommendation.
+Compass has enough repeated evidence to file a recommendation.
 
 The two maintenance scripts that read this directory live in `web/packages/studio/scripts/`
 (`bump-trace-timestamps.ts`, `convert-trace-formats.ts`) and run as `pnpm traces:bump` and
 `pnpm traces:convert` from `web/packages/studio`.
 
-| Files                                          | Pattern                          | Why it's here                                                                                                                                                                                                                   |
-| ---------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `trace-01`, `trace-02`, `trace-17`, `trace-18` | `triage_message`, correct        | Healthy contrast. Without these the set reads as uniformly broken and no cluster stands out.                                                                                                                                    |
-| `trace-03`                                     | `review_messages`, correct       | No question typed, two messages, one block each.                                                                                                                                                                                |
-| `trace-04`                                     | `draft_warning`, correct         | `format` scored 0.5 — over the 80-word bar.                                                                                                                                                                                     |
-| `trace-07` … `trace-11`                        | **Routing failure (5 sessions)** | A direct triage question arriving with a _multi-message_ selection falls back to `review_messages`, so Compass gets an ANALYSIS block where the contract promises one word. Verdicts are right; `routing` and `format` are 0.0. |
-| `trace-05`, `trace-12` … `trace-14`            | **Missed phishing (4 sessions)** | Every lure keeps its portal link on the sender's own lookalike domain, so there is no sender/link mismatch to catch. `correctness` 0.0.                                                                                         |
-| `trace-06`, `trace-15`, `trace-16`             | **Timeouts (3 sessions)**        | Terminal `AgentTimeoutError` on long bodies or large selections. Root span errored, no agent step.                                                                                                                              |
+| Files                                          | Pattern                          | Why it's here                                                                                                                                                                                                                       |
+| ---------------------------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `trace-01`, `trace-02`, `trace-17`, `trace-18` | `triage_message`, correct        | Healthy contrast. Without these the set reads as uniformly broken and no cluster stands out.                                                                                                                                        |
+| `trace-03`                                     | `review_messages`, correct       | No question typed, two messages, one block each.                                                                                                                                                                                    |
+| `trace-04`                                     | `draft_warning`, correct         | `format` scored 0.5 — over the 80-word bar.                                                                                                                                                                                         |
+| `trace-07` … `trace-11`                        | **Routing failure (5 sessions)** | A direct triage question arriving with a _multi-message_ selection falls back to `review_messages`, so the analyst gets an ANALYSIS block where the contract promises one word. Verdicts are right; `routing` and `format` are 0.0. |
+| `trace-05`, `trace-12` … `trace-14`            | **Missed phishing (4 sessions)** | Every lure keeps its portal link on the sender's own lookalike domain, so there is no sender/link mismatch to catch. `correctness` 0.0.                                                                                             |
+| `trace-06`, `trace-15`, `trace-16`             | **Timeouts (3 sessions)**        | Terminal `AgentTimeoutError` on long bodies or large selections. Root span errored, no agent step.                                                                                                                                  |
 
 The three bolded clusters are deliberate: each spans at least three sessions with one shared
-trigger condition, which is the shape Compass files on.
+trigger condition, which is the shape the Compass files on.
 
 Each carries `extra.verifier_result.rewards` with `correctness`, `format`, and `routing`, which
 Intake turns into a `harbor.verifier` evaluator span plus one evaluator result per criterion —

@@ -29,7 +29,7 @@ empty target and is not idempotent into a populated workspace. Legacy tar
 bundles (state-v1..v5) are restorable only from a pre-migration checkout; see
 evaluation/README.md.
 
-This drives the shared Python analyst runner against registered subjects; it is not
+This drives the shared Python Compass runner against registered subjects; it is not
 the product CLI and is not shipped in the wheel.
 """
 
@@ -189,7 +189,7 @@ def _resolved_lock_entries(lockfile: dict, lockfile_path: Path) -> list[str]:
         visited.add(request)
         packages = packages_by_name.get(name)
         if not packages:
-            raise ValueError(f"{lockfile_path} is missing Analyst dependency: {name}")
+            raise ValueError(f"{lockfile_path} is missing Compass dependency: {name}")
         for package in packages:
             optional = package.get("optional-dependencies", {})
             entry = {key: value for key, value in package.items() if key not in {"metadata", "optional-dependencies"}}
@@ -206,7 +206,7 @@ def _compass_sha256(
     root: Path = COMPASS_SOURCE_ROOT,
     lockfile_path: Path = COMPASS_LOCKFILE,
 ) -> str:
-    """Fingerprint Insights plugin source and the resolved Analyst dependency closure."""
+    """Fingerprint Compass plugin source and the resolved Compass dependency closure."""
     digest = hashlib.sha256()
     for path in sorted(root.rglob("*.py")):
         digest.update(path.relative_to(root).as_posix().encode())
@@ -238,10 +238,10 @@ def _write_insights_manifest(
             raise ValueError(f"{path} does not contain a snapshots mapping")
         snapshots.update(existing.get("snapshots", {}))
 
-    analyst_sha256 = _compass_sha256()
+    compass_sha256 = _compass_sha256()
     for name, state in states.items():
         snapshots[name] = {
-            "analyst_sha256": analyst_sha256,
+            "analyst_sha256": compass_sha256,
             "insights_sha256": hashlib.sha256((insights_dir / f"{name}.yaml").read_bytes()).hexdigest(),
             "state": state,
         }
@@ -555,15 +555,15 @@ def _remap_record(record: dict, workspace_map: dict[str, str], *, base_url: str)
 
 
 def _ensure_fresh_insights(subject_name: str, update: bool, *, backup_dir: Path | None = None) -> None:
-    """Fresh-by-default analyze: move any prior local insights YAML out of the analyst's path.
+    """Fresh-by-default analyze: move any prior local insights YAML out of Compass's path.
 
-    The analyst backend picks up ``evaluation/tmp/insights_<subject>.yaml`` as its
+    Compass backend picks up ``evaluation/tmp/insights_<subject>.yaml`` as its
     prior-insight seed purely by presence, so a fresh run must take the file off
     that path — it moves into *backup_dir* (the caller's per-invocation
     ``tmp/backup-<UTC stamp>/``; never deleted) with one printed line saying so.
-    ``--update-insights`` (*update*) leaves it in place to seed the analyst with
+    ``--update-insights`` (*update*) leaves it in place to seed Compass with
     priors. Runs for EVERY analyze mode (pinned, ``--state``, ``--live``),
-    before the analyst.
+    before Compass.
     """
     if update:
         return
@@ -597,23 +597,23 @@ def _register_analysis_evaluation(
     record: dict[str, object] | None,
     state_label: str,
 ) -> CompassEvaluationContext | None:
-    """Create the Experiment/Evaluation that owns one Analyst OTLP trace."""
+    """Create the Experiment/Evaluation that owns one Compass OTLP trace."""
     if subject.config.get("auth") == "basic":
         # Custom Intake routing/auth remains owned by the existing subject client.
         return None
     workspace = _analysis_workspace(subject, record)
     if workspace is None:
-        raise RuntimeError("cannot register Analyst evaluation without an analysis workspace")
+        raise RuntimeError("cannot register Compass evaluation without an analysis workspace")
     if subject.type == "benchmark":
         if record is None or not record.get("base_url"):
-            raise RuntimeError("cannot register benchmark Analyst evaluation without a recorded base URL")
+            raise RuntimeError("cannot register benchmark Compass evaluation without a recorded base URL")
         base_url = str(record["base_url"])
         target_agent = str(record.get("agent") or subject_name)
     else:
         base_url = str(subject.config.get("base_url") or "")
         target_agent = str(subject.config.get("agent") or subject_name)
     if not base_url:
-        raise RuntimeError("cannot register Analyst evaluation without a platform base URL")
+        raise RuntimeError("cannot register Compass evaluation without a platform base URL")
     evaluation_name = mint_agent_id(COMPASS_EXPERIMENT_NAME)
     experiment_id = ensure_experiment_group(
         base_url,
@@ -635,7 +635,7 @@ def _register_analysis_evaluation(
         },
     )
     print(
-        f"Analyst telemetry: Experiment '{COMPASS_EXPERIMENT_NAME}', Evaluation '{evaluation_name}', "
+        f"Compass telemetry: Experiment '{COMPASS_EXPERIMENT_NAME}', Evaluation '{evaluation_name}', "
         f"test case '{subject_name}' in workspace '{workspace}'"
     )
     return CompassEvaluationContext(evaluation_name=evaluation_name, test_case_name=subject_name)
@@ -644,10 +644,10 @@ def _register_analysis_evaluation(
 def _warn_insights_workspace_mismatch(subject_name: str, workspace: str | None) -> None:
     """--update-insights sanity check: warn when the kept priors can't be seen.
 
-    The analyst backend scopes the local YAML's prior insights by their
+    Compass backend scopes the local YAML's prior insights by their
     ``workspace`` field, so priors kept from another mode (e.g. a live run's,
     before a pinned analyze that runs under fixture workspaces) silently match
-    nothing — the analyst would skip every update and re-create each insight.
+    nothing — Compass would skip every update and re-create each insight.
     When ZERO records match this analysis's workspace, print one prominent
     warning. Never rewrites the file: the priors stay valid for their own
     workspace.
@@ -1146,7 +1146,7 @@ def main() -> None:
             )
         # Membership check BEFORE restoring: the one workspace the analysis reads
         # (benchmark: the realistic workspace; intake: the workspace) must be in
-        # the bundle, or the analyst would read an empty fixture. The oracle twin
+        # the bundle, or Compass would read an empty fixture. The oracle twin
         # is never required — analysis doesn't read it — but when the bundle
         # carries it, the restore below still ingests it (restore takes every
         # manifest workspace).
@@ -1197,14 +1197,14 @@ def main() -> None:
         with Path(args.summary_md).open("a", encoding="utf-8") as fh:
             fh.write(f"### analyze @ {label} ({args.name})\n")
 
-    # Fresh by default, in every mode: a prior insights YAML on the analyst's
+    # Fresh by default, in every mode: a prior insights YAML on Compass's
     # path would silently seed this run — move it aside unless --update-insights.
     _ensure_fresh_insights(args.name, args.update_insights, backup_dir=backup_dir)
     out = TMP / f"insights_{args.name}.yaml"
     out.parent.mkdir(parents=True, exist_ok=True)
     record = load_run(TMP / f"{args.name}.run.json")
     if not args.live and record is not None:
-        # The analyst must read the fixture workspaces on the platform the bundle
+        # Compass must read the fixture workspaces on the platform the bundle
         # was just restored onto, not the workspaces/URL the record was minted with.
         record = _remap_record(record, workspace_map, base_url=str(subject.config["base_url"]))
         if subject.type == "benchmark":
@@ -1229,15 +1229,15 @@ def main() -> None:
         # workspace this analysis actually reads.
         _warn_insights_workspace_mismatch(args.name, _analysis_workspace(subject, record))
     try:
-        analyst_evaluation = _register_analysis_evaluation(
+        compass_evaluation = _register_analysis_evaluation(
             subject=subject,
             subject_name=args.name,
             record=record,
             state_label=label,
         )
     except RuntimeError as exc:
-        sys.exit(f"could not register Analyst evaluation: {exc}")
-    adapter = build_adapter(subject, analyst_evaluation=analyst_evaluation)
+        sys.exit(f"could not register Compass evaluation: {exc}")
+    adapter = build_adapter(subject, compass_evaluation=compass_evaluation)
     analysis = adapter.analyze(
         record=record,
         since=since,

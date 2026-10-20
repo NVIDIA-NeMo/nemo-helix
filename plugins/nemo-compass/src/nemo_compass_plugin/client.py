@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Typed HTTP clients for the Insights plugin API."""
+"""Typed HTTP clients for Compass plugin API."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.method import method
 
 
-class _InsightsMethods:
+class _CompassMethods:
     create_insight = method(endpoints.create_insight)
     list_insights = method(endpoints.list_insights)
     get_insight = method(endpoints.get_insight)
@@ -32,9 +32,9 @@ class _InsightsMethods:
     get_analysis_run = method(endpoints.get_analysis_run)
 
 
-class InsightsClient(_InsightsMethods, NemoClient):
-    """Sync client for the Insights plugin API."""
+class CompassClient(_CompassMethods, NemoClient):
+    """Sync client for Compass plugin API."""
 
 
-class AsyncInsightsClient(_InsightsMethods, AsyncNemoClient):
-    """Async client for the Insights plugin API."""
+class AsyncCompassClient(_CompassMethods, AsyncNemoClient):
+    """Async client for Compass plugin API."""

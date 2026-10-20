@@ -3,16 +3,16 @@
 
 """E2E tests for Insights analysis runs backed by ``agents.execute`` jobs.
 
-This is the platform-side replacement for running Compass from an
+This is the platform-side replacement for running the Compass from an
 operator's shell: everything here goes through the ``analysis-runs`` API, so
 passing it means the path works on a remotely-deployed platform, where nobody
 needs to execute analysis in an operator's shell.
 
-Compass's model is mocked, deliberately. What is under test is the wiring —
+The Compass's model is mocked, deliberately. What is under test is the wiring —
 run recorded, job submitted under the run's name, Fabric runs the inline
-Analyst, the ``insights.analysis`` extension persists the change-set and saves
+Compass, the ``compass.analysis`` extension persists the change-set and saves
 the report — not whether a real model reaches a good conclusion. Two seeded
-Intake traces pass through trace-intel's evidence streams and compilation,
+Intake traces pass through Compass's evidence streams and compilation,
 with deterministic Nooa model responses.
 """
 
@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
-from nemo_compass_plugin.sdk import InsightsPluginResource
+from nemo_compass_plugin.sdk import CompassPluginResource
 from nemo_helix_plugin.agents.client import AgentsClient
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.inference_middleware import BackendFormat
@@ -38,7 +38,7 @@ from nhx.testing import MockProviderResponse, add_mock_provider, wait_for_model_
 
 from e2e.agents_deploy_helpers import unique_name
 
-# Subprocess jobs, so the run needs no Docker: Compass executes in-process
+# Subprocess jobs, so the run needs no Docker: the Compass executes in-process
 # inside a Fabric local environment, and the mock provider stands in for the
 # model, so nothing here needs a container or a real inference provider.
 pytestmark = [
@@ -61,7 +61,7 @@ INSIGHT_DESCRIPTION = (
     "The retrieval tool returns an empty document set, and the agent produces a "
     "confident answer instead of saying it could not find supporting context."
 )
-TRACE_REF = "trace-insights-analysis-run-e2e"
+TRACE_REF = "trace-compass-analysis-run-e2e"
 TRACE_REFS = [f"{TRACE_REF}-1", f"{TRACE_REF}-2"]
 # Sent inline on the run so the whole ethos chain — request, harness settings,
 # adapter, prompt — is exercised by a real job. We can't assert this makes it
@@ -89,7 +89,7 @@ def _return_result_cell() -> str:
 def _execute_python_response(model: str, code: str) -> dict[str, Any]:
     """A chat completion that calls the CodeAct ``execute_python`` tool."""
     return {
-        "id": "chatcmpl-insights-analysis-run-e2e",
+        "id": "chatcmpl-compass-analysis-run-e2e",
         "object": "chat.completion",
         "model": model,
         "choices": [
@@ -99,7 +99,7 @@ def _execute_python_response(model: str, code: str) -> dict[str, Any]:
                     "content": None,
                     "tool_calls": [
                         {
-                            "id": "call_analyst_execute",
+                            "id": "call_compass_execute",
                             "type": "function",
                             "function": {
                                 "name": "execute_python",
@@ -118,7 +118,7 @@ def _execute_python_response(model: str, code: str) -> dict[str, Any]:
 
 def _plain_response(model: str, content: str) -> dict[str, Any]:
     return {
-        "id": "chatcmpl-insights-analysis-run-e2e-fast",
+        "id": "chatcmpl-compass-analysis-run-e2e-fast",
         "object": "chat.completion",
         "model": model,
         "choices": [
@@ -132,19 +132,19 @@ def _plain_response(model: str, content: str) -> dict[str, Any]:
     }
 
 
-def _mock_analyst_models(client: NemoClient, workspace: str) -> tuple[str, str]:
-    """Register Compass's default/fast Model Entity pair against a mock provider.
+def _mock_compass_models(client: NemoClient, workspace: str) -> tuple[str, str]:
+    """Register the Compass's default/fast Model Entity pair against a mock provider.
 
-    The pair must be workspace-qualified Model Entity refs — Compass
+    The pair must be workspace-qualified Model Entity refs — the Compass
     resolves them through the platform, not as raw provider model ids.
     """
-    default_model = unique_name("analyst-default")
-    fast_model = unique_name("analyst-fast")
+    default_model = unique_name("compass-default")
+    fast_model = unique_name("compass-fast")
 
     provider = add_mock_provider(
         client,
         workspace=workspace,
-        name=unique_name("analyst-provider"),
+        name=unique_name("compass-provider"),
         mock_response_body_by_model={
             # The default model drives the CodeAct loop and ends it on the
             # first turn.
@@ -167,7 +167,7 @@ def _mock_analyst_models(client: NemoClient, workspace: str) -> tuple[str, str]:
     # Create the Model Entities rather than waiting on provider autodiscovery.
     # The models controller reconciles a provider's served_models into entities
     # asynchronously, so relying on it races the run we are about to submit --
-    # and Compass resolves Model Entities, not served-model ids. This is the
+    # and the Compass resolves Model Entities, not served-model ids. This is the
     # same create-then-wait the evaluator e2e does for the same reason.
     models = ModelsClient.from_client(client)
     for name in (default_model, fast_model):
@@ -186,8 +186,8 @@ def _mock_analyst_models(client: NemoClient, workspace: str) -> tuple[str, str]:
 
 
 @pytest.fixture
-def insights(client: NemoClient) -> InsightsPluginResource:
-    return InsightsPluginResource(client)
+def compass(client: NemoClient) -> CompassPluginResource:
+    return CompassPluginResource(client)
 
 
 @pytest.fixture
@@ -204,7 +204,7 @@ def _job_diagnostics(client: NemoClient, workspace: str, job_name: str, prefix: 
     """Explain a failed run with the backing job's own error details and logs."""
     parts = [prefix]
     # Fabric reports an adapter failure as a failed *result*, not an exception,
-    # so the task exits non-zero with nothing in its stdout and Compass's
+    # so the task exits non-zero with nothing in its stdout and the Compass's
     # own error lives only in these results.
     for result_name in (FABRIC_ERROR_RESULT_NAME, FABRIC_RUN_RESULT_NAME):
         try:
@@ -267,7 +267,7 @@ def _created_insight_id(report: str) -> str:
 def test_analysis_run_persists_insights_and_saves_its_report(
     client: NemoClient,
     workspace: str,
-    insights: InsightsPluginResource,
+    compass: CompassPluginResource,
     intake: IntakeClient,
     agents_client: AgentsClient,
 ) -> None:
@@ -277,7 +277,7 @@ def test_analysis_run_persists_insights_and_saves_its_report(
     intake.create_spans(
         workspace=workspace,
         body=DirectSpansIngestRequest(
-            source="insights-e2e",
+            source="compass-e2e",
             spans=[
                 DirectSpanInput(
                     span_id=f"{ref}-root",
@@ -306,9 +306,9 @@ def test_analysis_run_persists_insights_and_saves_its_report(
         time.sleep(1)
     else:
         pytest.fail("Seeded traces did not become queryable")
-    default_model, fast_model = _mock_analyst_models(client, workspace)
+    default_model, fast_model = _mock_compass_models(client, workspace)
 
-    created = insights.analysis_runs.create(
+    created = compass.analysis_runs.create(
         workspace=workspace,
         agent=target_agent,
         default_model=default_model,
@@ -324,7 +324,7 @@ def test_analysis_run_persists_insights_and_saves_its_report(
     assert created.job is not None
     assert created.job["name"] == run_name
 
-    final = insights.analysis_runs.wait(
+    final = compass.analysis_runs.wait(
         workspace=workspace,
         name=run_name,
         timeout=JOB_TIMEOUT_SECONDS,
@@ -335,7 +335,7 @@ def test_analysis_run_persists_insights_and_saves_its_report(
     )
 
     # The run survives as a queryable record, not just as a job.
-    listed = insights.analysis_runs.list_runs(workspace=workspace, agent=target_agent)
+    listed = compass.analysis_runs.list_runs(workspace=workspace, agent=target_agent)
     assert run_name in {run.name for run in listed.data}
     assert final.run.default_model == default_model
     assert final.run.fast_model == fast_model
@@ -350,14 +350,14 @@ def test_analysis_run_persists_insights_and_saves_its_report(
     # The extension persisted the change-set as a real Insight. The report's
     # change log is what says which one: it is written from what the Insights
     # API returned, so its id only exists if the write landed.
-    # Relay carries Compass's own trajectory to Intake. Nothing in this
+    # Relay carries the Compass's own trajectory to Intake. Nothing in this
     # test configures telemetry: the agents plugin wires the export, Fabric
     # resolves it, and the adapter activates it.
-    spans = _wait_for_spans(intake, workspace=workspace, agent_name="insights-analyst")
-    assert spans, "Compass ran but its trajectory never reached Intake"
+    spans = _wait_for_spans(intake, workspace=workspace, agent_name="compass")
+    assert spans, "the Compass ran but its trajectory never reached Intake"
 
     insight_id = _created_insight_id(report)
-    filed = insights.insights.get(workspace=workspace, insight_id=insight_id)
+    filed = compass.insights.get(workspace=workspace, insight_id=insight_id)
     assert filed.title == INSIGHT_TITLE
     assert filed.description == INSIGHT_DESCRIPTION
     assert filed.agent == target_agent

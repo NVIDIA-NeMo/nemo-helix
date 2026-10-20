@@ -25,22 +25,22 @@ dependencies = [
 ]
 
 [project.entry-points."nemo.cli"]
-insights = "nemo_compass_plugin.cli:InsightsCLI"
+compass = "nemo_compass_plugin.cli:CompassCLI"
 
 [project.entry-points."nemo.services"]
-insights = "nemo_compass_plugin.service:InsightsService"
+compass = "nemo_compass_plugin.service:CompassService"
 
 [project.entry-points."nemo.controllers"]
-insights-analysis = "nemo_compass_plugin.controller:InsightsAnalysisController"
+compass-analysis = "nemo_compass_plugin.controller:CompassAnalysisController"
 
 [project.entry-points."nemo.agents.execute_extensions"]
-"insights.analysis" = "nemo_compass_plugin.execute_extensions:InsightsAnalysisExtension"
+"compass.analysis" = "nemo_compass_plugin.execute_extensions:CompassAnalysisExtension"
 
 [project.entry-points."nemo.sdk"]
-insights = "nemo_compass_plugin.sdk:insights_sdk_resources"
+compass = "nemo_compass_plugin.sdk:compass_sdk_resources"
 
 [project.entry-points."nemo.skills"]
-insights = "nemo_compass_plugin.skills:skills_dir"
+compass = "nemo_compass_plugin.skills:skills_dir"
 
 [tool.nemo.openapi]
 

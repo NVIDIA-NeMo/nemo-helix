@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Evaluation subjects for the analyst harness — one table per subject.
+# Evaluation subjects for Compass harness — one table per subject.
 # Top-level keys are shared defaults merged into every subject.
 base_url = "https://nemo-helix-freeplay.dev.aire.nvidia.com"
 state_s3_endpoint = "https://pdx.s8k.io"

@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Insights analyst evaluation (maintainer tooling)
+# Compass evaluation (maintainer tooling)
 
 Evaluates Compass against registered telemetry **subjects** and
 emits Insights for comparison. This maintainer tooling calls the shared Python
@@ -107,6 +107,8 @@ state_s3_endpoint = "https://pdx.s8k.io"
 state_s3_region = "us-east-1"
 state_s3_bucket = "insights-analyst-evaluation-dataset"
 ```
+
+The bucket keeps its original name so existing fixture pins remain usable.
 
 Each subject's `state = "state-vN"` key in `evaluations.toml` pins the exact object
 that bare `analyze <subject>` downloads. The corresponding object key is
@@ -297,4 +299,4 @@ committed pin for one run with `analyze <subject> --state state-vN`.
 
 - Run `uv run python -m evaluation doctor` to check the configured subjects.
 - Edit [`evaluations.toml`](evaluations.toml) to add a subject or update a state pin.
-- See the [NeMo Insights README](../README.md) for the product Analyst CLI and plugin architecture.
+- See the [NeMo Compass README](../README.md) for the product Compass CLI and plugin architecture.

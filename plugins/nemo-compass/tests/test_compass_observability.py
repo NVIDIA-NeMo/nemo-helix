@@ -30,7 +30,7 @@ def test_setup_maps_intake_endpoint_auth_resource_and_session(monkeypatch: pytes
         workspace="workspace",
         target_agent="target-agent",
         evaluation_context=observability.CompassEvaluationContext(
-            evaluation_name="analyst-eval-1",
+            evaluation_name="compass-eval-1",
             test_case_name="smoke/g1",
         ),
     )
@@ -40,8 +40,8 @@ def test_setup_maps_intake_endpoint_auth_resource_and_session(monkeypatch: pytes
     enabled_exporters, attributes = cast(tuple[list[object], dict[str, str]], seen["enable"])
     assert enabled_exporters == [exporter]
     assert attributes["gen_ai.agent.name"] == observability.COMPASS_OBSERVABILITY_AGENT_NAME
-    assert attributes["nemo.insights.target_agent"] == "target-agent"
-    assert attributes["nemo.evaluation.name"] == "analyst-eval-1"
+    assert attributes["nemo.compass.target_agent"] == "target-agent"
+    assert attributes["nemo.evaluation.name"] == "compass-eval-1"
     assert attributes["nemo.test_case.name"] == "smoke/g1"
     assert seen["session"] == configured.session_id
 

@@ -54,7 +54,9 @@ logger = logging.getLogger(__name__)
 # a plugin cannot claim another service's namespace by declaring it: a ``permission_namespace``
 # that disagrees with this mapping fails the plugin closed. Add an entry only when a service is
 # renamed and its permission ids must stay; delete it once the permissions migrate.
-LEGACY_PERMISSION_NAMESPACES: Mapping[str, str] = MappingProxyType({"garak": "auditor", "evals": "evaluator"})
+LEGACY_PERMISSION_NAMESPACES: Mapping[str, str] = MappingProxyType(
+    {"garak": "auditor", "evals": "evaluator", "compass": "insights"}
+)
 
 
 def _method_from_dict(spec: dict[str, Any]) -> AuthzEndpointMethod:

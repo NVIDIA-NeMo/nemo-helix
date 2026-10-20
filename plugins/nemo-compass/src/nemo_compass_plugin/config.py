@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Configuration for the NeMo Insights plugin."""
+"""Configuration for the NeMo Compass plugin."""
 
 from enum import IntEnum, StrEnum
 from typing import ClassVar
@@ -80,23 +80,23 @@ class CompassSchedulerConfig(BaseModel):
 
     job_profile: str = Field(
         default="default",
-        description="Jobs execution profile used for scheduled analyst jobs.",
+        description="Jobs execution profile used for scheduled Compass jobs.",
     )
     base_url: str | None = Field(
         default=None,
         description=(
-            "Optional platform base URL passed to analyst jobs. When unset, jobs use their active platform context."
+            "Optional platform base URL passed to Compass jobs. When unset, jobs use their active platform context."
         ),
     )
 
 
-class InsightsConfig(NemoConfig):
-    """Configuration for the NeMo Insights plugin."""
+class CompassConfig(NemoConfig):
+    """Configuration for the NeMo Compass plugin."""
 
-    plugin_name: ClassVar[str] = "insights"
-    plugin_description: ClassVar[str] = "Configuration for NeMo Insights."
+    plugin_name: ClassVar[str] = "compass"
+    plugin_description: ClassVar[str] = "Configuration for NeMo Compass."
 
-    analyst: CompassSchedulerConfig = Field(
+    analysis: CompassSchedulerConfig = Field(
         default_factory=CompassSchedulerConfig,
-        description="Periodic insights analyst settings.",
+        description="Periodic Compass analysis settings.",
     )

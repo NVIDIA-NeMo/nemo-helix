@@ -691,7 +691,7 @@ nemo_agents_files_telemetry = "nemo_agents_plugin.telemetry.files_service_export
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.agents.execute_extensions"]
-"insights.analysis" = "nemo_compass_plugin.execute_extensions:InsightsAnalysisExtension"
+"compass.analysis" = "nemo_compass_plugin.execute_extensions:CompassAnalysisExtension"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.cli"]
@@ -700,7 +700,7 @@ anonymizer = "nemo_anonymizer_plugin.cli:AnonymizerCLI"
 garak = "nemo_garak.cli:GarakPluginCLI"
 data-designer = "nemo_data_designer_plugin.cli.main:DataDesignerCLI"
 evals = "nemo_evals.cli:EvaluatorPluginCLI"
-insights = "nemo_compass_plugin.cli:InsightsCLI"
+compass = "nemo_compass_plugin.cli:CompassCLI"
 customization = "nemo_customizer.cli:CustomizationCLI"
 guardrail = "nemo_guardrails_plugin.cli:GuardrailCLI"
 intake = "nhx.intake.cli:IntakeCLI"
@@ -721,7 +721,7 @@ platform = "nhx.common.client_factory:HelixNemoClientProvider"
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.controllers"]
 agents-deployment = "nemo_agents_plugin.runner.controller:AgentDeploymentController"
-insights-analysis = "nemo_compass_plugin.controller:InsightsAnalysisController"
+compass-analysis = "nemo_compass_plugin.controller:CompassAnalysisController"
 deployments = "nemo_deployments_plugin.controller:DeploymentsController"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
@@ -788,7 +788,7 @@ garak = "nemo_garak.sdk:garak_sdk_resources"
 data_designer = "nemo_data_designer_plugin.sdk.resources:data_designer_sdk_resources"
 evals = "nemo_evals.sdk.resources:evaluator_sdk_resources"
 safe_synthesizer = "nemo_safe_synthesizer_plugin.sdk.resources:safe_synthesizer_sdk_resources"
-insights = "nemo_compass_plugin.sdk:insights_sdk_resources"
+compass = "nemo_compass_plugin.sdk:compass_sdk_resources"
 customization = "nemo_customizer.sdk.resources:customization_sdk_resources"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
@@ -804,7 +804,7 @@ anonymizer = "nemo_anonymizer_plugin.service:AnonymizerService"
 garak = "nemo_garak.service:GarakPluginService"
 data-designer = "nemo_data_designer_plugin.service:DataDesignerService"
 evals = "nemo_evals.service:EvaluatorPluginService"
-insights = "nemo_compass_plugin.service:InsightsService"
+compass = "nemo_compass_plugin.service:CompassService"
 deployments = "nemo_deployments_plugin.service:DeploymentsService"
 customization = "nemo_customizer.router:CustomizationRouterService"
 builder = "nemo_builder_plugin.service:BuilderService"
@@ -819,7 +819,7 @@ anonymizer = "nemo_anonymizer_plugin.skills:get_skills_path"
 guardrails = "nemo_guardrails_plugin.skills:get_skills_path"
 platform = "nemo_helix_ext.skills:skills_dir"
 safe-synthesizer = "nemo_safe_synthesizer_plugin.skills:get_skills_path"
-insights = "nemo_compass_plugin.skills:skills_dir"
+compass = "nemo_compass_plugin.skills:skills_dir"
 deployments = "nemo_deployments_plugin.skills:skills_dir"
 customizer = "nemo_customizer.skills:get_skills_path"
 

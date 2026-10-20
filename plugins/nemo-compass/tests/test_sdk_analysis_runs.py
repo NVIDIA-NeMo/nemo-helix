@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The ``client.insights.analysis_runs`` SDK sub-resource."""
+"""The ``client.compass.analysis_runs`` SDK sub-resource."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from nemo_compass_plugin.sdk_resources.analysis_runs import (
 )
 from nemo_compass_plugin.types import ListAnalysisRunsQueryParams
 
-RUN_NAME = "insights-run-0123456789abcdef0123456789abcdef"
+RUN_NAME = "compass-run-0123456789abcdef0123456789abcdef"
 DEFAULT_MODEL = "default/big"
 FAST_MODEL = "default/small"
 
@@ -61,7 +61,7 @@ class _StubTypedResponse:
         return None
 
 
-class _StubInsightsClient:
+class _StubCompassClient:
     """Records typed client calls and replays a queued sequence of response bodies.
 
     The last body repeats, so a polling test only has to queue the states it
@@ -81,7 +81,7 @@ class _StubInsightsClient:
         self.calls.append(
             {
                 "method": "POST",
-                "url": f"http://platform/apis/insights/v2/workspaces/{workspace}/analysis-runs",
+                "url": f"http://platform/apis/compass/v2/workspaces/{workspace}/analysis-runs",
                 "json": body.model_dump(mode="json", exclude_unset=True),
             }
         )
@@ -91,7 +91,7 @@ class _StubInsightsClient:
         self.calls.append(
             {
                 "method": "GET",
-                "url": f"http://platform/apis/insights/v2/workspaces/{workspace}/analysis-runs",
+                "url": f"http://platform/apis/compass/v2/workspaces/{workspace}/analysis-runs",
                 "params": query_params,
             }
         )
@@ -101,17 +101,17 @@ class _StubInsightsClient:
         self.calls.append(
             {
                 "method": "GET",
-                "url": f"http://platform/apis/insights/v2/workspaces/{workspace}/analysis-runs/{name}",
+                "url": f"http://platform/apis/compass/v2/workspaces/{workspace}/analysis-runs/{name}",
             }
         )
         return self._next()
 
 
-class _AsyncStubInsightsClient:
-    """Async mirror of :class:`_StubInsightsClient`, delegating to one for recording."""
+class _AsyncStubCompassClient:
+    """Async mirror of :class:`_StubCompassClient`, delegating to one for recording."""
 
     def __init__(self, *bodies: dict[str, Any]) -> None:
-        self._sync = _StubInsightsClient(*bodies)
+        self._sync = _StubCompassClient(*bodies)
 
     @property
     def calls(self) -> list[dict[str, Any]]:
@@ -130,20 +130,20 @@ class _AsyncStubInsightsClient:
 
 
 class _StubParent:
-    def __init__(self, client: _StubInsightsClient) -> None:
+    def __init__(self, client: _StubCompassClient) -> None:
         self._client = client
 
 
 class _AsyncStubParent:
-    def __init__(self, client: _AsyncStubInsightsClient) -> None:
+    def __init__(self, client: _AsyncStubCompassClient) -> None:
         self._client = client
 
 
-def _resource(client: _StubInsightsClient) -> _AnalysisRunResource:
+def _resource(client: _StubCompassClient) -> _AnalysisRunResource:
     return _AnalysisRunResource(_StubParent(client))
 
 
-def _async_resource(client: _AsyncStubInsightsClient) -> _AsyncAnalysisRunResource:
+def _async_resource(client: _AsyncStubCompassClient) -> _AsyncAnalysisRunResource:
     return _AsyncAnalysisRunResource(_AsyncStubParent(client))
 
 
@@ -153,7 +153,7 @@ def _async_resource(client: _AsyncStubInsightsClient) -> _AsyncAnalysisRunResour
 
 
 def test_create_posts_the_request_to_the_analysis_runs_route() -> None:
-    http = _StubInsightsClient()
+    http = _StubCompassClient()
 
     _resource(http).create(
         workspace="team-a",
@@ -162,7 +162,7 @@ def test_create_posts_the_request_to_the_analysis_runs_route() -> None:
         fast_model=FAST_MODEL,
     )
 
-    assert http.calls[0]["url"] == "http://platform/apis/insights/v2/workspaces/team-a/analysis-runs"
+    assert http.calls[0]["url"] == "http://platform/apis/compass/v2/workspaces/team-a/analysis-runs"
     assert http.calls[0]["json"] == {
         "agent": "demo-agent",
         "default_model": DEFAULT_MODEL,
@@ -172,7 +172,7 @@ def test_create_posts_the_request_to_the_analysis_runs_route() -> None:
 
 def test_create_sends_optional_read_scope_when_given() -> None:
     """Unset optionals stay off the wire so the server's defaults apply."""
-    http = _StubInsightsClient()
+    http = _StubCompassClient()
 
     _resource(http).create(
         workspace="default",
@@ -196,7 +196,7 @@ def test_create_sends_optional_read_scope_when_given() -> None:
 
 def test_create_sends_the_ethos_inline() -> None:
     """The Fabric adapter has no Files access, so the Markdown travels in the body."""
-    http = _StubInsightsClient()
+    http = _StubCompassClient()
 
     _resource(http).create(
         workspace="default",
@@ -210,7 +210,7 @@ def test_create_sends_the_ethos_inline() -> None:
 
 
 def test_create_omits_the_ethos_when_unset() -> None:
-    http = _StubInsightsClient()
+    http = _StubCompassClient()
 
     _resource(http).create(workspace="default", agent="demo-agent", default_model=DEFAULT_MODEL, fast_model=FAST_MODEL)
 
@@ -218,7 +218,7 @@ def test_create_omits_the_ethos_when_unset() -> None:
 
 
 async def test_async_create_sends_the_ethos_inline() -> None:
-    http = _AsyncStubInsightsClient()
+    http = _AsyncStubCompassClient()
 
     await _async_resource(http).create(
         workspace="default",
@@ -232,7 +232,7 @@ async def test_async_create_sends_the_ethos_inline() -> None:
 
 
 def test_create_returns_the_run_with_its_store_assigned_id() -> None:
-    response = _resource(_StubInsightsClient()).create(
+    response = _resource(_StubCompassClient()).create(
         workspace="default",
         agent="demo-agent",
         default_model=DEFAULT_MODEL,
@@ -250,7 +250,7 @@ def test_create_returns_the_run_with_its_store_assigned_id() -> None:
 
 
 def test_list_runs_omits_the_agent_filter_when_not_given() -> None:
-    http = _StubInsightsClient({"data": [], "pagination": None, "sort": "-created_at", "filter": None})
+    http = _StubCompassClient({"data": [], "pagination": None, "sort": "-created_at", "filter": None})
 
     _resource(http).list_runs(workspace="default")
 
@@ -258,7 +258,7 @@ def test_list_runs_omits_the_agent_filter_when_not_given() -> None:
 
 
 def test_list_runs_filters_by_agent_and_hydrates_items() -> None:
-    http = _StubInsightsClient(
+    http = _StubCompassClient(
         {
             "data": [_run_body()],
             "pagination": {
@@ -280,7 +280,7 @@ def test_list_runs_filters_by_agent_and_hydrates_items() -> None:
 
 
 def test_list_runs_uses_paginated_response_status_handling() -> None:
-    http = _StubInsightsClient(
+    http = _StubCompassClient(
         {"detail": "permission denied"},
         page_error=RuntimeError("paginated status error"),
     )
@@ -290,7 +290,7 @@ def test_list_runs_uses_paginated_response_status_handling() -> None:
 
 
 def test_get_reads_one_run_joined_with_its_job() -> None:
-    http = _StubInsightsClient(_response_body(status="active"))
+    http = _StubCompassClient(_response_body(status="active"))
 
     response = _resource(http).get(workspace="default", name=RUN_NAME)
 
@@ -301,7 +301,7 @@ def test_get_reads_one_run_joined_with_its_job() -> None:
 
 def test_a_run_with_no_job_has_no_status_and_is_not_terminal() -> None:
     """A missing job means submission never landed — not that the run finished."""
-    response = _resource(_StubInsightsClient(_response_body(status=None))).get(workspace="default", name=RUN_NAME)
+    response = _resource(_StubCompassClient(_response_body(status=None))).get(workspace="default", name=RUN_NAME)
 
     assert response.job is None
     assert response.job_status is None
@@ -313,7 +313,7 @@ def test_a_run_with_no_job_has_no_status_and_is_not_terminal() -> None:
     [("completed", True), ("error", True), ("cancelled", True), ("pending", False), ("active", False)],
 )
 def test_job_terminality_follows_the_platform_job_states(status: str, terminal: bool) -> None:
-    response = _resource(_StubInsightsClient(_response_body(status=status))).get(workspace="default", name=RUN_NAME)
+    response = _resource(_StubCompassClient(_response_body(status=status))).get(workspace="default", name=RUN_NAME)
 
     assert response.job_is_terminal is terminal
 
@@ -324,7 +324,7 @@ def test_job_terminality_follows_the_platform_job_states(status: str, terminal: 
 
 
 def test_wait_polls_until_the_job_is_terminal() -> None:
-    http = _StubInsightsClient(
+    http = _StubCompassClient(
         _response_body(status="created"),
         _response_body(status="active"),
         _response_body(status="completed"),
@@ -345,7 +345,7 @@ def test_wait_polls_until_the_job_is_terminal() -> None:
 
 def test_wait_returns_a_failed_job_rather_than_raising() -> None:
     """A job that ran and failed is an answer; the caller decides what it means."""
-    response = _resource(_StubInsightsClient(_response_body(status="error"))).wait(
+    response = _resource(_StubCompassClient(_response_body(status="error"))).wait(
         workspace="default", name=RUN_NAME, poll_interval=0
     )
 
@@ -355,7 +355,7 @@ def test_wait_returns_a_failed_job_rather_than_raising() -> None:
 
 def test_wait_refuses_to_poll_a_run_that_was_never_submitted() -> None:
     """Its job will never appear, so polling would only burn the timeout."""
-    http = _StubInsightsClient(_response_body(status=None))
+    http = _StubCompassClient(_response_body(status=None))
 
     with pytest.raises(AnalysisRunNotSubmittedError) as excinfo:
         _resource(http).wait(workspace="default", name=RUN_NAME, poll_interval=0)
@@ -365,7 +365,7 @@ def test_wait_refuses_to_poll_a_run_that_was_never_submitted() -> None:
 
 
 def test_wait_times_out_with_the_last_status_it_saw() -> None:
-    http = _StubInsightsClient(_response_body(status="active"))
+    http = _StubCompassClient(_response_body(status="active"))
 
     with pytest.raises(AnalysisRunTimeoutError) as excinfo:
         _resource(http).wait(workspace="default", name=RUN_NAME, timeout=0, poll_interval=0)
@@ -379,7 +379,7 @@ def test_wait_times_out_with_the_last_status_it_saw() -> None:
 
 
 async def test_async_create_matches_the_sync_request() -> None:
-    http = _AsyncStubInsightsClient()
+    http = _AsyncStubCompassClient()
 
     response = await _async_resource(http).create(
         workspace="team-a",
@@ -388,12 +388,12 @@ async def test_async_create_matches_the_sync_request() -> None:
         fast_model=FAST_MODEL,
     )
 
-    assert http.calls[0]["url"] == "http://platform/apis/insights/v2/workspaces/team-a/analysis-runs"
+    assert http.calls[0]["url"] == "http://platform/apis/compass/v2/workspaces/team-a/analysis-runs"
     assert response.run.id == "entity-123"
 
 
 async def test_async_wait_polls_until_terminal() -> None:
-    http = _AsyncStubInsightsClient(
+    http = _AsyncStubCompassClient(
         _response_body(status="active"),
         _response_body(status="completed"),
     )
@@ -405,7 +405,7 @@ async def test_async_wait_polls_until_terminal() -> None:
 
 
 async def test_async_get_reads_one_run() -> None:
-    http = _AsyncStubInsightsClient(_response_body(status="active"))
+    http = _AsyncStubCompassClient(_response_body(status="active"))
 
     response = await _async_resource(http).get(workspace="default", name=RUN_NAME)
 

@@ -7,7 +7,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Protocol, TypeAlias, TypedDict
 
-from nemo_compass_plugin.client import AsyncInsightsClient, InsightsClient
+from nemo_compass_plugin.client import AsyncCompassClient, CompassClient
 from nemo_compass_plugin.entities import (
     AnalysisConfig,
     AnalysisConfigStatus,
@@ -43,13 +43,13 @@ _NullableDatetimeUpdate: TypeAlias = datetime | None | _Unset
 
 
 class _ResourceParent(Protocol):
-    """The slice of the insights SDK namespace this sub-resource needs."""
+    """The slice of the Compass SDK namespace this sub-resource needs."""
 
-    _client: InsightsClient
+    _client: CompassClient
 
 
 class _AsyncResourceParent(Protocol):
-    _client: AsyncInsightsClient
+    _client: AsyncCompassClient
 
 
 def _list_params(
@@ -122,7 +122,7 @@ class _AnalysisConfigResource:
         self._parent = parent
 
     @property
-    def _client(self) -> InsightsClient:
+    def _client(self) -> CompassClient:
         return self._parent._client
 
     def enable(self, *, workspace: str, agent: str, default_model: str, fast_model: str) -> AnalysisConfig:
@@ -184,7 +184,7 @@ class _AsyncAnalysisConfigResource:
         self._parent = parent
 
     @property
-    def _client(self) -> AsyncInsightsClient:
+    def _client(self) -> AsyncCompassClient:
         return self._parent._client
 
     async def enable(self, *, workspace: str, agent: str, default_model: str, fast_model: str) -> AnalysisConfig:
@@ -246,7 +246,7 @@ class _AnalysisRunStatusResource:
         self._parent = parent
 
     @property
-    def _client(self) -> InsightsClient:
+    def _client(self) -> CompassClient:
         return self._parent._client
 
     def list_statuses(
@@ -306,7 +306,7 @@ class _AsyncAnalysisRunStatusResource:
         self._parent = parent
 
     @property
-    def _client(self) -> AsyncInsightsClient:
+    def _client(self) -> AsyncCompassClient:
         return self._parent._client
 
     async def list_statuses(

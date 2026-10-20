@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
-from nemo_compass_plugin.config import InsightsConfig
-from nemo_compass_plugin.controller import InsightsAnalysisController
+from nemo_compass_plugin.config import CompassConfig
+from nemo_compass_plugin.controller import CompassAnalysisController
 from nemo_compass_plugin.entities import AnalysisConfig, AnalysisConfigStatus, AnalysisRunStatus
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NotFoundError, raise_for_status
@@ -39,7 +39,7 @@ def _pending() -> AnalysisRunStatus:
 
 
 def _controller(job_status: HelixJobStatus = HelixJobStatus.COMPLETED):
-    controller = InsightsAnalysisController()
+    controller = CompassAnalysisController()
     entities = AsyncMock(spec=NemoEntitiesClient)
     entities.update.side_effect = lambda status: status
     jobs = AsyncMock(spec=AsyncJobsClient)
@@ -49,7 +49,7 @@ def _controller(job_status: HelixJobStatus = HelixJobStatus.COMPLETED):
     controller._jobs = jobs
     # The controller only derives typed clients from this idle client.
     controller._client = AsyncNemoClient(base_url="http://insights.test")
-    controller._config = InsightsConfig()
+    controller._config = CompassConfig()
     return controller, entities, jobs
 
 

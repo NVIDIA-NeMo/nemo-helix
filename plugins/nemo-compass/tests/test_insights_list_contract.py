@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_compass_plugin.entities import Insight
 from nemo_compass_plugin.evidence import TraceEvidence
-from nemo_compass_plugin.service import InsightsService
+from nemo_compass_plugin.service import CompassService
 from nemo_helix_plugin.entity_client import NemoPaginationInfo, get_entity_client
 from nhx.intake.entities.experiments import ExperimentGroup
 from nhx.intake.spans.api.dependencies import get_spans_service
@@ -32,7 +32,7 @@ def _insight(name: str, entity_id: str) -> Insight:
 
 def _app(entity_client: AsyncMock, spans_service: AsyncMock) -> FastAPI:
     app = FastAPI()
-    for spec in InsightsService().get_routers():
+    for spec in CompassService().get_routers():
         app.include_router(spec.router, prefix=spec.prefix)
     app.dependency_overrides[get_entity_client] = lambda: entity_client
     app.dependency_overrides[get_spans_service] = lambda: spans_service

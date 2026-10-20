@@ -389,15 +389,15 @@ class TestDiscoverAgentCLI:
         mock_eps.assert_called_once_with(group=AGENT_CLI_GROUP)
 
     def test_loads_cli_class_under_agent_name(self) -> None:
-        class _AnalystCLI(_MinimalPluginCLI):
-            name = "analyst"
+        class _CompassCLI(_MinimalPluginCLI):
+            name = "compass"
 
-        ep = _make_ep("analyst", _AnalystCLI)
+        ep = _make_ep("compass", _CompassCLI)
         with patch("nemo_helix_plugin.discovery.entry_points", return_value=[ep]):
             result = discover_agent_cli()
 
-        assert result["analyst"] is _AnalystCLI
-        assert isinstance(result["analyst"]().get_cli(), typer.Typer)
+        assert result["compass"] is _CompassCLI
+        assert isinstance(result["compass"]().get_cli(), typer.Typer)
 
 
 # ---------------------------------------------------------------------------

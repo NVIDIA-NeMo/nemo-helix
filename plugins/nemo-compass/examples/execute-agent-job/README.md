@@ -20,7 +20,7 @@ backed by the generic `agents.execute` job.
 - A running local platform with Intake, Agents, Jobs, and Insights, and a
   running ClickHouse for Intake (see `services/intake/README.md`).
 - `nemo setup` completed, so a default/fast Model Entity pair exists. The
-  Analyst resolves its models as Platform Model Entities. Each ref is a
+  Compass resolves its models as Platform Model Entities. Each ref is a
   workspace-qualified entity name such as
   `default/nvidia-nemotron-3-super-120b-a12b`, not a raw provider model id.
 
@@ -68,7 +68,7 @@ This posts to `POST .../ingest/spans` and `POST .../annotations`, then reads
 both back.
 
 **The corpus is sized against Compass's own bar, not for brevity.** The
-Analyst files an Insight only for patterns it can evidence with at least
+Compass files an Insight only for patterns it can evidence with at least
 three representative traces, and it ranks issues recurring across many
 sessions above one-offs — so a handful of sessions reliably produces "no
 high-impact failure patterns detected". The spec expands to 84 spans across
@@ -118,7 +118,7 @@ Pass `--dry-run` to see the counts first.
 Submit an analysis run and wait for it to finish:
 
 ```bash
-nemo insights analysis-runs create --agent demo-agent --wait
+nemo compass analysis-runs create --agent demo-agent --wait
 ```
 
 `--wait` reports each status change on stderr and prints the final run as
@@ -137,17 +137,17 @@ explicitly:
 
 ```python
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_compass_plugin.sdk import InsightsPluginResource
+from nemo_compass_plugin.sdk import CompassPluginResource
 
 client = NemoClient.from_config()
-insights = InsightsPluginResource(client)
-response = insights.analysis_runs.create(
+compass = CompassPluginResource(client)
+response = compass.analysis_runs.create(
     workspace="default",
     agent="demo-agent",
     default_model="default/<default-model>",
     fast_model="default/<fast-model>",
 )
-final = insights.analysis_runs.wait(workspace="default", name=response.run.name)
+final = compass.analysis_runs.wait(workspace="default", name=response.run.name)
 print(final.job_status)
 ```
 
@@ -159,9 +159,9 @@ its credentials. Pass `context=` to use another CLI context.
 If you did not use `--wait`, check on the run:
 
 ```bash
-nemo insights analysis-runs list --agent demo-agent
-nemo insights analysis-runs get <run-name>          # joined with its job
-nemo insights analysis-runs get <run-name> --wait   # poll to a terminal state
+nemo compass analysis-runs list --agent demo-agent
+nemo compass analysis-runs get <run-name>          # joined with its job
+nemo compass analysis-runs get <run-name> --wait   # poll to a terminal state
 ```
 
 A run and its backing job share one name, and `get` returns them together.
@@ -170,7 +170,7 @@ resubmitted.
 
 ### 4. Download the report
 
-The `analysis-report` result, saved by the Insights execute extension, is the
+The `analysis-report` result, saved by the Compass execute extension, is the
 durable record of what the run did:
 
 ```bash
@@ -198,11 +198,11 @@ root, save this as a file and run it with `uv run python <file>`:
 
 ```python
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_compass_plugin.sdk import InsightsPluginResource
+from nemo_compass_plugin.sdk import CompassPluginResource
 
 client = NemoClient.from_config()
-insights = InsightsPluginResource(client)
-page = insights.insights.list_insights(workspace="default", agent="demo-agent")
+compass = CompassPluginResource(client)
+page = compass.insights.list_insights(workspace="default", agent="demo-agent")
 for insight in page.data:
     print(f"[{insight.status}] {insight.title} ({len(insight.evidence)} traces)")
 ```

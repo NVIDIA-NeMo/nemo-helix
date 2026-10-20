@@ -21,7 +21,7 @@ the platform run it on a daily or weekly schedule.
 
 You need:
 
-- A running NeMo Helix with the Insights plugin and Intake. The plugin is installed by
+- A running NeMo Helix with the Compass plugin and Intake. The plugin is installed by
   default. Runs execute as [execute-agent jobs](/documentation/agents/execute-agents-as-jobs),
   so the platform also needs a working `agents.execute` runtime.
 - Traces for the agent in Intake. Compass can only diagnose what it can
@@ -29,7 +29,7 @@ You need:
 - A default and fast model pair. `nemo setup` stores one, or you can pass
   `--default-model` and `--fast-model` (Model Entity refs such as
   `default/<model>`) on each command. The fast model reviews traces in each
-  Compass signal; the default model compiles the findings into Insights.
+  Compass Signal; the default model compiles the findings into Insights.
 
 <Note>
 
@@ -54,7 +54,7 @@ the agent's traces must match the `--agent` you pass. For OTLP, set
 
 1. **Load traces.** The run reads the agent's traces and their spans from
    Intake. `--since` and `--evaluation-id` narrow which traces are read.
-1. **Collect evidence.** Several Compass signals (evidence streams) examine the traces in
+1. **Collect evidence.** Several Compass Signals (evidence streams) examine the traces in
    parallel. Each stream either reports the problems it found or is skipped with a
    reason.
 1. **Apply recurrence thresholds.** Isolated failures are dropped. Only
@@ -107,7 +107,7 @@ so you can tell "nothing is wrong" apart from "not enough evidence yet". See
 Submit a run and wait for it to finish:
 
 ```bash
-nemo insights analysis-runs create --agent my-agent --wait
+nemo compass analysis-runs create --agent my-agent --wait
 ```
 
 With `--wait`, the command prints each job status change, then the final run.
@@ -136,9 +136,9 @@ Each run is backed by an execute-agent job that has the same name as the run.
 `list` does not include job state; use `get` to see it:
 
 ```bash
-nemo insights analysis-runs list --agent my-agent
-nemo insights analysis-runs get <run-name>
-nemo insights analysis-runs get <run-name> --wait
+nemo compass analysis-runs list --agent my-agent
+nemo compass analysis-runs get <run-name>
+nemo compass analysis-runs get <run-name> --wait
 ```
 
 The `job` field in `get` shows the backing job's status: `completed`, `error`, or
@@ -197,10 +197,10 @@ When the report shows a `below threshold` line, you can:
 Opt an agent in to periodic analysis:
 
 ```bash
-nemo insights analysis enable --agent my-agent
-nemo insights analysis status                    # all agents in the workspace
-nemo insights analysis status --agent my-agent
-nemo insights analysis disable --agent my-agent
+nemo compass analysis enable --agent my-agent
+nemo compass analysis status                    # all agents in the workspace
+nemo compass analysis status --agent my-agent
+nemo compass analysis disable --agent my-agent
 ```
 
 `enable` stores the model pair that scheduled runs use: the `nemo setup` pair,
@@ -224,11 +224,11 @@ scheduler's own state for an agent, including the last error, is available from 
 
 ```python
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_compass_plugin.sdk import InsightsPluginResource
+from nemo_compass_plugin.sdk import CompassPluginResource
 
 client = NemoClient.from_config()
-insights_client = InsightsPluginResource(client)
-state = insights_client.analysis_run_statuses.get(workspace="default", agent="my-agent")
+compass_client = CompassPluginResource(client)
+state = compass_client.analysis_run_statuses.get(workspace="default", agent="my-agent")
 print(state.status, state.last_successful_run_at, state.last_error)
 ```
 
@@ -238,18 +238,18 @@ state is `error` and `last_error` records the job status.
 ### Configure the Schedule
 
 The schedule is a deployment setting that applies to every opted-in agent. Set
-it in the `insights:` section of the platform configuration file:
+it in the `compass:` section of the platform configuration file:
 
 ```yaml
-insights:
-  analyst:
+compass:
+  analysis:
     enabled: true            # run the periodic analysis controller
     frequency: daily         # daily or weekly
     run_at_hour: 0           # local hour of day, 0-23
     run_on_weekday: monday   # used only when frequency is weekly
     timezone: UTC            # IANA name, such as America/Denver
     job_profile: default     # jobs execution profile for scheduled runs
-    base_url: null           # platform URL passed to analyst jobs; unset uses the job's platform context
+    base_url: null           # platform URL passed to Compass jobs; unset uses the job's platform context
 ```
 
 | Setting | Default | Description |
@@ -259,8 +259,8 @@ insights:
 | `run_at_hour` | `0` | Hour of day that runs become due, in `timezone`. |
 | `run_on_weekday` | `monday` | Day of week runs become due. Used only with `weekly`. |
 | `timezone` | `UTC` | IANA time zone name. Runs keep their local hour across daylight saving changes. An unknown name fails validation. |
-| `job_profile` | `default` | Jobs execution profile for scheduled analyst jobs. |
-| `base_url` | unset | Platform base URL passed to analyst jobs. When unset, jobs use their active platform context. |
+| `job_profile` | `default` | Jobs execution profile for scheduled Compass jobs. |
+| `base_url` | unset | Platform base URL passed to Compass jobs. When unset, jobs use their active platform context. |
 
 ## Review Insights
 
@@ -271,11 +271,11 @@ To list Insights from Python:
 
 ```python
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_compass_plugin.sdk import InsightsPluginResource
+from nemo_compass_plugin.sdk import CompassPluginResource
 
 client = NemoClient.from_config()
-insights_client = InsightsPluginResource(client)
-page = insights_client.insights.list_insights(workspace="default", agent="my-agent", status="open")
+compass_client = CompassPluginResource(client)
+page = compass_client.insights.list_insights(workspace="default", agent="my-agent", status="open")
 for insight in page.data:
     print(f"[{insight.status}] {insight.title} ({len(insight.evidence)} traces)")
 ```
@@ -321,12 +321,12 @@ Download the `analysis-report` result and check it:
 
 ### Periodic Analysis Does Not Start
 
-- Check that the agent is enabled with `nemo insights analysis status`.
-- Check that `insights.analyst.enabled` is true.
+- Check that the agent is enabled with `nemo compass analysis status`.
+- Check that `compass.analysis.enabled` is true.
 - Check that the scheduled time has passed in the configured `timezone`.
 - After the first scheduled run, a run starts only when at least 10 new sessions
   have arrived since the last successful run.
-- If status shows no model pair, run `nemo insights analysis enable` again
+- If status shows no model pair, run `nemo compass analysis enable` again
   with a model pair.
 
 ### `create` Fails Without a Model Pair
@@ -340,4 +340,4 @@ When `nemo setup` has not stored a model pair, pass `--default-model` and
 - [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces)
 - [Optimize Agents](/documentation/agents/optimize-agents)
 - [Execute Agents as Jobs](/documentation/agents/execute-agents-as-jobs)
-- [Full CLI Reference](/documentation/reference/cli-reference/full-cli-reference#nemo-insights)
+- [Full CLI Reference](/documentation/reference/cli-reference/full-cli-reference#nemo-compass)

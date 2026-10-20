@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Nooa OpenTelemetry setup for analyst self-observability."""
+"""Nooa OpenTelemetry setup for Compass self-observability."""
 
 from dataclasses import dataclass
 from urllib.parse import urlparse
@@ -11,15 +11,15 @@ from nemo_compass_plugin.platform_client import LOOPBACK_HOSTS
 from nemo_helix_ext.config.config import Config
 from nooa.tracing import enable_tracing, exporters, flush_traces, set_session
 
-COMPASS_OBSERVABILITY_ENV = "NEMO_INSIGHTS_ANALYST_OBSERVABILITY"
-COMPASS_OBSERVABILITY_AGENT_NAME = "Analyst"
-COMPASS_OBSERVABILITY_SERVICE_NAMESPACE = "nemo-insights"
+COMPASS_OBSERVABILITY_ENV = "NEMO_COMPASS_OBSERVABILITY"
+COMPASS_OBSERVABILITY_AGENT_NAME = "Compass"
+COMPASS_OBSERVABILITY_SERVICE_NAMESPACE = "nemo-compass"
 OTLP_TRACES_PATH = "/apis/intake/v2/workspaces/{workspace}/ingest/otlp/v1/traces"
 
 
 @dataclass(frozen=True)
 class CompassEvaluationContext:
-    """Evaluation identity attached to every span in one Analyst run."""
+    """Evaluation identity attached to every span in one Compass run."""
 
     evaluation_name: str
     test_case_name: str
@@ -27,7 +27,7 @@ class CompassEvaluationContext:
 
 @dataclass
 class CompassObservability:
-    """Configured Nooa instrumentation for one analyst run."""
+    """Configured Nooa instrumentation for one Compass run."""
 
     endpoint: str
     session_id: str
@@ -44,7 +44,7 @@ def build_intake_otlp_traces_endpoint(*, base_url: str, workspace: str) -> str:
     host = (parsed.hostname or "").lower()
     if scheme != "https" and not (scheme == "http" and host in LOOPBACK_HOSTS):
         raise ValueError(
-            f"Analyst observability endpoint must use HTTPS (got {base_url!r}). "
+            f"Compass observability endpoint must use HTTPS (got {base_url!r}). "
             "HTTP is only allowed for loopback addresses."
         )
     return f"{base_url.rstrip('/')}{OTLP_TRACES_PATH.format(workspace=workspace)}"
@@ -116,8 +116,8 @@ def _resource_attributes(
         "project.name": COMPASS_OBSERVABILITY_AGENT_NAME,
         "session.id": session_id,
         "gen_ai.conversation.id": session_id,
-        "nemo.insights.workspace": workspace,
-        "nemo.insights.target_agent": target_agent,
+        "nemo.compass.workspace": workspace,
+        "nemo.compass.target_agent": target_agent,
     }
     if evaluation_context is not None:
         attributes["nemo.evaluation.name"] = evaluation_context.evaluation_name

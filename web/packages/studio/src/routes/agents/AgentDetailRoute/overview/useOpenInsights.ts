@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useInsightsListInsights } from '@nemo/sdk/generated/insights/insights-insights';
-import type { InsightListItem } from '@nemo/sdk/generated/insights/schema';
+import { useCompassListInsights } from '@nemo/sdk/generated/compass/compass-insights';
+import type { InsightListItem } from '@nemo/sdk/generated/compass/schema';
 import { useMemo } from 'react';
 
 /**
@@ -49,7 +49,7 @@ export const useOpenInsights = ({
   agent,
   enabled,
 }: UseOpenInsightsParams): UseOpenInsightsResult => {
-  const { data, isPending, error } = useInsightsListInsights(
+  const { data, isPending, error } = useCompassListInsights(
     workspace,
     {
       agent,

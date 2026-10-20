@@ -18,7 +18,7 @@ general:
         # NAT's otelcollector exporter only emits `service.name` by default,
         # which Intake does not map to either `project` or `agent_name`. Setting
         # these resource attributes explicitly makes the spans queryable by the
-        # analyst's `agent_name` / `project` filters.
+        # compass's `agent_name` / `project` filters.
         resource_attributes:
           gen_ai.agent.name: research-agent
           project.name: research-agent

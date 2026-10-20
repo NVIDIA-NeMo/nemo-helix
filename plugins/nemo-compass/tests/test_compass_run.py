@@ -258,7 +258,7 @@ async def test_evaluation_context_is_forwarded_to_default_on_observability(monke
         workspace="default",
         base_url="http://localhost:8080",
         client=cast(AsyncNemoClient, client),
-        analyst_evaluation=evaluation_context,
+        compass_evaluation=evaluation_context,
     )
 
     assert seen["observability"] == {

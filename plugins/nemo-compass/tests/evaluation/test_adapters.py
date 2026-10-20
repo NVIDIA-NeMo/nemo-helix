@@ -170,11 +170,11 @@ async def test_intake_analyze_closes_client_when_compass_fails(monkeypatch, tmp_
     built_client = _FakeClient()
 
     async def failing_run_compass(**kwargs):
-        raise RuntimeError("analyst failed")
+        raise RuntimeError("compass failed")
 
     monkeypatch.setattr("evaluation.adapters.run_compass", failing_run_compass)
     monkeypatch.setattr("evaluation.adapters.make_client", lambda base_url: built_client)
-    with pytest.raises(RuntimeError, match="analyst failed"):
+    with pytest.raises(RuntimeError, match="compass failed"):
         await build_adapter(_intake_subject()).analyze(
             record=None, since=None, verbose=False, out_path=tmp_path / "insights.json"
         )
@@ -340,10 +340,10 @@ async def test_benchmark_produce_records_run_without_analyzing(monkeypatch, tmp_
     evals: list[tuple[str, str, str, float]] = []
     experiments: list[tuple[str, str, str, str]] = []
     _patch_otlp(monkeypatch, exported=exported, evals=evals, created=created, experiments=experiments)
-    analyst_called = {"v": False}
+    compass_called = {"v": False}
 
     async def fake_run_compass(**kwargs):
-        analyst_called["v"] = True
+        compass_called["v"] = True
         return "SHOULD-NOT-RUN"
 
     monkeypatch.setattr("evaluation.adapters.run_compass", fake_run_compass)
@@ -354,7 +354,7 @@ async def test_benchmark_produce_records_run_without_analyzing(monkeypatch, tmp_
     experiment_id = record["experiment_id"]
     assert isinstance(experiment_id, str)
 
-    assert analyst_called["v"] is False  # produce does NOT analyze
+    assert compass_called["v"] is False  # produce does NOT analyze
     assert record["realistic_workspace"] == "tau2-airline"  # stable, not per-run
     assert record["oracle_workspace"] == "tau2-airline-oracle"
     assert experiment_id.startswith("tau2-airline-")  # run id = experiment name
@@ -401,7 +401,7 @@ async def test_benchmark_analyze_uses_record(monkeypatch, tmp_path):
         verbose,
         since,
         evaluation_id,
-        analyst_evaluation,
+        compass_evaluation,
     ):
         seen.update(
             agent=agent,
@@ -410,7 +410,7 @@ async def test_benchmark_analyze_uses_record(monkeypatch, tmp_path):
             base_url=base_url,
             evaluation_id=evaluation_id,
             local_only=local_only,
-            analyst_evaluation=analyst_evaluation,
+            compass_evaluation=compass_evaluation,
         )
         return "REPORT-OK"
 
@@ -427,13 +427,13 @@ async def test_benchmark_analyze_uses_record(monkeypatch, tmp_path):
         "base_url": "http://localhost:8080",
         "domain": "airline",
     }
-    analyst_evaluation = CompassEvaluationContext(
+    compass_evaluation = CompassEvaluationContext(
         evaluation_name="nemo-compass-run",
         test_case_name="tau2-airline",
     )
     adapter = BenchmarkAdapter(
         Subject("tau2-airline", "benchmark", cfg),
-        analyst_evaluation=analyst_evaluation,
+        compass_evaluation=compass_evaluation,
     )
     out = await adapter.analyze(
         record=record,
@@ -449,7 +449,7 @@ async def test_benchmark_analyze_uses_record(monkeypatch, tmp_path):
     assert seen["evaluation_id"] == "tau2-airline-20260626-000000-abcd"  # run-scoped
     assert seen["base_url"] == "http://localhost:8080"
     assert seen["local_only"] is True  # benchmark runs capture to file and never write to the platform
-    assert seen["analyst_evaluation"] == analyst_evaluation
+    assert seen["compass_evaluation"] == compass_evaluation
     assert built_client.closed
 
 

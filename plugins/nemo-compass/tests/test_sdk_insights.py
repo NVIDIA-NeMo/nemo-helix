@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The ``client.insights.insights`` SDK sub-resource."""
+"""The ``client.compass.insights`` SDK sub-resource."""
 
 from unittest.mock import AsyncMock, MagicMock
 

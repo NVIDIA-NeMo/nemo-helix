@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Wire-level harness for ``nemo insights`` CLI tests (fixtures live in ``conftest.py``).
+"""Wire-level harness for ``nemo compass`` CLI tests (fixtures live in ``conftest.py``).
 
 The CLI takes its typed client from the ``nemo`` CLI state, so tests install a
-stand-in state whose clients talk to :class:`FakeInsightsAPI` over an
+stand-in state whose clients talk to :class:`FakeCompassAPI` over an
 ``httpx.MockTransport``. Assertions are made on the HTTP requests the command
 actually sent and on what it printed.
 """
@@ -24,11 +24,11 @@ from nemo_helix_plugin.cli_output import is_tty
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 
 BASE_URL = "http://nhx.test"
-RUN_NAME = "insights-run-0123456789abcdef0123456789abcdef"
+RUN_NAME = "compass-run-0123456789abcdef0123456789abcdef"
 CONFIGURED_DEFAULT = "default/configured-big"
 CONFIGURED_FAST = "default/configured-small"
 
-_PATH = re.compile(r"^/apis/insights/v2/workspaces/(?P<workspace>[^/]+)(?P<rest>/.*)$")
+_PATH = re.compile(r"^/apis/compass/v2/workspaces/(?P<workspace>[^/]+)(?P<rest>/.*)$")
 
 ClientT = TypeVar("ClientT", bound=NemoClient)
 AsyncClientT = TypeVar("AsyncClientT", bound=AsyncNemoClient)
@@ -90,7 +90,7 @@ class RecordedRequest:
 
 
 @dataclass
-class FakeInsightsAPI:
+class FakeCompassAPI:
     """Serves queued responses per ``(method, path after the workspace)`` and records requests.
 
     The last queued response for a route repeats, so a single response serves
@@ -123,9 +123,9 @@ class FakeInsightsAPI:
 
 @dataclass
 class WireState:
-    """Stand-in for the ``nemo`` CLI state (``CLIState``), backed by :class:`FakeInsightsAPI`."""
+    """Stand-in for the ``nemo`` CLI state (``CLIState``), backed by :class:`FakeCompassAPI`."""
 
-    api: FakeInsightsAPI
+    api: FakeCompassAPI
     workspace: str | None = "default"
     output_format: ListOutputFormat = "table"
 
@@ -171,5 +171,5 @@ def app_with_state(state: object | None) -> typer.Typer:
     def _root(ctx: typer.Context) -> None:
         ctx.obj = state
 
-    parent.add_typer(cli.InsightsCLI().get_cli(), name="insights")
+    parent.add_typer(cli.CompassCLI().get_cli(), name="compass")
     return parent

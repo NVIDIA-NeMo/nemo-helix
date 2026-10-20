@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Fixtures for the ``nemo insights`` CLI tests; the harness is in ``nemo_compass_plugin.testing.cli``."""
+"""Fixtures for the ``nemo compass`` CLI tests; the harness is in ``nemo_compass_plugin.testing.cli``."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from nemo_compass_plugin import cli
 from nemo_compass_plugin.testing.cli import (
     CONFIGURED_DEFAULT,
     CONFIGURED_FAST,
-    FakeInsightsAPI,
+    FakeCompassAPI,
     WireState,
     app_with_state,
 )
@@ -21,12 +21,12 @@ from nemo_helix_plugin.nooa_model_client import ConfiguredModelRefs
 
 
 @pytest.fixture
-def api() -> FakeInsightsAPI:
-    return FakeInsightsAPI()
+def api() -> FakeCompassAPI:
+    return FakeCompassAPI()
 
 
 @pytest.fixture
-def state(api: FakeInsightsAPI) -> WireState:
+def state(api: FakeCompassAPI) -> WireState:
     return WireState(api)
 
 

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Typed permissions for Insights HTTP resources."""
+"""Stable permission IDs for Compass HTTP resources."""
 
 from nemo_helix_plugin.authz import PermissionSet, perm
 

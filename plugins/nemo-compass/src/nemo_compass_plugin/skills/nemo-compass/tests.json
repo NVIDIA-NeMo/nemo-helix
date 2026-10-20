@@ -38,7 +38,7 @@
     },
     {
       "type": "implicit",
-      "prompt": "Run the analyst to find failure patterns in recent telemetry.",
+      "prompt": "Run Compass to find failure patterns in recent telemetry.",
       "expected_skill": "nemo-compass"
     },
     {

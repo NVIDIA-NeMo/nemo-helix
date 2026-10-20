@@ -1,15 +1,15 @@
 openapi: 3.1.0
 info:
-  title: insights (plugin)
+  title: compass (plugin)
   version: 0.0.0
 paths:
-  /apis/insights/v2/workspaces/{workspace}/analysis-configs:
+  /apis/compass/v2/workspaces/{workspace}/analysis-configs:
     get:
       tags:
-      - Insights Analysis Configs
+      - Compass Analysis Configs
       summary: List Analysis Configs
       description: List periodic analysis opt-in records.
-      operationId: list_analysis_configs_apis_insights_v2_workspaces__workspace__analysis_configs_get
+      operationId: list_analysis_configs_apis_compass_v2_workspaces__workspace__analysis_configs_get
       parameters:
       - name: workspace
         in: path
@@ -68,13 +68,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /apis/insights/v2/workspaces/{workspace}/analysis-configs/{agent}:
+  /apis/compass/v2/workspaces/{workspace}/analysis-configs/{agent}:
     get:
       tags:
-      - Insights Analysis Configs
+      - Compass Analysis Configs
       summary: Get Analysis Config
       description: Get periodic analysis opt-in state for one agent.
-      operationId: get_analysis_config_apis_insights_v2_workspaces__workspace__analysis_configs__agent__get
+      operationId: get_analysis_config_apis_compass_v2_workspaces__workspace__analysis_configs__agent__get
       parameters:
       - name: workspace
         in: path
@@ -103,10 +103,10 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
     patch:
       tags:
-      - Insights Analysis Configs
+      - Compass Analysis Configs
       summary: Update Analysis Config
       description: Partially update periodic analysis state for one agent.
-      operationId: update_analysis_config_apis_insights_v2_workspaces__workspace__analysis_configs__agent__patch
+      operationId: update_analysis_config_apis_compass_v2_workspaces__workspace__analysis_configs__agent__patch
       parameters:
       - name: workspace
         in: path
@@ -139,13 +139,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /apis/insights/v2/workspaces/{workspace}/analysis-configs/{agent}/disable:
+  /apis/compass/v2/workspaces/{workspace}/analysis-configs/{agent}/disable:
     post:
       tags:
-      - Insights Analysis Configs
+      - Compass Analysis Configs
       summary: Disable Analysis Config
       description: Disable periodic insights analysis for one agent.
-      operationId: disable_analysis_config_apis_insights_v2_workspaces__workspace__analysis_configs__agent__disable_post
+      operationId: disable_analysis_config_apis_compass_v2_workspaces__workspace__analysis_configs__agent__disable_post
       parameters:
       - name: workspace
         in: path
@@ -172,13 +172,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /apis/insights/v2/workspaces/{workspace}/analysis-configs/{agent}/enable:
+  /apis/compass/v2/workspaces/{workspace}/analysis-configs/{agent}/enable:
     post:
       tags:
-      - Insights Analysis Configs
+      - Compass Analysis Configs
       summary: Enable Analysis Config
       description: Enable periodic insights analysis for one agent.
-      operationId: enable_analysis_config_apis_insights_v2_workspaces__workspace__analysis_configs__agent__enable_post
+      operationId: enable_analysis_config_apis_compass_v2_workspaces__workspace__analysis_configs__agent__enable_post
       parameters:
       - name: workspace
         in: path
@@ -211,13 +211,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /apis/insights/v2/workspaces/{workspace}/analysis-run-statuses:
+  /apis/compass/v2/workspaces/{workspace}/analysis-run-statuses:
     get:
       tags:
-      - Insights Analysis Run Statuses
+      - Compass Analysis Run Statuses
       summary: List Analysis Run Statuses
       description: List machine-written periodic analysis run status records.
-      operationId: list_analysis_run_statuses_apis_insights_v2_workspaces__workspace__analysis_run_statuses_get
+      operationId: list_analysis_run_statuses_apis_compass_v2_workspaces__workspace__analysis_run_statuses_get
       parameters:
       - name: workspace
         in: path
@@ -268,13 +268,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /apis/insights/v2/workspaces/{workspace}/analysis-run-statuses/{agent}:
+  /apis/compass/v2/workspaces/{workspace}/analysis-run-statuses/{agent}:
     get:
       tags:
-      - Insights Analysis Run Statuses
+      - Compass Analysis Run Statuses
       summary: Get Analysis Run Status
       description: Get machine-written periodic analysis run status for one agent.
-      operationId: get_analysis_run_status_apis_insights_v2_workspaces__workspace__analysis_run_statuses__agent__get
+      operationId: get_analysis_run_status_apis_compass_v2_workspaces__workspace__analysis_run_statuses__agent__get
       parameters:
       - name: workspace
         in: path
@@ -303,11 +303,11 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
     patch:
       tags:
-      - Insights Analysis Run Statuses
+      - Compass Analysis Run Statuses
       summary: Update Analysis Run Status
       description: Create or partially update periodic analysis run status for one
         agent.
-      operationId: update_analysis_run_status_apis_insights_v2_workspaces__workspace__analysis_run_statuses__agent__patch
+      operationId: update_analysis_run_status_apis_compass_v2_workspaces__workspace__analysis_run_statuses__agent__patch
       parameters:
       - name: workspace
         in: path
@@ -340,14 +340,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /apis/insights/v2/workspaces/{workspace}/analysis-runs:
+  /apis/compass/v2/workspaces/{workspace}/analysis-runs:
     post:
       tags:
-      - Insights Analysis Runs
+      - Compass Analysis Runs
       summary: Create Analysis Run
-      description: Create an Insights analysis run backed by the generic ``agents.execute``
+      description: Create a Compass analysis run backed by the generic ``agents.execute``
         job.
-      operationId: create_analysis_run_apis_insights_v2_workspaces__workspace__analysis_runs_post
+      operationId: create_analysis_run_apis_compass_v2_workspaces__workspace__analysis_runs_post
       parameters:
       - name: workspace
         in: path
@@ -376,11 +376,11 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
     get:
       tags:
-      - Insights Analysis Runs
+      - Compass Analysis Runs
       summary: List Analysis Runs
       description: "List analysis runs. Job state is not joined here \u2014 read a\
         \ run to get it."
-      operationId: list_analysis_runs_apis_insights_v2_workspaces__workspace__analysis_runs_get
+      operationId: list_analysis_runs_apis_compass_v2_workspaces__workspace__analysis_runs_get
       parameters:
       - name: workspace
         in: path
@@ -439,14 +439,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /apis/insights/v2/workspaces/{workspace}/analysis-runs/{name}:
+  /apis/compass/v2/workspaces/{workspace}/analysis-runs/{name}:
     get:
       tags:
-      - Insights Analysis Runs
+      - Compass Analysis Runs
       summary: Get Analysis Run
       description: Get one analysis run, joined with the live state of its backing
         job.
-      operationId: get_analysis_run_apis_insights_v2_workspaces__workspace__analysis_runs__name__get
+      operationId: get_analysis_run_apis_compass_v2_workspaces__workspace__analysis_runs__name__get
       parameters:
       - name: workspace
         in: path
@@ -473,13 +473,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /apis/insights/v2/workspaces/{workspace}/insights:
+  /apis/compass/v2/workspaces/{workspace}/insights:
     post:
       tags:
-      - Insights Insights
+      - Compass Insights
       summary: Create Insight
       description: Create a new Insight. The store auto-generates the slug name.
-      operationId: create_insight_apis_insights_v2_workspaces__workspace__insights_post
+      operationId: create_insight_apis_compass_v2_workspaces__workspace__insights_post
       parameters:
       - name: workspace
         in: path
@@ -508,10 +508,10 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
     get:
       tags:
-      - Insights Insights
+      - Compass Insights
       summary: List Insights
       description: List Insights with pagination, sort, and basic filters.
-      operationId: list_insights_apis_insights_v2_workspaces__workspace__insights_get
+      operationId: list_insights_apis_compass_v2_workspaces__workspace__insights_get
       parameters:
       - name: workspace
         in: path
@@ -579,13 +579,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /apis/insights/v2/workspaces/{workspace}/insights/{insight_id}:
+  /apis/compass/v2/workspaces/{workspace}/insights/{insight_id}:
     get:
       tags:
-      - Insights Insights
+      - Compass Insights
       summary: Get Insight
       description: Get a single Insight by its store-assigned id.
-      operationId: get_insight_apis_insights_v2_workspaces__workspace__insights__insight_id__get
+      operationId: get_insight_apis_compass_v2_workspaces__workspace__insights__insight_id__get
       parameters:
       - name: workspace
         in: path
@@ -614,10 +614,10 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
     patch:
       tags:
-      - Insights Insights
+      - Compass Insights
       summary: Update Insight
       description: Partially update an Insight by id. Omitted fields are unchanged.
-      operationId: update_insight_apis_insights_v2_workspaces__workspace__insights__insight_id__patch
+      operationId: update_insight_apis_compass_v2_workspaces__workspace__insights__insight_id__patch
       parameters:
       - name: workspace
         in: path
@@ -652,10 +652,10 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
     delete:
       tags:
-      - Insights Insights
+      - Compass Insights
       summary: Delete Insight
       description: Delete an Insight by its store-assigned id. Returns 204 on success.
-      operationId: delete_insight_apis_insights_v2_workspaces__workspace__insights__insight_id__delete
+      operationId: delete_insight_apis_compass_v2_workspaces__workspace__insights__insight_id__delete
       parameters:
       - name: workspace
         in: path
@@ -883,18 +883,18 @@ components:
       - parent
       - db_version
       title: AnalysisRun
-      description: "One Insights analysis run \u2014 what was asked for, not how it\
+      description: "One Compass analysis run \u2014 what was asked for, not how it\
         \ went.\n\nThe record's ``name`` is also the name of the backing ``agents.execute``\n\
-        job. Insights mints that name before submitting, so the link between a run\n\
+        job. Compass mints that name before submitting, so the link between a run\n\
         and its job is *derivable* rather than written back after the fact. That\n\
         removes the dual write, and with it the failure mode where a job exists\n\
         that no run points at: a run whose job name 404s simply never landed. There\n\
         is no resubmit-under-an-existing-name route yet, so such a run is a read\n\
         today, not something a caller can drive back to completion.\n\nProgress is\
         \ deliberately absent. Status, logs, and results belong to the\nJob and are\
-        \ read from it; mirroring them here would go stale immediately.\nInsights\
-        \ owns only what no lower layer knows: that this job was an analysis\nrun,\
-        \ over which agent and scope."
+        \ read from it; mirroring them here would go stale immediately.\nCompass owns\
+        \ only what no lower layer knows: that this job was an analysis\nrun, over\
+        \ which agent and scope."
     AnalysisRunResponse:
       properties:
         run:

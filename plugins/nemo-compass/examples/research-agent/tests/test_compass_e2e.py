@@ -1,16 +1,16 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""End-to-end integration test for Compass.
+"""End-to-end integration test for Compass agent.
 
 This exercises the whole loop against *real* services and *real* LLM APIs:
 
 1. Start ClickHouse (auto-provisioned via the platform's docker helper).
-2. Start the NeMo Helix (``nemo services run``) with Intake + Insights.
+2. Start the NeMo Helix (``nemo services run``) with Intake + Compass.
 3. Clear all spans for the test project.
 4. Run the research agent on three questions (concurrently) so it logs
    traces to Intake.
-5. Run Compass (``nemo insights analysis-runs create --wait``).
+5. Run Compass agent (``nemo compass analysis-runs create --wait``).
 6. Assert Compass created at least one Insight.
 
 Required setup (the test is **opt-in** because it costs real tokens and needs
@@ -33,7 +33,7 @@ Optional overrides: ``NHX_INSIGHTS_E2E_PORT`` (default ``18080``),
 helper script lives), and ``NHX_INTAKE_CLICKHOUSE_{URL,USER,PASSWORD,DATABASE}``.
 
 Run it from the example's venv so every dependency
-(``nemo-helix[services]``, the NAT langchain provider, and the Insights
+(``nemo-helix[services]``, the NAT langchain provider, and the Compass
 plugin) is present::
 
     cd examples/research-agent
@@ -241,7 +241,7 @@ def _server_ready() -> bool:
             timeout=3.0,
         )
         insights = httpx.get(
-            f"{BASE_URL}/apis/insights/v2/workspaces/{WORKSPACE}/insights",
+            f"{BASE_URL}/apis/compass/v2/workspaces/{WORKSPACE}/insights",
             params={"page_size": 1},
             timeout=3.0,
         )
@@ -320,7 +320,7 @@ def platform_server(clickhouse: None) -> Iterator[str]:  # noqa: ARG001 - orderi
 
 
 # --------------------------------------------------------------------------- #
-# Client helpers (reuse the Insights plugin's own client/preflight code)      #
+# Client helpers (reuse Compass plugin's own client/preflight code)      #
 # --------------------------------------------------------------------------- #
 def _count_traces() -> int:
     from nemo_compass_plugin.analysis.backend import make_backend
@@ -339,12 +339,12 @@ def _count_traces() -> int:
 
 def _list_insight_ids() -> list[str]:
     from nemo_compass_plugin.platform_client import make_client
-    from nemo_compass_plugin.sdk import AsyncInsightsPluginResource
+    from nemo_compass_plugin.sdk import AsyncCompassPluginResource
 
     async def _run() -> list[str]:
         client = make_client(BASE_URL)
         try:
-            page = await AsyncInsightsPluginResource(client).insights.list_insights(
+            page = await AsyncCompassPluginResource(client).insights.list_insights(
                 workspace=WORKSPACE, agent=TEST_AGENT, page_size=100
             )
         finally:
@@ -356,12 +356,12 @@ def _list_insight_ids() -> list[str]:
 
 def _delete_insights(insight_ids: list[str]) -> None:
     from nemo_compass_plugin.platform_client import make_client
-    from nemo_compass_plugin.sdk import AsyncInsightsPluginResource
+    from nemo_compass_plugin.sdk import AsyncCompassPluginResource
 
     async def _run() -> None:
         client = make_client(BASE_URL)
         try:
-            insights = AsyncInsightsPluginResource(client).insights
+            insights = AsyncCompassPluginResource(client).insights
             for insight_id in insight_ids:
                 await insights.delete(workspace=WORKSPACE, insight_id=insight_id)
         finally:
@@ -422,7 +422,7 @@ def _wait_for_traces(minimum: int, timeout_s: int) -> int:
     return count
 
 
-def _wait_for_analyst_spans(timeout_s: int) -> list[dict]:
+def _wait_for_compass_spans(timeout_s: int) -> list[dict]:
     deadline = time.monotonic() + timeout_s
     spans: list[dict] = []
     while time.monotonic() < deadline:
@@ -464,7 +464,7 @@ def test_compass_creates_insight_end_to_end(platform_server: str) -> None:  # no
     result = subprocess.run(
         _cli_cmd(
             "nemo",
-            "insights",
+            "compass",
             "analysis-runs",
             "create",
             "--wait",
@@ -481,20 +481,20 @@ def test_compass_creates_insight_end_to_end(platform_server: str) -> None:  # no
         text=True,
         timeout=600,
     )
-    assert result.returncode == 0, f"analyst failed:\n{result.stdout}\n{result.stderr}"
+    assert result.returncode == 0, f"compass failed:\n{result.stdout}\n{result.stderr}"
 
     # 5. Compass must have persisted at least one Insight.
     insight_ids = _list_insight_ids()
     assert len(insight_ids) >= 1, (
-        f"analyst created no Insights for {TEST_AGENT}.\n"
-        f"--- analyst stdout ---\n{result.stdout}\n--- analyst stderr ---\n{result.stderr}"
+        f"compass created no Insights for {TEST_AGENT}.\n"
+        f"--- compass stdout ---\n{result.stdout}\n--- compass stderr ---\n{result.stderr}"
     )
 
     # 6. Compass's own Nooa spans should be queryable in Intake.
-    analyst_spans = _wait_for_analyst_spans(SPAN_VISIBLE_TIMEOUT_S)
-    assert analyst_spans, (
+    compass_spans = _wait_for_compass_spans(SPAN_VISIBLE_TIMEOUT_S)
+    assert compass_spans, (
         f"expected Intake spans for {COMPASS_OBSERVABILITY_AGENT_NAME}; "
-        f"--- analyst stdout ---\n{result.stdout}\n--- analyst stderr ---\n{result.stderr}"
+        f"--- compass stdout ---\n{result.stdout}\n--- compass stderr ---\n{result.stderr}"
     )
-    assert {span["agent_name"] for span in analyst_spans} == {COMPASS_OBSERVABILITY_AGENT_NAME}
-    assert all(span["session_id"] for span in analyst_spans)
+    assert {span["agent_name"] for span in compass_spans} == {COMPASS_OBSERVABILITY_AGENT_NAME}
+    assert all(span["session_id"] for span in compass_spans)

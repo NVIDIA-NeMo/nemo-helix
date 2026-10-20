@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Insights plugin HTTP service.
+"""Compass plugin HTTP service.
 
-Mounts Insight CRUD routes under ``/apis/insights/v2/workspaces/{workspace}/``.
+Mounts Insight CRUD routes under ``/apis/compass/v2/workspaces/{workspace}/``.
 Discovered by the platform via the ``nemo.services`` entry-point.
 """
 
@@ -56,48 +56,49 @@ def _to_list_item(insight: Insight) -> InsightListItem:
     return item
 
 
-class InsightsService(NemoService):
-    """NeMo Insights plugin service.
+class CompassService(NemoService):
+    """NeMo Compass plugin service.
 
     Exposes CRUD routes for :class:`~nemo_compass_plugin.entities.Insight` —
-    Compass's primary output. Routes are mounted under
-    ``/apis/insights/v2/workspaces/{workspace}/``.
+    Compass agent's primary output. Routes are mounted under
+    ``/apis/compass/v2/workspaces/{workspace}/``.
     """
 
-    name: ClassVar[str] = "insights"
+    name: ClassVar[str] = "compass"
+    permission_namespace: ClassVar[str] = "insights"
     dependencies: ClassVar[list[str]] = ["entities", "jobs", "intake", "models", "agents"]
 
     def get_routers(self) -> list[RouterSpec]:
         return [
             RouterSpec(
                 _build_insights_router(),
-                tag="Insights Insights",
-                description="CRUD for analyst-authored Insight entities.",
+                tag="Compass Insights",
+                description="CRUD for Compass-authored Insight entities.",
                 prefix="/v2/workspaces/{workspace}",
             ),
             RouterSpec(
                 _build_analysis_configs_router(),
-                tag="Insights Analysis Configs",
+                tag="Compass Analysis Configs",
                 description="Per-agent opt-in state for periodic insights analysis.",
                 prefix="/v2/workspaces/{workspace}",
             ),
             RouterSpec(
                 _build_analysis_run_statuses_router(),
-                tag="Insights Analysis Run Statuses",
+                tag="Compass Analysis Run Statuses",
                 description="Machine-written state for periodic insights analysis.",
                 prefix="/v2/workspaces/{workspace}",
             ),
             RouterSpec(
                 analysis_runs_router,
-                tag="Insights Analysis Runs",
-                description="Submit Insights analysis runs backed by generic execute-agent jobs.",
+                tag="Compass Analysis Runs",
+                description="Submit Compass analysis runs backed by generic execute-agent jobs.",
                 prefix="/v2/workspaces/{workspace}",
             ),
         ]
 
 
 # The jobs backing AnalysisRuns read and write Insights through a task client,
-# which calls as ``service:insights`` on behalf of the run's submitter.
+# which calls as ``service:compass`` on behalf of the run's submitter.
 # A principal-only rule would deny those calls whenever authz is enforced.
 # Delete stays principal-only: the job never removes an Insight.
 _COMPASS_CALLERS = [CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL]
@@ -110,7 +111,7 @@ def _build_insights_router() -> APIRouter:
         "/insights",
         response_model=Insight,
         status_code=201,
-        tags=["Insights Insights"],
+        tags=["Compass Insights"],
     )
     @scope.write
     @path_rule(callers=_COMPASS_CALLERS, permissions=[InsightPerms.CREATE])
@@ -143,7 +144,7 @@ def _build_insights_router() -> APIRouter:
     @router.get(
         "/insights",
         response_model=InsightPage,
-        tags=["Insights Insights"],
+        tags=["Compass Insights"],
     )
     @scope.read
     @path_rule(callers=_COMPASS_CALLERS, permissions=[InsightPerms.LIST])
@@ -221,7 +222,7 @@ def _build_insights_router() -> APIRouter:
     @router.get(
         "/insights/{insight_id}",
         response_model=Insight,
-        tags=["Insights Insights"],
+        tags=["Compass Insights"],
     )
     @scope.read
     @path_rule(callers=_COMPASS_CALLERS, permissions=[InsightPerms.READ])
@@ -246,7 +247,7 @@ def _build_insights_router() -> APIRouter:
     @router.patch(
         "/insights/{insight_id}",
         response_model=Insight,
-        tags=["Insights Insights"],
+        tags=["Compass Insights"],
     )
     @scope.write
     @path_rule(callers=_COMPASS_CALLERS, permissions=[InsightPerms.UPDATE])
@@ -302,7 +303,7 @@ def _build_insights_router() -> APIRouter:
     @router.delete(
         "/insights/{insight_id}",
         status_code=204,
-        tags=["Insights Insights"],
+        tags=["Compass Insights"],
     )
     @scope.write
     @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[InsightPerms.DELETE])
@@ -404,7 +405,7 @@ def _build_analysis_configs_router() -> APIRouter:
     @router.post(
         "/analysis-configs/{agent}/enable",
         response_model=AnalysisConfig,
-        tags=["Insights Analysis Configs"],
+        tags=["Compass Analysis Configs"],
     )
     @scope.write
     @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[AnalysisConfigPerms.ENABLE])
@@ -438,7 +439,7 @@ def _build_analysis_configs_router() -> APIRouter:
     @router.post(
         "/analysis-configs/{agent}/disable",
         response_model=AnalysisConfig,
-        tags=["Insights Analysis Configs"],
+        tags=["Compass Analysis Configs"],
     )
     @scope.write
     @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[AnalysisConfigPerms.DISABLE])
@@ -464,7 +465,7 @@ def _build_analysis_configs_router() -> APIRouter:
     @router.get(
         "/analysis-configs",
         response_model=AnalysisConfigPage,
-        tags=["Insights Analysis Configs"],
+        tags=["Compass Analysis Configs"],
     )
     @scope.read
     @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[AnalysisConfigPerms.LIST])
@@ -505,7 +506,7 @@ def _build_analysis_configs_router() -> APIRouter:
     @router.get(
         "/analysis-configs/{agent}",
         response_model=AnalysisConfig,
-        tags=["Insights Analysis Configs"],
+        tags=["Compass Analysis Configs"],
     )
     @scope.read
     @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[AnalysisConfigPerms.READ])
@@ -526,7 +527,7 @@ def _build_analysis_configs_router() -> APIRouter:
     @router.patch(
         "/analysis-configs/{agent}",
         response_model=AnalysisConfig,
-        tags=["Insights Analysis Configs"],
+        tags=["Compass Analysis Configs"],
     )
     @scope.write
     @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[AnalysisConfigPerms.UPDATE])
@@ -565,7 +566,7 @@ def _build_analysis_run_statuses_router() -> APIRouter:
     @router.get(
         "/analysis-run-statuses",
         response_model=AnalysisRunStatusPage,
-        tags=["Insights Analysis Run Statuses"],
+        tags=["Compass Analysis Run Statuses"],
     )
     @scope.read
     @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[AnalysisRunStatusPerms.LIST])
@@ -600,7 +601,7 @@ def _build_analysis_run_statuses_router() -> APIRouter:
     @router.get(
         "/analysis-run-statuses/{agent}",
         response_model=AnalysisRunStatus,
-        tags=["Insights Analysis Run Statuses"],
+        tags=["Compass Analysis Run Statuses"],
     )
     @scope.read
     @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[AnalysisRunStatusPerms.READ])
@@ -621,7 +622,7 @@ def _build_analysis_run_statuses_router() -> APIRouter:
     @router.patch(
         "/analysis-run-statuses/{agent}",
         response_model=AnalysisRunStatus,
-        tags=["Insights Analysis Run Statuses"],
+        tags=["Compass Analysis Run Statuses"],
     )
     @scope.write
     @path_rule(

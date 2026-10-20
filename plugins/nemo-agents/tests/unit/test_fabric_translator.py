@@ -511,7 +511,7 @@ class TestTranslateAgentConfig:
     @pytest.mark.parametrize(
         "adapter_id",
         [
-            "nvidia.fabric.insights-analyst",
+            "nvidia.fabric.compass",
             "nvidia.fabric.some.future.adapter",
         ],
     )

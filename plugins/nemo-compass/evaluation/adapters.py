@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Per-type evaluation adapters that turn a subject into analyst Insights."""
+"""Per-type evaluation adapters that turn a subject into Compass insights."""
 
 import os
 import shutil
@@ -49,9 +49,9 @@ class EvaluationAdapter(Protocol):
 class IntakeAdapter:
     """Analyze an agent's existing Intake traces (no production step)."""
 
-    def __init__(self, subject: Subject, *, analyst_evaluation: CompassEvaluationContext | None = None) -> None:
+    def __init__(self, subject: Subject, *, compass_evaluation: CompassEvaluationContext | None = None) -> None:
         self.subject = subject
-        self.analyst_evaluation = analyst_evaluation
+        self.compass_evaluation = compass_evaluation
 
     def check(self) -> list[str]:
         """Unmet prerequisites for this subject (empty list = ready to run)."""
@@ -101,7 +101,7 @@ class IntakeAdapter:
                 local_only=True,
                 verbose=verbose,
                 since=since,
-                analyst_evaluation=self.analyst_evaluation,
+                compass_evaluation=self.compass_evaluation,
                 enable_observability=cfg.get("auth") != "basic",
             )
 
@@ -120,9 +120,9 @@ class IntakeAdapter:
 class BenchmarkAdapter:
     """Run a benchmark to produce traces, ingest them, then analyze."""
 
-    def __init__(self, subject: Subject, *, analyst_evaluation: CompassEvaluationContext | None = None) -> None:
+    def __init__(self, subject: Subject, *, compass_evaluation: CompassEvaluationContext | None = None) -> None:
         self.subject = subject
-        self.analyst_evaluation = analyst_evaluation
+        self.compass_evaluation = compass_evaluation
 
     def check(self) -> list[str]:
         """Unmet prerequisites for this benchmark (empty list = ready to run)."""
@@ -312,7 +312,7 @@ class BenchmarkAdapter:
                 verbose=verbose,
                 since=since,
                 evaluation_id=evaluation_id,
-                analyst_evaluation=self.analyst_evaluation,
+                compass_evaluation=self.compass_evaluation,
             )
 
 
@@ -325,7 +325,7 @@ _ADAPTERS: dict[str, type[IntakeAdapter] | type[BenchmarkAdapter]] = {
 def build_adapter(
     subject: Subject,
     *,
-    analyst_evaluation: CompassEvaluationContext | None = None,
+    compass_evaluation: CompassEvaluationContext | None = None,
 ) -> EvaluationAdapter:
     """Construct the adapter for a subject's ``type``."""
     cls = _ADAPTERS.get(subject.type)
@@ -333,4 +333,4 @@ def build_adapter(
         raise SystemExit(
             f"evaluation '{subject.name}' has unknown type '{subject.type}'. Known types: {', '.join(sorted(_ADAPTERS))}."
         )
-    return cls(subject, analyst_evaluation=analyst_evaluation)
+    return cls(subject, compass_evaluation=compass_evaluation)
