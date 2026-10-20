@@ -735,6 +735,8 @@ class VolcanoJobBackend(
                     self._workload_delegations.revoke_for_target(target)
                 else:
                     self._workload_delegations.ensure_for_target(step, target)
+        if status in HelixJobStatus.terminals():
+            self._delete_step_network_policy(job.get("metadata", {}).get("name"))
         return JobUpdate(status=status, status_details=status_details)
 
     def enforce_image_pull_ttl(self, step: HelixJobStepWithContext, volcano_job: dict) -> JobUpdate | None:
@@ -878,8 +880,12 @@ class VolcanoJobBackend(
                 namespace=self.namespace,
                 name=job_name,
             )
-            if self._execution_profile_config.step_network_policies_enabled:
-                delete_step_network_policy(self._networking_v1, self.namespace, job_name)
+            self._delete_step_network_policy(job_name)
+
+    def _delete_step_network_policy(self, name: str | None) -> None:
+        if not name or not self._execution_profile_config.step_network_policies_enabled:
+            return
+        delete_step_network_policy(self._networking_v1, self.namespace, name)
 
 
 def map_volcano_job_status_to_platform_status(status: dict) -> tuple[HelixJobStatus, dict]:

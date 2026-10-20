@@ -3978,7 +3978,7 @@ components:
         name:
           title: Name
           type: string
-          maxLength: 255
+          maxLength: 63
       additionalProperties: false
       type: object
       title: RlOutputRequest
@@ -3988,7 +3988,7 @@ components:
       properties:
         name:
           type: string
-          maxLength: 255
+          maxLength: 63
           title: Name
           examples:
           - my-dpo-llama
@@ -3998,7 +3998,7 @@ components:
           default: model
         fileset:
           type: string
-          maxLength: 255
+          maxLength: 63
           title: Fileset
       additionalProperties: false
       type: object

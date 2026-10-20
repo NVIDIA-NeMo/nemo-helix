@@ -1993,7 +1993,9 @@ def test_schedule_creates_network_policy_before_volcano_job_and_hands_it_to_the_
     ]
     assert order == ["networking.create_namespaced_network_policy", "custom.create_namespaced_custom_object"]
     (owner,) = calls.networking.patch_namespaced_network_policy.call_args.kwargs["body"]["metadata"]["ownerReferences"]
-    assert (owner["api_version"], owner["kind"], owner["uid"]) == ("batch.volcano.sh/v1alpha1", "Job", "vcjob-uid")
+    assert (owner["apiVersion"], owner["kind"], owner["uid"]) == ("batch.volcano.sh/v1alpha1", "Job", "vcjob-uid")
+    assert owner["controller"] is True
+    assert owner["blockOwnerDeletion"] is True
 
 
 def test_schedule_removes_network_policy_when_volcano_is_missing(
@@ -2009,6 +2011,27 @@ def test_schedule_removes_network_policy_when_volcano_is_missing(
 
     assert update.status == HelixJobStatus.ERROR
     volcano_job._networking_v1.delete_namespaced_network_policy.assert_called_once()
+
+
+def test_finished_volcano_step_deletes_its_network_policy(
+    volcano_job: VolcanoJobBackend, test_step_pending: HelixJobStepWithContext
+):
+    volcano_job._execution_profile_config.step_network_policies_enabled = True
+    volcano_job._networking_v1 = MagicMock()
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks", return_value=False),
+        patch.object(volcano_job, "get_volcano_job_events", return_value=[]),
+        patch.object(volcano_job, "get_volcano_pod_group_events", return_value=[]),
+    ):
+        update = volcano_job.create_step_update(
+            test_step_pending, _volcano_job_for_step(test_step_pending, phase="Completed")
+        )
+
+    assert update.status == HelixJobStatus.COMPLETED
+    volcano_job._networking_v1.delete_namespaced_network_policy.assert_called_once_with(
+        name=name_for_step(test_step_pending), namespace="test-namespace"
+    )
 
 
 def test_terminate_volcano_job_deletes_network_policy(

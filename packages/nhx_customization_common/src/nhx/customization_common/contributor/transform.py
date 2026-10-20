@@ -15,7 +15,10 @@ from __future__ import annotations
 import re
 import uuid
 
+from nemo_helix_plugin.entity_naming import NAME_PATTERN, NAME_PATTERN_DESCRIPTION
 from nhx.common.entities.utils import parse_entity_ref
+
+_OUTPUT_NAME_RE = re.compile(NAME_PATTERN)
 
 _MAX_PREFIX_LEN = 50
 _HEX_LEN = 12
@@ -58,3 +61,17 @@ def dataset_basename(uri: str) -> str:
 def generated_output_name(model_ref: str, dataset_ref: str, workspace: str) -> str:
     """Default output entity/fileset name used when the submitter omits one."""
     return random_suffix(f"{model_basename(model_ref, workspace)}-{dataset_basename(dataset_ref)}")
+
+
+def require_output_fileset_name(name: str) -> str:
+    """Reject an output model name that cannot be the fileset created for its weights.
+
+    The fileset is created only after training. A name that fails this check must stop the job
+    at submit, before any step is scheduled.
+    """
+    if _OUTPUT_NAME_RE.fullmatch(name) is None:
+        raise ValueError(
+            f"output model name {name!r} is not a valid fileset name, so the job was not created. "
+            f"{NAME_PATTERN_DESCRIPTION}"
+        )
+    return name

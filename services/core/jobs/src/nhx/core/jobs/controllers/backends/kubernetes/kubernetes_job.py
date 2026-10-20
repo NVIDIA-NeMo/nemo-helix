@@ -440,6 +440,8 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
                 else:
                     self._workload_delegations.ensure_for_target(step, target)
         error_details = {"message": error_message} if error_message is not None else {}
+        if status in HelixJobStatus.terminals():
+            self._delete_step_network_policy(job.metadata.name)
         return JobUpdate(status=status, status_details=status_details, error_details=error_details)
 
     def enforce_image_pull_ttl(self, step: HelixJobStepWithContext, k8s_job: V1Job) -> JobUpdate | None:
@@ -625,8 +627,12 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             namespace=self.namespace,
             name=job_name,
         )
-        if self._execution_profile_config.step_network_policies_enabled:
-            delete_step_network_policy(self._networking_v1, self.namespace, job_name)
+        self._delete_step_network_policy(job_name)
+
+    def _delete_step_network_policy(self, name: str | None) -> None:
+        if not name or not self._execution_profile_config.step_network_policies_enabled:
+            return
+        delete_step_network_policy(self._networking_v1, self.namespace, name)
 
     def cleanup_steps(self):
         jobs = self.get_kubernetes_job_list_by_labels(labels=KUBE_JOB_SELECTOR_LABELS)

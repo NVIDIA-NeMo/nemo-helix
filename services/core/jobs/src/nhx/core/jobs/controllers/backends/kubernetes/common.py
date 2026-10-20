@@ -869,11 +869,13 @@ def adopt_step_network_policy(
     networking_v1: client.NetworkingV1Api, namespace: str, name: str, owner: client.V1OwnerReference
 ) -> None:
     """Make the workload own the policy so garbage collection removes it with the workload."""
+    owner.controller = True
+    owner.block_owner_deletion = True
     try:
         networking_v1.patch_namespaced_network_policy(
             name=name,
             namespace=namespace,
-            body={"metadata": {"ownerReferences": [owner.to_dict()]}},
+            body={"metadata": {"ownerReferences": [client.ApiClient().sanitize_for_serialization(owner)]}},
         )
     except ApiException:
         logger.warning(

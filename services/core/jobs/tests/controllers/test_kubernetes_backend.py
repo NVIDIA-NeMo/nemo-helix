@@ -3488,7 +3488,9 @@ def test_schedule_creates_network_policy_before_job_and_hands_it_to_the_job(
     patch_kwargs = calls.networking.patch_namespaced_network_policy.call_args.kwargs
     assert patch_kwargs["name"] == name_for_step(test_step_pending)
     (owner,) = patch_kwargs["body"]["metadata"]["ownerReferences"]
-    assert (owner["api_version"], owner["kind"], owner["uid"]) == ("batch/v1", "Job", "job-uid")
+    assert (owner["apiVersion"], owner["kind"], owner["uid"]) == ("batch/v1", "Job", "job-uid")
+    assert owner["controller"] is True
+    assert owner["blockOwnerDeletion"] is True
 
 
 def test_schedule_fails_closed_when_network_policy_cannot_be_created(
@@ -3547,6 +3549,46 @@ def test_terminate_job_deletes_network_policy_only_when_enabled(kubernetes_job, 
         delete.assert_called_once_with(name=name_for_step(test_step_pending), namespace="test-namespace")
     else:
         delete.assert_not_called()
+
+
+def test_finished_step_deletes_its_network_policy(kubernetes_job, test_step_pending):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = True
+    kubernetes_job._networking_v1 = MagicMock()
+    finished = _kubernetes_job_for_step(
+        test_step_pending,
+        status=client.V1JobStatus(
+            succeeded=1,
+            completion_time=datetime.datetime.now(datetime.timezone.utc),
+        ),
+    )
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
+        patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
+    ):
+        update = kubernetes_job.create_step_update(test_step_pending, finished)
+
+    assert update.status == HelixJobStatus.COMPLETED
+    kubernetes_job._networking_v1.delete_namespaced_network_policy.assert_called_once_with(
+        name=name_for_step(test_step_pending), namespace="test-namespace"
+    )
+
+
+def test_running_step_keeps_its_network_policy(kubernetes_job, test_step_pending):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = True
+    kubernetes_job._networking_v1 = MagicMock()
+    kubernetes_job._core_v1.list_namespaced_pod.return_value = SimpleNamespace(
+        items=[_kubernetes_pod("pod-1", phase="Running")]
+    )
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
+        patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
+    ):
+        update = kubernetes_job.create_step_update(test_step_pending, _kubernetes_job_for_step(test_step_pending))
+
+    assert update.status == HelixJobStatus.ACTIVE
+    kubernetes_job._networking_v1.delete_namespaced_network_policy.assert_not_called()
 
 
 @pytest.mark.parametrize("status", [403, 404])
