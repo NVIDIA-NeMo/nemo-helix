@@ -89,3 +89,61 @@ def test_installed_sources_use_installed_source_version_and_explicit_sources_sta
     downloaded_sources = (output_dir / "manifests" / "downloaded-apt-sources.txt").read_text().splitlines()
     assert "openssl=3.0.2-0ubuntu1.20" in downloaded_sources
     assert "explicit-src" in downloaded_sources
+
+
+def test_a_source_download_is_retried_before_it_is_recorded_missing(tmp_path: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    apt_get_log = tmp_path / "apt-get.log"
+    sleep_log = tmp_path / "sleep.log"
+
+    write_executable(
+        fake_bin / "dpkg-query",
+        """
+        #!/usr/bin/env bash
+        printf 'libacl1:arm64\\t2.3.2-2+b1\\tacl\\t2.3.2-2\\nlibgone:arm64\\t1-1\\tgone\\t1-1\\n'
+        """,
+    )
+    write_executable(fake_bin / "apt-cache", "#!/usr/bin/env bash\n")
+    write_executable(fake_bin / "sleep", f'#!/usr/bin/env bash\nprintf "%s\\n" "$1" >> "{sleep_log}"\n')
+    # acl's first download drops its connection; gone's source is never available.
+    write_executable(
+        fake_bin / "apt-get",
+        f"""
+        #!/usr/bin/env bash
+        printf '%s\\n' "$*" >> "{apt_get_log}"
+        case "$*" in
+            "source --download-only --only-source acl=2.3.2-2")
+                [ "$(grep -c 'only-source acl=' "{apt_get_log}")" -gt 1 ]
+                exit
+                ;;
+            "source --download-only --only-source gone=1-1")
+                exit 1
+                ;;
+        esac
+        exit 0
+        """,
+    )
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    env["NHX_COLLECT_SOURCES"] = "1"
+    output_dir = tmp_path / "out"
+
+    result = subprocess.run(
+        ["bash", str(SCRIPT), str(output_dir), "--installed"],
+        check=False,
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    assert result.returncode == 0, result.stderr
+    apt_get_calls = apt_get_log.read_text().splitlines()
+    assert apt_get_calls.count("source --download-only --only-source acl=2.3.2-2") == 2
+    assert apt_get_calls.count("source --download-only --only-source gone=1-1") == 3
+    manifests = output_dir / "manifests"
+    assert (manifests / "downloaded-apt-sources.txt").read_text().splitlines() == ["acl=2.3.2-2"]
+    assert (manifests / "missing-apt-sources.txt").read_text().splitlines() == ["gone=1-1"]

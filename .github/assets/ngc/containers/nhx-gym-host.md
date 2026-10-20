@@ -20,3 +20,5 @@ prefetches first-party Gym component environments when available.
 ### License
 
 This container is licensed under the [Apache License 2.0](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/LICENSE).
+It includes open source components under their own licenses. Their source code is in the image under
+`/usr/share/nemo-helix/source-distributions`.

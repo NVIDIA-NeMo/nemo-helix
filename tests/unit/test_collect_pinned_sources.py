@@ -145,3 +145,62 @@ def test_release_archives_are_named_after_the_component() -> None:
     )
 
     assert source.filename == "kaniko-1.28.5.tar.gz"
+
+
+def pinned(name: str, covers: list[str], bundled_in: str | None = None):
+    return load_module().PinnedSource(
+        name, "1", "MIT", "https://example.com/a.tar.gz", "0" * 64, tuple(covers), bundled_in
+    )
+
+
+def test_a_python_pin_behind_the_installed_version_is_stale() -> None:
+    module = load_module()
+    sources = [pinned("ray", ["python:ray@2.57.0"]), pinned("launcher", ["dotnet:Simple Launcher@1.1.0.14"])]
+
+    assert module.stale_python_pins(sources, {"ray": {"2.58.0"}, "simple-launcher": {"2"}}) == [
+        "ray pins ray 2.57.0, but 2.58.0 is installed"
+    ]
+
+
+def test_a_python_pin_that_is_installed_absent_or_bundled_elsewhere_is_not_stale() -> None:
+    module = load_module()
+    sources = [
+        pinned("ray", ["python:Ray@2.58.0"]),
+        pinned("setuptools", ["python:setuptools@84.0.0"]),
+        pinned("colorama", ["python:colorama@0.4.6"], bundled_in="ray"),
+    ]
+
+    assert module.stale_python_pins(sources, {"ray": {"2.57.0", "2.58.0"}, "colorama": {"0.4.7"}}) == []
+
+
+def test_a_stale_pin_fails_the_build_even_when_collection_is_disabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    module = load_module()
+    manifest = tmp_path / "m.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "sources": [
+                    {
+                        "name": "ray",
+                        "version": "2.57.0",
+                        "license": "Apache-2.0",
+                        "url": "https://example.com/ray.tar.gz",
+                        "sha256": "0" * 64,
+                        "covers": ["python:ray@2.57.0"],
+                    }
+                ]
+            }
+        )
+    )
+    monkeypatch.delenv("NHX_COLLECT_SOURCES", raising=False)
+    monkeypatch.setattr(module, "installed_versions", lambda python: {"ray": {"2.58.0"}})
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [str(SCRIPT), "--manifest", str(manifest), "--output", str(tmp_path / "out"), "--installed-in", "python3"],
+    )
+
+    with pytest.raises(RuntimeError, match="ray pins ray 2.57.0, but 2.58.0 is installed"):
+        module.main()
