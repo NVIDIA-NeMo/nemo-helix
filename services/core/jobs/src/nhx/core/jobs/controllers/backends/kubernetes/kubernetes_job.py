@@ -297,7 +297,13 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             logger.exception(
                 "Failed to create Kubernetes job", extra={"job_name": job_name, "namespace": self.namespace}
             )
-            self._delete_step_network_policy(network_policy_name)
+            try:
+                self._delete_step_network_policy(network_policy_name)
+            except Exception:
+                logger.exception(
+                    "Failed to delete step NetworkPolicy after Kubernetes job creation failed",
+                    extra={"network_policy": network_policy_name, "namespace": self.namespace},
+                )
             raise
         logger.info("Scheduled job step with Kubernetes job", extra={"job_name": job_name, "namespace": self.namespace})
         if network_policy_name and created.metadata and created.metadata.uid:

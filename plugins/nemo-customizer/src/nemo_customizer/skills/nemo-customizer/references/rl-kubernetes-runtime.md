@@ -97,6 +97,17 @@ Cluster-private, node-local and metadata destinations stay denied either way. A
 complete `wheels-v1` closure avoids needing any of this — see
 `gym-environments.md` § **Dependency installation**.
 
+### Ingress to the training pod
+
+The sandbox must reach the training pod's vLLM port and the episode broker, and must not reach its Ray ports. That isolation is a per-step ingress NetworkPolicy, and it is **off by default**.
+
+| Setting | Default | Notes |
+|---|---|---|
+| `networkPolicies.jobSteps.enabled` | `false` | Helm value. Set `true` to write `jobs.executor_defaults.kubernetes_job.step_network_policies_enabled` and the same flag on `volcano_job`. The jobs controller then creates and deletes an ingress NetworkPolicy for each step that declares `network`, which sandboxed GRPO does. |
+| `jobs.executor_defaults.{kubernetes_job,volcano_job}.step_network_policies_enabled` | `false` | The resolved flag. A `platformConfig` override turns the controller, its NetworkPolicy RBAC, and the ValidatingAdmissionPolicy on or off together. Enabling it needs a CNI that enforces NetworkPolicy (Cilium on the minikube Docker driver; the default CNI accepts the resources and does not enforce them) and Kubernetes 1.30+ for the admission policy, or 1.28+ with the ValidatingAdmissionPolicy beta API. |
+
+Leave it off and a Gym sandbox can open the training pod's Ray ports.
+
 ### Rollout transport and sandbox sizing (operator-scoped)
 
 All jobs-invisible; jobs cannot set them. Reach for these only when a running GRPO
@@ -107,7 +118,7 @@ job fails in a way that matches:
 | `rl.sandbox_rollout_chunk_size` | NeMo-RL's 8 | Every rollout fails with HTTP 500 after a long POST — the OpenSandbox proxy caps how long one request may stay open, and a large `max_new_tokens` overruns it. Read elapsed time on the failing POSTs and divide down |
 | `rl.sandbox_rollout_max_in_flight` | NeMo-RL's 8 | In-flight rollouts are chunk × this. Raise in proportion when lowering the chunk, or step throughput falls with it |
 | `rl.sandbox_ttl_s` | NeMo-RL's 14400 (4h) | A run outliving the reap timer loses its sandbox mid-rollout and fails with a proxy 502. Must exceed the longest accepted run; capped by the server's `max_sandbox_timeout_seconds` |
-| `rl.sandbox_resources` | `cpu: "2"`, `memory: 4Gi` | Sandbox OOMKilled mid-rollout, surfacing as a proxy 502 rather than a memory error. The pod runs one Gym server process per config entry plus its own Ray. The OpenSandbox SDK default (1 CPU / 2Gi) is too small for that |
+| `rl.sandbox_resources` | `cpu: "4"`, `memory: 8Gi` | Sandbox OOMKilled mid-rollout, surfacing as a proxy 502 rather than a memory error. The pod runs one Gym server process per config entry plus its own Ray. The OpenSandbox SDK default (1 CPU / 2Gi) is too small for that |
 | `rl.gym_runtime_image` | the `nhx-rl-training` image | Only if the sandbox must run a different image |
 
 Reference (local platform config): `docs/set-up/manage-jobs.mdx` (execution

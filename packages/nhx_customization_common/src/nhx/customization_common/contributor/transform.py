@@ -72,6 +72,6 @@ def require_output_fileset_name(name: str) -> str:
     if _OUTPUT_NAME_RE.fullmatch(name) is None:
         raise ValueError(
             f"output model name {name!r} is not a valid fileset name, so the job was not created. "
-            f"{NAME_PATTERN_DESCRIPTION}"
+            f"A valid fileset name: {NAME_PATTERN_DESCRIPTION}"
         )
     return name

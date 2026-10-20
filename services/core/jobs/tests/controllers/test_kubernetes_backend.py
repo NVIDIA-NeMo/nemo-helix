@@ -3509,6 +3509,20 @@ def test_schedule_removes_network_policy_when_kubernetes_job_creation_fails(
     )
 
 
+def test_schedule_keeps_the_job_creation_error_when_policy_cleanup_fails(
+    kubernetes_job, cpu_execution_provider, test_step_pending
+):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = True
+    kubernetes_job._networking_v1 = MagicMock()
+    kubernetes_job._batch_v1.create_namespaced_job.side_effect = ApiException(status=422)
+    kubernetes_job._networking_v1.delete_namespaced_network_policy.side_effect = ApiException(status=500)
+
+    with pytest.raises(ApiException) as raised:
+        kubernetes_job.schedule(cpu_execution_provider, _step_with_network(test_step_pending))
+
+    assert raised.value.status == 422
+
+
 def test_schedule_fails_closed_when_network_policy_cannot_be_created(
     kubernetes_job, cpu_execution_provider, test_step_pending
 ):
