@@ -185,7 +185,10 @@ def check_bundled_harness_clis() -> list[str]:
 
 
 def check_sandboxed_codex_archive() -> list[str]:
-    """The codex archive nemo-evals' SandboxedCodex uploads into Harbor sandboxes holds its binary."""
+    """Check that the bundled codex archive contains the codex binary.
+
+    nemo-evals' SandboxedCodex agent copies this archive into each Harbor sandbox and runs codex from it.
+    """
     import tarfile
 
     from nemo_evals.harbor.agents import CODEX_ARCHIVE_MEMBER, DEFAULT_CODEX_ARCHIVE
