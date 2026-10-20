@@ -289,14 +289,15 @@ def ensure_passthrough_virtual_model(
     last_error: Exception | None = None
 
     while time.time() - start < timeout:
-        _create_passthrough_virtual_model_once(
-            client,
-            workspace,
-            name,
-            autoprovisioned=autoprovisioned,
-        )
-
         try:
+            # exist_ok=True can follow a create conflict with a GET that races
+            # controller deletion, so creation must share the read retry scope.
+            _create_passthrough_virtual_model_once(
+                client,
+                workspace,
+                name,
+                autoprovisioned=autoprovisioned,
+            )
             virtual_models_client.get_virtual_model(workspace=workspace, name=name)
             return
         except NotFoundError as e:

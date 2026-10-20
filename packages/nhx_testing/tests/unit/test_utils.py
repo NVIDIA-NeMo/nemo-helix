@@ -7,13 +7,87 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
+import httpx
+import pytest
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nhx.common.entities.constants import NAME_PATTERN
 from nhx.testing import utils
 from nhx.testing.utils import short_unique_name
 
 _ENTITY_NAME_PATTERN = re.compile(NAME_PATTERN)
+
+
+class TestEnsurePassthroughVirtualModel:
+    @pytest.fixture
+    def clock(self, monkeypatch: pytest.MonkeyPatch) -> list[float]:
+        now = [0.0]
+
+        def advance(seconds: float) -> None:
+            now[0] += seconds
+
+        # Replace the helper's module reference, leaving other threads' clocks alone.
+        monkeypatch.setattr(utils, "time", SimpleNamespace(time=lambda: now[0], sleep=advance))
+        return now
+
+    @pytest.mark.parametrize(
+        ("statuses", "methods"),
+        [
+            ([201, 200], ["POST", "GET"]),
+            # exist_ok=True follows a create conflict with a GET that can race deletion.
+            ([409, 404, 201, 200], ["POST", "GET", "POST", "GET"]),
+            # The explicit verification GET can also race deletion.
+            ([201, 404, 201, 200], ["POST", "GET", "POST", "GET"]),
+        ],
+    )
+    def test_retries_create_and_read(self, clock: list[float], statuses: list[int], methods: list[str]) -> None:
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            status = statuses[len(requests)]
+            requests.append(request)
+            body = {"name": "model", "workspace": "test"} if status < 400 else {"detail": "model unavailable"}
+            return httpx.Response(status, json=body)
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+            client = NemoClient(base_url="http://test", http_client=http_client)
+            utils.ensure_passthrough_virtual_model(client, "test", "model")
+
+        assert [request.method for request in requests] == methods
+        assert clock[0] == (0.5 if 404 in statuses else 0.0)
+
+    def test_persistent_create_read_race_times_out(self, clock: list[float]) -> None:
+        methods: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            methods.append(request.method)
+            return httpx.Response(409 if request.method == "POST" else 404, json={"detail": "model unavailable"})
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+            client = NemoClient(base_url="http://test", http_client=http_client)
+            with pytest.raises(TimeoutError, match="VirtualModel test/model not available after 1s.*HTTP 404"):
+                utils.ensure_passthrough_virtual_model(client, "test", "model", timeout=1, poll_interval=0.5)
+
+        assert methods == ["POST", "GET", "POST", "GET"]
+        assert clock[0] == 1
+
+    def test_create_permission_error_is_not_retried(self, clock: list[float]) -> None:
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(403, json={"detail": "Forbidden"})
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+            client = NemoClient(base_url="http://test", http_client=http_client)
+            with pytest.raises(PermissionDeniedError):
+                utils.ensure_passthrough_virtual_model(client, "test", "model")
+
+        assert len(requests) == 1
+        assert clock[0] == 0
 
 
 class TestShortUniqueName:
