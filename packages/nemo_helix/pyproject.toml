@@ -840,7 +840,7 @@ build-backend = "hatchling.build"
 path = "hatch_build.py"
 
 [tool.hatch.metadata]
-allow-direct-references = true
+allow-direct-references = false
 
 [tool.hatch.build.targets.wheel]
 packages = []
