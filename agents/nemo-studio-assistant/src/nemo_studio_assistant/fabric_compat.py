@@ -5,9 +5,12 @@
 
 import inspect
 import os
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
+
+# The wrappers this module has installed, so applying a compatibility patch twice is a no-op.
+_INSTALLED: set[Callable[..., Any]] = set()
 
 
 def virtualize_skill_sources(skill_paths: Iterable[str], workspace_root: Path) -> list[str]:
@@ -43,7 +46,7 @@ def apply_deepagents_skill_path_compatibility() -> None:
     common_utils = adapter.common_utils
 
     original_plan = common_utils.capability_plan
-    if not getattr(original_plan, "_nemo_studio_virtual_paths", False):
+    if original_plan not in _INSTALLED:
 
         def capability_plan(payload: dict[str, Any]) -> dict[str, Any]:
             plan = original_plan(payload)
@@ -63,11 +66,11 @@ def apply_deepagents_skill_path_compatibility() -> None:
             }
             return {**plan, "native": normalized_native}
 
-        capability_plan._nemo_studio_virtual_paths = True  # type: ignore[attr-defined]
+        _INSTALLED.add(capability_plan)
         common_utils.capability_plan = capability_plan
 
     original = adapter.resolve_skills
-    if getattr(original, "_nemo_studio_virtual_paths", False):
+    if original in _INSTALLED:
         return
 
     def resolve_skills(payload: dict[str, Any]) -> list[str] | None:
@@ -83,7 +86,7 @@ def apply_deepagents_skill_path_compatibility() -> None:
         )
         return virtualize_skill_sources(skill_paths, workspace_root)
 
-    resolve_skills._nemo_studio_virtual_paths = True  # type: ignore[attr-defined]
+    _INSTALLED.add(resolve_skills)
     adapter.resolve_skills = resolve_skills
 
 
@@ -93,7 +96,7 @@ def apply_deepagents_mcp_env_compatibility() -> None:
 
     adapter: Any = adapter_module
     original = adapter._mcp_connection
-    if getattr(original, "_nemo_studio_inherits_env", False):
+    if original in _INSTALLED:
         return
 
     def mcp_connection(name: str, spec: Any) -> dict[str, Any]:
@@ -102,7 +105,7 @@ def apply_deepagents_mcp_env_compatibility() -> None:
             connection["env"] = {**os.environ, **connection.get("env", {})}
         return connection
 
-    mcp_connection._nemo_studio_inherits_env = True  # type: ignore[attr-defined]
+    _INSTALLED.add(mcp_connection)
     adapter._mcp_connection = mcp_connection
 
 
@@ -112,7 +115,7 @@ def apply_platform_skill_translation_compatibility() -> None:
 
     translator: Any = translator_module
     original = translator._skills_config
-    if getattr(original, "_nemo_studio_virtual_paths", False):
+    if original in _INSTALLED:
         return
 
     def skills_config(config: Any) -> Any:
@@ -121,5 +124,5 @@ def apply_platform_skill_translation_compatibility() -> None:
             translated.paths = [str(path) if Path(path).is_absolute() else f"/{path}" for path in translated.paths]
         return translated
 
-    skills_config._nemo_studio_virtual_paths = True  # type: ignore[attr-defined]
+    _INSTALLED.add(skills_config)
     translator._skills_config = skills_config

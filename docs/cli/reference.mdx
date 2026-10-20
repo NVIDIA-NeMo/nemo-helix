@@ -4128,6 +4128,7 @@ nemo jobs [OPTIONS] COMMAND [ARGS]...
 * `list-execution-profiles`: Get all currently configured execution profiles.
 * `pause`: Pause a platform job by name or ID.
 * `resume`: Resume a paused platform job by name or ID.
+* `control`: Change mutable job behavior, such as how long a pause...
 * `get`: Get a platform job by name or ID.
 * `update-status-details`: Update the status details of a platform job.
 * `watch`: Watch a platform job until it reaches a terminal status.
@@ -4414,6 +4415,33 @@ nemo jobs resume [OPTIONS] NAME
 
 **Options:**
 
+* `--workspace`
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+#### nemo jobs control
+
+Change mutable job behavior, such as how long a pause keeps storage.
+
+**Usage:**
+
+```shell
+nemo jobs control [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Job name or ID (both are accepted).
+
+**Options:**
+
+* `--pause-ttl-seconds <INTEGER>`: How long to keep storage after a pause, measured from the pause. Cannot exceed the platform maximum.
 * `--workspace`
 
 **Help:**
@@ -5612,6 +5640,7 @@ nemo workspaces [OPTIONS] COMMAND [ARGS]...
 
 * `create`: Create a new workspace.
 * `delete`: Delete a workspace.
+* `deletion-status`: Show why a workspace name is still reserved.
 * `list`: List all workspaces with pagination.
 * `get`: Get a specific workspace by ID.
 * `update`: Update a workspace's description.
@@ -5703,6 +5732,40 @@ nemo workspaces delete [OPTIONS] NAME
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+#### nemo workspaces deletion-status
+
+Show why a workspace name is still reserved.
+
+Returns the cleanup stage and the last error for a workspace that is
+pending, deleting, or failed. The original creator, a platform admin, or a
+service principal can read it. A missing workspace, a live workspace, and a
+deletion the caller may not see all return not found.
+
+**Examples:**
+
+
+```
+GET /apis/entities/v2/workspace-deletions/ml-team
+```
+
+**Usage:**
+
+```shell
+nemo workspaces deletion-status [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Workspace name
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 #### nemo workspaces list
 
@@ -9133,10 +9196,11 @@ nemo evals runs submit [OPTIONS]
 * `--agent`: Harbor built-in agent (without --spec-file). [default: oracle]
 * `--sandbox-profile`: Operator sandbox profile; default: the operator's (without --spec-file).
 * `--dispatcher-profile`: Jobs profile for task Jobs.
-* `--cpus <INTEGER RANGE>`: CPUs for every task sandbox, over task.toml (without --spec-file).
-* `--memory-mb <INTEGER RANGE>`: Memory in MB for every task sandbox (without --spec-file).
-* `--storage-mb <INTEGER RANGE>`: Disk in MB for every task sandbox (without --spec-file).
-* `--no-build-images`: Don't request or wait for builds.
+* `--cpus <INTEGER RANGE>`: CPUs for every task's agent sandbox, over task.toml (without --spec-file).
+* `--memory-mb <INTEGER RANGE>`: Memory in MB for every task's agent sandbox (without --spec-file).
+* `--storage-mb <INTEGER RANGE>`: Disk in MB for every task's agent sandbox (without --spec-file).
+* `--no-build-images`: Don't request or wait for image builds here; submit starts a first build for a task that has none.
+* `--idempotency-key`: Key that makes a resubmit return the same run; default: a new one. A failed submit prints its key.
 * `--list-tasks`: Print the selectable tasks and exit.
 * `--workspace`: Workspace for tasks, taskset and run; default: the configured workspace.
 * `--poll-seconds <FLOAT>`: Image-build polling interval. [default: 10.0]
@@ -9163,7 +9227,7 @@ nemo evals agent-evaluate [OPTIONS] [COMMAND] [ARGS]...
 **Job Spec:**
 
 * `--max-concurrent-tasks <INTEGER>`: Concurrency for this evaluation's SDK work. Harbor and Gym: concurrent scoring calls only (trials are bounded by the runner). Other runners: concurrent trials and scoring calls. For model and agent targets, target.params.parallelism bounds concurrent inference requests during trial generation. On Kubernetes runs it applies per task Job; the task-Job cap is execution.max_concurrent_task_jobs.
-* `--fail-fast`: Fail on the first metric error instead of recording an errored score. On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks budget can also fail the run and cancel remaining task Jobs.
+* `--fail-fast`: Fail on the first metric error instead of recording an errored score. On Kubernetes runs it fails that task's Job.
 * `--publication.intake.evaluation-id`: Name of the existing Evaluation to publish under. Must already exist; the job does not create it.
 * `--publication.intake.agent-name`: Agent name recorded on each published trajectory. Derived from the target when it names one; required otherwise.
 * `--publication.intake.agent-version`: Agent version recorded on each published trajectory. Neither a Model nor an Agent carries a version, so this defaults to the version the agent's own trajectory records (a Harbor agent's, such as codex's), else 'unknown'.

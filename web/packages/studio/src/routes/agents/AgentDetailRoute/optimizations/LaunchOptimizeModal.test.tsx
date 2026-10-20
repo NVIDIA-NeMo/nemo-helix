@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { OptimizationStrategy } from '@nemo/sdk/generated/agent-optimization/schema/OptimizationStrategy';
 import {
   getFilesListFilesetFilesQueryKey,
   getFilesListFilesetsQueryKey,
@@ -106,7 +107,7 @@ const LocationSearch = () => <div data-testid="location-search">{useLocation().s
 const jobsTable = () =>
   screen.findByText('?tab=optimizations', { selector: '[data-testid="location-search"]' });
 
-const renderModal = () =>
+const renderModal = (strategy?: OptimizationStrategy) =>
   renderRoute(undefined, {
     history: getAgentDetailRoute(workspace, agentName),
     routes: [
@@ -119,6 +120,7 @@ const renderModal = () =>
               onClose={vi.fn()}
               workspace={workspace}
               agentName={agentName}
+              strategy={strategy}
             />
             <LocationSearch />
           </>
@@ -317,6 +319,88 @@ describe('LaunchOptimizeModal', () => {
 
       expect(await within(dialog).findByText('This fileset has no YAML files.')).toBeVisible();
       expect(startButton(dialog)).toBeDisabled();
+    });
+  });
+
+  describe('for an installed strategy', () => {
+    const promptMaster: OptimizationStrategy = {
+      name: 'prompt-master',
+      title: 'Prompt optimization using Prompt Master',
+      description: 'Rewrite the system prompt.',
+      requires_config: false,
+    };
+    const configured: OptimizationStrategy = {
+      name: 'needs-config',
+      title: 'Needs a config',
+      description: 'Reads its settings from a config.',
+      requires_config: true,
+    };
+
+    it('titles and describes itself from the strategy', async () => {
+      mockHelix();
+      renderModal(promptMaster);
+
+      const dialog = await screen.findByRole('dialog', { name: promptMaster.title });
+      expect(within(dialog).getByText('Rewrite the system prompt.')).toBeInTheDocument();
+      expect(within(dialog).getByText('Config bundle (optional)')).toBeInTheDocument();
+    });
+
+    it('runs an optional-config strategy without a config', async () => {
+      const user = userEvent.setup();
+      const { uploaded, submitted } = mockHelix();
+      renderModal(promptMaster);
+
+      const dialog = await screen.findByRole('dialog', { name: promptMaster.title });
+      await user.click(startButton(dialog));
+
+      expect(await jobsTable()).toBeInTheDocument();
+      expect(uploaded).toEqual([]);
+      expect(submitted).toHaveLength(1);
+      expect(submitted[0]?.spec).toEqual({ strategy: 'prompt-master', agent: agentName });
+    });
+
+    it('stages an optional config when one is picked, with any YAML mapping', async () => {
+      const { uploaded, submitted } = mockHelix();
+      renderModal(promptMaster);
+
+      const dialog = await pickBundle([makeFile('bundle/settings.yaml', 'rounds: 2\n')]);
+      await waitFor(() => expect(startButton(dialog)).toBeEnabled());
+      fireEvent.click(startButton(dialog));
+
+      expect(await jobsTable()).toBeInTheDocument();
+      expect(uploaded).toEqual(['settings.yaml']);
+      expect(submitted[0]?.spec).toMatchObject({
+        strategy: 'prompt-master',
+        optimize_config: 'settings.yaml',
+        agent: agentName,
+      });
+    });
+
+    it('holds submit on an unusable pick, until it is cleared', async () => {
+      const user = userEvent.setup();
+      mockHelix();
+      renderModal(promptMaster);
+
+      const dialog = await pickBundle([makeFile('bundle/notes.txt', 'hello')]);
+      await waitFor(() => expect(startButton(dialog)).toBeDisabled());
+
+      await user.click(within(dialog).getByRole('button', { name: 'Run without a config' }));
+      await waitFor(() => expect(startButton(dialog)).toBeEnabled());
+    });
+
+    it('requires a config when the strategy does', async () => {
+      const { submitted } = mockHelix();
+      renderModal(configured);
+
+      const dialog = await screen.findByRole('dialog', { name: configured.title });
+      expect(within(dialog).getByText('Config bundle')).toBeInTheDocument();
+      expect(startButton(dialog)).toBeDisabled();
+
+      await pickBundle([makeFile('bundle/settings.yaml', 'rounds: 2\n')]);
+      await waitFor(() => expect(startButton(dialog)).toBeEnabled());
+      fireEvent.click(startButton(dialog));
+
+      await waitFor(() => expect(submitted[0]?.spec?.strategy).toBe('needs-config'));
     });
   });
 });

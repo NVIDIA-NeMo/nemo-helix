@@ -91,6 +91,7 @@ async def test_post_snapshots_tasks_before_creating_job(entity_store, monkeypatc
                 error_details=None,
                 ownership=None,
                 custom_fields=None,
+                control=None,
             )
             return response
 

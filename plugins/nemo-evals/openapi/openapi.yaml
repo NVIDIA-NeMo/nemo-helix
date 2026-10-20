@@ -581,12 +581,14 @@ paths:
         \ Job per task\n    right after acceptance; a keyed replay creates any that\
         \ are still missing.\n\nRaises:\n    RequestValidationError: The execution\
         \ budget exceeds the operator maximum.\n    HTTPException: Source denial (403),\
-        \ conflicting key (409), resolution rejection\n        (422), missing task\
-        \ Jobs after acceptance (503, which the SDK retries only with an\n       \
-        \ idempotency_key), or a sanitized unexpected failure (500, which the SDK\
-        \ retries automatically).\n        Without an idempotency_key a submit is\
-        \ at-least-once: a retried 5xx or timeout may accept a\n        second run.\
-        \ Send a key for exactly-once."
+        \ conflicting key (409), resolution rejection\n        (422), an unavailable\
+        \ image build service before acceptance (503, safe to resend), missing\n \
+        \       task Jobs after acceptance (503), an Intake Evaluation refused after\
+        \ acceptance (403, not\n        retried), or a sanitized unexpected failure\
+        \ (500).\n        When the request omits idempotency_key, submit generates\
+        \ one. A 5xx then names it in the\n        detail and the ``x-idempotency-key``\
+        \ header and says not to retry automatically: the SDK\n        would resend\
+        \ the keyless request and accept a second run. Resubmit with that key instead."
       operationId: submit_taskset_run_apis_evals_v2_workspaces__workspace__agent_evaluate_runs_post
       parameters:
       - name: workspace
@@ -3061,8 +3063,7 @@ components:
           type: boolean
           title: Fail Fast
           description: Fail on the first metric error instead of recording an errored
-            score. On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks
-            budget can also fail the run and cancel remaining task Jobs.
+            score. On Kubernetes runs it fails that task's Job.
           default: false
         labels:
           additionalProperties:
@@ -3317,8 +3318,7 @@ components:
           type: boolean
           title: Fail Fast
           description: Fail on the first metric error instead of recording an errored
-            score. On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks
-            budget can also fail the run and cancel remaining task Jobs.
+            score. On Kubernetes runs it fails that task's Job.
           default: false
         labels:
           additionalProperties:
@@ -3499,6 +3499,8 @@ components:
           title: Custom Fields
           additionalProperties: true
           type: object
+        control:
+          $ref: '#/components/schemas/JobControl'
       type: object
       required:
       - name
@@ -4314,6 +4316,8 @@ components:
           title: Custom Fields
           additionalProperties: true
           type: object
+        control:
+          $ref: '#/components/schemas/JobControl'
       type: object
       required:
       - name
@@ -5408,24 +5412,6 @@ components:
           examples:
           - local-k8s
           type: string
-        missing_prebuilt_image:
-          type: string
-          enum:
-          - fail
-          - build
-          title: Missing Prebuilt Image
-          description: What to do when a task pins a prebuilt image (its docker_image)
-            and that image is no longer in the registry. 'fail' (default) fails that
-            task with image_unavailable. 'build' builds the image from the task's
-            Dockerfile instead and records the substitution; the result may differ
-            from the image the task author benchmarked, and a task without a Dockerfile
-            still fails. Does not apply to tasks without a pinned image, which are
-            always built from their Dockerfile, or to an image this run built that
-            disappears mid-run, which is always rebuilt.
-          default: fail
-          examples:
-          - fail
-          - build
         max_concurrent_task_jobs:
           title: Max Concurrent Task Jobs
           description: Maximum number of this run's task Jobs running at once. Omit
@@ -5434,27 +5420,15 @@ components:
           - 5
           type: integer
           minimum: 1.0
-        max_failed_tasks:
-          anyOf:
-          - type: integer
-            minimum: 0.0
-          - type: string
-            pattern: ^(100|[1-9]?\d)%$
-          title: Max Failed Tasks
-          description: Failed tasks the run tolerates, as a count or a percent of
-            the taskset's tasks. Once exceeded, the run fails and its remaining task
-            Jobs are cancelled. Submit resolves a percent into a count. Omit for no
-            limit.
-          examples:
-          - 3
-          - 10%
         sandbox:
           allOf:
           - $ref: '#/components/schemas/SandboxSelection'
-          description: 'Sandbox for every task, agent and verifier alike. profile
-            names an operator sandbox profile: isolation, egress and resource ceilings;
-            omitted uses the operator''s default. cpus, memory_mb and storage_mb beat
-            the task''s task.toml [environment]; each must stay within the profile''s
+          description: 'Sandbox for every task. profile names an operator sandbox
+            profile: isolation, egress and resource ceilings; omitted uses the operator''s
+            default. cpus, memory_mb and storage_mb size each task''s agent sandbox,
+            over its task.toml [environment]; a separate verifier keeps task.toml''s
+            resources. Unset cpus and memory_mb default to 1 CPU and 2048 MB, capped
+            by the ceilings. Every sandbox''s values must stay within the profile''s
             ceilings, or submit fails with 422. Omit the whole object for the default
             profile and each task''s own resources.'
           examples:
@@ -5481,8 +5455,8 @@ components:
         It exists because these settings mean nothing on the Docker path: where task
         Jobs are
 
-        placed, which sandbox they may use, and when to give up on a run. Keeping
-        them in their
+        placed, which sandbox they may use, and how many run at once. Keeping them
+        in their
 
         own model, selected by ``kind``, lets future execution strategies add new
         models rather
@@ -5491,22 +5465,17 @@ components:
         runs.
 
 
-        Submit validates this input, resolves the percent form of ``max_failed_tasks``
-        into a
+        Submit validates this input and freezes the ``sandbox`` profile, with its
+        resource
 
-        count, and stores the execution caps and missing-image policy in the run''s
-        plan. It
+        overrides checked against the profile''s ceilings, the ``dispatcher_profile``,
+        the pinned
 
-        freezes the ``sandbox`` profile, with its resource overrides checked against
-        the
+        dispatcher image and the concurrency cap into the run''s plan, so operator
+        config edits
 
-        profile''s ceilings, and the ``dispatcher_profile`` into the plan too, so
-        operator
-
-        config edits never reach a running run. Earlier development runs are deleted
-        rather
-
-        than migrated.'
+        never reach a running run. Earlier development runs are deleted rather than
+        migrated.'
     HelixJobListResultResponse:
       properties:
         data:
@@ -6011,6 +5980,30 @@ components:
         group is a different resource and is not what goes here. The job never creates\
         \ the Evaluation: a\nmissing one is an error, because nothing in an eval spec\
         \ can supply the dataset identity\n``evaluations.create`` requires."
+    JobControl:
+      properties:
+        pause_ttl_seconds:
+          title: Pause Ttl Seconds
+          description: How long this job keeps storage after it pauses, measured from
+            stopped_at. When the job has no value, the platform paused-storage TTL
+            applies. Cannot exceed the platform maximum. 0 reclaims on the next retention
+            pass. In a control update, an omitted or null value keeps the current
+            value. Changing this value does not move the start time.
+          nullable: true
+          type: integer
+          minimum: 0.0
+      type: object
+      title: JobControl
+      description: 'Mutable job behavior, stored on the job and kept off the execution
+        spec.
+
+
+        The attempt spec stays the immutable snapshot of what a run executes. Rerun
+
+        copies the job spec into the next attempt and keeps using this object. In
+        a
+
+        control update, an omitted or null value keeps the job''s current value.'
     JsonValue:
       title: JsonValue
     LiveMetricResult:
@@ -7242,6 +7235,8 @@ components:
           title: Custom Fields
           additionalProperties: true
           type: object
+        control:
+          $ref: '#/components/schemas/JobControl'
       type: object
       required:
       - name
@@ -8203,12 +8198,12 @@ components:
           allOf:
           - $ref: '#/components/schemas/HarborTaskJobsExecutionInput'
           description: 'Kubernetes task Job settings: sandbox profile and resources,
-            dispatcher profile, run-wide task Job concurrency and failure tolerance.'
+            dispatcher profile and run-wide task Job concurrency.'
         idempotency_key:
           title: Idempotency Key
-          description: Optional caller-supplied key, scoped to workspace and caller,
-            so retries of the same request return the accepted run. Omit for a new
-            keyless run.
+          description: Optional key, scoped to workspace and caller, so retries of
+            the same request return the accepted run. When omitted, submit generates
+            one and returns it as the run's idempotency_key.
           type: string
           maxLength: 256
           minLength: 1
@@ -8364,7 +8359,8 @@ components:
           type: string
         idempotency_key:
           title: Idempotency Key
-          description: Caller-supplied submit key; None for a keyless run.
+          description: 'Submit key: the caller''s, or the one submit generated when
+            the request omitted it.'
           type: string
       additionalProperties: false
       type: object
@@ -8466,7 +8462,8 @@ components:
           type: string
         idempotency_key:
           title: Idempotency Key
-          description: Caller-supplied submit key; None for a keyless run.
+          description: 'Submit key: the caller''s, or the one submit generated when
+            the request omitted it.'
           type: string
         warnings:
           items:

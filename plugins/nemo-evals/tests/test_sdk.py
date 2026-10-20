@@ -304,7 +304,7 @@ def test_sync_resource_calls_evaluator_plugin_status() -> None:
 
 def test_sync_resource_rejects_non_object_plugin_status() -> None:
     platform = _SyncHelix()
-    platform.http_client.request.return_value = _json_response(
+    platform.http_client_mock.request.return_value = _json_response(
         "GET", "http://127.0.0.1:8000/apis/evals/v1/healthz", ["ok"]
     )
     resource = Evaluator(platform)
@@ -695,7 +695,7 @@ async def test_async_resource_calls_evaluator_plugin_status() -> None:
 @pytest.mark.asyncio
 async def test_async_resource_rejects_non_object_plugin_status() -> None:
     platform = _AsyncHelix()
-    platform.http_client.request.return_value = _json_response(
+    platform.http_client_mock.request.return_value = _json_response(
         "GET", "http://127.0.0.1:8000/apis/evals/v1/healthz", ["ok"]
     )
     resource = AsyncEvaluator(platform)
@@ -761,7 +761,7 @@ async def test_async_executor_waits_when_requested(mocker: MockerFixture) -> Non
     job = await executor.create(spec=_EXACT_MATCH_EVALUATE_INPUT_SPEC, workspace="ws", wait_until_done=True)
 
     assert isinstance(job, AsyncEvaluatorJobResource)
-    platform.http_client.request.assert_awaited_once()
+    platform.http_client_mock.request.assert_awaited_once()
     assert _last_request_url(platform) == "http://127.0.0.1:8000/apis/evals/v2/workspaces/ws/evaluate/jobs"
     assert _request_body(platform) == {"spec": _EXACT_MATCH_EVALUATE_INPUT_SPEC_JSON}
     wait.assert_awaited_once_with(

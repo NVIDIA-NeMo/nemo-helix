@@ -104,10 +104,6 @@ class HarborTaskJobsConfig(BaseModel):
         min_length=1,
         description="The sandbox_profiles key a request gets when execution.sandbox.profile is omitted.",
     )
-    allowed_registries: list[str] = Field(
-        default_factory=list,
-        description="Registries a task's prebuilt docker_image may come from. Empty allows none.",
-    )
 
     @model_validator(mode="after")
     def _default_profile_exists(self) -> Self:

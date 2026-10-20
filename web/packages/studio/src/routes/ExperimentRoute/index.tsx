@@ -140,7 +140,8 @@ export const ExperimentRoute: FC = () => {
   );
 
   const experiments = data?.data ?? [];
-  const totalResults = data?.pagination?.total_results ?? 0;
+  const totalResults =
+    (data?.pagination?.total_results ?? 0) + (favoritesTruncated ? 0 : favoritesTotal);
 
   return (
     <AccessibleTitle title="Experiments">

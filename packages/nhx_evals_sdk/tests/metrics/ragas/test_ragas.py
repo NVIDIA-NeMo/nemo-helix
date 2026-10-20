@@ -5,7 +5,7 @@ import logging
 import math
 import os
 from json import JSONDecodeError
-from typing import Protocol, TypeGuard
+from typing import Any, Protocol, TypeGuard
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -86,6 +86,11 @@ class _SecretResolver:
 class _UnexpectedSecretResolver:
     async def resolve_secret(self, secret_ref: SecretRef) -> str | None:
         raise AssertionError(f"Resolver should not be called for {secret_ref.root}")
+
+
+def _first_sample_fields(dataset: Any) -> dict[str, Any]:
+    """The first evaluation sample's fields, as ragas built them."""
+    return dataset.samples[0].model_dump()
 
 
 @pytest.mark.asyncio
@@ -385,11 +390,8 @@ async def test_create_evaluation_dataset_uses_sample_output_text():
     assert isinstance(dataset, EvaluationDataset)
 
     # Verify response was injected from sample
-    payload = dataset.samples[0] if hasattr(dataset, "samples") else dataset.to_pandas().iloc[0].to_dict()
-    if hasattr(payload, "response"):
-        assert payload.response == "The capital of France is Paris."
-    else:
-        assert payload.get("response") == "The capital of France is Paris."
+    payload = _first_sample_fields(dataset)
+    assert payload["response"] == "The capital of France is Paris."
 
 
 @pytest.mark.asyncio
@@ -401,24 +403,24 @@ async def test_create_evaluation_dataset_response_priority():
     item = {"user_input": "Question?", "response": "item response"}
     sample = {"output_text": "sample output_text", "response": "sample response"}
     dataset = metric._create_evaluation_dataset(item, sample)
-    payload = dataset.samples[0] if hasattr(dataset, "samples") else dataset.to_pandas().iloc[0].to_dict()
-    response_value = payload.response if hasattr(payload, "response") else payload.get("response")
+    payload = _first_sample_fields(dataset)
+    response_value = payload["response"]
     assert response_value == "sample output_text"
 
     # sample['response'] is used when payload has no response.
     item = {"user_input": "Question?"}
     sample = {"response": "sample response"}
     dataset = metric._create_evaluation_dataset(item, sample)
-    payload = dataset.samples[0] if hasattr(dataset, "samples") else dataset.to_pandas().iloc[0].to_dict()
-    response_value = payload.response if hasattr(payload, "response") else payload.get("response")
+    payload = _first_sample_fields(dataset)
+    response_value = payload["response"]
     assert response_value == "sample response"
 
     # item['response'] is used when sample does not provide a response.
     item = {"user_input": "Question?", "response": "item response"}
     sample = {}
     dataset = metric._create_evaluation_dataset(item, sample)
-    payload = dataset.samples[0] if hasattr(dataset, "samples") else dataset.to_pandas().iloc[0].to_dict()
-    response_value = payload.response if hasattr(payload, "response") else payload.get("response")
+    payload = _first_sample_fields(dataset)
+    response_value = payload["response"]
     assert response_value == "item response"
 
 
@@ -441,13 +443,9 @@ async def test_create_evaluation_dataset_with_template():
     sample = {"output_text": "sample output text"}
 
     dataset = metric._create_evaluation_dataset(item, sample)
-    payload = dataset.samples[0] if hasattr(dataset, "samples") else dataset.to_pandas().iloc[0].to_dict()
-    if hasattr(payload, "response"):
-        assert payload.response == "template response"
-        assert payload.user_input == "What is the capital?"
-    else:
-        assert payload.get("response") == "template response"
-        assert payload.get("user_input") == "What is the capital?"
+    payload = _first_sample_fields(dataset)
+    assert payload["response"] == "template response"
+    assert payload["user_input"] == "What is the capital?"
 
 
 @pytest.mark.asyncio
@@ -468,8 +466,8 @@ async def test_create_evaluation_dataset_with_template_fallback_injects_response
     sample = {"output_text": "fallback response"}
 
     dataset = metric._create_evaluation_dataset(item, sample)
-    payload = dataset.samples[0] if hasattr(dataset, "samples") else dataset.to_pandas().iloc[0].to_dict()
-    response_value = payload.response if hasattr(payload, "response") else payload.get("response")
+    payload = _first_sample_fields(dataset)
+    response_value = payload["response"]
     assert response_value == "fallback response"
 
 
@@ -486,8 +484,8 @@ async def test_create_evaluation_dataset_offline_mode():
     sample = {}  # No output_text (offline mode)
 
     dataset = metric._create_evaluation_dataset(item, sample)
-    payload = dataset.samples[0] if hasattr(dataset, "samples") else dataset.to_pandas().iloc[0].to_dict()
-    response_value = payload.response if hasattr(payload, "response") else payload.get("response")
+    payload = _first_sample_fields(dataset)
+    response_value = payload["response"]
     assert response_value == "Paris is the capital of France."
 
 

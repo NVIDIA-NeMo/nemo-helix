@@ -17,6 +17,7 @@ from types import TracebackType
 from typing import Self
 
 import yaml
+from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.service.context import NHXJobContext
 from nhx.rl.app.constants import DEFAULT_TRAINING_RESULT_FILE_NAME
 from nhx.rl.app.jobs.training.schemas import (
@@ -201,7 +202,7 @@ class TrainingRunner:
         """
         if self._dist_ctx.is_coordinator:
             if isinstance(self._backend, SupportsPreprocessing):
-                self._progress.report_running("conversions")
+                self._progress.report_running(TrainingPhase.CONVERSIONS)
                 self._backend.run_preprocessing(self._config)
                 logger.info("Pre-training conversions complete")
             # Always release workers, even if no conversions are needed
@@ -221,7 +222,7 @@ class TrainingRunner:
         config_path = self._get_library_config_path()
 
         if self._dist_ctx.is_coordinator:
-            self._progress.report_running("compiling_config")
+            self._progress.report_running(TrainingPhase.COMPILING_CONFIG)
 
             # Backend compiles config (pure transformation, no I/O)
             config_dict = self._backend.compile_config(self._config, self._workspace_path)
@@ -294,7 +295,7 @@ class TrainingRunner:
                 training_duration_seconds=self._progress.training_duration_seconds,
             )
 
-        self._progress.report_running("processing_checkpoint")
+        self._progress.report_running(TrainingPhase.FINALIZING_CHECKPOINT)
         checkpoint_path = self._backend.find_best_checkpoint(self._workspace_path, self._config, library_config)
         checkpoint_info = self._backend.process_checkpoint(
             checkpoint_path, self._output_path, self._config, library_config

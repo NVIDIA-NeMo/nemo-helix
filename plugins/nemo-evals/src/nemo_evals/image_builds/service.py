@@ -9,7 +9,9 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
+from urllib.parse import quote
 
+from fastapi import HTTPException, status
 from nemo_evals.api.task_definitions.harbor import HarborTaskDefinition
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
 from nemo_evals.image_builds.models import (
@@ -25,6 +27,7 @@ from nemo_evals.jobs.task_image_build import is_job_for, task_image_build_job_re
 from nemo_evals.revisions import get_revision
 from nemo_evals.task_identity import UnsupportedTaskKindError
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
+from nemo_helix_plugin.dependencies import RequestAuthorizer
 from nemo_helix_plugin.entities import EntityClient, PaginationInfo
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperator
@@ -47,6 +50,25 @@ class ImageBuildForbiddenError(Exception):
 
 #: Raises :class:`ImageBuildForbiddenError` unless the caller may submit Builder builds in the workspace.
 AuthorizeBuilds = Callable[[str], Awaitable[None]]
+
+
+def builder_authorizer(authorize: RequestAuthorizer) -> AuthorizeBuilds:
+    """Check the caller may submit Builder builds in a workspace.
+
+    Builder admits the task-builder Job on evals' own permissions, so the caller's permission to build is checked here.
+    """
+
+    async def authorize_builds(build_workspace: str) -> None:
+        try:
+            await authorize("POST", f"/apis/builder/v2/workspaces/{quote(build_workspace, safe='')}/builds")
+        except HTTPException as e:
+            if e.status_code != status.HTTP_403_FORBIDDEN:
+                raise
+            raise ImageBuildForbiddenError(
+                f"You may not submit container image builds in workspace {build_workspace}"
+            ) from e
+
+    return authorize_builds
 
 
 @dataclass(frozen=True)

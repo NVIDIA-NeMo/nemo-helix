@@ -24,6 +24,7 @@ from nemo_agent_hardener_plugin.cli._shared import (
     validated_intensity,
 )
 from nemo_agent_hardener_plugin.jobs.manifest import DEFENDER_ENTRIES
+from nemo_helix_plugin.agent_hardener.types import JsonMap
 
 
 def build_app() -> typer.Typer:
@@ -93,7 +94,15 @@ def build_app() -> typer.Typer:
         safety_model: str | None = typer.Option(
             None,
             "--safety-model",
-            help="Default model the generated guardrail uses to screen traffic. Unset reuses the agent's own.",
+            help="Default model the generated guardrail uses to screen traffic. Unset uses the analysis model.",
+        ),
+        safety_base_url: str | None = typer.Option(
+            None,
+            "--safety-base-url",
+            help="Custom OpenAI-compatible endpoint for the safety model. Unset uses the analysis endpoint.",
+        ),
+        safety_key_secret: str | None = typer.Option(
+            None, "--safety-key-secret", help="Secrets-store name holding the safety endpoint's API key."
         ),
         workspace: str | None = typer.Option(None, "--workspace", help="Workspace of the manifest."),
     ) -> None:
@@ -123,19 +132,26 @@ def build_app() -> typer.Typer:
             analysis_base_url=analysis_base_url,
             analysis_key_secret=analysis_key_secret,
             safety_model=safety_model,
+            safety_base_url=safety_base_url,
+            safety_key_secret=safety_key_secret,
         )
         if not body and not chosen_models:
             typer.secho("Error: pass at least one field to set.", fg="red")
             raise typer.Exit(code=1)
 
         ctx = command_context(workspace, preflight=False)
+        stored: JsonMap | None = None
         if chosen_models:
-            preflight_models(ctx, chosen_models)
+            try:
+                stored = json_mapping(ctx.agent_hardener.manifests.get(name, workspace=ctx.workspace).get("models"))
+            except Exception as exc:
+                typer.secho(f"Error: could not read manifest {name!r} — {exc}", fg="red")
+                raise typer.Exit(code=1) from exc
+            preflight_models(ctx, chosen_models, stored)
         try:
             if chosen_models:
                 # PATCH replaces `models` wholesale, so merge over the stored selection first — otherwise
                 # setting one group would silently clear the others.
-                stored = json_mapping(ctx.agent_hardener.manifests.get(name, workspace=ctx.workspace).get("models"))
                 body["models"] = merge_models(stored, chosen_models)
             ctx.agent_hardener.manifests.update(name, workspace=ctx.workspace, **body)
         except Exception as exc:

@@ -13,6 +13,7 @@ from typing import Generic, Literal, Optional, TypeVar
 from urllib.parse import SplitResult, quote, urlsplit
 
 import nhx.common.auth.workload_identity as _workload_identity
+from kubernetes.utils import parse_quantity
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.jobs import execution_profiles as _execution_profiles
@@ -44,6 +45,7 @@ from nhx.common.jobs.constants import (
     TASK_CONFIG_ENVVAR,
 )
 from nhx.common.platform_endpoint import parse_platform_endpoint
+from nhx.core.jobs.app.lifecycle import active_ttl_anchor, ensure_aware
 from nhx.core.jobs.app.providers import ComputeResources
 from nhx.core.jobs.entities import get_step_spec_name, is_final_platform_step
 from pydantic import BaseModel, model_validator
@@ -210,11 +212,11 @@ def resolve_gpu_job_shm_size(
     profile_resources: ComputeResources | None,
     num_gpus: int,
 ) -> str:
-    """Pick SHM size for GPU workloads: explicit shm_size on executor, then profile, then 1Gi x GPU count."""
-    for res in (executor_resources, profile_resources):
-        if res is not None and res.shm_size:
-            return res.shm_size
-    return f"{max(1, num_gpus)}Gi"
+    """Pick SHM size for GPU workloads: the larger of the executor and profile shm_size, then 8Gi x GPU count."""
+    sizes = [res.shm_size for res in (executor_resources, profile_resources) if res is not None and res.shm_size]
+    if sizes:
+        return max(sizes, key=parse_quantity)
+    return f"{8 * max(1, num_gpus)}Gi"
 
 
 def _split_url(url: str) -> SplitResult | None:
@@ -466,16 +468,23 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
         )
         return False
 
-    def check_step_ttl(self, step: HelixJobStepWithContext, ttl_seconds: int) -> bool:
-        # Ensure created_at is timezone-aware (assume UTC if naive)
-        if step.created_at is None:
+    def check_step_ttl(
+        self,
+        step: HelixJobStepWithContext,
+        ttl_seconds: int,
+        now: datetime.datetime | None = None,
+    ) -> bool:
+        """Return whether the step exceeded ``ttl_seconds`` of active time.
+
+        The clock is ``max(created_at, resumed_at)``, so time spent paused does
+        not count. Kubernetes ``activeDeadlineSeconds`` restarts with each pod;
+        this clock is for backends that measure the TTL themselves.
+        """
+        anchor = active_ttl_anchor(step)
+        if anchor is None:
             return False
-
-        created_at = step.created_at
-        if created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=datetime.timezone.utc)
-
-        return (created_at + datetime.timedelta(seconds=ttl_seconds)) < datetime.datetime.now(datetime.timezone.utc)
+        current = ensure_aware(now) or datetime.datetime.now(datetime.timezone.utc)
+        return (anchor + datetime.timedelta(seconds=ttl_seconds)) < current
 
     @staticmethod
     def should_enforce_before_active_ttl(step: HelixJobStepWithContext) -> bool:

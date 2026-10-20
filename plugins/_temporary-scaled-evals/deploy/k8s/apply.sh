@@ -2,9 +2,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Apply the stack, generating the two secrets on first run so no key is ever
-# committed. Re-running is safe: existing secrets are left alone, so the Fernet
-# key stays stable and previously stored credentials remain decryptable.
+# Apply the stack, generating the platform secrets key on first run so no key
+# is ever committed. Re-running is safe: the existing key is left alone, so
+# previously stored platform secrets remain decryptable.
 #
 #   ./apply.sh                 # deploy
 #   ./apply.sh --render        # print manifests, touch nothing
@@ -73,15 +73,8 @@ fi
 echo "==> context: $(kubectl config current-context)"
 kubectl get namespace "$NS" >/dev/null 2>&1 || kubectl create namespace "$NS"
 
-# `create --dry-run | apply` would overwrite the Fernet key on every run and
-# orphan every credential encrypted under the old one, so only create if absent.
-if ! kubectl get secret scaled-evals-credential-encryption -n "$NS" >/dev/null 2>&1; then
-  echo "==> generating credential encryption key"
-  kubectl create secret generic scaled-evals-credential-encryption -n "$NS" \
-    --from-literal=CREDENTIALS_ENCRYPTION_KEY="$(python3 -c \
-      'import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())')"
-fi
-
+# `create --dry-run | apply` would overwrite the key on every run and orphan
+# every secret encrypted under the old one, so only create if absent.
 if ! kubectl get secret scaled-evals-platform-secrets-key -n "$NS" >/dev/null 2>&1; then
   echo "==> generating platform secrets encryption key"
   kubectl create secret generic scaled-evals-platform-secrets-key -n "$NS" \
@@ -136,7 +129,6 @@ import urllib.request
 base = "http://127.0.0.1:8080/apis/secrets/v2/workspaces/default/secrets"
 for name, value in {
     "scaled-evals-postgres-password": os.environ["PGPASSWORD"],
-    "scaled-evals-credentials-encryption-key": os.environ["CREDENTIALS_ENCRYPTION_KEY"],
     "scaled-evals-registry-auth": Path(os.environ["TASK_IMAGE_REGISTRY_AUTH_FILE"]).read_text(),
 }.items():
     body = json.dumps({"name": name, "value": value}).encode()

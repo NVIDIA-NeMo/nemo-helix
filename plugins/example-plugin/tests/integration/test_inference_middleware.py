@@ -257,6 +257,7 @@ class TestResponseMiddleware:
         joined = "".join(
             (choice.get("delta") or {}).get("content") or ""
             for chunk in chunks
+            if isinstance(chunk, dict)
             for choice in (chunk.get("choices") or [])
         )
         assert "secret" not in joined

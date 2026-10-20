@@ -26,7 +26,7 @@ const makeInsight = (id: string, title: string): InsightListItem => ({
   description: `${title} description`,
   agent: 'research-agent',
   status: 'open',
-  trace_refs: ['trace-1'],
+  evidence: [{ trace_id: 'trace-1' }],
   created_at: '2026-07-20T12:00:00Z',
   created_by: 'user@example.com',
   updated_at: '2026-07-20T12:00:00Z',
@@ -61,6 +61,21 @@ const findCell = async (insightTitle: string, columnName: string): Promise<HTMLE
 };
 
 describe('OptimizerRoute', () => {
+  it('does not declare an empty row actions column for insights', async () => {
+    server.use(
+      http.get(INSIGHTS_URL, () =>
+        HttpResponse.json(insightsPage([makeInsight('insight-1', 'Investigate latency')]))
+      )
+    );
+
+    renderList();
+
+    const row = await screen.findByRole('row', { name: /Investigate latency/ });
+    expect(within(row).queryByRole('button', { name: 'Row Actions' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Row Actions' })).not.toBeInTheDocument();
+    expect(within(row).getAllByRole('cell')).toHaveLength(7);
+  });
+
   it('renders server-provided list metadata without per-row requests', async () => {
     const experimentRequest = vi.fn(() => HttpResponse.json({}));
     const insights = [

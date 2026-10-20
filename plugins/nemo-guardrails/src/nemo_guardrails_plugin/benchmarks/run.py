@@ -44,7 +44,6 @@ from nemo_guardrails_plugin.benchmarks.constants import (
     IGW_CHAT_PATH,
     NHX_BASE_URL,
     NHX_HEALTH_PATH,
-    SCALED_EVALS_CREDENTIALS_ENCRYPTION_KEY,
     VARIANT_WITH_GUARDRAILS,
     VARIANT_WITHOUT_GUARDRAILS,
     WORKSPACE,
@@ -176,7 +175,6 @@ def _build_nhx_process(paths: RunPaths) -> SupervisedProcess:
         env={
             "NHX_BASE_URL": NHX_BASE_URL,
             "NHX_DATA_DIR": str(paths.nhx_data_dir),
-            "CREDENTIALS_ENCRYPTION_KEY": SCALED_EVALS_CREDENTIALS_ENCRYPTION_KEY,
         },
         health_url=f"{NHX_BASE_URL}{NHX_HEALTH_PATH}",
         health_timeout_seconds=_NHX_HEALTH_TIMEOUT_SECONDS,

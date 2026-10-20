@@ -10,6 +10,7 @@ from nhx_evals_sdk.inference import (
     ClientInferenceError,
     InjectSystemMessage,
     LogHook,
+    StreamingNotSupportedError,
     TransformReasoningOutput,
     deep_merge,
     make_inference_request,
@@ -21,6 +22,7 @@ from nhx_evals_sdk.inference import (
 )
 from nhx_evals_sdk.values.models import Model
 from nhx_evals_sdk.values.params import RunConfigOnlineModel
+from openai import AsyncStream
 from openai.types.chat import ChatCompletion, ChatCompletionMessage
 from openai.types.chat.chat_completion import Choice
 from pytest_mock import MockerFixture
@@ -121,6 +123,20 @@ class TestMakeInferenceRequest:
 
         request_body = get_mock_args(mock_chat.completions.create)
         assert request_body["extra_headers"] == {"X-Trace-Id": "trace-123"}
+
+    @pytest.mark.asyncio
+    async def test_a_streamed_response_is_closed_and_rejected_with_the_streaming_error(self, mocker: MockerFixture):
+        stream = Mock(spec=AsyncStream)
+        stream.close = AsyncMock()
+        mock_chat = mocker.patch("nhx_evals_sdk.inference.AsyncOpenAI.chat")
+        mock_chat.completions.create = AsyncMock(return_value=stream)
+
+        with pytest.raises(StreamingNotSupportedError, match="streaming is not supported"):
+            await make_inference_request(
+                self._make_model(), {"messages": [{"role": "user", "content": "hi"}], "stream": True}
+            )
+
+        stream.close.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_redacts_extra_headers_from_persisted_request_log(self, mocker: MockerFixture):

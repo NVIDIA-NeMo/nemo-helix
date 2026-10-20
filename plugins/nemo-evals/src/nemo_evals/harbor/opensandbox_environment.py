@@ -1,12 +1,14 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The OpenSandbox environment task Jobs run trials in: scaled-evals' environment plus an agent channel.
+"""The OpenSandbox environment task Jobs run trials in: nhx-sandbox's environment plus an agent channel.
 
 A no-network task (``allow_internet = false``) normally gets a deny-all sandbox. An agent that runs
 inside the sandbox (codex, hermes, ...) then can't reach its model. ``agent_channel_hosts`` keeps
-those hosts (the inference gateway) reachable for such tasks; the internet stays closed. Imported
-only by the dispatcher image, which carries the ``scaled-evals`` group.
+those hosts (the inference gateway) reachable for such tasks; the internet stays closed.
+
+It also sizes each sandbox as submit checked it: ``agent_resource_overrides`` in the agent sandbox only,
+then task.toml, then ``sandbox_resource_defaults``.
 
 ``agent_setup_hosts`` lets an agent that installs itself from the network (apt, npm, PyPI) run on a
 no-network task. The dispatcher rewrites such a task so its sandbox starts on an allowlist of those
@@ -19,14 +21,18 @@ reads the policy back.
 
 from __future__ import annotations
 
+import logging
 import shlex
 from typing import Any, override
 
 from harbor.environments.capabilities import EnvironmentCapabilities
 from harbor.models.task.config import NetworkMode, NetworkPolicy
+from nemo_evals.harbor.remote.resources import effective_resources
 from nhx_sandbox.egress import EgressAllowlist, EgressPolicy, EgressRule, build_egress_policy
+from nhx_sandbox.harbor_opensandbox_environment import NemoOpenSandboxEnvironment, sandbox_role
 from nhx_sandbox.opensandbox_policy import EgressVerificationError, canonical_egress_target, verify_applied_egress
-from scaled_evals.harbor_opensandbox_environment import NemoOpenSandboxEnvironment
+
+logger = logging.getLogger(__name__)
 
 # A process's identity is "<pid>:<start time>", so a PID reused after startup isn't mistaken for the
 # process that had it. Fields are read after the last ")", because a command name may contain spaces.
@@ -81,7 +87,7 @@ exit 0
 
 def network_rules(rules: list[EgressRule]) -> list[Any]:
     """The SDK's rule objects; imported here because only the dispatcher image installs the SDK."""
-    from opensandbox.models.sandboxes import NetworkRule
+    from opensandbox.models.sandboxes import NetworkRule  # ty: ignore[unresolved-import]  # Harbor runner venvs only
 
     return [NetworkRule(action=rule.action, target=rule.target) for rule in rules]
 
@@ -96,6 +102,8 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
         self,
         *args: Any,
         agent_channel_hosts: list[str] | None = None,
+        agent_resource_overrides: dict[str, int] | None = None,
+        sandbox_resource_defaults: dict[str, int] | None = None,
         agent_setup_hosts: list[str] | None = None,
         **kwargs: Any,
     ) -> None:
@@ -104,6 +112,23 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
         self._agent_setup_hosts = tuple(agent_setup_hosts or ())
         self._agent_setup_targets = frozenset(canonical_egress_target(host) for host in self._agent_setup_hosts)
         self._startup_pids: tuple[str, ...] | None = None
+        if agent_resource_overrides or sandbox_resource_defaults:
+            # Harbor's factory passes these as keywords. A copy: the task's own config must keep task.toml's
+            # values, since an inherited separate verifier's config is a copy of it, made after this one.
+            role = sandbox_role(kwargs["session_id"], kwargs["trial_paths"].trial_dir.name)
+            overrides = (agent_resource_overrides or {}) if role == "agent" else {}
+            kwargs["task_env_config"], defaulted = effective_resources(
+                kwargs["task_env_config"], overrides=overrides, defaults=sandbox_resource_defaults or {}
+            )
+            if defaulted:
+                config = kwargs["task_env_config"]
+                logger.warning(
+                    "The %s sandbox of %s relies on default resources: %s. Set them in task.toml or the run's "
+                    "execution.sandbox.",
+                    role,
+                    kwargs["session_id"],
+                    ", ".join(f"{field}={getattr(config, field)}" for field in defaulted),
+                )
         super().__init__(*args, **kwargs)
 
     @property

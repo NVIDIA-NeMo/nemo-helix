@@ -13,6 +13,7 @@ Get detailed execution status for a customization job, including step-by-step pr
 This endpoint provides granular execution details including:
 
 - **Step-level status**: `model-and-dataset-download` → `training` → `model-upload` → `model-entity-creation`
+- **Current phase**: `phase` in each task's `status_details`. Training reports `conversions` (RL only), `compiling_config`, `training`, `validation`, `saving_checkpoint`, `checkpoint_saved` and `epoch_end`, then `merging_adapter` (LoRA merged) or `finalizing_checkpoint`, then `completed`. Downloads and uploads report `downloading` or `uploading`, then `completed`. Model entity creation reports `registering_model`, then `completed`.
 - **Training progress**: `step`, `epoch`, `max_steps`, `num_epochs`, `percentage_done`
 - **Latest metric values**: one field per metric, named `<phase>_<metric>` — `train_loss`, `train_lr`, `train_grad_norm`, `val_loss`, and whatever else your backend reports
 - **Metric history**: `metrics`, holding each metric as a series of `{step, epoch, value}` points
@@ -234,7 +235,7 @@ curl -X GET \
            "status": "completed",
            "status_details": {
              "message": "Job completed successfully with exit code 0",
-             "phase": "processing_checkpoint",
+             "phase": "completed",
              "backend": "automodel",
              "max_steps": 94,
              "num_epochs": 2,

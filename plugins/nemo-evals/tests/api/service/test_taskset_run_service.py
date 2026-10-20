@@ -104,7 +104,6 @@ async def test_accept_freezes_resolved_harbor_content(
     assert plan.spec.tasks[0].spec.kind == "harbor"
     assert plan.spec.tasks[0].spec.provenance.revision_digest
     assert plan.spec.max_concurrent_tasks == 8 and plan.spec.fail_fast is True
-    assert plan.max_failed_tasks is None  # submit rejects it until M4 story 6 enforces it
     assert plan.sandbox_policy.profile == "harbor-standard"
     assert plan.sandbox_policy.connection.domain == "opensandbox.opensandbox-system.svc.cluster.local"
     assert plan.dispatcher_profile == "local-k8s" and plan.dispatcher_image.endswith("1" * 64)
@@ -169,11 +168,21 @@ async def test_retry_rechecks_lowered_operator_maximum(service, published, reque
         await service.submit(request, workspace="default", caller="user:alice")
 
 
-async def test_keyless_requests_create_distinct_runs_and_warn(service, published, request_body):
-    request_body["idempotency_key"] = None
-    request = TasksetRunInput.model_validate(request_body)
-    first = await service.submit(request, workspace="default", caller="user:alice")
-    second = await service.submit(request, workspace="default", caller="user:alice")
+async def test_submit_needs_a_key_from_the_route(service, published, request_body):
+    request = TasksetRunInput.model_validate(request_body | {"idempotency_key": None})
+    with pytest.raises(ValueError, match="idempotency_key"):
+        await service.submit(request, workspace="default", caller="user:alice")
+
+
+async def test_requests_with_new_keys_create_distinct_runs_and_warn(service, published, request_body):
+    first, second = [
+        await service.submit(
+            TasksetRunInput.model_validate(request_body | {"idempotency_key": key}),
+            workspace="default",
+            caller="user:alice",
+        )
+        for key in ("first", "second")
+    ]
     assert first.created and second.created
     assert first.status.run_id != second.status.run_id
     assert second.status.warnings == [
@@ -316,25 +325,6 @@ async def test_submit_freezes_agent_and_inline_metric_without_compiling(
     )
     assert plan.spec.target.source.agent.root == "agents/coder"
     compile_job.assert_not_awaited()
-
-
-@pytest.mark.skip(reason="submit rejects max_failed_tasks until M4 story 6 enforces it")
-async def test_submit_percentage_uses_resolved_task_count(service, published, request_body, monkeypatch):
-    request_body["execution"]["max_failed_tasks"] = "10%"
-    request = TasksetRunInput.model_validate(request_body)
-    pinned, spec = await service._resolve(request, "default")
-    tasks = []
-    for index in range(74):
-        task = spec.tasks[0].model_copy(deep=True)
-        task.id = task.spec.native_task_id = f"task-{index}"
-        task.spec.provenance.entity_name = f"default/task-{index}"
-        tasks.append(task)
-    spec.tasks = tasks
-    monkeypatch.setattr(service, "_resolve", AsyncMock(return_value=(pinned, spec)))
-    result = await service.submit(request, workspace="default", caller="user:alice")
-    run = await service._store.find("default", result.status.run_id)
-    plan = await service._store.load_plan(run)
-    assert plan.max_failed_tasks == 7 and len(plan.spec.tasks) == 74
 
 
 def _deny(*paths: str):

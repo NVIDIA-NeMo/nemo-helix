@@ -4,26 +4,20 @@
 """Resolved execution plan stored as digest-verified bytes in Files."""
 
 from datetime import datetime, timezone
-from typing import Literal, Self
+from typing import Self
 
 from nemo_evals.harbor.remote.images import PreparedHarborEnvironment
 from nemo_evals.harbor.remote.profile import PINNED_IMAGE_REF_PATTERN, ResolvedHarborSandboxPolicy
 from nemo_evals.jobs.agent_spec import AgentEvalSpec
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-MissingPrebuiltImagePolicy = Literal["fail", "build"]
-"""What to do when a task's pinned prebuilt image is gone: fail the task, or build it from its Dockerfile.
-
-Shared by the submit request and the frozen plan so the two cannot drift.
-"""
-
 
 class RunIntakePublication(BaseModel):
     """Where the run publishes its trials: one Intake Evaluation, named after the run, in this Experiment.
 
     Frozen at submit with the Experiment resolved to its id and the agent identity resolved from the
-    target, so task Jobs and the controller never resolve them again. The Evaluation's name is not
-    stored: a keyless run's id can change during acceptance, so it is always the run record's name.
+    target, so task Jobs and the controller never resolve them again. The Evaluation's name is the
+    run record's name, so it isn't stored again here.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -52,10 +46,9 @@ class TasksetRunPlan(BaseModel):
     ref as ``plan_ref`` and the SHA-256 of its bytes as ``plan_digest``.
 
     Inputs are a run ID and workspace, pinned taskset revision, resolved agent
-    evaluation spec, missing-image policy, explicit concurrency/failure caps, and
-    the sandbox policy, dispatcher image and dispatcher profile resolved from
-    operator configuration, and each task's prepared images. Each cap must be supplied even when None denotes no
-    limit; percentages must already have been resolved into a nonnegative count.
+    evaluation spec, an explicit concurrency cap (None denotes no limit), the sandbox
+    policy, dispatcher image and dispatcher profile resolved from operator
+    configuration, and each task's prepared images.
     Task Jobs read only the plan, so a config change, a moved image tag or a newer
     build between a partial submit and its retry can't give sibling Jobs different
     images, lifetimes or egress.
@@ -86,22 +79,9 @@ class TasksetRunPlan(BaseModel):
             "A member's task_index is its position in spec.tasks."
         )
     )
-    missing_prebuilt_image: MissingPrebuiltImagePolicy = Field(
-        description=(
-            "Copied from the request: when a task's pinned prebuilt image is gone from the registry, "
-            "'fail' fails that task and 'build' builds it from the task's Dockerfile instead."
-        )
-    )
     max_concurrent_task_jobs: int | None = Field(
         ge=1,
         description="Maximum task Jobs of this run running at once; None relies only on Jobs Service admission limits.",
-    )
-    max_failed_tasks: int | None = Field(
-        ge=0,
-        description=(
-            "Failed tasks the run tolerates before it fails and cancels remaining task Jobs. "
-            "Always a count: submit resolves a request percent (10% of 100 tasks -> 10). None means no limit."
-        ),
     )
     sandbox_policy: ResolvedHarborSandboxPolicy = Field(
         description="The operator sandbox profile execution.sandbox.profile named (or the default), frozen at submit."
@@ -131,7 +111,7 @@ class TasksetRunPlan(BaseModel):
 class AcceptedTaskOutput(BaseModel):
     """One task Job whose result the run's bundle includes (MVP slice of M5 story 7).
 
-    M5 adds ``manifest_ref`` and ``attempt_id`` once task Jobs write output manifests (M2 story 6b).
+    TODO(M5 story 7): add ``manifest_ref`` and ``attempt_id`` once task Jobs write output manifests.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)

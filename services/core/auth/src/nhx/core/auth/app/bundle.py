@@ -19,6 +19,7 @@ from nhx.common.auth import ALL_WORKSPACES
 from nhx.common.auth.authz_format import validate_static_authz_data
 from nhx.common.config import get_service_config
 from nhx.common.entities import EntityClient
+from nhx.core.auth.app.scope_families import with_scope_families
 from nhx.core.auth.config import AuthServiceConfig
 from nhx.core.auth.entities import RoleBindingEntity
 
@@ -268,7 +269,7 @@ async def _build_authorization_data_internal(entities_client: Optional[EntityCli
                 static_data["authz"]["principals"][principal]["workspaces"][workspace].append(role)
 
     # Return the authorization data structure
-    return static_data
+    return with_scope_families(static_data)
 
 
 async def build_authorization_data(entities_client: Optional[EntityClient] = None) -> dict:

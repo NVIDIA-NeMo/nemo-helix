@@ -75,7 +75,8 @@ def trajectory_to_spans(
     return _trajectory_tree_to_spans(
         workspace=workspace,
         trajectory=trajectory,
-        trace_session_id=trajectory.session_id,
+        session_id=trajectory.session_id,
+        trace_id=_trace_id(trajectory),
         trajectory_identity=(),
         external_parent_span_id=None,
         ingested_at=ingested_at,
@@ -84,11 +85,19 @@ def trajectory_to_spans(
     )
 
 
+def _trace_id(trajectory: AtifTrajectory) -> str:
+    """Return the root trajectory's trace ID; ``session_id`` alone may be shared by several trajectories."""
+    if trajectory.trajectory_id is None:
+        return trajectory.session_id
+    return stable_id(trajectory.session_id, trajectory.trajectory_id, prefix="trace")
+
+
 def _trajectory_tree_to_spans(
     *,
     workspace: str,
     trajectory: AtifTrajectory,
-    trace_session_id: str,
+    session_id: str,
+    trace_id: str,
     trajectory_identity: TrajectoryIdentity,
     external_parent_span_id: str | None,
     ingested_at: datetime,
@@ -101,7 +110,8 @@ def _trajectory_tree_to_spans(
     trajectory_span = _trajectory_to_span(
         workspace=workspace,
         trajectory=trajectory,
-        trace_session_id=trace_session_id,
+        session_id=session_id,
+        trace_id=trace_id,
         trajectory_identity=trajectory_identity,
         external_parent_span_id=external_parent_span_id,
         include_evaluation_context=not trajectory_identity,
@@ -112,7 +122,8 @@ def _trajectory_tree_to_spans(
         _evaluator_result_to_span(
             workspace=workspace,
             trajectory=trajectory,
-            trace_session_id=trace_session_id,
+            session_id=session_id,
+            trace_id=trace_id,
             trajectory_identity=trajectory_identity,
             parent_span=trajectory_span,
             ingested_at=ingested_at,
@@ -128,7 +139,8 @@ def _trajectory_tree_to_spans(
         step_ended_at = _step_ended_at(step)
         step_span = _step_to_span(
             workspace=workspace,
-            default_session_id=trace_session_id,
+            default_session_id=session_id,
+            trace_id=trace_id,
             default_agent_name=trajectory.agent.name,
             default_agent_version=trajectory.agent.version,
             default_model_name=trajectory.agent.model_name,
@@ -143,7 +155,8 @@ def _trajectory_tree_to_spans(
         spans.extend(
             _tool_call_to_span(
                 workspace=workspace,
-                default_session_id=trace_session_id,
+                default_session_id=session_id,
+                trace_id=trace_id,
                 default_agent_name=trajectory.agent.name,
                 default_agent_version=trajectory.agent.version,
                 default_model_name=trajectory.agent.model_name,
@@ -168,7 +181,8 @@ def _trajectory_tree_to_spans(
                         _trajectory_tree_to_spans(
                             workspace=workspace,
                             trajectory=subagent,
-                            trace_session_id=trace_session_id,
+                            session_id=session_id,
+                            trace_id=trace_id,
                             trajectory_identity=(*trajectory_identity, "subagent", subagent.trajectory_id),
                             external_parent_span_id=step_span.external_span_id,
                             ingested_at=step_span.start_time,
@@ -180,7 +194,8 @@ def _trajectory_tree_to_spans(
                 spans.append(
                     _subagent_ref_to_span(
                         workspace=workspace,
-                        default_session_id=trace_session_id,
+                        default_session_id=session_id,
+                        trace_id=trace_id,
                         default_agent_name=trajectory.agent.name,
                         default_agent_version=trajectory.agent.version,
                         default_model_name=trajectory.agent.model_name,
@@ -204,7 +219,8 @@ def _trajectory_tree_to_spans(
             _trajectory_tree_to_spans(
                 workspace=workspace,
                 trajectory=subagent,
-                trace_session_id=trace_session_id,
+                session_id=session_id,
+                trace_id=trace_id,
                 trajectory_identity=(*trajectory_identity, "subagent", subagent.trajectory_id),
                 external_parent_span_id=trajectory_span.external_span_id,
                 ingested_at=trajectory_span.start_time,
@@ -218,18 +234,19 @@ def _trajectory_tree_to_spans(
 def _trajectory_span_id(
     *,
     workspace: str,
-    trace_session_id: str,
+    trace_id: str,
     trajectory_identity: TrajectoryIdentity,
 ) -> str:
     """Return the stable span ID for a trajectory at a tree identity."""
-    return stable_id(workspace, trace_session_id, *trajectory_identity, "trajectory", prefix="span")
+    return stable_id(workspace, trace_id, *trajectory_identity, "trajectory", prefix="span")
 
 
 def _trajectory_to_span(
     *,
     workspace: str,
     trajectory: AtifTrajectory,
-    trace_session_id: str,
+    session_id: str,
+    trace_id: str,
     trajectory_identity: TrajectoryIdentity,
     external_parent_span_id: str | None,
     include_evaluation_context: bool,
@@ -240,7 +257,7 @@ def _trajectory_to_span(
     raw_attributes.pop("steps", None)
     raw_attributes.pop("evaluation_context", None)
     raw_attributes.pop("subagent_trajectories", None)
-    # ATIF span IDs are trace-native by design: session_id is the trace identity,
+    # ATIF span IDs are trace-native by design: trace_id scopes every span ID,
     # while evaluation_context is queryable metadata on the root span.
     #
     # Token/cost accounting belongs on the spans that incurred the LLM calls
@@ -273,7 +290,7 @@ def _trajectory_to_span(
     error_message = _non_empty_string(trajectory_error.get("message")) if trajectory_error is not None else None
     external_span_id = _trajectory_span_id(
         workspace=workspace,
-        trace_session_id=trace_session_id,
+        trace_id=trace_id,
         trajectory_identity=trajectory_identity,
     )
     attribute_bags = _span_attributes(
@@ -295,8 +312,8 @@ def _trajectory_to_span(
     # root ``extra.error`` convention; tool failures remain on their TOOL spans.
     return IntakeSpan(
         workspace=workspace,
-        session_id=trace_session_id,
-        trace_id=trace_session_id,
+        session_id=session_id,
+        trace_id=trace_id,
         source_format="atif",
         external_span_id=external_span_id,
         external_parent_span_id=external_parent_span_id or "",
@@ -318,6 +335,7 @@ def _step_to_span(
     *,
     workspace: str,
     default_session_id: str,
+    trace_id: str,
     default_agent_name: str,
     default_agent_version: str | None,
     default_model_name: str | None,
@@ -336,7 +354,7 @@ def _step_to_span(
     output_tokens = metrics.completion_tokens if metrics is not None else None
     external_span_id = stable_id(
         workspace,
-        default_session_id,
+        trace_id,
         *trajectory_identity,
         str(index),
         json_dumps(raw_step),
@@ -358,7 +376,7 @@ def _step_to_span(
     return IntakeSpan(
         workspace=workspace,
         session_id=default_session_id,
-        trace_id=default_session_id,
+        trace_id=trace_id,
         source_format="atif",
         external_span_id=external_span_id,
         external_parent_span_id=external_parent_span_id,
@@ -380,6 +398,7 @@ def _tool_call_to_span(
     *,
     workspace: str,
     default_session_id: str,
+    trace_id: str,
     default_agent_name: str,
     default_agent_version: str | None,
     default_model_name: str | None,
@@ -397,7 +416,7 @@ def _tool_call_to_span(
     error_message = _tool_result_error_message(step, result, tool_call.function_name)
     external_span_id = stable_id(
         workspace,
-        default_session_id,
+        trace_id,
         *trajectory_identity,
         str(step_index),
         "tool",
@@ -422,7 +441,7 @@ def _tool_call_to_span(
     return IntakeSpan(
         workspace=workspace,
         session_id=default_session_id,
-        trace_id=default_session_id,
+        trace_id=trace_id,
         source_format="atif",
         external_span_id=external_span_id,
         external_parent_span_id=external_parent_span_id,
@@ -444,6 +463,7 @@ def _subagent_ref_to_span(
     *,
     workspace: str,
     default_session_id: str,
+    trace_id: str,
     default_agent_name: str,
     default_agent_version: str | None,
     default_model_name: str | None,
@@ -465,7 +485,7 @@ def _subagent_ref_to_span(
     subagent_identity = _subagent_ref_identity(subagent_ref)
     external_span_id = stable_id(
         workspace,
-        default_session_id,
+        trace_id,
         *trajectory_identity,
         str(step_index),
         "subagent",
@@ -489,7 +509,7 @@ def _subagent_ref_to_span(
     return IntakeSpan(
         workspace=workspace,
         session_id=default_session_id,
-        trace_id=default_session_id,
+        trace_id=trace_id,
         source_format="atif",
         external_span_id=external_span_id,
         external_parent_span_id=external_parent_span_id,
@@ -511,7 +531,8 @@ def _evaluator_result_to_span(
     *,
     workspace: str,
     trajectory: AtifTrajectory,
-    trace_session_id: str,
+    session_id: str,
+    trace_id: str,
     trajectory_identity: TrajectoryIdentity,
     parent_span: IntakeSpan,
     ingested_at: datetime,
@@ -526,7 +547,7 @@ def _evaluator_result_to_span(
     input_value = {
         key: value
         for key, value in {
-            "session_id": trace_session_id,
+            "session_id": session_id,
             "evaluated_span_id": parent_span.external_span_id,
             "task_id": extra.get("task_id"),
             "task_name": extra.get("task_name"),
@@ -568,7 +589,7 @@ def _evaluator_result_to_span(
     ended_at = _evaluator_ended_at(trajectory)
     external_span_id = stable_id(
         workspace,
-        trace_session_id,
+        trace_id,
         *trajectory_identity,
         "evaluator",
         json_dumps(raw_attributes),
@@ -583,8 +604,8 @@ def _evaluator_result_to_span(
     return [
         IntakeSpan(
             workspace=workspace,
-            session_id=trace_session_id,
-            trace_id=trace_session_id,
+            session_id=session_id,
+            trace_id=trace_id,
             source_format="atif",
             external_span_id=external_span_id,
             external_parent_span_id=parent_span.external_span_id,
@@ -664,7 +685,7 @@ def trajectory_to_evaluator_results(
             continue
         trajectory_span_id = _trajectory_span_id(
             workspace=workspace,
-            trace_session_id=trajectory.session_id,
+            trace_id=_trace_id(trajectory),
             trajectory_identity=trajectory_identity,
         )
         evaluator_span = next(

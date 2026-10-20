@@ -4,7 +4,7 @@
 import pytest
 from httpx import AsyncClient
 from nhx.core.jobs.api.v2.jobs.schemas import CreateHelixJobRequest
-from nhx.core.jobs.app.schemas import HelixJobSpec, HelixJobStepSpec
+from nhx.core.jobs.app.schemas import HelixJobSpec, HelixJobStepSpec, StepLifecycle
 from nhx.core.jobs.app.test_helpers import TestConstants
 
 
@@ -281,7 +281,12 @@ async def test_job_cancel_while_resuming(test_client: AsyncClient):
         spec={"param1": "value1"},
         platform_spec=HelixJobSpec(
             steps=[
-                HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(
+                    name="step1",
+                    executor=TestConstants.TEST_EXECUTOR,
+                    config={},
+                    lifecycle=StepLifecycle(pause_deadline_seconds=3600),
+                ),
             ]
         ),
     )
@@ -313,6 +318,40 @@ async def test_job_cancel_while_resuming(test_client: AsyncClient):
     # Cancel immediately while still in RESUMING — should NOT return 500
     response = await test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/cancel")
     assert response.status_code in (200, 202, 409), f"Expected 200/202/409, got {response.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_job_cancel_while_pausing(test_client: AsyncClient):
+    """Cancel pre-empts an in-flight pause."""
+    req = CreateHelixJobRequest(
+        name="test-job-cancel-pausing",
+        source="test-source",
+        spec={"param1": "value1"},
+        platform_spec=HelixJobSpec(
+            steps=[
+                HelixJobStepSpec(
+                    name="step1",
+                    executor=TestConstants.TEST_EXECUTOR,
+                    config={},
+                    lifecycle=StepLifecycle(pause_deadline_seconds=3600),
+                ),
+            ]
+        ),
+    )
+    response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=req.model_dump())
+    assert response.status_code == 201
+    job_name = response.json()["name"]
+    response = await test_client.patch(
+        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/steps/step1/status", json={"status": "active"}
+    )
+    assert response.status_code == 200
+    response = await test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/pause")
+    assert response.status_code == 200
+    assert response.json()["status"] == "pausing"
+
+    response = await test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/cancel")
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelling"
 
 
 @pytest.mark.asyncio

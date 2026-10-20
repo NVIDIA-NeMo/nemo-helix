@@ -5,6 +5,8 @@
 title: "Safe Synthesizer 101"
 description: ""
 ---
+{/* @nemo-nb: process */}
+
 <a id="tutorial-safe-synthesizer-101"></a>
 
 Learn the fundamentals of NeMo Safe Synthesizer by creating your first Safe Synthesizer job using provided defaults. In this tutorial, you'll upload sample customer data, replace personally identifiable information, fine-tune a model, generate synthetic records, and review the evaluation report.
@@ -15,7 +17,7 @@ Before you begin, make sure that you have:
 
 - Access to a deployment of NeMo Helix with NeMo Safe Synthesizer available (see [getting-started](/documentation/synthesize-safe-data))
 - **An NVIDIA GPU with 80 GB+ VRAM** — Safe Synthesizer requires GPU access for model training.
-- Python environment with `nemo-helix` SDK installed
+- A Python environment where you can install packages (Step 1 installs the `nemo-helix` SDK)
 - Basic understanding of Python and pandas
 
 ---
@@ -126,7 +128,7 @@ import os
 
 # Use the pre-configured NVIDIA Build model provider
 # This provider is set up during platform deployment
-provider_name = os.environ.get("NSS_CLASSIFY_MODEL_PROVIDER", "default/nvidia-build")
+provider_name = os.environ.get("NSS_CLASSIFY_MODEL_PROVIDER", "system/nvidia-build")
 if "/" in provider_name:
     provider_workspace, provider_id = provider_name.split("/", 1)
     client.models.get_provider(name=provider_id, workspace=provider_workspace)
@@ -253,9 +255,9 @@ except RuntimeError as e:
 `wait_for_completion()` raises `RuntimeError` if the job ends in an `error` or `cancelled` state.
 Check the printed status output and logs above for the cause.
 
-If the job fails with **"No GPUs available on this system"**, ensure your system is configured with GPU access:
+If the job fails with **"No GPUs available on this system"**, ensure your system is configured with GPU access. Run the following recovery command manually only if needed; do not restart services during a successful notebook run:
 
-```bash
+```text
 nemo setup --start-services
 ```
 
@@ -356,7 +358,7 @@ all_jobs = safe_synthesizer.jobs.list()
 print(f"Total jobs: {len(list(all_jobs.items()))}")
 
 # Delete this job (optional)
-# safe_synthesizer.jobs.list()
+# client.jobs.delete_job(name=job.job_name, workspace="default")
 # print(f"✅ Job {job.job_name} deleted")
 ```
 
@@ -381,7 +383,7 @@ print(f"Total jobs: {len(list(all_jobs.items()))}")
 **Slow performance:**
 
 - Reduce dataset size for testing
-- Use smaller model (adjust `training.pretrained_model`)
+- Use a smaller model, for example `.with_train(pretrained_model="TinyLlama/TinyLlama-1.1B-Chat-v1.0")` on the builder. Models other than the default are downloaded from Hugging Face Hub when the job starts; see [Pretrained Model](/documentation/synthesize-safe-data/about/parameters-reference#pretrained-model)
 - Check GPU availability
 
 **Error: "Dataset must have at least 200 records to use holdout."**

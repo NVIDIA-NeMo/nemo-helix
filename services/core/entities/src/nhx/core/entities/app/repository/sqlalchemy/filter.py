@@ -155,17 +155,18 @@ class SQLAlchemyFilterRepository(FilterRepository):
     }
 
     _STRING_OPS = frozenset({FilterOperator.STARTS_WITH, FilterOperator.ENDS_WITH})
+    _NULL_EXCLUDING_OPS = _STRING_OPS | {FilterOperator.NIN}
 
     def _compare(self, element: Any, is_json: bool, operator: FilterOperator, value: Any) -> Any:
         """One comparison against a column, or against a JSON field when ``is_json``.
 
         A missing or null JSON value renders as the text ``null``; it never satisfies
-        ``$startsWith``/``$endsWith``.
+        ``$startsWith``/``$endsWith``/``$nin``.
         """
         if operator == FilterOperator.EQ:
             return self._json_eq(element, value) if is_json else element == value
         comparison = self._non_eq_compare(element, is_json, operator, value)
-        if is_json and operator in self._STRING_OPS:
+        if is_json and operator in self._NULL_EXCLUDING_OPS:
             return and_(not_(self._json_eq(element, None)), comparison)
         return comparison
 

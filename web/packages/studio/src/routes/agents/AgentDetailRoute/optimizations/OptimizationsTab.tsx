@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { OptimizationStrategy } from '@nemo/sdk/generated/agent-optimization/schema/OptimizationStrategy';
+import { STUDIO_OPTIMIZE_STRATEGY } from '@studio/api/agents/useLaunchOptimizeStudy';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { NewOptimizationForm } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm';
 import { useSubmitOptimization } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/useSubmitOptimization';
 import { OptimizationStrategySelect } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect';
-import type { OptimizationStrategyId } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect/types';
+import { SWITCHYARD_STRATEGY } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect/constants';
 import { OptimizeJobsTable } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizeJobsTable';
 import { SwitchyardOptimizationForm } from '@studio/routes/agents/AgentDetailRoute/optimizations/SwitchyardOptimizationForm';
 import { useSubmitSwitchyardOptimization } from '@studio/routes/agents/AgentDetailRoute/optimizations/SwitchyardOptimizationForm/useSubmitSwitchyardOptimization';
@@ -20,12 +22,16 @@ export interface OptimizationsTabProps {
   view: OptimizationView;
   onOptimize?: () => void;
   onViewChange: (view: OptimizationView) => void;
+  /** Opens the launch modal for uploading a `config-tuning` bundle. */
   onUploadConfig: () => void;
+  /** Opens the launch modal for an installed strategy Studio has no form of its own for. */
+  onRunStrategy: (strategy: OptimizationStrategy) => void;
 }
 
 /** The tab's views: the studies table, the strategy picker, and the forms that create one. The
  *  picker and forms take over the tab rather than opening a dialog, so each has its own back button;
- *  only the upload strategy hands off to a dialog, the launch modal the route owns. */
+ *  only the upload tile and installed strategies without a form of their own hand off to a
+ *  dialog, the launch modal the route owns. */
 export const OptimizationsTab: FC<OptimizationsTabProps> = ({
   agentName,
   evals,
@@ -34,15 +40,14 @@ export const OptimizationsTab: FC<OptimizationsTabProps> = ({
   onOptimize,
   onViewChange,
   onUploadConfig,
+  onRunStrategy,
 }) => {
   const workspace = useWorkspaceFromPath();
   const submitOptimization = useSubmitOptimization({ workspace, agentName, evals });
   const submitRouting = useSubmitSwitchyardOptimization({ workspace, agentName });
-  // A record rather than a switch, so a strategy added without a handler fails to compile.
-  const continueWith: Record<OptimizationStrategyId, () => void> = {
-    hyperparameter: () => onViewChange(OptimizationView.Form),
-    routing: () => onViewChange(OptimizationView.Routing),
-    upload: onUploadConfig,
+  const forms: Record<string, OptimizationView> = {
+    [STUDIO_OPTIMIZE_STRATEGY]: OptimizationView.Form,
+    [SWITCHYARD_STRATEGY]: OptimizationView.Routing,
   };
 
   switch (view) {
@@ -51,7 +56,12 @@ export const OptimizationsTab: FC<OptimizationsTabProps> = ({
         <OptimizationStrategySelect
           agentName={agentName}
           onBack={() => onViewChange(OptimizationView.Table)}
-          onSelect={(strategy) => continueWith[strategy]()}
+          onSelect={(strategy) => {
+            const form = forms[strategy.name];
+            if (form) onViewChange(form);
+            else onRunStrategy(strategy);
+          }}
+          onUploadConfig={onUploadConfig}
         />
       );
     case OptimizationView.Form:

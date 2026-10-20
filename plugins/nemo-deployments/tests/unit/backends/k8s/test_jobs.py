@@ -817,11 +817,12 @@ async def test_get_job_logs(k8s_backend, mock_k8s_clients: MagicMock, mock_entit
     pod.metadata.name = "task-pod"
     pod.metadata.creation_timestamp = "2026-01-02T00:00:00Z"
     mock_k8s_clients.core_v1.list_namespaced_pod.return_value = MagicMock(items=[pod])
-    mock_k8s_clients.core_v1.read_namespaced_pod_log.return_value = "hello\nworld\n"
+    mock_k8s_clients.core_v1.read_namespaced_pod_log.return_value = MagicMock(data=b"hello\nworld\n")
 
     result = await k8s_backend.get_logs(workspace="default", name="task", tail=10)
 
     assert result.lines == ["hello", "world"]
+    assert mock_k8s_clients.core_v1.read_namespaced_pod_log.call_args.kwargs["_preload_content"] is False
 
 
 @pytest.mark.asyncio

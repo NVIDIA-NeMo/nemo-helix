@@ -9,6 +9,7 @@ import subprocess
 import tarfile
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import httpx
 import pytest
@@ -23,13 +24,15 @@ from nemo_evals.runs_cli import (
     SelectionError,
     TaskJobView,
     _results_table,
+    _select_from_spec,
     _status_table,
+    _view_json,
     _workspace_flag,
     add_runs_commands,
+    build_images,
     check_git_source,
     download_git_tasks,
     job_error,
-    needs_image_build,
     newest_bundle_job,
     rollup_scores,
     run_request,
@@ -38,6 +41,7 @@ from nemo_evals.runs_cli import (
     selection_suffix,
     submit_run,
 )
+from nemo_evals.sdk.resources import Evaluator
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.jobs.types import HelixJobResponse
 from typer.testing import CliRunner
@@ -81,9 +85,53 @@ def test_selection_suffix_ignores_order():
     assert selection_suffix(["a#1", "b#2"]) == selection_suffix(["b#2", "a#1"]) != selection_suffix(["a#1"])
 
 
-def test_only_dockerfile_tasks_need_builds():
-    assert needs_image_build({"environment": {}})
-    assert not needs_image_build({"environment": {"docker_image": "public.ecr.aws/x:1"}})
+class _Tasks:
+    """Image builds that finish on the second poll.
+
+    ``fail`` names tasks whose build fails; ``abandon`` names tasks whose first attempt's Job dies, so
+    requesting again records it failed and starts attempt 2, as ``request_build`` does.
+    """
+
+    def __init__(self, fail: frozenset[str] = frozenset(), abandon: frozenset[str] = frozenset()) -> None:
+        self.fail, self.abandon = fail, abandon
+        self.requested: list[str] = []
+        self.polls: dict[str, int] = {}
+
+    def build_images(self, name, *, revision, workspace):
+        self.requested.append(f"{workspace}/{name}#{revision}")
+        polls = self.polls[name] = self.polls.get(name, -1) + 1
+        if polls == 0:
+            return SimpleNamespace(id="1", status="pending", images=[], error=None)
+        if name in self.abandon:
+            return SimpleNamespace(id="2", status="pending", images=[], error=None)
+        if polls < 2:
+            return SimpleNamespace(id="1", status="running", images=[], error=None)
+        if name in self.fail:
+            return SimpleNamespace(id="2", status="pending", images=[], error=None)  # failed, so a new attempt
+        return SimpleNamespace(id="1", status="ready", images=[object()], error=None)
+
+    def get_image_build(self, name, build_id, *, revision, workspace):
+        assert build_id == "1"
+        error = "Job ended (error) without a result" if name in self.abandon else "no Dockerfile"
+        return SimpleNamespace(id=build_id, status="failed", images=[], error=error)
+
+
+def test_build_images_waits_for_every_task_prebuilt_included():
+    tasks, lines = _Tasks(), []
+    refs = ["default/dockerfile#r1", "default/prebuilt#r2"]
+    evaluator = cast(Evaluator, SimpleNamespace(tasks=tasks))
+    build_images(evaluator, refs, poll_seconds=0, echo=lines.append, sleep=lambda _: None)
+    assert tasks.polls == {"dockerfile": 2, "prebuilt": 2}
+    assert lines == ["Image builds: 2 tasks ready (2 images)"]
+
+
+@pytest.mark.parametrize(("kind", "error"), [("fail", "no Dockerfile"), ("abandon", "without a result")])
+def test_build_images_stops_at_the_attempt_that_ended(kind, error):
+    """Polling requests again, which repairs a dead Job; a new attempt means the followed one ended."""
+    tasks = _Tasks(**{kind: frozenset({"broken"})})
+    evaluator = cast(Evaluator, SimpleNamespace(tasks=tasks))
+    with pytest.raises(RuntimeError, match=f"default/broken#r1: .*{error}"):
+        build_images(evaluator, ["default/broken#r1"], poll_seconds=0, echo=print, sleep=lambda _: None)
 
 
 def test_spec_file_keeps_its_settings_and_takes_the_selected_taskset(tmp_path):
@@ -92,7 +140,7 @@ def test_spec_file_keeps_its_settings_and_takes_the_selected_taskset(tmp_path):
         json.dumps(
             {
                 "spec": {"tasks": "default/full", "target": {"kind": "harbor", "source": {"name": "oracle"}}},
-                "execution": {"sandbox": {"profile": "harbor-open"}, "max_failed_tasks": "10%"},
+                "execution": {"sandbox": {"profile": "harbor-open"}, "max_concurrent_task_jobs": 3},
             }
         )
     )
@@ -106,7 +154,7 @@ def test_spec_file_keeps_its_settings_and_takes_the_selected_taskset(tmp_path):
     assert isinstance(request.spec.tasks, TasksetRef)
     assert request.spec.tasks.root.startswith("default/full-sel-1234abcd#")
     assert request.execution.sandbox == SandboxSelection(profile="harbor-open")
-    assert request.execution.max_failed_tasks == "10%"
+    assert request.execution.max_concurrent_task_jobs == 3
     assert request.idempotency_key
 
 
@@ -127,7 +175,7 @@ def test_experiment_publishes_the_run_to_intake(tmp_path):
     no_tasks = tmp_path / "no-tasks.json"
     no_tasks.write_text(json.dumps({"spec": {"target": {"kind": "harbor"}}, "execution": {}}))
     selected = run_request("default/t#" + "a" * 64, spec_file=no_tasks, agent="", dispatcher_profile=None)
-    assert selected.spec.tasks.root == "default/t#" + "a" * 64
+    assert isinstance(selected.spec.tasks, TasksetRef) and selected.spec.tasks.root == "default/t#" + "a" * 64
     # --experiment replaces the file's publication before validation, so an invalid one doesn't block it.
     no_tasks.write_text(
         json.dumps(
@@ -206,13 +254,15 @@ def test_sandbox_flags_are_rejected_with_a_spec_file(tmp_path, flag, value):
 
 
 TB = "https://github.com/harbor-framework/terminal-bench.git"
-SHA = "2b0442c3" + "0" * 32
+SHA = "2b0442c3" + "0" * 32  # what Harbor's ls-remote gives an annotated tag: the tag object
+COMMIT = "9f1e7a55" + "0" * 32  # the commit the download checks out
 
 
 class FakeGitRegistry:
     """Harbor's ``GitRepoRegistryClient``: three tasks under ``tasks/`` at ``SHA``; records what it downloads."""
 
     downloads: list[list[str]] = []
+    commits: list[str | None] | None = None  # per selected task; default COMMIT for each
 
     repos: list = []
 
@@ -231,7 +281,10 @@ class FakeGitRegistry:
 
     async def download_tasks(self, task_ids, output_dir, export):
         FakeGitRegistry.downloads.append([t.get_name() for t in task_ids])
-        return SimpleNamespace(paths=[output_dir / t.get_name() for t in task_ids])
+        paths = [output_dir / t.get_name() for t in task_ids]
+        commits = FakeGitRegistry.commits or [COMMIT] * len(paths)
+        results = [SimpleNamespace(path=p, resolved_git_commit_id=c) for p, c in zip(paths, commits, strict=True)]
+        return SimpleNamespace(paths=paths, results=results)
 
 
 @pytest.fixture
@@ -240,15 +293,24 @@ def git_registry(monkeypatch):
 
     FakeGitRegistry.downloads = []
     FakeGitRegistry.repos = []
+    FakeGitRegistry.commits = None
     monkeypatch.setattr(git_repo, "GitRepoRegistryClient", FakeGitRegistry)
     return FakeGitRegistry
 
 
 def test_git_source_downloads_only_the_selected_tasks(git_registry, tmp_path):
     name, sha, dirs, total = download_git_tasks(f"{TB}@v3.0.0", "sum-three,0", tmp_path)
-    assert (name, sha, total) == ("harbor-framework/terminal-bench", SHA, 3)
+    # The checked-out commit, not the tag object an annotated tag's ls-remote gives.
+    assert (name, sha, total) == ("harbor-framework/terminal-bench", COMMIT, 3)
     assert dirs == [tmp_path / "sum-three", tmp_path / "bun-sourcemap-leak"]  # name order: index 0 is bun-…
     assert git_registry.downloads == [["sum-three", "bun-sourcemap-leak"]]
+
+
+@pytest.mark.parametrize("second", ["a" * 40, None], ids=["another-commit", "unresolved"])
+def test_git_source_needs_one_commit_for_every_task(git_registry, tmp_path, second):
+    git_registry.commits = [COMMIT, second]
+    with pytest.raises(RuntimeError, match="not one commit"):
+        download_git_tasks(f"{TB}@v3.0.0", "sum-three,0", tmp_path)
 
 
 def test_git_source_needs_a_ref():
@@ -355,6 +417,65 @@ def test_submit_retries_a_503_with_the_same_body():
     assert status["run_id"] == "run-1" and len(bodies) == 2 and bodies[0] == bodies[1]
 
 
+def test_a_failed_submit_names_its_key_so_a_rerun_finishes_the_run():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"detail": "task Jobs of run run-1 not created"})
+
+    client = NemoClient(
+        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    with pytest.raises(RuntimeError, match="rerun the same command with --idempotency-key k-123$"):
+        submit_run(client, {"idempotency_key": "k-123"}, workspace="default", echo=lambda _: None, sleep=lambda _: None)
+
+
+@pytest.mark.parametrize("spec_key", [None, "from-file"])
+def test_an_explicit_idempotency_key_wins(tmp_path, spec_key):
+    ref = "default/t#" + "a" * 64
+    assert (
+        run_request(
+            ref, spec_file=None, agent="oracle", dispatcher_profile=None, idempotency_key="k-123"
+        ).idempotency_key
+        == "k-123"
+    )
+    spec = tmp_path / "run.json"
+    body = {
+        "spec": {"tasks": "default/full", "target": {"kind": "harbor"}},
+        "execution": {},
+        "idempotency_key": spec_key,
+    }
+    spec.write_text(json.dumps(body))
+    explicit = run_request(ref, spec_file=spec, agent="", dispatcher_profile=None, idempotency_key="k-123")
+    assert explicit.idempotency_key == "k-123"
+    default = run_request(ref, spec_file=spec, agent="", dispatcher_profile=None)
+    assert default.idempotency_key == (spec_key or default.idempotency_key) and default.idempotency_key
+
+
+def test_spec_selection_ignores_a_publication_that_experiment_replaces(tmp_path):
+    spec = tmp_path / "run.json"
+    body = {
+        "spec": {"tasks": "default/suite#" + "e" * 64, "target": {"kind": "harbor"}},
+        "execution": {"sandbox_policy": "p"},
+        "publication": {"intake": {"experiment": ""}},  # invalid on its own; --experiment replaces it
+    }
+    spec.write_text(json.dumps(body))
+    member = "default/a#" + "1" * 64
+    tasks = SimpleNamespace(
+        retrieve=lambda name, revision, workspace: SimpleNamespace(revision=1, spec=SimpleNamespace())
+    )
+    tasksets = SimpleNamespace(retrieve=lambda name, revision, workspace: SimpleNamespace(tasks=[member]))
+    evaluator = cast(Evaluator, SimpleNamespace(tasks=tasks, tasksets=tasksets))
+    assert _select_from_spec(evaluator, spec, None, "default") == ([member], 1, "suite")
+
+
+def test_spec_selection_needs_a_taskset(tmp_path):
+    spec = tmp_path / "run.json"
+    spec.write_text(
+        json.dumps({"spec": {"tasks": ["default/a#" + "1" * 64], "target": {"kind": "harbor"}}, "execution": {}})
+    )
+    with pytest.raises(ValueError, match="must name a taskset"):
+        _select_from_spec(cast(Evaluator, SimpleNamespace()), spec, None, "default")
+
+
 # --- runs status / runs results ----------------------------------------------------------------------------
 
 RUN = {
@@ -410,7 +531,8 @@ def page(items):
 @pytest.fixture
 def platform():
     jobs = {
-        "run-0123456789abcdef-task-0": job("run-0123456789abcdef-task-0", "completed", "hello/greet-universe"),
+        "run-0123456789abcdef-task-0": job("run-0123456789abcdef-task-0", "completed", "hello/greet-universe")
+        | {"status_details": {"publication": {"status": "completed", "evaluation_id": "e", "trial_count": 2}}},
         "run-0123456789abcdef-task-1": job("run-0123456789abcdef-task-1", "active", "hello/sum-three"),
     }
     results = {  # keyed and filtered by the Job's name, as the platform stores them
@@ -474,6 +596,16 @@ def test_rollup_weights_task_means_by_count():
     rollup = {s.name: s for s in rollup_scores([first, second])}
     assert rollup["harbor_reward.reward"] == ScoreRollup("harbor_reward.reward", 0.75, 4, 1, 2)
     assert rollup["harbor_reward.extra"].tasks == 1
+
+
+def test_status_shows_what_each_task_published(platform):
+    views = run_task_jobs(platform, RUN, workspace="default")
+    assert views[0].publication == {"status": "completed", "evaluation_id": "e", "trial_count": 2}
+    failed = TaskJobView(1, "j1", "b", "completed", publication={"status": "error", "error": "intake 503"})
+    lines = _status_table(RUN, [views[0], failed, views[2]])
+    assert lines[-5].endswith("published")
+    assert lines[-4].endswith("✓ 2 trials") and lines[-3].endswith("✗ intake 503") and lines[-2].endswith("  -")
+    assert _view_json(failed)["publication"] == {"status": "error", "error": "intake 503"}
 
 
 def test_status_counts_done_and_failed():
@@ -580,11 +712,12 @@ def test_job_error_prefers_the_failed_process_over_the_retry_summary(status_deta
     assert job_error(HelixJobResponse.model_validate(failed)) == expected
 
 
-def test_newest_bundle_job_is_the_last_attempt_with_its_error():
-    jobs = {
-        "run-x-bundle-1": job("run-x-bundle-1", "error", "t"),
-        "run-x-bundle-2": job("run-x-bundle-2", "error", "t") | {"status_details": FAILED_POD},
-    }
+@pytest.mark.parametrize("first", ["error", None], ids=["failed", "unreadable"])
+def test_newest_bundle_job_is_the_last_attempt_with_its_error(first):
+    """The controller skips a name its create left unreadable (404), so the search goes on past it."""
+    jobs = {"run-x-bundle-2": job("run-x-bundle-2", "error", "t") | {"status_details": FAILED_POD}}
+    if first is not None:
+        jobs["run-x-bundle-1"] = job("run-x-bundle-1", first, "t")
 
     def handler(request: httpx.Request) -> httpx.Response:
         name = request.url.path.rsplit("/", 1)[1]

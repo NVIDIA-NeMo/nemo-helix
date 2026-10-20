@@ -10,6 +10,7 @@ import pytest
 from nemo_nb.discovery import (
     expand_literalincludes,
     find_processable_notebooks,
+    find_testable_notebooks,
     has_process_marker_markdown,
     has_process_marker_notebook,
     is_excluded_file,
@@ -130,6 +131,30 @@ def test_find_processable_notebooks_conflicts():
         # Should detect conflict
         assert len(result.conflicts) == 1
         assert (tmpdir / "tutorial") in result.conflicts
+
+
+def test_mdx_discovery(tmp_path):
+    marked = tmp_path / "tutorial.mdx"
+    marked.write_text('{/* @nemo-nb: process */}\n\n```python\nprint("hello")\n```')
+    skipped = tmp_path / "skipped.mdx"
+    skipped.write_text("{/* @nemo-nb: process */}\n{/* @nemo-nb: skip-test */}")
+    (tmp_path / "unmarked.mdx").write_text("# Not executable")
+    build = tmp_path / "_build"
+    build.mkdir()
+    (build / "generated.mdx").write_text("{/* @nemo-nb: process */}")
+
+    assert set(find_processable_notebooks(str(tmp_path)).md_files) == {marked, skipped}
+    assert find_processable_notebooks(str(marked)).md_files == [marked]
+    assert find_testable_notebooks(str(tmp_path)).md_files == [marked]
+    assert find_testable_notebooks(str(skipped)).md_files == []
+
+
+def test_mdx_ipynb_conflict(tmp_path):
+    (tmp_path / "tutorial.mdx").write_text("{/* @nemo-nb: process */}")
+    (tmp_path / "tutorial.ipynb").write_text(
+        '{"cells": [{"cell_type": "markdown", "source": "<!-- @nemo-nb: process -->"}]}'
+    )
+    assert find_processable_notebooks(str(tmp_path)).conflicts == {tmp_path / "tutorial"}
 
 
 def test_expand_literalincludes_basic():

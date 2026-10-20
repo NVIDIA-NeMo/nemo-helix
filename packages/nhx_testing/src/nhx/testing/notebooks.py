@@ -253,7 +253,7 @@ def execute_notebook(
     execution_timeout: int | None = None,
     output_path: Path | None = None,
 ) -> Path:
-    """Execute a single ``.md`` or ``.ipynb`` notebook via papermill.
+    """Execute a single ``.md``, ``.mdx`` or ``.ipynb`` notebook via papermill.
 
     Handles conversion/transformation, runs the notebook, and cleans up
     intermediate temp files (``.tmp.ipynb``).  The executed output
@@ -261,7 +261,7 @@ def execute_notebook(
     CI artifact or inspected after failure.
 
     Args:
-        notebook_path: Path to the ``.md`` or ``.ipynb`` notebook.
+        notebook_path: Path to the ``.md``, ``.mdx`` or ``.ipynb`` notebook.
         language_filter: Which cells to run (``"all"``, ``"python"``, ``"shell"``).
         kernel_name: Jupyter kernel to use.
         execution_timeout: Per-cell timeout in seconds (``None`` for no limit).
@@ -277,7 +277,7 @@ def execute_notebook(
 
     output_path = output_path or notebook_path.with_suffix(".executed.ipynb")
 
-    if notebook_path.suffix == ".md":
+    if notebook_path.suffix in {".md", ".mdx"}:
         temp_nb = convert_md_to_notebook(notebook_path, language_filter)
         try:
             papermill.execute_notebook(

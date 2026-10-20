@@ -6,7 +6,9 @@
 import signal
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -23,6 +25,7 @@ from nhx.automodel.tasks.training.backends.checkpoints import ModelType  # noqa:
 from nhx.automodel.tasks.training.progress import JobsServiceProgressReporter  # noqa: E402
 from nhx.automodel.tasks.training.protocol import LibraryConfig  # noqa: E402
 from nhx.automodel.tasks.training.schemas import TrainingRecipe  # noqa: E402
+from nhx.customization_common.training.progress import TrainingWallClock  # noqa: E402
 
 
 class TestAutomodelBackend:
@@ -143,14 +146,17 @@ class TestAutomodelBackend:
 
 
 class Proc:
-    def __init__(self, *, fail: str | None = None) -> None:
+    def __init__(self, *, fail: str | None = None, on_wait: Callable[[], None] | None = None) -> None:
         self.returncode = 0
         self.fail = fail
+        self.on_wait = on_wait
         self.waits = 0
         self.killed = False
 
     def wait(self, timeout: float | None = None) -> int:
         self.waits += 1
+        if self.on_wait is not None:
+            self.on_wait()
         if self.fail == "timeout" and self.waits == 1:
             raise subprocess.TimeoutExpired("torchrun", 1)
         if self.fail == "exit":
@@ -179,29 +185,27 @@ class Thread:
 
 
 class RecordingProgress(JobsServiceProgressReporter):
-    sent: list[dict]
+    """Records the progress it would send, and times training with a scripted clock."""
 
-
-def wall_clock_progress(start: float, end: float) -> RecordingProgress:
-    ticks = iter((start, end))
-    progress = RecordingProgress.__new__(RecordingProgress)
-    progress.training_duration_seconds = None
-    progress.sent = []
+    def __init__(self, start: float, end: float) -> None:
+        # The base constructor builds a Jobs client; nothing here is sent anywhere.
+        self.training_duration_seconds = None
+        self.sent: list[dict] = []
+        self._ticks = iter((start, end))
 
     def update_task(
+        self,
         status: str = "active",
-        status_details: dict | None = None,
-        error_details: dict | None = None,
+        status_details: dict[str, Any] | None = None,
+        error_details: dict[str, Any] | None = None,
     ) -> None:
-        progress.sent.append(status_details or {})
+        self.sent.append(status_details or {})
 
-    def training_wall_clock(clock: object = None) -> object:
-        return JobsServiceProgressReporter.training_wall_clock(progress, clock=lambda: next(ticks))
+    def report_running(self, phase: str, **details: Any) -> None:
+        self.sent.append({"phase": phase, **details})
 
-    progress.update_task = update_task  # type: ignore[method-assign]
-    progress.report_running = lambda phase, **details: progress.sent.append({"phase": phase, **details})  # type: ignore[method-assign]
-    progress.training_wall_clock = training_wall_clock  # type: ignore[method-assign]
-    return progress
+    def training_wall_clock(self, clock: Callable[[], float] | None = None) -> TrainingWallClock:
+        return super().training_wall_clock(clock=lambda: next(self._ticks))
 
 
 def run_execute(monkeypatch: pytest.MonkeyPatch, progress: JobsServiceProgressReporter, proc: Proc):
@@ -223,16 +227,13 @@ class TestExecuteTrainingWallClock:
     def test_duration_is_the_torchrun_wait(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
-        progress = wall_clock_progress(10.0, 25.0)
-        proc = Proc()
+        progress = RecordingProgress(10.0, 25.0)
 
-        def wait(timeout: float | None = None) -> int:
+        def check_training_is_running() -> None:
             assert any("training_started_at" in item for item in progress.sent)
             assert all("training_finished_at" not in item for item in progress.sent)
-            proc.returncode = 0
-            return 0
 
-        proc.wait = wait  # type: ignore[method-assign]  # ty: ignore[invalid-assignment]
+        proc = Proc(on_wait=check_training_is_running)
         with caplog.at_level("INFO"):
             result = run_execute(monkeypatch, progress, proc)
 
@@ -245,7 +246,7 @@ class TestExecuteTrainingWallClock:
     def test_timeout_still_reports_the_duration(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
-        progress = wall_clock_progress(10.0, 25.0)
+        progress = RecordingProgress(10.0, 25.0)
         with caplog.at_level("INFO"), pytest.raises(subprocess.TimeoutExpired):
             run_execute(monkeypatch, progress, Proc(fail="timeout"))
 
@@ -254,7 +255,7 @@ class TestExecuteTrainingWallClock:
         assert "Training finished in 15.0 seconds" in caplog.text
 
     def test_nonzero_exit_still_reports_the_duration(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        progress = wall_clock_progress(10.0, 25.0)
+        progress = RecordingProgress(10.0, 25.0)
         with pytest.raises(Exception):
             run_execute(monkeypatch, progress, Proc(fail="exit"))
 

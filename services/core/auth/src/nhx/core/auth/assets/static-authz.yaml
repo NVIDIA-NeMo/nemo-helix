@@ -271,6 +271,9 @@ authz:
         description: "Create workspaces"
       delete:
         description: "Delete workspaces"
+      deletion:
+        read:
+          description: "Read workspace deletion status"
       list:
         description: "List workspaces"
       members:
@@ -406,9 +409,10 @@ authz:
       - models.trust-remote-code.set
       - models.tool-call-plugin.set
     WorkspaceCreator:
-      description: "Create new workspaces"
+      description: "Create new workspaces and read deletion status for workspaces they created"
       permissions:
       - workspaces.create
+      - workspaces.deletion.read
     HelixAdmin:
       description: "Platform-wide administrative access"
       permissions:
@@ -557,6 +561,13 @@ authz:
       get:
         permissions:
         - entities.read
+        scopes:
+        - entities:read
+        - platform:read
+    /apis/entities/v2/workspace-deletions/{name}:
+      get:
+        permissions:
+        - workspaces.deletion.read
         scopes:
         - entities:read
         - platform:read
@@ -1320,6 +1331,13 @@ authz:
         - platform:read
     /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/pause:
       post:
+        permissions:
+        - jobs.update
+        scopes:
+        - jobs:write
+        - platform:write
+    /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/control:
+      patch:
         permissions:
         - jobs.update
         scopes:

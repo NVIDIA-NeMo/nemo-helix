@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unsloth's wall clock covers model load and training, and stops before save."""
+"""Unsloth's wall clock covers model load and training, and stops before save, which reports its own phase."""
 
 from __future__ import annotations
 
@@ -35,11 +35,17 @@ class Reporter:
     def training_wall_clock(self) -> Clock:
         return Clock(self.events)
 
+    def report_completed(self, message: str = "Completed") -> None:
+        self.events.append("completed")
+
 
 class Callback:
     def __init__(self, events: list[str]) -> None:
         self.reporter = Reporter(events)
         self.events = events
+
+    def report_phase(self, phase: str) -> None:
+        self.events.append(phase)
 
     def close(self) -> None:
         self.events.append("close")
@@ -56,12 +62,11 @@ def test_wall_clock_wraps_load_and_train_but_not_save(tmp_path: Path, monkeypatc
             events.append("load")
             return object(), object()
 
-    unsloth_mod.FastLanguageModel = FastLanguageModel  # type: ignore[attr-defined]
+    unsloth_mod.__dict__.update(FastLanguageModel=FastLanguageModel)
     monkeypatch.setitem(sys.modules, "unsloth", unsloth_mod)
 
     datasets_mod = types.ModuleType("datasets")
-    datasets_mod.Dataset = object  # type: ignore[attr-defined]
-    datasets_mod.load_dataset = lambda *args, **kwargs: None  # type: ignore[attr-defined]
+    datasets_mod.__dict__.update(Dataset=object, load_dataset=lambda *args, **kwargs: None)
     monkeypatch.setitem(sys.modules, "datasets", datasets_mod)
 
     trl_mod = types.ModuleType("trl")
@@ -78,8 +83,7 @@ def test_wall_clock_wraps_load_and_train_but_not_save(tmp_path: Path, monkeypatc
             events.append("train")
             return SimpleNamespace(training_loss=0.2)
 
-    trl_mod.SFTConfig = SFTConfig  # type: ignore[attr-defined]
-    trl_mod.SFTTrainer = SFTTrainer  # type: ignore[attr-defined]
+    trl_mod.__dict__.update(SFTConfig=SFTConfig, SFTTrainer=SFTTrainer)
     monkeypatch.setitem(sys.modules, "trl", trl_mod)
 
     monkeypatch.setattr(unsloth_sft.NHXJobContext, "from_env", staticmethod(lambda: SimpleNamespace()))
@@ -113,5 +117,11 @@ def test_wall_clock_wraps_load_and_train_but_not_save(tmp_path: Path, monkeypatc
     )
 
     assert events.index("clock-start") < events.index("load") < events.index("train") < events.index("clock-end")
-    assert events.index("clock-end") < events.index("close") < events.index("save")
+    assert (
+        events.index("clock-end")
+        < events.index("merging_adapter")
+        < events.index("save")
+        < events.index("completed")
+        < events.index("close")
+    )
     assert result["loss"] == 0.2

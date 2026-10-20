@@ -125,14 +125,11 @@ async def run_analyst_change_set(
         from nemo_insights_plugin.analyst.trace_intel import analyze_snapshot, load_existing_insights
         from nemo_insights_plugin.analyst.trace_snapshot import load_trace_snapshot
     except ModuleNotFoundError as exc:
-        if exc.name not in {"insight_agent", "trace_ingest"}:
+        if exc.name not in {"compass", "trace_ingest"}:
             raise
         raise RuntimeError(
-            "The Insights analyst requires the separately installed insight-agent and trace-ingest packages. "
-            "Install the pinned dependencies in the environment running the analyst. "
-            "For uv tool and virtual-environment installation commands, see "
-            "https://github.com/NVIDIA-NeMo/nemo-helix/blob/release/0.7/plugins/nemo-insights/README.md"
-            "#install-analyst-dependencies-for-pypi-installations"
+            "The Insights analyst requires Compass (nemo-compass==0.1.0) on Python 3.12 or 3.13. "
+            "Reinstall nemo-helix[all] in the environment running the analyst to restore its dependencies."
         ) from exc
 
     observability = None

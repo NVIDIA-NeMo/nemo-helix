@@ -93,13 +93,13 @@ def _sync_event_hooks_as_async(client: NemoClient) -> dict[str, list[_AsyncReque
 
 @contextmanager
 def async_client_from_sync_client(client: NemoClient) -> Generator[AsyncNemoClient, None, None]:
-    """Yield an async typed client with the sync client's auth, headers, and request hooks.
+    """Yield an async typed client with the sync client's auth, headers, timeout, and request hooks.
 
     Sync evaluator jobs still use their sync client for downloads and inference identity checks.
     Result persistence and Intake publication are async side effects, so they need an async client
     carrying the same platform identity.
     """
-    http_client = httpx.AsyncClient(event_hooks=_sync_event_hooks_as_async(client))
+    http_client = httpx.AsyncClient(timeout=client._client.timeout, event_hooks=_sync_event_hooks_as_async(client))
     async_client = AsyncNemoClient(
         base_url=client.base_url,
         workspace=client.workspace,
@@ -132,7 +132,7 @@ def run_with_isolated_async_client(
         event_hooks = {event: list(hooks) for event, hooks in async_client._client.event_hooks.items()}
         # Generated SDK auth refresh is implemented as request hooks; preserve it on the
         # loop-local transport so isolation does not turn authenticated clients anonymous.
-        async with httpx.AsyncClient(event_hooks=event_hooks) as http_client:
+        async with httpx.AsyncClient(timeout=async_client._client.timeout, event_hooks=event_hooks) as http_client:
             return await fn(async_client.with_http_client(http_client))
 
     return run_sync(_run)

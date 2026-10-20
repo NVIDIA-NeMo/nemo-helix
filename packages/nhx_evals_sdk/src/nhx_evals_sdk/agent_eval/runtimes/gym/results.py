@@ -27,7 +27,14 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.records import (
     read_jsonl,
 )
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
-from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput, TrialMeasurements
+from nhx_evals_sdk.agent_eval.trials import (
+    UNKNOWN_ERROR_TYPE,
+    AgentEvalTrial,
+    AgentEvalTrialStatus,
+    AgentOutput,
+    TrialError,
+    TrialMeasurements,
+)
 from nhx_evals_sdk.agent_eval.usage_keys import (
     CACHE_CREATION_INPUT_TOKENS_KEY,
     CACHE_READ_INPUT_TOKENS_KEY,
@@ -56,12 +63,77 @@ logger = logging.getLogger(__name__)
 #: Named for NeMo Gym's documented `ng_trajectory` schema; 0.5.0 writes it as one
 #: `<rollout_id>.capture.jsonl` per rollout rather than as a field on the rollout record.
 NG_TRAJECTORY_EVIDENCE = "ng_trajectory"
+#: ``TrialError.type`` for a rollout whose agent produced no output and never called the model.
+AGENT_NEVER_RAN_ERROR_TYPE = "agent_never_ran"
+#: Trial metadata key holding every diagnostic a failures-sidecar record carries, verbatim.
+GYM_FAILURE_RECORD = "gym_failure_record"
 
 
 _TOKEN_USAGE_KEYS = ("total_tokens", "input_tokens", "output_tokens", "prompt_tokens", "completion_tokens")
 #: The subset that proves a call happened. A model call always consumes input tokens, so zero on any
 #: of these is evidence the model was never reached; zero output tokens only means an empty answer.
 _INPUT_TOKEN_KEYS = ("total_tokens", "input_tokens", "prompt_tokens")
+#: Where a failures-sidecar record may say why the attempt failed. Gym's failure-record schema isn't
+#: contractual, so this probes the keys agents write, then Gym's own (0.6+, and its judge failsafe).
+_FAILURE_MESSAGE_KEYS = (
+    "error",
+    "exception",
+    "failure_reason",
+    "error_message",
+    "_ng_failure_message",
+    "_ng_failure_judge_error",
+)
+#: The exception Gym caught (0.6+), else the failure class Gym routed the record to the sidecar by.
+_FAILURE_TYPE_KEYS = ("_ng_failure_type", "_ng_failure_class")
+#: Prefix of every key Gym writes about a failure: its class, the exception, the HTTP status and reply,
+#: and later additions such as the stage. Gym strips by it before scoring a failure row as zero.
+_NG_FAILURE_PREFIX = "_ng_failure_"
+#: What the server answered a failed ``/run`` with. A NeMo Gym server answers 500 with its handler's
+#: exception, so this holds the cause that the transport message only gives the status of.
+_NG_FAILURE_RESPONSE_BODY = "_ng_failure_response_body"
+
+
+def _first_text(record: Mapping[str, Any], keys: Sequence[str]) -> str | None:
+    """The first of ``keys`` holding a non-blank string, or ``None``.
+
+    Strings only, because ``TrialError`` takes nothing else and an odd record must not sink the run.
+    A non-string under an earlier key is skipped, so it cannot hide a usable value under a later one.
+    """
+    return next((value for value in map(record.get, keys) if isinstance(value, str) and value.strip()), None)
+
+
+def _diagnostic_text(value: Any, *, reply: bool = False) -> str | None:
+    """One diagnostic as text: a string trimmed, an object or list as JSON, anything else ``None``.
+
+    Gym's servers JSON-encode their reply, so a reply that decodes to a string is shown decoded.
+    """
+    if reply and isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            decoded = None
+        if isinstance(decoded, str):
+            value = decoded
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, (Mapping, list)) and value:
+        return json.dumps(value)
+    return None
+
+
+def _failure_message(record: Mapping[str, Any]) -> str | None:
+    """Every reason the record gives for the failure, once each, one per line.
+
+    Each producer writes its own key, so a record can hold several. The server's reply comes last:
+    for a ``/run`` that failed, Gym's message is the transport exception's text, which names the
+    status and URL, while the reply holds the cause.
+    """
+    parts: list[str] = []
+    for key in (*_FAILURE_MESSAGE_KEYS, _NG_FAILURE_RESPONSE_BODY):
+        text = _diagnostic_text(record.get(key), reply=key == _NG_FAILURE_RESPONSE_BODY)
+        if text is not None and text not in parts:
+            parts.append(text)
+    return "\n".join(parts) or None
 
 
 def _agent_never_ran(record: Mapping[str, Any]) -> bool:
@@ -633,12 +705,14 @@ def trials_from_rollouts(
             NG_TASK_INDEX: record.get(NG_TASK_INDEX),
             NG_ROLLOUT_INDEX: raw_rollout_index,
         }
+        error: TrialError | None = None
         if never_ran:
             # Kept alongside the reward Gym reported, so the discarded value is still auditable.
             metadata["gym_failure"] = (
                 "the agent produced no output and consumed no tokens, so the model was never called; "
                 f"the reported score of {reward!r} is not a measurement of this agent"
             )
+            error = TrialError(type=AGENT_NEVER_RAN_ERROR_TYPE, message=metadata["gym_failure"])
         trial_id = _rollout_trial_id(
             task_id, raw_rollout_index, synth_seq, missing_label="noidx", attempt=record.get(NG_ATTEMPT_INDEX)
         )
@@ -655,6 +729,7 @@ def trials_from_rollouts(
                     trial_id=trial_id,
                     capture_dir=capture_dir,
                 ),
+                error=error,
                 measurements=_usage_measurements(record),
                 metadata=metadata,
             )
@@ -663,11 +738,7 @@ def trials_from_rollouts(
     failures_path = _failures_path_for(rollouts_path)
     unattributed_failures = 0
     if failures_path.exists():
-        failure_evidence = CandidateEvidence(
-            descriptors={
-                "rollout_failures": EvidenceDescriptor(kind="filesystem", format="file", ref=str(failures_path))
-            }
-        )
+        failures_file = EvidenceDescriptor(kind="filesystem", format="file", ref=str(failures_path))
         # tolerant: a truncated line in the abnormal-termination sidecar must not sink the good trials.
         for record in read_jsonl(failures_path, tolerant=True):
             # strict=False to match this loop's tolerant read: an odd record is counted, not fatal.
@@ -677,6 +748,18 @@ def trials_from_rollouts(
                 unattributed_failures += 1
                 continue
             raw_rollout_index = record.get(NG_ROLLOUT_INDEX)
+            descriptors = {"rollout_failures": failures_file}
+            capture_path = _capture_path(record, capture_dir)
+            if capture_path is not None:
+                # By reference only: an OTLP trace would move publication off the ATIF fallback, which
+                # records the run's agent identity.
+                descriptors[NG_TRAJECTORY_EVIDENCE] = EvidenceDescriptor(
+                    kind="filesystem", format="file", ref=str(capture_path)
+                )
+            error = TrialError(
+                type=_first_text(record, _FAILURE_TYPE_KEYS) or UNKNOWN_ERROR_TYPE,
+                message=_failure_message(record),
+            )
             trials.append(
                 AgentEvalTrial(
                     id=_rollout_trial_id(
@@ -691,12 +774,17 @@ def trials_from_rollouts(
                     output=AgentOutput(
                         response=record.get("response"), metadata={"agent_ref": record.get("agent_ref")}
                     ),
-                    evidence=failure_evidence,
+                    evidence=CandidateEvidence(descriptors=descriptors),
+                    error=error,
                     measurements=_usage_measurements(record),
                     metadata={
                         "reward": None,
-                        # best-effort: Gym's failure-record schema isn't contractual, so probe common keys.
-                        "gym_failure": record.get("error") or record.get("exception") or record.get("failure_reason"),
+                        "gym_failure": next((value for value in map(record.get, _FAILURE_MESSAGE_KEYS) if value), None),
+                        GYM_FAILURE_RECORD: {
+                            key: value
+                            for key, value in record.items()
+                            if key in _FAILURE_MESSAGE_KEYS or key.startswith(_NG_FAILURE_PREFIX)
+                        },
                         NG_TASK_INDEX: record.get(NG_TASK_INDEX),
                         NG_ROLLOUT_INDEX: raw_rollout_index,
                     },

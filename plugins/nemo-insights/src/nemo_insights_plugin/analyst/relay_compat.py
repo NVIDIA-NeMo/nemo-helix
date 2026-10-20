@@ -35,7 +35,10 @@ async def _tool_middleware(ctx: ExecutePythonContext, nxt: ExecutePythonNext) ->
         nonlocal captured_ctx
         if isinstance(inner_args, dict):
             if "code" in inner_args:
-                ctx.code = inner_args["code"]
+                code = inner_args["code"]
+                if not isinstance(code, str):
+                    raise TypeError(f"execute_python code must be a string, got {type(code).__name__}")
+                ctx.code = code
             for key in ("tool_call_id", "timeout"):
                 if key in inner_args:
                     ctx.params[key] = inner_args[key]

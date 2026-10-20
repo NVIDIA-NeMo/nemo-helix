@@ -64,7 +64,7 @@ def _row(**overrides):  # noqa: ANN001, ANN202
         "framework_profile_id": "cfg_framework",
         "harbor_profile_id": "cfg_harbor",
         "intake_profile_id": "cfg_intake",
-        "credentials": {"openai": "cred_openai"},
+        "credentials": {"openai": "team-a/openai-key"},
         "harbor_config": {
             "env": {
                 "SAFE_PROFILE": "dev",
@@ -225,6 +225,27 @@ def test_opensandbox_provenance_records_separate_verifier_image(tmp_path) -> Non
     assert manifest.runtime.sandbox["verifier_image_digest"] == verifier_digest
 
 
+def test_opensandbox_provenance_records_the_agent_bundle_and_its_delivery(tmp_path) -> None:  # noqa: ANN001
+    bundle_image = "registry.example/claude@sha256:" + "d" * 64
+    row = _opensandbox_row()
+    row["backend_handle"]["raw"]["provenance"].update(
+        agent_bundle_image=bundle_image, agent_bundle_delivery="init_container"
+    )
+
+    manifest = build_run_provenance_manifest(
+        row,
+        status="succeeded",
+        artifact_prefix="evaluations/ev_test123/artifacts/",
+        artifact_root=tmp_path,
+    )
+
+    assert manifest.config.agent_bundle is not None
+    assert manifest.config.agent_bundle.bundle_id == "ab_claude"
+    assert manifest.config.agent_bundle.image_digest == bundle_image
+    assert manifest.runtime.sandbox["agent_bundle_image"] == bundle_image
+    assert manifest.runtime.sandbox["agent_bundle_delivery"] == "init_container"
+
+
 def test_opensandbox_provenance_omits_verifier_image_for_shared_verifier(tmp_path) -> None:  # noqa: ANN001
     manifest = build_run_provenance_manifest(
         _opensandbox_row(),
@@ -310,7 +331,7 @@ def test_run_provenance_manifest_redacts_secret_values(tmp_path, monkeypatch) ->
     monkeypatch.setenv("POLICY_API_KEY", "sk-policy-secret")
 
     manifest = build_run_provenance_manifest(
-        _row(credentials={"openai": "cred_openai"}),
+        _row(credentials={"openai": "team-a/openai-key"}),
         status="failed",
         artifact_prefix="evaluations/ev_test123/artifacts/",
         artifact_root=tmp_path,
@@ -320,8 +341,9 @@ def test_run_provenance_manifest_redacts_secret_values(tmp_path, monkeypatch) ->
     assert "sk-do-not-serialize" not in payload
     assert "sk-env-secret" not in payload
     assert "sk-policy-secret" not in payload
-    assert "cred_openai" in payload
-    assert manifest.credentials[0].fingerprint
+    assert [c.model_dump() for c in manifest.credentials] == [
+        {"provider": "openai", "secret_name": "team-a/openai-key"}
+    ]
     assert "harbor_config" in manifest.config.config_hashes
     assert "DAYTONA_API_KEY" not in manifest.environment.env_hashes
 

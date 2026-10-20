@@ -20,7 +20,7 @@ A bundle Job whose create failed midway never runs, so the next attempt's name i
 Task and bundle Job names are predictable, so a Job under one counts only when it runs exactly what this
 run would create there: someone else's Job is never bundled, adopted or cancelled.
 
-Expiry keeps no partial result: merging the tasks that finished is M4 stories 5 and 7.
+Expiry keeps no partial result. TODO(M4 stories 5, 7): merge the tasks that finished.
 
 Task Jobs save their result bundle as a Job result and, being agent-evaluate Jobs, also a per-task
 result record named after the Job. The bundle Job saves files only. This controller writes the run's
@@ -223,6 +223,9 @@ async def _expire(
 
     Cancels first, so a run never ends with Jobs left running. If the state write then fails, the next
     pass sees only finished Jobs and ends the run ``failed`` (or bundles what completed) instead.
+
+    TODO(M4 story 8): delete the run's sandboxes by their ``nemo-run`` label. A dispatcher that is
+    cancelled, OOM-killed or evicted leaves its sandboxes until OpenSandbox's ``max_sandbox_lifetime_s`` TTL.
     """
     unfinished = 0
     for job in task_jobs:

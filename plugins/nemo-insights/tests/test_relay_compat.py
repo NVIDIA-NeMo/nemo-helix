@@ -69,6 +69,7 @@ async def test_real_relay_accepts_results_and_emits_tool_events(result):
             invocation = await manager.run_middleware(
                 MIDDLEWARE_AGENT_CALL, AgentCallContext(method_name="compile_insights"), invoke_agent
             )
+            assert isinstance(invocation, AgentCallContext)
             actual = invocation.result
             await nemo_relay.subscribers.flush_async()
             assert actual is ctx

@@ -24,6 +24,7 @@ from nemo_helix_plugin.client.errors import (
     NemoTransportError,
     NotFoundError,
 )
+from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.training.progress import JobsServiceProgressReporter
 
 SERIES: dict[str, list[dict[str, Any]]] = {
@@ -148,9 +149,9 @@ def _details(jobs: _Jobs, index: int = -1) -> dict[str, Any]:
 
 def test_a_report_sends_only_its_own_fields(jobs: _Jobs) -> None:
     """The server merges, so restating untouched fields would be pure upload."""
-    _reporter(jobs, STORED).report_running("processing_checkpoint")
+    _reporter(jobs, STORED).report_running(TrainingPhase.FINALIZING_CHECKPOINT)
 
-    assert _details(jobs) == {"phase": "processing_checkpoint"}
+    assert _details(jobs) == {"phase": "finalizing_checkpoint"}
 
 
 def test_completion_sends_only_its_own_fields(jobs: _Jobs) -> None:
@@ -164,7 +165,7 @@ def test_completion_sends_only_its_own_fields(jobs: _Jobs) -> None:
 def test_percentage_done_is_derived_from_a_stated_step(jobs: _Jobs) -> None:
     reporter = _reporter(jobs)
     reporter.configure_progress_tracking(max_steps=40, num_epochs=1)
-    reporter.report_running("training", step=10, metrics=SERIES)
+    reporter.report_running(TrainingPhase.TRAINING, step=10, metrics=SERIES)
 
     assert _details(jobs)["percentage_done"] == 25
 
@@ -173,7 +174,7 @@ def test_percentage_done_is_clamped(jobs: _Jobs) -> None:
     """A resumed or over-run job can report past max_steps."""
     reporter = _reporter(jobs)
     reporter.configure_progress_tracking(max_steps=10, num_epochs=1)
-    reporter.report_running("training", step=99, metrics=SERIES)
+    reporter.report_running(TrainingPhase.TRAINING, step=99, metrics=SERIES)
 
     assert _details(jobs)["percentage_done"] == 100
 
@@ -193,8 +194,8 @@ def test_no_report_reads_the_blob_back(jobs: _Jobs) -> None:
     """Writes are fire-and-forget. A read per report was the old carry-forward tax."""
     reporter = _reporter(jobs, STORED)
     for step in range(1, 11):
-        reporter.report_running("training", step=step, metrics=SERIES)
-    reporter.report_running("processing_checkpoint")
+        reporter.report_running(TrainingPhase.TRAINING, step=step, metrics=SERIES)
+    reporter.report_running(TrainingPhase.FINALIZING_CHECKPOINT)
     reporter.report_completed("Training completed")
     reporter.report_error("boom")
 
@@ -568,6 +569,6 @@ def test_later_report_does_not_restate_the_wall_clock(jobs: _Jobs) -> None:
     reporter = _reporter(jobs)
     with reporter.training_wall_clock(clock=fixed_clock(CLOCK_START, CLOCK_END)):
         pass
-    reporter.report_running("training", step=3)
+    reporter.report_running(TrainingPhase.TRAINING, step=3)
 
     assert _details(jobs) == {"phase": "training", "step": 3}

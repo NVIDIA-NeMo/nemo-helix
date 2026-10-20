@@ -11,17 +11,9 @@ FROM ${NHX_PYTHON_BASE} AS builder
 COPY --from=nhx-workspace . .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --only-group cpu-tasks --no-editable
-# Harbor task Jobs (nemo-evals) load scaled-evals' OpenSandbox environment. Copy just its four
-# modules onto the venv with a .pth file, as the scaled-evals runner image does, so the plugin's
-# control-plane deps stay out. Remove once nemo-evals carries these modules itself.
-COPY plugins/_temporary-scaled-evals/src/scaled_evals/harbor_opensandbox_environment.py \
-     plugins/_temporary-scaled-evals/src/scaled_evals/harbor_opensandbox_driver.py \
-     plugins/_temporary-scaled-evals/src/scaled_evals/harbor_opensandbox_cleanup.py \
-     plugins/_temporary-scaled-evals/src/scaled_evals/harbor_opensandbox_services.py \
-     /app/.venv/nemo-extensions/scaled_evals/
-RUN site="$(/app/.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" && \
-    echo /app/.venv/nemo-extensions > "${site}/nemo-extensions.pth" && \
-    /app/.venv/bin/python -c 'import nemo_evals.harbor.opensandbox_environment'
+# Harbor task Jobs (nemo-evals) run trials in nhx-sandbox's OpenSandbox environment; fail the build
+# if the image can't import it.
+RUN /app/.venv/bin/python -c 'import nemo_evals.harbor.opensandbox_environment'
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
 RUN --mount=type=cache,target=/root/.cache/uv \

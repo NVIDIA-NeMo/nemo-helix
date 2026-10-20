@@ -17,7 +17,6 @@ from scaled_evals.api.repositories import (
     BenchmarkRepository,
     BenchmarkRunRepository,
     ConfigProfileRepository,
-    CredentialRepository,
     EvaluationRepository,
     ExecutionCleanupRepository,
     ExecutionTelemetryRepository,
@@ -102,10 +101,6 @@ class Database:
     @property
     def config_profiles(self) -> ConfigProfileRepository:
         return ConfigProfileRepository(self.conn)
-
-    @property
-    def credentials(self) -> CredentialRepository:
-        return CredentialRepository(self.conn)
 
     @property
     def evaluations(self) -> EvaluationRepository:

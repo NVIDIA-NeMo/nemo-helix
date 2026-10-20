@@ -104,7 +104,6 @@ def test_invalid_cursor_returns_400() -> None:
     [
         "/v1/evaluations",
         "/v1/tasks",
-        "/v1/credentials",
         "/v1/config-profiles",
         "/v1/users/me/evaluations",
         "/v1/users/me/tasks",

@@ -28,13 +28,13 @@ from typing import Any
 import httpx
 import typer
 from nemo_evals.api.fields import TaskRef, TasksetRef
-from nemo_evals.api.schemas import AgentEvalResult, Task, TasksetInput
-from nemo_evals.api.task_definitions.harbor import HarborTaskDefinition
+from nemo_evals.api.schemas import AgentEvalResult, TasksetInput
 from nemo_evals.api.taskset_run_schemas import TasksetRunInput
 from nemo_evals.harbor.remote.profile import SandboxSelection
 from nemo_evals.image_builds.models import TERMINAL_BUILD_STATUSES, ImageBuild
 from nemo_evals.jobs.agent_evaluate import DEFAULT_RESULT_NAME, SUMMARY_FILE_NAME
 from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, HarborBuiltinAgentSource, HarborRunnerTarget
+from nemo_evals.jobs.run_outcome import PUBLICATION_STATUS_KEY
 from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.taskset_runs.controller import MAX_BUNDLE_ATTEMPTS
 from nemo_evals.taskset_runs.identifiers import bundle_job_name, task_job_name
@@ -114,12 +114,6 @@ def is_compose_task(task_dir: Path) -> bool:
     return any((task_dir / "environment" / name).is_file() for name in COMPOSE_FILENAMES)
 
 
-def needs_image_build(config: dict[str, Any]) -> bool:
-    """True when the task builds its agent image from a Dockerfile (no ``[environment] docker_image``)."""
-    environment = config.get("environment") or {}
-    return not environment.get("docker_image")
-
-
 def download_hub_tasks(dataset: str, names: str | None, output_dir: Path) -> tuple[str, str | None, list[Path]]:
     """Download the selected tasks of Harbor Hub dataset ``org/name@ref`` into ``output_dir``.
 
@@ -160,10 +154,12 @@ def download_git_tasks(source: str, names: str | None, output_dir: Path) -> tupl
     """Download the selected tasks of git repo ``<url>@<ref>`` (its ``tasks/`` directory, or the ``<dir>`` of a
     ``…/tree/<ref>/<dir>`` URL) into ``output_dir``.
 
-    Returns the repo's ``org/name``, the commit SHA the ref resolved to, the task directories in name order,
+    Returns the repo's ``org/name``, the commit the download checked out, the task directories in name order,
     and how many tasks the repo has.
+
+    Raises:
+        RuntimeError: The selected tasks didn't come from one commit.
     """
-    from harbor.models.task.id import GitTaskId
     from harbor.registry.client.git_repo import GitRepoRegistryClient, resolve_repo_source
 
     check_git_source(source)
@@ -174,9 +170,12 @@ def download_git_tasks(source: str, names: str | None, output_dir: Path) -> tupl
     candidates = [Candidate(i, entity_name(t.get_name()), t.get_name()) for i, t in enumerate(ids)]
     chosen = [ids[c.index] for c in select_tasks(candidates, names)]
     result = _run_git(client._task_client.download_tasks(task_ids=chosen, output_dir=output_dir, export=True))
-    sha = ids[0].git_commit_id if isinstance(ids[0], GitTaskId) else None  # every id pins the resolved commit
-    assert sha is not None
-    return f"{repo.org}/{repo.name}", sha, list(result.paths), len(ids)
+    # Not the ids' git_commit_id: for an annotated tag that's the tag object's SHA, not its commit.
+    commits = {r.resolved_git_commit_id for r in result.results}
+    commit = next(iter(commits)) if len(commits) == 1 else None
+    if commit is None:
+        raise RuntimeError(f"Harbor resolved {source} to {sorted(map(str, commits))}, not one commit")
+    return f"{repo.org}/{repo.name}", commit, list(result.paths), len(ids)
 
 
 def list_git_tasks(source: str) -> list[str]:
@@ -206,12 +205,11 @@ def _run_git[T](operation: Coroutine[Any, Any, T]) -> T:
 
 def publish_tasks(
     evaluator: Evaluator, task_dirs: Sequence[Path], *, prefix: str, workspace: str, echo: Callable[[str], None]
-) -> tuple[list[str], dict[str, dict[str, Any]]]:
-    """Publish each task directory as ``<prefix>-<dir>``; return pinned refs and each task's ``task.toml`` config."""
+) -> list[str]:
+    """Publish each task directory as ``<prefix>-<dir>``; return the pinned refs."""
     from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
 
     refs: list[str] = []
-    configs: dict[str, dict[str, Any]] = {}
     for task_dir in task_dirs:
         if is_compose_task(task_dir):
             raise SelectionError(f"{task_dir.name} is a compose task; Kubernetes runs don't support them yet")
@@ -220,9 +218,8 @@ def publish_tasks(
         task = evaluator.tasks.replace(name, task=source, workspace=workspace)
         ref = pinned_task_ref(evaluator, workspace, name, task.revision)
         refs.append(ref)
-        configs[ref] = _task_config(task)
         echo(f"Published task {ref}")
-    return refs, configs
+    return refs
 
 
 def pinned_task_ref(evaluator: Evaluator, workspace: str, name: str, revision: int) -> str:
@@ -236,39 +233,40 @@ def pinned_task_ref(evaluator: Evaluator, workspace: str, name: str, revision: i
 def build_images(
     evaluator: Evaluator,
     refs: Sequence[str],
-    configs: dict[str, dict[str, Any]],
     *,
     poll_seconds: float,
     echo: Callable[[str], None],
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
-    """Request (idempotent) and wait for the image build of every task that builds from a Dockerfile.
+    """Request (idempotent) and wait for every task's image build.
+
+    Prebuilt images go through a build too: it copies them into the platform's registry (#2986).
+    Requesting again after a failed build starts a new attempt.
 
     Raises:
         RuntimeError: A build failed.
     """
     pending: dict[str, ImageBuild] = {}
     for ref in refs:
-        if not needs_image_build(configs.get(ref, {})):
-            continue
         workspace, name, digest = _split_ref(ref)
         pending[ref] = evaluator.tasks.build_images(name, revision=digest, workspace=workspace)
     while any(build.status not in TERMINAL_BUILD_STATUSES for build in pending.values()):
         sleep(poll_seconds)
         for ref, build in pending.items():
             if build.status not in TERMINAL_BUILD_STATUSES:
+                # Requesting again repairs a build whose Job died. A new attempt means this one ended: report
+                # how, instead of following a retry of a build that failed.
                 workspace, name, digest = _split_ref(ref)
-                pending[ref] = evaluator.tasks.get_image_build(name, build.id, revision=digest, workspace=workspace)
+                current = evaluator.tasks.build_images(name, revision=digest, workspace=workspace)
+                if current.id != build.id:
+                    current = evaluator.tasks.get_image_build(name, build.id, revision=digest, workspace=workspace)
+                pending[ref] = current
     failed = {ref: build for ref, build in pending.items() if build.status != "ready"}
     images = sum(len(build.images) for build in pending.values())
     echo(f"Image builds: {len(pending) - len(failed)} tasks ready ({images} images)")
     if failed:
         detail = "; ".join(f"{ref}: {build.error}" for ref, build in failed.items())
         raise RuntimeError(f"image builds failed: {detail}")
-
-
-def _task_config(task: Task) -> dict[str, Any]:
-    return dict(task.spec.config) if isinstance(task.spec, HarborTaskDefinition) else {}
 
 
 def _split_ref(ref: str) -> tuple[str, str, str]:
@@ -294,7 +292,13 @@ def submit_run(
             sleep(2**attempt)
             continue
         if response.status_code >= 400:
-            raise RuntimeError(f"submit failed ({response.status_code}): {_detail(response)}")
+            message = f"submit failed ({response.status_code}): {_detail(response)}"
+            if response.status_code >= 500 and body.get("idempotency_key"):
+                # The run may already be accepted: only the same key finishes it instead of starting another.
+                message += (
+                    f"; to finish this run, rerun the same command with --idempotency-key {body['idempotency_key']}"
+                )
+            raise RuntimeError(message)
         return response.json()
     raise AssertionError("unreachable")
 
@@ -315,13 +319,15 @@ def run_request(
     sandbox: SandboxSelection | None = None,
     experiment: str | None = None,
     dataset: tuple[str, str | None] | None = None,
+    idempotency_key: str | None = None,
 ) -> TasksetRunInput:
     """The run request: ``--spec-file``'s with its tasks replaced, or ``--agent`` with default execution.
 
     ``--experiment`` sets ``publication.intake``, replacing the spec file's.
     ``dataset`` is the Harbor Hub dataset or git repo the tasks came from, as ``(name, version or commit)``:
     the Evaluation's dataset instead of the taskset. ``dispatcher_profile`` and ``sandbox`` apply
-    to ``--agent`` only; a spec file carries its own ``execution``.
+    to ``--agent`` only; a spec file carries its own ``execution``. The idempotency key is
+    ``idempotency_key``, else the spec file's, else a new one.
     """
     publication: dict[str, Any] | None = None
     if experiment is not None:
@@ -337,7 +343,7 @@ def run_request(
         raw["spec"] = {**(raw.get("spec") or {}), "tasks": taskset_ref}
         if publication is not None:
             raw["publication"] = publication  # --experiment replaces the file's, before it's validated
-        raw["idempotency_key"] = raw.get("idempotency_key") or str(uuid.uuid4())
+        raw["idempotency_key"] = idempotency_key or raw.get("idempotency_key") or str(uuid.uuid4())
         return TasksetRunInput.model_validate(raw)
     execution: dict[str, Any] = {}
     if dispatcher_profile is not None:
@@ -351,7 +357,7 @@ def run_request(
             ).model_dump(mode="json", exclude_none=True),
             "execution": execution,
             "publication": publication,
-            "idempotency_key": str(uuid.uuid4()),
+            "idempotency_key": idempotency_key or str(uuid.uuid4()),
         }
     )
 
@@ -385,15 +391,24 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         ),
         dispatcher_profile: str | None = typer.Option(None, "--dispatcher-profile", help="Jobs profile for task Jobs."),
         cpus: int | None = typer.Option(
-            None, "--cpus", min=1, help="CPUs for every task sandbox, over task.toml (without --spec-file)."
+            None, "--cpus", min=1, help="CPUs for every task's agent sandbox, over task.toml (without --spec-file)."
         ),
         memory_mb: int | None = typer.Option(
-            None, "--memory-mb", min=1, help="Memory in MB for every task sandbox (without --spec-file)."
+            None, "--memory-mb", min=1, help="Memory in MB for every task's agent sandbox (without --spec-file)."
         ),
         storage_mb: int | None = typer.Option(
-            None, "--storage-mb", min=1, help="Disk in MB for every task sandbox (without --spec-file)."
+            None, "--storage-mb", min=1, help="Disk in MB for every task's agent sandbox (without --spec-file)."
         ),
-        no_build_images: bool = typer.Option(False, "--no-build-images", help="Don't request or wait for builds."),
+        no_build_images: bool = typer.Option(
+            False,
+            "--no-build-images",
+            help="Don't request or wait for image builds here; submit starts a first build for a task that has none.",
+        ),
+        idempotency_key: str | None = typer.Option(
+            None,
+            "--idempotency-key",
+            help="Key that makes a resubmit return the same run; default: a new one. A failed submit prints its key.",
+        ),
         list_tasks: bool = typer.Option(False, "--list-tasks", help="Print the selectable tasks and exit."),
         workspace: str | None = typer.Option(
             None, "--workspace", help="Workspace for tasks, taskset and run; default: the configured workspace."
@@ -447,7 +462,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
             with tempfile.TemporaryDirectory(prefix="nemo-runs-") as scratch:
                 if from_spec:
                     assert spec_file is not None
-                    refs, configs, total, prefix = _select_from_spec(evaluator, spec_file, tasks, workspace)
+                    refs, total, prefix = _select_from_spec(evaluator, spec_file, tasks, workspace)
                 else:
                     if harbor_hub is not None:
                         hub_name, hub_version, task_dirs = download_hub_tasks(harbor_hub, tasks, Path(scratch))
@@ -464,7 +479,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                         candidates = [Candidate(i, d.name, _native_id(d)) for i, d in enumerate(all_dirs)]
                         task_dirs = [all_dirs[c.index] for c in select_tasks(candidates, tasks)]
                         prefix, total = harbor_dir.resolve().name, len(all_dirs)
-                    refs, configs = publish_tasks(evaluator, task_dirs, prefix=prefix, workspace=workspace, echo=echo)
+                    refs = publish_tasks(evaluator, task_dirs, prefix=prefix, workspace=workspace, echo=echo)
                 taskset = entity_name(
                     f"{prefix}-sel-{selection_suffix(refs)}" if from_spec else f"{prefix}-{selection_suffix(refs)}"
                 )
@@ -475,7 +490,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 taskset_ref = f"{workspace}/{taskset}#{revision.content_hash}"
                 echo(f"Published taskset {workspace}/{taskset} ({len(refs)} of {total} tasks)")
                 if not no_build_images:
-                    build_images(evaluator, refs, configs, poll_seconds=poll_seconds, echo=echo)
+                    build_images(evaluator, refs, poll_seconds=poll_seconds, echo=echo)
             request = run_request(
                 taskset_ref,
                 spec_file=spec_file,
@@ -484,6 +499,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 sandbox=_sandbox_selection(sandbox_profile, cpus, memory_mb, storage_mb),
                 experiment=experiment,
                 dataset=dataset,
+                idempotency_key=idempotency_key,
             )
             status = submit_run(
                 client, request.model_dump(mode="json", exclude_none=True), workspace=workspace, echo=echo
@@ -527,25 +543,28 @@ def _native_id(task_dir: Path) -> str:
 
 def _select_from_spec(
     evaluator: Evaluator, spec_file: Path, tokens: str | None, workspace: str
-) -> tuple[list[str], dict[str, dict[str, Any]], int, str]:
+) -> tuple[list[str], int, str]:
     """The pinned refs of ``--spec-file``'s taskset, narrowed by ``--tasks``; tasks are not re-uploaded."""
-    request = TasksetRunInput.model_validate(json.loads(spec_file.read_text(encoding="utf-8")))
-    assert isinstance(request.spec.tasks, TasksetRef)
-    ref = request.spec.tasks.root
+    # Only spec.tasks matters here: run_request applies --experiment before the whole file is validated.
+    raw = json.loads(spec_file.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or not isinstance(raw.get("spec"), dict):
+        raise ValueError(f"{spec_file}: expected a TasksetRunInput JSON object with an object 'spec'")
+    spec = AgentEvalInputSpec.model_validate(raw["spec"])
+    if not isinstance(spec.tasks, TasksetRef):
+        raise ValueError(f"{spec_file}: spec.tasks must name a taskset (workspace/name#revision)")
+    ref = spec.tasks.root
     head, _, fragment = ref.partition("#")
     taskset_workspace, _, name = head.rpartition("/")
     taskset = evaluator.tasksets.retrieve(name, revision=fragment or None, workspace=taskset_workspace or workspace)
     members = sorted(str(member.root if isinstance(member, TaskRef) else member) for member in taskset.tasks)
     candidates = []
-    configs: dict[str, dict[str, Any]] = {}
     for index, member in enumerate(members):
         task_workspace, task_name, digest = _split_ref(member)
         task = evaluator.tasks.retrieve(task_name, revision=digest or None, workspace=task_workspace or workspace)
         pinned = member if digest else pinned_task_ref(evaluator, task_workspace, task_name, task.revision)
-        configs[pinned] = _task_config(task)
         candidates.append(Candidate(index, pinned, getattr(task.spec, "native_task_id", task_name)))
     selected = select_tasks(candidates, tokens)
-    return [c.name for c in selected], configs, len(candidates), name
+    return [c.name for c in selected], len(candidates), name
 
 
 def _print_tasks(
@@ -570,7 +589,8 @@ def _print_tasks(
         typer.echo(f"{index:>3}  {row}")
 
 
-# --- Progress and results (M2 story 0 bonus; M4 and M5 replace the client-side joins) ------------------------
+# --- Progress and results ----------------------------------------------------------------------------------
+# TODO(M4, M5): replace these client-side joins with server-side reads.
 
 
 @dataclass(frozen=True)
@@ -583,6 +603,16 @@ class TaskJobView:
     status: str  # Jobs status, or "missing" when submit hasn't created the Job yet
     job_id: str | None = None
     result: AgentEvalResult | None = None
+    publication: dict[str, Any] | None = None  # the task's Intake publish outcome, once it published
+
+
+def _published(view: TaskJobView) -> str:
+    """The ``published`` cell: what the task's Job published to Intake."""
+    if view.publication is None:
+        return "-"
+    if view.publication.get("status") == "completed":
+        return f"✓ {view.publication.get('trial_count', 0)} trials"
+    return f"✗ {view.publication.get('error') or 'failed'}"
 
 
 def get_run(client: NemoClient, workspace: str, run_id: str) -> dict[str, Any]:
@@ -678,7 +708,8 @@ def run_task_jobs(
             # Result records carry the Job's name as job_id (NEMO_JOB_ID), not its platform id.
             found = evaluator.agent_eval_results.list(workspace=workspace, job_id=job_name, page_size=1).data
             result = found[0] if found else None
-        views.append(TaskJobView(index, job_name, tasks[0].get("id"), status, job.id, result))
+        publication = (job.status_details or {}).get(PUBLICATION_STATUS_KEY)
+        views.append(TaskJobView(index, job_name, tasks[0].get("id"), status, job.id, result, publication))
     return views
 
 
@@ -721,14 +752,17 @@ class BundleJobView:
 
 
 def newest_bundle_job(client: NemoClient, run_id: str, *, workspace: str) -> BundleJobView | None:
-    """The run's newest bundle Job, or None before the controller created one."""
+    """The run's newest bundle Job, or None before the controller created one.
+
+    A missing name doesn't end the search: the controller skips a name whose create left it unreadable.
+    """
     jobs = JobsClient.from_client(client)
     newest = None
     for attempt in range(1, MAX_BUNDLE_ATTEMPTS + 1):
         try:
             job = jobs.get_job(workspace=workspace, name=bundle_job_name(run_id, attempt)).data()
         except NotFoundError:
-            break
+            continue
         status = job.status.value if hasattr(job.status, "value") else str(job.status)
         newest = BundleJobView(job.name, attempt, status, job_error(job) if status in _FAILED else None)
     return newest
@@ -795,8 +829,17 @@ def _status_table(
         lines.append(f"  completed tasks' scores: nemo evals runs results {run['run_id']}{workspace_flag}")
     lines.append("")
     width = max([4, *(len(v.task or "") for v in views)])
-    lines.append(f"{'#':>3}  {'task':<{width}}  {'Job':<{len(views[0].job) if views else 3}}  status")
-    lines += [f"{v.index:>3}  {(v.task or '-'):<{width}}  {v.job}  {v.status}" for v in views]
+    job_width = len(views[0].job) if views else 3
+    if any(v.publication is not None for v in views):
+        status_width = max(6, *(len(v.status) for v in views))
+        lines.append(f"{'#':>3}  {'task':<{width}}  {'Job':<{job_width}}  {'status':<{status_width}}  published")
+        lines += [
+            f"{v.index:>3}  {(v.task or '-'):<{width}}  {v.job}  {v.status:<{status_width}}  {_published(v)}"
+            for v in views
+        ]
+    else:
+        lines.append(f"{'#':>3}  {'task':<{width}}  {'Job':<{job_width}}  status")
+        lines += [f"{v.index:>3}  {(v.task or '-'):<{width}}  {v.job}  {v.status}" for v in views]
     done = [v for v in views if v.status in _TERMINAL]
     failed = [v for v in done if v.status != "completed"]
     lines.append(f"{len(done)}/{len(views)} done ({len(done) - len(failed)} completed, {len(failed)} failed)")
@@ -998,6 +1041,8 @@ def add_progress_commands(runs: typer.Typer, client_factory: Callable[[], NemoCl
 
 def _view_json(view: TaskJobView) -> dict[str, Any]:
     data: dict[str, Any] = {"index": view.index, "job": view.job, "task": view.task, "status": view.status}
+    if view.publication is not None:
+        data["publication"] = view.publication
     if view.result is not None:
         data["result"] = view.result.model_dump(mode="json", include={"name", "scores", "summary", "bundle_ref"})
     return data

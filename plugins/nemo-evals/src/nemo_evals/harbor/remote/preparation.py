@@ -1,34 +1,35 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Image preparation contract: the state M4 stores per task and the call that advances it.
+"""Image preparation contract: the state M4 stores per task and the calls that advance it.
 
-Contract module (M1 story 5). ``prepare_task_images`` has M2 story 0's MVP body: it reads the newest
-``ready`` image build of the task revision (#2881) or pins the task's prebuilt images, and returns
-``ready`` or ``failed`` in one call, never ``pending``. M3 story 7 replaces the body; types change only
-additively, and ``FakePreparer`` (tests/conftest.py) changes with them.
+Contract module (M1 story 5). ``ImageBuildPreparer`` is M2 story 0's MVP: ``check`` rejects what a
+Kubernetes run can't take, then one call reads the task revision's image build through ``ImageBuildService``
+(starting or repairing it when needed) and returns ``ready`` or ``failed``, never ``pending``.
+TODO(M3 story 7): store the pending build and poll it instead of failing. Types change only additively,
+and ``FakePreparer`` (tests/conftest.py) changes with them.
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Protocol, Self, get_args
 
-import httpx
+from harbor.models.task.verifier_mode import resolve_effective_verifier_env_config
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
-from nemo_evals.config import get_config
 from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy, ResourceClass
-from nemo_evals.harbor.remote.registry import ImageDigestUnavailableError, resolve_image_digest
-from nemo_evals.image_builds.builder import builder_name
-from nemo_evals.image_builds.models import BuildImage, ImageBuild
-from nemo_evals.image_builds.planning import MAIN_SERVICE, VERIFIER_ROLE, ImagePlanError, parse_task_config, plan_images
+from nemo_evals.harbor.remote.sandbox_policy import task_resources_violation
+from nemo_evals.image_builds.models import ImageBuild, ImageBuildRequest
+from nemo_evals.image_builds.planning import MAIN_SERVICE, VERIFIER_ROLE, ImagePlanError, parse_task_config
 from nemo_evals.image_builds.runner import read_task_archive
+from nemo_evals.image_builds.service import ImageBuildForbiddenError, ImageBuildJobConflictError, ImageBuildService
 from nemo_evals.jobs.agent_spec import ResolvedTask
 from nemo_evals.jobs.harbor_task_spec import PreparedHarborEnvironment, PreparedImage
-from nemo_evals.taskset_runs.specs import MissingPrebuiltImagePolicy
+from nemo_evals.revisions import RevisionNotFoundError
+from nemo_evals.task_identity import UnsupportedTaskKindError
 from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.client.errors import NotFoundError
-from nemo_helix_plugin.evals.client import AsyncEvaluatorClient
+from nemo_helix_plugin.client.errors import NemoHTTPError, PermissionDeniedError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -36,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 ImageRole = Literal["agent", "verifier"]
 """``agent`` is ``image_builds``' ``BuildImage.role == "main"`` (Harbor's name for the agent container).
-M3 story 8b adds ``service``."""
+TODO(M3 story 8b): add ``service``."""
 
 PreparationErrorCode = Literal[
     # Raised by image_builds.planning today (ImagePlanError, #2881)
@@ -56,6 +57,7 @@ PreparationErrorCode = Literal[
     "unsupported_gpu_type",
     "gpu_request_exceeds_policy",
     "gpu_unsupported_by_backend",
+    "resources_exceed_policy",
     # Prebuilt images (M3 story 2)
     "image_unavailable",
     # Building (M3 stories 4-5)
@@ -79,7 +81,10 @@ class PreparationErrorInfo(BaseModel):
 
 
 class ImagePreparation(BaseModel):
-    """Progress of one image (agent or verifier). M3 stories 4-5 add optional ``staged`` / ``build`` fields."""
+    """Progress of one image (agent or verifier).
+
+    TODO(M3 stories 4-5): add optional ``staged`` / ``build`` fields.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -114,24 +119,30 @@ class TaskPreparation(BaseModel):
         return self
 
 
+class ImagePreparationUnavailableError(Exception):
+    """A service preparation depends on failed transiently; the submit can be retried as is."""
+
+
 @dataclass(frozen=True)
 class PreparationClients:
-    """Clients acting for the run's caller (M4 builds them with ``clients_for(run)``).
+    """Clients acting for the run's caller. M3 may add fields with defaults.
 
-    M3 may add fields with defaults; it never removes one.
+    TODO(M4): build them with ``clients_for(run)``.
     """
 
-    client: AsyncNemoClient  # build reads and submits on the caller's behalf
-    files: AsyncFilesClient  # archive reads and build-context staging
-    registry: httpx.AsyncClient | None = None  # anonymous tag lookups; None opens one per lookup
+    client: AsyncNemoClient  # reads and Jobs on the caller's behalf
+    files: AsyncFilesClient  # task archive reads
+    image_builds: Callable[[str], ImageBuildService] | None = None  # the build service for a task's workspace
 
 
 class ImagePreparer(Protocol):
-    """One bounded step of preparation for one task. Never waits; safe to repeat after a crash.
+    """Prepares one task's images in bounded steps. Never waits; safe to repeat after a crash."""
 
-    ``recorded=None`` is step A: decide images and keys, call no build backend.
-    Otherwise step B: advance each unprepared image. Transient errors return ``recorded`` unchanged.
-    """
+    async def check(
+        self, task: ResolvedTask, *, policy: ResolvedHarborSandboxPolicy, clients: PreparationClients
+    ) -> PreparationErrorInfo | None:
+        """Why a run can't take the task, or None. No side effects: submit checks every task before any build."""
+        ...
 
     async def __call__(
         self,
@@ -139,143 +150,167 @@ class ImagePreparer(Protocol):
         recorded: TaskPreparation | None,
         *,
         policy: ResolvedHarborSandboxPolicy,
-        missing_prebuilt_image: MissingPrebuiltImagePolicy,
         caller: str,
         clients: PreparationClients,
         deadline: datetime,
-    ) -> TaskPreparation: ...
+    ) -> TaskPreparation:
+        """Advance a checked task's preparation by one step.
+
+        ``recorded=None`` is step A: decide images and keys. Otherwise step B: advance each unprepared image.
+        Transient errors return ``recorded`` unchanged, or raise ``ImagePreparationUnavailableError`` before any
+        state is recorded.
+        """
+        ...
 
 
-async def prepare_task_images(
-    task: ResolvedTask,
-    recorded: TaskPreparation | None,
-    *,
-    policy: ResolvedHarborSandboxPolicy,
-    missing_prebuilt_image: MissingPrebuiltImagePolicy,
-    caller: str,
-    clients: PreparationClients,
-    deadline: datetime,
-) -> TaskPreparation:
-    """MVP: one call returns ``ready`` or ``failed``, never ``pending``.
+class ImageBuildPreparer:
+    """M2 story 0's preparer: images come from the task revision's image build (#2881, #2986)."""
 
-    - Every image prebuilt (the task names a ``docker_image``): pin each tag to its digest.
-    - Every image from a Dockerfile: use the newest ``ready`` build of the task revision (#2881).
-    - Mixed, compose or GPU tasks: ``failed``. #2881's runner fails a whole build when any role is prebuilt.
+    async def check(
+        self, task: ResolvedTask, *, policy: ResolvedHarborSandboxPolicy, clients: PreparationClients
+    ) -> PreparationErrorInfo | None:
+        """Reject non-Harbor, GPU (agent or separate verifier) and compose tasks, and tasks whose sandboxes exceed
+        the profile's ceilings.
 
-    ``missing_prebuilt_image`` is not applied yet: a tag that doesn't resolve fails with ``image_unavailable``.
-    """
-    if recorded is not None and recorded.status != "pending":
-        return recorded
-    if not isinstance(task.spec, ResolvedHarborTaskDefinition):
-        return _failed("invalid_task_config", f"task {task.id} is not a Harbor task")
-    harbor = get_config().runs.harbor
-    allowed_registries = list(harbor.allowed_registries) if harbor is not None else []
-    try:
-        return await _prepare(task.spec, clients=clients, allowed_registries=allowed_registries)
-    except ImagePlanError as exc:
-        code = exc.code if exc.code in get_args(PreparationErrorCode) else "invalid_task_config"
-        return _failed(code, exc.detail)  # ty: ignore[invalid-argument-type]
-
-
-async def _prepare(
-    definition: ResolvedHarborTaskDefinition, *, clients: PreparationClients, allowed_registries: list[str]
-) -> TaskPreparation:
-    task_config = parse_task_config(definition.config)
-    if task_config.environment.gpus:
-        return _failed("gpu_unsupported", "GPU tasks aren't supported on Kubernetes runs yet")
-    archive = await read_task_archive(clients.files, definition.source)
-    if archive.compose is not None:
-        return _failed("multi_container_not_yet_supported", "compose tasks aren't supported on Kubernetes runs yet")
-    roles = plan_images(definition.config, archive, allowed_registries=allowed_registries)
-    # plan_images treats an empty list as "no narrowing"; for runs it means no prebuilt registry is allowed.
-    if not allowed_registries and (prebuilt := next((role for role in roles if role.source == "prebuilt"), None)):
-        return _failed(
-            "registry_not_allowed",
-            f"{prebuilt.role} image {prebuilt.image} is prebuilt, and evals.runs.harbor.allowed_registries is empty",
-            role=_ROLE_BY_BUILD_ROLE[prebuilt.role],
-        )
-
-    if all(role.source == "prebuilt" for role in roles):
-        images: dict[ImageRole, ImagePreparation] = {}
-        for role in roles:
-            image_role = _ROLE_BY_BUILD_ROLE[role.role]
-            assert role.image is not None
-            try:
-                image_ref = await resolve_image_digest(role.image, http_client=clients.registry)
-            except ImageDigestUnavailableError as exc:
-                return _failed("image_unavailable", str(exc), role=image_role)
-            prepared = PreparedImage(image_ref=image_ref, preparation_key=image_ref.rpartition("@")[2])
-            images[image_role] = ImagePreparation(
-                role=image_role, preparation_key=prepared.preparation_key, source="prebuilt", prepared=prepared
+        Build roles can't show compose: a compose file whose only service is ``main`` builds just ``main``.
+        So the archive is still read, for its compose file only.
+        """
+        if not isinstance(task.spec, ResolvedHarborTaskDefinition):
+            return PreparationErrorInfo(code="invalid_task_config", detail=f"task {task.id} is not a Harbor task")
+        try:
+            task_config = parse_task_config(task.spec.config)
+            verifier = resolve_effective_verifier_env_config(task_config, None)
+            if task_config.environment.gpus or (verifier is not None and verifier.gpus):
+                return PreparationErrorInfo(
+                    code="gpu_unsupported", detail="GPU tasks aren't supported on Kubernetes runs yet"
+                )
+            if (violation := task_resources_violation(task_config, policy)) is not None:
+                return PreparationErrorInfo(code="resources_exceed_policy", detail=violation)
+            archive = await read_task_archive(clients.files, task.spec.source)
+        except ImagePlanError as exc:
+            return _plan_error(exc)
+        except NemoHTTPError as exc:
+            raise ImagePreparationUnavailableError(f"could not read task {task.id}'s archive: {exc}") from exc
+        if archive.compose is not None:
+            return PreparationErrorInfo(
+                code="multi_container_not_yet_supported", detail="compose tasks aren't supported on Kubernetes runs yet"
             )
-    elif all(role.source == "dockerfile" for role in roles):
-        build = await _newest_ready_build(clients.client, definition)
+        return None
+
+    async def __call__(
+        self,
+        task: ResolvedTask,
+        recorded: TaskPreparation | None,
+        *,
+        policy: ResolvedHarborSandboxPolicy,
+        caller: str,
+        clients: PreparationClients,
+        deadline: datetime,
+    ) -> TaskPreparation:
+        """MVP: one call returns ``ready`` or ``failed``, never ``pending``.
+
+        Raises:
+            ImagePreparationUnavailableError: The Jobs service failed while starting or repairing a build.
+        """
+        if recorded is not None and recorded.status != "pending":
+            return recorded
+        if not isinstance(task.spec, ResolvedHarborTaskDefinition):
+            return _failed("invalid_task_config", f"task {task.id} is not a Harbor task")
+        if clients.image_builds is None:
+            raise ValueError("PreparationClients.image_builds is required to prepare Harbor task images")
+        definition = task.spec
+        workspace, _, name = definition.provenance.entity_name.partition("/")
+        try:
+            build = await _current_build(
+                clients.image_builds(workspace), workspace, name, definition.provenance.revision_digest
+            )
+        except (RevisionNotFoundError, UnsupportedTaskKindError) as exc:
+            return _failed("invalid_task_config", str(exc))
+        except ImagePlanError as exc:
+            return TaskPreparation(status="failed", error=_plan_error(exc))
+        except (ImageBuildForbiddenError, PermissionDeniedError) as exc:
+            return _failed("image_unavailable", f"could not start an image build: {exc}")
+        except ImageBuildJobConflictError as exc:
+            return _failed("image_unavailable", f"could not start an image build: {exc}")
+        except NemoHTTPError as exc:
+            raise ImagePreparationUnavailableError(f"could not start an image build for task {task.id}: {exc}") from exc
         if build is None:
-            return _failed(
-                "image_unavailable",
-                f"no ready image build for {definition.provenance.entity_name}#"
-                f"{definition.provenance.revision_digest}; run `nemo evals runs submit` without "
-                "--no-build-images, or POST …/image-builds",
-            )
-        images = {}
-        for role in roles:
-            image_role = _ROLE_BY_BUILD_ROLE[role.role]
-            prepared = _built(build, role, definition)
-            if prepared is None:
-                return _failed("image_unavailable", f"build {build.id} has no ready {role.role} image", role=image_role)
-            images[image_role] = ImagePreparation(
-                role=image_role, preparation_key=prepared.preparation_key, source="built", prepared=prepared
-            )
-    else:
-        return _failed("image_unavailable", "mixed prebuilt and Dockerfile images aren't supported yet")
+            return _failed("invalid_task_config", f"task {definition.provenance.entity_name} no longer exists")
+        return _from_build(build, definition)
 
-    agent = images["agent"].prepared
-    verifier = images["verifier"].prepared if "verifier" in images else None
-    assert agent is not None
+
+prepare_task_images = ImageBuildPreparer()
+"""The deployment's preparer."""
+
+
+async def _current_build(builds: ImageBuildService, workspace: str, name: str, revision: str) -> ImageBuild | None:
+    """The revision's newest build, after ``request_build`` starts or repairs it; None when the task is gone.
+
+    A ready or failed build is returned as is, so a broken task fails here instead of starting attempt after
+    attempt. Only a missing, pending or running build goes through ``request_build``: that starts the first
+    attempt, recreates a lost Job, or replaces a build whose Job ended without a result. ``request_build``
+    checks build permission first, so a caller without it still learns that someone else's build is running.
+    """
+    page = await builds.list_builds(workspace, name, revision, page_size=1)
+    if page is None:
+        return None
+    newest = page.data[0] if page.data else None
+    if newest is not None and newest.status in ("ready", "failed"):
+        return newest
+    try:
+        return await builds.request_build(workspace, name, revision, ImageBuildRequest())
+    except ImageBuildForbiddenError:
+        if newest is None:
+            raise
+        return newest
+
+
+def _from_build(build: ImageBuild, definition: ResolvedHarborTaskDefinition) -> TaskPreparation:
+    target = f"{definition.provenance.entity_name}#{definition.provenance.revision_digest}"
+    if build.status == "failed":
+        return _failed("build_failed", f"image build {build.id} of {target} failed: {build.error or 'no reason given'}")
+    if build.status != "ready":
+        return _failed(
+            "image_unavailable",
+            f"image build {build.id} of {target} is {build.status}; resubmit when it's ready "
+            "(`nemo evals runs submit` waits for it)",
+        )
+    images: dict[ImageRole, ImagePreparation] = {}
+    for image in build.images:
+        role = _ROLE_BY_BUILD_ROLE.get(image.role)
+        if role is None:
+            return _failed(
+                "multi_container_not_yet_supported", f"image build {build.id} of {target} has a {image.role} image"
+            )
+        if image.status != "ready" or image.image_ref is None:
+            return _failed("image_unavailable", f"image build {build.id} has no ready {image.role} image", role=role)
+        built = image.source == "dockerfile"
+        prepared = PreparedImage(
+            image_ref=image.image_ref,
+            preparation_key=image.image_ref.rpartition("@")[2],
+            builder_image=image.builder_image,
+            build_job=image.build_job,
+            source_archive_digest=definition.source.files_hash if built else None,
+        )
+        source: Literal["prebuilt", "built"] = "built" if built else "prebuilt"
+        images[role] = ImagePreparation(
+            role=role, preparation_key=prepared.preparation_key, source=source, prepared=prepared
+        )
+    agent = images["agent"].prepared if "agent" in images else None
+    if agent is None:
+        return _failed("image_unavailable", f"image build {build.id} of {target} has no main image")
     environment = PreparedHarborEnvironment(
         task_revision_digest=definition.provenance.revision_digest,
         archive_digest=definition.source.files_hash,
         agent=agent,
-        verifier=verifier,
+        verifier=images["verifier"].prepared if "verifier" in images else None,
     )
     return TaskPreparation(status="ready", resource_class="cpu", images=images, environment=environment)
 
 
-async def _newest_ready_build(client: AsyncNemoClient, definition: ResolvedHarborTaskDefinition) -> ImageBuild | None:
-    """The newest ``ready`` build of the task revision, or None. Builds list newest first."""
-    workspace, _, name = definition.provenance.entity_name.partition("/")
-    evaluator = AsyncEvaluatorClient.from_client(client)
-    try:
-        response = await evaluator.list_task_image_builds(
-            workspace=workspace,
-            name=name,
-            revision=definition.provenance.revision_digest,
-            query_params={"page": 1, "page_size": 100},
-        )
-    except NotFoundError:
-        return None
-    for item in response.page().items:
-        build = ImageBuild.model_validate(item.model_dump(mode="json"))
-        if build.status == "ready":
-            return build
-    return None
-
-
-def _built(build: ImageBuild, role: BuildImage, definition: ResolvedHarborTaskDefinition) -> PreparedImage | None:
-    image = next((i for i in build.images if i.role == role.role and i.status == "ready" and i.image_ref), None)
-    if image is None or image.image_ref is None:
-        return None
-    assert role.context_path is not None and role.dockerfile is not None
-    return PreparedImage(
-        image_ref=image.image_ref,
-        # Builder's per-archive name, without the revision suffix of its ContainerImage record.
-        preparation_key=builder_name(
-            archive_digest=definition.source.files_hash, context_path=role.context_path, dockerfile=role.dockerfile
-        ),
-        builder_image=image.builder_image,
-        build_job=image.build_job,
-        source_archive_digest=definition.source.files_hash,
-    )
+def _plan_error(exc: ImagePlanError) -> PreparationErrorInfo:
+    code = exc.code if exc.code in get_args(PreparationErrorCode) else "invalid_task_config"
+    return PreparationErrorInfo(code=code, detail=exc.detail)  # ty: ignore[invalid-argument-type]
 
 
 def _failed(code: PreparationErrorCode, detail: str, *, role: ImageRole | None = None) -> TaskPreparation:

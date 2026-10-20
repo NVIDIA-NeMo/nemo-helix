@@ -1,77 +1,58 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { StartOptionTag } from '@studio/components/StartOptions/types';
-import type {
-  OptimizationStrategyId,
-  OptimizationStrategyOption,
-} from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect/types';
-import { FileUp, Route, SlidersHorizontal, Sparkles } from 'lucide-react';
-
-/** Marks a strategy the platform has but Studio cannot start yet. */
-const COMING_SOON: StartOptionTag = { label: 'Coming soon', color: 'gray', kind: 'outline' };
-
-/** Marks a strategy Studio can start but this platform has no plugin for. */
-const NOT_INSTALLED: StartOptionTag = { label: 'Not installed', color: 'gray', kind: 'outline' };
+import type { OptimizationStrategy } from '@nemo/sdk/generated/agent-optimization/schema/OptimizationStrategy';
+import { STUDIO_OPTIMIZE_STRATEGY } from '@studio/api/agents/useLaunchOptimizeStudy';
+import type { StartOption } from '@studio/components/StartOptions/types';
+import { FileUp, type LucideIcon, Puzzle, Route, SlidersHorizontal } from 'lucide-react';
 
 /** The `run-strategy` name the Switchyard plugin registers its strategy under. */
 export const SWITCHYARD_STRATEGY = 'switchyard';
 
-/**
- * Tiles that only work when the platform has a plugin installed, keyed to the strategy name that
- * plugin registers. The rest run on strategies the optimization service always ships.
- */
-const REQUIRED_STRATEGY: Partial<Record<OptimizationStrategyId, string>> = {
-  routing: SWITCHYARD_STRATEGY,
+/** Icons for the strategies Studio has a form for; every other strategy gets {@link Puzzle}. */
+const STRATEGY_ICONS: Record<string, LucideIcon> = {
+  [STUDIO_OPTIMIZE_STRATEGY]: SlidersHorizontal,
+  [SWITCHYARD_STRATEGY]: Route,
 };
 
-/** Rendered in order. Picking a tile goes straight to that strategy. */
-export const STRATEGY_OPTIONS: OptimizationStrategyOption[] = [
-  {
-    id: 'upload',
-    title: 'Upload a config',
-    description:
-      'Bring your own optimize bundle, from your computer or a fileset: the config plus the dataset and any other files it references.',
-    icon: FileUp,
-    enabled: true,
-  },
-  {
-    id: 'hyperparameter',
-    title: 'Hyper-parameter optimization',
-    description:
-      'Answer three questions — what to tune for, what to score against, how many trials — and we build the study for you.',
-    icon: SlidersHorizontal,
-    enabled: true,
-  },
-  {
-    id: 'skill',
-    title: 'Skill optimization',
-    description:
-      'Rewrite the agent’s skills from where its evaluation runs fail, and keep the edits that improve the score.',
-    icon: Sparkles,
-    tag: COMING_SOON,
-    enabled: false,
-  },
-  {
-    id: 'routing',
-    title: 'Model Routing (Switchyard)',
-    description:
-      'Send each request to the smallest model that can handle it, cutting cost without losing quality.',
-    icon: Route,
-    enabled: true,
-  },
-];
+/** Tile id for uploading a `config-tuning` bundle; not a valid strategy name, so it cannot collide. */
+export const UPLOAD_CONFIG_OPTION_ID = 'upload a config';
 
 /**
- * {@link STRATEGY_OPTIONS} as this platform can run them: a tile whose plugin is not among the
- * `installed` strategy names is disabled. While the listing is still unknown those tiles are
- * disabled without a tag, so nothing claims a plugin is missing before the platform has said so.
+ * The one tile that is not a strategy of its own: a bring-your-own bundle for `config-tuning`,
+ * beside that strategy's guided form.
  */
-export const strategyOptions = (
-  installed: readonly string[] | undefined
-): OptimizationStrategyOption[] =>
-  STRATEGY_OPTIONS.map((option) => {
-    const required = REQUIRED_STRATEGY[option.id as OptimizationStrategyId];
-    if (!required || installed?.includes(required)) return option;
-    return { ...option, enabled: false, ...(installed ? { tag: NOT_INSTALLED } : {}) };
-  });
+const UPLOAD_CONFIG_OPTION: StartOption = {
+  id: UPLOAD_CONFIG_OPTION_ID,
+  title: 'Upload a config',
+  description:
+    'Bring your own optimize bundle, from your computer or a fileset: the config plus the dataset and any other files it references.',
+  icon: FileUp,
+  enabled: true,
+};
+
+// TODO: remove this override once config-tuning supports prompt optimization and its plugin-provided
+// title/description are accurate again. Until then the tile advertises only what it does: HPO.
+const CONFIG_TUNING_OVERRIDE = {
+  title: 'Hyperparameter optimization',
+  description:
+    "Search over your agent's hyperparameters, such as model and temperature, to find the best-scoring configuration.",
+};
+
+/**
+ * One tile per strategy the platform has installed, titled and described by the plugin that ships
+ * it, so installing a strategy is all it takes to offer it. Tile ids are the strategy names. The
+ * upload tile leads when `config-tuning` is installed, since that is the strategy it submits to.
+ */
+export const strategyOptions = (strategies: readonly OptimizationStrategy[]): StartOption[] => {
+  const options = strategies.map((strategy) => ({
+    id: strategy.name,
+    title: strategy.title || strategy.name,
+    description: strategy.description ?? '',
+    icon: STRATEGY_ICONS[strategy.name] ?? Puzzle,
+    enabled: true,
+    ...(strategy.name === STUDIO_OPTIMIZE_STRATEGY ? CONFIG_TUNING_OVERRIDE : {}),
+  }));
+  const canUpload = strategies.some((strategy) => strategy.name === STUDIO_OPTIMIZE_STRATEGY);
+  return canUpload ? [UPLOAD_CONFIG_OPTION, ...options] : options;
+};

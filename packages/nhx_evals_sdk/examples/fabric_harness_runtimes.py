@@ -74,6 +74,7 @@ def main() -> None:
     """Print each harness's Fabric config to show how the structure differs."""
     for harness, config in HARNESS_CONFIGS.items():
         build_runtime(harness)  # verify the config constructs a runtime
+        assert config.harness is not None
         print(f"# {harness}  (adapter_id={config.harness.adapter_id})")
         print(json.dumps(config.to_mapping(), indent=2))
         print()

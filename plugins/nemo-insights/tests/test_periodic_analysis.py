@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Generic, TypeVar
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -54,8 +54,10 @@ from nemo_insights_plugin.entities import (
     AnalysisRun,
     AnalysisRunStatus,
     Insight,
+    InsightRating,
     InsightStatus,
 )
+from nemo_insights_plugin.evidence import TraceEvidence
 from nemo_insights_plugin.schedule import is_due, previous_scheduled
 from nemo_insights_plugin.schema import AnalysisRunResponse, CreateAnalysisRunRequest
 from pydantic import JsonValue, ValidationError
@@ -150,7 +152,10 @@ class _RecordingInsights:
         agent: str,
         description: str,
         status: InsightStatus | str = InsightStatus.OPEN,
-        trace_refs: list[str] | None = None,
+        evidence: list | None = None,
+        updated_date: datetime | None = None,
+        severity: InsightRating | None = None,
+        confidence: InsightRating | None = None,
     ) -> Insight:
         insight_id = f"insight-remote-{len(self.rows) + 1}"
         row = Insight(
@@ -160,7 +165,10 @@ class _RecordingInsights:
             agent=agent,
             description=description,
             status=InsightStatus(status),
-            trace_refs=list(trace_refs or []),
+            evidence=list(evidence or []),
+            updated_date=updated_date,
+            severity=severity,
+            confidence=confidence,
         )
         row._id = insight_id
         row._created_at = _STAMP
@@ -184,7 +192,8 @@ class _RecordingInsights:
         agent: str | None = None,
         description: str | None = None,
         status: InsightStatus | str | None = None,
-        trace_refs: list[str] | None = None,
+        evidence: list | None = None,
+        updated_date: datetime | None = None,
     ) -> Insight:
         del workspace
         row = self.rows.get(insight_id)
@@ -196,8 +205,10 @@ class _RecordingInsights:
             row.description = description
         if status is not None:
             row.status = InsightStatus(status)
-        if trace_refs is not None:
-            row.trace_refs = list(trace_refs)
+        if evidence is not None:
+            row.evidence = list(evidence)
+        if updated_date is not None:
+            row.updated_date = updated_date
         return row
 
 
@@ -239,7 +250,11 @@ async def test_remote_persist_mirrors_platform_records_to_the_file(
     path = tmp_path / "insights.yaml"
     result = AnalystResult(
         summary="Found one.",
-        new_insights=[NewInsight(title="Retrieval drops context", description="Long inputs.", trace_refs=["t1"])],
+        new_insights=[
+            NewInsight(
+                title="Retrieval drops context", description="Long inputs.", evidence=[TraceEvidence(trace_id="t1")]
+            )
+        ],
     )
 
     async with _remote_backend_with_mirror(path, monkeypatch) as (backend, _):
@@ -247,7 +262,7 @@ async def test_remote_persist_mirrors_platform_records_to_the_file(
 
     records = yaml.safe_load(path.read_text(encoding="utf-8"))["insights"]
     assert [r["id"] for r in records] == ["insight-remote-1"]
-    assert records[0]["trace_refs"] == ["t1"]
+    assert [item["trace_id"] for item in records[0]["evidence"]] == ["t1"]
     assert records[0]["created_at"] == _STAMP.isoformat()
     assert f"- mirrored 1 insight(s) to {path}" in report
 
@@ -262,7 +277,11 @@ async def test_mirror_updates_match_platform_ids_across_runs(tmp_path: Path, mon
             result=AnalystResult(
                 summary="Found one.",
                 new_insights=[
-                    NewInsight(title="Retrieval drops context", description="Long inputs.", trace_refs=["t1"])
+                    NewInsight(
+                        title="Retrieval drops context",
+                        description="Long inputs.",
+                        evidence=[TraceEvidence(trace_id="t1")],
+                    )
                 ],
             ),
         )
@@ -272,13 +291,13 @@ async def test_mirror_updates_match_platform_ids_across_runs(tmp_path: Path, mon
             agent="research-agent",
             result=AnalystResult(
                 summary="More evidence.",
-                updated_insights=[InsightUpdate(id="insight-remote-1", trace_refs=["t2"])],
+                updated_insights=[InsightUpdate(id="insight-remote-1", evidence=[TraceEvidence(trace_id="t2")])],
             ),
         )
 
     records = yaml.safe_load(path.read_text(encoding="utf-8"))["insights"]
     assert len(records) == 1, "the second run must update the mirrored record, not append a second one"
-    assert records[0]["trace_refs"] == ["t1", "t2"]
+    assert [item["trace_id"] for item in records[0]["evidence"]] == ["t1", "t2"]
 
 
 @pytest.mark.asyncio
@@ -407,6 +426,123 @@ async def test_local_backend_list_preserves_entity_metadata(tmp_path: Path) -> N
     assert page.data[0].id == "insight-local-1"
     assert page.data[0].created_at == _STAMP
     assert page.data[0].updated_at == _STAMP
+
+
+@pytest.mark.asyncio
+async def test_local_persistence_converts_legacy_evidence(tmp_path):
+    backend = LocalAnalystBackend(client=MagicMock(), path=tmp_path / "insights.yaml")
+    backend.store.write_records(
+        [dict(id="id", workspace="test", title="Issue", description="Details", agent="target", trace_refs=["a", "b"])]
+    )
+    date = datetime(2026, 10, 7, tzinfo=timezone.utc)
+    await backend.persist_result(
+        workspace="test",
+        agent="target",
+        result=AnalystResult(
+            summary="Updated",
+            updated_insights=[InsightUpdate(id="id", evidence=[TraceEvidence(trace_id="c")], updated_date=date)],
+        ),
+    )
+    record = backend.store.read_records()[0]
+    assert [item["trace_id"] for item in record["evidence"]] == ["a", "b", "c"]
+    assert record["title"] == "Issue"
+    assert record["updated_date"] == date.isoformat()
+
+
+@pytest.mark.asyncio
+async def test_remote_persistence_merges_evidence_and_preserves_newer_date():
+    date = datetime(2026, 10, 7, tzinfo=timezone.utc)
+    backend = RemoteAnalystBackend(MagicMock())
+    backend._get = AsyncMock(
+        return_value=Insight(
+            workspace="test",
+            title="Issue",
+            description="Details",
+            agent="target",
+            evidence=[TraceEvidence(trace_id="a"), TraceEvidence(trace_id="b")],
+            updated_date=date,
+        )
+    )
+    backend.client.insights.insights.update = AsyncMock()
+    await backend._add_evidence(
+        workspace="test", agent="target", insight_id="id", evidence=[TraceEvidence(trace_id="c")]
+    )
+    assert backend.client.insights.insights.update.await_args is not None
+    args = backend.client.insights.insights.update.await_args.kwargs
+    assert args["updated_date"] == date
+    assert [item.trace_id for item in args["evidence"]] == ["a", "b", "c"]
+
+
+@pytest.mark.parametrize("severity,confidence", [(None, None), ("high", "med")])
+@pytest.mark.asyncio
+async def test_persistence_preserves_optional_ratings(tmp_path, severity, confidence):
+    insight = NewInsight(
+        title="Issue",
+        description="Details",
+        evidence=[TraceEvidence(trace_id="a"), TraceEvidence(trace_id="b")],
+        severity=severity,
+        confidence=confidence,
+    )
+    result = AnalystResult(summary="Created", new_insights=[insight])
+    local = LocalAnalystBackend(client=MagicMock(), path=tmp_path / "insights.yaml")
+    await local.persist_result(workspace="test", agent="target", result=result)
+    record = local.store.read_records()[0]
+    assert record["severity"] == severity
+    assert record["confidence"] == confidence
+    await local.persist_result(
+        workspace="test",
+        agent="target",
+        result=AnalystResult(
+            summary="Updated", updated_insights=[InsightUpdate(id=record["id"], evidence=[TraceEvidence(trace_id="c")])]
+        ),
+    )
+    record = local.store.read_records()[0]
+    assert record["severity"] == severity
+    assert record["confidence"] == confidence
+    remote = RemoteAnalystBackend(MagicMock())
+    remote.client.insights.insights.create = AsyncMock(return_value=Insight.model_validate(record))
+    await remote.persist_result(workspace="test", agent="target", result=result)
+    call = remote.client.insights.insights.create.await_args
+    assert call is not None
+    kwargs = call.kwargs
+    assert kwargs["severity"] == severity
+    assert kwargs["confidence"] == confidence
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stored_day,incoming_day,expected_day",
+    [(10, 9, 10), (9, 10, 10), (10, None, 10), (None, 10, 10), (None, None, None)],
+)
+async def test_local_evidence_update_keeps_latest_date(tmp_path, stored_day, incoming_day, expected_day):
+    def date(day):
+        return datetime(2026, 10, day, tzinfo=timezone.utc) if day else None
+
+    backend = LocalAnalystBackend(client=MagicMock(), path=tmp_path / "insights.yaml")
+    record = Insight(
+        workspace="test",
+        title="Issue",
+        description="Details",
+        agent="target",
+        name="issue",
+        evidence=[TraceEvidence(trace_id="a")],
+        updated_date=date(stored_day),
+    ).model_dump(mode="json")
+    record["id"] = "id"
+    backend.store.write_records([record])
+    await backend.persist_result(
+        workspace="test",
+        agent="target",
+        result=AnalystResult(
+            summary="Updated",
+            updated_insights=[
+                InsightUpdate(id="id", evidence=[TraceEvidence(trace_id="b")], updated_date=date(incoming_day))
+            ],
+        ),
+    )
+    reread = Insight.model_validate(backend.store.read_records()[0])
+    assert reread.updated_date == date(expected_day)
+    assert [entry.trace_id for entry in reread.evidence] == ["a", "b"]
 
 
 def test_merge_eval_filter_pins_evaluation_id() -> None:

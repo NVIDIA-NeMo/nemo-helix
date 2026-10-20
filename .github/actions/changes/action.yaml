@@ -202,13 +202,6 @@ runs:
             - 'packages/nemo_helix_plugin/**'
             - 'packages/nhx_platform_runner/**'
             - 'packages/nhx_sandbox/**'
-            # Harbor task Jobs load scaled-evals' OpenSandbox environment through this module.
-            - 'plugins/nemo-evals/src/nemo_evals/harbor/**'
-            - 'plugins/nemo-evals/tests/harbor/**'
-            # ...and import these outside that tree.
-            - 'plugins/nemo-evals/src/nemo_evals/config.py'
-            - 'plugins/nemo-evals/src/nemo_evals/image_builds/planning.py'
-            - 'plugins/nemo-evals/src/nemo_evals/jobs/harbor_task_spec.py'
             # test_files_backend.py imports these from outside the plugin tree.
             - 'packages/filesets/src/filesets/resources.py'
             - 'packages/nhx_testing/src/nhx/testing/**'

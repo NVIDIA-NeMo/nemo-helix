@@ -9,17 +9,27 @@ import hashlib
 import math
 import pickle
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from collections.abc import Set as AbstractSet
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
-from nemo_evals.api.schemas import MetricInline
+from nemo_evals.api.schemas import (
+    EvaluatorTaskDefinition,
+    HarborTaskDefinition,
+    MetricInline,
+    MetricRef,
+    TaskInput,
+    TaskInputs,
+)
+from nemo_evals.api.service.task_service import TaskService
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash, ResolvedHarborTaskDefinition
 from nemo_evals.api.task_definitions.provenance import TaskProvenance
 from nemo_evals.config import HarborTaskJobsConfig, get_config
+from nemo_evals.entities import TaskEntity, TaskRevisionEntity
 from nemo_evals.harbor.remote.preparation import (
     ImagePreparation,
     ImageRole,
@@ -32,10 +42,11 @@ from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy
 from nemo_evals.harbor.remote.sandbox_policy import resolve_sandbox_policy
 from nemo_evals.jobs.agent_spec import AgentEvalSpec, HarborBuiltinAgentSource, HarborRunnerTarget, ResolvedTask
 from nemo_evals.jobs.harbor_task_spec import PreparedHarborEnvironment, PreparedImage
+from nemo_evals.revisions import get_revision
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager, CloudpickleMetricPayload
 from nemo_evals.taskset_runs.entities import TasksetRunEntity
-from nemo_evals.taskset_runs.specs import MissingPrebuiltImagePolicy, TasksetRunPlan
+from nemo_evals.taskset_runs.specs import TasksetRunPlan
 from nemo_helix_plugin.client.errors import ConflictError, InternalServerError, NemoHTTPError, PermissionDeniedError
 from nemo_helix_plugin.config import NemoHelixConfig, get_platform_config
 from nemo_helix_plugin.entities import (
@@ -332,7 +343,8 @@ def sandbox_policy() -> ResolvedHarborSandboxPolicy:
 class FakePreparer:
     """Stand-in for ``prepare_task_images``: prebuilt images only, deterministic, no network.
 
-    Satisfies ``ImagePreparer``. Keep it in step with the real function when M3 story 7 lands.
+    Satisfies ``ImagePreparer``. Keep it in step with the real preparer when M3 story 7 lands.
+    ``reject`` scripts ``check``; ``fail`` scripts the preparation call.
     ``ready_at_once=True`` skips step A and returns ``ready`` on the first call, as the MVP body does.
     """
 
@@ -340,15 +352,26 @@ class FakePreparer:
         self,
         *,
         fail: Mapping[str, PreparationErrorCode] | None = None,
+        reject: Mapping[str, PreparationErrorCode] | None = None,
         stay_pending: AbstractSet[str] = frozenset(),
         with_verifier: AbstractSet[str] = frozenset(),
         ready_at_once: bool = False,
     ) -> None:
         self.fail = dict(fail or {})
+        self.reject = dict(reject or {})
+        self.checked: list[str] = []
         self.stay_pending = stay_pending
         self.with_verifier = with_verifier
         self.ready_at_once = ready_at_once
         self.calls: list[tuple[str, TaskPreparation | None]] = []
+
+    async def check(
+        self, task: ResolvedTask, *, policy: ResolvedHarborSandboxPolicy, clients: PreparationClients
+    ) -> PreparationErrorInfo | None:
+        self.checked.append(task.id)
+        if task.id in self.reject:
+            return PreparationErrorInfo(code=self.reject[task.id], detail="scripted")
+        return None
 
     async def __call__(
         self,
@@ -356,7 +379,6 @@ class FakePreparer:
         recorded: TaskPreparation | None,
         *,
         policy: ResolvedHarborSandboxPolicy,
-        missing_prebuilt_image: MissingPrebuiltImagePolicy,
         caller: str,
         clients: PreparationClients,
         deadline: datetime,
@@ -573,9 +595,7 @@ def harbor_plan(harbor_spec, sandbox_policy, harbor_config) -> TasksetRunPlan:
         workspace="default",
         taskset_ref="default/debug#" + "e" * 64,
         spec=harbor_spec,
-        missing_prebuilt_image="fail",
         max_concurrent_task_jobs=None,
-        max_failed_tasks=None,
         sandbox_policy=sandbox_policy,
         dispatcher_image=harbor_config.dispatcher_image,
         dispatcher_profile="k8s-cpu",
@@ -598,3 +618,52 @@ def harbor_run() -> TasksetRunEntity:
         execution_deadline_at=accepted + timedelta(hours=1),
         finalization_deadline_at=accepted + timedelta(hours=2),
     )
+
+
+ARCHIVE_REF = "default/harbor-tasks#sort-task/abc/task_archive"
+ARCHIVE_DIGEST = "a" * 64
+
+StoreTask = Callable[..., Awaitable[str]]
+
+
+class _StoreTaskMetrics:
+    async def store_derived_metric(self, metric, *, workspace: str) -> MetricRef:
+        return MetricRef(f"{workspace}/derived")
+
+    async def get_metric(self, workspace: str, name: str) -> object | None:
+        return object()
+
+
+@pytest.fixture
+def store_task(entity_store, monkeypatch) -> StoreTask:
+    """Store a task in ``entity_store`` and return its revision digest."""
+    from nhx_evals_sdk.agent_eval.runtimes.harbor.archive import NativeTask
+
+    async def verify(spec, files_client):
+        return NativeTask("sort-task", spec.instruction, spec.config)
+
+    monkeypatch.setattr("nemo_evals.api.service.task_service.verify_definition", verify)
+    service = TaskService(entity_store, _StoreTaskMetrics(), files_client=Mock(), authorize_metric_read=AsyncMock())
+
+    async def store(name: str = "sort-task", *, config: dict | None = None, harbor: bool = True) -> str:
+        spec = (
+            HarborTaskDefinition(
+                kind="harbor",
+                native_task_id="sort-task",
+                harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
+                source=HarborArchiveSource(fileset_ref=ARCHIVE_REF, files_hash=ARCHIVE_DIGEST),
+                config=config or {},
+            )
+            if harbor
+            else EvaluatorTaskDefinition(
+                kind="evaluator",
+                intent="Answer.",
+                inputs=TaskInputs(instruction="2+2?"),
+                metrics=[MetricRef("default/m")],
+            )
+        )
+        await service.create_task(name, TaskInput(spec=spec), workspace="default")
+        head = await entity_store.get(TaskEntity, name=name, workspace="default")
+        return (await get_revision(entity_store, TaskRevisionEntity, head)).content_hash
+
+    return store

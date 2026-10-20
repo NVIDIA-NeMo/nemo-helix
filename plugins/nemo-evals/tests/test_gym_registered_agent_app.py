@@ -74,6 +74,7 @@ def app():
         if name not in sys.modules or not all(hasattr(sys.modules[name], k) for k in attrs):
             _stub(name, **attrs)
     spec = importlib.util.spec_from_file_location("nemo_registered_agent_app_under_test", _APP)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

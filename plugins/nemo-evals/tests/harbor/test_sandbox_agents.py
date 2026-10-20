@@ -13,14 +13,14 @@ from harbor.environments.base import ExecResult
 from harbor.models.task.config import NetworkMode, NetworkPolicy
 from nemo_evals.harbor import agents
 from nemo_evals.harbor.agents import CODEX_ARCHIVE_ENV, REMOTE_ARCHIVE, REMOTE_BINARY, SandboxedCodex
+from nemo_evals.harbor.opensandbox_environment import AgentChannelOpenSandboxEnvironment
 
 IGW = "nemo-helix-api.ns.svc.cluster.local"
 
 
 def _environment(mode: NetworkMode, channel: tuple[str, ...], trusted: tuple[str, ...] = ()) -> Any:
     """The environment's egress state only; ``egress_policy`` reads nothing else."""
-    module = pytest.importorskip("nemo_evals.harbor.opensandbox_environment")  # needs the scaled-evals group
-    environment = object.__new__(module.AgentChannelOpenSandboxEnvironment)
+    environment = object.__new__(AgentChannelOpenSandboxEnvironment)
     environment._network_policy = NetworkPolicy(network_mode=mode)
     environment._agent_channel_hosts = channel
     environment._trusted_allowed_hosts = trusted

@@ -297,12 +297,9 @@ class IntakeProvenance(BaseModel):
 class CredentialProvenance(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    role: str
-    credential_id: str
-    fingerprint: str
-    provider: str | None = None
-    payload_kind: str | None = None
-    fingerprint_source: str = "stored-credential"
+    provider: str
+    # Platform secret reference "workspace/name"; the value is never recorded.
+    secret_name: str
 
 
 class EnvironmentProvenance(BaseModel):
@@ -413,7 +410,10 @@ def build_run_provenance_manifest(
             agent_bundle=agent_bundle,
             config_hashes=_config_hashes(row),
         ),
-        credentials=_credential_refs(row.get("credentials") or {}, snapshot=snapshot),
+        credentials=[
+            CredentialProvenance(provider=str(provider), secret_name=str(ref))
+            for provider, ref in sorted((row.get("credentials") or {}).items())
+        ],
         environment=EnvironmentProvenance(env_hashes=_env_hashes()),
         tools=ToolProvenance(
             python_version=sys.version.split()[0],
@@ -564,6 +564,9 @@ def _opensandbox_sandbox(row: Mapping[str, Any]) -> dict[str, str]:
         # The verifier image bound into task.toml; absent when the verifier shared the agent sandbox.
         "verifier_image_ref": launch.get("verifier_image_ref"),
         "verifier_image_digest": launch.get("verifier_image_digest"),
+        # The agent bundle image the agent sandbox's init container installed; absent without a bundle.
+        "agent_bundle_image": launch.get("agent_bundle_image"),
+        "agent_bundle_delivery": launch.get("agent_bundle_delivery"),
         "egress_allowed_hosts": ",".join(str(host) for host in launch.get("trusted_allowed_hosts") or []),
         "egress_verification": launch.get("egress_verification"),
         "ownership_labels": json.dumps(dict(ownership), sort_keys=True) if ownership else None,
@@ -831,27 +834,6 @@ def _optional_value_hash(value: Any) -> str | None:
     return _value_hash(value)
 
 
-def _credential_refs(
-    credentials: Mapping[str, Any], *, snapshot: Mapping[str, Any] | None
-) -> list[CredentialProvenance]:
-    refs = []
-    snap_credentials = _mapping(snapshot.get("credentials")) if snapshot else {}
-    for role, credential_id in sorted(credentials.items()):
-        credential_id_text = str(credential_id)
-        snap = _mapping(snap_credentials.get(str(role)))
-        refs.append(
-            CredentialProvenance(
-                role=str(role),
-                credential_id=credential_id_text,
-                fingerprint=str(snap.get("fingerprint") or _short_fingerprint(credential_id_text)),
-                provider=_clean_optional(snap.get("provider")),
-                payload_kind=_clean_optional(snap.get("payload_kind")),
-                fingerprint_source="stored-credential" if snap else "legacy-id-derived",
-            )
-        )
-    return refs
-
-
 def _effective_isolation(row: Mapping[str, Any]) -> EffectiveIsolationProvenance:
     policy = str(row.get("network_policy") or "unrestricted")
     direct_egress = {
@@ -1004,10 +986,6 @@ def _redacted_value(value: Any) -> Any:
     if isinstance(value, str):
         return redact_secret_text(value)
     return value
-
-
-def _short_fingerprint(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
 
 
 def _first_env(*keys: str) -> str | None:

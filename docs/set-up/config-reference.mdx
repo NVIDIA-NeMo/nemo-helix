@@ -341,7 +341,7 @@ jobs:
         num_nodes: 1
         # Step requesting number of GPUs.
         num_gpus:
-        # Shared memory (/dev/shm) size as a Kubernetes quantity (e.g. '1Gi', '4Gi'). Used for GPU and distributed-GPU job executors. When unset, defaults to 1Gi per allocated GPU.
+        # Shared memory (/dev/shm) size as a Kubernetes quantity (e.g. '1Gi', '4Gi'). Used for GPU and distributed-GPU job executors. When both the step and the execution profile set shm_size, the larger value is used. When neither is set, the size is 8Gi per allocated GPU.
         shm_size:
       # Pod security context for the Kubernetes job pods.
       pod_security_context: {}
@@ -423,7 +423,7 @@ jobs:
         num_nodes: 1
         # Step requesting number of GPUs.
         num_gpus:
-        # Shared memory (/dev/shm) size as a Kubernetes quantity (e.g. '1Gi', '4Gi'). Used for GPU and distributed-GPU job executors. When unset, defaults to 1Gi per allocated GPU.
+        # Shared memory (/dev/shm) size as a Kubernetes quantity (e.g. '1Gi', '4Gi'). Used for GPU and distributed-GPU job executors. When both the step and the execution profile set shm_size, the larger value is used. When neither is set, the size is 8Gi per allocated GPU.
         shm_size:
       # Pod security context for the Kubernetes job pods.
       pod_security_context: {}
@@ -493,6 +493,14 @@ jobs:
   schedule_interval_seconds: 5
   # Register the subprocess/default execution profile. When unset, defaults to true for docker/none runtimes and false for kubernetes.
   enable_subprocess_executor:
+  # How long paused and failed jobs keep their storage.
+  storage:
+    # How long storage is kept after a job pauses, unless that job sets its own pause window. Measured from the paused step's stopped_at. 0 reclaims on the next retention pass. | default: 604800
+    paused_storage_ttl_seconds: 604800
+    # Longest pause window a job may set, measured from stopped_at. A longer pause_ttl_seconds is rejected. The platform paused-storage TTL still applies when a job does not set its own window, and that default is also capped by this maximum. | default: 2592000
+    maximum_pause_ttl_seconds: 2592000
+    # How long storage is kept after a job fails, measured from the failed step's stopped_at. 0 reclaims on the next retention pass. | default: 14400
+    failed_storage_ttl_seconds: 14400
   # Include raw job log lines in controller diagnostics snapshots. Disabled by default because job logs may contain secrets or PII. Enable only for local debugging or test environments. | default: False
   include_job_logs_in_diagnostics: false
 ```

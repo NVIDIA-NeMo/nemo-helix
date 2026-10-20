@@ -14,12 +14,12 @@ from typing import Optional
 
 import nemo_helix_plugin.jobs.openapi_utils as job_openapi_utils
 import pytest
-from fastapi import FastAPI, Query, Request
+from fastapi import Query, Request
 from fastapi.testclient import TestClient
 from nhx.common.api.utils import (
+    QueryParamSchemaFastAPI,
     clear_query_param_schemas,
     generate_openapi_extra_params,
-    install_query_param_schema_openapi_hook,
     register_query_param_schemas,
 )
 from pydantic import BaseModel, create_model
@@ -111,7 +111,7 @@ def test_custom_openapi_hook_resolves_filter_ref():
     into its ``custom_openapi`` hook emits a spec where the filter $ref
     resolves — which is exactly the regression the runtime was missing.
     """
-    app = FastAPI()
+    app = QueryParamSchemaFastAPI()
 
     @app.get(
         "/items",
@@ -119,8 +119,6 @@ def test_custom_openapi_hook_resolves_filter_ref():
     )
     async def list_items(request: Request, page: int = Query(default=1)):
         return {"data": []}
-
-    install_query_param_schema_openapi_hook(app)
 
     spec = TestClient(app).get("/openapi.json").json()
 
@@ -136,7 +134,7 @@ def test_custom_openapi_hook_retries_registration_after_component_conflict(monke
     class ConflictFilter(BaseModel):
         created_at: FilterNested | None = None
 
-    app = FastAPI()
+    app = QueryParamSchemaFastAPI()
 
     @app.get(
         "/items",
@@ -155,7 +153,6 @@ def test_custom_openapi_hook_retries_registration_after_component_conflict(monke
         return original_register(spec)
 
     monkeypatch.setattr(job_openapi_utils, "register_query_param_schemas", counting_register)
-    install_query_param_schema_openapi_hook(app)
 
     with pytest.raises(ValueError, match="conflicts with existing component"):
         app.openapi()

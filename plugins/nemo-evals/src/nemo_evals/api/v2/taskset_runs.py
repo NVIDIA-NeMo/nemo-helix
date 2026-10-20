@@ -4,12 +4,14 @@
 """Submit Harbor tasksets and read stored runs/members under agent-evaluate."""
 
 import logging
+import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.exceptions import RequestValidationError
 from nemo_evals.api.dependencies import get_taskset_run_service
 from nemo_evals.api.service.taskset_run_service import (
     IntakeUnavailableError,
+    RunEvaluationDeniedError,
     RunEvaluationError,
     TasksetRunResolutionError,
     TasksetRunService,
@@ -21,6 +23,7 @@ from nemo_evals.api.taskset_run_schemas import (
     TasksetRunTask,
 )
 from nemo_evals.authz import scope
+from nemo_evals.harbor.remote.preparation import ImagePreparationUnavailableError
 from nemo_evals.taskset_runs.entities import MemberPhase
 from nemo_evals.taskset_runs.store import RunRequestConflict
 from nemo_evals.taskset_runs.submission import TimeoutAboveMaximumError
@@ -95,11 +98,16 @@ async def submit_taskset_run(
     Raises:
         RequestValidationError: The execution budget exceeds the operator maximum.
         HTTPException: Source denial (403), conflicting key (409), resolution rejection
-            (422), missing task Jobs after acceptance (503, which the SDK retries only with an
-            idempotency_key), or a sanitized unexpected failure (500, which the SDK retries automatically).
-            Without an idempotency_key a submit is at-least-once: a retried 5xx or timeout may accept a
-            second run. Send a key for exactly-once.
+            (422), an unavailable image build service before acceptance (503, safe to resend), missing
+            task Jobs after acceptance (503), an Intake Evaluation refused after acceptance (403, not
+            retried), or a sanitized unexpected failure (500).
+            When the request omits idempotency_key, submit generates one. A 5xx then names it in the
+            detail and the ``x-idempotency-key`` header and says not to retry automatically: the SDK
+            would resend the keyless request and accept a second run. Resubmit with that key instead.
     """
+    generated = req.idempotency_key is None
+    key = req.idempotency_key or secrets.token_hex(16)
+    req = req.model_copy(update={"idempotency_key": key})
     try:
         outcome = await service.submit(req, workspace=workspace, caller=caller)
     except TimeoutAboveMaximumError as exc:
@@ -125,23 +133,40 @@ async def submit_taskset_run(
     except IntakeUnavailableError as exc:
         # Raised before acceptance: nothing exists yet, so a retry is safe with or without an idempotency_key.
         raise HTTPException(status_code=503, detail=str(exc), headers={"x-should-retry": "true"}) from exc
+    except ImagePreparationUnavailableError as exc:
+        # Raised before acceptance, so no run exists yet: resending the same request is safe, keyed or not.
+        raise HTTPException(status_code=503, detail=str(exc), headers={"x-should-retry": "true"}) from exc
+    except RunEvaluationDeniedError as exc:
+        # Accepted but refused its Evaluation, so no Job started; an automatic retry would be refused the same way.
+        headers = {"x-should-retry": "false"} | ({"x-idempotency-key": key} if generated else {})
+        detail = f"{exc}; once you may create Intake Evaluations, resubmit with idempotency_key={key}"
+        raise HTTPException(status_code=403, detail=detail, headers=headers) from exc
     except (TaskJobsIncompleteError, RunEvaluationError) as exc:
-        # The run is already accepted here. Its ID is derived from (workspace, caller, req.idempotency_key),
-        # so a retry with the same idempotency_key finds this run and creates only its missing Jobs. Without
-        # an idempotency_key the run ID is random, so the SDK's automatic retry would create a new run and
-        # new Jobs.
-        if req.idempotency_key is not None:
-            detail, retry = f"{exc}; retry the same submit with its idempotency_key", "true"
-        else:
-            detail, retry = f"{exc}; a submit without an idempotency_key can't complete them", "false"
-        raise HTTPException(status_code=503, detail=detail, headers={"x-should-retry": retry}) from exc
+        # The run is already accepted here. Its ID is derived from (workspace, caller, idempotency_key),
+        # so a retry with the same key finds this run and creates only its missing Jobs.
+        raise _server_error(503, str(exc), key, generated=generated) from exc
     except HTTPException:
         raise
     except Exception:
         logger.exception("Failed to submit taskset run in workspace %s", sanitize_for_log(workspace))
-        raise HTTPException(status_code=500, detail="Internal server error") from None
+        raise _server_error(500, "Internal server error", key, generated=generated) from None
     response.status_code = status.HTTP_201_CREATED if outcome.created else status.HTTP_200_OK
     return outcome.status
+
+
+def _server_error(status_code: int, detail: str, key: str, *, generated: bool) -> HTTPException:
+    """A submit 5xx that tells the caller how to finish the run it may have accepted.
+
+    With the caller's key, the SDK's automatic retry resends it and replays the run. A generated key isn't
+    in the request the SDK would resend, so that retry would accept a second run: name the key instead.
+    """
+    if generated:
+        headers = {"x-should-retry": "false", "x-idempotency-key": key}
+        return HTTPException(status_code, f"{detail}; retry with idempotency_key={key}", headers=headers)
+    if status_code == 503:
+        detail = f"{detail}; retry the same submit with its idempotency_key"
+        return HTTPException(status_code, detail, headers={"x-should-retry": "true"})
+    return HTTPException(status_code, detail)
 
 
 @router.get(

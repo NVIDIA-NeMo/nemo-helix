@@ -37,6 +37,7 @@ from nemo_helix_plugin.jobs.types import (
     HelixJobStepWithContext,
     HelixJobTaskResponse,
     HelixJobTaskUpdate,
+    JobControl,
     JobLogsQueryParams,
     JobStatusDetailsUpdate,
     ListJobResultsQueryParams,
@@ -109,6 +110,11 @@ def resume_job(*, workspace: str | None = None, name: str) -> HelixJobResponse: 
 # NOTE: no ``rerun_job`` — the server's ``/rerun`` route is test-only and not
 # mounted in the release service (see services/core/jobs/.../api/v2/jobs/rerun.py),
 # so exposing it on the client would 404 in production.
+
+
+@patch("/apis/jobs/v2/workspaces/{workspace}/jobs/{name}/control")
+@abstractmethod
+def update_job_control(*, workspace: str | None = None, name: str, body: JobControl) -> HelixJobResponse: ...
 
 
 # ---------------------------------------------------------------------------

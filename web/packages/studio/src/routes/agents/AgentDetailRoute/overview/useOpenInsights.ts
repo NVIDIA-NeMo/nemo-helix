@@ -32,12 +32,10 @@ export interface UseOpenInsightsResult {
 /**
  * Rank by evidence volume, then recency.
  *
- * The analyst prioritizes by impact when it files an Insight, but that ranking is not persisted —
- * `Insight` has no severity field — so the panel falls back to the two impact signals the list
- * response does carry. Replace this with a server-side sort once severity lands.
+ * Severity is optional; this panel continues to rank by evidence volume and recency.
  */
 const byImpact = (a: InsightListItem, b: InsightListItem): number => {
-  const volume = (b.trace_refs?.length ?? 0) - (a.trace_refs?.length ?? 0);
+  const volume = (b.evidence?.length ?? 0) - (a.evidence?.length ?? 0);
   if (volume !== 0) return volume;
   return (
     Date.parse(b.last_seen_at ?? b.created_at ?? '') -

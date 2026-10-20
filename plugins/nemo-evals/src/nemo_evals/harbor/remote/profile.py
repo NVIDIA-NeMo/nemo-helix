@@ -50,17 +50,16 @@ class OpenSandboxConnection(OpenSandboxClientSettings):
 
 
 class ResourceOverrides(BaseModel):
-    """Request-level resource overrides; beat task.toml ``[environment]``. Field names match task.toml (M2 story 3)."""
+    """Request-level resource overrides; beat task.toml ``[environment]`` in the agent sandbox only.
+
+    A separate verifier keeps task.toml's resources. Field names match task.toml (M2 story 3).
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     cpus: int | None = Field(default=None, gt=0)
     memory_mb: int | None = Field(default=None, gt=0)
     storage_mb: int | None = Field(default=None, gt=0)
-
-    def harbor_kwargs(self) -> dict[str, int]:
-        """Harbor's environment kwargs: ``cpus`` → ``override_cpus``, unset fields omitted."""
-        return {f"override_{k}": v for k, v in self.model_dump(exclude_none=True).items()}
 
 
 class SandboxSelection(ResourceOverrides):
@@ -108,3 +107,20 @@ class ResolvedHarborSandboxPolicy(BaseModel):
     unschedulable_after_s: int = Field(ge=1)
     stale_attempt_cleanup_timeout_s: int = Field(ge=1)
     image_reference_mode: Literal["digest", "tag"] = "digest"
+
+
+DEFAULT_SANDBOX_CPUS = 1
+DEFAULT_SANDBOX_MEMORY_MB = 2048
+"""What a sandbox gets when neither task.toml nor the request sets cpus or memory_mb: the OpenSandbox SDK's
+own fallback for a create with no resources. Filled in explicitly, because the SDK applies it only when
+no resource at all is set, and a disk limit alone would leave the sandbox without CPU or memory limits."""
+
+
+def resource_defaults(policy: ResolvedHarborSandboxPolicy) -> dict[str, int]:
+    """The ``cpus`` and ``memory_mb`` a sandbox gets when nothing sets them, capped by the profile's ceilings."""
+    cpus, memory_mb = DEFAULT_SANDBOX_CPUS, DEFAULT_SANDBOX_MEMORY_MB
+    if policy.max_cpus is not None:
+        cpus = min(cpus, policy.max_cpus)
+    if policy.max_memory_mb is not None:
+        memory_mb = min(memory_mb, policy.max_memory_mb)
+    return {"cpus": cpus, "memory_mb": memory_mb}

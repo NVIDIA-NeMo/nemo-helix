@@ -20,3 +20,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nhx_sandbox"]
+
+# Read when the tests run from this directory, as in the per-Harbor-runner CI step. Repo-wide runs use
+# the root pytest.ini, which carries the same settings.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = ["tests"]

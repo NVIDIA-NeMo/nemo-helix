@@ -6,7 +6,7 @@
 import hashlib
 import json
 from datetime import datetime
-from typing import Annotated, Literal, Self
+from typing import Literal, Self
 
 from nemo_evals.api.fields import TasksetRef
 from nemo_evals.harbor.remote.profile import SandboxSelection
@@ -18,7 +18,6 @@ from nemo_evals.taskset_runs.entities import (
     TasksetRunMemberEntity,
     TasksetRunPhase,
 )
-from nemo_evals.taskset_runs.specs import MissingPrebuiltImagePolicy
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -30,16 +29,14 @@ class HarborTaskJobsExecutionInput(BaseModel):
     register one Jobs Service Job per task and combine the per-task results.
 
     It exists because these settings mean nothing on the Docker path: where task Jobs are
-    placed, which sandbox they may use, and when to give up on a run. Keeping them in their
+    placed, which sandbox they may use, and how many run at once. Keeping them in their
     own model, selected by ``kind``, lets future execution strategies add new models rather
     than new ``submit`` methods. It never changes benchmark content or which agent runs.
 
-    Submit validates this input, resolves the percent form of ``max_failed_tasks`` into a
-    count, and stores the execution caps and missing-image policy in the run's plan. It
-    freezes the ``sandbox`` profile, with its resource overrides checked against the
-    profile's ceilings, and the ``dispatcher_profile`` into the plan too, so operator
-    config edits never reach a running run. Earlier development runs are deleted rather
-    than migrated.
+    Submit validates this input and freezes the ``sandbox`` profile, with its resource
+    overrides checked against the profile's ceilings, the ``dispatcher_profile``, the pinned
+    dispatcher image and the concurrency cap into the run's plan, so operator config edits
+    never reach a running run. Earlier development runs are deleted rather than migrated.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -56,18 +53,6 @@ class HarborTaskJobsExecutionInput(BaseModel):
         ),
         examples=["local-k8s"],
     )
-    missing_prebuilt_image: MissingPrebuiltImagePolicy = Field(
-        default="fail",
-        description=(
-            "What to do when a task pins a prebuilt image (its docker_image) and that image is no longer "
-            "in the registry. 'fail' (default) fails that task with image_unavailable. 'build' builds the "
-            "image from the task's Dockerfile instead and records the substitution; the result may differ "
-            "from the image the task author benchmarked, and a task without a Dockerfile still fails. "
-            "Does not apply to tasks without a pinned image, which are always built from their Dockerfile, "
-            "or to an image this run built that disappears mid-run, which is always rebuilt."
-        ),
-        examples=["fail", "build"],
-    )
     max_concurrent_task_jobs: int | None = Field(
         default=None,
         ge=1,
@@ -77,39 +62,18 @@ class HarborTaskJobsExecutionInput(BaseModel):
         ),
         examples=[5],
     )
-    max_failed_tasks: Annotated[int, Field(ge=0)] | Annotated[str, Field(pattern=r"^(100|[1-9]?\d)%$")] | None = Field(
-        default=None,
-        description=(
-            "Failed tasks the run tolerates, as a count or a percent of the taskset's tasks. "
-            "Once exceeded, the run fails and its remaining task Jobs are cancelled. "
-            "Submit resolves a percent into a count. Omit for no limit."
-        ),
-        examples=[3, "10%"],
-    )
     sandbox: SandboxSelection | None = Field(
         default=None,
         description=(
-            "Sandbox for every task, agent and verifier alike. profile names an operator sandbox profile: "
-            "isolation, egress and resource ceilings; omitted uses the operator's default. cpus, memory_mb "
-            "and storage_mb beat the task's task.toml [environment]; each must stay within the profile's "
-            "ceilings, or submit fails with 422. Omit the whole object for the default profile and each "
-            "task's own resources."
+            "Sandbox for every task. profile names an operator sandbox profile: isolation, egress and "
+            "resource ceilings; omitted uses the operator's default. cpus, memory_mb and storage_mb size each "
+            "task's agent sandbox, over its task.toml [environment]; a separate verifier keeps task.toml's "
+            "resources. Unset cpus and memory_mb default to 1 CPU and 2048 MB, capped by the ceilings. Every "
+            "sandbox's values must stay within the profile's ceilings, or submit fails with 422. Omit the "
+            "whole object for the default profile and each task's own resources."
         ),
         examples=[{"cpus": 4, "memory_mb": 8192, "storage_mb": 20480}, {"profile": "harbor-open", "memory_mb": 4096}],
     )
-
-    def resolve_max_failed_tasks(self, task_count: int) -> int | None:
-        """Convert a percentage tolerance to a floored task count.
-
-        Args:
-            task_count: Number of resolved tasks, including zero for pure arithmetic.
-
-        Returns:
-            The count tolerance, or None when the run has no failure limit.
-        """
-        if isinstance(self.max_failed_tasks, str):
-            return int(self.max_failed_tasks[:-1]) * task_count // 100
-        return self.max_failed_tasks
 
 
 class TasksetRunIntakeInput(BaseModel):
@@ -169,15 +133,15 @@ class TasksetRunInput(BaseModel):
         "Inline tasks and precomputed trials are not supported for Kubernetes runs."
     )
     execution: HarborTaskJobsExecutionInput = Field(
-        description="Kubernetes task Job settings: sandbox profile and resources, dispatcher profile, "
-        "run-wide task Job concurrency and failure tolerance."
+        description="Kubernetes task Job settings: sandbox profile and resources, dispatcher profile and "
+        "run-wide task Job concurrency."
     )
     idempotency_key: str | None = Field(
         default=None,
         min_length=1,
         max_length=256,
-        description="Optional caller-supplied key, scoped to workspace and caller, "
-        "so retries of the same request return the accepted run. Omit for a new keyless run.",
+        description="Optional key, scoped to workspace and caller, so retries of the same request return the "
+        "accepted run. When omitted, submit generates one and returns it as the run's idempotency_key.",
     )
     publication: TasksetRunPublicationInput | None = Field(
         default=None,
@@ -306,7 +270,9 @@ class TasksetRunStatus(BaseModel):
         default=None,
         description="Principal ID of the caller who created the run; None when creator metadata is unavailable.",
     )
-    idempotency_key: str | None = Field(default=None, description="Caller-supplied submit key; None for a keyless run.")
+    idempotency_key: str | None = Field(
+        default=None, description="Submit key: the caller's, or the one submit generated when the request omitted it."
+    )
 
 
 _INTERNAL_FIELDS = {"plan_ref", "plan_digest", "request_digest"}

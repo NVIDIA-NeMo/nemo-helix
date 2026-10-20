@@ -1218,16 +1218,11 @@ jobs:
         run: uv run --frozen --group scaled-evals pytest plugins/_temporary-scaled-evals/tests -v
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
-      # nemo-evals' Harbor tests skip in python-unit-test, which lacks scaled_evals; run them here.
-      - name: Run nemo-evals Harbor tests against scaled-evals
-        run: uv run --frozen --group scaled-evals pytest plugins/nemo-evals/tests/harbor -v
-        env:
-          _TYPER_FORCE_DISABLE_TERMINAL: "1"
       # The workspace venv carries a single Harbor release, but NemoOpenSandboxEnvironment must run on
       # every runner harbor_opensandbox accepts: those whose requirements pin the OpenSandbox SDK.
       # Build each runner's venv from its own requirements, as the image does, and run the tests there.
       - name: Run harbor_opensandbox environment tests on each supported Harbor runner
-        working-directory: plugins/_temporary-scaled-evals
+        working-directory: packages/nhx_sandbox
         run: |
           set -eu
           for requirements in harbor-runners/*.txt; do
@@ -1237,7 +1232,7 @@ jobs:
             uv venv --python 3.12 "$venv"
             # --python, not VIRTUAL_ENV: setup-uv exports UV_PYTHON, which would otherwise send the
             # install to the workspace .venv.
-            uv pip install --python "$venv/bin/python" -r "$requirements" ../../packages/nhx_sandbox pytest pytest-asyncio
+            uv pip install --python "$venv/bin/python" -r "$requirements" . pytest pytest-asyncio
             echo "::group::Harbor $version"
             "$venv/bin/python" -m pytest -p no:cacheprovider -v \
               tests/test_harbor_opensandbox_environment.py tests/test_harbor_opensandbox_driver.py \

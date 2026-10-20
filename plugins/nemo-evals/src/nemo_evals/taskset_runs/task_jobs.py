@@ -3,9 +3,10 @@
 
 """Create one task Job per task of an accepted run, or adopt the one an earlier attempt created.
 
-M2 story 0's fan-out, run by submit right after acceptance; M4 story 4's controller registration
-replaces it. Every Job input comes from the stored plan, so a retry after a config change creates the
-remaining Jobs exactly as the first attempt would have.
+Run by submit right after acceptance. Every Job input comes from the stored plan, so a retry after a
+config change creates the remaining Jobs exactly as the first attempt would have.
+
+TODO(M4 story 4): the controller registers task Jobs instead.
 """
 
 import logging
@@ -76,10 +77,12 @@ class TaskJobsIncompleteError(Exception):
 
     run_id: str
     missing: tuple[tuple[int, str], ...]  # (task index, reason)
+    notices: tuple[str, ...] = ()  # what submit had to say about the run before the Jobs failed
 
     def __str__(self) -> str:
         detail = "; ".join(f"task {index}: {reason}" for index, reason in self.missing)
-        return f"task Jobs of run {self.run_id} not created ({detail})"
+        message = f"task Jobs of run {self.run_id} not created ({detail})"
+        return "; ".join((message, *self.notices))
 
 
 async def task_job_request(

@@ -91,9 +91,7 @@ def test_run_requires_execution(run_body):
         {"sandbox": {"profile": ""}},
         {"sandbox": {"gpus": 1}},
         {"max_concurrent_task_jobs": 0},
-        {"max_failed_tasks": -1},
-        {"max_failed_tasks": "101%"},
-        {"max_failed_tasks": "1.5%"},
+        {"max_failed_tasks": 1},
         {"sandbox": {"cpus": 0}},
         {"sandbox": {"memory_mb": -1}},
         {"sandbox": {"cpu": 4}},
@@ -225,8 +223,7 @@ def test_shared_scoring_schema_has_correct_scope(spec_type):
     assert schema["fail_fast"]["default"] is False
     assert schema["fail_fast"]["description"] == (
         "Fail on the first metric error instead of recording an errored score. "
-        "On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks "
-        "budget can also fail the run and cancel remaining task Jobs."
+        "On Kubernetes runs it fails that task's Job."
     )
 
 
@@ -285,7 +282,7 @@ def test_digest_sorts_nested_dictionary_keys(run_body):
         (("execution", "sandbox"), {"profile": "harbor-standard"}, {"profile": "another-profile"}),
         (("execution", "dispatcher_profile"), "local-k8s", "remote-k8s"),
         (("spec", "target", "artifacts"), ["/a", "/b"], ["/b", "/a"]),
-        (("execution", "max_failed_tasks"), "10%", 10),
+        (("execution", "max_concurrent_task_jobs"), None, 10),
         (("execution", "sandbox"), {"cpus": 2}, {"cpus": 4}),
         (("spec", "target", "agent_kwargs"), {"value": 1}, {"value": 1.0}),
     ],
@@ -349,9 +346,7 @@ def test_digest_hashes_the_exact_compact_json_projection(run_body):
         "execution": {
             "kind": "harbor-task-jobs",
             "dispatcher_profile": None,
-            "missing_prebuilt_image": "fail",
             "max_concurrent_task_jobs": None,
-            "max_failed_tasks": None,
             "sandbox": None,
         },
         "timeout_seconds": None,

@@ -12,7 +12,37 @@ from nhx.core.jobs.controllers.backends.config import (
     get_default_executor_profiles_for_runtime,
     merge_executor_profiles,
 )
-from pydantic import Field, model_validator
+from pydantic import BaseModel, Field, model_validator
+
+
+class JobsStorageConfig(BaseModel):
+    """How long a paused or failed job keeps its storage.
+
+    These are platform settings under ``jobs.storage`` in the platform config, and
+    each deployment can set its own values. The numbers here are only the defaults.
+    A job may set its own pause window, up to ``maximum_pause_ttl_seconds``. A failed
+    job always uses ``failed_storage_ttl_seconds``.
+    """
+
+    paused_storage_ttl_seconds: int = Field(
+        default=7 * 24 * 3600,
+        ge=0,
+        description="How long storage is kept after a job pauses, unless that job sets its own pause window. "
+        "Measured from the paused step's stopped_at. 0 reclaims on the next retention pass.",
+    )
+    maximum_pause_ttl_seconds: int = Field(
+        default=30 * 24 * 3600,
+        ge=0,
+        description="Longest pause window a job may set, measured from stopped_at. "
+        "A longer pause_ttl_seconds is rejected. The platform paused-storage TTL still applies when a job "
+        "does not set its own window, and that default is also capped by this maximum.",
+    )
+    failed_storage_ttl_seconds: int = Field(
+        default=4 * 3600,
+        ge=0,
+        description="How long storage is kept after a job fails, measured from the failed step's stopped_at. "
+        "0 reclaims on the next retention pass.",
+    )
 
 
 class JobsServiceConfig(create_service_config_class("jobs")):  # type: ignore
@@ -36,6 +66,10 @@ class JobsServiceConfig(create_service_config_class("jobs")):  # type: ignore
             "Register the subprocess/default execution profile. When unset, defaults to true for "
             "docker/none runtimes and false for kubernetes."
         ),
+    )
+    storage: JobsStorageConfig = Field(
+        default_factory=JobsStorageConfig,
+        description="How long paused and failed jobs keep their storage.",
     )
     include_job_logs_in_diagnostics: bool = Field(
         default=False,

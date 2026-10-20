@@ -42,6 +42,7 @@ from nhx.core.jobs.app.schemas import (
     HelixJobEnvironmentVariable,
     HelixJobSecretEnvironmentVariableRef,
     HelixJobStepSpec,
+    StepLifecycle,
 )
 from nhx.core.jobs.controllers.backends.base import (
     NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR,
@@ -51,6 +52,7 @@ from nhx.core.jobs.controllers.backends.base import (
     WORKLOAD_IDENTITY_VOLUME_PATH,
     JobUpdate,
 )
+from nhx.core.jobs.controllers.backends.exceptions import SchedulingDeferred
 from nhx.core.jobs.controllers.backends.kubernetes import (
     CPUKubernetesJobBackend,
     GPUKubernetesJobBackend,
@@ -74,10 +76,12 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     build_metadata,
     build_pod_security_context,
     build_tolerations,
+    classify_task_containers,
     cleanup_job_persistent_storage,
     common_labels_for_step,
     create_configmap,
     delete_configmap,
+    last_task_exit_time,
     name_for_step,
 )
 from nhx.core.jobs.controllers.backends.workload_tokens import WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS
@@ -1112,14 +1116,53 @@ def test_schedule_job_api_exception(kubernetes_job, cpu_execution_provider, test
 
 
 def test_schedule_from_resuming_existing_job(kubernetes_job, cpu_execution_provider, test_step_resuming):
-    """Test scheduling when resuming from an existing job."""
-    # Mock existing job found
-    kubernetes_job._batch_v1.read_namespaced_job.return_value = MagicMock()
+    """A job paused by the old suspend path is unsuspended instead of recreated."""
+    existing = MagicMock()
+    existing.spec.suspend = True
+    kubernetes_job._batch_v1.read_namespaced_job.return_value = existing
 
-    # Schedule the job
     kubernetes_job.schedule(cpu_execution_provider, test_step_resuming)
 
-    # Verify that no new job was created
+    kubernetes_job._batch_v1.create_namespaced_job.assert_not_called()
+    kubernetes_job._batch_v1.patch_namespaced_job.assert_called_once()
+    assert kubernetes_job._batch_v1.patch_namespaced_job.call_args.kwargs["body"] == {"spec": {"suspend": False}}
+
+
+def test_schedule_from_resuming_finished_job_is_replaced(kubernetes_job, cpu_execution_provider, test_step_resuming):
+    """A finished Job is deleted, and the new same-name Job is created only once the old one is gone."""
+    existing = MagicMock()
+    existing.spec.suspend = False
+    existing.metadata.deletion_timestamp = None
+    kubernetes_job._batch_v1.read_namespaced_job.return_value = existing
+
+    with patch.object(kubernetes_job, "terminate_job") as terminate:
+        with pytest.raises(SchedulingDeferred):
+            kubernetes_job.schedule(cpu_execution_provider, test_step_resuming)
+        terminate.assert_called_once_with(existing)
+
+        # Foreground deletion is still running. Do not delete again, and do not create yet.
+        existing.metadata.deletion_timestamp = datetime.datetime.now(datetime.timezone.utc)
+        with pytest.raises(SchedulingDeferred):
+            kubernetes_job.schedule(cpu_execution_provider, test_step_resuming)
+        terminate.assert_called_once_with(existing)
+        kubernetes_job._batch_v1.create_namespaced_job.assert_not_called()
+
+        # The old Job is gone, so the new one is created.
+        kubernetes_job._batch_v1.read_namespaced_job.side_effect = ApiException(status=404)
+        kubernetes_job.schedule(cpu_execution_provider, test_step_resuming)
+
+    kubernetes_job._batch_v1.create_namespaced_job.assert_called_once()
+
+
+def test_schedule_from_resuming_defers_when_the_previous_job_lookup_fails(
+    kubernetes_job, cpu_execution_provider, test_step_resuming
+):
+    """A failed lookup is retried on a later tick instead of failing the step or creating a second Job."""
+    kubernetes_job._batch_v1.read_namespaced_job.side_effect = ApiException(status=500)
+
+    with pytest.raises(SchedulingDeferred):
+        kubernetes_job.schedule(cpu_execution_provider, test_step_resuming)
+
     kubernetes_job._batch_v1.create_namespaced_job.assert_not_called()
 
 
@@ -1293,19 +1336,31 @@ def test_sync_job_active_to_paused_to_resumed(kubernetes_job, test_step_active, 
 
     assert job_update.status == HelixJobStatus.PAUSING
 
-    # The Job should now be paused after the status is no longer active
+    # Exit 75 while pausing deletes the Job and reports paused. suspend is ignored.
     mock_job_status.active = None
-    mock_job.status = mock_job_status
+    mock_job_status.succeeded = None
+    mock_job_status.failed = 1
+    mock_job_status.completion_time = None
+    mock_job.spec.suspend = False
     kubernetes_job._batch_v1.read_namespaced_job.return_value = mock_job
+    pausing_step = _cooperative_pausing_step(test_step_pausing)
 
-    # Mock pod status to return no running pods (paused)
-    with patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status:
-        mock_list_pod_status.return_value = []
-        # Sync the job again
-        job_update = kubernetes_job.sync(test_step_pausing)
+    with (
+        patch(
+            "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pods_by_labels",
+            return_value=[_terminated_task_pod(75)],
+        ),
+        patch.object(kubernetes_job, "terminate_job") as terminate,
+    ):
+        job_update = kubernetes_job.sync(pausing_step)
     assert job_update.status == HelixJobStatus.PAUSED
+    terminate.assert_called_once_with(mock_job)
 
-    # Externally we resume the job, so the job spec is no longer suspended
+    # The paused Job was deleted. The resumed Job is a new object that has not failed.
+    mock_job_status.failed = None
+    mock_job_status.active = None
+    mock_job_status.succeeded = None
+    mock_job_status.completion_time = None
     mock_job_spec.suspend = False
     mock_job.spec = mock_job_spec
     kubernetes_job._batch_v1.read_namespaced_job.return_value = mock_job
@@ -1456,6 +1511,180 @@ def test_sync_job_pausing_with_errored_pods_from_sigterm(kubernetes_job, test_st
         job_update = kubernetes_job.sync(test_step_pending)
 
     assert job_update.status == HelixJobStatus.PAUSING
+
+
+def _cooperative_pausing_step(step, *, requested_ago_seconds: int = 0, deadline_seconds: int = 3600):
+    pausing = step.model_copy(deep=True)
+    pausing.status = HelixJobStatus.PAUSING
+    requested_at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=requested_ago_seconds)
+    pausing.status_details = {"pause_requested_at": requested_at.isoformat()}
+    pausing.step_spec.lifecycle = StepLifecycle(pause_deadline_seconds=deadline_seconds)
+    return pausing
+
+
+def _running_pause_job():
+    job = MagicMock()
+    job.spec.suspend = False
+    job.status.failed = None
+    job.status.succeeded = None
+    job.status.completion_time = None
+    job.status.conditions = None
+    job.metadata.namespace = "default"
+    job.metadata.name = "test-job"
+    return job
+
+
+def test_sync_pausing_does_not_suspend_a_running_job(kubernetes_job, test_step_pausing):
+    step = _cooperative_pausing_step(test_step_pausing)
+    kubernetes_job._batch_v1.read_namespaced_job.return_value = _running_pause_job()
+
+    with (
+        patch(
+            "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status",
+            return_value=[
+                PodStatus(
+                    task_id="test-task",
+                    name="test-pod",
+                    errors={},
+                    completed=set(),
+                    active={"test-container"},
+                    waiting={},
+                    phase="Running",
+                )
+            ],
+        ),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pods_by_labels", return_value=[]),
+    ):
+        update = kubernetes_job.sync(step)
+
+    assert update.status == HelixJobStatus.PAUSING
+    kubernetes_job._batch_v1.patch_namespaced_job.assert_not_called()
+    kubernetes_job._batch_v1.delete_namespaced_job.assert_not_called()
+
+
+def test_sync_pausing_deadline_deletes_job_and_returns_error(kubernetes_job, test_step_pausing):
+    step = _cooperative_pausing_step(test_step_pausing, requested_ago_seconds=120, deadline_seconds=30)
+    job = _running_pause_job()
+    kubernetes_job._batch_v1.read_namespaced_job.return_value = job
+
+    with patch.object(kubernetes_job, "terminate_job") as terminate:
+        update = kubernetes_job.sync(step)
+
+    assert update.status == HelixJobStatus.ERROR
+    assert update.error_details["message"] == "Pause deadline exceeded"
+    terminate.assert_called_once_with(job)
+
+
+def _terminated_task_pod(exit_code: int, finished_at: datetime.datetime | None = None):
+    terminated = SimpleNamespace(exit_code=exit_code, finished_at=finished_at)
+    state = SimpleNamespace(terminated=terminated)
+    container = SimpleNamespace(name="nemo-job-task", state=state)
+    return SimpleNamespace(status=SimpleNamespace(container_statuses=[container], phase="Succeeded"))
+
+
+@pytest.mark.parametrize(
+    "exit_code,expected",
+    [(75, HelixJobStatus.PAUSED), (0, HelixJobStatus.COMPLETED), (1, HelixJobStatus.ERROR)],
+)
+def test_sync_pausing_exit_uses_exit_code(kubernetes_job, test_step_pausing, exit_code, expected):
+    step = _cooperative_pausing_step(test_step_pausing)
+    job = _running_pause_job()
+    job.status.failed = 1 if exit_code != 0 else None
+    job.status.succeeded = 1 if exit_code == 0 else None
+    kubernetes_job._batch_v1.read_namespaced_job.return_value = job
+
+    with (
+        patch(
+            "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pods_by_labels",
+            return_value=[_terminated_task_pod(exit_code)],
+        ),
+        patch.object(kubernetes_job, "terminate_job") as terminate,
+    ):
+        update = kubernetes_job.sync(step)
+
+    assert update.status == expected
+    if expected == HelixJobStatus.PAUSED:
+        terminate.assert_called_once_with(job)
+    else:
+        terminate.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "succeeded,failed,expected",
+    [(1, None, HelixJobStatus.COMPLETED), (None, 1, HelixJobStatus.ERROR), (None, None, HelixJobStatus.PAUSING)],
+)
+def test_sync_pausing_falls_back_to_the_job_status(kubernetes_job, test_step_pausing, succeeded, failed, expected):
+    """With no readable task container, the Job's own status decides. An undecided Job keeps pausing."""
+    step = _cooperative_pausing_step(test_step_pausing)
+    job = _running_pause_job()
+    job.status.succeeded = succeeded
+    job.status.failed = failed
+    kubernetes_job._batch_v1.read_namespaced_job.return_value = job
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pods_by_labels", return_value=[]),
+        patch.object(kubernetes_job, "terminate_job") as terminate,
+    ):
+        update = kubernetes_job.sync(step)
+
+    assert update.status == expected
+    terminate.assert_not_called()
+
+
+def test_sync_pausing_without_a_job_is_paused(kubernetes_job, test_step_pausing):
+    """A step paused before its Job exists has nothing to wait for."""
+    step = _cooperative_pausing_step(test_step_pausing)
+    kubernetes_job._batch_v1.read_namespaced_job.side_effect = ApiException(status=404)
+
+    update = kubernetes_job.sync(step)
+
+    assert update.status == HelixJobStatus.PAUSED
+
+
+def test_sync_pausing_without_a_job_is_paused_after_the_deadline(kubernetes_job, test_step_pausing):
+    """A missing Job has nothing left to stop, so the deadline does not turn it into an error."""
+    step = _cooperative_pausing_step(test_step_pausing, requested_ago_seconds=120, deadline_seconds=30)
+    kubernetes_job._batch_v1.read_namespaced_job.side_effect = ApiException(status=404)
+
+    assert kubernetes_job.sync(step).status == HelixJobStatus.PAUSED
+
+
+@pytest.mark.parametrize("error", [ApiException(status=500), RuntimeError("connection reset")])
+def test_sync_pausing_lookup_error_is_not_a_missing_job(kubernetes_job, test_step_pausing, error):
+    """An unknown Job state must not mark the step paused. The reconciler retries on the next tick."""
+    step = _cooperative_pausing_step(test_step_pausing)
+    kubernetes_job._batch_v1.read_namespaced_job.side_effect = error
+
+    with pytest.raises(type(error)):
+        kubernetes_job.sync(step)
+
+
+@pytest.mark.parametrize(
+    "exited_after_request_seconds,expected",
+    [(20, HelixJobStatus.PAUSED), (40, HelixJobStatus.ERROR)],
+)
+def test_sync_pausing_judges_an_exit_seen_late_by_its_exit_time(
+    kubernetes_job, test_step_pausing, exited_after_request_seconds, expected
+):
+    """Exit 75 seen after the deadline still pauses when the task exited before it."""
+    step = _cooperative_pausing_step(test_step_pausing, requested_ago_seconds=120, deadline_seconds=30)
+    requested_at = datetime.datetime.fromisoformat(step.status_details["pause_requested_at"])
+    exited_at = requested_at + datetime.timedelta(seconds=exited_after_request_seconds)
+    job = _running_pause_job()
+    job.status.failed = 1
+    kubernetes_job._batch_v1.read_namespaced_job.return_value = job
+
+    with (
+        patch(
+            "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pods_by_labels",
+            return_value=[_terminated_task_pod(75, finished_at=exited_at)],
+        ),
+        patch.object(kubernetes_job, "terminate_job") as terminate,
+    ):
+        update = kubernetes_job.sync(step)
+
+    assert update.status == expected
+    terminate.assert_called_once_with(job)
 
 
 def test_sync_job_cancelling_with_errored_pods(kubernetes_job, test_step_cancelling):
@@ -1845,12 +2074,12 @@ def test_schedule_kubernetes_gpu(mock_nemo_client, kubernetes_execution_profile_
         # GPU steps keep whatever the image sets for device visibility
         assert "NVIDIA_VISIBLE_DEVICES" not in {env.name for env in main_container.env}
 
-        # GPU jobs get a memory-backed /dev/shm (default 1Gi per GPU)
+        # GPU jobs get a memory-backed /dev/shm (default 8Gi per GPU)
         dshm_vol = next((v for v in pod_spec.volumes if v.name == JOB_DSHM_VOLUME_NAME), None)
         assert dshm_vol is not None
         assert dshm_vol.empty_dir is not None
         assert dshm_vol.empty_dir.medium == "Memory"
-        assert dshm_vol.empty_dir.size_limit == "2Gi"
+        assert dshm_vol.empty_dir.size_limit == "16Gi"
         dshm_mount = next((vm for vm in main_container.volume_mounts if vm.name == JOB_DSHM_VOLUME_NAME), None)
         assert dshm_mount is not None
         assert dshm_mount.mount_path == "/dev/shm"
@@ -3115,3 +3344,72 @@ def test_image_pull_ttl_can_be_disabled(kubernetes_job, test_step_pending):
 
     assert update.status == HelixJobStatus.PENDING
     terminate.assert_not_called()
+
+
+def test_classify_task_containers_reads_only_the_task_container():
+    """A sidecar that keeps running after the task exits must not hold the pause open."""
+    task = SimpleNamespace(
+        name="nemo-job-task", state=SimpleNamespace(terminated=SimpleNamespace(exit_code=75, finished_at=None))
+    )
+    sidecar = SimpleNamespace(name="istio-proxy", state=SimpleNamespace(terminated=None))
+    pod = SimpleNamespace(status=SimpleNamespace(container_statuses=[sidecar, task], phase="Running"))
+
+    assert classify_task_containers([pod]) == (False, 75)
+
+
+def _classified_pod(task: int | str) -> SimpleNamespace:
+    """A pod whose task exited with ``task``, is ``"running"``, or has no readable status in phase ``task``."""
+    if isinstance(task, int):
+        return _terminated_task_pod(task)
+    if task == "running":
+        container = SimpleNamespace(name="nemo-job-task", state=SimpleNamespace(terminated=None))
+        return SimpleNamespace(status=SimpleNamespace(container_statuses=[container], phase="Running"))
+    return SimpleNamespace(status=SimpleNamespace(container_statuses=None, phase=task))
+
+
+@pytest.mark.parametrize(
+    "tasks,expected",
+    [
+        pytest.param([0, 0], (False, 0), id="all-exit-0"),
+        pytest.param([0, 75], (False, 75), id="0-then-75"),
+        pytest.param([75, 0], (False, 75), id="75-then-0"),
+        pytest.param([75, 1], (False, 1), id="75-then-failure"),
+        pytest.param([1, 75], (False, 1), id="failure-then-75"),
+        pytest.param([2, 3], (False, 2), id="first-failure-wins"),
+        pytest.param([75, "running"], (True, None), id="75-then-running"),
+        pytest.param(["running", 75], (True, None), id="running-then-75"),
+        pytest.param([], (False, None), id="no-pods"),
+        pytest.param([75, "Failed"], (False, 1), id="75-then-unreadable-failed-pod"),
+        pytest.param([0, "Failed"], (False, 1), id="0-then-unreadable-failed-pod"),
+        pytest.param([75, "Succeeded"], (False, 75), id="75-then-unreadable-succeeded-pod"),
+        pytest.param([75, "Pending"], (True, None), id="75-then-unstarted-pod"),
+    ],
+)
+def test_classify_task_containers(tasks: list[int | str], expected: tuple[bool, int | None]):
+    assert classify_task_containers([_classified_pod(task) for task in tasks]) == expected
+
+
+def test_last_task_exit_time_is_the_latest_task_exit():
+    first = datetime.datetime(2026, 10, 19, 12, 0, tzinfo=datetime.timezone.utc)
+    last = first + datetime.timedelta(seconds=30)
+    pods = [_terminated_task_pod(75, finished_at=last), _terminated_task_pod(75, finished_at=first)]
+
+    assert last_task_exit_time(pods) == last
+
+
+@pytest.mark.parametrize(
+    "pods",
+    [
+        pytest.param([], id="no-pods"),
+        pytest.param([_terminated_task_pod(75)], id="no-exit-time"),
+        pytest.param(
+            [
+                _terminated_task_pod(75, finished_at=datetime.datetime(2026, 10, 19, tzinfo=datetime.timezone.utc)),
+                _classified_pod("Failed"),
+            ],
+            id="a-pod-without-task-status",
+        ),
+    ],
+)
+def test_last_task_exit_time_is_unknown_unless_every_task_has_one(pods):
+    assert last_task_exit_time(pods) is None

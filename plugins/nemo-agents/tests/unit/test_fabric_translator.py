@@ -635,6 +635,7 @@ class TestTranslateAgentConfig:
 
         # The Pi adapter hard-requires relay_extension_path when Relay is active; the
         # translator defaults it to the image-staged copy so telemetry does not fail.
+        assert fabric_config.harness is not None
         assert fabric_config.harness.settings["relay_extension_path"] == PI_RELAY_EXTENSION_PATH
 
     def test_relay_preserves_explicit_pi_extension_path(self) -> None:
@@ -650,6 +651,7 @@ class TestTranslateAgentConfig:
         fabric_config = translate_agent_config(config)
 
         # An explicitly configured path is never overwritten by the default.
+        assert fabric_config.harness is not None
         assert fabric_config.harness.settings["relay_extension_path"] == "/custom/pi-extension"
 
     def test_relay_extension_default_only_applies_to_pi(self) -> None:
@@ -661,6 +663,7 @@ class TestTranslateAgentConfig:
 
         # Only the Pi adapter consumes relay_extension_path; a non-Pi harness (hermes
         # here) must not have it injected.
+        assert fabric_config.harness is not None
         assert "relay_extension_path" not in fabric_config.harness.settings
 
     def test_relay_extension_default_skipped_when_telemetry_disabled(self) -> None:
@@ -674,6 +677,7 @@ class TestTranslateAgentConfig:
 
         # No Relay, no extension-path default — a plain Pi agent is untouched.
         assert fabric_config.relay is None
+        assert fabric_config.harness is not None
         assert "relay_extension_path" not in fabric_config.harness.settings
 
     def test_relay_telemetry_prefers_platform_registered_agent_name(self) -> None:

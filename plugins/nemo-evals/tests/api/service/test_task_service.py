@@ -79,11 +79,11 @@ def _ref(metric: MetricRef | MetricInline) -> MetricRef:
     return metric
 
 
-def _task_input() -> TaskInput:
+def _task_input(*, intent: str = "Answer the question.") -> TaskInput:
     return TaskInput(
         spec=EvaluatorTaskDefinition(
             kind="evaluator",
-            intent="Answer the question.",
+            intent=intent,
             inputs=TaskInputs(instruction="What is 2+2?"),
             metrics=[MetricRef("default/stored-metric")],
         ),
@@ -437,11 +437,12 @@ async def test_resolve_revision_honours_a_tag_naming_an_older_revision(service: 
     the fragment were ignored entirely.
     """
     await service.create_task("task-1", _task_input(), workspace="default")
-    first = (await service.list_revisions("default", "task-1")).data[0].content_hash
+    revisions = await service.list_revisions("default", "task-1")
+    assert revisions is not None
+    first = revisions.data[0].content_hash
     await service.tag_revision("default", "task-1", "blessed", "latest")
 
-    revised = _task_input()
-    revised.spec.intent = "Answer differently."
+    revised = _task_input(intent="Answer differently.")
     await service.replace_task("task-1", revised, workspace="default")
 
     latest = await service.resolve_revision("default", "task-1")
@@ -454,10 +455,11 @@ async def test_resolve_revision_honours_a_tag_naming_an_older_revision(service: 
 async def test_resolve_revision_round_trips_a_digest_fragment(service: TaskService) -> None:
     """A member submitted already-pinned must resolve to itself rather than to the head."""
     await service.create_task("task-1", _task_input(), workspace="default")
-    first = (await service.list_revisions("default", "task-1")).data[0].content_hash
+    revisions = await service.list_revisions("default", "task-1")
+    assert revisions is not None
+    first = revisions.data[0].content_hash
 
-    revised = _task_input()
-    revised.spec.intent = "Answer differently."
+    revised = _task_input(intent="Answer differently.")
     await service.replace_task("task-1", revised, workspace="default")
 
     assert await service.resolve_revision("default", "task-1", first) == first
@@ -473,11 +475,11 @@ async def test_resolve_revision_raises_for_a_missing_task(service: TaskService) 
 # --- Harbor-kind tasks --------------------------------------------------------
 
 
-def _harbor_input(digest: str = "a" * 64) -> TaskInput:
+def _harbor_input(digest: str = "a" * 64, *, native_task_id: str = "fixture") -> TaskInput:
     return TaskInput(
         spec=HarborTaskDefinition(
             kind="harbor",
-            native_task_id="fixture",
+            native_task_id=native_task_id,
             harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
             source=HarborArchiveSource(
                 fileset_ref="default/harbor-tasks#packages/org-name/abc/files",
@@ -491,8 +493,7 @@ def _harbor_input(digest: str = "a" * 64) -> TaskInput:
 
 
 async def test_harbor_registration_rejects_incorrect_native_identity(service):
-    request = _harbor_input()
-    request.spec.native_task_id = "incorrect"
+    request = _harbor_input(native_task_id="incorrect")
     with pytest.raises(ValueError, match="native_task_id does not match"):
         await service.create_task("incorrect", request, workspace="default")
 
