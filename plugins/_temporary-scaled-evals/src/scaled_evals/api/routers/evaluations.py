@@ -6,6 +6,7 @@ import json
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from datetime import datetime
+from functools import partial
 from threading import Lock
 from time import monotonic
 from typing import Annotated, Any
@@ -56,6 +57,7 @@ from scaled_evals.api.schemas.evaluations import (
 )
 from scaled_evals.api.schemas.runnability import RunnabilityReport
 from scaled_evals.api.settings import settings
+from scaled_evals.api.tenancy import IsAdmin
 from scaled_evals.api.utils import list_envelope, make_id
 from scaled_evals.dispatch.registry import get_backend as _resolve_backend
 from scaled_evals.dispatch.registry import get_backend_capabilities
@@ -480,6 +482,7 @@ def preflight_evaluation_request(
     db: Db,
     current: Principal,
     secrets: Secrets,
+    admin: IsAdmin,
 ) -> RunnabilityReport:
     """Check whether an evaluation request is runnable without creating it."""
     result = preflight_evaluation(
@@ -487,7 +490,7 @@ def preflight_evaluation_request(
         body,
         current,
         object_exists=artifacts.object_exists,
-        resolve_bundle=accessible_bundle_for_run,
+        resolve_bundle=partial(accessible_bundle_for_run, include_all=admin),
         secret_readable=secrets,
     )
     return result.report
@@ -499,6 +502,7 @@ def create_evaluation(
     db: Db,
     current: Principal,
     secrets: Secrets,
+    admin: IsAdmin,
 ) -> EvaluationResponse:
     """Start an evaluation run over a single task.
 
@@ -514,7 +518,7 @@ def create_evaluation(
         body,
         current,
         object_exists=artifacts.object_exists,
-        resolve_bundle=accessible_bundle_for_run,
+        resolve_bundle=partial(accessible_bundle_for_run, include_all=admin),
         secret_readable=secrets,
     )
     if isinstance(preflight, BlockedPreflight):

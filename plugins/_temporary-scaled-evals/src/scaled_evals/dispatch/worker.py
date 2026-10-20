@@ -49,6 +49,7 @@ from psycopg.rows import dict_row
 
 from scaled_evals.api import artifacts
 from scaled_evals.api.build.task_image_identity import verify_stored_task_image
+from scaled_evals.api.execution_analytics import emit_execution_span
 from scaled_evals.api.failure_diagnostics import failure_category_for_code, is_retryable_failure
 from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_RUNTIME
 from scaled_evals.api.redaction import redact_secret_text
@@ -501,9 +502,10 @@ class Dispatcher:
     def build_evidence(self, evaluation_id: str) -> None:
         """Generate terminal evidence and upload it before the archive is built."""
         execution_number: int | None = None
+        row: dict[str, Any] | None = None
         try:
             with self.connect() as conn:
-                row: dict[str, Any] | None = EvaluationRepository(conn).load_for_dispatch(evaluation_id)
+                row = EvaluationRepository(conn).load_for_dispatch(evaluation_id)
                 if row is None:
                     raise RuntimeError(f"evaluation not found: {evaluation_id}")
                 if row.get("status") not in _DB_TERMINAL_STATUSES:
@@ -571,6 +573,21 @@ class Dispatcher:
                     str(exc),
                     expected_execution_number=execution_number,
                 )
+        finally:
+            # Evidence can fail permanently; the outcome still belongs in analytics.
+            # Each attempt re-emits the same span id and reads keep one per evaluation.
+            if row is not None and row.get("status") in _DB_TERMINAL_STATUSES:
+                self._record_analytics(row)
+
+    def _record_analytics(self, row: dict[str, Any]) -> None:
+        """Record the terminal evaluation in Intake; analytics never block evidence."""
+        try:
+            with self.connect() as conn:
+                usage = ResourceUsageRepository(conn).totals_for_evaluation(str(row["id"]))
+        except Exception:  # noqa: BLE001 — analytics are best-effort
+            LOG.warning("could not read resource usage for %s", row["id"], exc_info=True)
+            usage = {}
+        emit_execution_span(row, usage, workspace=settings.platform_jobs_workspace)
 
     def build_archive(self, evaluation_id: str) -> None:
         """Build ``results.tar.gz`` for an evaluation from synced artifacts."""

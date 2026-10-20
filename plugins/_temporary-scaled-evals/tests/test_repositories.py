@@ -748,135 +748,30 @@ def test_execution_telemetry_repository_records_attempt_aware_phases_and_summary
     assert summary_params[0:2] == ("ev_1", 2)
 
 
-def test_admin_compute_summary_reports_coverage_and_normalizes_decimals() -> None:
+def test_live_usage_counts_only_unfinished_evaluations() -> None:
     conn, cur = _conn()
-    summary = {
-        "evaluations": 3,
-        "sampled_evaluations": 2,
-        "samples": 9,
-        "avg_cpu_cores": Decimal("0.25"),
-        "peak_cpu_cores": 1.5,
-        "avg_cpu_request_cores": Decimal("1.0"),
-        "avg_cpu_limit_cores": Decimal("2.0"),
-        "avg_cpu_request_utilization_percent": Decimal("25"),
-        "avg_memory_bytes": Decimal("1024"),
-        "peak_memory_bytes": 2048,
-        "avg_memory_request_bytes": Decimal("4096"),
-        "avg_memory_limit_bytes": Decimal("8192"),
-        "avg_memory_request_utilization_percent": Decimal("25"),
-        "requested_gpus": Decimal("1"),
-        "gpu_utilization_available": False,
+    cur.fetchone.return_value = {
+        "queued_runs": 1,
+        "active_runs": Decimal("2"),
+        "total_parallelism": None,
+        "total_tasks": 5,
     }
-    runtime = {"runtime": "sandbox_k8s", **summary}
-    timeline = {"day": datetime(2026, 8, 7, tzinfo=UTC).date(), **summary}
-    cur.fetchone.return_value = summary
-    cur.fetchall.side_effect = [[runtime], [timeline]]
-    window_start = datetime(2026, 8, 1, tzinfo=UTC)
-    window_end = datetime(2026, 8, 8, tzinfo=UTC)
+    cur.fetchall.return_value = [{"owner_id": "usr_1", "queued_runs": 1, "active_runs": 2}]
 
-    result = UserRepository(conn).compute_summary(window_days=7, window_start=window_start, window_end=window_end)
+    result = UserRepository(conn).live_usage()
 
-    summary_sql, summary_params = _executed_sql_and_params(cur)
-    assert "LEFT JOIN evaluation_resource_usage" in summary_sql
-    assert "cpu_samples * cpu_request_cores" in summary_sql
-    assert "FILTER (WHERE usage.cpu_sample_count > 0)" in summary_sql
-    assert "FILTER (WHERE usage.memory_sample_count > 0)" in summary_sql
-    assert summary_params == (window_start, window_end)
-    timeline_sql, timeline_params = _executed_sql_and_params(cur, 2)
-    assert "generate_series" in timeline_sql
-    assert timeline_params == (window_start, window_end, window_start, window_end)
-    assert result["avg_cpu_cores"] == 0.25
-    assert result["avg_memory_request_bytes"] == 4096.0
-    assert result["gpu_utilization_available"] is False
-    assert "gpu_utilization_available" not in result["runtimes"][0]
-    assert result["timeline"][0]["avg_cpu_request_cores"] == 1.0
-
-
-def test_admin_failure_summary_categorizes_and_limits_examples() -> None:
-    conn, cur = _conn()
-    category_rows = [
-        {
-            "category": "inference_http_504",
-            "category_count": 4,
-            "evaluation_id": "ev_504",
-            "evaluation_name": "gateway failure",
-            "task_id": "task_1",
-            "owner_id": "user_1",
-            "owner_label": "User One",
-            "runtime": "sandbox_k8s",
-            "failure_code": "APIStatusError",
-            "detail": "inference request returned 504 with api_key=sk-secret123456",
-            "occurred_at": datetime(2026, 8, 7, tzinfo=UTC),
-        },
-        {
-            "category": "evaluation_timeout",
-            "category_count": 2,
-            "evaluation_id": "ev_timeout",
-            "evaluation_name": "deadline",
-            "task_id": "task_2",
-            "owner_id": None,
-            "owner_label": None,
-            "runtime": "sandbox_k8s",
-            "failure_code": "poll_timeout",
-            "detail": "timed out waiting for the run to finish",
-            "occurred_at": datetime(2026, 8, 6, tzinfo=UTC),
-        },
-    ]
-    timeline_rows = [
-        {
-            "day": datetime(2026, 8, 6, tzinfo=UTC).date(),
-            "total": 2,
-            "counts": {"evaluation_timeout": 2},
-            "codes": {"evaluation_timeout": {"poll_timeout": 2}},
-        },
-        {
-            "day": datetime(2026, 8, 7, tzinfo=UTC).date(),
-            "total": 4,
-            "counts": {"inference_http_504": 4},
-            "codes": {"inference_http_504": {"APIStatusError": 4}},
-        },
-    ]
-    cur.fetchall.side_effect = [category_rows, timeline_rows]
-
-    window_start = datetime(2026, 7, 9, tzinfo=UTC)
-    window_end = datetime(2026, 8, 8, tzinfo=UTC)
-    result = UserRepository(conn).failure_summary(
-        window_days=30,
-        window_start=window_start,
-        window_end=window_end,
-        examples_per_category=3,
-    )
-
-    sql, params = _executed_sql_and_params(cur)
-    assert "e.status = 'failed'" in sql
-    assert "inference_http_504" in sql
-    assert "inference_rate_limit" in sql
-    assert "inference_timeout" in sql
-    assert "sandbox_startup" in sql
-    assert "runtime_cleanup" in sql
-    assert "evaluation_timeout" in sql
-    assert "trial_cancelled" in sql
-    assert "object_storage" in sql
-    assert "agent_exit" in sql
-    assert "runtime_infrastructure" in sql
-    assert "task_configuration" in sql
-    assert "control_plane_state" in sql
-    assert "ROW_NUMBER() OVER" in sql
-    assert params == (window_start, window_end, 3)
-    timeline_sql, timeline_params = _executed_sql_and_params(cur, 1)
-    assert "generate_series" in timeline_sql
-    assert "JSONB_OBJECT_AGG" in timeline_sql
-    assert "e.result->>'finished_at'" in timeline_sql
-    assert "daily_codes" in timeline_sql
-    assert timeline_params == (window_start, window_end, window_start, window_end)
-    assert result["total_failures"] == 6
-    assert result["categories"][0]["count"] == 4
-    assert result["categories"][0]["examples"][0]["evaluation_id"] == "ev_504"
-    assert result["categories"][0]["examples"][0]["detail"] == (
-        "inference request returned 504 with api_key=<redacted>"
-    )
-    assert result["timeline"][1]["counts"] == {"inference_http_504": 4}
-    assert result["timeline"][1]["codes"] == {"inference_http_504": {"APIStatusError": 4}}
+    summary_sql, actors_sql = (call.args[0] for call in cur.execute.call_args_list)
+    for sql in (summary_sql, actors_sql):
+        assert "status IN ('queued', 'blocked', 'provisioning', 'running')" in sql
+        assert "deleted_at IS NULL" in sql
+    assert "GROUP BY owner_id" in actors_sql
+    assert result == {
+        "queued_runs": 1,
+        "active_runs": 2,
+        "total_parallelism": 0,
+        "total_tasks": 5,
+        "actors": [{"owner_id": "usr_1", "queued_runs": 1, "active_runs": 2}],
+    }
 
 
 def test_patch_set_clause_rejects_unlisted_patch_field() -> None:

@@ -180,15 +180,6 @@ class ActivityRecord(BaseModel):
     created_at: datetime
 
 
-class AdminUserRecord(BaseModel):
-    id: str
-    email: str | None = None
-    username: str | None = None
-    display_name: str | None = None
-    created_at: datetime
-    last_seen_at: datetime
-
-
 class TeamSummaryResponse(BaseModel):
     team_id: str
     evaluations: StubEvaluationSummary
@@ -213,9 +204,6 @@ class AdminCapacityResponse(BaseModel):
 
 class AdminUsageActor(BaseModel):
     owner_id: str | None = None
-    email: str | None = None
-    username: str | None = None
-    display_name: str | None = None
     total_runs: int = 0
     queued_runs: int = 0
     active_runs: int = 0
@@ -229,6 +217,9 @@ class AdminUsageActor(BaseModel):
 
 
 class AdminUsageSummaryResponse(BaseModel):
+    window_days: int
+    window_start: datetime
+    window_end: datetime
     total_runs: int = 0
     total_tasks: int = 0
     total_tasks_run: int = 0
