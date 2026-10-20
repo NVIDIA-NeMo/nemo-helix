@@ -148,6 +148,24 @@ async def test_a_caller_who_may_not_create_evaluations_is_refused_before_accepta
     assert not await runs(entity_store) and not fake_task_jobs.created
 
 
+async def test_a_caller_who_may_not_read_the_experiment_is_refused_before_the_lookup(
+    service, publishing, authorizer, fake_evaluations, entity_store
+):
+    """The lookup runs as the evals service, so the caller's own read is checked first."""
+
+    async def check(method: str, path: str) -> None:
+        if (method, path) == ("GET", "/apis/intake/v2/workspaces/default/experiments/swe-agent-tuning"):
+            raise HTTPException(status_code=403, detail="denied")
+
+    authorizer.side_effect = check
+    fake_evaluations.fail = {"experiment"}  # a lookup would 503 instead
+    with pytest.raises(HTTPException) as exc:
+        await submit(service, publishing)
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "you can't read Intake Experiment default/swe-agent-tuning"
+    assert not await runs(entity_store)
+
+
 async def test_an_evaluation_create_denied_after_acceptance_starts_no_jobs(
     service, publishing, fake_evaluations, fake_task_jobs
 ):

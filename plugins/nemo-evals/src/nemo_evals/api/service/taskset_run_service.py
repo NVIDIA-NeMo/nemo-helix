@@ -468,12 +468,22 @@ class TasksetRunService:
         if req.publication is None:
             return None
         requested = req.publication.intake
+        unreadable = f"you can't read Intake Experiment {workspace}/{requested.experiment}"
+        # The lookup below runs as the evals service, so check the caller's own read first.
+        try:
+            await self._authorizer(
+                "GET",
+                f"/apis/intake/v2/workspaces/{quote(workspace, safe='')}"
+                f"/experiments/{quote(requested.experiment, safe='')}",
+            )
+        except HTTPException as exc:
+            if exc.status_code != 403:
+                raise
+            raise HTTPException(status_code=403, detail=unreadable) from exc
         try:
             experiment_id = await self._evaluations.experiment_id(workspace, requested.experiment)
         except (AuthenticationError, PermissionDeniedError) as exc:
-            raise HTTPException(
-                status_code=403, detail=f"you can't read Intake Experiment {workspace}/{requested.experiment}"
-            ) from exc
+            raise HTTPException(status_code=403, detail=unreadable) from exc
         except NemoClientError as exc:
             raise IntakeUnavailableError(
                 f"looking up Intake Experiment {workspace}/{requested.experiment} failed ({type(exc).__name__}); "
