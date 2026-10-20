@@ -155,7 +155,10 @@ def preflight_models(ctx: CommandContext, chosen: dict[str, dict[str, str]], sto
     }
     effective = merge_models(stored, chosen)
     analysis = ModelChoice.model_validate(effective.get("analysis", {}))
-    for group in chosen:
+    groups = set(chosen)
+    if "analysis" in chosen and effective.get("safety"):
+        groups.add("safety")  # a stored safety choice inherits the analysis endpoint and key
+    for group in (g for g in endpoints if g in groups):
         fields = effective[group]
         if group == "safety":
             safety = effective_safety(ModelChoice.model_validate(fields), analysis)

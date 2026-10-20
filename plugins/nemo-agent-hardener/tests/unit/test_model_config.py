@@ -147,6 +147,24 @@ def test_preflight_probes_safety_where_the_judge_will_go(monkeypatch: Any) -> No
     assert ("guard/model", "http://10.0.0.9/v1", "value-of-analysis-key") in probed
 
 
+def test_preflight_checks_the_built_in_judge_when_only_its_endpoint_is_set(monkeypatch: Any) -> None:
+    """With no safety model the judge runs agent-hardener's default, so that is the model to probe."""
+    from nemo_agent_hardener_plugin.model_config import SAFETY_DEFAULT_MODEL
+
+    probed: list[tuple[str | None, str | None]] = []
+
+    def _validate(model: str | None, base_url: str | None, key: str | None) -> Any:
+        probed.append((model, base_url))
+        return SimpleNamespace(ok=True)
+
+    monkeypatch.setattr(run_module, "validate_choice", _validate)
+    models = WarGameModels(safety=ModelChoice(base_url="http://10.0.0.5/v1"))
+
+    run_module._preflight_models(models, sdk=None, workspace="default", default_key="k")
+
+    assert probed == [(SAFETY_DEFAULT_MODEL, "http://10.0.0.5/v1")]
+
+
 class _Secrets:
     """Secrets double: `access` raises for an unknown name, as the real client does."""
 

@@ -48,8 +48,8 @@ const GROUP_HELP: Record<keyof WarGameModels, string> = {
   analysis:
     'The defenders and the benign validator — both its suite generation (synth) and judging — one shared model.',
   safety:
-    "The LLM the generated guardrail uses to screen the agent's traffic. Blank fields fall back to the " +
-    'analysis model, endpoint and key.',
+    "The LLM the generated guardrail uses to screen the agent's traffic. A blank endpoint or key falls " +
+    'back to the analysis one.',
 };
 
 const NO_SECRET = '';
@@ -115,14 +115,15 @@ export const ModelGroupFields: FC<ModelGroupFieldsProps> = ({
       defaultBaseUrl={defaults?.analysis.base_url}
       divider
     />
-    {/* The judge falls back to the analysis endpoint, so that is what a blank safety endpoint means. */}
+    {/* The judge falls back to the analysis endpoint and key, so that is what blank safety fields mean. */}
     <CredentialedGroupFields
       group="safety"
       value={value}
       onChange={onChange}
       workspace={workspace}
-      defaultModel={value.analysis?.model || defaults?.safety.model}
+      defaultModel={defaults?.safety.model}
       defaultBaseUrl={value.analysis?.base_url || defaults?.safety.base_url}
+      fallbackKeySecret={value.analysis?.api_key_secret}
       divider
     />
   </Stack>
@@ -135,6 +136,8 @@ interface CredentialedGroupProps {
   workspace: string;
   defaultModel?: string;
   defaultBaseUrl?: string;
+  /** The key the run uses when this group leaves its own blank. */
+  fallbackKeySecret?: string;
   divider?: boolean;
 }
 
@@ -145,6 +148,7 @@ const CredentialedGroupFields: FC<CredentialedGroupProps> = ({
   workspace,
   defaultModel,
   defaultBaseUrl,
+  fallbackKeySecret,
   divider,
 }) => {
   const choice = value[group] ?? {};
@@ -178,7 +182,7 @@ const CredentialedGroupFields: FC<CredentialedGroupProps> = ({
         data: {
           model: choice.model ?? undefined,
           base_url: choice.base_url || defaultBaseUrl || '',
-          api_key_secret: choice.api_key_secret ?? undefined,
+          api_key_secret: choice.api_key_secret || fallbackKeySecret || undefined,
         },
       });
       setTestResult(formatVerdict(res.ok, res.reason, res.available ?? [], res.detail));

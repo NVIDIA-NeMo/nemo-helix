@@ -63,13 +63,14 @@ def effective_safety(safety: ModelChoice | None, analysis: ModelChoice | None) -
     """The safety choice the guardrail judge will actually use.
 
     agent-hardener falls back to the analysis endpoint and key for whichever of them safety leaves unset,
-    so a check of the safety model must probe that same combination.
+    so a check of the safety model must probe that same combination. An unset model is the built-in judge,
+    not the analysis model.
     """
     if safety is None:
         return None
     analysis = analysis or ModelChoice()
     return ModelChoice(
-        model=safety.model,
+        model=safety.model or SAFETY_DEFAULT_MODEL,
         base_url=safety.base_url or analysis.base_url,
         api_key_secret=safety.api_key_secret or analysis.api_key_secret,
     )
