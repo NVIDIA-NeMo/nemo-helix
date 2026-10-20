@@ -28,7 +28,7 @@ import type {
   ModelEntitySortField,
   ModelsListModelsParams,
 } from '@nemo/sdk/generated/platform/schema';
-import { Button, type DropdownEntry, Text, Tooltip } from '@nvidia/foundations-react-core';
+import { Anchor, Button, type DropdownEntry, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { queryClient } from '@studio/api/queryClient';
 import {
   DEFAULT_CUSTOM_MODELS_FILTER,
@@ -280,13 +280,15 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
           cell: ({ row }) => {
             const jobName = jobsByOutputName.get(row.original.name);
             return jobName ? (
-              <Link
-                to={getWorkspaceCustomizationJobDetailsRoute(workspace, jobName)}
-                className="truncate text-primary underline"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {row.original.name}
-              </Link>
+              <Anchor asChild>
+                <Link
+                  to={getWorkspaceCustomizationJobDetailsRoute(workspace, jobName)}
+                  className="truncate"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {row.original.name}
+                </Link>
+              </Anchor>
             ) : (
               <Text className="truncate">{row.original.name}</Text>
             );
