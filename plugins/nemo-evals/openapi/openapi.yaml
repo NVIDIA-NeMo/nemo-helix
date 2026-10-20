@@ -583,7 +583,8 @@ paths:
         \ budget exceeds the operator maximum.\n    HTTPException: Source denial (403),\
         \ conflicting key (409), resolution rejection\n        (422), an unavailable\
         \ image build service before acceptance (503, safe to resend), missing\n \
-        \       task Jobs after acceptance (503), or a sanitized unexpected failure\
+        \       task Jobs after acceptance (503), an Intake Evaluation refused after\
+        \ acceptance (403, not\n        retried), or a sanitized unexpected failure\
         \ (500).\n        When the request omits idempotency_key, submit generates\
         \ one. A 5xx then names it in the\n        detail and the ``x-idempotency-key``\
         \ header and says not to retry automatically: the SDK\n        would resend\
