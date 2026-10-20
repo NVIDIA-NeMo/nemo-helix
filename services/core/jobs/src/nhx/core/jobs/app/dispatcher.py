@@ -6,7 +6,6 @@ import json
 import logging
 import re
 import weakref
-from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, TypeVar
 
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
@@ -16,8 +15,7 @@ from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.jobs.types import JOB_FILESET_NAME_PREFIX, JobControl
 from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
-from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
-from nhx.common.api.in_memory_filter import InMemoryFilterRepository
+from nhx.common.api.filter import ComparisonOperation, FilterOperator
 from nhx.common.api.parsed_filter import ParsedFilter
 from nhx.common.auth import AuthContext
 from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
@@ -169,11 +167,6 @@ def _reject_pause_ttl_over_maximum(pause_ttl_seconds: int | None) -> None:
         raise PauseTTLLimitError(f"pause_ttl_seconds cannot exceed the platform maximum of {maximum} seconds.")
 
 
-def _job_updated_at(job: HelixJob, attempt: HelixJobAttempt) -> datetime:
-    # Status changes only rewrite the attempt, so the job entity's own timestamp stays at creation.
-    return max(ts for ts in (job.updated_at, attempt.updated_at) if ts is not None)
-
-
 def create_platform_job_response(job: HelixJob, attempt: HelixJobAttempt) -> HelixJobResponse:
     """Helper to create HelixJobResponse from job and attempt entities."""
     ownership = job.ownership
@@ -187,7 +180,7 @@ def create_platform_job_response(job: HelixJob, attempt: HelixJobAttempt) -> Hel
         workspace=job.workspace,
         project=job.project,
         created_at=job.created_at,  # type: ignore
-        updated_at=_job_updated_at(job, attempt),
+        updated_at=job.updated_at,  # type: ignore
         source=job.source,
         spec=job.spec,
         platform_spec=job.platform_spec,
@@ -206,112 +199,6 @@ def _format_status_for_message(status: HelixJobStatus | str) -> str:
     if isinstance(status, HelixJobStatus):
         return status.value
     return str(status)
-
-
-# Status lives on HelixJobAttempt, not HelixJob, and the reported updated_at
-# folds in the attempt's timestamp, so neither can be resolved by the HelixJob
-# entity-store query. Instead, the full filter tree is evaluated in-memory
-# (op.apply(InMemoryFilterRepository(virtual_job))) against a "virtual job"
-# entity that carries the attempt-derived values. The store query receives only
-# an attempt-free *superset* of the filter (see _attempt_free_superset) so it
-# never drops a row the in-memory pass would accept; that pass then narrows
-# exactly.
-_STATUS_FIELD = "data.status"
-_ATTEMPT_DERIVED_FIELDS = frozenset({_STATUS_FIELD, "updated_at"})
-
-
-def _references_attempt_field(operation: FilterOperation | None) -> bool:
-    """Whether the operation tree contains any comparison on an attempt-derived field."""
-    if operation is None:
-        return False
-    if isinstance(operation, ComparisonOperation):
-        return operation.field in _ATTEMPT_DERIVED_FIELDS
-    if isinstance(operation, LogicalOperation):
-        return any(_references_attempt_field(child) for child in operation.operations)
-    return False
-
-
-def _attempt_free_superset(operation: FilterOperation | None) -> FilterOperation | None:
-    """Build an attempt-free store filter that accepts a SUPERSET of ``operation``.
-
-    Status and the reported updated_at derive from the attempt, so they cannot
-    be pushed to the HelixJob store query. We push down a relaxed,
-    attempt-independent filter that is guaranteed to keep every row the
-    in-memory evaluation would accept; that evaluation then narrows the
-    candidate set exactly.
-
-    ``None`` means "no store constraint" (accept all jobs in scope) — always a
-    valid superset. The relaxation rules below preserve the superset property:
-
-    - Attempt-derived comparison -> None. Replacing a constraint with "accept
-      all" only widens.
-    - Any other comparison -> itself. Attempt-independent, so it is exact and
-      safe to push verbatim.
-    - ``$and`` -> AND of the children's supersets (children that relax to None
-      are dropped). Any row satisfying the original AND satisfies every child,
-      hence every child-superset, hence their AND. Dropping a None child only
-      removes a constraint.
-    - ``$or`` -> OR of the children's supersets, UNLESS any child relaxes to
-      None, in which case the whole OR relaxes to None (an unconstrained branch
-      makes the union unconstrained). Each child-superset is a superset of its
-      child, so the OR of supersets is a superset of the OR of children.
-    - ``$not`` -> kept verbatim only when its operand is attempt-free (then the
-      whole negation is exact and attempt-independent). If the operand references
-      an attempt-derived field, negation can invert sub/superset relationships, so we relax the
-      entire ``$not`` to None and let the in-memory pass do the work.
-    """
-    if operation is None:
-        return None
-    if isinstance(operation, ComparisonOperation):
-        return None if operation.field in _ATTEMPT_DERIVED_FIELDS else operation
-    if isinstance(operation, LogicalOperation):
-        if operation.operator == FilterOperator.NOT:
-            # not X is attempt-independent only when X is; otherwise relax to None.
-            return None if _references_attempt_field(operation) else operation
-
-        relaxed = [_attempt_free_superset(child) for child in operation.operations]
-
-        if operation.operator == FilterOperator.OR:
-            # An unconstrained branch makes the union unconstrained.
-            if any(child is None for child in relaxed):
-                return None
-            kept = [child for child in relaxed if child is not None]
-        else:  # AND: dropping a None child only removes a constraint.
-            kept = [child for child in relaxed if child is not None]
-
-        if not kept:
-            return None
-        if len(kept) == 1:
-            return kept[0]
-        return LogicalOperation(operator=operation.operator, operations=kept)
-    return operation
-
-
-def _build_virtual_job_entity(job: HelixJob, attempt: HelixJobAttempt) -> dict[str, Any]:
-    """Build the virtual entity that ``InMemoryFilterRepository`` evaluates.
-
-    The filter tree addresses fields the way the entity store stores them: base
-    columns (``name``, ``project``, ``workspace``, ...) as plain attributes and
-    everything else under ``data.<field>`` (e.g. ``data.source``). This dict
-    mirrors that DBEntity row shape so the in-memory repository resolves every
-    field the same way the SQL repository would.
-
-    Status is the join: it lives on the attempt, so it is injected as
-    ``data.status``. The attempt status enum is stored as its string value
-    (e.g. ``"active"``) so it compares equal to the string the filter carries.
-    """
-    data = dict(job._get_data_fields())
-    data[_STATUS_FIELD.split(".", 1)[1]] = attempt.status.value
-    return {
-        "id": job.id,
-        "name": job.name,
-        "workspace": job.workspace,
-        "project": job.project,
-        "entity_type": HelixJob.__entity_type__,
-        "created_at": job.created_at,
-        "updated_at": _job_updated_at(job, attempt),
-        "data": data,
-    }
 
 
 class JobDispatcher:
@@ -428,6 +315,7 @@ class JobDispatcher:
                     control=control,
                     fileset=fileset_name,
                     output_location=job_req.output_location,
+                    status=HelixJobStatus.CREATED,
                     ownership=job_req.ownership,
                     custom_fields=job_req.custom_fields,
                 )
@@ -504,14 +392,6 @@ class JobDispatcher:
         sort: Optional[HelixJobListSortField] = None,
     ) -> Tuple[List[HelixJobResponse], int]:
         """List platform jobs with their current attempts."""
-        # Status lives on HelixJobAttempt, not HelixJob, so the full filter
-        # tree is evaluated in-memory against a virtual job entity that carries the
-        # attempt-derived fields. The store query receives an attempt-free SUPERSET
-        # of the filter so it never drops a row the in-memory pass would accept (see
-        # _attempt_free_superset); that pass then narrows the page exactly.
-        # The operation is already entity-translated by make_filter_dep.
-        store_operation = _attempt_free_superset(parsed.operation)
-
         # Calculate page from offset
         page = 1
         page_size = limit or 100
@@ -522,15 +402,13 @@ class JobDispatcher:
 
         response = await self.store.list(
             HelixJob,
-            filter_operation=store_operation,
+            filter_operation=parsed.operation,
             page=page,
             page_size=page_size,
             workspace=workspace,
             sort=sort_str,
         )
 
-        # IN-MEMORY JOIN: load each job's current attempt, then evaluate the full
-        # (status-aware) filter tree against a virtual entity carrying the status.
         attempts_by_id = await self._list_current_attempts(response.data, workspace)
         job_outputs: list[HelixJobResponse] = []
         for job in response.data:
@@ -542,18 +420,8 @@ class JobDispatcher:
                 logger.warning(f"Attempt {job.current_attempt_id} not found for job {job.id}")
                 continue
 
-            if parsed.operation is not None:
-                virtual_entity = _build_virtual_job_entity(job, attempt)
-                if not parsed.operation.apply(InMemoryFilterRepository(virtual_entity)):
-                    continue
-
             platform_job = create_platform_job_response(job, attempt)
             job_outputs.append(platform_job)
-
-        # Sort in memory
-        if sort:
-            reverse = sort.get_sort_direction() == "desc"
-            job_outputs.sort(key=lambda j: getattr(j, sort.get_field_name()), reverse=reverse)
 
         return job_outputs, response.pagination.total_results
 
@@ -1225,6 +1093,7 @@ class JobDispatcher:
         if new_attempt_status != attempt.status:
             attempt, changed = await self._save_attempt_status(attempt, new_attempt_status, saved_step)
             if changed:
+                await self._save_job_status(attempt)
                 if _should_emit_job_run_telemetry(previous_attempt_status, attempt.status):
                     try:
                         job = await self.store.get_by_id(HelixJob, attempt.job)
@@ -1308,6 +1177,22 @@ class JobDispatcher:
                 except EntityNotFoundError:
                     raise e from e
         raise RuntimeError("_save_attempt_status did not save or skip the attempt")
+
+    async def _save_job_status(self, attempt: HelixJobAttempt) -> None:
+        """Copy the attempt's status onto its job so list filters, sorts and paging run in the store."""
+        # A caller-scoped read strips the stored auth context, and an update would write that back.
+        store = self.store.as_service("jobs", internal=True)
+        for try_number in range(2):
+            job = await store.get_by_id(HelixJob, attempt.job)
+            if job.current_attempt_id != attempt.id or job.status == attempt.status:
+                return
+            job.status = attempt.status
+            try:
+                await store.update(job)
+                return
+            except EntityConflictError:
+                if try_number > 0:
+                    raise
 
     async def update_job_status_details(
         self, job_name: str, workspace: str, status_details: Dict[str, Any]
@@ -1433,6 +1318,7 @@ class JobDispatcher:
             )
             # Update job with new attempt ID
             job_entity.current_attempt_id = next_attempt.id
+            job_entity.status = next_attempt.status
             job_entity = await self.store.update(job_entity)
             await self._start_attempt(job_entity, next_attempt)
             operations_counter.add(1, attributes={"operation": "rerun_job"})

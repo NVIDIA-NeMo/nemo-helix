@@ -54,6 +54,10 @@ class HelixJob(EntityBase):
         description="Mutable job behavior. This is not part of the execution spec.",
     )
     current_attempt_id: Optional[str] = Field(default=None, description="Current Attempt ID")
+    status: Optional[HelixJobStatus] = Field(
+        default=None,
+        description="Copy of the current attempt's status so list filters and sorts run in the store",
+    )
     fileset: str = Field(..., description="Fileset ID for storing job artifacts (logs, results)")
     output_location: Optional[str] = Field(
         default=None,
