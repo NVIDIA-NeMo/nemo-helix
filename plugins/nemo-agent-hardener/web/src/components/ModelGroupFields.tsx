@@ -180,7 +180,7 @@ const CredentialedGroupFields: FC<CredentialedGroupProps> = ({
       const res = await validate.mutateAsync({
         workspace,
         data: {
-          model: choice.model ?? undefined,
+          model: choice.model || defaultModel || undefined,
           base_url: choice.base_url || defaultBaseUrl || '',
           api_key_secret: choice.api_key_secret || fallbackKeySecret || undefined,
         },
