@@ -531,14 +531,14 @@ class JobDispatcher:
 
         # IN-MEMORY JOIN: load each job's current attempt, then evaluate the full
         # (status-aware) filter tree against a virtual entity carrying the status.
+        attempts_by_id = await self._list_current_attempts(response.data, workspace)
         job_outputs: list[HelixJobResponse] = []
         for job in response.data:
             if not job.current_attempt_id:
                 continue
 
-            try:
-                attempt = await self.store.get_by_id(HelixJobAttempt, job.current_attempt_id)
-            except EntityNotFoundError:
+            attempt = attempts_by_id.get(job.current_attempt_id)
+            if attempt is None:
                 logger.warning(f"Attempt {job.current_attempt_id} not found for job {job.id}")
                 continue
 
@@ -746,6 +746,19 @@ class JobDispatcher:
         async with asyncio.TaskGroup() as tg:
             tasks = [tg.create_task(self.get_attempt(aid)) for aid in aid_list]
         return [t.result() for t in tasks]
+
+    async def _list_current_attempts(self, jobs: list[HelixJob], workspace: str) -> dict[str, HelixJobAttempt]:
+        """Fetch the current attempt of every job in one store query, keyed by attempt ID."""
+        attempt_ids = [job.current_attempt_id for job in jobs if job.current_attempt_id]
+        if not attempt_ids:
+            return {}
+        response = await self.store.list(
+            HelixJobAttempt,
+            filter_operation=ComparisonOperation(field="id", operator=FilterOperator.IN, value=attempt_ids),
+            page_size=len(attempt_ids),
+            workspace=workspace,
+        )
+        return {attempt.id: attempt for attempt in response.data}
 
     async def _gather_jobs(self, job_ids: set[str]) -> list[Optional[HelixJob]]:
         """Fetch all jobs by ID concurrently using TaskGroup."""

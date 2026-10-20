@@ -2748,6 +2748,29 @@ async def test_list_jobs_status_not_forwarded_to_entity_store(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("job_count", [1, 6])
+async def test_list_jobs_store_calls_do_not_grow_with_page_size(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    job_count: int,
+):
+    for i in range(job_count):
+        await _make_job(mock_dispatcher, mock_store, f"job-{i}", HelixJobStatus.ACTIVE)
+
+    with (
+        patch.object(mock_store, "list", side_effect=mock_store.list) as list_spy,
+        patch.object(mock_store, "get_by_id", side_effect=mock_store.get_by_id) as get_by_id_spy,
+    ):
+        jobs, _ = await mock_dispatcher.list_jobs(
+            parsed=ParsedFilter(operation=None), workspace=DEFAULT_WORKSPACE, limit=job_count, offset=0
+        )
+
+    assert len(jobs) == job_count
+    assert [call.args[0] for call in list_spy.call_args_list] == [HelixJob, HelixJobAttempt]
+    get_by_id_spy.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_list_jobs_filter_name_like(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
