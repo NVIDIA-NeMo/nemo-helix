@@ -185,8 +185,13 @@ def build_images(
         sleep(poll_seconds)
         for ref, build in pending.items():
             if build.status not in TERMINAL_BUILD_STATUSES:
+                # Requesting again repairs a build whose Job died. A new attempt means this one ended: report
+                # how, instead of following a retry of a build that failed.
                 workspace, name, digest = _split_ref(ref)
-                pending[ref] = evaluator.tasks.get_image_build(name, build.id, revision=digest, workspace=workspace)
+                current = evaluator.tasks.build_images(name, revision=digest, workspace=workspace)
+                if current.id != build.id:
+                    current = evaluator.tasks.get_image_build(name, build.id, revision=digest, workspace=workspace)
+                pending[ref] = current
     failed = {ref: build for ref, build in pending.items() if build.status != "ready"}
     images = sum(len(build.images) for build in pending.values())
     echo(f"Image builds: {len(pending) - len(failed)} tasks ready ({images} images)")
@@ -218,7 +223,13 @@ def submit_run(
             sleep(2**attempt)
             continue
         if response.status_code >= 400:
-            raise RuntimeError(f"submit failed ({response.status_code}): {_detail(response)}")
+            message = f"submit failed ({response.status_code}): {_detail(response)}"
+            if response.status_code >= 500 and body.get("idempotency_key"):
+                # The run may already be accepted: only the same key finishes it instead of starting another.
+                message += (
+                    f"; to finish this run, rerun the same command with --idempotency-key {body['idempotency_key']}"
+                )
+            raise RuntimeError(message)
         return response.json()
     raise AssertionError("unreachable")
 
@@ -237,13 +248,17 @@ def run_request(
     agent: str,
     sandbox_policy: str,
     dispatcher_profile: str | None,
+    idempotency_key: str | None = None,
 ) -> TasksetRunInput:
-    """The run request: ``--spec-file``'s with its tasks replaced, or ``--agent`` with default execution."""
+    """The run request: ``--spec-file``'s with its tasks replaced, or ``--agent`` with default execution.
+
+    The idempotency key is ``idempotency_key``, else the spec file's, else a new one.
+    """
     if spec_file is not None:
         request = TasksetRunInput.model_validate(json.loads(spec_file.read_text()))
         spec = request.spec.model_copy(update={"tasks": TasksetRef(taskset_ref)})
         data = request.model_dump(mode="json", exclude={"spec"}) | {"spec": spec.model_dump(mode="json")}
-        data["idempotency_key"] = data.get("idempotency_key") or str(uuid.uuid4())
+        data["idempotency_key"] = idempotency_key or data.get("idempotency_key") or str(uuid.uuid4())
         return TasksetRunInput.model_validate(data)
     execution: dict[str, Any] = {"sandbox_policy": sandbox_policy}
     if dispatcher_profile is not None:
@@ -253,7 +268,7 @@ def run_request(
             tasks=TasksetRef(taskset_ref), target=HarborRunnerTarget(source=HarborBuiltinAgentSource(name=agent))
         ),
         execution=HarborTaskJobsExecutionInput.model_validate(execution),
-        idempotency_key=str(uuid.uuid4()),
+        idempotency_key=idempotency_key or str(uuid.uuid4()),
     )
 
 
@@ -276,6 +291,11 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
             False,
             "--no-build-images",
             help="Don't request or wait for image builds here; submit starts a first build for a task that has none.",
+        ),
+        idempotency_key: str | None = typer.Option(
+            None,
+            "--idempotency-key",
+            help="Key that makes a resubmit return the same run; default: a new one. A failed submit prints its key.",
         ),
         list_tasks: bool = typer.Option(False, "--list-tasks", help="Print the selectable tasks and exit."),
         workspace: str | None = typer.Option(
@@ -326,6 +346,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 agent=agent,
                 sandbox_policy=sandbox_policy,
                 dispatcher_profile=dispatcher_profile,
+                idempotency_key=idempotency_key,
             )
             status = submit_run(
                 client, request.model_dump(mode="json", exclude_none=True), workspace=workspace, echo=echo

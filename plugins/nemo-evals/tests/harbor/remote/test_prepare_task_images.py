@@ -267,6 +267,12 @@ async def test_settled_preparation_is_returned_unchanged(clients, sandbox_policy
         # Its build has only a main image, so only the archive shows it's a compose task.
         ({"environment": {}}, "services: {main: {}}", "multi_container_not_yet_supported"),
         ({"environment": {"os": "windows"}}, None, "windows_unsupported"),
+        # A CPU agent with a GPU verifier would still ask OpenSandbox for a GPU.
+        (
+            {"environment": {"gpus": 0}, "verifier": {"environment_mode": "separate", "environment": {"gpus": 1}}},
+            None,
+            "gpu_unsupported",
+        ),
     ],
 )
 async def test_check_rejects_what_kubernetes_runs_cannot_take(clients, archive, sandbox_policy, config, compose, code):
@@ -278,3 +284,12 @@ async def test_check_rejects_what_kubernetes_runs_cannot_take(clients, archive, 
 async def test_check_passes_a_dockerfile_task_without_starting_a_build(clients, archive, sandbox_policy, jobs):
     assert await prepare_task_images.check(task("f" * 64), policy=sandbox_policy, clients=clients) is None
     assert not jobs.created
+
+
+async def test_check_reports_a_files_outage_as_retryable(clients, sandbox_policy, monkeypatch):
+    async def read(files, source):
+        raise InternalServerError(httpx.Response(503, json={"detail": "files is down"}))
+
+    monkeypatch.setattr(preparation, "read_task_archive", read)
+    with pytest.raises(ImagePreparationUnavailableError, match="files is down"):
+        await prepare_task_images.check(task("f" * 64), policy=sandbox_policy, clients=clients)

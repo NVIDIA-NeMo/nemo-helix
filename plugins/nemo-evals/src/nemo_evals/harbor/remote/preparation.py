@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Protocol, Self, get_args
 
+from harbor.models.task.verifier_mode import resolve_effective_verifier_env_config
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy, ResourceClass
 from nemo_evals.image_builds.models import ImageBuild, ImageBuildRequest
@@ -166,7 +167,7 @@ class ImageBuildPreparer:
     async def check(
         self, task: ResolvedTask, *, policy: ResolvedHarborSandboxPolicy, clients: PreparationClients
     ) -> PreparationErrorInfo | None:
-        """Reject non-Harbor, GPU and compose tasks.
+        """Reject non-Harbor, GPU (agent or separate verifier) and compose tasks.
 
         Build roles can't show compose: a compose file whose only service is ``main`` builds just ``main``.
         So the archive is still read, for its compose file only.
@@ -175,13 +176,16 @@ class ImageBuildPreparer:
             return PreparationErrorInfo(code="invalid_task_config", detail=f"task {task.id} is not a Harbor task")
         try:
             task_config = parse_task_config(task.spec.config)
-            if task_config.environment.gpus:
+            verifier = resolve_effective_verifier_env_config(task_config, None)
+            if task_config.environment.gpus or (verifier is not None and verifier.gpus):
                 return PreparationErrorInfo(
                     code="gpu_unsupported", detail="GPU tasks aren't supported on Kubernetes runs yet"
                 )
             archive = await read_task_archive(clients.files, task.spec.source)
         except ImagePlanError as exc:
             return _plan_error(exc)
+        except NemoHTTPError as exc:
+            raise ImagePreparationUnavailableError(f"could not read task {task.id}'s archive: {exc}") from exc
         if archive.compose is not None:
             return PreparationErrorInfo(
                 code="multi_container_not_yet_supported", detail="compose tasks aren't supported on Kubernetes runs yet"

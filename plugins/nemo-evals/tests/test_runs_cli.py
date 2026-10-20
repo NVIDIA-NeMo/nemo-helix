@@ -79,24 +79,34 @@ def test_selection_suffix_ignores_order():
 
 
 class _Tasks:
-    """Image builds that finish on the second poll; ``fail`` names tasks whose build fails."""
+    """Image builds that finish on the second poll.
 
-    def __init__(self, fail: frozenset[str] = frozenset()) -> None:
-        self.fail = fail
+    ``fail`` names tasks whose build fails; ``abandon`` names tasks whose first attempt's Job dies, so
+    requesting again records it failed and starts attempt 2, as ``request_build`` does.
+    """
+
+    def __init__(self, fail: frozenset[str] = frozenset(), abandon: frozenset[str] = frozenset()) -> None:
+        self.fail, self.abandon = fail, abandon
         self.requested: list[str] = []
         self.polls: dict[str, int] = {}
 
     def build_images(self, name, *, revision, workspace):
         self.requested.append(f"{workspace}/{name}#{revision}")
-        return SimpleNamespace(id="1", status="pending", images=[], error=None)
+        polls = self.polls[name] = self.polls.get(name, -1) + 1
+        if polls == 0:
+            return SimpleNamespace(id="1", status="pending", images=[], error=None)
+        if name in self.abandon:
+            return SimpleNamespace(id="2", status="pending", images=[], error=None)
+        if polls < 2:
+            return SimpleNamespace(id="1", status="running", images=[], error=None)
+        if name in self.fail:
+            return SimpleNamespace(id="2", status="pending", images=[], error=None)  # failed, so a new attempt
+        return SimpleNamespace(id="1", status="ready", images=[object()], error=None)
 
     def get_image_build(self, name, build_id, *, revision, workspace):
-        self.polls[name] = self.polls.get(name, 0) + 1
-        if self.polls[name] < 2:
-            return SimpleNamespace(id=build_id, status="running", images=[], error=None)
-        if name in self.fail:
-            return SimpleNamespace(id=build_id, status="failed", images=[], error="no Dockerfile")
-        return SimpleNamespace(id=build_id, status="ready", images=[object()], error=None)
+        assert build_id == "1"
+        error = "Job ended (error) without a result" if name in self.abandon else "no Dockerfile"
+        return SimpleNamespace(id=build_id, status="failed", images=[], error=error)
 
 
 def test_build_images_waits_for_every_task_prebuilt_included():
@@ -104,15 +114,16 @@ def test_build_images_waits_for_every_task_prebuilt_included():
     refs = ["default/dockerfile#r1", "default/prebuilt#r2"]
     evaluator = cast(Evaluator, SimpleNamespace(tasks=tasks))
     build_images(evaluator, refs, poll_seconds=0, echo=lines.append, sleep=lambda _: None)
-    assert tasks.requested == refs
     assert tasks.polls == {"dockerfile": 2, "prebuilt": 2}
     assert lines == ["Image builds: 2 tasks ready (2 images)"]
 
 
-def test_build_images_reports_a_failed_build():
-    tasks = _Tasks(fail=frozenset({"broken"}))
+@pytest.mark.parametrize(("kind", "error"), [("fail", "no Dockerfile"), ("abandon", "without a result")])
+def test_build_images_stops_at_the_attempt_that_ended(kind, error):
+    """Polling requests again, which repairs a dead Job; a new attempt means the followed one ended."""
+    tasks = _Tasks(**{kind: frozenset({"broken"})})
     evaluator = cast(Evaluator, SimpleNamespace(tasks=tasks))
-    with pytest.raises(RuntimeError, match="default/broken#r1: no Dockerfile"):
+    with pytest.raises(RuntimeError, match=f"default/broken#r1: .*{error}"):
         build_images(evaluator, ["default/broken#r1"], poll_seconds=0, echo=print, sleep=lambda _: None)
 
 
@@ -155,6 +166,41 @@ def test_submit_retries_a_503_with_the_same_body():
         client, {"idempotency_key": "k"}, workspace="default", echo=lambda _: None, sleep=lambda _: None
     )
     assert status["run_id"] == "run-1" and len(bodies) == 2 and bodies[0] == bodies[1]
+
+
+def test_a_failed_submit_names_its_key_so_a_rerun_finishes_the_run():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"detail": "task Jobs of run run-1 not created"})
+
+    client = NemoClient(
+        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    with pytest.raises(RuntimeError, match="rerun the same command with --idempotency-key k-123$"):
+        submit_run(client, {"idempotency_key": "k-123"}, workspace="default", echo=lambda _: None, sleep=lambda _: None)
+
+
+@pytest.mark.parametrize("spec_key", [None, "from-file"])
+def test_an_explicit_idempotency_key_wins(tmp_path, spec_key):
+    ref = "default/t#" + "a" * 64
+    assert (
+        run_request(
+            ref, spec_file=None, agent="oracle", sandbox_policy="p", dispatcher_profile=None, idempotency_key="k-123"
+        ).idempotency_key
+        == "k-123"
+    )
+    spec = tmp_path / "run.json"
+    body = {
+        "spec": {"tasks": "default/full", "target": {"kind": "harbor"}},
+        "execution": {"sandbox_policy": "p"},
+        "idempotency_key": spec_key,
+    }
+    spec.write_text(json.dumps(body))
+    explicit = run_request(
+        ref, spec_file=spec, agent="", sandbox_policy="", dispatcher_profile=None, idempotency_key="k-123"
+    )
+    assert explicit.idempotency_key == "k-123"
+    default = run_request(ref, spec_file=spec, agent="", sandbox_policy="", dispatcher_profile=None)
+    assert default.idempotency_key == (spec_key or default.idempotency_key) and default.idempotency_key
 
 
 # --- runs status / runs results ----------------------------------------------------------------------------
