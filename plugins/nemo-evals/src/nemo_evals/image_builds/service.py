@@ -136,7 +136,7 @@ class ImageBuildService:
             task=task,
             revision_digest=task_revision.content_hash,
             attempt=attempt,
-            job=build_job_name(task, task_revision.content_hash, attempt),
+            job=build_job_name(task, task_revision.id, attempt),
             allowed_registries=request.allowed_registries,
         )
         build._parent = task_revision.id
@@ -216,8 +216,14 @@ class ImageBuildService:
     async def _ensure_job(self, build: TaskImageBuildEntity) -> None:
         """Create the build's Job, or confirm the Job already under its name is this build's."""
         workspace, _, task = build.task.partition("/")
+        if not build.parent:
+            raise ValueError("An image build must belong to an exact task revision")
         spec = TaskImageBuildSpec(
-            workspace=workspace, task=task, revision_digest=build.revision_digest, attempt=build.attempt
+            workspace=workspace,
+            task=task,
+            revision_id=build.parent,
+            revision_digest=build.revision_digest,
+            attempt=build.attempt,
         )
         try:
             await self.jobs.create(task_image_build_job_request(spec, name=build.job))

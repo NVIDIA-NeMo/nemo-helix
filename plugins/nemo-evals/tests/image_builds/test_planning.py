@@ -160,10 +160,48 @@ def test_a_compose_main_image_replaces_the_docker_image() -> None:
 def test_a_docker_image_wins_over_a_compose_main_build() -> None:
     """Harbor builds over a `docker_image` only with `force_build`, which a trial never sets."""
     config = {"environment": {"docker_image": "ghcr.io/org/sort:1"}}
-    compose = "services:\n  main:\n    build: {context: ., dockerfile: Dockerfile.custom}\n"
+    compose = (
+        "services:\n  main:\n    build: {context: ., dockerfile: Dockerfile.custom, target: test, args: {MODE: test}}\n"
+    )
     archive = _archive("environment/Dockerfile", "environment/Dockerfile.custom", compose=compose)
 
     assert _plan(config, archive, ["ghcr.io"]) == [("main", "prebuilt", None, None, "ghcr.io/org/sort:1")]
+
+
+@pytest.mark.parametrize("service", ["main", "db"])
+@pytest.mark.parametrize(
+    "option", ["target: test", "args: {MODE: test}", "args: [MODE=test]", "additional_contexts: {other: .}"]
+)
+def test_compose_rejects_build_options_builder_cannot_preserve(service: str, option: str) -> None:
+    compose = f"services:\n  {service}:\n    build: {{context: ., {option}}}\n"
+    archive = _archive("environment/Dockerfile", compose=compose)
+
+    with pytest.raises(ImagePlanError) as error:
+        plan_images({}, archive, allowed_registries=[])
+
+    assert error.value.code == "unsupported_compose_build_option"
+    assert service in error.value.detail and option.split(":", 1)[0] in error.value.detail
+
+
+def test_compose_error_reports_option_names_without_argument_values() -> None:
+    archive = _archive(
+        "environment/Dockerfile",
+        compose="services:\n  main:\n    build: {args: {KEY: do-not-display-this-value}, target: test}\n",
+    )
+    with pytest.raises(ImagePlanError) as error:
+        plan_images({}, archive, allowed_registries=[])
+
+    assert error.value.code == "unsupported_compose_build_option"
+    assert "args, target" in error.value.detail
+    assert "do-not-display-this-value" not in str(error.value)
+
+
+def test_nonstring_compose_build_keys_are_malformed() -> None:
+    archive = _archive("environment/Dockerfile", compose="services:\n  main:\n    build: {1: bad}\n")
+    with pytest.raises(ImagePlanError) as error:
+        plan_images({}, archive, allowed_registries=[])
+
+    assert error.value.code == "invalid_compose_file"
 
 
 def test_a_compose_service_named_like_the_separate_verifier_is_refused() -> None:
