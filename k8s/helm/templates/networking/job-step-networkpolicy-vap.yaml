@@ -53,12 +53,15 @@ spec:
         (peer.podSelector.matchLabels == {'nhx.nvidia.com/managed_by': 'jobs-controller', 'nhx.nvidia.com/job_id': variables.jobId} ||
         (peer.podSelector.matchLabels.size() == 1 && peer.podSelector.matchLabels.all(k, peer.podSelector.matchLabels[k] == variables.jobId)))))
       message: Ingress peers may only be same-namespace pods labelled with the target job's id.
+    {{- $jobSteps := .Values.networkPolicies.jobSteps | default dict }}
+    {{- $ports := dig "allowedIngressTcpPorts" (list 51234) $jobSteps }}
+    {{- $ranges := dig "allowedIngressTcpPortRanges" (list (dict "low" 3000 "high" 4999)) $jobSteps }}
     - expression: >-
         request.operation == 'DELETE' || !has(object.spec.ingress) ||
         object.spec.ingress.all(rule, has(rule.ports) ?
         rule.ports.all(p, (!has(p.protocol) || p.protocol == 'TCP') && (
-        (!has(p.endPort) && p.port in {{ .Values.networkPolicies.jobSteps.allowedIngressTcpPorts | toJson }}) ||
-        {{ .Values.networkPolicies.jobSteps.allowedIngressTcpPortRanges | toJson }}.exists(r, p.port >= r.low && (has(p.endPort) ? p.endPort >= p.port && p.endPort < r.high : p.port < r.high)))) :
+        (!has(p.endPort) && p.port in {{ $ports | toJson }}) ||
+        {{ $ranges | toJson }}.exists(r, p.port >= r.low && (has(p.endPort) ? p.endPort >= p.port && p.endPort < r.high : p.port < r.high)))) :
         rule.from.all(peer, peer.podSelector.matchLabels == {'nhx.nvidia.com/managed_by': 'jobs-controller', 'nhx.nvidia.com/job_id': variables.jobId}))
       message: Only the job's own pods may reach every port; other workloads may reach only the allowed TCP ports.
 ---
