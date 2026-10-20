@@ -10,6 +10,8 @@ selection, port), and seeds the frozen validate-only baseline.
 from __future__ import annotations
 
 import logging
+import re
+import shlex
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -17,7 +19,6 @@ from typing import Any
 import yaml
 from nemo_agent_hardener_plugin.agent_resolver import (
     current_agent_timestamp,
-    fabric_start_command,
     gateway_backend,
     parse_agent_ref,
     resolve_agent_to_manifest,
@@ -108,17 +109,15 @@ def _apply_manifest_overrides(manifest: dict[str, Any], data: dict[str, Any]) ->
     must be re-injected here, as agent-hardener's native top-level ``garak:`` block and ``overrides.defenders``
     list. An empty defender selection leaves agent-hardener's defaults untouched.
     """
+    # Validate listener changes before mutating any overrides (including attacker settings).
+    if "port" in data and data["port"] is not None:
+        agent = manifest.get("agent")
+        if not isinstance(agent, dict):
+            raise AgentHardenerRunError(CATEGORY_MANIFEST, "Victim manifest requires an agent object.")
+        _apply_agent_port(agent, data["port"])
     garak = INTENSITY_GARAK.get(str(data.get("attack_intensity") or "standard"))
     if garak:
         manifest["garak"] = garak
-    # Apply an explicit victim port only when set (stored on the manifest or a per-run override); otherwise
-    # leave the port the agent resolver derived from the running deployment.
-    if data.get("port"):
-        agent = manifest.setdefault("agent", {})
-        port = int(data["port"])
-        if agent.get("start_command") == fabric_start_command(agent.get("port", 8000)):
-            agent["start_command"] = fabric_start_command(port)
-        agent["port"] = port
     safety_model = _safety_model(data)
     enabled = [key for key in (data.get("defenders") or []) if key in DEFENDER_ENTRIES]
     if not enabled:
@@ -149,6 +148,57 @@ def _apply_manifest_overrides(manifest: dict[str, Any], data: dict[str, Any]) ->
         manifest.setdefault("overrides", {})["defenders"] = entries
 
 
+# Only literal numeric arguments on a simple command are supported. Do not reinterpret shell scripts.
+_START_COMMAND_PORT = re.compile(r"(?P<prefix>(?:^|\s)--port(?:=|\s+))(?P<quote>['\"]?)[0-9]+(?P=quote)(?=$|\s)")
+_START_COMMAND_PORT_OPTION = re.compile(r"(?:^|\s)--port(?:=|\s|$)")
+
+
+def _apply_agent_port(agent: dict[str, Any], port: Any) -> None:
+    """Update routing and explicit listener declarations together, or leave the agent untouched."""
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise AgentHardenerRunError(CATEGORY_MANIFEST, "Victim port must be an integer between 1 and 65535.")
+    # Reapplying a saved port does not require interpreting a custom listener command.
+    if agent.get("port") == port:
+        return
+    command = agent.get("start_command")
+    env = agent.get("env")
+    if env is not None and not isinstance(env, dict):
+        raise AgentHardenerRunError(CATEGORY_MANIFEST, "Victim agent.env must be an object to override its port.")
+    if command is not None and not isinstance(command, str):
+        raise AgentHardenerRunError(CATEGORY_MANIFEST, "Victim agent.start_command must be a string.")
+    try:
+        tokens = shlex.split(command or "")
+    except ValueError as exc:
+        raise AgentHardenerRunError(CATEGORY_MANIFEST, "Cannot override victim port in a malformed command.") from exc
+    token_options = [token for token in tokens if token == "--port" or token.startswith("--port=")]
+    command_ports = list(_START_COMMAND_PORT.finditer(command or ""))
+    options = list(_START_COMMAND_PORT_OPTION.finditer(command or ""))
+    if len(options) > 1 or len(options) != len(command_ports) or len(token_options) != len(command_ports):
+        raise AgentHardenerRunError(
+            CATEGORY_MANIFEST,
+            "Cannot override victim port: start_command must declare at most one literal numeric --port option.",
+        )
+    if command and any(character in command for character in ";|&<>`$\\()#\n\r"):
+        raise AgentHardenerRunError(
+            CATEGORY_MANIFEST,
+            "Cannot override victim port in a shell expression; use a simple command with a numeric --port option.",
+        )
+    has_port_env = isinstance(env, dict) and "PORT" in env
+    if not command_ports and not has_port_env:
+        raise AgentHardenerRunError(
+            CATEGORY_MANIFEST,
+            "Cannot override victim port: declare a numeric --port option or agent.env.PORT for the listener.",
+        )
+    updated_command = _START_COMMAND_PORT.sub(
+        lambda match: f"{match.group('prefix')}{match.group('quote')}{port}{match.group('quote')}", command or ""
+    )
+    agent["port"] = port
+    if has_port_env:
+        env["PORT"] = str(port)
+    if command is not None:
+        agent["start_command"] = updated_command
+
+
 def _materialize_manifest(
     sdk: Any, manifest_id: str, ctx: JobContext, config_overrides: dict[str, Any] | None = None
 ) -> str:
@@ -170,7 +220,11 @@ def _materialize_manifest(
         .get_entity_by_name(name=manifest_id, entity_type=AGENT_HARDENER_MANIFEST_TYPE, workspace=ctx.workspace)
         .data()
     )
-    data = {**(getattr(record, "data", {}) or {}), **(config_overrides or {})}
+    stored_data = dict(getattr(record, "data", {}) or {})
+    data = {**stored_data, **(config_overrides or {})}
+    # Legacy records used zero for an underived port. Explicit run-level zero remains invalid.
+    if stored_data.get("port") == 0 and not (config_overrides and "port" in config_overrides):
+        data.pop("port", None)
     manifest_dir = ctx.storage.persistent
     manifest_dir.mkdir(parents=True, exist_ok=True)
     is_project = (data.get("source_type") or "agent") == "project"

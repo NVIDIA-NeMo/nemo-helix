@@ -354,6 +354,16 @@ uv run nemo agent-hardener synth-benign --manifest-id react-agent --yes    # int
 uv run nemo agent-hardener synth-benign --manifest-id react-agent --no-interactive   # CI: rules only
 ```
 
+### Victim port overrides
+
+Victim ports must be between 1 and 65535. A run-level port override updates both the
+probe destination and the listener's literal numeric `--port` argument and/or
+`agent.env.PORT`. Generated Fabric commands are supported, including non-default
+original ports. Custom listeners must declare one of those conventions; ambiguous
+arguments, shell expressions, and unsupported commands are rejected rather than
+silently probing a port where nothing listens. Keeping the existing port does not
+rewrite a custom command. Overrides apply only to that run, not to the saved target.
+
 ### War-game a local NAT project
 
 No deployed agent needed — point `init` at the project directory instead:
