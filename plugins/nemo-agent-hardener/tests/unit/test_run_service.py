@@ -754,6 +754,7 @@ def test_scoped_manifest_pins_exact_native_run_and_publishes_its_artifacts(
     assert scoped != manifest
     assert scoped.stat().st_mode & 0o777 == 0o600
     assert manifest.read_text(encoding="utf-8") == original
+    assert capture.run_dir is not None
     assert capture.run_dir == project / ".agent-hardener" / "run-logs" / run_id
 
     hitlog = capture.run_dir / "round_1" / "garak" / "agent-breaker.uuid.hitlog.jsonl"

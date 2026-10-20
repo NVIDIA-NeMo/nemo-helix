@@ -174,6 +174,7 @@ def test_compile_training_step_sets_shm_by_finetuning_type(
         output=_output(output_type=output_type),
     )
     step = compile_training_step(job_output, base_env=[], me=_make_mock_model_entity())
+    assert step.executor.provider == "gpu"
     assert step.executor.resources.shm_size == shm_size
 
 
