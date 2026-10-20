@@ -18,7 +18,7 @@ ARG SAFE_SYNTHESIZER_RUNTIME_PACKAGE="nemo-safe-synthesizer[engine,cu129]==0.1.1
 ARG FLASHINFER_CUBIN_INDEX_URL="https://flashinfer.ai/whl/"
 ARG FLASHINFER_CU129_INDEX_URL="https://flashinfer.ai/whl/cu129"
 ARG PYTORCH_CU129_INDEX_URL="https://download.pytorch.org/whl/cu129"
-ARG VLLM_CU129_INDEX_URL="https://wheels.vllm.ai/0.26.0/cu129"
+ARG VLLM_CU129_INDEX_URL="https://wheels.vllm.ai/0.24.0/cu129"
 
 # =============================================================================
 # uv binary
@@ -97,6 +97,9 @@ LABEL org.opencontainers.image.title="Safe Synthesizer Tasks" \
 # sources, so plugin-only edits do not invalidate the large dependency layers.
 COPY plugins/nemo-safe-synthesizer/constraints.txt /tmp/safe-synthesizer-constraints.txt
 RUN uv venv /opt/venv
+# Override NSS 0.1.13's generation pins together: vLLM 0.26.0 unconditionally
+# warms up a CuTe DSL router kernel on Hopper that fails to compile. 0.24.0
+# avoids that warmup and uses the same PyTorch 2.11 / CUDA 12.9 training stack.
 RUN printf '%s\n' \
         flashinfer-cubin \
         flashinfer-jit-cache \
@@ -128,10 +131,10 @@ RUN printf '%s\n' \
         'aiohttp>=3.14.3,<4' \
         'cryptography>=50.0.0,<51' \
         'pyarrow>=23.0.1,<24' \
-        'vllm==0.26.0+cu129' \
-        'flashinfer-python==0.6.14' \
-        'flashinfer-cubin==0.6.14' \
-        'flashinfer-jit-cache==0.6.14+cu129' \
+        'vllm==0.24.0+cu129' \
+        'flashinfer-python==0.6.12' \
+        'flashinfer-cubin==0.6.12' \
+        'flashinfer-jit-cache==0.6.12+cu129' \
         > /tmp/safe-synthesizer-overrides.txt
 
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -202,8 +205,8 @@ RUN mkdir -p docs && \
 # The runtime layer above installs CVE-patched cryptography/pyarrow; do not let
 # the workspace lock downgrade them during plugin sync.
 # Preserve the separately resolved training stack too: the workspace lock has
-# different PEFT/Accelerate versions. vLLM and FlashInfer match NSS 0.1.13's
-# cu129 generation extras.
+# different PEFT/Accelerate versions. Preserve the vLLM/FlashInfer rollback
+# overrides above as well.
 RUN --mount=type=cache,target=/root/.cache/uv \
     UV_CACHE_DIR=/root/.cache/uv uv sync --package nemo-safe-synthesizer-plugin --no-dev --no-editable --inexact \
         --no-install-package nemo-helix \
@@ -274,9 +277,10 @@ COPY docker/scripts/cve-cleanup.sh /bin/
 # compiler toolchain available for runtime JIT/native extension builds.
 RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/remove-listed-files.py,readonly \
     --mount=type=bind,source=docker/removals/files/base/cve-cleanup-runtime.txt,target=/tmp/file-removals.txt,readonly \
+    --mount=type=bind,source=docker/removals/files/final/safe-synthesizer-codecs.txt,target=/tmp/codec-removals.txt,readonly \
     apt-mark manual gcc g++ make libc6-dev && \
     sh /bin/cve-cleanup.sh && \
-    python /tmp/remove-listed-files.py /tmp/file-removals.txt && \
+    python /tmp/remove-listed-files.py /tmp/file-removals.txt /tmp/codec-removals.txt && \
     printf 'int main(void) { return 0; }\n' | gcc -x c - -o /tmp/gcc-check && \
     rm -f /tmp/gcc-check
 RUN mkdir -p "${XDG_CACHE_HOME}" "${MPLCONFIGDIR}" "${OUTLINES_CACHE_DIR}" && \
