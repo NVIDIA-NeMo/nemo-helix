@@ -54,7 +54,9 @@ class FilesetOutput(BaseModel):
     custom_fields: dict[str, Any]
     project: str
     created_at: str
+    created_by: str | None = Field(default=None, description="Principal id for the fileset creator.")
     updated_at: str
+    updated_by: str | None = Field(default=None, description="Principal id for the last fileset update.")
 
 
 class FilesetFileOutput(BaseModel):
