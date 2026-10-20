@@ -114,6 +114,8 @@
     # via
     #   nemohelix
     #   nhx-platform
+-e ./packages/nhx_sandbox ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+    # via nemo-evals-plugin
 -e ./packages/sandboxed_gym ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via nhx-evals-sdk
 -e ./plugins/nemo-agent-optimization ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
@@ -858,6 +860,7 @@ docker==7.2.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   ngcsdk
     #   nhx-intake
     #   nhx-jobs
+    #   nhx-platform-runner
 docstring-parser==0.18.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:292510982205c12b1248696f44959db3cdd1740237a968ea1e2e7a900eeb2015 \
     --hash=sha256:b3fcbed555c47d8479be0796ef7e19c2670d428d72e96da63f3a40122860374b
@@ -3052,6 +3055,7 @@ pydantic==2.13.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   nhx-jobs
     #   nhx-models
     #   nhx-rl
+    #   nhx-sandbox
     #   nhx-unsloth
     #   nooa
     #   nvidia-nat-atif

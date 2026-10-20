@@ -576,11 +576,18 @@ paths:
         \ HTTP response whose status distinguishes acceptance from replay.\n    caller:\
         \ Effective authenticated principal, supplied by the platform dependency.\n\
         \    service: Caller-delegated request-scoped acceptance service.\n\nReturns:\n\
-        \    Public run status with advisory overlap warnings; 201 for acceptance\
-        \ or 200\n    for replay. Submission creates no Jobs or member records.\n\n\
-        Raises:\n    RequestValidationError: The execution budget exceeds the operator\
-        \ maximum.\n    HTTPException: Source denial (403), conflicting key (409),\
-        \ resolution rejection\n        (422), or a sanitized unexpected failure (500)."
+        \    Public run status with advisory overlap warnings and one notice per task\
+        \ Job;\n    201 for acceptance or 200 for replay. Submission creates one task\
+        \ Job per task\n    right after acceptance; a keyed replay creates any that\
+        \ are still missing.\n\nRaises:\n    RequestValidationError: The execution\
+        \ budget exceeds the operator maximum.\n    HTTPException: Source denial (403),\
+        \ conflicting key (409), resolution rejection\n        (422), an unavailable\
+        \ image build service before acceptance (503, safe to resend), missing\n \
+        \       task Jobs after acceptance (503), or a sanitized unexpected failure\
+        \ (500).\n        When the request omits idempotency_key, submit generates\
+        \ one. A 5xx then names it in the\n        detail and the ``x-idempotency-key``\
+        \ header and says not to retry automatically: the SDK\n        would resend\
+        \ the keyless request and accept a second run. Resubmit with that key instead."
       operationId: submit_taskset_run_apis_evals_v2_workspaces__workspace__agent_evaluate_runs_post
       parameters:
       - name: workspace
@@ -611,8 +618,11 @@ paths:
         '409':
           description: The idempotency key already belongs to a different request.
         '422':
-          description: Invalid request, excessive timeout, or missing or incompatible
-            source.
+          description: Invalid request, excessive timeout, missing or incompatible
+            source, unconfigured execution, or a task without images.
+        '503':
+          description: The run was accepted but some task Jobs weren't created; retry
+            the same request.
     get:
       tags:
       - Evals Plugin Taskset Run Routes
@@ -3052,8 +3062,7 @@ components:
           type: boolean
           title: Fail Fast
           description: Fail on the first metric error instead of recording an errored
-            score. On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks
-            budget can also fail the run and cancel remaining task Jobs.
+            score. On Kubernetes runs it fails that task's Job.
           default: false
         labels:
           additionalProperties:
@@ -3308,8 +3317,7 @@ components:
           type: boolean
           title: Fail Fast
           description: Fail on the first metric error instead of recording an errored
-            score. On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks
-            budget can also fail the run and cancel remaining task Jobs.
+            score. On Kubernetes runs it fails that task's Job.
           default: false
         labels:
           additionalProperties:
@@ -5405,32 +5413,13 @@ components:
           examples:
           - harbor-standard
         dispatcher_profile:
-          type: string
           title: Dispatcher Profile
           description: Name of a Jobs Service profile that decides where task Jobs
             run and what resources they get. Operators define the available profiles;
-            defaults to local-k8s, the profile the Helm chart ships.
-          default: local-k8s
+            omitted uses the first one they list.
           examples:
           - local-k8s
-        missing_prebuilt_image:
           type: string
-          enum:
-          - fail
-          - build
-          title: Missing Prebuilt Image
-          description: What to do when a task pins a prebuilt image (its docker_image)
-            and that image is no longer in the registry. 'fail' (default) fails that
-            task with image_unavailable. 'build' builds the image from the task's
-            Dockerfile instead and records the substitution; the result may differ
-            from the image the task author benchmarked, and a task without a Dockerfile
-            still fails. Does not apply to tasks without a pinned image, which are
-            always built from their Dockerfile, or to an image this run built that
-            disappears mid-run, which is always rebuilt.
-          default: fail
-          examples:
-          - fail
-          - build
         max_concurrent_task_jobs:
           title: Max Concurrent Task Jobs
           description: Maximum number of this run's task Jobs running at once. Omit
@@ -5439,20 +5428,6 @@ components:
           - 5
           type: integer
           minimum: 1.0
-        max_failed_tasks:
-          anyOf:
-          - type: integer
-            minimum: 0.0
-          - type: string
-            pattern: ^(100|[1-9]?\d)%$
-          title: Max Failed Tasks
-          description: Failed tasks the run tolerates, as a count or a percent of
-            the taskset's tasks. Once exceeded, the run fails and its remaining task
-            Jobs are cancelled. Submit resolves a percent into a count. Omit for no
-            limit.
-          examples:
-          - 3
-          - 10%
       additionalProperties: false
       type: object
       required:
@@ -5473,8 +5448,8 @@ components:
         It exists because these settings mean nothing on the Docker path: where task
         Jobs are
 
-        placed, which sandbox they may use, and when to give up on a run. Keeping
-        them in their
+        placed, which sandbox they may use, and how many run at once. Keeping them
+        in their
 
         own model, selected by ``kind``, lets future execution strategies add new
         models rather
@@ -5483,24 +5458,13 @@ components:
         runs.
 
 
-        Submit validates this input, resolves the percent form of ``max_failed_tasks``
-        into a
+        Submit resolves ``sandbox_policy`` and ``dispatcher_profile`` against the
+        operator''s
 
-        count, and stores the M1 execution caps and missing-image policy in the run''s
-        plan.
+        config and freezes them, the pinned dispatcher image and the concurrency cap
+        into the
 
-        In M1, ``sandbox_policy`` and ``dispatcher_profile`` participate in request
-        identity
-
-        only; their names are intentionally neither resolved nor stored while execution
-        is
-
-        unavailable. M2 Story 3 validates these selections and adds the resolved sandbox
-
-        policy, dispatcher profile and pinned dispatcher image as required plan fields
-        before
-
-        execution is enabled. Earlier development runs are deleted rather than migrated.'
+        run''s plan. Earlier development runs are deleted rather than migrated.'
     HelixJobListResultResponse:
       properties:
         data:
@@ -8192,13 +8156,13 @@ components:
         execution:
           allOf:
           - $ref: '#/components/schemas/HarborTaskJobsExecutionInput'
-          description: 'Kubernetes task Job settings: sandbox policy, dispatcher profile,
-            run-wide task Job concurrency and failure tolerance.'
+          description: 'Kubernetes task Job settings: sandbox policy, dispatcher profile
+            and run-wide task Job concurrency.'
         idempotency_key:
           title: Idempotency Key
-          description: Optional caller-supplied key, scoped to workspace and caller,
-            so retries of the same request return the accepted run. Omit for a new
-            keyless run.
+          description: Optional key, scoped to workspace and caller, so retries of
+            the same request return the accepted run. When omitted, submit generates
+            one and returns it as the run's idempotency_key.
           type: string
           maxLength: 256
           minLength: 1
@@ -8296,7 +8260,8 @@ components:
           type: string
         idempotency_key:
           title: Idempotency Key
-          description: Caller-supplied submit key; None for a keyless run.
+          description: 'Submit key: the caller''s, or the one submit generated when
+            the request omitted it.'
           type: string
       additionalProperties: false
       type: object
@@ -8398,7 +8363,8 @@ components:
           type: string
         idempotency_key:
           title: Idempotency Key
-          description: Caller-supplied submit key; None for a keyless run.
+          description: 'Submit key: the caller''s, or the one submit generated when
+            the request omitted it.'
           type: string
         warnings:
           items:

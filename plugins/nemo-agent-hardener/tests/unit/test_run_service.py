@@ -754,15 +754,16 @@ def test_scoped_manifest_pins_exact_native_run_and_publishes_its_artifacts(
     assert scoped != manifest
     assert scoped.stat().st_mode & 0o777 == 0o600
     assert manifest.read_text(encoding="utf-8") == original
-    assert capture.run_dir is not None
-    assert capture.run_dir == project / ".agent-hardener" / "run-logs" / run_id
+    run_dir = capture.run_dir
+    assert run_dir is not None
+    assert run_dir == project / ".agent-hardener" / "run-logs" / run_id
 
-    hitlog = capture.run_dir / "round_1" / "garak" / "agent-breaker.uuid.hitlog.jsonl"
+    hitlog = run_dir / "round_1" / "garak" / "agent-breaker.uuid.hitlog.jsonl"
     hitlog.parent.mkdir(parents=True)
     hitlog.write_text("{}\n", encoding="utf-8")
-    mitigations = capture.run_dir / "mitigations.json"
+    mitigations = run_dir / "mitigations.json"
     mitigations.write_text("{}\n", encoding="utf-8")
-    validation = capture.run_dir / "validation.json"
+    validation = run_dir / "validation.json"
     validation.write_text("{}\n", encoding="utf-8")
     saved: dict[str, Path] = {}
     uploaded: list[Path] = []

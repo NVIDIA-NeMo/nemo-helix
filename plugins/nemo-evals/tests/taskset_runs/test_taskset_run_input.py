@@ -89,9 +89,7 @@ def test_run_requires_execution(run_body):
         {},
         {"sandbox_policy": "harbor-standard", "kind": "docker"},
         {"sandbox_policy": "harbor-standard", "max_concurrent_task_jobs": 0},
-        {"sandbox_policy": "harbor-standard", "max_failed_tasks": -1},
-        {"sandbox_policy": "harbor-standard", "max_failed_tasks": "101%"},
-        {"sandbox_policy": "harbor-standard", "max_failed_tasks": "1.5%"},
+        {"sandbox_policy": "harbor-standard", "max_failed_tasks": 1},
     ],
 )
 def test_run_preserves_execution_validation(run_body, execution):
@@ -220,8 +218,7 @@ def test_shared_scoring_schema_has_correct_scope(spec_type):
     assert schema["fail_fast"]["default"] is False
     assert schema["fail_fast"]["description"] == (
         "Fail on the first metric error instead of recording an errored score. "
-        "On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks "
-        "budget can also fail the run and cancel remaining task Jobs."
+        "On Kubernetes runs it fails that task's Job."
     )
 
 
@@ -237,7 +234,6 @@ def test_run_schema_has_only_the_four_request_fields():
     [
         {"idempotency_key": "retry-1"},
         {"idempotency_key": "retry-2", "timeout_seconds": None},
-        {"execution": {"sandbox_policy": "harbor-standard", "dispatcher_profile": "local-k8s"}},
         {
             "spec": {
                 "tasks": "default/sort-suite",
@@ -272,7 +268,7 @@ def test_digest_sorts_nested_dictionary_keys(run_body):
         (("execution", "sandbox_policy"), "harbor-standard", "another-policy"),
         (("execution", "dispatcher_profile"), "local-k8s", "remote-k8s"),
         (("spec", "target", "artifacts"), ["/a", "/b"], ["/b", "/a"]),
-        (("execution", "max_failed_tasks"), "10%", 10),
+        (("execution", "max_concurrent_task_jobs"), None, 10),
         (("spec", "target", "agent_kwargs"), {"value": 1}, {"value": 1.0}),
     ],
 )
@@ -317,10 +313,8 @@ def test_digest_hashes_the_exact_compact_json_projection(run_body):
         "execution": {
             "kind": "harbor-task-jobs",
             "sandbox_policy": "harbor-standard",
-            "dispatcher_profile": "local-k8s",
-            "missing_prebuilt_image": "fail",
+            "dispatcher_profile": None,
             "max_concurrent_task_jobs": None,
-            "max_failed_tasks": None,
         },
         "timeout_seconds": None,
     }

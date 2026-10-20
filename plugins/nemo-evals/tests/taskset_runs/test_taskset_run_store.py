@@ -20,7 +20,6 @@ from nemo_evals.taskset_runs.store import (
     _ACCEPT_RETRY_POLICY,
     PlanDigestMismatchError,
     PlanStorageError,
-    RunIdExhausted,
     RunRequestConflict,
     TasksetRunStore,
 )
@@ -467,16 +466,15 @@ async def test_accept_same_key_different_scope(store, entity_store, files_servic
     assert len(set(runs)) == len(entity_store.entities) == len(plan_filesets(files_service)) == 3
 
 
-@pytest.mark.parametrize("key", ["key", None])
-async def test_accept_lost_reply(store, entity_store, files_service, acceptance, monkeypatch, key) -> None:
-    """Recover this attempt's committed create for keyed and keyless inputs.
+async def test_accept_lost_reply(store, entity_store, files_service, acceptance, monkeypatch) -> None:
+    """Recover this attempt's committed create.
 
-    Store/client/acceptance fixtures own a snapshot, ``key`` selects retry mode,
-    and monkeypatch makes create commit before reporting conflict. Assertions
-    require created=True and no deletion, proving own-plan equality recovers the
-    lost reply before keyless collision handling or loser cleanup can run.
+    Store/client/acceptance fixtures own a snapshot, and monkeypatch makes create
+    commit before reporting conflict. Assertions require created=True and no
+    deletion, proving own-plan equality recovers the lost reply before loser
+    cleanup can run.
     """
-    acceptance = with_snapshot(replace(acceptance, idempotency_key=key), files_service, "snapshot")
+    acceptance = with_snapshot(acceptance, files_service, "snapshot")
     original_create = entity_store.create
 
     async def lost_reply(entity):
@@ -490,54 +488,6 @@ async def test_accept_lost_reply(store, entity_store, files_service, acceptance,
     assert len(entity_store.entities) == len(plan_filesets(files_service)) == 1
     assert all(op != "delete" for op, _, _ in files_service.calls)
     assert ("default", "snapshot") in files_service.filesets
-
-
-async def test_accept_keyless_collision(store, entity_store, files_service, acceptance, monkeypatch) -> None:
-    """Retry one keyless name collision with a fresh plan binding and preserved snapshot.
-
-    Store/client/acceptance fixtures seed the colliding record; monkeypatch fixes
-    the next random ID. Assertions require the new run/plan ID, an untouched
-    existing record, retained snapshot, and deletion of only the first plan.
-    """
-    existing = await entity_store.create(make_run(acceptance))
-    acceptance = with_snapshot(replace(acceptance, idempotency_key=None), files_service, "snapshot")
-    monkeypatch.setattr("nemo_evals.taskset_runs.store.random_run_id", lambda: "run-1111111111111111")
-    accepted = await store.accept(acceptance)
-    assert accepted.created is True
-    assert accepted.run.name == "run-1111111111111111"
-    assert await store.find(existing.workspace, existing.name) == existing
-    stored_plan = await store.load_plan(accepted.run)
-    assert stored_plan.run_id == accepted.run.name
-    assert stored_plan.spec == acceptance.plan.spec
-    assert len(entity_store.entities) == 2
-    assert len(plan_filesets(files_service)) == 1
-    assert ("default", "snapshot") in files_service.filesets
-    assert len([op for op, _, _ in files_service.calls if op == "delete"]) == 1
-
-
-async def test_accept_two_keyless_collisions(store, entity_store, files_service, acceptance, monkeypatch) -> None:
-    """Bound keyless collision handling to two attempts and discard exhausted inputs.
-
-    Store/client/acceptance fixtures seed both names and monkeypatch forces the
-    second collision. Assertions require RunIdExhausted, exactly two creates,
-    cleaned request storage, and unchanged existing records, preventing an
-    unbounded retry loop or deletion of another run's resources.
-    """
-    existing = await entity_store.create(make_run(acceptance))
-    second = make_run(acceptance)
-    second.name = "run-1111111111111111"
-    second = await entity_store.create(second)
-    monkeypatch.setattr("nemo_evals.taskset_runs.store.random_run_id", lambda: second.name)
-    create = Mock(wraps=entity_store.create)
-    monkeypatch.setattr(entity_store, "create", create)
-    acceptance = with_snapshot(replace(acceptance, idempotency_key=None), files_service, "snapshot")
-    with pytest.raises(RunIdExhausted):
-        await store.accept(acceptance)
-    assert create.call_count == 2
-    assert not files_service.filesets
-    assert len(entity_store.entities) == 2
-    assert await store.find(existing.workspace, existing.name) == existing
-    assert await store.find(second.workspace, second.name) == second
 
 
 @pytest.mark.parametrize("different_digest", [False, True])
