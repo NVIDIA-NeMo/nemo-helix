@@ -2,10 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { parametersToString } from '@nemo/common/src/components/ModelDetailsTooltip/utils';
-import {
-  formatAbsoluteTimestamp,
-  getTimeRelativeToNow,
-} from '@nemo/common/src/components/RelativeTime/util';
+import { formatAbsoluteTimestamp } from '@nemo/common/src/components/RelativeTime/util';
 import type { StatTileDiagnosticProps } from '@nemo/common/src/components/StatTile';
 import { formatFinetuningType, kebabCaseToTitleCase } from '@nemo/common/src/utils/formatters';
 import type {
@@ -90,10 +87,14 @@ export const getAdapterTiles = (adapter: Adapter): DetailTile[] => {
     { label: 'Type', value: formatFinetuningType(adapter.finetuning_type) },
     { label: 'LoRA Rank', value: adapter.lora_config?.rank },
     { label: 'LoRA Alpha', value: adapter.lora_config?.alpha },
-    { label: 'Created', value: getTimeRelativeToNow(adapter.created_at) },
-    { label: 'Status', value: adapter.enabled === false ? 'Disabled' : undefined },
   ]);
 };
+
+export const getAdapterFields = (adapter: Adapter): DetailField[] => [
+  { label: 'Enabled', value: adapter.enabled },
+  { label: 'Created', value: adapter.created_at && formatAbsoluteTimestamp(adapter.created_at) },
+  { label: 'Updated', value: adapter.updated_at && formatAbsoluteTimestamp(adapter.updated_at) },
+];
 
 export const getArchitectureTiles = (spec: ModelSpec): DetailTile[] => {
   return presentTiles([

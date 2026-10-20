@@ -60,32 +60,18 @@ describe('getModelFields', () => {
   });
 });
 
-describe('adapter status', () => {
-  it('only mentions the status when the adapter is disabled', () => {
-    const status = (enabled: boolean) =>
-      getAdapterTiles({ name: 'a', finetuning_type: 'lora', enabled } as Adapter).find(
-        (tile) => tile.label === 'Status'
-      )?.value;
-
-    expect(status(true)).toBeUndefined();
-    expect(status(false)).toBe('Disabled');
-  });
-});
-
 describe('getAdapterTiles', () => {
-  it('shows the type, LoRA settings and age', () => {
+  it('shows the type and LoRA settings', () => {
     const adapter = {
       name: 'a',
       finetuning_type: 'lora',
       lora_config: { rank: 16, alpha: 32 },
-      created_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
     } as Adapter;
 
     expect(getAdapterTiles(adapter).map((tile) => [tile.label, tile.value])).toEqual([
       ['Type', 'LoRA'],
       ['LoRA Rank', '16'],
       ['LoRA Alpha', '32'],
-      ['Created', '3 days ago'],
     ]);
   });
 });

@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { StatTile } from '@nemo/common/src/components/StatTile';
 import { isBaseModel } from '@nemo/common/src/utils/models';
 import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { Grid, Stack } from '@nvidia/foundations-react-core';
@@ -9,6 +8,7 @@ import type { ModelLineage } from '@studio/hooks/useModelLineage';
 import { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
 import { AdaptersSection } from '@studio/routes/ModelDetailRoute/DetailsTab/AdaptersSection';
 import {
+  getAdapterFields,
   getAdapterTiles,
   getArchitectureFields,
   getArchitectureTiles,
@@ -68,27 +68,36 @@ export const DetailsTab: FC<DetailsTabProps> = ({ model, adapter, lineage, jobRe
         isAdapter={Boolean(adapter)}
       />
 
-      {adapter && (
-        <Grid colMinWidth="220px" gap="density-lg">
-          {getAdapterTiles(adapter).map((tile) => (
-            <StatTile key={tile.label} {...tile} />
-          ))}
-        </Grid>
-      )}
-
       <Grid cols={{ base: 1, lg: 2 }} gap="density-xl">
-        <DetailPanel
-          heading={adapter ? 'Base Model' : 'Model'}
-          description={adapter ? `${model.name}, the model this adapter is applied to.` : undefined}
-          tiles={getModelTiles(model)}
-          fields={getModelFields(model)}
-        />
-        {model.spec && (
-          <DetailPanel
-            heading="Architecture"
-            tiles={getArchitectureTiles(model.spec)}
-            fields={getArchitectureFields(model.spec)}
-          />
+        {adapter ? (
+          <>
+            <DetailPanel
+              heading="Adapter"
+              tiles={getAdapterTiles(adapter)}
+              fields={getAdapterFields(adapter)}
+            />
+            <DetailPanel
+              heading="Base Model"
+              description={`${model.name}, the model this adapter is applied to.`}
+              tiles={getModelTiles(model)}
+              fields={getModelFields(model)}
+            />
+          </>
+        ) : (
+          <>
+            <DetailPanel
+              heading="Model"
+              tiles={getModelTiles(model)}
+              fields={getModelFields(model)}
+            />
+            {model.spec && (
+              <DetailPanel
+                heading="Architecture"
+                tiles={getArchitectureTiles(model.spec)}
+                fields={getArchitectureFields(model.spec)}
+              />
+            )}
+          </>
         )}
       </Grid>
 
@@ -98,6 +107,14 @@ export const DetailsTab: FC<DetailsTabProps> = ({ model, adapter, lineage, jobRe
 
       {model.api_endpoint && <InferenceSection model={model} />}
       <PromptSection model={model} />
+      {adapter && model.spec && (
+        <DetailPanel
+          heading="Architecture"
+          description={`The network shape of ${model.name}.`}
+          tiles={getArchitectureTiles(model.spec)}
+          fields={getArchitectureFields(model.spec)}
+        />
+      )}
     </Stack>
   );
 };
