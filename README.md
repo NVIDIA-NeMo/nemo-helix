@@ -3,7 +3,19 @@
 
 # NeMo Helix
 
-![NEMO Helix](docs/assets/nemo-wordmark.svg)
+```text
+███╗     ██╗         ███╗     ███╗
+████╗    ██║         ████╗   ████║
+██╔██╗   ██║ ██████╗ ██╔██╗ ██╔██║ ██████╗
+██║╚██╗  ██║██╔═══██╗██║╚████╔╝██║██╔═══██╗
+██║ ╚██╗ ██║████████║██║ ╚██╔╝ ██║██║   ██║
+██║  ╚██╗██║██╔═════╝██║  ╚═╝  ██║██║   ██║
+██║   ╚████║╚███████╗██║       ██║╚██████╔╝
+╚═╝    ╚═══╝ ╚══════╝╚═╝       ╚═╝ ╚═════╝
+                            █ █ ▓▀ █  █ █ █
+                            █▀█ █▀ █  █ ▄▀▄
+                            ▀ ▀ ▀▀ ▀▀ ▀ ▀ ▀
+```
 
 [![CI](https://github.com/NVIDIA-NeMo/nemo-helix/actions/workflows/ci.yaml/badge.svg)](https://github.com/NVIDIA-NeMo/nemo-helix/actions/workflows/ci.yaml)
 [![License](https://img.shields.io/badge/license-Apache_2.0-D22128?style=flat-square)](LICENSE)
