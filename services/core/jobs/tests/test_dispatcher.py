@@ -9,7 +9,6 @@ These tests verify that the JobDispatcher correctly manages job lifecycle operat
 
 import asyncio
 import gc
-import json
 import re
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -32,6 +31,7 @@ from nhx.common.entities import (
 from nhx.common.jobs.schemas import FileStorageType, HelixJobStatus
 from nhx.core.jobs.api.v2.jobs.schemas import (
     CreateHelixJobRequest,
+    HelixJobListSortField,
     HelixJobResponse,
     HelixJobSortField,
     HelixJobStepsListFilter,
@@ -1348,6 +1348,8 @@ async def test_get_job_updated_at_tracks_attempt_status_change(
     assert step is not None
 
     step, _ = await mock_dispatcher.update_job_status_from_step(step=step, status=HelixJobStatus.ACTIVE)
+    active_job = await mock_dispatcher.get_job(job.name, DEFAULT_WORKSPACE)
+    assert active_job is not None
     await asyncio.sleep(0.01)
     _, attempt = await mock_dispatcher.update_job_status_from_step(
         step=step,
@@ -1356,10 +1358,9 @@ async def test_get_job_updated_at_tracks_attempt_status_change(
     )
     assert attempt.status == HelixJobStatus.COMPLETED
 
-    updated_job = await mock_dispatcher.get_job(job.name, DEFAULT_WORKSPACE)
-    assert updated_job is not None
-    assert updated_job.updated_at == attempt.updated_at
-    assert updated_job.updated_at > updated_job.created_at
+    completed_job = await mock_dispatcher.get_job(job.name, DEFAULT_WORKSPACE)
+    assert completed_job is not None
+    assert completed_job.updated_at > active_job.updated_at
 
 
 @pytest.mark.asyncio
@@ -2459,11 +2460,13 @@ async def test_list_jobs_sort_by_source(
 # =============================================================================
 
 
-async def _set_attempt_status(store: EntityClient, attempt_id: str, status: HelixJobStatus) -> None:
-    """Update the status of an attempt directly in the store."""
-    attempt = await store.get_by_id(HelixJobAttempt, attempt_id)
-    attempt.status = status
-    await store.update(attempt)
+async def _set_job_status(dispatcher: JobDispatcher, job_name: str, status: HelixJobStatus) -> None:
+    step = await dispatcher.get_current_job_step_by_name(
+        job_name, TestConstants.PLATFORM_SPEC.steps[0].name, DEFAULT_WORKSPACE
+    )
+    assert step is not None
+    for next_status in dict.fromkeys([HelixJobStatus.ACTIVE, status]):
+        step, _ = await dispatcher.update_job_status_from_step(step=step, status=next_status, error_details={})
 
 
 async def _make_job(
@@ -2481,7 +2484,7 @@ async def _make_job(
         platform_spec=TestConstants.PLATFORM_SPEC,
     )
     job = await dispatcher.create_job(request, DEFAULT_WORKSPACE)
-    await _set_attempt_status(store, job.attempt_id, status)
+    await _set_job_status(dispatcher, job.name, status)
     return job
 
 
@@ -2514,7 +2517,7 @@ async def test_list_jobs_filter_updated_at_matches_attempt_change(
     await asyncio.sleep(0.01)
     cutoff = datetime.now(timezone.utc)
     await asyncio.sleep(0.01)
-    await _set_attempt_status(mock_store, job.attempt_id, HelixJobStatus.COMPLETED)
+    await _set_job_status(mock_dispatcher, job.name, HelixJobStatus.COMPLETED)
 
     jobs, _ = await mock_dispatcher.list_jobs(
         parsed=ParsedFilter(
@@ -2706,45 +2709,184 @@ async def test_list_jobs_filter_or_with_status_in_each_branch(
 
 
 @pytest.mark.asyncio
-async def test_list_jobs_status_not_forwarded_to_entity_store(
+async def test_list_jobs_status_filter_fills_pages_and_counts_only_matches(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
 ):
-    """status must not reach the entity store (lives on HelixJobAttempt).
+    active_ids = set()
+    for i in range(5):
+        active_ids.add((await _make_job(mock_dispatcher, mock_store, f"active-{i}", HelixJobStatus.ACTIVE)).id)
+        await _make_job(mock_dispatcher, mock_store, f"completed-{i}", HelixJobStatus.COMPLETED)
+    status_filter = ParsedFilter(
+        operation=ComparisonOperation(field="data.status", operator=FilterOperator.EQ, value="active")
+    )
 
-    name and project ARE forwarded to the entity store. Only status is
-    filtered in-memory after the join.
-    """
+    pages = [
+        await mock_dispatcher.list_jobs(parsed=status_filter, workspace=DEFAULT_WORKSPACE, limit=2, offset=offset)
+        for offset in (0, 2, 4)
+    ]
 
+    assert [len(jobs) for jobs, _ in pages] == [2, 2, 1]
+    assert [total for _, total in pages] == [5, 5, 5]
+    assert {job.id for jobs, _ in pages for job in jobs} == active_ids
+
+
+@pytest.mark.asyncio
+async def test_list_jobs_status_filter_with_no_matches_reports_zero_total(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+):
     await _make_job(mock_dispatcher, mock_store, "job-active", HelixJobStatus.ACTIVE)
 
-    captured_operations: list = []
-    original_list = mock_store.list
+    jobs, total = await mock_dispatcher.list_jobs(
+        parsed=ParsedFilter(
+            operation=ComparisonOperation(field="data.status", operator=FilterOperator.EQ, value="error")
+        ),
+        workspace=DEFAULT_WORKSPACE,
+        limit=10,
+        offset=0,
+    )
 
-    async def capturing_list(entity_type, *, filter_operation=None, **kwargs):
-        if entity_type is HelixJob:
-            op_dict = filter_operation.to_dict() if filter_operation else {}
-            captured_operations.append(op_dict)
-        return await original_list(entity_type, filter_operation=filter_operation, **kwargs)
+    assert jobs == []
+    assert total == 0
 
-    with patch.object(mock_store, "list", side_effect=capturing_list):
-        await mock_dispatcher.list_jobs(
-            parsed=ParsedFilter(
-                operation=LogicalOperation(
-                    operator=FilterOperator.AND,
-                    operations=[
-                        ComparisonOperation(field="name", operator=FilterOperator.LIKE, value="job"),
-                        ComparisonOperation(field="data.status", operator=FilterOperator.EQ, value="active"),
-                    ],
-                ),
-            ),
-            workspace=DEFAULT_WORKSPACE,
+
+@pytest.mark.asyncio
+async def test_list_jobs_updated_at_filter_counts_only_matches(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+):
+    for i in range(3):
+        await _make_job(mock_dispatcher, mock_store, f"stale-{i}", HelixJobStatus.ACTIVE)
+    changed = await _make_job(mock_dispatcher, mock_store, "changed", HelixJobStatus.ACTIVE)
+    await asyncio.sleep(0.01)
+    cutoff = datetime.now(timezone.utc)
+    await asyncio.sleep(0.01)
+    await _set_job_status(mock_dispatcher, changed.name, HelixJobStatus.COMPLETED)
+
+    jobs, total = await mock_dispatcher.list_jobs(
+        parsed=ParsedFilter(
+            operation=ComparisonOperation(field="updated_at", operator=FilterOperator.GTE, value=cutoff.isoformat())
+        ),
+        workspace=DEFAULT_WORKSPACE,
+        limit=1,
+        offset=0,
+    )
+
+    assert [job.id for job in jobs] == [changed.id]
+    assert total == 1
+
+
+@pytest.mark.asyncio
+async def test_list_jobs_sort_by_updated_at_spans_pages(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+):
+    oldest = await _make_job(mock_dispatcher, mock_store, "oldest", HelixJobStatus.ACTIVE)
+    for i in range(3):
+        await _make_job(mock_dispatcher, mock_store, f"newer-{i}", HelixJobStatus.ACTIVE)
+    await asyncio.sleep(0.01)
+    await _set_job_status(mock_dispatcher, oldest.name, HelixJobStatus.COMPLETED)
+
+    first_page, _ = await mock_dispatcher.list_jobs(
+        parsed=ParsedFilter(operation=None),
+        workspace=DEFAULT_WORKSPACE,
+        limit=1,
+        offset=0,
+        sort=HelixJobListSortField.UPDATED_AT_DESC,
+    )
+    last_page, _ = await mock_dispatcher.list_jobs(
+        parsed=ParsedFilter(operation=None),
+        workspace=DEFAULT_WORKSPACE,
+        limit=1,
+        offset=3,
+        sort=HelixJobListSortField.UPDATED_AT_ASC,
+    )
+
+    assert [job.id for job in first_page] == [oldest.id]
+    assert [job.id for job in last_page] == [oldest.id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing_entity_type", [HelixJob, HelixJobAttempt])
+async def test_retried_step_update_repairs_job_status_after_a_failed_save(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    failing_entity_type: type,
+):
+    job = await _make_job(mock_dispatcher, mock_store, "flaky-store", HelixJobStatus.ACTIVE)
+    original_update = EntityClient.update
+
+    async def fail_once(self, entity, **kwargs):
+        if isinstance(entity, failing_entity_type) and not fail_once.failed:
+            fail_once.failed = True
+            raise RuntimeError("store unavailable")
+        return await original_update(self, entity, **kwargs)
+
+    fail_once.failed = False
+
+    async def complete_step():
+        step = await mock_dispatcher.get_current_job_step_by_name(
+            job.name, TestConstants.PLATFORM_SPEC.steps[0].name, DEFAULT_WORKSPACE
+        )
+        assert step is not None
+        await mock_dispatcher.update_job_status_from_step(step=step, status=HelixJobStatus.COMPLETED, error_details={})
+
+    with patch.object(EntityClient, "update", fail_once):
+        with pytest.raises(RuntimeError, match="store unavailable"):
+            await complete_step()
+        await complete_step()
+
+    jobs, total = await mock_dispatcher.list_jobs(
+        parsed=ParsedFilter(
+            operation=ComparisonOperation(field="data.status", operator=FilterOperator.EQ, value="completed")
+        ),
+        workspace=DEFAULT_WORKSPACE,
+    )
+    assert [(listed.id, listed.status) for listed in jobs] == [(job.id, HelixJobStatus.COMPLETED)]
+    assert total == 1
+
+
+@pytest.mark.asyncio
+async def test_rerun_job_resets_job_status_for_list_filters(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+):
+    job = await _make_job(mock_dispatcher, mock_store, "rerun-me", HelixJobStatus.COMPLETED)
+
+    await mock_dispatcher.rerun_job(job.name, DEFAULT_WORKSPACE)
+
+    jobs, total = await mock_dispatcher.list_jobs(
+        parsed=ParsedFilter(
+            operation=ComparisonOperation(field="data.status", operator=FilterOperator.EQ, value="completed")
+        ),
+        workspace=DEFAULT_WORKSPACE,
+    )
+    assert jobs == []
+    assert total == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("job_count", [1, 6])
+async def test_list_jobs_store_calls_do_not_grow_with_page_size(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    job_count: int,
+):
+    for i in range(job_count):
+        await _make_job(mock_dispatcher, mock_store, f"job-{i}", HelixJobStatus.ACTIVE)
+
+    with (
+        patch.object(mock_store, "list", side_effect=mock_store.list) as list_spy,
+        patch.object(mock_store, "get_by_id", side_effect=mock_store.get_by_id) as get_by_id_spy,
+    ):
+        jobs, _ = await mock_dispatcher.list_jobs(
+            parsed=ParsedFilter(operation=None), workspace=DEFAULT_WORKSPACE, limit=job_count, offset=0
         )
 
-    assert captured_operations, "Expected at least one entity store query for HelixJob"
-    for op_dict in captured_operations:
-        # status lives on HelixJobAttempt — must never appear in entity store query
-        assert "data.status" not in json.dumps(op_dict), "data.status must not be forwarded to entity store"
+    assert len(jobs) == job_count
+    assert [call.args[0] for call in list_spy.call_args_list] == [HelixJob, HelixJobAttempt]
+    get_by_id_spy.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -2897,7 +3039,7 @@ async def test_list_jobs_filter_name_operator_and_project_like(
         platform_spec=TestConstants.PLATFORM_SPEC,
     )
     no_proj_job = await mock_dispatcher.create_job(no_project, DEFAULT_WORKSPACE)
-    await _set_attempt_status(mock_store, no_proj_job.attempt_id, HelixJobStatus.ACTIVE)
+    await _set_job_status(mock_dispatcher, no_proj_job.name, HelixJobStatus.ACTIVE)
 
     jobs, _ = await mock_dispatcher.list_jobs(
         parsed=ParsedFilter(
