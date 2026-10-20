@@ -24,6 +24,7 @@ class _WorkspacesMethods:
     create_workspace = method(endpoints.create_workspace)
     update_workspace = method(endpoints.update_workspace)
     delete_workspace = method(endpoints.delete_workspace)
+    get_workspace_deletion = method(endpoints.get_workspace_deletion)
     list_workspace_members = method(endpoints.list_workspace_members)
     create_workspace_member = method(endpoints.create_workspace_member)
     update_workspace_member = method(endpoints.update_workspace_member)

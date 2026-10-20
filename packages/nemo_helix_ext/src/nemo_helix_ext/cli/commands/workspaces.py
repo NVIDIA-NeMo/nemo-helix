@@ -218,9 +218,46 @@ def delete_workspaces(
     DELETE /apis/entities/v2/workspaces/ml-team
     ```"""
     state: CLIContext = ctx.obj
-    state.typed_client(WorkspacesClient).delete_workspace(name=name)
+    result = state.typed_client(WorkspacesClient).delete_workspace(name=name)
+    typer.echo(result.data().message)
 
-    typer.echo("✓ Deleted successfully")
+
+@app.command("deletion-status")
+@collect_warnings
+@handle_errors
+def deletion_status(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Workspace name")],
+    output_format: EntityOutputFormatOption = None,
+) -> None:
+    """Show why a workspace name is still reserved.
+
+    Returns the cleanup stage and the last error for a workspace that is
+    pending, deleting, or failed. The original creator, a platform admin, or a
+    service principal can read it. A missing workspace, a live workspace, and a
+    deletion the caller may not see all return not found.
+
+    Example:
+
+    ```
+    GET /apis/entities/v2/workspace-deletions/ml-team
+    ```"""
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+
+    kwargs = build_kwargs(name=name)
+    if handle_code_generation(WorkspacesClient, "get_workspace_deletion", kwargs, resolved_output_format, state):
+        return
+
+    result = state.typed_client(WorkspacesClient).get_workspace_deletion(name=name)
+
+    format_output(
+        result,
+        is_list=False,
+        output_format=resolved_output_format,
+        no_truncate=state.get_no_truncate(),
+        timestamp_format=state.get_timestamp_format(),
+    )
 
 
 @app.command("list")

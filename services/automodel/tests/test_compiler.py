@@ -155,6 +155,28 @@ def test_compile_training_step_carries_pass2_fields() -> None:
     assert cfg["training"]["lora"]["use_triton"] is False
 
 
+@pytest.mark.parametrize(
+    ("peft", "output_type", "shm_size"),
+    [
+        (None, OutputNameType.MODEL, "64Gi"),
+        (LoRAParams(rank=8, alpha=32, merge=False), OutputNameType.ADAPTER, "8Gi"),
+    ],
+)
+def test_compile_training_step_sets_shm_by_finetuning_type(
+    peft: LoRAParams | None, output_type: OutputNameType, shm_size: str
+) -> None:
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
+
+    job_output = CustomizationJobOutput(
+        model="default/test-target",
+        dataset="default/my-dataset",
+        training=SFTTraining(peft=peft, learning_rate=1e-4, batch_size=4, micro_batch_size=1, max_seq_length=2048),
+        output=_output(output_type=output_type),
+    )
+    step = compile_training_step(job_output, base_env=[], me=_make_mock_model_entity())
+    assert step.executor.resources.shm_size == shm_size
+
+
 def test_compile_training_step_carries_explicit_cross_encoder_recipe() -> None:
     from nhx.automodel.app.jobs.training.compiler import compile_training_step
 

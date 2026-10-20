@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "Analyze Agent Telemetry with Insights"
+title: "Insights from Traces"
 description: "Run the NeMo Analyst over an agent's traces to file evidence-backed Insights, on demand or on a schedule."
 ---
 
@@ -25,7 +25,7 @@ You need:
   default. Runs execute as [execute-agent jobs](/documentation/agents/execute-agents-as-jobs),
   so the platform also needs a working `agents.execute` runtime.
 - Traces for the agent in Intake. The Analyst can only diagnose what it can
-  observe. See [Observe Agents](/documentation/agents/observe-agents).
+  observe. See [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces).
 - A default and fast model pair. `nemo setup` stores one, or you can pass
   `--default-model` and `--fast-model` (Model Entity refs such as
   `default/<model>`) on each command. The fast model reviews traces in each
@@ -337,6 +337,7 @@ When `nemo setup` has not stored a model pair, pass `--default-model` and
 ## Related Topics
 
 - [NeMo Studio Insights](/documentation/studio/insights)
-- [Observe Agents](/documentation/agents/observe-agents)
+- [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces)
+- [Optimize Agents](/documentation/agents/optimize-agents)
 - [Execute Agents as Jobs](/documentation/agents/execute-agents-as-jobs)
 - [Full CLI Reference](/documentation/reference/cli-reference/full-cli-reference#nemo-insights)

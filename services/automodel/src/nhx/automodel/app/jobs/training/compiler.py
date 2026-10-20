@@ -49,6 +49,12 @@ from nhx.customization_common.integrations import (
 
 logger = logging.getLogger(__name__)
 
+# All-weights checkpoints stage the full model and optimizer state in /dev/shm; LoRA
+# stages only the adapter. Operators raise either through the execution profile's
+# resources.shm_size.
+ALL_WEIGHTS_SHM_SIZE = "64Gi"
+LORA_SHM_SIZE = "8Gi"
+
 
 def _resolve_is_embedding_model(me: ModelEntity) -> bool:
     """Resolve embedding flag while preserving compatibility with legacy specs."""
@@ -235,6 +241,7 @@ def compile_training_step(
         else config.default_training_execution_profile
     )
 
+    shm_size = LORA_SHM_SIZE if training.peft is not None else ALL_WEIGHTS_SHM_SIZE
     if p.num_nodes > 1:
         logger.debug(f"Using distributed GPU executor: num_nodes={p.num_nodes}, num_gpus_per_node={num_gpus_per_node}")
         executor = DistributedGPUExecutionProviderSpec(
@@ -244,6 +251,7 @@ def compile_training_step(
             resources=ResourcesSpec(
                 num_gpus=num_gpus_per_node,
                 num_nodes=p.num_nodes,
+                shm_size=shm_size,
             ),
         )
     else:
@@ -254,6 +262,7 @@ def compile_training_step(
             container=container,
             resources=ResourcesSpec(
                 num_gpus=num_gpus_per_node,
+                shm_size=shm_size,
             ),
         )
 

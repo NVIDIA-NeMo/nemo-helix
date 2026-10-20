@@ -2074,12 +2074,12 @@ def test_schedule_kubernetes_gpu(mock_nemo_client, kubernetes_execution_profile_
         # GPU steps keep whatever the image sets for device visibility
         assert "NVIDIA_VISIBLE_DEVICES" not in {env.name for env in main_container.env}
 
-        # GPU jobs get a memory-backed /dev/shm (default 1Gi per GPU)
+        # GPU jobs get a memory-backed /dev/shm (default 8Gi per GPU)
         dshm_vol = next((v for v in pod_spec.volumes if v.name == JOB_DSHM_VOLUME_NAME), None)
         assert dshm_vol is not None
         assert dshm_vol.empty_dir is not None
         assert dshm_vol.empty_dir.medium == "Memory"
-        assert dshm_vol.empty_dir.size_limit == "2Gi"
+        assert dshm_vol.empty_dir.size_limit == "16Gi"
         dshm_mount = next((vm for vm in main_container.volume_mounts if vm.name == JOB_DSHM_VOLUME_NAME), None)
         assert dshm_mount is not None
         assert dshm_mount.mount_path == "/dev/shm"

@@ -314,6 +314,7 @@ class TestWorkspaceCleanupAsyncStep:
         repo.fail_workspace_deletion_if_claimed.assert_awaited_once_with(
             name="test-workspace",
             expected_updated_at=workspace.updated_at,
+            deletion_error="jobs service down",
         )
         repo.delete_workspace_if_claimed.assert_not_called()
 
@@ -569,6 +570,7 @@ class TestWorkspaceCleanupAsyncStep:
         repo.fail_workspace_deletion_if_claimed.assert_awaited_once_with(
             name=pending.name,
             expected_updated_at=claimed.updated_at,
+            deletion_error="database unavailable",
         )
         repo.delete_workspace_if_claimed.assert_not_called()
 
@@ -622,6 +624,7 @@ class TestWorkspaceCleanupAsyncStep:
         repo.fail_workspace_deletion_if_claimed.assert_awaited_once_with(
             name=pending.name,
             expected_updated_at=claimed.updated_at,
+            deletion_error="TimeoutError",
         )
         repo.delete_workspace_if_claimed.assert_not_called()
 
@@ -730,10 +733,10 @@ class TestWorkspaceCleanupAsyncStep:
         if kind != "fileset":
             files_client.delete_fileset.assert_not_called()
         repo.delete_workspace_if_claimed.assert_not_called()
-        repo.fail_workspace_deletion_if_claimed.assert_awaited_once_with(
-            name=workspace.name,
-            expected_updated_at=claimed.updated_at,
-        )
+        failure = repo.fail_workspace_deletion_if_claimed.await_args.kwargs
+        assert failure["name"] == workspace.name
+        assert failure["expected_updated_at"] == claimed.updated_at
+        assert "first: fail" in failure["deletion_error"]
 
     @pytest.mark.parametrize("kind", ["deployment", "model", "adapter", "fileset"])
     @pytest.mark.asyncio
@@ -813,10 +816,10 @@ class TestWorkspaceCleanupAsyncStep:
             "remaining",
             "remaining",
         ]
-        repo.fail_workspace_deletion_if_claimed.assert_awaited_once_with(
-            name=pending.name,
-            expected_updated_at=claimed_pending.updated_at,
-        )
+        failure = repo.fail_workspace_deletion_if_claimed.await_args.kwargs
+        assert failure["name"] == pending.name
+        assert failure["expected_updated_at"] == claimed_pending.updated_at
+        assert "remaining: HTTP 503: no healthy upstream" in failure["deletion_error"]
         repo.delete_workspace_if_claimed.assert_awaited_once_with(
             name=pending.name,
             expected_updated_at=claimed_retry.updated_at,
@@ -1088,10 +1091,39 @@ class TestWorkspaceCleanupFilesets:
         controller = _make_controller()
 
         with patch.object(AsyncFilesClient, "from_client", return_value=mock_files):
-            with pytest.raises(WorkspaceResourceCleanupError):
+            with pytest.raises(WorkspaceResourceCleanupError, match="fs1: fail"):
                 await controller._cleanup_filesets(workspace)
 
         assert mock_files.delete_fileset.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_fileset_conflict_is_stored_on_the_failed_workspace(self):
+        workspace = _make_workspace()
+        claimed = _make_workspace(deletion_stage=WorkspaceDeletionStage.DELETING)
+        repo = AsyncMock()
+        repo.list_workspaces.return_value = ([workspace], None)
+        repo.claim_workspace_for_deletion.return_value = claimed
+        repo.fail_workspace_deletion_if_claimed.return_value = True
+        fileset = MagicMock()
+        fileset.name = "shared-weights"
+        files_client = _make_mock_files_client([fileset])
+        files_client.delete_fileset = AsyncMock(
+            side_effect=Exception(
+                "HTTP 409: Cannot delete fileset 'team-a/shared-weights' because 1 model entity reference(s) still use it"
+            )
+        )
+        controller = _make_controller(workspace_repo=repo)
+
+        with _patch_clients(_make_jobs_client([]), files_client, _make_models_client([])):
+            await controller._async_step()
+
+        failure = repo.fail_workspace_deletion_if_claimed.await_args.kwargs
+        assert failure["name"] == workspace.name
+        assert failure["expected_updated_at"] == claimed.updated_at
+        assert "shared-weights:" in failure["deletion_error"]
+        assert "HTTP 409:" in failure["deletion_error"]
+        assert "1 model entity reference" in failure["deletion_error"]
+        repo.delete_workspace_if_claimed.assert_not_called()
 
 
 class TestJobCancellationBranches:

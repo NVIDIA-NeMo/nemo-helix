@@ -10,6 +10,7 @@ Core Operations:
 - GET /apis/entities/v2/workspaces/{id}          - Get workspace by ID
 - PUT /apis/entities/v2/workspaces/{id}          - Update workspace
 - DELETE /apis/entities/v2/workspaces/{id}       - Delete workspace
+- GET /apis/entities/v2/workspace-deletions/{name} - Read in-progress deletion status
 
 Member Management:
 - GET /apis/entities/v2/workspaces/{workspace}/members                  - List workspace members
@@ -25,8 +26,10 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query, status
 from nemo_helix_plugin.workspaces.constants import SAMPLE_WORKSPACE_PREFIX
+from nemo_helix_plugin.workspaces.types import WorkspaceDeletionStatus
 from nhx.common.api.common import DeleteResponse, GenericSortField, Page, PaginationData
 from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
+from nhx.common.auth.client import AuthClient
 from nhx.common.auth.models import Principal
 from nhx.core.entities.api.dependencies import AuthClientDep, EntityRepository, WorkspaceRepository
 from nhx.core.entities.api.v2.utils import (
@@ -66,6 +69,16 @@ def _exclude_deleting_workspaces(filter_op: FilterOperation | None) -> FilterOpe
         operator=FilterOperator.AND,
         operations=[filter_op, _ACTIVE_WORKSPACE_FILTER],
     )
+
+
+def _workspace_name_conflict_detail(existing: Workspace) -> str:
+    """Distinguish a live workspace from a name reserved by cleanup."""
+    if existing._deletion_stage is None:
+        return f"Workspace '{existing.name}' already exists"
+    detail = f"Workspace '{existing.name}' is still being deleted"
+    if existing._deletion_error:
+        return f"{detail} ({existing._deletion_error})"
+    return detail
 
 
 def _principal_for_role_binding(principal: Principal) -> str | None:
@@ -218,7 +231,7 @@ async def create_workspace(
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Workspace '{workspace.name}' already exists",
+            detail=_workspace_name_conflict_detail(existing),
         )
 
     try:
@@ -235,9 +248,14 @@ async def create_workspace(
         )
 
         if "duplicate key" in error_msg.lower() or "unique constraint" in error_msg.lower():
+            raced = await workspace_repository.get_workspace_by_name(name=workspace.name)
+            if raced is not None and raced._deletion_stage is not None:
+                detail = _workspace_name_conflict_detail(raced)
+            else:
+                detail = f"Workspace '{workspace.name}' already exists."
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Workspace '{workspace.name}' already exists.",
+                detail=detail,
             )
         else:
             raise HTTPException(
@@ -486,6 +504,73 @@ async def delete_workspace(
     return DeleteResponse(
         id=name,
         message="Workspace marked for deletion",
+    )
+
+
+def _workspace_not_found(name: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Workspace '{name}' not found",
+    )
+
+
+async def _may_read_workspace_deletion(auth_client: AuthClient, workspace: Workspace) -> bool:
+    """Allow the creator, a platform admin, or a service principal.
+
+    Auth off allows the read. Anyone else gets the same not-found response as a
+    missing workspace, so the route does not confirm that the name exists.
+    """
+    if not auth_client.auth_enabled or auth_client.principal.caller_kind == "service_principal":
+        return True
+    created_by = (workspace.created_by or "").strip()
+    principal = auth_client.principal
+    identities = {principal.effective_id.strip()}
+    email = (principal.effective_email or "").strip()
+    if email:
+        identities.add(email)
+    identities.discard("")
+    if created_by and created_by in identities:
+        return True
+    return await auth_client.has_role("system", "HelixAdmin")
+
+
+@router.get(
+    "/v2/workspace-deletions/{name}",
+    response_model=WorkspaceDeletionStatus,
+    tags=[API_TAG],
+    summary="Get workspace deletion status",
+    description=textwrap.dedent("""
+        Read the cleanup stage for a workspace whose name is still reserved.
+
+        The workspace itself is hidden from get and list while deletion is in
+        progress. This route is system-scoped because delete already removed the
+        workspace role bindings. With authentication enabled, the original
+        creator, a platform admin, and service principals can read it. A missing
+        workspace, a live workspace, and a deletion the caller may not see all
+        return not found.
+
+        Example:
+        ```
+        GET /apis/entities/v2/workspace-deletions/ml-team
+        ```
+    """),
+)
+async def get_workspace_deletion(
+    name: str,
+    repository: WorkspaceRepository,
+    auth_client: AuthClientDep,
+) -> WorkspaceDeletionStatus:
+    """Return the stored cleanup stage without changing the deletion lease."""
+    workspace = await repository.get_workspace_by_name(name=name)
+    if workspace is None or workspace._deletion_stage is None:
+        raise _workspace_not_found(name)
+    if not await _may_read_workspace_deletion(auth_client, workspace):
+        raise _workspace_not_found(name)
+    return WorkspaceDeletionStatus(
+        name=workspace.name,
+        deletion_stage=workspace._deletion_stage.value,
+        deletion_error=workspace._deletion_error,
+        updated_at=workspace.updated_at,
     )
 
 

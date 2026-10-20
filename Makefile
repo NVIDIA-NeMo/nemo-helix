@@ -120,9 +120,8 @@ docs-check: ## Validate the Fern docs (fern check + validate-mdx + gated-link ch
 	cd docs/fern && npm run check
 
 DOCS_TYPED_SNIPPET_PATHS := \
-	docs/agents/add-guardrails.mdx \
 	docs/agents/deploy-agents.mdx \
-	docs/agents/optimization.mdx \
+	docs/agents/optimize-agents.mdx \
 	docs/anonymizer/tutorials/preview.mdx \
 	docs/garak/targets/index.mdx \
 	docs/garak/targets/inference-gateway.mdx \
@@ -149,6 +148,7 @@ DOCS_TYPED_SNIPPET_PATHS := \
 	docs/run-inference/about.mdx \
 	docs/run-inference/tutorials/deploy-models.mdx \
 	docs/run-inference/tutorials/run-inference.mdx \
+	docs/run-inference/virtual-models.mdx \
 	docs/safe-synthesizer/about/jobs.mdx \
 	docs/safe-synthesizer/about/reference.mdx \
 	docs/safe-synthesizer/tutorials/differential-privacy.mdx \

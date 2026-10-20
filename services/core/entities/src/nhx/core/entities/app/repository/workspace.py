@@ -126,9 +126,14 @@ class WorkspaceRepositoryInterface(ABC):
         *,
         name: str,
         expected_updated_at: datetime,
+        deletion_error: str,
         session: AsyncSession | None = None,
     ) -> bool:
-        """Mark a deletion failed only while holding its current lease."""
+        """Mark a deletion failed only while holding its current lease.
+
+        ``deletion_error`` is stored in the same update as the transition to
+        failed. A lost lease leaves the previous error unchanged.
+        """
         pass
 
     @abstractmethod
