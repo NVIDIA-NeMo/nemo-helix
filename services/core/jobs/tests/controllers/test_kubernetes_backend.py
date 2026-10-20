@@ -3418,7 +3418,7 @@ def test_last_task_exit_time_is_the_latest_task_exit():
 def test_last_task_exit_time_is_unknown_unless_every_task_has_one(pods):
     assert last_task_exit_time(pods) is None
 
-    
+
 def _step_with_network(step: HelixJobStepWithContext) -> HelixJobStepWithContext:
     step = step.model_copy(deep=True)
     assert step.step_spec is not None
