@@ -52,6 +52,7 @@ export const ChatPlaygroundContent: FC<ChatPlaygroundContentProps> = ({
   const {
     extraHeaders,
     isPending: isSessionPending,
+    resetSession,
     recoverFromError,
   } = useAgentChatSession(workspace, chatDeployment);
 
@@ -92,6 +93,7 @@ export const ChatPlaygroundContent: FC<ChatPlaygroundContentProps> = ({
           }
           extraHeaders={extraHeaders}
           onError={handleChatError}
+          onReset={resetSession}
           disabled={
             isDeploymentsLoading || noHealthyDeployments || !chatDeployment || isSessionPending
           }
