@@ -12,6 +12,9 @@ from nemo_evals.api.fields import TaskRef
 from nemo_evals.api.service.taskset_run_service import MAX_CONCURRENT_IMAGE_PREPARATIONS, TasksetRunResolutionError
 from nemo_evals.api.taskset_run_schemas import TasksetRunInput
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity, TasksetEntity, TasksetRevisionEntity
+from nemo_evals.harbor.remote.preparation import prepare_task_images
+from nemo_evals.image_builds.planning import TaskArchive
+from nemo_evals.image_builds.service import ImageBuildService
 from nemo_evals.jobs.harbor_task_spec import HarborTaskJobSpec
 from nemo_evals.revisions import publish_revision
 from nemo_evals.taskset_runs.entities import TasksetRunEntity, TasksetRunPhase
@@ -72,7 +75,9 @@ async def test_subprocess_dispatcher_profile_is_rejected(service, request_body, 
         await submit(service, request_body)
 
 
-async def test_more_tasks_than_the_concurrency_cap_is_rejected(service, request_body, entity_store, published):
+@pytest.fixture
+async def two_task_body(request_body, entity_store, published):
+    """``request_body`` over a published taskset ``default/pair`` of task-1 and task-2."""
     task_head = await entity_store.get(TaskEntity, name="task-1", workspace="default")
     second = TaskEntity(
         name="task-2", workspace="default", spec=task_head.spec.model_copy(update={"native_task_id": "task-2"})
@@ -87,9 +92,13 @@ async def test_more_tasks_than_the_concurrency_cap_is_rejected(service, request_
     )
     await publish_revision(entity_store, entity_store, await entity_store.create(pair), TasksetRevisionEntity)
     request_body["spec"]["tasks"] = "default/pair"
-    request_body["execution"]["max_concurrent_task_jobs"] = 1
+    return request_body
+
+
+async def test_more_tasks_than_the_concurrency_cap_is_rejected(service, two_task_body, entity_store):
+    two_task_body["execution"]["max_concurrent_task_jobs"] = 1
     with pytest.raises(TasksetRunResolutionError, match="2 tasks exceed execution.max_concurrent_task_jobs=1"):
-        await submit(service, request_body)
+        await submit(service, two_task_body)
     assert not await runs(entity_store)
 
 
@@ -98,6 +107,47 @@ async def test_task_without_images_is_rejected_before_acceptance(service, reques
     with pytest.raises(TasksetRunResolutionError, match="tasks without images: task-1: image_unavailable"):
         await submit(service, request_body)
     assert not await runs(entity_store)
+
+
+class _BuildJobs:
+    def __init__(self) -> None:
+        self.created: list[str] = []
+
+    async def create(self, request) -> None:
+        self.created.append(request.name)
+
+    async def get(self, name: str):
+        return None
+
+
+async def test_a_cold_submit_starts_the_first_build_and_asks_to_resubmit(
+    service, request_body, entity_store, monkeypatch
+):
+    """The real preparer: no build yet means submit starts one and rejects the run until it's ready."""
+    build_jobs = _BuildJobs()
+
+    async def allow(workspace: str) -> None:
+        return None
+
+    async def archive(files, source):
+        return TaskArchive(root="t", files=frozenset({"t/environment/Dockerfile"}), compose=None)
+
+    monkeypatch.setattr("nemo_evals.harbor.remote.preparation.read_task_archive", archive)
+    monkeypatch.setattr(service, "_image_builds", lambda workspace: ImageBuildService(entity_store, build_jobs, allow))
+    service._preparer = prepare_task_images
+    with pytest.raises(TasksetRunResolutionError, match="task-1: image_unavailable: image build 1 of default/task-1"):
+        await submit(service, request_body)
+    assert len(build_jobs.created) == 1 and not await runs(entity_store)
+
+
+@pytest.mark.parametrize("rejected", [0, 1], ids=["first-rejected", "second-rejected"])
+async def test_a_rejected_task_stops_every_preparation(service, two_task_body, run_preparer, rejected):
+    """Every task is checked before any is prepared, so a rejected task never leaves builds behind for the rest."""
+    tasks = ["task-1", "task-2"]
+    run_preparer.reject = {tasks[rejected]: "gpu_unsupported"}
+    with pytest.raises(TasksetRunResolutionError, match=f"{tasks[rejected]}: gpu_unsupported"):
+        await submit(service, two_task_body)
+    assert sorted(run_preparer.checked) == tasks and run_preparer.calls == []
 
 
 async def test_missing_task_job_is_503_and_a_retry_completes_it_from_the_plan(
@@ -173,13 +223,6 @@ async def test_a_retry_after_the_execution_deadline_creates_no_task_jobs(
     assert outcome.created is False and outcome.status.warnings == [] and not fake_task_jobs.created
 
 
-async def test_failure_tolerance_is_rejected_until_enforced(service, request_body, entity_store):
-    request_body["execution"]["max_failed_tasks"] = 0
-    with pytest.raises(TasksetRunResolutionError, match="max_failed_tasks isn't enforced"):
-        await submit(service, request_body)
-    assert not await runs(entity_store)
-
-
 @pytest.mark.parametrize("revoke", ["dispatcher_profile", "sandbox_policy", "runs"])
 async def test_retry_after_execution_policy_change_starts_no_jobs(
     service, request_body, fake_task_jobs, entity_store, harbor_config, revoke
@@ -213,6 +256,9 @@ class SlowPreparer:
         self.running = self.most_running = 0
         self.cancelled: list[str] = []
 
+    async def check(self, task, **_):
+        return None
+
     async def __call__(self, task, recorded, **_):
         self.running += 1
         self.most_running = max(self.most_running, self.running)
@@ -232,7 +278,7 @@ class SlowPreparer:
 async def prepare(service, preparer, count):
     service._preparer = preparer
     tasks = [SimpleNamespace(id=f"task-{i}") for i in range(count)]
-    return await service._prepare_images(tasks, None, "fail", caller="user:alice")
+    return await service._prepare_images(tasks, None, caller="user:alice")
 
 
 async def test_images_are_prepared_ten_at_a_time_in_task_order(service):

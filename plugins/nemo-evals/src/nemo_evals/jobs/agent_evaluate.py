@@ -205,7 +205,7 @@ class _AgentEvalJobBase(NemoJob):
     job_collection_path: ClassVar[str | None] = "/agent-evaluate/jobs"
     adapters: ClassVar[Mapping[str, TaskKindAdapter]] = KIND_ADAPTERS
     #: Delete a registered agent's files snapshot after a successful run. A taskset run's task Jobs
-    #: share one snapshot, so they keep it; the run controller deletes it (M4 story 8).
+    #: share one snapshot, so they keep it. TODO(M4 story 8): the run controller deletes it.
     discard_agent_files: ClassVar[bool] = True
 
     @classmethod

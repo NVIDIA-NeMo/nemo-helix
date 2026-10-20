@@ -3,9 +3,10 @@
 
 """Create one task Job per task of an accepted run, or adopt the one an earlier attempt created.
 
-M2 story 0's fan-out, run by submit right after acceptance; M4 story 4's controller registration
-replaces it. Every Job input comes from the stored plan, so a retry after a config change creates the
-remaining Jobs exactly as the first attempt would have.
+Run by submit right after acceptance. Every Job input comes from the stored plan, so a retry after a
+config change creates the remaining Jobs exactly as the first attempt would have.
+
+TODO(M4 story 4): the controller registers task Jobs instead.
 """
 
 import logging

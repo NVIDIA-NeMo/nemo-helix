@@ -27,8 +27,7 @@ from typing import Any
 import httpx
 import typer
 from nemo_evals.api.fields import TaskRef, TasksetRef
-from nemo_evals.api.schemas import AgentEvalResult, Task, TasksetInput
-from nemo_evals.api.task_definitions.harbor import HarborTaskDefinition
+from nemo_evals.api.schemas import AgentEvalResult, TasksetInput
 from nemo_evals.api.taskset_run_schemas import HarborTaskJobsExecutionInput, TasksetRunInput
 from nemo_evals.image_builds.models import TERMINAL_BUILD_STATUSES, ImageBuild
 from nemo_evals.jobs.agent_evaluate import DEFAULT_RESULT_NAME, SUMMARY_FILE_NAME
@@ -112,12 +111,6 @@ def is_compose_task(task_dir: Path) -> bool:
     return any((task_dir / "environment" / name).is_file() for name in COMPOSE_FILENAMES)
 
 
-def needs_image_build(config: dict[str, Any]) -> bool:
-    """True when the task builds its agent image from a Dockerfile (no ``[environment] docker_image``)."""
-    environment = config.get("environment") or {}
-    return not environment.get("docker_image")
-
-
 def download_hub_tasks(dataset: str, names: str | None, output_dir: Path) -> tuple[str, list[Path]]:
     """Download the selected tasks of Harbor Hub dataset ``org/name@ref`` into ``output_dir``.
 
@@ -143,12 +136,11 @@ def list_hub_tasks(dataset: str) -> list[str]:
 
 def publish_tasks(
     evaluator: Evaluator, task_dirs: Sequence[Path], *, prefix: str, workspace: str, echo: Callable[[str], None]
-) -> tuple[list[str], dict[str, dict[str, Any]]]:
-    """Publish each task directory as ``<prefix>-<dir>``; return pinned refs and each task's ``task.toml`` config."""
+) -> list[str]:
+    """Publish each task directory as ``<prefix>-<dir>``; return the pinned refs."""
     from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
 
     refs: list[str] = []
-    configs: dict[str, dict[str, Any]] = {}
     for task_dir in task_dirs:
         if is_compose_task(task_dir):
             raise SelectionError(f"{task_dir.name} is a compose task; Kubernetes runs don't support them yet")
@@ -157,9 +149,8 @@ def publish_tasks(
         task = evaluator.tasks.replace(name, task=source, workspace=workspace)
         ref = pinned_task_ref(evaluator, workspace, name, task.revision)
         refs.append(ref)
-        configs[ref] = _task_config(task)
         echo(f"Published task {ref}")
-    return refs, configs
+    return refs
 
 
 def pinned_task_ref(evaluator: Evaluator, workspace: str, name: str, revision: int) -> str:
@@ -173,21 +164,21 @@ def pinned_task_ref(evaluator: Evaluator, workspace: str, name: str, revision: i
 def build_images(
     evaluator: Evaluator,
     refs: Sequence[str],
-    configs: dict[str, dict[str, Any]],
     *,
     poll_seconds: float,
     echo: Callable[[str], None],
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
-    """Request (idempotent) and wait for the image build of every task that builds from a Dockerfile.
+    """Request (idempotent) and wait for every task's image build.
+
+    Prebuilt images go through a build too: it copies them into the platform's registry (#2986).
+    Requesting again after a failed build starts a new attempt.
 
     Raises:
         RuntimeError: A build failed.
     """
     pending: dict[str, ImageBuild] = {}
     for ref in refs:
-        if not needs_image_build(configs.get(ref, {})):
-            continue
         workspace, name, digest = _split_ref(ref)
         pending[ref] = evaluator.tasks.build_images(name, revision=digest, workspace=workspace)
     while any(build.status not in TERMINAL_BUILD_STATUSES for build in pending.values()):
@@ -202,10 +193,6 @@ def build_images(
     if failed:
         detail = "; ".join(f"{ref}: {build.error}" for ref, build in failed.items())
         raise RuntimeError(f"image builds failed: {detail}")
-
-
-def _task_config(task: Task) -> dict[str, Any]:
-    return dict(task.spec.config) if isinstance(task.spec, HarborTaskDefinition) else {}
 
 
 def _split_ref(ref: str) -> tuple[str, str, str]:
@@ -285,7 +272,11 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         agent: str = typer.Option("oracle", "--agent", help="Harbor built-in agent (without --spec-file)."),
         sandbox_policy: str = typer.Option("harbor-standard", "--sandbox-policy", help="Operator sandbox profile."),
         dispatcher_profile: str | None = typer.Option(None, "--dispatcher-profile", help="Jobs profile for task Jobs."),
-        no_build_images: bool = typer.Option(False, "--no-build-images", help="Don't request or wait for builds."),
+        no_build_images: bool = typer.Option(
+            False,
+            "--no-build-images",
+            help="Don't request or wait for image builds here; submit starts a first build for a task that has none.",
+        ),
         list_tasks: bool = typer.Option(False, "--list-tasks", help="Print the selectable tasks and exit."),
         workspace: str | None = typer.Option(
             None, "--workspace", help="Workspace for tasks, taskset and run; default: the configured workspace."
@@ -305,7 +296,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
             evaluator = Evaluator.from_client(client)
             with tempfile.TemporaryDirectory(prefix="nemo-runs-") as scratch:
                 if spec_file is not None:
-                    refs, configs, total, prefix = _select_from_spec(evaluator, spec_file, tasks, workspace)
+                    refs, total, prefix = _select_from_spec(evaluator, spec_file, tasks, workspace)
                 else:
                     if harbor_hub is not None:
                         prefix, task_dirs = download_hub_tasks(harbor_hub, tasks, Path(scratch))
@@ -317,7 +308,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                         candidates = [Candidate(i, d.name, _native_id(d)) for i, d in enumerate(all_dirs)]
                         task_dirs = [all_dirs[c.index] for c in select_tasks(candidates, tasks)]
                         prefix, total = harbor_dir.resolve().name, len(all_dirs)
-                    refs, configs = publish_tasks(evaluator, task_dirs, prefix=prefix, workspace=workspace, echo=echo)
+                    refs = publish_tasks(evaluator, task_dirs, prefix=prefix, workspace=workspace, echo=echo)
                 taskset = entity_name(
                     f"{prefix}-sel-{selection_suffix(refs)}" if spec_file else f"{prefix}-{selection_suffix(refs)}"
                 )
@@ -328,7 +319,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 taskset_ref = f"{workspace}/{taskset}#{revision.content_hash}"
                 echo(f"Published taskset {workspace}/{taskset} ({len(refs)} of {total} tasks)")
                 if not no_build_images:
-                    build_images(evaluator, refs, configs, poll_seconds=poll_seconds, echo=echo)
+                    build_images(evaluator, refs, poll_seconds=poll_seconds, echo=echo)
             request = run_request(
                 taskset_ref,
                 spec_file=spec_file,
@@ -369,7 +360,7 @@ def _native_id(task_dir: Path) -> str:
 
 def _select_from_spec(
     evaluator: Evaluator, spec_file: Path, tokens: str | None, workspace: str
-) -> tuple[list[str], dict[str, dict[str, Any]], int, str]:
+) -> tuple[list[str], int, str]:
     """The pinned refs of ``--spec-file``'s taskset, narrowed by ``--tasks``; tasks are not re-uploaded."""
     request = TasksetRunInput.model_validate(json.loads(spec_file.read_text()))
     assert isinstance(request.spec.tasks, TasksetRef)
@@ -379,15 +370,13 @@ def _select_from_spec(
     taskset = evaluator.tasksets.retrieve(name, revision=fragment or None, workspace=taskset_workspace or workspace)
     members = sorted(str(member.root if isinstance(member, TaskRef) else member) for member in taskset.tasks)
     candidates = []
-    configs: dict[str, dict[str, Any]] = {}
     for index, member in enumerate(members):
         task_workspace, task_name, digest = _split_ref(member)
         task = evaluator.tasks.retrieve(task_name, revision=digest or None, workspace=task_workspace or workspace)
         pinned = member if digest else pinned_task_ref(evaluator, task_workspace, task_name, task.revision)
-        configs[pinned] = _task_config(task)
         candidates.append(Candidate(index, pinned, getattr(task.spec, "native_task_id", task_name)))
     selected = select_tasks(candidates, tokens)
-    return [c.name for c in selected], configs, len(candidates), name
+    return [c.name for c in selected], len(candidates), name
 
 
 def _print_tasks(
@@ -409,7 +398,8 @@ def _print_tasks(
         typer.echo(f"{index:>3}  {row}")
 
 
-# --- Progress and results (M2 story 0 bonus; M4 and M5 replace the client-side joins) ------------------------
+# --- Progress and results ----------------------------------------------------------------------------------
+# TODO(M4, M5): replace these client-side joins with server-side reads.
 
 
 @dataclass(frozen=True)

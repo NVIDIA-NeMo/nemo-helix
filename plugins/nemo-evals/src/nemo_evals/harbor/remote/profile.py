@@ -4,8 +4,9 @@
 """Frozen OpenSandbox policy a taskset run carries in its plan.
 
 Contract module (M1 story 5). The operator config that produces the policy lives in
-``nemo_evals.config``; ``resolve_sandbox_policy`` is M2 story 0's slice of M2 story 3's
-resolver: it picks a profile by name and applies no request overrides or ceilings.
+``nemo_evals.config``; ``resolve_sandbox_policy`` picks a profile by name.
+
+TODO(M2 story 3): request resource overrides and the profile's ceilings.
 """
 
 from typing import Literal, Self

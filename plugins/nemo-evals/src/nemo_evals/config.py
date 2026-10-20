@@ -73,10 +73,6 @@ class HarborTaskJobsConfig(BaseModel):
     sandbox_profiles: dict[str, HarborSandboxProfileConfig] = Field(
         min_length=1, description="Named sandbox profiles; a request picks one with execution.sandbox_policy."
     )
-    allowed_registries: list[str] = Field(
-        default_factory=list,
-        description="Registries a task's prebuilt docker_image may come from. Empty allows none.",
-    )
 
 
 class TasksetRunsConfig(BaseModel):

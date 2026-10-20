@@ -6,7 +6,9 @@
 ``HarborTaskDispatchJob.compile`` (M2 story 6a) turns a ``HarborTaskJobSpec`` into the Job;
 ``HarborTaskAgentEvalJob`` is what the dispatcher entrypoint runs inside it: today's agent evaluation
 over the one task, with its images bound to the prepared digests and Harbor's environment set to
-``NemoOpenSandboxEnvironment``. M2 story 6b replaces the run with its own dispatcher.
+``NemoOpenSandboxEnvironment``.
+
+TODO(M2 story 6b): replace the agent evaluation with a dedicated dispatcher.
 """
 
 from __future__ import annotations

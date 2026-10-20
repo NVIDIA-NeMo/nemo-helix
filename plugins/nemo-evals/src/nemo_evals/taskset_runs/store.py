@@ -15,7 +15,6 @@ from nemo_evals.taskset_runs.entities import (
     TasksetRunMemberEntity,
     TasksetRunPhase,
 )
-from nemo_evals.taskset_runs.identifiers import random_run_id
 from nemo_evals.taskset_runs.plan_storage import PlanDigestMismatchError as PlanDigestMismatchError
 from nemo_evals.taskset_runs.plan_storage import PlanStorageError as PlanStorageError
 from nemo_evals.taskset_runs.plan_storage import StoredPlan, delete_fileset_ref, load_plan, store_plan
@@ -78,8 +77,8 @@ class RunAcceptance:
     Attributes:
         plan: Resolved plan to store; ``plan.run_id`` comes from ``derive_run_id``
             and ``plan.taskset_ref`` is already pinned.
-        idempotency_key: Caller-supplied retry key, or None for a keyless submit.
-            Stored on the run; submit already used it to derive ``plan.run_id``.
+        idempotency_key: Retry key, the caller's or one submit generated. Stored on
+            the run; submit already used it to derive ``plan.run_id``.
         request_digest: Digest of the logical submit request. A same-key retry with
             a different digest raises ``RunRequestConflict``.
         accepted_at: When submit accepted the request; copied onto the run.
@@ -94,7 +93,7 @@ class RunAcceptance:
     """
 
     plan: TasksetRunPlan
-    idempotency_key: str | None
+    idempotency_key: str
     request_digest: str
     accepted_at: datetime
     execution_deadline_at: datetime
@@ -129,10 +128,6 @@ class RunRequestConflict(RuntimeError):
     def __init__(self, run_id: str) -> None:
         self.run_id = run_id
         super().__init__(f"run {run_id!r} already exists with a different request digest")
-
-
-class RunIdExhausted(RuntimeError):
-    """Both attempts to allocate a keyless random run name collided."""
 
 
 class TasksetRunStore:
@@ -239,10 +234,9 @@ class TasksetRunStore:
     async def accept(self, acceptance: RunAcceptance) -> AcceptedRun:
         """Upload a fresh plan, named-create its run and settle proven conflicts.
 
-        Own-plan equality recovers a committed create whose reply was lost. Keyed
-        losers discard only request-owned resources and replay by request digest.
-        Keyless losers retry once with a new plan/run ID. Unknown outcomes keep
-        all resources because a committed run may already reference them.
+        Own-plan equality recovers a committed create whose reply was lost. A loser
+        discards only request-owned resources and replays by request digest. Unknown
+        outcomes keep all resources because a committed run may already reference them.
 
         Args:
             acceptance: Resolved plan, fixed times, request identity, and exclusively
@@ -254,32 +248,24 @@ class TasksetRunStore:
 
         Raises:
             PlanStorageError: Creating or uploading the plan failed.
-            RunRequestConflict: A keyed winner has a different request digest.
-            RunIdExhausted: Both keyless name attempts collided.
+            RunRequestConflict: The winner has a different request digest.
             Exception: Entity failures, including a failed conflict lookup, propagate
                 without cleanup because they do not prove resource ownership.
         """
         plan = acceptance.plan
-        for attempt in range(2):
-            stored = await store_plan(self.files_client, plan)
-            try:
-                run = await self.entity_client.create(self._new_run(acceptance, plan, stored))
-                return AcceptedRun(run=run, created=True)
-            except NemoEntityConflictError:
-                existing = await self.entity_client.get(TasksetRunEntity, name=plan.run_id, workspace=plan.workspace)
-                if existing.plan_ref == stored.ref:
-                    return AcceptedRun(run=existing, created=True)
-                await delete_fileset_ref(self.files_client, stored.ref)
-                if acceptance.idempotency_key is None:
-                    if attempt == 0:
-                        plan = plan.model_copy(update={"run_id": random_run_id()})
-                    continue
-                await self._discard(acceptance.discard_on_loss)
-                if existing.request_digest != acceptance.request_digest:
-                    raise RunRequestConflict(existing.name) from None
-                return AcceptedRun(run=existing, created=False)
+        stored = await store_plan(self.files_client, plan)
+        try:
+            run = await self.entity_client.create(self._new_run(acceptance, plan, stored))
+            return AcceptedRun(run=run, created=True)
+        except NemoEntityConflictError:
+            existing = await self.entity_client.get(TasksetRunEntity, name=plan.run_id, workspace=plan.workspace)
+        if existing.plan_ref == stored.ref:
+            return AcceptedRun(run=existing, created=True)
+        await delete_fileset_ref(self.files_client, stored.ref)
         await self._discard(acceptance.discard_on_loss)
-        raise RunIdExhausted("could not allocate a random run name after two collisions")
+        if existing.request_digest != acceptance.request_digest:
+            raise RunRequestConflict(existing.name) from None
+        return AcceptedRun(run=existing, created=False)
 
     async def _discard(self, refs: tuple[str, ...]) -> None:
         """Delete losing-request filesets without masking the acceptance outcome.
@@ -300,7 +286,7 @@ class TasksetRunStore:
 
         Args:
             acceptance: Request identity and precomputed times to preserve on retries.
-            plan: Plan for this attempt, possibly renamed after a keyless collision.
+            plan: The plan being accepted.
             stored: Reference and digest of the bytes uploaded for that plan.
 
         Returns:
@@ -432,7 +418,7 @@ class TasksetRunStore:
         """Every run in every workspace that hasn't finished (accepted or running), oldest first.
 
         For the run controller, whose client acts as the evals service principal. Reads every page:
-        runs that never finish (no deadlines until M4) must not hide newer ones. A run that finishes
+        a backlog of old open runs must not hide newer ones. A run that finishes
         mid-scan shifts later pages, so one may be skipped until the next pass.
         """
         runs: list[TasksetRunEntity] = []
@@ -501,8 +487,9 @@ class TasksetRunStore:
             page_size: Maximum records on the requested page.
 
         Returns:
-            Stored members and filtered pagination counts; accepted M1 runs have
-            empty pages. No plan or Jobs reads occur; storage failures propagate.
+            Stored members and filtered pagination counts. No plan or Jobs reads occur;
+            storage failures propagate. TODO(M4 story 4): nothing writes members yet, so pages
+            are empty until the controller does.
         """
         conditions: list[FilterOperation] = [
             ComparisonOperation(field="parent", operator=FilterOperator.EQ, value=run.id),

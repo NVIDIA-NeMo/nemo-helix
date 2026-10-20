@@ -154,9 +154,9 @@ def test_member_defaults_and_index() -> None:
 def test_frozen_plan_roundtrip(plan: TasksetRunPlan) -> None:
     """Verify the plan fixture round-trips while retaining its strict frozen schema.
 
-    Assertions pin the eleven stored fields and expect validation errors for
-    rebinding, extras, unresolved percentages, invalid caps, and missing nullable
-    cap fields, protecting the resolved-input contract of stored plans.
+    Assertions pin the nine stored fields and expect validation errors for
+    rebinding, extras, an invalid cap, and a missing nullable cap field,
+    protecting the resolved-input contract of stored plans.
     """
     assert TasksetRunPlan.model_validate_json(plan.model_dump_json()) == plan
     assert set(TasksetRunPlan.model_fields) == {
@@ -164,9 +164,7 @@ def test_frozen_plan_roundtrip(plan: TasksetRunPlan) -> None:
         "workspace",
         "taskset_ref",
         "spec",
-        "missing_prebuilt_image",
         "max_concurrent_task_jobs",
-        "max_failed_tasks",
         "sandbox_policy",
         "dispatcher_image",
         "dispatcher_profile",
@@ -176,17 +174,15 @@ def test_frozen_plan_roundtrip(plan: TasksetRunPlan) -> None:
         setattr(plan, "run_id", "changed")  # setattr: ty already rejects a direct write to a frozen field
     for field, value in [
         ("schema_version", 1),
-        ("max_failed_tasks", -1),
-        ("max_failed_tasks", "10%"),
+        ("max_failed_tasks", None),
         ("max_concurrent_task_jobs", 0),
     ]:
         with pytest.raises(ValidationError):
             TasksetRunPlan.model_validate({**plan.model_dump(), field: value})
-    for field in ("max_failed_tasks", "max_concurrent_task_jobs"):
-        data = plan.model_dump()
-        del data[field]
-        with pytest.raises(ValidationError):
-            TasksetRunPlan.model_validate(data)
+    data = plan.model_dump()
+    del data["max_concurrent_task_jobs"]
+    with pytest.raises(ValidationError):
+        TasksetRunPlan.model_validate(data)
     # One frozen environment per task: a retry reads images from here, never prepares them again.
     with pytest.raises(ValidationError, match="task_environments has 2 entries for 1 tasks"):
         TasksetRunPlan.model_validate(
@@ -197,21 +193,17 @@ def test_frozen_plan_roundtrip(plan: TasksetRunPlan) -> None:
 def test_execution_input() -> None:
     """Verify caller configuration defaults and reject unsupported execution inputs.
 
-    Locally built sandbox settings must accept a supported percentage and apply
-    documented defaults; invalid limits, unknown fields/kinds, and a missing
-    sandbox policy must raise ValidationError before submit resolution.
+    Locally built sandbox settings must apply documented defaults; an invalid
+    limit, unknown fields/kinds (including the removed max_failed_tasks), and a
+    missing sandbox policy must raise ValidationError before submit resolution.
     """
     input_model = HarborTaskJobsExecutionInput(sandbox_policy="sandbox")
     assert input_model.kind == "harbor-task-jobs"
     assert input_model.dispatcher_profile is None  # submit resolves the operator's first profile
-    assert input_model.missing_prebuilt_image == "fail"
-    assert input_model.max_concurrent_task_jobs is input_model.max_failed_tasks is None
-    assert HarborTaskJobsExecutionInput(sandbox_policy="sandbox", max_failed_tasks="10%").max_failed_tasks == "10%"
+    assert input_model.max_concurrent_task_jobs is None
     for changes in (
-        {"max_failed_tasks": -1},
-        {"max_failed_tasks": "1.5%"},
-        {"max_failed_tasks": "101%"},
-        {"max_failed_tasks": "1000%"},
+        {"max_failed_tasks": 1},
+        {"missing_prebuilt_image": "fail"},
         {"max_concurrent_task_jobs": 0},
         {"unexpected": True},
         {"kind": "other"},

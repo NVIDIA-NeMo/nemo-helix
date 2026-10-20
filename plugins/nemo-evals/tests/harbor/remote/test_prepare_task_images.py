@@ -1,93 +1,91 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The MVP preparer: ready builds or pinned prebuilt images in one call, never pending."""
+"""The MVP preparer over the real ``ImageBuildService``: check first, then one call that is ready or failed."""
 
 from datetime import datetime, timezone
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import httpx
 import pytest
+from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash, ResolvedHarborTaskDefinition
+from nemo_evals.api.task_definitions.provenance import TaskProvenance
+from nemo_evals.entities import TaskEntity, TaskRevisionEntity
 from nemo_evals.harbor.remote import preparation
-from nemo_evals.harbor.remote.preparation import PreparationClients, prepare_task_images
+from nemo_evals.harbor.remote.preparation import (
+    ImagePreparationUnavailableError,
+    PreparationClients,
+    PreparationErrorInfo,
+    TaskPreparation,
+    prepare_task_images,
+)
+from nemo_evals.image_builds.models import BuildImage, BuildImageSource, TaskImageBuildEntity, build_job_name
 from nemo_evals.image_builds.planning import TaskArchive
-from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_evals.image_builds.runner import TaskImageBuildSpec
+from nemo_evals.image_builds.service import BuildJob, ImageBuildForbiddenError, ImageBuildService
+from nemo_evals.jobs.agent_spec import ResolvedTask
+from nemo_evals.jobs.task_image_build import task_image_build_job_request
+from nemo_evals.revisions import get_revision
+from nemo_helix_plugin.client.errors import ConflictError, InternalServerError
+from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
-SHA = "sha256:" + "c" * 64
 SEPARATE = {"environment": {}, "verifier": {"environment_mode": "separate"}}
-PREBUILT = {"environment": {"docker_image": "public.ecr.aws/team/swe:abc"}}
 
 
-def archive(*files: str, compose: str | None = None) -> TaskArchive:
-    return TaskArchive(root="t", files=frozenset(f"t/{f}" for f in files), compose=compose)
+def digest_ref(char: str) -> str:
+    return f"registry.invalid/{char}@sha256:{char * 64}"
 
 
-def build(status: str, *roles: str) -> dict:
-    images = [
-        {
-            "role": role,
-            "source": "dockerfile",
-            "status": "ready",
-            "builder_image": f"harbor-env-{role}-1",
-            "build_job": f"builder-{role}",
-            "image_ref": f"registry.invalid/{role}@sha256:{(role[0] * 64)[:64].replace('m', 'd').replace('v', 'e')}",
-        }
-        for role in roles
-    ]
-    return {
-        "id": "1",
-        "task": "default/x",
-        "revision": "r",
-        "status": status,
-        "job": "j",
-        "allowed_registries": [],
-        "images": images,
-    }
+class _Jobs:
+    """Jobs that, like the real service, refuse a second Job under a taken name."""
+
+    def __init__(self) -> None:
+        self.created: dict[str, CreateHelixJobRequest] = {}
+        self.statuses: dict[str, str] = {}
+        self.refuse: Exception | None = None
+
+    async def create(self, request: CreateHelixJobRequest) -> None:
+        if self.refuse is not None:
+            raise self.refuse
+        assert request.name is not None
+        if request.name in self.created:
+            raise ConflictError(httpx.Response(409, json={"detail": "job exists"}))
+        self.created[request.name] = request
+
+    async def get(self, name: str) -> BuildJob | None:
+        if name not in self.created:
+            return None
+        return BuildJob(status=self.statuses.get(name, "active"), custom_fields=self.created[name].custom_fields)
 
 
-@pytest.fixture
-def builds() -> list[dict]:
-    return []
+class _Authorizer:
+    def __init__(self) -> None:
+        self.allowed = True
 
-
-@pytest.fixture
-async def clients(builds):
-    def api(request: httpx.Request) -> httpx.Response:
-        if request.url.host == "platform.test" and request.url.path.endswith("/image-builds"):
-            return httpx.Response(
-                200,
-                json={
-                    "data": builds,
-                    "pagination": {
-                        "page": 1,
-                        "page_size": 100,
-                        "current_page_size": len(builds),
-                        "total_pages": 1,
-                        "total_results": len(builds),
-                    },
-                },
-            )
-        if request.url.host == "public.ecr.aws" and request.url.path.startswith("/v2/"):
-            if request.headers.get("authorization") != "Bearer anon":
-                challenge = 'Bearer realm="https://public.ecr.aws/token/",service="public.ecr.aws"'
-                return httpx.Response(401, headers={"www-authenticate": challenge})
-            if request.url.path.endswith("/manifests/abc"):
-                return httpx.Response(200, headers={"docker-content-digest": SHA})
-            return httpx.Response(404)
-        if request.url.path == "/token/":
-            return httpx.Response(200, json={"token": "anon"})
-        raise AssertionError(f"unexpected request {request.method} {request.url}")
-
-    transport = httpx.MockTransport(api)
-    async with httpx.AsyncClient(transport=transport) as http, httpx.AsyncClient(transport=transport) as registry:
-        async with AsyncNemoClient(base_url="http://platform.test", http_client=http) as client:
-            yield PreparationClients(client=client, files=MagicMock(), registry=registry)
+    async def __call__(self, workspace: str) -> None:
+        if not self.allowed:
+            raise ImageBuildForbiddenError(f"You may not submit container image builds in workspace {workspace}")
 
 
 @pytest.fixture
-def task_archive(monkeypatch):
-    holder = {"archive": archive("environment/Dockerfile", "tests/Dockerfile")}
+def jobs() -> _Jobs:
+    return _Jobs()
+
+
+@pytest.fixture
+def authorizer() -> _Authorizer:
+    return _Authorizer()
+
+
+@pytest.fixture
+def clients(entity_store, jobs, authorizer) -> PreparationClients:
+    service = ImageBuildService(entity_store, jobs, authorizer)
+    return PreparationClients(client=MagicMock(), files=MagicMock(), image_builds=lambda workspace: service)
+
+
+@pytest.fixture
+def archive(monkeypatch) -> dict[str, TaskArchive]:
+    holder = {"archive": TaskArchive(root="t", files=frozenset({"t/environment/Dockerfile"}), compose=None)}
 
     async def read(files, source):
         return holder["archive"]
@@ -96,108 +94,187 @@ def task_archive(monkeypatch):
     return holder
 
 
-@pytest.fixture(autouse=True)
-def allowed_registries(monkeypatch, harbor_config):
-    config = harbor_config.model_copy(update={"allowed_registries": ["public.ecr.aws"]})
-    monkeypatch.setattr(preparation, "get_config", lambda: SimpleNamespace(runs=SimpleNamespace(harbor=config)))
+def task(digest: str, *, name: str = "sort-task", config: dict | None = None) -> ResolvedTask:
+    return ResolvedTask(
+        id=name,
+        spec=ResolvedHarborTaskDefinition(
+            kind="harbor",
+            native_task_id=name,
+            instruction="Solve the task.",
+            source=HarborArchiveSource(fileset_ref="default/harbor-tasks#t/task_archive", files_hash="a" * 64),
+            harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
+            config=config if config is not None else SEPARATE,
+            provenance=TaskProvenance(entity_name=f"default/{name}", revision_digest=digest),
+        ),
+    )
 
 
-async def prepare(task, clients, policy):
+async def prepare(resolved: ResolvedTask, clients, policy, recorded: TaskPreparation | None = None):
     return await prepare_task_images(
-        task,
-        None,
-        policy=policy,
-        missing_prebuilt_image="fail",
-        caller="user:alice",
-        clients=clients,
-        deadline=datetime.now(timezone.utc),
+        resolved, recorded, policy=policy, caller="user:alice", clients=clients, deadline=datetime.now(timezone.utc)
     )
 
 
-async def test_ready_build_gives_agent_and_verifier(
-    clients, builds, task_archive, sandbox_policy, harbor_resolved_task
-):
-    builds.extend([build("failed"), build("ready", "main", "verifier")])
-    result = await prepare(harbor_resolved_task(config=SEPARATE), clients, sandbox_policy)
-    assert result.status == "ready" and result.environment is not None
-    assert result.environment.agent.image_ref.startswith("registry.invalid/main@")
-    assert (
-        result.environment.verifier is not None and result.environment.verifier.builder_image == "harbor-env-verifier-1"
+async def settle(entity_store, digest: str, attempt: int, status: str, *, images=(), error=None) -> None:
+    """Record the outcome the task-builder Job would write on build ``attempt``."""
+    head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
+    revision = await get_revision(entity_store, TaskRevisionEntity, head, digest)
+    build = await entity_store.get(
+        TaskImageBuildEntity, name=f"build.{attempt}", workspace="default", parent=revision.id
     )
-    assert result.images["agent"].source == "built"
-    assert result.environment.agent.preparation_key.startswith("harbor-env-")
+    build.status, build.images, build.error = status, list(images), error
+    await entity_store.update(build)
 
 
-async def test_no_ready_build_is_image_unavailable(clients, builds, task_archive, sandbox_policy, harbor_resolved_task):
-    builds.append(build("running"))
-    result = await prepare(harbor_resolved_task(config=SEPARATE), clients, sandbox_policy)
+def image(role: str, ref: str, *, source: BuildImageSource = "dockerfile") -> BuildImage:
+    return BuildImage(
+        role=role, source=source, status="ready", image_ref=ref, builder_image=f"harbor-env-{role}", build_job="b"
+    )
+
+
+def failure(result: TaskPreparation) -> tuple[str, str]:
     assert result.status == "failed" and result.error is not None
-    assert result.error.code == "image_unavailable" and "no ready image build" in result.error.detail
+    return result.error.code, result.error.detail
 
 
-async def test_prebuilt_tag_is_pinned_anonymously(clients, task_archive, sandbox_policy, harbor_resolved_task):
-    task_archive["archive"] = archive()
-    result = await prepare(harbor_resolved_task(config=PREBUILT), clients, sandbox_policy)
+async def test_a_task_without_a_build_starts_its_first_attempt(clients, store_task, sandbox_policy, jobs):
+    digest = await store_task(config=SEPARATE)
+    code, detail = failure(await prepare(task(digest), clients, sandbox_policy))
+    assert code == "image_unavailable" and "image build 1 of default/sort-task" in detail and "pending" in detail
+    assert list(jobs.created) == [build_job_name("default/sort-task", digest, 1)]
+
+
+async def test_a_ready_build_gives_agent_and_verifier(clients, store_task, sandbox_policy, entity_store):
+    digest = await store_task(config=SEPARATE)
+    await prepare(task(digest), clients, sandbox_policy)
+    images = [image("main", digest_ref("d")), image("verifier", digest_ref("e"))]
+    await settle(entity_store, digest, 1, "ready", images=images)
+    result = await prepare(task(digest), clients, sandbox_policy)
     assert result.status == "ready" and result.environment is not None
-    assert result.environment.agent.image_ref == f"public.ecr.aws/team/swe@{SHA}"
-    assert result.environment.verifier is None and result.images["agent"].source == "prebuilt"
+    agent, verifier = result.environment.agent, result.environment.verifier
+    assert agent.image_ref == digest_ref("d") and agent.preparation_key == "sha256:" + "d" * 64
+    assert agent.builder_image == "harbor-env-main" and agent.source_archive_digest == "a" * 64
+    assert verifier is not None and verifier.image_ref == digest_ref("e")
+    assert result.images["agent"].source == "built"
 
 
-async def test_prebuilt_tag_that_does_not_resolve_fails(clients, task_archive, sandbox_policy, harbor_resolved_task):
-    task_archive["archive"] = archive()
-    config = {"environment": {"docker_image": "public.ecr.aws/team/swe:gone"}}
-    result = await prepare(harbor_resolved_task(config=config), clients, sandbox_policy)
-    assert result.error is not None and result.error.code == "image_unavailable" and result.error.role == "agent"
+async def test_a_prebuilt_copy_is_marked_prebuilt(clients, store_task, sandbox_policy, entity_store):
+    digest = await store_task(config={"environment": {"docker_image": "docker.io/library/ubuntu:24.04"}})
+    await prepare(task(digest), clients, sandbox_policy)
+    await settle(entity_store, digest, 1, "ready", images=[image("main", digest_ref("c"), source="prebuilt")])
+    result = await prepare(task(digest), clients, sandbox_policy)
+    assert result.environment is not None and result.environment.verifier is None
+    assert result.images["agent"].source == "prebuilt" and result.environment.agent.source_archive_digest is None
+
+
+async def test_a_failed_build_fails_the_task_without_a_new_attempt(
+    clients, store_task, sandbox_policy, entity_store, jobs
+):
+    digest = await store_task(config=SEPARATE)
+    await prepare(task(digest), clients, sandbox_policy)
+    await settle(entity_store, digest, 1, "failed", error="Dockerfile step 3 failed")
+    code, detail = failure(await prepare(task(digest), clients, sandbox_policy))
+    assert code == "build_failed" and detail.endswith("Dockerfile step 3 failed")
+    assert len(jobs.created) == 1  # a broken task doesn't start attempt after attempt
+
+
+async def test_a_running_build_is_reported_and_left_alone(clients, store_task, sandbox_policy, jobs):
+    digest = await store_task(config=SEPARATE)
+    await prepare(task(digest), clients, sandbox_policy)
+    code, detail = failure(await prepare(task(digest), clients, sandbox_policy))
+    assert code == "image_unavailable" and "resubmit when it's ready" in detail
+    assert len(jobs.created) == 1
+
+
+async def test_a_caller_who_may_not_build_still_learns_a_build_is_pending(
+    clients, store_task, sandbox_policy, authorizer
+):
+    digest = await store_task(config=SEPARATE)
+    await prepare(task(digest), clients, sandbox_policy)  # someone else started it
+    authorizer.allowed = False
+    code, detail = failure(await prepare(task(digest), clients, sandbox_policy))
+    assert code == "image_unavailable" and "is pending" in detail and "may not" not in detail
+
+
+async def test_a_caller_who_may_not_build_cannot_start_one(clients, store_task, sandbox_policy, authorizer, jobs):
+    digest = await store_task(config=SEPARATE)
+    authorizer.allowed = False
+    code, detail = failure(await prepare(task(digest), clients, sandbox_policy))
+    assert code == "image_unavailable" and "may not submit container image builds" in detail
+    assert not jobs.created
+
+
+async def test_a_lost_build_job_is_created_again(clients, store_task, sandbox_policy, jobs):
+    digest = await store_task(config=SEPARATE)
+    jobs.refuse = InternalServerError(httpx.Response(500, json={"detail": "jobs is down"}))
+    with pytest.raises(ImagePreparationUnavailableError, match="jobs is down"):
+        await prepare(task(digest), clients, sandbox_policy)
+    jobs.refuse = None
+    code, _ = failure(await prepare(task(digest), clients, sandbox_policy))
+    assert code == "image_unavailable" and list(jobs.created) == [build_job_name("default/sort-task", digest, 1)]
+
+
+async def test_a_build_whose_job_ended_without_a_result_is_replaced(clients, store_task, sandbox_policy, jobs):
+    digest = await store_task(config=SEPARATE)
+    await prepare(task(digest), clients, sandbox_policy)
+    jobs.statuses[build_job_name("default/sort-task", digest, 1)] = "error"
+    code, detail = failure(await prepare(task(digest), clients, sandbox_policy))
+    assert code == "image_unavailable" and "image build 2" in detail
+    assert len(jobs.created) == 2
+
+
+async def test_a_job_name_held_by_another_job_is_reported(clients, store_task, sandbox_policy, jobs):
+    digest = await store_task(config=SEPARATE)
+    name = build_job_name("default/sort-task", digest, 1)
+    other = TaskImageBuildSpec(workspace="default", task="other-task", revision_digest=digest, attempt=1)
+    jobs.created[name] = task_image_build_job_request(other, name=name)
+    code, _ = failure(await prepare(task(digest), clients, sandbox_policy))
+    assert code == "image_unavailable"
+
+
+async def test_a_compose_service_image_is_not_supported(clients, store_task, sandbox_policy, entity_store):
+    digest = await store_task(config=SEPARATE)
+    await prepare(task(digest), clients, sandbox_policy)
+    images = [image("main", digest_ref("d")), image("db", digest_ref("f"))]
+    await settle(entity_store, digest, 1, "ready", images=images)
+    code, _ = failure(await prepare(task(digest), clients, sandbox_policy))
+    assert code == "multi_container_not_yet_supported"
+
+
+@pytest.mark.parametrize("missing", ["task", "revision"])
+async def test_a_task_or_revision_that_is_gone_is_invalid(clients, store_task, sandbox_policy, missing):
+    digest = await store_task(config=SEPARATE)
+    gone = task(digest, name="no-such-task") if missing == "task" else task("f" * 64)
+    code, _ = failure(await prepare(gone, clients, sandbox_policy))
+    assert code == "invalid_task_config"
+
+
+async def test_a_non_harbor_task_is_invalid(clients, store_task, sandbox_policy):
+    digest = await store_task(harbor=False)
+    code, _ = failure(await prepare(task(digest), clients, sandbox_policy))
+    assert code == "invalid_task_config"
+
+
+async def test_settled_preparation_is_returned_unchanged(clients, sandbox_policy):
+    failed = TaskPreparation(status="failed", error=PreparationErrorInfo(code="build_failed", detail="x"))
+    assert await prepare(task("f" * 64), clients, sandbox_policy, failed) is failed
 
 
 @pytest.mark.parametrize(
-    ("config", "files", "compose", "code"),
+    ("config", "compose", "code"),
     [
-        (
-            {  # pinned agent, verifier built from tests/Dockerfile (deep-swe-1-1's shape)
-                "environment": {"docker_image": "public.ecr.aws/team/swe:abc"},
-                "verifier": {"environment_mode": "separate", "environment": {"cpus": 1}},
-            },
-            ("tests/Dockerfile",),
-            None,
-            "image_unavailable",
-        ),
-        ({"environment": {}}, ("environment/Dockerfile",), "services: {main: {}}", "multi_container_not_yet_supported"),
-        ({"environment": {"gpus": 1}}, ("environment/Dockerfile",), None, "gpu_unsupported"),
-        ({"environment": {"docker_image": "docker.io/library/ubuntu:24.04"}}, (), None, "registry_not_allowed"),
-        ({"environment": {}}, (), None, "main_dockerfile_missing"),
+        ({"environment": {"gpus": 1}}, None, "gpu_unsupported"),
+        # Its build has only a main image, so only the archive shows it's a compose task.
+        ({"environment": {}}, "services: {main: {}}", "multi_container_not_yet_supported"),
+        ({"environment": {"os": "windows"}}, None, "windows_unsupported"),
     ],
 )
-async def test_unsupported_tasks_fail_with_stable_codes(
-    clients, task_archive, sandbox_policy, config, files, compose, code, harbor_resolved_task
-):
-    task_archive["archive"] = archive(*files, compose=compose)
-    result = await prepare(harbor_resolved_task(config=config), clients, sandbox_policy)
-    assert result.status == "failed" and result.error is not None and result.error.code == code
+async def test_check_rejects_what_kubernetes_runs_cannot_take(clients, archive, sandbox_policy, config, compose, code):
+    archive["archive"] = TaskArchive(root="t", files=frozenset({"t/environment/Dockerfile"}), compose=compose)
+    rejected = await prepare_task_images.check(task("f" * 64, config=config), policy=sandbox_policy, clients=clients)
+    assert rejected is not None and rejected.code == code
 
 
-async def test_empty_allowlist_allows_no_prebuilt_registry(
-    monkeypatch, clients, task_archive, sandbox_policy, harbor_config, harbor_resolved_task
-):
-    """Unlike Builder's narrowing list, an empty evals.runs.harbor.allowed_registries denies every registry."""
-    config = harbor_config.model_copy(update={"allowed_registries": []})
-    monkeypatch.setattr(preparation, "get_config", lambda: SimpleNamespace(runs=SimpleNamespace(harbor=config)))
-    result = await prepare(harbor_resolved_task(config=PREBUILT), clients, sandbox_policy)
-    assert result.status == "failed" and result.error is not None
-    assert (result.error.code, result.error.role) == ("registry_not_allowed", "agent")
-
-
-async def test_settled_preparation_is_returned_unchanged(clients, sandbox_policy, harbor_resolved_task):
-    from nemo_evals.harbor.remote.preparation import PreparationErrorInfo, TaskPreparation
-
-    failed = TaskPreparation(status="failed", error=PreparationErrorInfo(code="build_failed", detail="x"))
-    result = await prepare_task_images(
-        harbor_resolved_task(),
-        failed,
-        policy=sandbox_policy,
-        missing_prebuilt_image="fail",
-        caller="user:alice",
-        clients=clients,
-        deadline=datetime.now(timezone.utc),
-    )
-    assert result is failed
+async def test_check_passes_a_dockerfile_task_without_starting_a_build(clients, archive, sandbox_policy, jobs):
+    assert await prepare_task_images.check(task("f" * 64), policy=sandbox_policy, clients=clients) is None
+    assert not jobs.created

@@ -20,7 +20,7 @@ A bundle Job whose create failed midway never runs, so the next attempt's name i
 Task and bundle Job names are predictable, so a Job under one counts only when it runs exactly what this
 run would create there: someone else's Job is never bundled, adopted or cancelled.
 
-Expiry keeps no partial result: merging the tasks that finished is M4 stories 5 and 7.
+Expiry keeps no partial result. TODO(M4 stories 5, 7): merge the tasks that finished.
 
 Task Jobs save their result bundle as a Job result and, being agent-evaluate Jobs, also a per-task
 result record named after the Job. The bundle Job saves files only. This controller writes the run's

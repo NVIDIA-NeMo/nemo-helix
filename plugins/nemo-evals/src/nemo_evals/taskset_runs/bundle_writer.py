@@ -5,7 +5,7 @@
 
 M2 story 0's slice of M5 story 7. Files only: the bundle Job never writes records; the run
 controller saves the run's result record from what this writes. The whole run is held in memory,
-which is fine for hundreds of trials; M5 story 7 streams one task at a time.
+which is fine for hundreds of trials. TODO(M5 story 7): stream one task at a time.
 """
 
 import json

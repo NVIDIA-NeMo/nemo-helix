@@ -6,6 +6,8 @@
 import io
 import json
 import tarfile
+from types import SimpleNamespace
+from typing import cast
 
 import httpx
 import pytest
@@ -22,8 +24,8 @@ from nemo_evals.runs_cli import (
     _status_table,
     _workspace_flag,
     add_runs_commands,
+    build_images,
     job_error,
-    needs_image_build,
     newest_bundle_job,
     rollup_scores,
     run_request,
@@ -32,6 +34,7 @@ from nemo_evals.runs_cli import (
     selection_suffix,
     submit_run,
 )
+from nemo_evals.sdk.resources import Evaluator
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.jobs.types import HelixJobResponse
 from typer.testing import CliRunner
@@ -75,9 +78,42 @@ def test_selection_suffix_ignores_order():
     assert selection_suffix(["a#1", "b#2"]) == selection_suffix(["b#2", "a#1"]) != selection_suffix(["a#1"])
 
 
-def test_only_dockerfile_tasks_need_builds():
-    assert needs_image_build({"environment": {}})
-    assert not needs_image_build({"environment": {"docker_image": "public.ecr.aws/x:1"}})
+class _Tasks:
+    """Image builds that finish on the second poll; ``fail`` names tasks whose build fails."""
+
+    def __init__(self, fail: frozenset[str] = frozenset()) -> None:
+        self.fail = fail
+        self.requested: list[str] = []
+        self.polls: dict[str, int] = {}
+
+    def build_images(self, name, *, revision, workspace):
+        self.requested.append(f"{workspace}/{name}#{revision}")
+        return SimpleNamespace(id="1", status="pending", images=[], error=None)
+
+    def get_image_build(self, name, build_id, *, revision, workspace):
+        self.polls[name] = self.polls.get(name, 0) + 1
+        if self.polls[name] < 2:
+            return SimpleNamespace(id=build_id, status="running", images=[], error=None)
+        if name in self.fail:
+            return SimpleNamespace(id=build_id, status="failed", images=[], error="no Dockerfile")
+        return SimpleNamespace(id=build_id, status="ready", images=[object()], error=None)
+
+
+def test_build_images_waits_for_every_task_prebuilt_included():
+    tasks, lines = _Tasks(), []
+    refs = ["default/dockerfile#r1", "default/prebuilt#r2"]
+    evaluator = cast(Evaluator, SimpleNamespace(tasks=tasks))
+    build_images(evaluator, refs, poll_seconds=0, echo=lines.append, sleep=lambda _: None)
+    assert tasks.requested == refs
+    assert tasks.polls == {"dockerfile": 2, "prebuilt": 2}
+    assert lines == ["Image builds: 2 tasks ready (2 images)"]
+
+
+def test_build_images_reports_a_failed_build():
+    tasks = _Tasks(fail=frozenset({"broken"}))
+    evaluator = cast(Evaluator, SimpleNamespace(tasks=tasks))
+    with pytest.raises(RuntimeError, match="default/broken#r1: no Dockerfile"):
+        build_images(evaluator, ["default/broken#r1"], poll_seconds=0, echo=print, sleep=lambda _: None)
 
 
 def test_spec_file_keeps_its_settings_and_takes_the_selected_taskset(tmp_path):
@@ -86,7 +122,7 @@ def test_spec_file_keeps_its_settings_and_takes_the_selected_taskset(tmp_path):
         json.dumps(
             {
                 "spec": {"tasks": "default/full", "target": {"kind": "harbor", "source": {"name": "oracle"}}},
-                "execution": {"sandbox_policy": "harbor-open", "max_failed_tasks": "10%"},
+                "execution": {"sandbox_policy": "harbor-open", "max_concurrent_task_jobs": 3},
             }
         )
     )
@@ -99,7 +135,7 @@ def test_spec_file_keeps_its_settings_and_takes_the_selected_taskset(tmp_path):
     )
     assert isinstance(request.spec.tasks, TasksetRef)
     assert request.spec.tasks.root.startswith("default/full-sel-1234abcd#")
-    assert request.execution.sandbox_policy == "harbor-open" and request.execution.max_failed_tasks == "10%"
+    assert request.execution.sandbox_policy == "harbor-open" and request.execution.max_concurrent_task_jobs == 3
     assert request.idempotency_key
 
 

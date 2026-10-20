@@ -3,34 +3,26 @@
 
 """Stable caller-scoped run names and per-task record/Job names."""
 
-import secrets
 from hashlib import sha256
 
 
-def derive_run_id(workspace: str, caller: str, idempotency_key: str | None) -> str:
+def derive_run_id(workspace: str, caller: str, idempotency_key: str) -> str:
     """Return a 20-character run name scoped to workspace, caller and key.
 
-    A missing key creates a random name; a supplied key, including an empty one,
-    retains its deterministic name until the run record is deleted.
+    A key, including an empty one, keeps its name until the run record is deleted. Submit generates
+    a key when the caller omits one.
 
     Args:
         workspace: Namespace that isolates runs belonging to different workspaces.
         caller: Authenticated identity that isolates callers reusing the same key.
-        idempotency_key: Logical retry key, or None for a new keyless submission.
+        idempotency_key: Logical retry key, the caller's or one submit generated.
 
     Returns:
-        ``run-`` plus 16 hex characters. Keyed names hash null-separated scope
+        ``run-`` plus 16 hex characters. Names hash null-separated scope
         components so retries find the same named-create acceptance point.
     """
-    if idempotency_key is None:
-        return random_run_id()
     digest = sha256(f"{workspace}\0{caller}\0{idempotency_key}".encode("utf-8")).hexdigest()
     return f"run-{digest[:16]}"
-
-
-def random_run_id() -> str:
-    """Return a fresh run name using eight cryptographically random bytes."""
-    return f"run-{secrets.token_hex(8)}"
 
 
 def member_name(task_index: int) -> str:

@@ -3,8 +3,9 @@
 
 """Freeze an operator sandbox profile into a run's plan (M2 story 3's resolver, trimmed for M2 story 0).
 
-The MVP picks a profile by the request's ``execution.sandbox_policy`` name and applies no request
-overrides or ceilings; M2 story 3 adds both without changing the frozen shape.
+The MVP picks a profile by the request's ``execution.sandbox_policy`` name.
+
+TODO(M2 story 3): request resource overrides and the profile's ceilings, without changing the frozen shape.
 """
 
 from nemo_evals.config import HarborTaskJobsConfig
