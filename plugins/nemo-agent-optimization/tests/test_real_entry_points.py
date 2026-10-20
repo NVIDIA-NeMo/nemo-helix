@@ -22,13 +22,14 @@ import importlib
 import importlib.util
 import tomllib
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from nemo_agent_optimization_plugin.cli import OPTIMIZE_CLI_GROUP
 from nemo_agent_optimization_plugin.discovery import STRATEGY_ATTR, declared_strategy, discover_strategy_jobs
 from nemo_agent_optimization_plugin.jobs.run_strategy import RunStrategyJob
 from nemo_agent_optimization_plugin.schemas.optimize import RunStrategySpec
+from nemo_helix_plugin.agents import validation
 from nemo_helix_plugin.discovery import discover
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
@@ -108,6 +109,46 @@ async def test_the_router_applies_the_config_tuning_strategys_own_submit_rules()
         )
 
     assert "optimize_config_fileset is required" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("module", "job_name", "fields"),
+    [
+        (
+            "nemo_optimization.jobs.optimize",
+            "OptimizeJob",
+            {"optimize_config": "optimize.yml", "optimize_config_fileset": "default/bundle"},
+        ),
+        (
+            "nemo_switchyard.jobs.optimize",
+            "SwitchyardOptimizeJob",
+            {"models": ["a", "b"], "routing_strategies": ["random_routing"]},
+        ),
+        ("prompt_master_plugin.jobs.optimize", "PromptMasterOptimizeJob", {}),
+    ],
+)
+async def test_builtin_strategies_require_agent_config_on_submit(
+    monkeypatch: pytest.MonkeyPatch, module: str, job_name: str, fields: dict
+) -> None:
+    job = getattr(pytest.importorskip(module), job_name)
+    schema = job.input_spec_schema or job.spec_schema
+    submitted = schema.model_validate({"agent": "other/trace-agent", **fields})
+    response = MagicMock()
+    response.data.return_value.config = {}
+    client = MagicMock(get_agent=AsyncMock(return_value=response))
+    monkeypatch.setattr(validation, "client_from_platform", lambda *_: client)
+    kwargs = dict(workspace="default", entity_client=None, async_sdk=MagicMock(), is_local=False)
+
+    with pytest.raises(ValueError, match="Agent 'other/trace-agent' has no configuration"):
+        await job.to_spec(submitted, **kwargs)
+    client.get_agent.assert_awaited_once_with(workspace="other", name="trace-agent")
+
+    response.data.return_value.config = {
+        "default_harness": "deepagents",
+        "harnesses": {"deepagents": {"kind": "deepagents"}},
+    }
+    assert (await job.to_spec(submitted, **kwargs)).agent == submitted.agent
 
 
 def test_the_router_job_submits_to_this_plugins_api_segment() -> None:

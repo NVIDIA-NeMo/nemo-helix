@@ -7,13 +7,42 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from nemo_agents_plugin.jobs.evaluate_agent import EvaluateAgentJob, EvaluateAgentSpec
 from nemo_agents_plugin.refs import AgentRef
+from nemo_helix_plugin.agents import validation
 from nemo_helix_plugin.job_context import JobContext
-from nemo_helix_plugin.refs import FilesetRef
+from nemo_helix_plugin.refs import EndpointURL, FilesetRef
+
+
+@pytest.mark.asyncio
+async def test_to_spec_rejects_a_registered_agent_without_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    response = MagicMock()
+    response.data.return_value.config = {}
+    client = MagicMock(get_agent=AsyncMock(return_value=response))
+    monkeypatch.setattr(validation, "client_from_platform", lambda *_: client)
+
+    with pytest.raises(ValueError, match="Agent 'default/calc' has no configuration"):
+        await EvaluateAgentJob.to_spec(
+            EvaluateAgentSpec(agent=AgentRef("calc"), eval_config="config.yml"),
+            workspace="default",
+            entity_client=None,
+            async_sdk=MagicMock(),
+            is_local=False,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("agent", [None, EndpointURL("https://agent.example/v1")])
+async def test_to_spec_needs_no_registered_config_for_inline_or_endpoint_targets(agent: EndpointURL | None) -> None:
+    spec = EvaluateAgentSpec(agent=agent, eval_config="config.yml")
+    assert (
+        await EvaluateAgentJob.to_spec(
+            spec, workspace="default", entity_client=None, async_sdk=MagicMock(), is_local=False
+        )
+    ) == spec
 
 
 @pytest.mark.asyncio

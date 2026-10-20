@@ -368,8 +368,9 @@ agent name found in ingested traces.
 </Tabs>
 
 A trace-only agent works with [Insights](/documentation/agents/traces-and-insights/insights-from-traces),
-but has nothing to deploy or evaluate. To run it on NeMo Helix, delete it and register it again
-under the same name with a config.
+but has no runnable config. Deployment, execute jobs, registered-agent evaluations, and the built-in
+optimization strategies reject it at submission. To run it on NeMo Helix, delete it and register it
+again under the same name with a config.
 
 ## Manage Registered Agents
 

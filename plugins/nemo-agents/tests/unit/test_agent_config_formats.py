@@ -53,13 +53,12 @@ def test_unknown_config_format_is_rejected() -> None:
         validate_agent_config("custom-v2", {})
 
 
-def test_empty_fabric_config_can_register_but_not_deploy() -> None:
-    assert validate_agent_config(NEMO_AGENTS_SPEC_CONFIG_FORMAT, {}) == {}
+@pytest.mark.parametrize("config_format", [NAT_WORKFLOW_CONFIG_FORMAT, NEMO_AGENTS_SPEC_CONFIG_FORMAT])
+def test_empty_config_can_register_but_not_deploy(config_format: str) -> None:
+    assert validate_agent_config(config_format, {}) == {}
 
-    with pytest.raises(InvalidAgentConfigError, match="Invalid agent config"):
-        resolve_agent_config_for_deployment(
-            NEMO_AGENTS_SPEC_CONFIG_FORMAT, {}, workspace="default", agent_name="test-agent"
-        )
+    with pytest.raises(InvalidAgentConfigError, match="Agent 'default/test-agent' has no configuration"):
+        resolve_agent_config_for_deployment(config_format, {}, workspace="default", agent_name="test-agent")
 
 
 def test_nat_deployment_resolution_applies_legacy_injections(monkeypatch: pytest.MonkeyPatch) -> None:

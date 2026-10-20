@@ -144,7 +144,11 @@ def _platform(mocker: MockerFixture, agent: object, *, ethos_fileset: bool = Fal
 
 
 def _agent(config: dict[str, Any] | None = None, *, config_format: str = "nemo-agents-spec-v1") -> Any:
-    return SimpleNamespace(name="calculator-agent", config_format=config_format, config=config or _calculator_config())
+    return SimpleNamespace(
+        name="calculator-agent",
+        config_format=config_format,
+        config=config if config is not None else _calculator_config(),
+    )
 
 
 async def _resolve(target: FabricRunnerTarget | GymRunnerTarget | HarborRunnerTarget, workspace: str = "dev") -> Any:
@@ -260,6 +264,15 @@ async def test_a_legacy_nat_agent_is_rejected_rather_than_guessed_at(mocker: Moc
 
     with pytest.raises(ValueError, match="nat-workflow-v1"):
         await _resolve(_by_agent())
+
+
+async def test_an_agent_without_config_is_rejected_before_staging_files(mocker: MockerFixture) -> None:
+    agents = _platform(mocker, _agent({}))
+
+    with pytest.raises(ValueError, match="Agent 'dev/calculator-agent' has no configuration"):
+        await _resolve(_by_agent())
+
+    agents.files.get_fileset.assert_not_called()
 
 
 async def test_the_published_agent_name_survives_resolution(mocker: MockerFixture) -> None:

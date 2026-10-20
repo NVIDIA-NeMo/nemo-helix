@@ -29,6 +29,7 @@ from nemo_agent_optimization_plugin.schemas.strategies import OptimizationStrate
 from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.jobs.fileset_io import resolve_staged_config
 from nemo_helix_plugin.agents.client import AgentsClient
+from nemo_helix_plugin.agents.validation import require_registered_agent_config
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import (
@@ -93,6 +94,20 @@ class PromptMasterOptimizeJob(NemoJob):
     )
     description: ClassVar[str] = "Optimize a platform agent's system prompt with Prompt Master."
     spec_schema: ClassVar[type[BaseModel]] = PromptMasterOptimizeSpec
+
+    @classmethod
+    async def to_spec(
+        cls,
+        input_spec: BaseModel,
+        *,
+        workspace: str,
+        entity_client: object,
+        async_sdk: AsyncNemoClient,
+        is_local: bool,
+    ) -> BaseModel:
+        spec = PromptMasterOptimizeSpec.model_validate(input_spec.model_dump())
+        await require_registered_agent_config(spec.agent, workspace=workspace, async_sdk=async_sdk)
+        return spec
 
     @classmethod
     async def compile(  # ty: ignore[invalid-method-override]  (narrows the spec types)

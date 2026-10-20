@@ -37,7 +37,8 @@ from nemo_agents_plugin.utils import (
     preflight_validate_llm_models,
     temp_injected_config,
 )
-from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.agents.validation import require_registered_agent_config
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.errors import LocalRunError
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.job import NemoJob
@@ -151,6 +152,21 @@ class EvaluateAgentJob(NemoJob):
     description: ClassVar[str] = "Evaluate an agent workflow against a dataset as a scheduled platform job."
     container: ClassVar[str] = "cpu-tasks"
     spec_schema: ClassVar[type[BaseModel]] = EvaluateAgentSpec
+
+    @classmethod
+    async def to_spec(
+        cls,
+        input_spec: BaseModel,
+        *,
+        workspace: str,
+        entity_client: object,
+        async_sdk: AsyncNemoClient,
+        is_local: bool,
+    ) -> BaseModel:
+        spec = EvaluateAgentSpec.model_validate(input_spec.model_dump())
+        if spec.agent is not None and classify_agent_target(spec.agent) is AgentRef:
+            await require_registered_agent_config(spec.agent, workspace=workspace, async_sdk=async_sdk)
+        return spec
 
     @classmethod
     async def compile(  # ty: ignore[invalid-method-override]
