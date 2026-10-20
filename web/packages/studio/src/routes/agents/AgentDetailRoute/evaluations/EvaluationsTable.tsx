@@ -298,13 +298,11 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
           id: 'duration',
           header: 'Duration',
           enableSorting: false,
-          // Keyed by job so a rerun restarts the live count. Duration comes from the evaluation
-          // because a row may have no job.
+          // Duration comes from the evaluation because a row may have no job.
           cell: ({ row }) => {
             const { job, evaluation } = row.original;
             return (
               <ElapsedTime
-                key={job?.id}
                 start={job?.created_at}
                 durationMs={evalDurationMs(evaluation?.metadata)}
                 running={job != null && !isTerminalJob(job)}

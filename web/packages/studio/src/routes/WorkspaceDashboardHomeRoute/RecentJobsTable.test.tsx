@@ -191,6 +191,7 @@ describe('RecentJobsTable', () => {
     const filter = JSON.parse(filterParam ?? '');
     const [sourceClause, statusClause] = filter.$and;
     expect(sourceClause.source.$nin).toContain('models-system');
+    expect(sourceClause.source.$nin).not.toContain('customization');
 
     const [inProgress, recentlyFinished] = statusClause.$or;
     expect(inProgress).toEqual({ status: { $in: IN_PROGRESS_JOB_STATUSES } });
@@ -199,6 +200,25 @@ describe('RecentJobsTable', () => {
     expect(recentlyFinished.$and[1]).toEqual({
       updated_at: { $gte: '2026-01-01T12:00:00.000Z' },
     });
+  });
+
+  it('leaves fine-tuning jobs out of the request when fine-tuning is disabled', async () => {
+    mockEnvironment.customizerEnabled = false;
+    let filterParam: string | null = null;
+    server.use(
+      http.get(JOBS_URL, ({ request }) => {
+        filterParam = new URL(request.url).searchParams.get('filter');
+        return HttpResponse.json(makeJobsPage([makeJob()]));
+      })
+    );
+
+    renderComponent();
+    await screen.findByText('my-job');
+
+    const [sourceClause] = JSON.parse(filterParam ?? '').$and;
+    expect(sourceClause.source.$nin).toEqual(
+      expect.arrayContaining(['models-system', 'customization'])
+    );
   });
 
   it('shows cached rows right away when the table remounts within the hour', async () => {

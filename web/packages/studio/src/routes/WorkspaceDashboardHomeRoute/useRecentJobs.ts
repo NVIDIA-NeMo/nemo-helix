@@ -15,8 +15,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 const RECENT_WINDOW_MS = 48 * 60 * 60 * 1000;
 const JOBS_FETCH_SIZE = 100;
-// Used when nothing is running or the last poll failed. It picks up jobs started elsewhere and
-// recovers from a jobs service restart without polling the full list every 5s.
+// Picks up jobs started elsewhere and recovers from a service restart without polling every 5s.
 const SLOW_POLLING_INTERVAL_MS = 30 * 1000;
 const CUTOFF_BUCKET_MS = 60 * 60 * 1000;
 

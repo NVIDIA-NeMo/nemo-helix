@@ -12,15 +12,16 @@ import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import type { HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
 import { Flex, Tag } from '@nvidia/foundations-react-core';
-import { SOURCE_DISPLAY } from '@studio/components/dataViews/JobsDataView/sourceDisplay';
+import {
+  getSourceDisplay,
+  getSourceTitle,
+} from '@studio/components/dataViews/JobsDataView/sourceDisplay';
 import { getJobDetailRoute } from '@studio/components/dataViews/JobsDataView/utils';
 import { CUSTOMIZER_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { iconColorClass } from '@studio/routes/constants';
 import { getNewCustomizationJobRoute } from '@studio/routes/utils';
 import { isJobRunning } from '@studio/routes/WorkspaceDashboardHomeRoute/recentJobsUtils';
 import { useRecentJobs } from '@studio/routes/WorkspaceDashboardHomeRoute/useRecentJobs';
-import { Cog } from 'lucide-react';
 import { type ComponentProps, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -36,24 +37,19 @@ const makeColumns: ComponentProps<typeof StudioDataView<HelixJobResponse>>['make
     id: 'source',
     header: 'Source',
     meta: {
-      title: (cell) => {
-        const value = cell.getValue();
-        return typeof value === 'string' && value
-          ? (SOURCE_DISPLAY[value]?.label ?? value)
-          : undefined;
-      },
+      title: (cell) => getSourceTitle(cell.getValue()),
     },
     cell: ({ row }) => {
       const sourceValue = row.original.source;
       if (!sourceValue) {
         return '-';
       }
-      const display = SOURCE_DISPLAY[sourceValue];
+      const { icon, label } = getSourceDisplay(sourceValue);
       return (
         <Tag kind="outline" color="gray" density="compact" readOnly>
           <Flex align="center" gap="density-sm">
-            {display?.icon ?? <Cog className={iconColorClass} size={14} />}
-            {display?.label ?? sourceValue}
+            {icon}
+            {label}
           </Flex>
         </Tag>
       );
@@ -70,7 +66,6 @@ const makeColumns: ComponentProps<typeof StudioDataView<HelixJobResponse>>['make
     meta: { title: false },
     cell: ({ row }) => (
       <ElapsedTime
-        key={row.original.id}
         start={row.original.created_at}
         end={row.original.updated_at}
         running={isJobRunning(row.original.status)}

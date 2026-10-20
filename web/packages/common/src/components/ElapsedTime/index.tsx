@@ -15,7 +15,6 @@ import type { FC } from 'react';
 interface ElapsedTimeProps {
   start?: string;
   end?: string;
-  /** Recorded duration; when stopped, shown instead of `start` → `end`. */
   durationMs?: number;
   running: boolean;
 }

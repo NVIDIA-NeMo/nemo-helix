@@ -9,22 +9,14 @@ import {
   type HelixJobsListFilter,
   HelixJobStatus,
 } from '@nemo/sdk/generated/platform/schema';
-import {
-  HIDDEN_JOB_SOURCES,
-  JOB_SOURCE,
-} from '@studio/components/dataViews/JobsDataView/constants';
-import { CUSTOMIZER_ENABLED } from '@studio/constants/environment';
+import { getHiddenJobSources } from '@studio/components/dataViews/JobsDataView/constants';
 import { IN_PROGRESS_JOB_STATUSES } from '@studio/constants/platformJobs';
 
-const HIDDEN_SOURCES = CUSTOMIZER_ENABLED
-  ? HIDDEN_JOB_SOURCES
-  : [...HIDDEN_JOB_SOURCES, JOB_SOURCE.CUSTOMIZATION];
-
-/** Running jobs, or jobs finished in the last 48 hours (`updated_at` stands in for finish time). */
+/** Jobs in progress, or finished in the last 48 hours (`updated_at` stands in for finish time). */
 export const buildFilter = (finishedSince: string): HelixJobsListFilter =>
   jsonFilter<HelixJobsListFilter>({
     $and: [
-      { source: { $nin: HIDDEN_SOURCES } },
+      { source: { $nin: getHiddenJobSources() } },
       {
         $or: [
           { status: { $in: IN_PROGRESS_JOB_STATUSES } },

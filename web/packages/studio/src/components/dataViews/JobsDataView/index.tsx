@@ -22,18 +22,19 @@ import type {
 } from '@nemo/sdk/generated/platform/schema';
 import { Flex, Tag } from '@nvidia/foundations-react-core';
 import {
-  HIDDEN_JOB_SOURCES,
+  getHiddenJobSources,
   JOB_SOURCE,
   SOURCE_OPTIONS,
 } from '@studio/components/dataViews/JobsDataView/constants';
-import { SOURCE_DISPLAY } from '@studio/components/dataViews/JobsDataView/sourceDisplay';
+import {
+  getSourceDisplay,
+  getSourceTitle,
+} from '@studio/components/dataViews/JobsDataView/sourceDisplay';
 import { getJobDetailRoute } from '@studio/components/dataViews/JobsDataView/utils';
 import { CUSTOMIZER_ENABLED } from '@studio/constants/environment';
 import { STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { iconColorClass } from '@studio/routes/constants';
 import { keepPreviousData } from '@tanstack/react-query';
-import { Cog } from 'lucide-react';
 import { ComponentProps, useRef } from 'react';
 
 const STATUS_OPTIONS_WITH_ALL = [{ value: '', label: 'All' }, ...STATUS_FILTER_OPTIONS];
@@ -52,9 +53,7 @@ export const JobsDataView = () => {
     delete userFilter.source;
   }
 
-  const hiddenJobSources = CUSTOMIZER_ENABLED
-    ? HIDDEN_JOB_SOURCES
-    : [...HIDDEN_JOB_SOURCES, JOB_SOURCE.CUSTOMIZATION];
+  const hiddenJobSources = getHiddenJobSources();
   const sourceFilterOptions = SOURCE_OPTIONS.filter(
     (option) => CUSTOMIZER_ENABLED || option.value !== JOB_SOURCE.CUSTOMIZATION
   );
@@ -109,7 +108,7 @@ export const JobsDataView = () => {
   const dynamicSourceOptions = [...seenSourcesRef.current]
     .filter((source) => !staticSourceValues.has(source) && !hiddenJobSources.includes(source))
     .sort()
-    .map((source) => ({ label: SOURCE_DISPLAY[source]?.label ?? source, value: source }));
+    .map((source) => ({ label: getSourceDisplay(source).label, value: source }));
   const mergedSourceOptions = [...sourceFilterOptions, ...dynamicSourceOptions];
 
   const makeColumns: ComponentProps<typeof StudioDataView<HelixJobResponse>>['makeColumns'] = ({
@@ -126,12 +125,7 @@ export const JobsDataView = () => {
       meta: {
         // The cell renders a label for the source; without this the OS tooltip falls back
         // to the raw accessor value and shows the API's own word for it instead.
-        title: (cell) => {
-          const value = cell.getValue();
-          return typeof value === 'string' && value
-            ? (SOURCE_DISPLAY[value]?.label ?? value)
-            : undefined;
-        },
+        title: (cell) => getSourceTitle(cell.getValue()),
         filter: {
           type: 'single-select' as const,
           label: 'Source',
@@ -141,9 +135,7 @@ export const JobsDataView = () => {
       cell: ({ row, column: col }) => {
         const sourceValue = row.original.source;
         if (!sourceValue) return '-';
-        const display = SOURCE_DISPLAY[sourceValue];
-        const icon = display?.icon ?? <Cog className={iconColorClass} size={14} />;
-        const label = display?.label ?? sourceValue;
+        const { icon, label } = getSourceDisplay(sourceValue);
         return (
           <Tag
             kind="outline"
