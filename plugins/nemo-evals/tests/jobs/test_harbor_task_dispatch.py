@@ -7,10 +7,18 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from harbor.environments.factory import EnvironmentFactory
+from harbor.models.task.config import EnvironmentConfig, TaskConfig
+from harbor.models.task.verifier_mode import resolve_effective_verifier_env_config
+from harbor.models.trial.config import EnvironmentConfig as TrialEnvironmentConfig
+from harbor.models.trial.config import ResourceMode
+from harbor.models.trial.paths import TrialPaths
 from nemo_evals.filesets import FilesetRef
+from nemo_evals.harbor.remote.profile import ResourceOverrides, resource_defaults
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evals.jobs.agent_spec import AgentEvalSpec, RegisteredAgentSource
 from nemo_evals.jobs.harbor_task_dispatch import (
@@ -173,6 +181,8 @@ def test_runtime_selects_opensandbox_with_frozen_policy_and_no_key(task_spec, tm
     assert kwargs["trusted_allowed_hosts"] == ["igw.svc.cluster.local"]
     assert kwargs["agent_channel_hosts"] == []
     assert kwargs["sandbox_timeout_sec"] == 30_600 and kwargs["use_server_proxy"] is True
+    assert kwargs["enforce_disk_limit"] is True and kwargs["max_disk_mb"] == 131_072
+    assert not any(key.startswith("override_") for key in kwargs)
     assert kwargs["metadata"] == {"nemo-run": "run-0123456789abcdef", "nemo-task-index": "1", "nemo-job": ctx.job_id}
     assert configured.n_concurrent_trials == 1
     assert "private-worker-value" not in json.dumps(configured.model_dump(mode="json"))
@@ -186,6 +196,77 @@ def test_runtime_passes_the_frozen_agent_channel(task_spec, tmp_path):
     configured = configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path), ctx, spec)
     assert configured.environment is not None
     assert configured.environment.kwargs["agent_channel_hosts"] == ["igw.svc.cluster.local"]
+
+
+def test_runtime_passes_agent_overrides_and_capped_defaults(task_spec, tmp_path):
+    overrides = ResourceOverrides(cpus=4, storage_mb=20_480)
+    policy = task_spec.sandbox_policy.model_copy(update={"resource_overrides": overrides, "max_memory_mb": 1024})
+    spec = task_spec.model_copy(update={"sandbox_policy": policy})
+    ctx = MagicMock(spec=JobContext)
+    ctx.job_id = "run-0123456789abcdef-task-1"
+    configured = configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path), ctx, spec)
+    assert configured.environment is not None
+    kwargs = configured.environment.kwargs
+    assert kwargs["agent_resource_overrides"] == {"cpus": 4, "storage_mb": 20_480}
+    assert kwargs["sandbox_resource_defaults"] == resource_defaults(policy) == {"cpus": 1, "memory_mb": 1024}
+    assert not [key for key in kwargs if key.startswith("override_")]
+    harbor = TrialEnvironmentConfig.model_validate(configured.environment.model_dump())  # as the runtime hands it over
+    assert harbor.cpu_enforcement_policy == harbor.memory_enforcement_policy == ResourceMode.AUTO
+
+
+def _sandbox(configured, tmp_path: Path, session_id: str, task_env_config: EnvironmentConfig) -> Any:
+    """The sandbox environment Harbor's factory builds for ``session_id`` from the dispatcher's config."""
+    (tmp_path / "env").mkdir(exist_ok=True)
+    (tmp_path / "trial-x").mkdir(exist_ok=True)
+    return EnvironmentFactory.create_environment_from_config(
+        TrialEnvironmentConfig.model_validate(configured.environment.model_dump()),
+        environment_dir=tmp_path / "env",
+        environment_name="t",
+        session_id=session_id,
+        trial_paths=TrialPaths(trial_dir=tmp_path / "trial-x"),
+        task_env_config=task_env_config,
+    )
+
+
+@pytest.mark.parametrize("verifier", ["explicit", "inherited"])
+def test_overrides_size_the_agent_sandbox_only(task_spec, tmp_path, monkeypatch, verifier):
+    monkeypatch.setenv("OPEN_SANDBOX_API_KEY", "")
+    overrides = ResourceOverrides(cpus=4, memory_mb=8192)
+    policy = task_spec.sandbox_policy.model_copy(update={"resource_overrides": overrides, "max_memory_mb": 1024})
+    configured = configure_runtime(
+        HarborRuntimeConfig(jobs_dir=tmp_path),
+        MagicMock(spec=JobContext, job_id="j"),
+        task_spec.model_copy(update={"sandbox_policy": policy}),
+    )
+    task = TaskConfig.model_validate(
+        {
+            "environment": {"docker_image": AGENT.image_ref, "cpus": 2, "storage_mb": 1024},
+            "verifier": {"environment_mode": "separate"}
+            | ({"environment": {"docker_image": VERIFIER.image_ref, "cpus": 1}} if verifier == "explicit" else {}),
+        }
+    )
+    agent = _sandbox(configured, tmp_path, "trial-x__env", task.environment)
+    verifier_config = resolve_effective_verifier_env_config(task, None)  # Harbor copies it after the agent's
+    assert verifier_config is not None
+    verifier_sandbox = _sandbox(configured, tmp_path, "trial-x__verifier__main", verifier_config)
+    assert agent._resource()["cpu"] == "4" and agent._resource()["memory"] == "8192Mi"
+    expected_cpus = "1" if verifier == "explicit" else "2"  # task.toml's, never the override
+    assert verifier_sandbox._resource()["cpu"] == expected_cpus
+    assert verifier_sandbox._resource()["memory"] == "1024Mi"  # the capped default
+    assert task.environment.cpus == 2 and task.environment.memory_mb is None  # the task's own config is untouched
+
+
+def test_a_storage_only_task_still_gets_cpu_and_memory_limits(task_spec, tmp_path, monkeypatch):
+    monkeypatch.setenv("OPEN_SANDBOX_API_KEY", "")
+    policy = task_spec.sandbox_policy.model_copy(update={"enforce_disk_limit": True, "max_disk_mb": None})
+    configured = configure_runtime(
+        HarborRuntimeConfig(jobs_dir=tmp_path),
+        MagicMock(spec=JobContext, job_id="j"),
+        task_spec.model_copy(update={"sandbox_policy": policy}),
+    )
+    config = EnvironmentConfig(docker_image=AGENT.image_ref, storage_mb=4096)
+    resource = _sandbox(configured, tmp_path, "trial-x", config)._resource()
+    assert resource == {"cpu": "1", "memory": "2048Mi", "ephemeral-storage": "4096Mi"}
 
 
 def write_task(root: Path, toml: str, *, compose: bool = False) -> Path:

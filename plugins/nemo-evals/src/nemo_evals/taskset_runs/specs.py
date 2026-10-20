@@ -84,7 +84,7 @@ class TasksetRunPlan(BaseModel):
         description="Maximum task Jobs of this run running at once; None relies only on Jobs Service admission limits.",
     )
     sandbox_policy: ResolvedHarborSandboxPolicy = Field(
-        description="The operator sandbox profile execution.sandbox_policy named, frozen at submit."
+        description="The operator sandbox profile execution.sandbox.profile named (or the default), frozen at submit."
     )
     dispatcher_image: str = Field(
         pattern=PINNED_IMAGE_REF_PATTERN, description="Task Job image, pinned by digest, from evals.runs.harbor."

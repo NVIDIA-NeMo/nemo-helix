@@ -19,6 +19,7 @@ from typing import Literal, Protocol, Self, get_args
 from harbor.models.task.verifier_mode import resolve_effective_verifier_env_config
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy, ResourceClass
+from nemo_evals.harbor.remote.sandbox_policy import task_resources_violation
 from nemo_evals.image_builds.models import ImageBuild, ImageBuildRequest
 from nemo_evals.image_builds.planning import MAIN_SERVICE, VERIFIER_ROLE, ImagePlanError, parse_task_config
 from nemo_evals.image_builds.runner import read_task_archive
@@ -56,6 +57,7 @@ PreparationErrorCode = Literal[
     "unsupported_gpu_type",
     "gpu_request_exceeds_policy",
     "gpu_unsupported_by_backend",
+    "resources_exceed_policy",
     # Prebuilt images (M3 story 2)
     "image_unavailable",
     # Building (M3 stories 4-5)
@@ -167,7 +169,8 @@ class ImageBuildPreparer:
     async def check(
         self, task: ResolvedTask, *, policy: ResolvedHarborSandboxPolicy, clients: PreparationClients
     ) -> PreparationErrorInfo | None:
-        """Reject non-Harbor, GPU (agent or separate verifier) and compose tasks.
+        """Reject non-Harbor, GPU (agent or separate verifier) and compose tasks, and tasks whose sandboxes exceed
+        the profile's ceilings.
 
         Build roles can't show compose: a compose file whose only service is ``main`` builds just ``main``.
         So the archive is still read, for its compose file only.
@@ -181,6 +184,8 @@ class ImageBuildPreparer:
                 return PreparationErrorInfo(
                     code="gpu_unsupported", detail="GPU tasks aren't supported on Kubernetes runs yet"
                 )
+            if (violation := task_resources_violation(task_config, policy)) is not None:
+                return PreparationErrorInfo(code="resources_exceed_policy", detail=violation)
             archive = await read_task_archive(clients.files, task.spec.source)
         except ImagePlanError as exc:
             return _plan_error(exc)

@@ -14,6 +14,7 @@ from urllib.parse import quote
 
 from fastapi import HTTPException
 from nemo_evals.api.fields import TasksetRef, parse_subentity_ref
+from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.api.taskset_run_schemas import (
     TasksetRunInput,
     TasksetRunStatus,
@@ -32,6 +33,7 @@ from nemo_evals.harbor.remote.preparation import (
     prepare_task_images,
 )
 from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy
+from nemo_evals.harbor.remote.resources import defaulted_resources_notice
 from nemo_evals.harbor.remote.sandbox_policy import SandboxPolicyError, resolve_sandbox_policy
 from nemo_evals.image_builds.service import ImageBuildService, JobsServiceBuildJobs, builder_authorizer
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
@@ -389,16 +391,18 @@ class TasksetRunService:
     ) -> tuple[HarborTaskJobsConfig, ResolvedHarborSandboxPolicy, str]:
         """Check the deployment can run the request's execution settings; freeze its sandbox and dispatcher profiles.
 
-        An omitted dispatcher profile is the operator's first ``dispatcher_profiles`` entry.
+        The sandbox profile is frozen with the request's resource overrides. An omitted dispatcher profile
+        is the operator's first ``dispatcher_profiles`` entry.
 
         Raises:
-            TasksetRunResolutionError: Runs are off, or the profile or dispatcher profile can't be used.
+            TasksetRunResolutionError: Runs are off, the profile or dispatcher profile can't be used, or a
+                resource override exceeds the profile's ceilings.
         """
         harbor = self._config.runs.harbor
         if harbor is None:
             raise TasksetRunResolutionError("Kubernetes taskset runs aren't configured in this deployment")
         try:
-            policy = resolve_sandbox_policy(harbor, self._platform, req.execution.sandbox_policy)
+            policy = resolve_sandbox_policy(harbor, self._platform, req.execution.sandbox)
         except SandboxPolicyError as exc:
             raise TasksetRunResolutionError(str(exc)) from exc
         profile = req.execution.dispatcher_profile or harbor.dispatcher_profiles[0]
@@ -564,7 +568,15 @@ class TasksetRunService:
             raise TasksetRunResolutionError(
                 f"run {run.name}'s dispatcher_profile {plan.dispatcher_profile!r} is no longer allowed"
             )
+        if plan.sandbox_policy.profile not in harbor.sandbox_profiles:
+            # Likewise for a request that omits execution.sandbox: it passes on today's default profile.
+            raise TasksetRunResolutionError(
+                f"run {run.name}'s sandbox profile {plan.sandbox_policy.profile!r} is no longer offered"
+            )
         notices = await self._ensure_run_evaluation(run, plan) if plan.intake is not None else []
+        configs = [(t.id, t.spec.config) for t in plan.spec.tasks if isinstance(t.spec, ResolvedHarborTaskDefinition)]
+        if (resources := defaulted_resources_notice(configs, plan.sandbox_policy)) is not None:
+            notices.append(resources)
         try:
             names = await create_task_jobs(self._task_jobs, plan, run, plan.task_environments)
         except TaskJobsIncompleteError as exc:

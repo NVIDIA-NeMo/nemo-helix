@@ -9193,8 +9193,11 @@ nemo evals runs submit [OPTIONS]
 * `--spec-file <PATH>`: TasksetRunInput JSON: its target and execution, and its taskset unless --harbor-dir or --harbor-hub supplies the tasks.
 * `--tasks`: Indexes or names, comma-separated; default all.
 * `--agent`: Harbor built-in agent (without --spec-file). [default: oracle]
-* `--sandbox-policy`: Operator sandbox profile. [default: harbor-standard]
+* `--sandbox-profile`: Operator sandbox profile; default: the operator's (without --spec-file).
 * `--dispatcher-profile`: Jobs profile for task Jobs.
+* `--cpus <INTEGER RANGE>`: CPUs for every task's agent sandbox, over task.toml (without --spec-file).
+* `--memory-mb <INTEGER RANGE>`: Memory in MB for every task's agent sandbox (without --spec-file).
+* `--storage-mb <INTEGER RANGE>`: Disk in MB for every task's agent sandbox (without --spec-file).
 * `--no-build-images`: Don't request or wait for image builds here; submit starts a first build for a task that has none.
 * `--idempotency-key`: Key that makes a resubmit return the same run; default: a new one. A failed submit prints its key.
 * `--list-tasks`: Print the selectable tasks and exit.

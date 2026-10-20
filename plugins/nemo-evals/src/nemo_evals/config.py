@@ -7,12 +7,7 @@ from __future__ import annotations
 
 from typing import Any, ClassVar, Literal, Self
 
-from nemo_evals.harbor.remote.profile import (
-    PINNED_IMAGE_REF_PATTERN,
-    OpenSandboxClientSettings,
-    ResourceClass,
-    ResourceClassPolicy,
-)
+from nemo_evals.harbor.remote.profile import PINNED_IMAGE_REF_PATTERN, OpenSandboxClientSettings
 from nemo_helix_plugin.config import NemoConfig, get_platform_config
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -21,16 +16,13 @@ class HarborSandboxProfileConfig(BaseModel):
     """One named OpenSandbox profile for Harbor task Jobs (M2 story 3, trimmed for M2 story 0).
 
     The server address and API key come from the platform's ``sandbox_*`` settings, not from here:
-    a profile only tunes the client and sets templates, egress and lifetimes.
+    a profile only tunes the client and sets egress, resource ceilings and lifetimes. The sandbox template
+    is the OpenSandbox server's own: v0.2.1 can't select one per sandbox.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     connection: OpenSandboxClientSettings = Field(default_factory=OpenSandboxClientSettings)
-    resource_classes: dict[ResourceClass, ResourceClassPolicy] = Field(
-        description="Sandbox template and task-Job profile per resource class; `cpu` is required."
-    )
-    root_template: str | None = Field(default=None, description="Template for images that must run as root.")
     egress_allow: tuple[str, ...] = Field(
         default=(),
         description="Hostnames, IPs or CIDRs every sandbox may reach; no port. Everything else is denied.",
@@ -50,12 +42,38 @@ class HarborSandboxProfileConfig(BaseModel):
     unschedulable_after_s: int = Field(default=600, ge=1)
     stale_attempt_cleanup_timeout_s: int = Field(default=300, ge=1)
     image_reference_mode: Literal["digest", "tag"] = "digest"
-
-    @model_validator(mode="after")
-    def _cpu_class_required(self) -> Self:
-        if "cpu" not in self.resource_classes:
-            raise ValueError("resource_classes must include 'cpu'")
-        return self
+    max_cpus: int | None = Field(
+        default=None, gt=0, description="Largest execution.sandbox.cpus a request may ask for; None means no ceiling."
+    )
+    max_memory_mb: int | None = Field(
+        default=None,
+        gt=0,
+        description="Largest execution.sandbox.memory_mb a request may ask for; None means no ceiling.",
+    )
+    max_storage_mb: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Largest execution.sandbox.storage_mb a request may ask for; None means no ceiling. "
+            "While enforce_disk_limit is on, max_disk_mb caps requests too."
+        ),
+    )
+    enforce_disk_limit: bool = Field(
+        default=True,
+        description=(
+            "Cap each sandbox's ephemeral storage at its task's storage_mb; Kubernetes evicts a pod that "
+            "exceeds it. Turn off only where the sandbox runtime doesn't enforce the limit."
+        ),
+    )
+    max_disk_mb: int | None = Field(
+        default=131_072,
+        gt=0,
+        description=(
+            "Ceiling on that limit, in MB, so a task asking for more than any node holds can't leave its pod "
+            "unschedulable: a larger task.toml storage_mb is clamped, a larger request override is rejected. "
+            "None applies each task's value as given."
+        ),
+    )
 
 
 class HarborTaskJobsConfig(BaseModel):
@@ -71,8 +89,22 @@ class HarborTaskJobsConfig(BaseModel):
         min_length=1, description="Jobs execution profiles a request may name as execution.dispatcher_profile."
     )
     sandbox_profiles: dict[str, HarborSandboxProfileConfig] = Field(
-        min_length=1, description="Named sandbox profiles; a request picks one with execution.sandbox_policy."
+        min_length=1, description="Named sandbox profiles; a request picks one with execution.sandbox.profile."
     )
+    default_sandbox_profile: str = Field(
+        default="harbor-standard",
+        min_length=1,
+        description="The sandbox_profiles key a request gets when execution.sandbox.profile is omitted.",
+    )
+
+    @model_validator(mode="after")
+    def _default_profile_exists(self) -> Self:
+        if self.default_sandbox_profile not in self.sandbox_profiles:
+            names = ", ".join(sorted(self.sandbox_profiles))
+            raise ValueError(
+                f"default_sandbox_profile {self.default_sandbox_profile!r} isn't a sandbox_profiles key ({names})"
+            )
+        return self
 
 
 class TasksetRunsConfig(BaseModel):

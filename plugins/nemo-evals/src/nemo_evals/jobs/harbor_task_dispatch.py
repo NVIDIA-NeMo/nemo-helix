@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
 
+from nemo_evals.harbor.remote.profile import resource_defaults
 from nemo_evals.jobs.agent_compiler import _environment_stage_step, _secret_refs, _staged_fileset
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evals.jobs.harbor_task_spec import HarborTaskJobSpec
@@ -159,7 +160,12 @@ def check_sandbox_server(spec: HarborTaskJobSpec) -> None:
 
 
 def configure_runtime(config: HarborRuntimeConfig, ctx: JobContext, spec: HarborTaskJobSpec) -> HarborRuntimeConfig:
-    """Select ``NemoOpenSandboxEnvironment`` with the run's frozen policy, labels and one trial at a time."""
+    """Select ``NemoOpenSandboxEnvironment`` with the run's frozen policy, labels and one trial at a time.
+
+    The request's resource overrides size the agent sandbox only; a separate verifier keeps task.toml's
+    resources. Every sandbox gets ``resource_defaults(policy)`` for unset cpus and memory_mb, the values
+    submit checked against the profile's ceilings. No Harbor resource mode is set, so every value is a limit.
+    """
     policy = spec.sandbox_policy
     connection = policy.connection
     environment = HarborEnvironmentConfig(
@@ -174,6 +180,10 @@ def configure_runtime(config: HarborRuntimeConfig, ctx: JobContext, spec: Harbor
             "trusted_allowed_hosts": [*policy.egress_allow, *policy.request_egress_allow],
             "agent_channel_hosts": list(policy.agent_channel),
             "egress_verification": policy.egress_verification,
+            "enforce_disk_limit": policy.enforce_disk_limit,
+            "max_disk_mb": policy.max_disk_mb,
+            "agent_resource_overrides": policy.resource_overrides.model_dump(exclude_none=True),
+            "sandbox_resource_defaults": resource_defaults(policy),
             "metadata": {
                 "nemo-run": spec.run_id,
                 "nemo-task-index": str(spec.task_index),
