@@ -508,6 +508,15 @@ describe('jobToFormFields', () => {
     const fields = jobToFormFields(jobWithNulls);
     expect(fields.automodel.optimizer?.learning_rate).toBeUndefined();
   });
+
+  it('drops the stored spec’s backend, which the automodel submit schema forbids', () => {
+    const job = {
+      ...customizationJob1,
+      spec: { ...customizationJob1.spec, backend: 'automodel' },
+    } as typeof customizationJob1;
+    const body = formToAutomodelCreate(jobToFormFields(job));
+    expect(body.spec).not.toHaveProperty('backend');
+  });
 });
 
 describe('getInitialFormValuesFromState', () => {

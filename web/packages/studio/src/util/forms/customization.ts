@@ -604,7 +604,10 @@ export const jobToFormFields = (job: ReplayableJob): CustomizationFormFields => 
   const backend = job.backend ?? getCustomizationBackend(job.spec);
 
   if (backend === CustomizationBackend.automodel) {
-    const spec = stripNulls(job.spec) as AutomodelJobInput;
+    // The stored spec carries `backend`, which the submit schema forbids, so a clone or a
+    // template saved from a job would otherwise be rejected on submit.
+    const spec = stripNulls(job.spec) as AutomodelJobInput & { backend?: string };
+    delete spec.backend;
     // A job submitted outside Studio can ask to merge either way round. Both merge, and
     // the form only shows `finetuning_type`, so a job carrying `lora.merge` has to come
     // back as lora_merged or it would replay as an unmerged adapter.
