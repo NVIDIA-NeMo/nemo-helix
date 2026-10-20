@@ -340,6 +340,85 @@ def _start_web_session_login(
     return state, redirect
 
 
+@pytest.mark.parametrize("client_name", ["public", "confidential"])
+@pytest.mark.parametrize("flow", ["browser", "cli"])
+@pytest.mark.parametrize("token_source", ["access_token", "id_token"])
+@pytest.mark.parametrize("selected_token", ["valid", "missing", "invalid"])
+def test_callback_validates_selected_client_bearer(
+    broker_app,
+    monkeypatch: pytest.MonkeyPatch,
+    client_name: str,
+    flow: str,
+    token_source: Literal["access_token", "id_token"],
+    selected_token: str,
+) -> None:
+    client, _transactions, credentials = broker_app
+    config = _confidential_auth_config()
+    public = _public_broker_auth_config().oidc.public_client
+    assert public is not None
+    assert config.oidc.confidential_client is not None
+    # Give the other client the opposite setting to detect global/default selection.
+    config.oidc.public_client = public
+    config.oidc.public_client.bearer_token_source = "access_token" if token_source == "id_token" else "id_token"
+    config.oidc.confidential_client.bearer_token_source = config.oidc.public_client.bearer_token_source
+    selected = config.oidc.public_client if client_name == "public" else config.oidc.confidential_client
+    selected.bearer_token_source = token_source
+    Configuration.set_override(config)
+    validated = []
+
+    async def resolve_selected(config, token, **kwargs):
+        validated.append(token)
+        if token != "selected-signed-jwt":
+            return None
+        assert kwargs == {"skip_access_key_check": True}
+        return ResolvedBearerToken(
+            claims=TokenClaims(subject="user-1", email=None, groups=[], scopes=[], raw_claims={"sub": "user-1"}),
+            token_kind="oidc_access_token",
+        )
+
+    monkeypatch.setattr("nhx.core.auth.oidc_broker.routes.resolve_bearer_token", resolve_selected)
+    tokens = {"access_token": "opaque-access-token", "id_token": "unselected-id-token"}
+    tokens[token_source] = "selected-signed-jwt"
+    if selected_token == "missing":
+        del tokens[token_source]
+    elif selected_token == "invalid":
+        tokens[token_source] = "invalid-jwt"
+    with respx.mock:
+        respx.post("https://idp.example.com/token").respond(200, json=tokens)
+        if flow == "browser":
+            state, _redirect = _start_web_session_login(client, oidc_client=client_name)
+        else:
+            start = client.post(
+                "/apis/auth/v2/authorize",
+                params={"client": client_name},
+                json={
+                    "redirect_uri": "http://127.0.0.1:54321/callback",
+                    "code_challenge": _CLI_CODE_CHALLENGE,
+                    "state": _CLI_STATE,
+                },
+            )
+            assert start.status_code == 200
+            state = start.json()["transaction_id"]
+        callback = client.get(
+            "/apis/auth/v2/login/callback",
+            params={"code": "auth-code", "state": state},
+            follow_redirects=False,
+        )
+
+    if selected_token == "missing":
+        assert callback.status_code == 502, callback.text
+        assert validated == []
+        assert not credentials.rows
+    elif selected_token == "invalid":
+        assert callback.status_code == 401, callback.text
+        assert validated == ["invalid-jwt"]
+        assert not credentials.rows
+    else:
+        assert callback.status_code == 302, callback.text
+        assert validated == ["selected-signed-jwt"]
+        assert len(credentials.rows) == 1
+
+
 def test_web_session_login_sets_account_bound_cookie_and_supports_logout(broker_app) -> None:
     client, _transactions, credentials = broker_app
     with respx.mock:

@@ -868,7 +868,10 @@ class OIDCTokenProvider:
                     certificate_authority=self.certificate_authority,
                 )
 
-            new_access_token = _select_bearer_token(token_data, self.bearer_token_source)
+            # The broker already selected the provider bearer and normalized it to access_token.
+            # Only direct provider responses still need configured token-source selection.
+            token_source = "access_token" if self.refresh_kind == "broker" else self.bearer_token_source
+            new_access_token = _select_bearer_token(token_data, token_source)
             # The IdP may rotate the refresh token.
             old_refresh_token = self.tokens.refresh_token
             new_refresh_token = token_data.get("refresh_token", old_refresh_token)
