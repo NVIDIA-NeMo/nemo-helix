@@ -1348,6 +1348,8 @@ async def test_get_job_updated_at_tracks_attempt_status_change(
     assert step is not None
 
     step, _ = await mock_dispatcher.update_job_status_from_step(step=step, status=HelixJobStatus.ACTIVE)
+    active_job = await mock_dispatcher.get_job(job.name, DEFAULT_WORKSPACE)
+    assert active_job is not None
     await asyncio.sleep(0.01)
     _, attempt = await mock_dispatcher.update_job_status_from_step(
         step=step,
@@ -1356,10 +1358,9 @@ async def test_get_job_updated_at_tracks_attempt_status_change(
     )
     assert attempt.status == HelixJobStatus.COMPLETED
 
-    updated_job = await mock_dispatcher.get_job(job.name, DEFAULT_WORKSPACE)
-    assert updated_job is not None
-    assert attempt.updated_at is not None
-    assert updated_job.updated_at >= attempt.updated_at
+    completed_job = await mock_dispatcher.get_job(job.name, DEFAULT_WORKSPACE)
+    assert completed_job is not None
+    assert completed_job.updated_at > active_job.updated_at
 
 
 @pytest.mark.asyncio
@@ -2804,6 +2805,46 @@ async def test_list_jobs_sort_by_updated_at_spans_pages(
 
     assert [job.id for job in first_page] == [oldest.id]
     assert [job.id for job in last_page] == [oldest.id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing_entity_type", [HelixJob, HelixJobAttempt])
+async def test_retried_step_update_repairs_job_status_after_a_failed_save(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    failing_entity_type: type,
+):
+    job = await _make_job(mock_dispatcher, mock_store, "flaky-store", HelixJobStatus.ACTIVE)
+    original_update = EntityClient.update
+
+    async def fail_once(self, entity, **kwargs):
+        if isinstance(entity, failing_entity_type) and not fail_once.failed:
+            fail_once.failed = True
+            raise RuntimeError("store unavailable")
+        return await original_update(self, entity, **kwargs)
+
+    fail_once.failed = False
+
+    async def complete_step():
+        step = await mock_dispatcher.get_current_job_step_by_name(
+            job.name, TestConstants.PLATFORM_SPEC.steps[0].name, DEFAULT_WORKSPACE
+        )
+        assert step is not None
+        await mock_dispatcher.update_job_status_from_step(step=step, status=HelixJobStatus.COMPLETED, error_details={})
+
+    with patch.object(EntityClient, "update", fail_once):
+        with pytest.raises(RuntimeError, match="store unavailable"):
+            await complete_step()
+        await complete_step()
+
+    jobs, total = await mock_dispatcher.list_jobs(
+        parsed=ParsedFilter(
+            operation=ComparisonOperation(field="data.status", operator=FilterOperator.EQ, value="completed")
+        ),
+        workspace=DEFAULT_WORKSPACE,
+    )
+    assert [(listed.id, listed.status) for listed in jobs] == [(job.id, HelixJobStatus.COMPLETED)]
+    assert total == 1
 
 
 @pytest.mark.asyncio

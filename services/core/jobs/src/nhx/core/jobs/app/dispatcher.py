@@ -1093,7 +1093,6 @@ class JobDispatcher:
         if new_attempt_status != attempt.status:
             attempt, changed = await self._save_attempt_status(attempt, new_attempt_status, saved_step)
             if changed:
-                await self._save_job_status(attempt)
                 if _should_emit_job_run_telemetry(previous_attempt_status, attempt.status):
                     try:
                         job = await self.store.get_by_id(HelixJob, attempt.job)
@@ -1167,6 +1166,8 @@ class JobDispatcher:
             attempt.status = status
             if status == HelixJobStatus.ERROR:
                 attempt.error_details = step.error_details
+            # Job first: if either save fails, the retried step update still finds the attempt behind and redoes both.
+            await self._save_job_status(attempt)
             try:
                 return await self.store.update(attempt), True
             except EntityConflictError as e:
