@@ -383,3 +383,177 @@ class TestWorkspaceListExcludesDeleting:
 
         get_response = await client.get(f"/apis/entities/v2/workspaces/{workspace_name}")
         assert get_response.status_code == 404
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+class TestCreateReportsInProgressDeletion:
+    """Create must not describe a hidden cleanup row as a workspace that already exists."""
+
+    async def test_failed_cleanup_conflict_includes_the_stored_reason(self, client: AsyncClient, repos):
+        workspace_name = "create-while-cleanup-failed"
+        created = await client.post("/apis/entities/v2/workspaces", json={"name": workspace_name})
+        assert created.status_code == 201
+
+        workspace_repo: WorkspaceRepositoryInterface = repos["workspace"]
+        await workspace_repo.mark_workspace_for_deletion(
+            name=workspace_name,
+            deletion_stage=WorkspaceDeletionStage.PENDING,
+        )
+        pending = await workspace_repo.get_workspace_by_name(name=workspace_name)
+        assert pending is not None
+        claimed = await workspace_repo.claim_workspace_for_deletion(
+            name=workspace_name,
+            expected_stage=WorkspaceDeletionStage.PENDING,
+            expected_updated_at=pending.updated_at,
+        )
+        assert claimed is not None
+        reason = "shared-weights: HTTP 409: Cannot delete fileset because 1 model entity reference(s) still use it"
+        assert await workspace_repo.fail_workspace_deletion_if_claimed(
+            name=workspace_name,
+            expected_updated_at=claimed.updated_at,
+            deletion_error=reason,
+        )
+
+        conflict = await client.post("/apis/entities/v2/workspaces", json={"name": workspace_name})
+        assert conflict.status_code == 409
+        assert conflict.json()["detail"] == f"Workspace '{workspace_name}' is still being deleted ({reason})"
+        assert "already exists" not in conflict.json()["detail"]
+
+        hidden = await client.get(f"/apis/entities/v2/workspaces/{workspace_name}")
+        assert hidden.status_code == 404
+
+    @pytest.mark.parametrize(
+        "stage",
+        [WorkspaceDeletionStage.PENDING, WorkspaceDeletionStage.DELETING],
+    )
+    async def test_in_progress_cleanup_without_an_error_is_still_not_already_exists(
+        self,
+        client: AsyncClient,
+        repos,
+        stage: WorkspaceDeletionStage,
+    ):
+        workspace_name = f"create-while-{stage.value}"
+        created = await client.post("/apis/entities/v2/workspaces", json={"name": workspace_name})
+        assert created.status_code == 201
+        workspace_repo: WorkspaceRepositoryInterface = repos["workspace"]
+        assert await workspace_repo.mark_workspace_for_deletion(name=workspace_name, deletion_stage=stage)
+
+        conflict = await client.post("/apis/entities/v2/workspaces", json={"name": workspace_name})
+        assert conflict.status_code == 409
+        assert conflict.json()["detail"] == f"Workspace '{workspace_name}' is still being deleted"
+
+    async def test_live_duplicate_still_says_already_exists(self, client: AsyncClient):
+        created = await client.post("/apis/entities/v2/workspaces", json={"name": "create-live-duplicate"})
+        assert created.status_code == 201
+        conflict = await client.post("/apis/entities/v2/workspaces", json={"name": "create-live-duplicate"})
+        assert conflict.status_code == 409
+        assert conflict.json()["detail"] == "Workspace 'create-live-duplicate' already exists"
+
+
+def _status_auth_client(*, principal_id: str, auth_enabled: bool, has_role: bool) -> MagicMock:
+    principal = Principal(id=principal_id, email=principal_id, groups=[], on_behalf_of=None)
+    auth_client = MagicMock(spec=AuthClient)
+    auth_client.principal = principal
+    auth_client.auth_enabled = auth_enabled
+    auth_client.has_role = AsyncMock(return_value=has_role)
+    return auth_client
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+class TestWorkspaceDeletionStatus:
+    """Deletion status reads the stored cleanup row and does not move its lease."""
+
+    async def test_status_returns_the_stored_error_without_touching_the_lease(self, client: AsyncClient, repos):
+        workspace_name = "deletion-status-failed"
+        created = await client.post("/apis/entities/v2/workspaces", json={"name": workspace_name})
+        assert created.status_code == 201
+        created_by = created.json()["created_by"]
+        reason = "shared-weights: HTTP 409: Cannot delete fileset because 1 model entity reference(s) still use it"
+
+        missing = await client.get("/apis/entities/v2/workspace-deletions/does-not-exist")
+        assert missing.status_code == 404
+        assert missing.json()["detail"] == "Workspace 'does-not-exist' not found"
+
+        live = await client.get(f"/apis/entities/v2/workspace-deletions/{workspace_name}")
+        assert live.status_code == 404
+        assert live.json()["detail"] == f"Workspace '{workspace_name}' not found"
+
+        workspace_repo: WorkspaceRepositoryInterface = repos["workspace"]
+        assert await workspace_repo.mark_workspace_for_deletion(
+            name=workspace_name,
+            deletion_stage=WorkspaceDeletionStage.PENDING,
+        )
+        pending = await client.get(f"/apis/entities/v2/workspace-deletions/{workspace_name}")
+        assert pending.status_code == 200
+        assert pending.json()["deletion_stage"] == "pending"
+        assert pending.json()["deletion_error"] is None
+
+        current = await workspace_repo.get_workspace_by_name(name=workspace_name)
+        assert current is not None
+        claimed = await workspace_repo.claim_workspace_for_deletion(
+            name=workspace_name,
+            expected_stage=WorkspaceDeletionStage.PENDING,
+            expected_updated_at=current.updated_at,
+        )
+        assert claimed is not None
+        assert await workspace_repo.fail_workspace_deletion_if_claimed(
+            name=workspace_name,
+            expected_updated_at=claimed.updated_at,
+            deletion_error=reason,
+        )
+
+        before = await workspace_repo.get_workspace_by_name(name=workspace_name)
+        assert before is not None
+        failed = await client.get(f"/apis/entities/v2/workspace-deletions/{workspace_name}")
+        assert failed.status_code == 200
+        body = failed.json()
+        assert body["name"] == workspace_name
+        assert body["deletion_stage"] == "failed"
+        assert body["deletion_error"] == reason
+        assert "description" not in body
+        after = await workspace_repo.get_workspace_by_name(name=workspace_name)
+        assert after is not None
+        assert after.updated_at == before.updated_at
+        assert after._deletion_stage == WorkspaceDeletionStage.FAILED
+        assert after._deletion_error == reason
+
+        hidden = await client.get(f"/apis/entities/v2/workspaces/{workspace_name}")
+        assert hidden.status_code == 404
+
+        app.dependency_overrides[get_auth_client] = lambda: _status_auth_client(
+            principal_id="other@example.com",
+            auth_enabled=True,
+            has_role=False,
+        )
+        denied = await client.get(f"/apis/entities/v2/workspace-deletions/{workspace_name}")
+        assert denied.status_code == 404
+        assert denied.json()["detail"] == f"Workspace '{workspace_name}' not found"
+
+        app.dependency_overrides[get_auth_client] = lambda: _status_auth_client(
+            principal_id=created_by,
+            auth_enabled=True,
+            has_role=False,
+        )
+        allowed = await client.get(f"/apis/entities/v2/workspace-deletions/{workspace_name}")
+        assert allowed.status_code == 200
+        assert allowed.json()["deletion_error"] == reason
+
+        app.dependency_overrides[get_auth_client] = lambda: _status_auth_client(
+            principal_id="admin@example.com",
+            auth_enabled=True,
+            has_role=True,
+        )
+        admin = await client.get(f"/apis/entities/v2/workspace-deletions/{workspace_name}")
+        assert admin.status_code == 200
+        assert admin.json()["deletion_stage"] == "failed"
+
+        app.dependency_overrides[get_auth_client] = lambda: _status_auth_client(
+            principal_id="service:entities",
+            auth_enabled=True,
+            has_role=False,
+        )
+        service = await client.get(f"/apis/entities/v2/workspace-deletions/{workspace_name}")
+        assert service.status_code == 200
+        assert service.json()["deletion_error"] == reason

@@ -1,0 +1,214 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Plugin Architecture"
+description: "Extend NeMo Helix with plugins, and teach coding agents to use it with skills."
+---
+
+<a id="plugin-architecture"></a>
+
+Every NeMo Helix capability, from agents and evaluation to guardrails, routing, and optimization, is
+a plugin: a Python package that registers its pieces through entry points. Skills are instructions,
+shipped with plugins, that teach coding agents how to use those capabilities.
+
+## Plugin Surfaces
+
+A plugin contributes one or more surfaces. Each entry-point group maps a name to a class or function:
+
+| Surface | Entry-point group | Adds |
+|---|---|---|
+| HTTP service | `nemo.services` | FastAPI routers under `/apis/<name>/` |
+| CLI | `nemo.cli` | `nemo <name> ...` commands |
+| Job | `nemo.jobs` | Platform jobs, each with generated submit and `explain` commands |
+| Controller | `nemo.controllers` | Background reconciliation loops |
+| Inference middleware | `nemo.inference_middleware` | Middleware that [virtual models](#virtual-model-plugins) can run |
+| Python SDK | `nemo.sdk` | Resources on the Python SDK client |
+| Skills | `nemo.skills` | A directory of coding-agent [skills](#skills) |
+| Studio UI | `nemo.studio` | Pages in NeMo Studio; see [Plugin UIs](/documentation/studio/plugins) |
+
+Some groups extend another plugin. For example, a job that declares an optimization strategy becomes
+a [strategy](#optimization-strategy-plugins) of `nemo agents optimize`.
+
+A minimal plugin depends only on `nemo-helix-plugin`:
+
+```toml
+[project]
+name = "my-plugin"
+version = "0.1.0"
+dependencies = ["nemo-helix-plugin"]
+
+[project.entry-points."nemo.services"]
+my-plugin = "my_plugin.service:MyService"
+
+[project.entry-points."nemo.cli"]
+my-plugin = "my_plugin.cli:MyCLI"
+```
+
+Every HTTP route must declare its authorization, or the platform refuses to build its policy; see
+[Plugin Authorization](/documentation/access-control/authorization/plugin-authorization). For a
+complete plugin with every surface, see the
+[example plugin](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/plugins/example-plugin).
+
+## Install a Plugin
+
+The default plugins ship with `nemo-helix`; `nemo --help` lists the ones in your environment.
+Install another plugin into the same Python environment as the platform, then restart the platform
+so its entry points are discovered:
+
+```bash
+uv pip install -e plugins/prompt-master   # from a source checkout
+nemo services run
+```
+
+Check that it loaded:
+
+```bash
+nemo <plugin> --help                          # CLI commands
+nemo agents optimize list-strategies          # optimization strategies
+```
+
+Middleware plugins log `Loaded inference middleware plugin '<name>'` at startup.
+
+## Virtual Model Plugins
+
+An inference middleware plugin processes requests and responses for any
+[virtual model](/documentation/models-and-inference/virtual-models) that lists it. Subclass
+`NemoInferenceMiddleware` and implement the hooks you need; unimplemented hooks pass through.
+
+```python
+from typing import Any
+
+from nemo_helix_plugin.inference_middleware import (
+    ImmediateResponse,
+    InferenceMiddlewareContext,
+    InferenceRequest,
+    NemoInferenceMiddleware,
+)
+from pydantic import BaseModel
+
+
+class BlocklistConfig(BaseModel):
+    blocked_keywords: list[str] = []
+
+
+class BlocklistMiddleware(NemoInferenceMiddleware):
+    async def validate_middleware_config(self, config_type: str, config: Any) -> BlocklistConfig:
+        return BlocklistConfig.model_validate(config)
+
+    async def process_request(
+        self,
+        ctx: InferenceMiddlewareContext,
+        request: InferenceRequest,
+        middleware_config: BlocklistConfig,
+    ) -> InferenceRequest | ImmediateResponse:
+        text = " ".join(str(m.get("content", "")) for m in request.body.get("messages", [])).lower()
+        if any(word.lower() in text for word in middleware_config.blocked_keywords):
+            return ImmediateResponse(
+                data={"choices": [{"index": 0, "message": {"role": "assistant", "content": "Blocked."}}]}
+            )
+        return request
+```
+
+| Hook | Called |
+|---|---|
+| `validate_middleware_config` | When a virtual model is created or updated; returns the config the request hooks receive. |
+| `get_middleware_config` | To load a stored config named by `config_id`. Implement it when your plugin stores configs. |
+| `process_request` | Before the backend call. Edit `request.body`, `headers`, or `path`, rewrite `request.body["model"]` to route, or return an `ImmediateResponse` to answer without calling the backend. |
+| `process_response` | After the backend call, on streaming and non-streaming responses. |
+| `on_startup`, `on_virtual_model_upserted`, `on_virtual_model_destroyed` | Lifecycle events, for warming caches or validating models. |
+
+Register the class. The entry-point name is what virtual models reference:
+
+```toml
+[project.entry-points."nemo.inference_middleware"]
+blocklist = "my_plugin.middleware:BlocklistMiddleware"
+```
+
+```bash
+nemo inference virtual-models create safe-model \
+  --default-model-entity default/<model-entity> \
+  --request-middleware '[{"name": "blocklist", "config_type": "blocklist", "config": {"blocked_keywords": ["secret"]}}]'
+```
+
+`nemo-switchyard` and `nemo-guardrails` are built the same way. The example plugin's
+[middleware](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/plugins/example-plugin/src/nemo_example_plugin/middleware.py)
+shows streaming redaction and stored configs.
+
+## Optimization Strategy Plugins
+
+An [optimization strategy](/documentation/agents/optimize-agents#optimization-strategies) is an ordinary
+job that declares one extra class variable, `nemo_agent_optimization_strategy`. The router behind
+`nemo agents optimize run-strategy` discovers every installed job that declares it, and forwards every
+submitted field except `strategy` to the job's own spec.
+
+```python
+from typing import ClassVar
+
+from nemo_agent_optimization_plugin.schemas.strategies import OptimizationStrategy
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from pydantic import BaseModel
+
+
+class MyStrategySpec(BaseModel):
+    agent: str
+
+
+class MyStrategyJob(NemoJob):
+    name: ClassVar[str] = "my-strategy"
+    description: ClassVar[str] = "Build candidate configs for a platform agent."
+    spec_schema: ClassVar[type[BaseModel]] = MyStrategySpec
+    nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(
+        name="my-strategy",
+        title="My strategy",
+        description="What this strategy changes, as shown by list-strategies.",
+        requires_config=False,
+    )
+
+    def run(self, config: dict, *, ctx: JobContext) -> dict:
+        spec = MyStrategySpec.model_validate(config)
+        candidates = ctx.storage.ephemeral / "candidates"
+        candidates.mkdir(parents=True, exist_ok=True)
+        ...  # fetch spec.agent, write one agent.yaml per candidate
+        return {"result": ctx.results.save("my-strategy", candidates).model_dump()}
+```
+
+```toml
+[project.entry-points."nemo.jobs"]
+"my-plugin.my-strategy" = "my_plugin.jobs:MyStrategyJob"
+```
+
+Users then run `nemo agents optimize run-strategy --strategy my-strategy --agent my-agent`. Fields
+outside the shared `--agent`, `--optimize-config`, `--optimize-config-fileset`, and `--output` flags
+travel through `--spec`. Keep the stored agent unchanged and write candidates to the job's results.
+
+To add a companion command to `nemo agents optimize`, register a `register(group: typer.Typer)`
+function under `nemo.cli.agents.optimize`. Prefix it with your strategy name unless it is generic.
+
+The [`switchyard`](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/plugins/nemo-switchyard/src/nemo_switchyard/jobs/optimize.py)
+and [`prompt-master`](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/plugins/prompt-master/src/prompt_master_plugin/jobs/optimize.py)
+strategies are complete examples, including executor selection.
+
+## Skills
+
+Skills are Markdown instructions (`SKILL.md` files) that teach a coding agent, such as Claude Code,
+Codex, Cursor, or OpenCode, to use NeMo Helix correctly. They are not runtime services. Each plugin
+ships the skills for its capability, so installed skills follow installed plugins.
+
+```bash
+nemo skills list                                   # available skills
+nemo skills show <skill>                           # print one skill
+nemo skills install --agent claude                 # install all skills into this project
+nemo skills install --agent claude --skill <skill>
+```
+
+`nemo setup` can install skills for you. To ship skills with a plugin, register a function that returns
+the directory holding one sub-directory per skill:
+
+```toml
+[project.entry-points."nemo.skills"]
+my-plugin = "my_plugin.skills:skills_dir"
+```
+
+For skill structure and conventions, see the [Skills Spec](/documentation/reference/contributing/skills-spec).

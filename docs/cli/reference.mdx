@@ -5640,6 +5640,7 @@ nemo workspaces [OPTIONS] COMMAND [ARGS]...
 
 * `create`: Create a new workspace.
 * `delete`: Delete a workspace.
+* `deletion-status`: Show why a workspace name is still reserved.
 * `list`: List all workspaces with pagination.
 * `get`: Get a specific workspace by ID.
 * `update`: Update a workspace's description.
@@ -5731,6 +5732,40 @@ nemo workspaces delete [OPTIONS] NAME
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+#### nemo workspaces deletion-status
+
+Show why a workspace name is still reserved.
+
+Returns the cleanup stage and the last error for a workspace that is
+pending, deleting, or failed. The original creator, a platform admin, or a
+service principal can read it. A missing workspace, a live workspace, and a
+deletion the caller may not see all return not found.
+
+**Examples:**
+
+
+```
+GET /apis/entities/v2/workspace-deletions/ml-team
+```
+
+**Usage:**
+
+```shell
+nemo workspaces deletion-status [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Workspace name
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 #### nemo workspaces list
 
