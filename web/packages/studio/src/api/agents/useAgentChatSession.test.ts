@@ -91,6 +91,23 @@ describe('useAgentChatSession', () => {
     );
   });
 
+  it('closes the session and opens a new one on reset', async () => {
+    const { result } = renderHook(() =>
+      useAgentChatSession('ws', deployment('nemo-agents-spec-v1'))
+    );
+    await waitFor(() => expect(result.current.extraHeaders).toBeDefined());
+
+    vi.mocked(agentsCreateSession).mockResolvedValue(session('def'));
+    act(() => {
+      result.current.resetSession();
+    });
+
+    await waitFor(() => expect(agentsCloseSession).toHaveBeenCalledWith('ws', 'session-abc'));
+    await waitFor(() =>
+      expect(result.current.extraHeaders).toEqual({ 'X-Nemo-Session-Id': 'def' })
+    );
+  });
+
   it('recovers from a rejection naming the current session', async () => {
     const { result } = renderHook(() =>
       useAgentChatSession('ws', deployment('nemo-agents-spec-v1'))

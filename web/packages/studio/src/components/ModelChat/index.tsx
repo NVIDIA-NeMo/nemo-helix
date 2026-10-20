@@ -39,6 +39,7 @@ interface ModelChatProps extends Pick<
   | 'stopCount'
   | 'onRunningChange'
   | 'onMessageComplete'
+  | 'onReset'
 > {
   /**
    * When provided, ModelChat derives default `disabled` state and a
