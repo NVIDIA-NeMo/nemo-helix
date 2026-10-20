@@ -109,6 +109,8 @@ class RecordedSteps:
 
     steps: list[AtifStepParam]
     timed: bool
+    agent_version: str | None = None
+    """The version the trajectory's producer recorded (``agent.version``), such as codex's ``0.162.1``."""
 
 
 async def atif_steps_from_trial(trial: AgentEvalTrial, *, started_at: datetime) -> RecordedSteps | None:
@@ -133,7 +135,8 @@ async def atif_steps_from_trial(trial: AgentEvalTrial, *, started_at: datetime) 
         # distinct from a trace that exists but will not read.
         return None
     try:
-        steps = await handle.steps()
+        trajectory = await handle.trace()
+        steps = trajectory.steps
     except (OSError, ValueError) as error:
         logger.warning("Ignoring unreadable ATIF trace for trial %s: %s", trial.id, error)
         return None
@@ -156,7 +159,8 @@ async def atif_steps_from_trial(trial: AgentEvalTrial, *, started_at: datetime) 
         # no timestamp, which would make re-publish duplicate instead of replace.
         dumped.setdefault("timestamp", started_at.isoformat())
         payload.append(dumped)
-    return RecordedSteps(payload, timed=has_invocation_window or recorded_timestamps >= 2)
+    agent_version = trajectory.agent.version if trajectory.agent is not None else None
+    return RecordedSteps(payload, timed=has_invocation_window or recorded_timestamps >= 2, agent_version=agent_version)
 
 
 async def otlp_ingest_for_trial(
@@ -259,7 +263,8 @@ def trial_to_atif_ingest(
     ``steps`` carries the trial's real ATIF trajectory when it has one (see
     :func:`atif_steps_from_trial`). Without it this falls back to a minimal single-step
     trajectory holding the trial's final output text, which is all a runner that emits no
-    trajectory — Harbor's ``oracle``, for one — can offer. ``ended_at`` gives a trajectory with
+    trajectory — Harbor's ``oracle``, for one — can offer. ``agent_version`` left at its default takes
+    the version the trajectory itself records, when it records one. ``ended_at`` gives a trajectory with
     no duration of its own the trial's runtime as an invocation window on its final step.
 
     ``started_at`` (the run's start time) stamps any step that carries no timestamp of its own,
@@ -270,6 +275,8 @@ def trial_to_atif_ingest(
     span's ``start_time`` a function of the run, not of when it was published.
     """
     output_text = trial.output.output_text if trial.output is not None else None
+    if agent_version == DEFAULT_AGENT_VERSION and steps is not None and steps.agent_version:
+        agent_version = steps.agent_version
     agent: AtifAgentParam = {"name": agent_name, "version": agent_version}
     if model_name is not None:
         agent["model_name"] = model_name

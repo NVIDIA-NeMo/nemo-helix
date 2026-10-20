@@ -153,8 +153,9 @@ async def _publish(
     workspace: str,
     agent_name: str,
     model_name: str | None,
+    record_durations: bool = True,
 ) -> PublishReport:
-    """Check the Evaluation exists, publish under it, then record how long both took."""
+    """Check the Evaluation exists, publish under it, then record how long both took (``record_durations``)."""
     # Measured before the publish so the two durations stay disjoint — for a result that carries only
     # a start time, reading this afterwards would fold the whole publish into the run's own length.
     eval_duration_sec = _eval_duration_sec(result)
@@ -174,6 +175,8 @@ async def _publish(
         model_name=model_name,
     )
     publish_duration_sec = time.monotonic() - publish_started
+    if not record_durations:
+        return report
     try:
         await _record_durations(
             intake,
@@ -202,12 +205,16 @@ def publish_agent_eval_result(
     target: Target | Model | AgentBase | None,
     workspace: str,
     intake: AsyncIntakeClient | None,
+    record_durations: bool = True,
 ) -> PublicationOutcome:
     """Publish a finished run to Intake and describe what happened.
 
     Raises :class:`PublicationFailedError` when publication fails and ``spec.required`` is set;
     otherwise returns a failed outcome for the job output. Either way the result bundle has already
     been saved by the caller, so nothing is lost — a failure costs a re-publish, not a re-run.
+
+    ``record_durations=False`` leaves the Evaluation's metadata alone: a taskset run's task Jobs share
+    one Evaluation, so each writing its own duration would race, and the run controller writes the run's.
     """
     derived_agent_name, model_name = target_agent_identity(target)
     # Spec validation guarantees one of these is set (see `_require_resolvable_publication_identity`).
@@ -243,6 +250,7 @@ def publish_agent_eval_result(
                 workspace=workspace,
                 agent_name=agent_name,
                 model_name=model_name,
+                record_durations=record_durations,
             ),
         )
     except PublishError as error:

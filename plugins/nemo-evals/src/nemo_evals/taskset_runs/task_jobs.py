@@ -77,10 +77,12 @@ class TaskJobsIncompleteError(Exception):
 
     run_id: str
     missing: tuple[tuple[int, str], ...]  # (task index, reason)
+    notices: tuple[str, ...] = ()  # what submit had to say about the run before the Jobs failed
 
     def __str__(self) -> str:
         detail = "; ".join(f"task {index}: {reason}" for index, reason in self.missing)
-        return f"task Jobs of run {self.run_id} not created ({detail})"
+        message = f"task Jobs of run {self.run_id} not created ({detail})"
+        return "; ".join((message, *self.notices))
 
 
 async def task_job_request(

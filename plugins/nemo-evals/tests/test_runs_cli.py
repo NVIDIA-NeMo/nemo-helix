@@ -21,7 +21,9 @@ from nemo_evals.runs_cli import (
     SelectionError,
     TaskJobView,
     _results_table,
+    _select_from_spec,
     _status_table,
+    _view_json,
     _workspace_flag,
     add_runs_commands,
     build_images,
@@ -150,6 +152,77 @@ def test_spec_file_keeps_its_settings_and_takes_the_selected_taskset(tmp_path):
     assert request.idempotency_key
 
 
+def test_experiment_publishes_the_run_to_intake(tmp_path):
+    plain = run_request(
+        "default/t#" + "a" * 64, spec_file=None, agent="codex", sandbox_policy="p", dispatcher_profile=None
+    )
+    assert plain.publication is None
+    request = run_request(
+        "default/t#" + "a" * 64,
+        spec_file=None,
+        agent="codex",
+        sandbox_policy="p",
+        dispatcher_profile=None,
+        experiment="swe-agent-tuning",
+    )
+    assert request.publication is not None and request.publication.intake.experiment == "swe-agent-tuning"
+    spec = tmp_path / "run.json"
+    spec.write_text(
+        json.dumps({"spec": {"tasks": "default/t", "target": {"kind": "harbor"}}, "execution": {"sandbox_policy": "p"}})
+    )
+    # With --harbor-hub/--harbor-dir the dataset supplies the tasks, so the file may leave spec.tasks out.
+    no_tasks = tmp_path / "no-tasks.json"
+    no_tasks.write_text(json.dumps({"spec": {"target": {"kind": "harbor"}}, "execution": {"sandbox_policy": "p"}}))
+    selected = run_request(
+        "default/t#" + "a" * 64, spec_file=no_tasks, agent="", sandbox_policy="", dispatcher_profile=None
+    )
+    assert isinstance(selected.spec.tasks, TasksetRef) and selected.spec.tasks.root == "default/t#" + "a" * 64
+    # --experiment replaces the file's publication before validation, so an invalid one doesn't block it.
+    no_tasks.write_text(
+        json.dumps(
+            {
+                "spec": {"target": {"kind": "harbor"}},
+                "execution": {"sandbox_policy": "p"},
+                "publication": {"intake": {"experiment": ""}},
+            }
+        )
+    )
+    overridden = run_request(
+        "default/t#" + "a" * 64,
+        spec_file=no_tasks,
+        agent="",
+        sandbox_policy="",
+        dispatcher_profile=None,
+        experiment="x",
+    )
+    assert overridden.publication is not None and overridden.publication.intake.experiment == "x"
+    for bad in ([], {"spec": ["not", "an", "object"]}):
+        no_tasks.write_text(json.dumps(bad))
+        with pytest.raises(ValueError, match="expected a TasksetRunInput JSON object"):
+            run_request(
+                "default/t#" + "a" * 64, spec_file=no_tasks, agent="", sandbox_policy="", dispatcher_profile=None
+            )
+    from_file = run_request(
+        "default/t#" + "a" * 64, spec_file=spec, agent="", sandbox_policy="", dispatcher_profile=None, experiment="x"
+    )
+    assert from_file.publication is not None and from_file.publication.intake.experiment == "x"
+    assert from_file.publication.intake.dataset_name is None  # no Hub dataset: the server uses the taskset
+    hub = run_request(
+        "default/t#" + "a" * 64,
+        spec_file=spec,
+        agent="",
+        sandbox_policy="",
+        dispatcher_profile=None,
+        experiment="x",
+        dataset=("datacurve/deep-swe", "sha256:" + "b" * 64),
+    )
+    assert hub.publication is not None
+    assert (hub.publication.intake.dataset_name, hub.publication.intake.dataset_version) == (
+        "datacurve/deep-swe",
+        "sha256:" + "b" * 64,
+    )
+
+
 def test_submit_retries_a_503_with_the_same_body():
     bodies = []
 
@@ -201,6 +274,32 @@ def test_an_explicit_idempotency_key_wins(tmp_path, spec_key):
     assert explicit.idempotency_key == "k-123"
     default = run_request(ref, spec_file=spec, agent="", sandbox_policy="", dispatcher_profile=None)
     assert default.idempotency_key == (spec_key or default.idempotency_key) and default.idempotency_key
+
+
+def test_spec_selection_ignores_a_publication_that_experiment_replaces(tmp_path):
+    spec = tmp_path / "run.json"
+    body = {
+        "spec": {"tasks": "default/suite#" + "e" * 64, "target": {"kind": "harbor"}},
+        "execution": {"sandbox_policy": "p"},
+        "publication": {"intake": {"experiment": ""}},  # invalid on its own; --experiment replaces it
+    }
+    spec.write_text(json.dumps(body))
+    member = "default/a#" + "1" * 64
+    tasks = SimpleNamespace(
+        retrieve=lambda name, revision, workspace: SimpleNamespace(revision=1, spec=SimpleNamespace())
+    )
+    tasksets = SimpleNamespace(retrieve=lambda name, revision, workspace: SimpleNamespace(tasks=[member]))
+    evaluator = cast(Evaluator, SimpleNamespace(tasks=tasks, tasksets=tasksets))
+    assert _select_from_spec(evaluator, spec, None, "default") == ([member], 1, "suite")
+
+
+def test_spec_selection_needs_a_taskset(tmp_path):
+    spec = tmp_path / "run.json"
+    spec.write_text(
+        json.dumps({"spec": {"tasks": ["default/a#" + "1" * 64], "target": {"kind": "harbor"}}, "execution": {}})
+    )
+    with pytest.raises(ValueError, match="must name a taskset"):
+        _select_from_spec(cast(Evaluator, SimpleNamespace()), spec, None, "default")
 
 
 # --- runs status / runs results ----------------------------------------------------------------------------
@@ -258,7 +357,8 @@ def page(items):
 @pytest.fixture
 def platform():
     jobs = {
-        "run-0123456789abcdef-task-0": job("run-0123456789abcdef-task-0", "completed", "hello/greet-universe"),
+        "run-0123456789abcdef-task-0": job("run-0123456789abcdef-task-0", "completed", "hello/greet-universe")
+        | {"status_details": {"publication": {"status": "completed", "evaluation_id": "e", "trial_count": 2}}},
         "run-0123456789abcdef-task-1": job("run-0123456789abcdef-task-1", "active", "hello/sum-three"),
     }
     results = {  # keyed and filtered by the Job's name, as the platform stores them
@@ -322,6 +422,16 @@ def test_rollup_weights_task_means_by_count():
     rollup = {s.name: s for s in rollup_scores([first, second])}
     assert rollup["harbor_reward.reward"] == ScoreRollup("harbor_reward.reward", 0.75, 4, 1, 2)
     assert rollup["harbor_reward.extra"].tasks == 1
+
+
+def test_status_shows_what_each_task_published(platform):
+    views = run_task_jobs(platform, RUN, workspace="default")
+    assert views[0].publication == {"status": "completed", "evaluation_id": "e", "trial_count": 2}
+    failed = TaskJobView(1, "j1", "b", "completed", publication={"status": "error", "error": "intake 503"})
+    lines = _status_table(RUN, [views[0], failed, views[2]])
+    assert lines[-5].endswith("published")
+    assert lines[-4].endswith("✓ 2 trials") and lines[-3].endswith("✗ intake 503") and lines[-2].endswith("  -")
+    assert _view_json(failed)["publication"] == {"status": "error", "error": "intake 503"}
 
 
 def test_status_counts_done_and_failed():

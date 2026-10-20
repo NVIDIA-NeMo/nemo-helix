@@ -12,6 +12,27 @@ from nemo_evals.jobs.agent_spec import AgentEvalSpec
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
+class RunIntakePublication(BaseModel):
+    """Where the run publishes its trials: one Intake Evaluation, named after the run, in this Experiment.
+
+    Frozen at submit with the Experiment resolved to its id and the agent identity resolved from the
+    target, so task Jobs and the controller never resolve them again. The Evaluation's name is the
+    run record's name, so it isn't stored again here.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    experiment: str = Field(min_length=1, description="The Experiment's name, as the request gave it.")
+    experiment_id: str = Field(min_length=1, description="The Experiment's id, resolved from its name at submit.")
+    agent_name: str = Field(min_length=1, description="Agent name recorded on each published trajectory.")
+    dataset_name: str = Field(
+        min_length=1, description="The Evaluation's dataset: the request's, or the taskset without its digest."
+    )
+    dataset_version: str = Field(
+        min_length=1, description="The dataset's version: the request's, or the pinned taskset's content digest."
+    )
+
+
 class TasksetRunPlan(BaseModel):
     """Freeze what submit resolved, so every later step runs exactly what was accepted.
 
@@ -73,6 +94,9 @@ class TasksetRunPlan(BaseModel):
     )
     task_environments: list[PreparedHarborEnvironment] = Field(
         description="Each task's images, pinned by digest at submit; task_environments[i] belongs to spec.tasks[i]."
+    )
+    intake: RunIntakePublication | None = Field(
+        default=None, description="Publish the run's trials to this Intake Experiment; None publishes nowhere."
     )
 
     @model_validator(mode="after")
