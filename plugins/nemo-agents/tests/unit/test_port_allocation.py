@@ -158,4 +158,4 @@ def test_reservation_propagates_permission_error_and_closes_socket() -> None:
         with pytest.raises(PermissionError):
             with _backend().reserve_socket():
                 pytest.fail("Reservation succeeded without bind permission")
-        socket_cls.return_value.__exit__.assert_called_once()
+        assert socket_cls.return_value.__exit__.call_args.args[0] is PermissionError

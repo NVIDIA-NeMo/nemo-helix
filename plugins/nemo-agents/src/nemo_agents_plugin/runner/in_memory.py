@@ -328,9 +328,7 @@ class InMemoryRunnerBackend(RunnerBackend):
             try:
                 sock.bind(("0.0.0.0", port))
             except OSError as exc:
-                if exc.errno == errno.EADDRINUSE:
-                    return True
-                raise
+                return exc.errno == errno.EADDRINUSE
         return False
 
     async def create_deployment(
