@@ -731,7 +731,8 @@ class VolcanoJobBackend(
                     self._workload_delegations.revoke_for_target(target)
                 else:
                     self._workload_delegations.ensure_for_target(step, target)
-        if status in HelixJobStatus.terminals():
+        phase = (job.get("status") or {}).get("state", {}).get("phase")
+        if status in HelixJobStatus.terminals() and phase in ("Completed", "Failed"):
             self._delete_step_network_policy(job.get("metadata", {}).get("name"))
         return JobUpdate(status=status, status_details=status_details)
 

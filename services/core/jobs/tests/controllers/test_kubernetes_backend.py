@@ -3607,6 +3607,85 @@ def test_running_step_keeps_its_network_policy(kubernetes_job, test_step_pending
     kubernetes_job._networking_v1.delete_namespaced_network_policy.assert_not_called()
 
 
+def test_errored_step_keeps_its_network_policy_while_a_pod_is_running(kubernetes_job, test_step_pending):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = True
+    kubernetes_job._networking_v1 = MagicMock()
+    failed = _kubernetes_pod("failed", phase="Failed")
+    failed.status.container_statuses[0].state.terminated = client.V1ContainerStateTerminated(
+        exit_code=1, reason="Error"
+    )
+    kubernetes_job._core_v1.list_namespaced_pod.return_value = SimpleNamespace(
+        items=[failed, _kubernetes_pod("running", phase="Running")]
+    )
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
+        patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
+    ):
+        update = kubernetes_job.create_step_update(test_step_pending, _kubernetes_job_for_step(test_step_pending))
+
+    assert update.status == HelixJobStatus.ERROR
+    kubernetes_job._networking_v1.delete_namespaced_network_policy.assert_not_called()
+
+
+def test_task_error_keeps_the_network_policy_while_the_job_is_active(kubernetes_job, test_step_pending):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = True
+    kubernetes_job._networking_v1 = MagicMock()
+    kubernetes_job._core_v1.list_namespaced_pod.return_value = SimpleNamespace(
+        items=[_kubernetes_pod("running", phase="Running")]
+    )
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=True),
+        patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
+    ):
+        update = kubernetes_job.create_step_update(test_step_pending, _kubernetes_job_for_step(test_step_pending))
+
+    assert update.status == HelixJobStatus.ERROR
+    kubernetes_job._networking_v1.delete_namespaced_network_policy.assert_not_called()
+
+
+def test_failed_kubernetes_job_deletes_its_network_policy(kubernetes_job, test_step_pending):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = True
+    kubernetes_job._networking_v1 = MagicMock()
+    failed = _kubernetes_job_for_step(
+        test_step_pending,
+        status=client.V1JobStatus(
+            failed=1,
+            conditions=[client.V1JobCondition(type="Failed", status="True", message="BackoffLimitExceeded")],
+        ),
+    )
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
+        patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
+    ):
+        update = kubernetes_job.create_step_update(test_step_pending, failed)
+
+    assert update.status == HelixJobStatus.ERROR
+    kubernetes_job._networking_v1.delete_namespaced_network_policy.assert_called_once_with(
+        name=name_for_step(test_step_pending), namespace="test-namespace"
+    )
+
+
+def test_cancelled_step_deletes_its_network_policy(kubernetes_job, test_step_pending):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = True
+    kubernetes_job._networking_v1 = MagicMock()
+    kubernetes_job._core_v1.list_namespaced_pod.return_value = SimpleNamespace(items=[])
+    cancelling = test_step_pending.model_copy(update={"status": HelixJobStatus.CANCELLING})
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
+        patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
+    ):
+        update = kubernetes_job.create_step_update(cancelling, _kubernetes_job_for_step(cancelling))
+
+    assert update.status == HelixJobStatus.CANCELLED
+    kubernetes_job._networking_v1.delete_namespaced_network_policy.assert_called_once_with(
+        name=name_for_step(cancelling), namespace="test-namespace"
+    )
+
+
 @pytest.mark.parametrize("status", [403, 404])
 def test_delete_step_network_policy_tolerates_denied_and_missing_policies(status):
     networking_v1 = MagicMock()

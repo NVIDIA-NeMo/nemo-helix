@@ -436,7 +436,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
                 else:
                     self._workload_delegations.ensure_for_target(step, target)
         error_details = {"message": error_message} if error_message is not None else {}
-        if status in HelixJobStatus.terminals():
+        if _kubernetes_job_workload_is_finished(job, status):
             self._delete_step_network_policy(job.metadata.name)
         return JobUpdate(status=status, status_details=status_details, error_details=error_details)
 
@@ -788,6 +788,22 @@ def _job_namespace(job: V1Job) -> str | None:
     if metadata is None:
         return None
     return metadata.namespace
+
+
+def _kubernetes_job_workload_is_finished(job: V1Job, status: HelixJobStatus) -> bool:
+    """Whether Kubernetes has stopped this Job, so its NetworkPolicy can be removed.
+
+    The platform status can be ERROR while pods are still running. The policy stays until the
+    Job has completed, Kubernetes has recorded a Failed condition, or cancellation has drained
+    every pod.
+    """
+    job_status = job.status
+    if job_status is not None and job_status.completion_time is not None:
+        return True
+    if status == HelixJobStatus.CANCELLED:
+        return True
+    conditions = job_status.conditions if job_status is not None else None
+    return any(condition.type == "Failed" and condition.status == "True" for condition in conditions or [])
 
 
 def map_kubernetes_job_status_to_step_status(
