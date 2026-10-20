@@ -1910,9 +1910,32 @@ chmod -R 777 {job_vol}/{storage_subpath}
         }
 
     def sync_pausing(self, step: HelixJobStepWithContext, container: Container | None) -> JobUpdate:
-        """Leave a pausing container running until it exits or the pause deadline passes."""
+        """Leave a pausing container running until it exits or the pause deadline passes.
+
+        An exit counts when the container exited before the deadline, even if it is seen
+        later. When the exit time is unreadable, the deadline is checked against now. A
+        missing container has nothing left to stop, so the step is paused.
+        """
+        if container is None:
+            return JobUpdate(
+                status=HelixJobStatus.PAUSED, status_details={"message": "Container not found, job paused"}
+            )
+        exited = container.status in ("exited", "dead")
+        if exited:
+            state = (container.attrs or {}).get("State", {})
+            exited_at = self.parse_docker_timestamp(state.get("FinishedAt")).parsed
+            if not pause_deadline_exceeded(step, now=exited_at):
+                raw_exit_code = state.get("ExitCode")
+                exit_code = raw_exit_code if isinstance(raw_exit_code, int) else 1
+                status, message, error_details = describe_paused_exit(
+                    exit_code, paused_message=f"Job paused successfully with exit code {exit_code}"
+                )
+                status_details: dict = {"message": message}
+                if status != HelixJobStatus.PAUSED:
+                    status_details["exit_code"] = exit_code
+                return JobUpdate(status=status, status_details=status_details, error_details=error_details or None)
         if pause_deadline_exceeded(step):
-            if container is not None:
+            if not exited:
                 try:
                     container.kill()
                 except (APIError, NotFound):
@@ -1923,21 +1946,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 status_details={"message": message},
                 error_details={"message": message},
             )
-        if container is None:
-            return JobUpdate(
-                status=HelixJobStatus.PAUSED, status_details={"message": "Container not found, job paused"}
-            )
-        if container.status not in ("exited", "dead"):
-            return JobUpdate(status=HelixJobStatus.PAUSING, status_details={"message": "Job is being paused"})
-        raw_exit_code = (container.attrs or {}).get("State", {}).get("ExitCode")
-        exit_code = raw_exit_code if isinstance(raw_exit_code, int) else 1
-        status, message, error_details = describe_paused_exit(
-            exit_code, paused_message=f"Job paused successfully with exit code {exit_code}"
-        )
-        status_details: dict = {"message": message}
-        if status != HelixJobStatus.PAUSED:
-            status_details["exit_code"] = exit_code
-        return JobUpdate(status=status, status_details=status_details, error_details=error_details or None)
+        return JobUpdate(status=HelixJobStatus.PAUSING, status_details={"message": "Job is being paused"})
 
     def create_step_update(self, step: HelixJobStepWithContext, container: Container) -> JobUpdate:
         status, status_details, error_stack = self.map_docker_container_status_to_platform_status(step, container)

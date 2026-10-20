@@ -279,13 +279,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
                     status_details={"message": "Subprocess not found, job cancelled"},
                 )
             if step.status == HelixJobStatus.PAUSING:
-                if pause_deadline_exceeded(step):
-                    message = "Pause deadline exceeded"
-                    return JobUpdate(
-                        status=HelixJobStatus.ERROR,
-                        status_details={"message": message},
-                        error_details={"message": message},
-                    )
+                # Nothing is running, so there is nothing for the pause deadline to stop.
                 return JobUpdate(
                     status=HelixJobStatus.PAUSED,
                     status_details={"message": "Subprocess not found, job paused"},

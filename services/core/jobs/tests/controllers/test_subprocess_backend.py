@@ -694,17 +694,17 @@ def test_sync_pausing_deadline_kills_the_process(
             metadata.process.wait(timeout=5)
 
 
-@pytest.mark.parametrize("ago_seconds,expected", [(0, HelixJobStatus.PAUSED), (120, HelixJobStatus.ERROR)])
+@pytest.mark.parametrize("ago_seconds", [0, 120])
 def test_sync_pausing_without_a_process(
-    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending, ago_seconds, expected
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending, ago_seconds
 ):
-    """A step paused before its process started is paused, unless the pause deadline already passed."""
+    """With no process left to stop, a pausing step is paused, even after the pause deadline."""
     backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     step = _mark_pausing(test_step_pending, ago_seconds=ago_seconds, deadline_seconds=60)
 
     update = backend.sync(step)
 
-    assert update.status == expected
+    assert update.status == HelixJobStatus.PAUSED
 
 
 def test_sync_pausing_step_older_than_the_ttl_is_not_timed_out(

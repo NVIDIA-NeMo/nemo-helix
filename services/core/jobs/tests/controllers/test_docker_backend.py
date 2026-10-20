@@ -613,6 +613,39 @@ def test_docker_job_sync_pausing_without_a_container_is_paused(docker_job, docke
     assert update.status == HelixJobStatus.PAUSED
 
 
+def test_docker_job_sync_pausing_without_a_container_is_paused_after_the_deadline(
+    docker_job, docker_client_mock, test_job_step
+):
+    """A missing container has nothing left to stop, so the deadline does not turn it into an error."""
+    step = _docker_pausing_step(test_job_step, requested_ago_seconds=120, deadline_seconds=60)
+    docker_client_mock.containers.get.side_effect = NotFound("Container not found")
+
+    assert docker_job.sync(step).status == HelixJobStatus.PAUSED
+
+
+@pytest.mark.parametrize(
+    "exited_after_request_seconds,expected",
+    [(30, HelixJobStatus.PAUSED), (90, HelixJobStatus.ERROR)],
+)
+def test_docker_job_sync_pausing_judges_an_exit_seen_late_by_its_exit_time(
+    docker_job, docker_client_mock, test_job_step, exited_after_request_seconds, expected
+):
+    """Exit 75 seen after the deadline still pauses when the container exited before it."""
+    step = _docker_pausing_step(test_job_step, requested_ago_seconds=120, deadline_seconds=60)
+    requested_at = datetime.datetime.fromisoformat(step.status_details["pause_requested_at"])
+    exited_at = requested_at + datetime.timedelta(seconds=exited_after_request_seconds)
+    container_mock = MagicMock()
+    container_mock.status = "exited"
+    container_mock.attrs = {"State": {"ExitCode": 75, "FinishedAt": exited_at.isoformat()}}
+    docker_client_mock.containers.get.side_effect = None
+    docker_client_mock.containers.get.return_value = container_mock
+
+    update = docker_job.sync(step)
+
+    assert update.status == expected
+    container_mock.kill.assert_not_called()
+
+
 def test_docker_job_sync_pausing_leaves_running_container(docker_job, docker_client_mock, test_job_step):
     test_job_step.status = HelixJobStatus.PAUSING
     test_job_step.status_details = {
