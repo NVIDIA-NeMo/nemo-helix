@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Awaitable, Callable
 
+from fastapi import HTTPException
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.inference_middleware import BackendFormat
@@ -29,6 +30,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+SECRET_REFRESH_FAILURE_BACKOFF_SEC = 60
+"""Minimum time between secret fetch attempts for a provider whose last attempt failed."""
+
 
 class ModelProviderRefreshError(Exception):
     """Exception raised when refreshing model provider information fails."""
@@ -46,6 +50,9 @@ class ModelProviderInfo:
 
     secret_value_updated_at: datetime = datetime.min
     """Timestamp of last secret refresh"""
+
+    secret_refresh_failed_at: datetime | None = None
+    """Timestamp of the last failed secret fetch, or ``None`` if the last attempt succeeded"""
 
 
 @dataclass
@@ -360,17 +367,31 @@ async def refresh_model_provider_info(
 
     api_key_secret_name = model_provider.api_key_secret_name
     secret_value_diff = now - model_info.secret_value_updated_at
-    if api_key_secret_name and (secret_value_diff.total_seconds() > model_cache.secret_value_ttl):
-        await _refresh_secret_value(model_info, client, api_key_secret_name)
+    if (
+        api_key_secret_name
+        and (secret_value_diff.total_seconds() > model_cache.secret_value_ttl)
+        and not _in_secret_failure_backoff(model_info, now)
+    ):
+        refreshed = await _refresh_secret_value(model_info, client, api_key_secret_name)
+        model_info.secret_refresh_failed_at = None if refreshed else now
         model_info.secret_value_updated_at = now
 
     model_cache.update_model_info(model_info)
 
 
-async def _refresh_secret_value(model_info: ModelProviderInfo, client: AsyncNemoClient, api_key_secret_name: str):
+def _in_secret_failure_backoff(model_info: ModelProviderInfo, now: datetime) -> bool:
+    """Whether the last secret fetch for this provider failed recently enough to skip retrying it."""
+    failed_at = model_info.secret_refresh_failed_at
+    return failed_at is not None and (now - failed_at).total_seconds() < SECRET_REFRESH_FAILURE_BACKOFF_SEC
+
+
+async def _refresh_secret_value(
+    model_info: ModelProviderInfo, client: AsyncNemoClient, api_key_secret_name: str
+) -> bool:
     """
     For a given model provider, update the cached secret value. This function
-    mutates the passed-in model_info.
+    mutates the passed-in model_info. Returns whether the secret was fetched; on
+    failure the previously cached value is kept.
     """
     model_provider = model_info.model_provider
     try:
@@ -380,10 +401,18 @@ async def _refresh_secret_value(model_info: ModelProviderInfo, client: AsyncNemo
             client=client,
         )
         logger.debug(f"Updated secret cache for model provider: {model_provider.workspace}/{model_provider.name}")
+        return True
+    except HTTPException:
+        # retrieve_secret_value already logged the cause (e.g. missing secret); skip the traceback.
+        logger.warning(
+            f"Failed to update secret cache for model provider: {model_provider.workspace}/{model_provider.name}. "
+            f"Retrying in {SECRET_REFRESH_FAILURE_BACKOFF_SEC}s."
+        )
     except Exception:
         logger.exception(
             f"Failed to update secret cache for model provider: {model_provider.workspace}/{model_provider.name}."
         )
+    return False
 
 
 async def _async_pause(delay: float) -> None:
