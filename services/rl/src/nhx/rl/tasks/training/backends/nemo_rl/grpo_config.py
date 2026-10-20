@@ -19,7 +19,7 @@ from nhx.customization_common.service.constants import (
     SANDBOX_WORK_PATH,
 )
 from nhx.customization_common.service.context import NHXJobContext
-from nhx.rl.app.constants import NHX_JOB_STORAGE_PVC_ENVVAR
+from nhx.rl.app.constants import DEFAULT_BROKER_PORT, NHX_JOB_STORAGE_PVC_ENVVAR
 from nhx.rl.app.jobs.training.schemas import BatchingStrategy, GRPOConfig, PolicyBackend, TrainingStepConfig
 from nhx.rl.entities.values import FinetuningType
 from nhx.rl.tasks.training.backends.nemo_rl.dpo_config import (
@@ -303,6 +303,7 @@ def _build_nemo_gym_env_config(
     nemo_gym: dict[str, Any] = {
         "port_range_low": 5000,
         "port_range_high": 5999,
+        "episode_broker": {"port": DEFAULT_BROKER_PORT},
     }
     env_block: dict[str, Any] = {
         "should_use_nemo_gym": True,

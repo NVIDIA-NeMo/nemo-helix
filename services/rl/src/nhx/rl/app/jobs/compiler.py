@@ -620,7 +620,7 @@ def _build_training_step(
         ):
             environment.append(EnvironmentVariable(name=name, value=value))
         # Sandboxes reach the training pods on the broker and on the port range vLLM picks a
-        # generation server from, never on Ray. The range is half-open; endPort is inclusive.
+        # generation server from, never on Ray. The span is inclusive; the controller emits each port.
         network = StepNetwork(
             ingress=[
                 StepIngressRule(

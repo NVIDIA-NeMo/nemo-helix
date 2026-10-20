@@ -3455,11 +3455,13 @@ def test_build_step_network_policy_limits_peers_to_declared_ports(test_step_pend
     ranged = _step_with_network(test_step_pending)
     ranged.step_spec.network.ingress[0].tcp_port_ranges = [TcpPortRange(low=3000, high=4998)]
     ranged_policy = build_step_network_policy(ranged)
-    assert [(p.protocol, p.port, p.end_port) for p in ranged_policy.spec.ingress[1].ports] == [
-        ("TCP", 8000, None),
-        ("TCP", 51234, None),
-        ("TCP", 3000, 4998),
-    ]
+    ranged_ports = [(p.protocol, p.port, p.end_port) for p in ranged_policy.spec.ingress[1].ports]
+    assert ranged_ports[:2] == [("TCP", 8000, None), ("TCP", 51234, None)]
+    enumerated = ranged_ports[2:]
+    assert enumerated[0] == ("TCP", 3000, None)
+    assert enumerated[-1] == ("TCP", 4998, None)
+    assert len(enumerated) == 4998 - 3000 + 1
+    assert all(protocol == "TCP" and end_port is None for protocol, _, end_port in enumerated)
     assert [(p.protocol, p.port, p.end_port) for p in sandboxes.ports] == [
         ("TCP", 8000, None),
         ("TCP", 51234, None),

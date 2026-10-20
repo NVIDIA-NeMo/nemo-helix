@@ -86,7 +86,7 @@ _K8S_LABEL_KEY_PATTERN = r"^([a-z0-9]([-a-z0-9.]*[a-z0-9])?/)?[A-Za-z0-9]([-A-Za
 
 
 class TcpPortRange(JobSpecModel):
-    """Inclusive TCP span. ``high`` is the last port, matching a NetworkPolicy ``endPort``."""
+    """Inclusive TCP span. ``high`` is the last port."""
 
     low: Annotated[int, Field(ge=1, le=65535)]
     high: Annotated[int, Field(ge=1, le=65535)]
@@ -108,7 +108,7 @@ class StepIngressRule(JobSpecModel):
     tcp_ports: list[Annotated[int, Field(ge=1, le=65535)]] = Field(
         min_length=1, description="TCP ports on the step's pods that matching peers may reach."
     )
-    # The controller turns these into NetworkPolicy endPorts. Kept out of the HTTP schema.
+    # The controller expands each span into one NetworkPolicy port. Kept out of the HTTP schema.
     tcp_port_ranges: SkipJsonSchema[list[TcpPortRange]] = Field(default_factory=list)
 
 

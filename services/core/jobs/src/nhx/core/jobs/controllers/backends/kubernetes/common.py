@@ -40,6 +40,7 @@ from nemo_helix_plugin.jobs.execution_profiles import (
 from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesVolumeMount as PluginKubernetesVolumeMount,
 )
+from nemo_helix_plugin.jobs.spec import StepIngressRule
 from nemo_helix_plugin.jobs.types import HelixJobStepWithContext, HelixJobTaskUpdate
 from nhx.common.auth import AuthContext
 from nhx.common.config import get_platform_config
@@ -769,12 +770,34 @@ def delete_configmap(core_v1: client.CoreV1Api, namespace: str, name: str) -> No
         raise e
 
 
+def _network_policy_ports(rule: StepIngressRule) -> list[client.V1NetworkPolicyPort]:
+    """Expand a rule into one TCP port entry, with no ``endPort``.
+
+    Cilium 1.15 ignores ``endPort`` and admits only ``port``. Overlaps between the discrete
+    list and a span are emitted once.
+    """
+    seen: set[int] = set()
+    ports: list[client.V1NetworkPolicyPort] = []
+    for port in rule.tcp_ports:
+        if port not in seen:
+            seen.add(port)
+            ports.append(client.V1NetworkPolicyPort(protocol="TCP", port=port))
+    for span in rule.tcp_port_ranges:
+        for port in range(span.low, span.high + 1):
+            if port not in seen:
+                seen.add(port)
+                ports.append(client.V1NetworkPolicyPort(protocol="TCP", port=port))
+    return ports
+
+
 def build_step_network_policy(step: HelixJobStepWithContext) -> client.V1NetworkPolicy | None:
     """Build the ingress NetworkPolicy for a step that declares ``network``, else ``None``.
 
     The step's pods accept ingress from pods of the same job on any port, and from pods matching each
-    declared rule on that rule's TCP ports and port ranges. NetworkPolicy allows are additive across policies, so this only
-    isolates the step when no other policy in the namespace selects its pods with a broader allow.
+    declared rule on that rule's TCP ports. Declared ranges are written as one port each: Cilium 1.15
+    ignores NetworkPolicy ``endPort`` and would admit only the first port of the span. NetworkPolicy
+    allows are additive across policies, so this only isolates the step when no other policy in the
+    namespace selects its pods with a broader allow.
 
     The Helm chart's ValidatingAdmissionPolicy (``job-step-networkpolicy-vap.yaml``) only admits this exact
     shape from the controller; keep the two in sync.
@@ -800,13 +823,7 @@ def build_step_network_policy(step: HelixJobStepWithContext) -> client.V1Network
                         pod_selector=client.V1LabelSelector(match_labels={rule.job_id_label: step.job})
                     )
                 ],
-                ports=[
-                    *[client.V1NetworkPolicyPort(protocol="TCP", port=port) for port in rule.tcp_ports],
-                    *[
-                        client.V1NetworkPolicyPort(protocol="TCP", port=span.low, end_port=span.high)
-                        for span in rule.tcp_port_ranges
-                    ],
-                ],
+                ports=_network_policy_ports(rule),
             )
         )
     return client.V1NetworkPolicy(
