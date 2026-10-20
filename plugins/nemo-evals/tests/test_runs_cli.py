@@ -254,13 +254,15 @@ def test_sandbox_flags_are_rejected_with_a_spec_file(tmp_path, flag, value):
 
 
 TB = "https://github.com/harbor-framework/terminal-bench.git"
-SHA = "2b0442c3" + "0" * 32
+SHA = "2b0442c3" + "0" * 32  # what Harbor's ls-remote gives an annotated tag: the tag object
+COMMIT = "9f1e7a55" + "0" * 32  # the commit the download checks out
 
 
 class FakeGitRegistry:
     """Harbor's ``GitRepoRegistryClient``: three tasks under ``tasks/`` at ``SHA``; records what it downloads."""
 
     downloads: list[list[str]] = []
+    commits: list[str | None] | None = None  # per selected task; default COMMIT for each
 
     repos: list = []
 
@@ -279,7 +281,10 @@ class FakeGitRegistry:
 
     async def download_tasks(self, task_ids, output_dir, export):
         FakeGitRegistry.downloads.append([t.get_name() for t in task_ids])
-        return SimpleNamespace(paths=[output_dir / t.get_name() for t in task_ids])
+        paths = [output_dir / t.get_name() for t in task_ids]
+        commits = FakeGitRegistry.commits or [COMMIT] * len(paths)
+        results = [SimpleNamespace(path=p, resolved_git_commit_id=c) for p, c in zip(paths, commits, strict=True)]
+        return SimpleNamespace(paths=paths, results=results)
 
 
 @pytest.fixture
@@ -288,15 +293,24 @@ def git_registry(monkeypatch):
 
     FakeGitRegistry.downloads = []
     FakeGitRegistry.repos = []
+    FakeGitRegistry.commits = None
     monkeypatch.setattr(git_repo, "GitRepoRegistryClient", FakeGitRegistry)
     return FakeGitRegistry
 
 
 def test_git_source_downloads_only_the_selected_tasks(git_registry, tmp_path):
     name, sha, dirs, total = download_git_tasks(f"{TB}@v3.0.0", "sum-three,0", tmp_path)
-    assert (name, sha, total) == ("harbor-framework/terminal-bench", SHA, 3)
+    # The checked-out commit, not the tag object an annotated tag's ls-remote gives.
+    assert (name, sha, total) == ("harbor-framework/terminal-bench", COMMIT, 3)
     assert dirs == [tmp_path / "sum-three", tmp_path / "bun-sourcemap-leak"]  # name order: index 0 is bun-…
     assert git_registry.downloads == [["sum-three", "bun-sourcemap-leak"]]
+
+
+@pytest.mark.parametrize("second", ["a" * 40, None], ids=["another-commit", "unresolved"])
+def test_git_source_needs_one_commit_for_every_task(git_registry, tmp_path, second):
+    git_registry.commits = [COMMIT, second]
+    with pytest.raises(RuntimeError, match="not one commit"):
+        download_git_tasks(f"{TB}@v3.0.0", "sum-three,0", tmp_path)
 
 
 def test_git_source_needs_a_ref():

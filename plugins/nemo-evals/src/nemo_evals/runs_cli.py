@@ -154,10 +154,12 @@ def download_git_tasks(source: str, names: str | None, output_dir: Path) -> tupl
     """Download the selected tasks of git repo ``<url>@<ref>`` (its ``tasks/`` directory, or the ``<dir>`` of a
     ``…/tree/<ref>/<dir>`` URL) into ``output_dir``.
 
-    Returns the repo's ``org/name``, the commit SHA the ref resolved to, the task directories in name order,
+    Returns the repo's ``org/name``, the commit the download checked out, the task directories in name order,
     and how many tasks the repo has.
+
+    Raises:
+        RuntimeError: The selected tasks didn't come from one commit.
     """
-    from harbor.models.task.id import GitTaskId
     from harbor.registry.client.git_repo import GitRepoRegistryClient, resolve_repo_source
 
     check_git_source(source)
@@ -168,9 +170,11 @@ def download_git_tasks(source: str, names: str | None, output_dir: Path) -> tupl
     candidates = [Candidate(i, entity_name(t.get_name()), t.get_name()) for i, t in enumerate(ids)]
     chosen = [ids[c.index] for c in select_tasks(candidates, names)]
     result = _run_git(client._task_client.download_tasks(task_ids=chosen, output_dir=output_dir, export=True))
-    sha = ids[0].git_commit_id if isinstance(ids[0], GitTaskId) else None  # every id pins the resolved commit
-    assert sha is not None
-    return f"{repo.org}/{repo.name}", sha, list(result.paths), len(ids)
+    # Not the ids' git_commit_id: for an annotated tag that's the tag object's SHA, not its commit.
+    commits = {r.resolved_git_commit_id for r in result.results}
+    if len(commits) != 1 or None in commits:
+        raise RuntimeError(f"Harbor resolved {source} to {sorted(map(str, commits))}, not one commit")
+    return f"{repo.org}/{repo.name}", commits.pop(), list(result.paths), len(ids)
 
 
 def list_git_tasks(source: str) -> list[str]:
