@@ -64,6 +64,7 @@ def test_exceptions_printed_while_shutting_down_are_ignored(line):
         "(raylet) Task was killed due to the node running low on memory. Memory on the node was 120GB",
         "[rank0]: tried to write checkpoint: No space left on device",
         "(VllmWorker pid=9) CUDA out of memory. Tried to allocate 1.00 GiB",
+        "  traceback : Signal 9 (SIGKILL) received by PID 1061",
     ],
 )
 def test_failures_reported_without_an_exception_line_are_kept(line):
@@ -87,6 +88,12 @@ def test_each_exception_is_kept_once_at_its_last_appearance():
 
 def test_output_without_exceptions_falls_back_to_the_error_lines():
     lines = ["step 10 loss 1.2", "Segmentation fault (core dumped)", "done"]
+
+    assert fallback_error(lines, 139) == ParsedError("RuntimeError", "Segmentation fault (core dumped)")
+
+
+def test_the_fallback_leaves_out_config_lines_that_name_nccl():
+    lines = ["backend: nccl", "step 10 loss 1.2", "Segmentation fault (core dumped)"]
 
     assert fallback_error(lines, 139) == ParsedError("RuntimeError", "Segmentation fault (core dumped)")
 

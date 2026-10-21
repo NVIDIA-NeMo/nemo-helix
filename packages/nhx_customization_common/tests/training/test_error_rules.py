@@ -203,7 +203,10 @@ EXAMPLES: dict[str, list[str]] = {
         "TimeoutError: Timeout waiting for coordinator at barrier 'training_complete' after 600s",
         "RuntimeError: ENDED file detected during worker wait",
     ],
-    "process_killed": ["RuntimeError: failed (exitcode: -9) local_rank: 0 (pid: 1057) of binary: /opt/venv/bin/python"],
+    "process_killed": [
+        "RuntimeError: failed (exitcode: -9) local_rank: 0 (pid: 1057) of binary: /opt/venv/bin/python",
+        "  traceback : Signal 9 (SIGKILL) received by PID 1061",
+    ],
     "internal_tensor_error": ["ValueError: You must provide either input_ids or inputs_embeds"],
     "training_exit_code": ["RuntimeError: Training failed with exit code: 1"],
 }
@@ -296,6 +299,26 @@ def test_a_storage_error_wins_over_the_checkpoint_wrapper_after_it(classifier):
     ]
 
     assert classifier.classify_output(lines, 1).cause == "disk_full"
+
+
+def test_a_killed_torchrun_worker_is_not_reported_as_nccl(classifier):
+    # torchrun prints no exception for a worker killed by a signal, only its root cause block.
+    lines = [
+        "2026-10-20 23:58:09 | INFO | root | Backend: nccl",
+        "  backend: nccl",
+        "INFO | root | step 31 | epoch 0 | loss 1.6779 | grad_norm 4.5590 | lr 8.51e-05 |",
+        "E1020 23:59:41.295000 990 torch/distributed/elastic/multiprocessing/api.py:1002] failed (exitcode: -9) "
+        "local_rank: 0 (pid: 1061) of binary: /opt/venv/bin/python",
+        "torch.distributed.elastic.multiprocessing.errors.ChildFailedError: ",
+        "nhx.automodel.tasks.training.backends.finetune FAILED",
+        "  exitcode  : -9 (pid: 1061)  (SIGKILL)",
+        "  traceback : Signal 9 (SIGKILL) received by PID 1061",
+    ]
+
+    error = classifier.classify_output(lines, 1)
+
+    assert error.cause == "process_killed"
+    assert error.rerunnable is True
 
 
 def test_our_dataset_errors_are_not_rerunnable(classifier):

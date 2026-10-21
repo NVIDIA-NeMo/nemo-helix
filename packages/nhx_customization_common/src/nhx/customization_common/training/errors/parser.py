@@ -29,7 +29,7 @@ ERROR_INDICATORS = [
     "worker crashed",
     "out of memory",
     "cuda error",
-    "nccl",
+    "nccl warn",  # not "nccl", which matches config lines such as "backend: nccl"
     "segmentation fault",
     "signal",
     "killed",
@@ -57,11 +57,11 @@ _SHUTDOWN_EXCEPTION_TYPES = {"CancelledError", "KeyboardInterrupt", "SystemExit"
 _SHUTDOWN_MESSAGES = ("sys.meta_path is None", "Python is likely shutting down")
 
 # Failures that some processes report without an exception line, or on a detail line under one, such
-# as Ray's memory monitor, a vLLM worker, or NCCL. A line with one of these becomes an exception named
-# ``LogMessage``.
+# as Ray's memory monitor, a vLLM worker, NCCL, or torchrun's report of a worker killed by a signal. A
+# line with one of these becomes an exception named ``LogMessage``.
 _FAILURE_LINE_RE = re.compile(
     r"CUDA out of memory|running low on memory|OOM killer|No space left on device|Disk quota exceeded"
-    r"|Error while creating shared memory segment"
+    r"|Error while creating shared memory segment|Signal \d+ \(SIG[A-Z]+\) received by PID"
 )
 LOG_MESSAGE_TYPE = "LogMessage"
 
