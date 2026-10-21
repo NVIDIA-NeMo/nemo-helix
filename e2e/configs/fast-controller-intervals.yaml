@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# E2E overlay: shorten controller intervals that tests wait on.
+#
+# Tests create a job or a provider, then wait for a background loop to pick it
+# up. At the product defaults (jobs schedule 5s, reconcile 2s, gateway cache
+# refresh 3s) each wait costs seconds that only add CI time.
+
+jobs:
+  schedule_interval_seconds: 1
+  reconcile_interval_seconds: 1
+
+inference_gateway:
+  refresh_model_cache_interval_sec: 1
