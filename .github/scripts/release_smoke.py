@@ -227,6 +227,9 @@ class Smoke:
         for key in ("NVIDIA_INFERENCE_URL", "NVIDIA_INFERENCE_KEY", "SMOKE_INFERENCE_MODEL"):
             if not self.env.get(key):
                 raise RuntimeError(f"Missing CI setting: {key}")
+        # Fail on incompatible published wheels before provisioning a Docker VM.
+        self.stage("wheel-install")
+        self.install("all" if target == "macos" else "all,nemo-agents-plugin-deepagents")
         if target == "macos":
             self.stage("colima-install")
             self.command(["brew", "install", "colima", "docker", "qemu"], timeout=600)
@@ -236,8 +239,6 @@ class Smoke:
             )
             self.env["DOCKER_HOST"] = f"unix://{self.root}/config/colima/default/docker.sock"
             self.command(["docker", "info"])
-        self.stage("wheel-install")
-        self.install("all" if target == "macos" else "all,nemo-agents-plugin-deepagents")
         if target == "macos":
             self.stage("platform-start")
             self.start()
