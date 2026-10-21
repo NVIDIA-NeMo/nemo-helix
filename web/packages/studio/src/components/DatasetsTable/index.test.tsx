@@ -398,6 +398,26 @@ describe('DatasetsTable', () => {
       await screen.findByText('dataset-1', undefined, { timeout: LG_SELECTOR_TIMEOUT });
       expect(state.lastUrl?.searchParams.has('filter[purpose][$in]')).toBe(false);
     });
+
+    it('honours a legacy single-select purpose value from a saved URL', async () => {
+      const state = installListHandler();
+      const filtersParam = encodeURIComponent(
+        JSON.stringify([{ id: 'purpose', value: 'generic' }])
+      );
+      render(
+        <TestProviders>
+          <MemoryRouter initialEntries={[`/?filters=${filtersParam}`]}>
+            <DatasetsTable enableFilters />
+          </MemoryRouter>
+        </TestProviders>
+      );
+      await waitFor(
+        () => {
+          expect(state.lastUrl?.searchParams.getAll('filter[purpose][$in]')).toEqual(['generic']);
+        },
+        { timeout: LG_SELECTOR_TIMEOUT }
+      );
+    });
   });
 
   describe('Sorting', () => {
@@ -520,6 +540,17 @@ describe('DatasetsTable', () => {
       expect(within(modal).getByTestId('fileset-modal-purpose')).toHaveTextContent(
         FilesetPurpose.dataset
       );
+    });
+
+    it('still shows the first-use empty state when only the seeded default purposes are set', async () => {
+      installListHandler([]);
+      renderTable({ enableFilters: true });
+
+      expect(
+        await screen.findByText(ENTITY_EMPTY_STATES.filesets.heading, undefined, {
+          timeout: LG_SELECTOR_TIMEOUT,
+        })
+      ).toBeInTheDocument();
     });
 
     it('shows the no-results empty state with a Clear filters button when search is active', async () => {

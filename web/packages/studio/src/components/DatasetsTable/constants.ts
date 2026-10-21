@@ -29,11 +29,16 @@ export const DEFAULT_PURPOSE_FILTER = Object.fromEntries(
   VISIBLE_PURPOSES.map((purpose) => [purpose, true])
 );
 
-/** Purposes ticked in a Purpose multi-select value. Only entries that are exactly `true` count. */
-export const checkedPurposes = (value: unknown): FilesetPurpose[] =>
-  Object.entries((value ?? {}) as Record<string, unknown>)
+/**
+ * Purposes ticked in a Purpose multi-select value (`{ [purpose]: true }`). Only entries that are
+ * exactly `true` count. A bare string is the legacy single-select value kept in saved URLs.
+ */
+export const checkedPurposes = (value: unknown): FilesetPurpose[] => {
+  if (typeof value === 'string') return value ? [value as FilesetPurpose] : [];
+  return Object.entries((value ?? {}) as Record<string, unknown>)
     .filter(([, checked]) => checked === true)
     .map(([purpose]) => purpose as FilesetPurpose);
+};
 
 export const isDefaultPurposeFilter = (value: unknown) => {
   const checked = checkedPurposes(value);
