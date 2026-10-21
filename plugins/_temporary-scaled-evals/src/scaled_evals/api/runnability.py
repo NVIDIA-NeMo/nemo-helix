@@ -529,7 +529,7 @@ def preflight_evaluation(
     if blocker:
         return BlockedPreflight(_report("evaluation", checks), blocker)
 
-    task_revision = db.evaluations.task_revision_for_evaluation(body.task_id, body.task_revision)
+    task_revision = db.tasks.revision(body.task_id, body.task_revision)
     if task_revision is None:
         message = f"task revision not found: {body.task_id} rev {body.task_revision}"
         checks.append(

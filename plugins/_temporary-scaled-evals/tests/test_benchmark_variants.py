@@ -25,6 +25,7 @@ from scaled_evals.dispatch.worker import (
     snapshot_agent_timeout_floor,
 )
 from scaled_evals.models.execution_snapshot import EXECUTION_SNAPSHOT_SCHEMA_VERSION
+from task_fixtures import seed_task_revision
 
 
 def _conn_returning(fetchones: list, fetchall=None) -> MagicMock:
@@ -100,6 +101,8 @@ def _snapshot_row(floor_sec: int | None, **overrides) -> dict:
 def test_variant_create_and_timeout_floor_cover_both_workflows(tmp_path: Path) -> None:
     """Create a metadata-only variant, then raise the staged agent timeout from it."""
     # --- workflow 1: create metadata-only variant ---
+    seed_task_revision("task_a", 3)
+    seed_task_revision("task_b")
     _use_conn(
         _conn_returning(
             [

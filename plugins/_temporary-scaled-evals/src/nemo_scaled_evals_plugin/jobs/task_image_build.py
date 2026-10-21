@@ -36,7 +36,7 @@ def _task_build_worker_cls() -> type[Any]:
 
 
 def _backend_task_build_job_cls() -> type[Any]:
-    from scaled_evals.api.repositories.build_repository import TaskBuildJob
+    from scaled_evals.api.task_store import TaskBuildJob
 
     return TaskBuildJob
 
