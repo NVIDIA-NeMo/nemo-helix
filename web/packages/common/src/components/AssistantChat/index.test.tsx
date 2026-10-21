@@ -724,20 +724,21 @@ describe('AssistantChat', () => {
   it(
     'stops a hanging stream when stop is clicked',
     async () => {
+      const user = userEvent.setup({ delay: null });
       const stream = createHangingStream('0 this is an example response');
       const abortSpy = vi.spyOn(stream.controller, 'abort');
       mocks.createChatCompletion.mockResolvedValueOnce(stream);
 
       renderAssistantChat(<AssistantChat model="test-model" workspace="default" />);
 
-      await userEvent.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'Hang forever');
-      await userEvent.click(screen.getByRole('button', { name: /Submit/i }));
+      await user.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'Hang forever');
+      await user.click(screen.getByRole('button', { name: /Submit/i }));
 
       expect(await screen.findByText('0 this is an example response')).toBeInTheDocument();
       const stopButton = screen.getByRole('button', { name: /Stop/i });
       expect(stopButton).toBeEnabled();
 
-      await userEvent.click(stopButton);
+      await user.click(stopButton);
 
       await waitFor(() => expect(abortSpy).toHaveBeenCalledTimes(1));
       await waitFor(() =>
@@ -752,6 +753,7 @@ describe('AssistantChat', () => {
   it(
     'can hide the running indicator while a stream is pending',
     async () => {
+      const user = userEvent.setup({ delay: null });
       const stream = createHangingStream('Waiting for user input.');
       mocks.createChatCompletion.mockResolvedValueOnce(stream);
 
@@ -759,13 +761,13 @@ describe('AssistantChat', () => {
         <AssistantChat model="test-model" workspace="default" showRunningIndicator={false} />
       );
 
-      await userEvent.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'Need input');
-      await userEvent.click(screen.getByRole('button', { name: /Submit/i }));
+      await user.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'Need input');
+      await user.click(screen.getByRole('button', { name: /Submit/i }));
 
       expect(await screen.findByText('Waiting for user input.')).toBeInTheDocument();
       expect(screen.queryByTestId('assistant-chat-skeleton')).not.toBeInTheDocument();
 
-      await userEvent.click(screen.getByRole('button', { name: /Stop/i }));
+      await user.click(screen.getByRole('button', { name: /Stop/i }));
     },
     interactionTimeoutMs
   );
