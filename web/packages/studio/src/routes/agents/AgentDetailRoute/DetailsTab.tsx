@@ -7,15 +7,27 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { isDefined } from '@nemo/common/src/utils/list';
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import { Stack, Text } from '@nvidia/foundations-react-core';
+import { useAgentSpecFileset } from '@studio/api/agents/useAgentSpecFileset';
 import type { AgentConfig } from '@studio/components/dataViews/AgentsDataView';
 import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
 import { ConfigValue } from '@studio/routes/agents/AgentDetailRoute/ConfigValue';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
 import { SourcePanel } from '@studio/routes/agents/AgentDetailRoute/SourcePanel';
+import { getFilesetRoute } from '@studio/routes/utils';
 import type { FC } from 'react';
+import { Link } from 'react-router';
 
-/** Config keys rendered by dedicated structured panels below. */
-const STRUCTURED_KEYS = ['workflow', 'llms', 'functions'] as const;
+/** Config keys rendered by the Summary panel or dedicated structured panels below. */
+const RENDERED_KEYS = new Set([
+  'name',
+  'workspace',
+  'project',
+  'description',
+  'config_format',
+  'workflow',
+  'llms',
+  'functions',
+]);
 
 interface DetailsTabProps {
   workspace: string;
@@ -31,13 +43,12 @@ interface DetailsTabProps {
 export const DetailsTab: FC<DetailsTabProps> = ({ workspace, agentName, agent }) => {
   const config = (agent?.config ?? {}) as Record<string, unknown>;
   const models = getAgentModelNames(agent?.config as AgentConfig | undefined);
+  const { data: fileset } = useAgentSpecFileset(workspace, agent?.name ?? agentName);
 
   const workflow = asRecord(config['workflow']);
   const llms = asRecord(config['llms']);
   const functions = asRecord(config['functions']);
-  const extraEntries = Object.entries(config).filter(
-    ([key]) => !STRUCTURED_KEYS.includes(key as (typeof STRUCTURED_KEYS)[number])
-  );
+  const extraEntries = Object.entries(config).filter(([key]) => !RENDERED_KEYS.has(key));
 
   return (
     <Stack gap="4" className="mx-auto w-full max-w-3xl pb-6">
@@ -59,6 +70,19 @@ export const DetailsTab: FC<DetailsTabProps> = ({ workspace, agentName, agent })
           {models.length > 0 && <KVPair label="Model" value={models.join(', ')} />}
           {isDefined(agent?.config_format) && (
             <KVPair label="Config format" value={agent.config_format} />
+          )}
+          {fileset && (
+            <KVPair
+              label="Fileset"
+              value={
+                <Link
+                  to={getFilesetRoute(fileset.workspace, fileset.name)}
+                  className="text-primary underline"
+                >
+                  {fileset.name}
+                </Link>
+              }
+            />
           )}
           {isDefined(agent?.id) && <KVPair label="Agent ID" value={agent.id} truncate />}
           {isDefined(agent?.created_at) && agent.created_at && (

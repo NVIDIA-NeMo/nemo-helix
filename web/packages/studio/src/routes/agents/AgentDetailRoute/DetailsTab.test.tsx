@@ -2,9 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
+import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { server } from '@studio/mocks/node';
 import { DetailsTab } from '@studio/routes/agents/AgentDetailRoute/DetailsTab';
-import { render, screen } from '@studio/tests/util/render';
+import { agentSpecFilesetName } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
+import { getFilesetRoute } from '@studio/routes/utils';
+import { render, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
+
+const FILESET_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/:name`;
 
 const baseAgent: Agent = {
   name: 'react-agent',
@@ -59,5 +66,59 @@ describe('DetailsTab', () => {
     await user.click(screen.getByText('Additional configuration'));
 
     expect(screen.getByText('enabled')).toBeVisible();
+  });
+
+  it('omits config keys already shown in the Summary panel from Additional configuration', async () => {
+    const user = userEvent.setup();
+    render(
+      <DetailsTab
+        workspace="default"
+        agentName="react-agent"
+        agent={{
+          ...baseAgent,
+          description: 'Support agent',
+          config_format: 'nemo-agents-spec-v1',
+          config: {
+            config_format: 'nemo-agents-spec-v1',
+            name: 'react-agent',
+            description: 'Support agent',
+            default_harness: 'hermes',
+          },
+        }}
+      />
+    );
+
+    await user.click(screen.getByText('Additional configuration'));
+
+    expect(screen.getByText('hermes')).toBeVisible();
+    expect(screen.getAllByText('nemo-agents-spec-v1')).toHaveLength(1);
+    expect(screen.getAllByText('Support agent')).toHaveLength(1);
+  });
+
+  it('links to the agent spec fileset from the Summary panel', async () => {
+    server.use(
+      http.get(FILESET_URL, ({ params }) =>
+        HttpResponse.json({ name: params['name'], workspace: params['workspace'] })
+      )
+    );
+    render(<DetailsTab workspace="default" agentName="react-agent" agent={baseAgent} />);
+
+    const filesetName = agentSpecFilesetName('react-agent');
+    const link = await screen.findByRole('link', { name: filesetName });
+    expect(link).toHaveAttribute('href', getFilesetRoute('default', filesetName));
+  });
+
+  it('omits the Fileset row when the agent has no spec fileset', async () => {
+    const requested = vi.fn();
+    server.use(
+      http.get(FILESET_URL, () => {
+        requested();
+        return HttpResponse.json({ detail: 'not found' }, { status: 404 });
+      })
+    );
+    render(<DetailsTab workspace="default" agentName="react-agent" agent={baseAgent} />);
+
+    await waitFor(() => expect(requested).toHaveBeenCalled());
+    expect(screen.queryByText('Fileset')).not.toBeInTheDocument();
   });
 });

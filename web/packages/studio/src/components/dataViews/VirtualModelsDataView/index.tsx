@@ -141,7 +141,6 @@ export const VirtualModelsDataView: FC<VirtualModelsDataViewProps> = ({
   const deleteVirtualModelMutation = useDeleteVirtualModel({
     mutation: {
       onSuccess: () => {
-        toast.success('Virtual model deleted successfully.');
         queryClient.invalidateQueries({
           queryKey: getListVirtualModelsQueryKey(workspace),
         });
