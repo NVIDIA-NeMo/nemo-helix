@@ -1,13 +1,20 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import asyncio
+import contextlib
 import logging
+import threading
+import traceback
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import jwt
+import pytest
+import respx
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
@@ -25,7 +32,8 @@ from nhx.common.config.base import (
     OIDCWorkloadConfig,
     TokenSigningConfig,
 )
-from nhx.core.auth.api.v2.authenticate import router
+from nhx.core.auth.api.v2 import authenticate as authenticate_module
+from nhx.core.auth.api.v2.authenticate import TokenIssuerBoundaryMisconfigurationError, router
 from nhx.core.auth.api.v2.workload_token_exchange import (
     WorkloadTokenExchangeService,
     get_workload_token_exchange_service,
@@ -102,8 +110,13 @@ def _test_client(
         app.dependency_overrides[get_workload_token_exchange_service] = lambda: workload_token_exchange_service
     Configuration.set_override(HelixConfig(base_url="http://testserver"))
     try:
-        with patch("nhx.core.auth.api.v2.authenticate.get_auth_config", return_value=config):
-            yield TestClient(app)
+        # Entered so every request shares one event loop, as under a real server; otherwise each
+        # request gets its own loop and background work started by one request dies with it.
+        with (
+            patch("nhx.core.auth.api.v2.authenticate.get_auth_config", return_value=config),
+            TestClient(app) as client,
+        ):
+            yield client
     finally:
         Configuration.clear_override(HelixConfig)
 
@@ -925,3 +938,308 @@ def test_access_key_specific_authenticate_route_is_removed(tmp_path):
         response = client.post("/v2/access-keys/authenticate")
 
     assert response.status_code == 404
+
+
+def _workload_access_token(config: AuthConfig) -> str:
+    signing_key = WorkloadTokenExchangeService().workload_signing_key(config)
+    now = datetime.now(tz=UTC)
+    return jwt.encode(
+        {
+            "iss": "http://testserver/apis/auth",
+            "sub": "system:serviceaccount:nemo:job",
+            "aud": "nemo-helix",
+            "iat": now,
+            "nbf": now,
+            "exp": now + timedelta(minutes=5),
+            "scope": "openid",
+        },
+        signing_key.private_key,
+        algorithm="RS256",
+        headers={"kid": signing_key.kid},
+    )
+
+
+def test_ext_authz_reuses_idp_discovery_and_jwks_across_requests(tmp_path):
+    """Every gateway request runs this callout under Envoy's 5s timeout, so it must not refetch
+    the IdP's discovery document and JWKS each time; a slow IdP turned that into 503s."""
+    config = _auth_config_with_workload_exchange(tmp_path, oidc_jwks_uri=None)
+    token = _workload_access_token(config)
+
+    with respx.mock(assert_all_called=False) as idp:
+        discovery = idp.get("https://sso.example.com/.well-known/openid-configuration").mock(
+            return_value=httpx.Response(200, json={"jwks_uri": "https://sso.example.com/jwks"})
+        )
+        idp_jwks = idp.get("https://sso.example.com/jwks").mock(return_value=httpx.Response(200, json={"keys": []}))
+        with _test_client(config, workload_token_exchange_service=WorkloadTokenExchangeService()) as client:
+            for _ in range(3):
+                response = client.get("/ext-authz", headers={"Authorization": f"Bearer {token}"})
+                assert response.status_code == 200, response.text
+
+    assert discovery.call_count == 1
+    assert idp_jwks.call_count == 1
+
+
+def test_ext_authz_does_not_wait_on_an_unreachable_idp_for_every_request(tmp_path):
+    """The issuer check is skipped when the IdP cannot be read, as before, but retried only after a
+    pause, so an unavailable IdP costs one request its timeout instead of every request."""
+    config = _auth_config_with_workload_exchange(tmp_path, oidc_jwks_uri=None)
+    token = _workload_access_token(config)
+
+    with respx.mock(assert_all_called=False) as idp:
+        discovery = idp.get("https://sso.example.com/.well-known/openid-configuration").mock(
+            side_effect=httpx.ConnectTimeout("IdP is not answering")
+        )
+        with _test_client(config, workload_token_exchange_service=WorkloadTokenExchangeService()) as client:
+            for _ in range(3):
+                response = client.get("/ext-authz", headers={"Authorization": f"Bearer {token}"})
+                assert response.status_code == 200, response.text
+
+    assert discovery.call_count == 1
+
+
+def test_authenticate_keeps_failing_closed_while_a_misconfiguration_is_cached(tmp_path):
+    config = _auth_config_with_workload_exchange(tmp_path)
+    service = WorkloadTokenExchangeService()
+    mirrored_jwk = {**service.public_jwk(config), "kid": "idp-key"}
+    idp_jwks = AsyncMock(return_value={"keys": [mirrored_jwk]})
+
+    with (
+        _test_client(config, workload_token_exchange_service=service) as client,
+        patch.object(JWTValidator, "jwks", new=idp_jwks),
+    ):
+        responses = [client.get("/authenticate", headers={"Authorization": "Bearer token"}) for _ in range(2)]
+
+    assert [response.status_code for response in responses] == [500, 500]
+    assert idp_jwks.await_count == 1
+
+
+def test_ext_authz_keeps_idp_caches_per_app(tmp_path):
+    config = _auth_config_with_workload_exchange(tmp_path, oidc_jwks_uri=None)
+    token = _workload_access_token(config)
+
+    with respx.mock(assert_all_called=False) as idp:
+        discovery = idp.get("https://sso.example.com/.well-known/openid-configuration").mock(
+            return_value=httpx.Response(200, json={"jwks_uri": "https://sso.example.com/jwks"})
+        )
+        idp.get("https://sso.example.com/jwks").mock(return_value=httpx.Response(200, json={"keys": []}))
+        for _ in range(2):
+            with _test_client(config, workload_token_exchange_service=WorkloadTokenExchangeService()) as client:
+                response = client.get("/ext-authz", headers={"Authorization": f"Bearer {token}"})
+                assert response.status_code == 200, response.text
+
+    assert discovery.call_count == 2
+
+
+class _FakeClock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+@pytest.fixture
+def verdict_clock(monkeypatch: pytest.MonkeyPatch) -> _FakeClock:
+    """Drive the issuer-boundary reuse windows without touching the event loop's clock."""
+    clock = _FakeClock()
+    monkeypatch.setattr(authenticate_module, "time", clock)
+    return clock
+
+
+def _finish_issuer_boundary_recheck(client: TestClient) -> None:
+    """Wait, on the app's event loop, for a background issuer-boundary recheck to complete."""
+    app, portal = client.app, client.portal
+    assert isinstance(app, FastAPI) and portal is not None
+
+    async def finish() -> None:
+        recheck = app.state.issuer_boundary._recheck_task
+        if recheck is not None:
+            await recheck
+
+    portal.call(finish)
+
+
+def test_ext_authz_fails_closed_once_a_recovered_idp_shows_a_misconfiguration(tmp_path, verdict_clock):
+    """An unverified verdict must not outlive its window: when the IdP answers again and its JWKS
+    holds NeMo's signing key, authentication fails closed as soon as the recheck finishes."""
+    config = _auth_config_with_workload_exchange(tmp_path)
+    service = WorkloadTokenExchangeService()
+    mirrored_jwk = {**service.public_jwk(config), "kid": "idp-key"}
+    token = _workload_access_token(config)
+
+    with respx.mock(assert_all_called=False) as idp:
+        idp_jwks = idp.get("https://sso.example.com/jwks").mock(side_effect=httpx.ConnectTimeout("IdP is down"))
+        with _test_client(config, workload_token_exchange_service=service) as client:
+            assert client.get("/ext-authz", headers={"Authorization": f"Bearer {token}"}).status_code == 200
+
+            idp_jwks.mock(side_effect=None, return_value=httpx.Response(200, json={"keys": [mirrored_jwk]}))
+            verdict_clock.now += 10
+            assert client.get("/ext-authz", headers={"Authorization": f"Bearer {token}"}).status_code == 200
+
+            # The expired verdict still answers while the recheck runs in the background.
+            verdict_clock.now += 21
+            assert client.get("/ext-authz", headers={"Authorization": f"Bearer {token}"}).status_code == 200
+            _finish_issuer_boundary_recheck(client)
+            response = client.get("/ext-authz", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Authentication token issuers are misconfigured"
+
+
+def test_authenticate_recovers_once_the_idp_misconfiguration_is_fixed(tmp_path, verdict_clock):
+    """A misconfigured verdict is rechecked against the IdP as it is now, not a cached JWKS, so a
+    fix on the IdP side is picked up without restarting the service."""
+    config = _auth_config_with_workload_exchange(tmp_path)
+    service = WorkloadTokenExchangeService()
+    mirrored_jwk = {**service.public_jwk(config), "kid": "idp-key"}
+    token = _workload_access_token(config)
+
+    with respx.mock(assert_all_called=False) as idp:
+        idp_jwks = idp.get("https://sso.example.com/jwks").mock(
+            return_value=httpx.Response(200, json={"keys": [mirrored_jwk]})
+        )
+        with _test_client(config, workload_token_exchange_service=service) as client:
+            assert client.get("/ext-authz", headers={"Authorization": f"Bearer {token}"}).status_code == 500
+
+            idp_jwks.mock(return_value=httpx.Response(200, json={"keys": []}))
+            verdict_clock.now += 10
+            assert client.get("/ext-authz", headers={"Authorization": f"Bearer {token}"}).status_code == 500
+
+            # A misconfiguration keeps failing closed until the recheck clears it.
+            verdict_clock.now += 21
+            assert client.get("/ext-authz", headers={"Authorization": f"Bearer {token}"}).status_code == 500
+            _finish_issuer_boundary_recheck(client)
+            response = client.get("/ext-authz", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
+async def test_concurrent_ext_authz_calls_share_one_idp_fetch(tmp_path):
+    """A burst of gateway requests while the IdP is slow waits on one boundary check, rather than
+    each request fetching discovery and JWKS itself."""
+    config = _auth_config_with_workload_exchange(tmp_path, oidc_jwks_uri=None)
+    token = await asyncio.to_thread(_workload_access_token, config)
+
+    async def slow_discovery(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(0.2)
+        return httpx.Response(200, json={"jwks_uri": "https://sso.example.com/jwks"})
+
+    with respx.mock(assert_all_called=False) as idp:
+        discovery = idp.get("https://sso.example.com/.well-known/openid-configuration").mock(side_effect=slow_discovery)
+        idp_jwks = idp.get("https://sso.example.com/jwks").mock(return_value=httpx.Response(200, json={"keys": []}))
+        with _test_client(config, workload_token_exchange_service=WorkloadTokenExchangeService()) as client:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=client.app), base_url="http://testserver"
+            ) as async_client:
+                responses = await asyncio.gather(
+                    *(async_client.get("/ext-authz", headers={"Authorization": f"Bearer {token}"}) for _ in range(5))
+                )
+
+    assert [response.status_code for response in responses] == [200] * 5
+    assert discovery.call_count == 1
+    assert idp_jwks.call_count == 1
+
+
+def test_issuer_boundary_starts_afresh_when_the_auth_config_changes(tmp_path):
+    """A verdict belongs to the config it was checked against; a new config on the same app must
+    not inherit it."""
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    config_a = _auth_config_with_workload_exchange(tmp_path / "a")
+    config_b = _auth_config_with_workload_exchange(tmp_path / "b")
+    service = WorkloadTokenExchangeService()
+    jwks_with_key_a = {"keys": [{**service.public_jwk(config_a), "kid": "idp-key"}]}
+    token_b = _workload_access_token(config_b)
+
+    with respx.mock(assert_all_called=False) as idp:
+        idp.get("https://sso.example.com/jwks").mock(return_value=httpx.Response(200, json=jwks_with_key_a))
+        with _test_client(config_a, workload_token_exchange_service=service) as client:
+            assert client.get("/authenticate", headers={"Authorization": "Bearer token"}).status_code == 500
+
+            with patch("nhx.core.auth.api.v2.authenticate.get_auth_config", return_value=config_b):
+                response = client.get("/ext-authz", headers={"Authorization": f"Bearer {token_b}"})
+
+    assert response.status_code == 200, response.text
+
+
+def test_ext_authz_answers_from_the_expired_verdict_while_a_slow_recheck_runs(tmp_path, verdict_clock):
+    """Rechecking an expired verdict must not hold up requests: they answer from the current
+    verdict while one background task waits on the IdP."""
+    config = _auth_config_with_workload_exchange(tmp_path)
+    token = _workload_access_token(config)
+    idp_answers = asyncio.Event()
+
+    async def slow_jwks(request: httpx.Request) -> httpx.Response:
+        # Bounded so a recheck that blocks requests fails this test instead of hanging it.
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(idp_answers.wait(), timeout=5)
+        return httpx.Response(200, json={"keys": []})
+
+    with respx.mock(assert_all_called=False) as idp:
+        idp_jwks = idp.get("https://sso.example.com/jwks").mock(return_value=httpx.Response(200, json={"keys": []}))
+        with _test_client(config, workload_token_exchange_service=WorkloadTokenExchangeService()) as client:
+            assert client.get("/ext-authz", headers={"Authorization": f"Bearer {token}"}).status_code == 200
+
+            idp_jwks.mock(side_effect=slow_jwks)
+            verdict_clock.now += 3601
+            for _ in range(3):
+                response = client.get("/ext-authz", headers={"Authorization": f"Bearer {token}"})
+                assert response.status_code == 200, response.text
+
+            app, portal = client.app, client.portal
+            assert isinstance(app, FastAPI) and portal is not None
+            recheck = app.state.issuer_boundary._recheck_task
+            assert recheck is not None and not recheck.done()
+            portal.call(idp_answers.set)
+            _finish_issuer_boundary_recheck(client)
+
+    assert idp_jwks.call_count == 2
+
+
+def test_issuer_boundary_raises_a_new_error_for_each_failed_request(tmp_path, monkeypatch):
+    """Re-raising one stored exception would grow its traceback, and keep every failed request's
+    frames alive, for as long as the misconfigured verdict is reused."""
+    boundary = authenticate_module._IssuerBoundary(_auth_config_with_workload_exchange(tmp_path))
+
+    async def overlapping_issuers(*args: object) -> bool:
+        raise TokenIssuerBoundaryMisconfigurationError("OIDC issuer must not match NeMo workload token issuer")
+
+    monkeypatch.setattr(authenticate_module, "_validate_token_issuer_boundary", overlapping_issuers)
+
+    async def failed_checks() -> list[TokenIssuerBoundaryMisconfigurationError]:
+        errors = []
+        for _ in range(3):
+            with pytest.raises(TokenIssuerBoundaryMisconfigurationError) as raised:
+                await boundary.check(WorkloadTokenExchangeService())
+            errors.append(raised.value)
+        return errors
+
+    errors = asyncio.run(failed_checks())
+
+    assert len({id(error) for error in errors}) == 3
+    assert len({len(traceback.extract_tb(error.__traceback__)) for error in errors}) == 1
+
+
+def test_issuer_boundary_is_built_on_the_event_loop_thread(tmp_path, monkeypatch):
+    """A sync dependency runs in a worker thread, where concurrent first requests could each build
+    their own state; the dependency must run on the event loop."""
+    config = _auth_config_with_workload_exchange(tmp_path)
+    token = _workload_access_token(config)
+    built_on: list[threading.Thread] = []
+    build = authenticate_module._IssuerBoundary.__init__
+
+    def recording_build(self: authenticate_module._IssuerBoundary, config: AuthConfig) -> None:
+        built_on.append(threading.current_thread())
+        build(self, config)
+
+    monkeypatch.setattr(authenticate_module._IssuerBoundary, "__init__", recording_build)
+    with respx.mock(assert_all_called=False) as idp:
+        idp.get("https://sso.example.com/jwks").mock(return_value=httpx.Response(200, json={"keys": []}))
+        with _test_client(config, workload_token_exchange_service=WorkloadTokenExchangeService()) as client:
+            assert client.get("/ext-authz", headers={"Authorization": f"Bearer {token}"}).status_code == 200
+            portal = client.portal
+            assert portal is not None
+            event_loop_thread = portal.call(threading.current_thread)
+
+    assert built_on == [event_loop_thread]
