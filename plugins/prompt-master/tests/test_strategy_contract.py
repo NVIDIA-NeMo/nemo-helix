@@ -17,7 +17,7 @@ import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from nemo_agent_optimization_plugin.discovery import STRATEGY_ATTR, declared_strategy
@@ -110,7 +110,9 @@ async def test_the_router_requires_an_agent_for_this_strategy(installed_strategy
     assert "agent" in str(exc.value)
 
 
-async def test_the_router_dispatches_compile_to_this_job(installed_strategy: None) -> None:
+async def test_the_router_dispatches_compile_to_this_job(
+    installed_strategy: None, source_agent: dict[str, Any]
+) -> None:
     spec = RunStrategySpec.model_validate(
         {
             "strategy": "prompt-master",
@@ -125,9 +127,16 @@ async def test_the_router_dispatches_compile_to_this_job(installed_strategy: Non
 
     jobs_client = MagicMock()
     jobs_client.get_execution_profiles = _get_execution_profiles
-    with patch.object(optimize_module, "client_from_platform", return_value=jobs_client):
+    agents_client = MagicMock()
+    agents_client.get_agent = AsyncMock(return_value=MagicMock())
+    agents_client.get_agent.return_value.data.return_value = SimpleNamespace(config=source_agent)
+    with (
+        patch.object(optimize_module, "client_from_platform", return_value=jobs_client),
+        patch("nemo_helix_plugin.agents.validation.client_from_platform", return_value=agents_client),
+    ):
         compiled = await _compile_through_router(spec, workspace="staging")
 
+    agents_client.get_agent.assert_awaited_once_with(workspace="staging", name="calculator-agent")
     (step,) = compiled.steps
     assert step.name == "prompt-master"
     assert step.executor.command == ["python", "-m", "prompt_master_plugin.tasks.optimize"]
