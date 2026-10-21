@@ -36,6 +36,7 @@ import { Loading } from '@studio/components/Layouts/Loading';
 import { LINK_DOCS_FINE_TUNE_DATASET_FORMAT_REQUIREMENTS } from '@studio/constants/links';
 import { useCustomizationDatasetValidation } from '@studio/hooks/useCustomizationDatasetValidation';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
+import { useAuthProfile } from '@studio/providers/auth/useAuthProfile';
 import { usesChatTemplate } from '@studio/util/customizerSchema';
 import { inferJsonContentType, isJsonFile } from '@studio/util/files';
 import {
@@ -43,6 +44,7 @@ import {
   resolveTrainingType,
   type CustomizationFormFields,
 } from '@studio/util/forms/customization';
+import { ownedFirst } from '@studio/util/ownedFirst';
 import { Database, FolderOpen } from 'lucide-react';
 import { FC, useEffect, useMemo } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
@@ -91,10 +93,15 @@ export const CustomizationFilesetSelect: FC<CustomizationFilesetSelectProps> = (
     error,
   } = useListFilesets(workspace, {
     page_size: 100,
-    sort: 'created_at',
+    sort: '-created_at',
     filter: { purpose: 'dataset' },
   });
-  const filesets = useMemo(() => filesetsResponse?.data ?? [], [filesetsResponse?.data]);
+  // Newest first, with the signed-in user's own datasets ahead of the rest.
+  const ownerId = useAuthProfile()?.id;
+  const filesets = useMemo(
+    () => ownedFirst(filesetsResponse?.data ?? [], ownerId),
+    [filesetsResponse?.data, ownerId]
+  );
   const dropdownDisabled = isPending || isFetching || !!error;
 
   const selectedParts = selectedRef ? getPartsFromReference(selectedRef) : undefined;

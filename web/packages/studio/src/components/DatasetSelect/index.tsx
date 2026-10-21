@@ -12,6 +12,8 @@ import {
 import { ValueWithLabel } from '@studio/components/ValueWithLabel';
 import { DEFAULT_LARGE_PAGE_SIZE } from '@studio/constants/constants';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
+import { useAuthProfile } from '@studio/providers/auth/useAuthProfile';
+import { ownedFirst } from '@studio/util/ownedFirst';
 import { FC, useMemo } from 'react';
 
 interface Props {
@@ -39,11 +41,12 @@ export const DatasetSelect: FC<Props> = ({ onChange, selectedDatasetId, errorTex
      * server-side search and pagination.
      */
     page_size: DEFAULT_LARGE_PAGE_SIZE,
-    sort: 'created_at',
+    sort: '-created_at',
     filter: { purpose: 'dataset' },
   });
 
   const { data: datasets } = datasetsResponse || {};
+  const ownerId = useAuthProfile()?.id;
 
   const selectedDatasetOption = useMemo(() => {
     const selectedDataset = datasets?.find(
@@ -59,12 +62,9 @@ export const DatasetSelect: FC<Props> = ({ onChange, selectedDatasetId, errorTex
       return [LOADING_DATASETS_ERROR_OPTION];
     }
 
-    return (
-      datasets
-        ?.sort((datasetA, datasetB) => (datasetA?.name || '').localeCompare(datasetB.name || ''))
-        .map(datasetToOption) || []
-    );
-  }, [datasets, isLoading, isError]);
+    // Newest first, with the signed-in user's own datasets ahead of the rest.
+    return ownedFirst(datasets ?? [], ownerId).map(datasetToOption);
+  }, [datasets, ownerId, isLoading, isError]);
 
   return (
     <Flex direction="col" gap="density-xs">
