@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MessagePrimitive } from '@assistant-ui/react';
-import { ReasoningPart } from '@nemo/common/src/components/AssistantChat/ReasoningPart';
+import { CollapsedThinkingToolCall } from '@nemo/common/src/components/AssistantChat/toolCall/CollapsedThinkingToolCall';
 import type { MessageRenderProps } from '@nemo/common/src/components/AssistantChat/types';
 import { MessageContent } from '@nemo/common/src/components/Chat/MessageContent';
 import { Banner } from '@nvidia/foundations-react-core';
@@ -47,7 +47,12 @@ export const AssistantChatMessageContent = ({
             content
           );
         },
-        Reasoning: ReasoningPart,
+        Reasoning: ({ status, text }) => (
+          <CollapsedThinkingToolCall
+            label={status.type === 'running' ? 'Thinking' : 'Thought process'}
+            text={text}
+          />
+        ),
         tools: { Fallback: toolCallPartComponent },
       }}
     />

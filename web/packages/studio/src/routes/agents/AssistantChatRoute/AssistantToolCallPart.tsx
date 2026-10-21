@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ToolCallMessagePartComponent } from '@assistant-ui/react';
-import { ReasoningContent } from '@nemo/common/src/components/AssistantChat/ReasoningPart';
 import { CollapsedThinkingToolCall } from '@nemo/common/src/components/AssistantChat/toolCall/CollapsedThinkingToolCall';
 import { TOOL_LABELS } from '@nemo/common/src/components/AssistantChat/toolCall/constants';
 import { FileChangeToolCallCard } from '@nemo/common/src/components/AssistantChat/toolCall/FileChangeToolCallCard';
@@ -114,7 +113,8 @@ const CollapsedStudioDetailsPartContent = ({
   readonly part: CollapsedStudioDetailsPart;
 }) => {
   if (part.type === 'text') return <CollapsedStudioDetailsText text={part.text} />;
-  if (part.type === 'reasoning') return <ReasoningContent text={part.text} />;
+  if (part.type === 'reasoning')
+    return <CollapsedThinkingToolCall label="Thought process" text={part.text} />;
 
   return (
     <AssistantToolCallPartContent

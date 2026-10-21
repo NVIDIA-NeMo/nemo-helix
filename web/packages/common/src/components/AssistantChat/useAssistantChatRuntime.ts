@@ -17,7 +17,7 @@ import {
 import {
   appendCompletionDeltaParts,
   getWorkDetailsMessageParts,
-} from '@nemo/common/src/components/AssistantChat/completionParts';
+} from '@nemo/common/src/components/AssistantChat/completionSections';
 import {
   getCompletionImages,
   getCompletionText,

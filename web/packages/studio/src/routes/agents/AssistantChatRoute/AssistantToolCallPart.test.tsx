@@ -260,7 +260,7 @@ describe('AssistantToolCallPart', () => {
     );
 
     expect(screen.getByTestId('assistant-collapsed-thinking')).toHaveTextContent(
-      'ThinkingComparing options.'
+      'Thought processComparing options.'
     );
   });
 

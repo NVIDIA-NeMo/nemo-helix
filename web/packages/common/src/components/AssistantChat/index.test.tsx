@@ -273,7 +273,7 @@ describe('AssistantChat', () => {
 
     expect(await screen.findByText('Done.')).toBeInTheDocument();
     expect(screen.getByTestId('assistant-collapsed-thinking')).toHaveTextContent(
-      'ThinkingWeighing options.'
+      'Thought processWeighing options.'
     );
   });
 

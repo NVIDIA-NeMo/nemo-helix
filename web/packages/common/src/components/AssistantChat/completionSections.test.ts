@@ -5,7 +5,7 @@ import type { ThreadAssistantMessagePart } from '@assistant-ui/react';
 import {
   appendCompletionDeltaParts,
   getWorkDetailsMessageParts,
-} from '@nemo/common/src/components/AssistantChat/completionParts';
+} from '@nemo/common/src/components/AssistantChat/completionSections';
 import {
   ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME,
   ASSISTANT_WORK_DETAILS_LABEL,
