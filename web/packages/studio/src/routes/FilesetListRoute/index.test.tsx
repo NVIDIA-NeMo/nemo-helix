@@ -15,6 +15,11 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, MemoryRouter, RouterProvider } from 'react-router';
 
+const mockProfile = vi.hoisted(() => ({ current: undefined as { id: string } | undefined }));
+vi.mock('@studio/providers/auth/useAuthProfile', () => ({
+  useAuthProfile: () => mockProfile.current,
+}));
+
 // Mock child components to isolate testing
 vi.mock('@studio/routes/FilesetListRoute/ActionMenu', () => ({
   ActionMenu: vi.fn(({ dataset, onNavigateToDetails, onDatasetUpdated, onDatasetDeleted }) => (
@@ -154,6 +159,7 @@ describe('FilesetListRoute', () => {
   };
 
   beforeEach(() => {
+    mockProfile.current = undefined;
     user = userEvent.setup();
     mockUseParams({
       [ROUTE_PARAMS.workspace]: workspace1.workspace,
@@ -327,6 +333,31 @@ describe('FilesetListRoute', () => {
       // checking Generic opts those filesets in
       await user.click(screen.getByRole('checkbox', { name: 'Generic' }));
       await screen.findByText('d-generic', undefined, { timeout: LG_SELECTOR_TIMEOUT });
+    });
+
+    it('lists the signed-in user’s filesets before everyone else’s', async () => {
+      mockProfile.current = { id: 'me@example.com' };
+      const rows = [
+        make('a-other', 'dataset', { created_by: 'someone@example.com' }),
+        make('z-mine', 'model', { created_by: 'me@example.com' }),
+      ];
+      server.use(
+        http.get(
+          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets`,
+          ({ request }) => {
+            // owned query carries a created_by filter; the "everyone else" query a JSON filter
+            const owned = new URL(request.url).searchParams.get('filter[created_by]');
+            const data = owned ? rows.filter((r) => r.created_by === owned) : rows.slice(0, 1);
+            return HttpResponse.json(pageEnvelope(data));
+          }
+        )
+      );
+
+      renderRoute();
+      await screen.findByText('z-mine', undefined, { timeout: LG_SELECTOR_TIMEOUT });
+
+      const names = screen.getAllByText(/^(a-other|z-mine)$/).map((el) => el.textContent);
+      expect(names).toEqual(['z-mine', 'a-other']);
     });
   });
 });

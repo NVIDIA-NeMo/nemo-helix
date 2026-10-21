@@ -8,6 +8,8 @@ import { useAuth } from 'react-oidc-context';
 import { useWebSession } from './useWebSession';
 
 export type AuthProfile = {
+  /** Principal id the platform records as `created_by` on resources this user creates. */
+  id?: string;
   name: string;
   email: string;
   workspace: string;
@@ -26,6 +28,7 @@ const getWorkspace = (user: User) => {
 
 export const getUserAuthProfile = (user: User): AuthProfile => ({
   name: user.profile.name ?? '',
+  id: user.profile.sub,
   email: user.profile.email ?? `${user.profile.unique_name}`,
   workspace: getWorkspace(user),
   state: user.state as AuthProfile['state'],
@@ -41,6 +44,7 @@ export const useAuthProfile = (): AuthProfile | undefined => {
       if (!session) return undefined;
       const name = session.email || session.id;
       return {
+        id: session.id,
         name,
         email: session.email || session.id,
         workspace: name.split('@')[0],
