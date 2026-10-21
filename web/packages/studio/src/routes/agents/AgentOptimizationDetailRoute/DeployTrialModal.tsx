@@ -242,7 +242,7 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
                     value={param.value}
                     language="markdown"
                     kind="block"
-                    className="max-h-48 overflow-auto"
+                    attributes={{ CodeSnippetCode: { className: 'max-h-48 overflow-auto' } }}
                   />
                 </Stack>
               ) : (

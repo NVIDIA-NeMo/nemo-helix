@@ -172,8 +172,11 @@ const parsePromptTrials = (
     const number = toNumber(row.global_trial_number as number);
     if (number === null) return [];
     const prompts = Object.entries(row)
-      .filter(([key, value]) => key.startsWith(PROMPT_COLUMN) && typeof value === 'string')
-      .map(([key, value]) => ({ name: key.slice(PROMPT_COLUMN.length), value: String(value) }));
+      .filter(
+        (entry): entry is [string, string] =>
+          entry[0].startsWith(PROMPT_COLUMN) && typeof entry[1] === 'string'
+      )
+      .map(([key, value]) => ({ name: key.slice(PROMPT_COLUMN.length), value }));
     const status = String(row.status ?? '');
     return [
       {
@@ -296,18 +299,18 @@ export const fetchStudyResults = async (
   const bestTrial = promptPhase?.bestTrial ?? summary?.bestTrial ?? null;
   const allTrials = [...trials, ...promptTrials].map((trial) => ({
     ...trial,
-    // The study keeps one winner, so with a single objective it is the whole frontier.
-    paretoOptimal: trial.number === bestTrial,
+    paretoOptimal: trial.paretoOptimal || trial.number === bestTrial,
   }));
 
   return {
     summary: {
       nTrials: allTrials.length,
       bestTrial,
-      metricNames: summary?.metricNames ?? metrics,
-      bestValues: promptPhase
-        ? metrics.map((name) => toNumber(promptPhase.bestMetrics[name] as number))
-        : (summary?.bestValues ?? []),
+      metricNames: metrics,
+      bestValues:
+        promptPhase?.bestTrial != null
+          ? metrics.map((name) => toNumber(promptPhase.bestMetrics[name] as number))
+          : (summary?.bestValues ?? []),
     },
     trials: allTrials,
     metricNames: metrics,

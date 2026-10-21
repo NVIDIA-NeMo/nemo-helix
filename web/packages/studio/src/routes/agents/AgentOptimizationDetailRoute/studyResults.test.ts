@@ -233,7 +233,7 @@ describe('fetchStudyResults', () => {
     });
     expect(results?.trials.map((trial) => trial.number)).toEqual([6, 3, 4, 7, 8, 9]);
     expect(results?.trials.filter((trial) => trial.paretoOptimal).map((t) => t.number)).toEqual([
-      8,
+      6, 3, 8,
     ]);
     // Each candidate ran on the sweep's best params, with its own prompt replacing the swept one.
     expect(results?.trials.find((trial) => trial.number === 8)).toEqual({
