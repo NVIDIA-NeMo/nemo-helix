@@ -18,6 +18,9 @@ import { http, HttpResponse } from 'msw';
 import type { ComponentProps } from 'react';
 import { MemoryRouter } from 'react-router';
 
+// Signed-out by default; the owned-first ordering is covered by useOwnedFirstFilesets.test.tsx
+vi.mock('@studio/providers/auth/useAuthProfile', () => ({ useAuthProfile: () => undefined }));
+
 vi.mock('use-debounce', () => ({
   useDebounce: (value: unknown) => [value, () => {}],
 }));
