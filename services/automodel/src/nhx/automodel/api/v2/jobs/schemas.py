@@ -653,7 +653,7 @@ class _CustomizationJobBase(BaseModel):
         description="Deployment configuration for auto-deploying the model after training. "
         "Pass a string to reference an existing ModelDeploymentConfig by name "
         "(e.g., 'my-config' or 'workspace/my-config'). "
-        "An object provides inline NIM deployment parameters. "
+        "An object provides inline deployment parameters, deployed with vLLM unless engine is 'nim'. "
         "Omit to skip deployment.",
     )
     custom_fields: Dict[str, Any] = Field(default_factory=dict, description="Custom user-defined fields.")

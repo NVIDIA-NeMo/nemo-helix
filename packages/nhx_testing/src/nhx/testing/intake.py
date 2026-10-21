@@ -64,8 +64,10 @@ class InMemoryIntakeService:
         #: Evaluation patches, as ``{"name": ..., **patch_body}``.
         self.evaluation_patches: list[dict[str, Any]] = []
 
-        #: Root span id prefix for trace lookups; each session resolves to ``"<prefix>:<session id>"``.
-        #: ``None`` makes every trace lookup come back empty.
+        #: ``(workspace, session id)`` of every ATIF trajectory stored; trace lookups find only these.
+        self.ingested_sessions: set[tuple[str, str]] = set()
+        #: Root span id prefix for trace lookups; each ingested session resolves to
+        #: ``"<prefix>:<session id>"``. ``None`` makes every trace lookup come back empty.
         self.root_span_prefix: str | None = "span"
         #: When set, ATIF ingest fails instead of recording the request: an ``int`` answers with that
         #: HTTP status, an exception is raised from the transport (e.g. ``httpx.ConnectError``).
@@ -84,7 +86,7 @@ class InMemoryIntakeService:
         self.evaluation_failure: Failure | None = None
         #: When set, evaluation patches fail this way (see :attr:`atif_failure`).
         self.patch_failure: Failure | None = None
-        #: Metadata returned on the evaluation.
+        #: Metadata returned on the evaluation; a successful patch carrying ``metadata`` replaces it.
         self.evaluation_metadata: dict[str, str] = {}
 
     def client(self, *, workspace: str | None = "default") -> AsyncIntakeClient:
@@ -118,6 +120,7 @@ class InMemoryIntakeService:
         if self.atif_rejects is not None and self.atif_rejects(body):
             return httpx.Response(422, json={"detail": "ATIF trajectory rejected"})
         self.atif_requests.append(body)
+        self.ingested_sessions.add((workspace, body["session_id"]))
         return httpx.Response(204)
 
     def _evaluator_result(self, request: httpx.Request, workspace: str) -> httpx.Response:
@@ -139,7 +142,7 @@ class InMemoryIntakeService:
         session_id = json.loads(request.url.params["filter"])["session_id"]
         self.trace_lookups.append(session_id)
         traces = []
-        if self.root_span_prefix is not None:
+        if self.root_span_prefix is not None and (workspace, session_id) in self.ingested_sessions:
             trace = Trace.model_validate(
                 {
                     "id": f"trace-{session_id}",
@@ -173,6 +176,9 @@ class InMemoryIntakeService:
             return httpx.Response(405, json={"detail": f"{request.method} is not supported here"})
         if not self.evaluation_exists:
             return httpx.Response(404, json={"detail": f"evaluation {workspace}/{name} not found"})
+        if request.method == "PATCH" and "metadata" in self.evaluation_patches[-1]:
+            # A patch replaces the metadata dict wholesale, and an explicit null clears it, as Intake does.
+            self.evaluation_metadata = dict(self.evaluation_patches[-1]["metadata"] or {})
         evaluation = EvaluationResponse(
             id=f"evaluation-{name}",
             name=name,

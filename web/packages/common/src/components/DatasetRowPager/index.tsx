@@ -40,7 +40,7 @@ export const DatasetRowPager: FC<DatasetRowPagerProps> = ({
         <ChevronLeft size={16} />
       </Button>
       <Text kind="body/regular/sm" className="text-secondary">
-        Row {rowIndex + 1} of {rowCount}
+        Preview Row {rowIndex + 1} of {rowCount}
       </Text>
       <Button
         kind="secondary"

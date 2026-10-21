@@ -128,6 +128,8 @@ def test_component_labels_match_resource_selectors(api_label: str, controller_la
         "api.serviceMonitor.enabled=true,core.serviceMonitor.enabled=true,"
         "networkPolicies.enabled=true,api.podDisruptionBudget.enabled=true,"
         "api.autoscaling.enabled=true,api.resources.requests.cpu=100m",
+        "--api-versions",
+        "admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy",
     ]
     if override:
         args += ["--set-string", f"api.componentLabel={api_label},core.controller.componentLabel={controller_label}"]

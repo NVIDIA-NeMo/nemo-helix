@@ -14,6 +14,8 @@ This container image provides shared CPU task support for NeMo Helix customizati
 
 [Documentation](https://docs.nvidia.com/nemo-helix)
 
+[NeMo Helix on GitHub](https://github.com/NVIDIA-NeMo/nemo-helix)
+
 ### License
 
 This container is licensed under the [Apache License 2.0](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/LICENSE).

@@ -22,6 +22,12 @@ The platform automatically creates two built-in workspaces during initialization
 - **`default`** — General-purpose workspace for experimentation, editable by all authenticated users.
 - **`system`** — Reserved for platform-provided resources (for example, evaluation targets, customization templates). Read-only for regular users; only platform administrators can modify.
 
+## Workspace creation on login
+
+When you sign in to Studio through the direct OIDC flow, it checks for a workspace named after your email prefix—for example, `alice` from `alice@example.com`. If the workspace is missing or inaccessible, Studio attempts to create it. Creation requires workspace creation permission, and the creator becomes the workspace Admin. If creation is denied, Studio shows an error but login still completes.
+
+Studio repeats this check on subsequent direct OIDC logins, so a deleted workspace may be recreated.
+
 ## Create a Workspace
 
 To create a workspace, provide a `name` and optionally a `description`. The `name` must be unique within your deployment.
@@ -181,9 +187,17 @@ nemo workspaces update ml-team \
 </Tabs>
 ## Delete a Workspace
 
-Deleting a workspace removes the workspace and all of its resources (jobs, deployments, filesets, role bindings, and other entities). The API returns immediately after revoking access, and an asynchronous cleanup controller handles deletion of the remaining resources in the background.
+Deleting a workspace revokes access immediately and asks an asynchronous cleanup controller to delete the remaining resources (jobs, deployments, filesets, and other entities). Role bindings are removed as part of that first step. The API returns `Workspace marked for deletion`, and the workspace disappears from get and list responses. Its name stays reserved until cleanup finishes.
 
-During cleanup, the workspace is no longer visible to users. If cleanup fails, the workspace enters a `FAILED` state that requires administrator attention.
+If cleanup cannot delete a resource, the attempt is recorded and retried about every 60 seconds. A fileset that another workspace's model or adapter still references is the common case: the files service returns 409, and the workspace stays in the `failed` stage with that error. Creating the same name then returns `409` saying the workspace `is still being deleted`, including the stored reason, instead of `already exists`.
+
+The original creator, a platform admin, or a service principal can read that status:
+
+```bash
+nemo workspaces deletion-status team-a
+```
+
+To free the name, relink or delete the referencing model or adapter, then wait for the next cleanup retry.
 
 <Tabs>
 

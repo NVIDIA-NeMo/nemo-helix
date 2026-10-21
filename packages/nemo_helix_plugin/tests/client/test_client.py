@@ -68,6 +68,11 @@ def GET_ITEMS_WITH_PARAMS(*, query_params: dict | None = None) -> ItemResponse:
     raise NotImplementedError
 
 
+@get("/apis/test/v2/items/{name}/-/{path:path}")
+def GET_ITEM_FILE(*, name: str, path: str) -> ItemResponse:
+    raise NotImplementedError
+
+
 # ---------------------------------------------------------------------------
 # Sync client
 # ---------------------------------------------------------------------------
@@ -131,6 +136,47 @@ def test_send_url_encodes_path_params() -> None:
     client.send(GET_ITEM(name="name with ?#/"))
 
     assert mock_http.request.call_args.args[1] == f"{BASE}/apis/test/v2/items/name%20with%20%3F%23%2F"
+
+
+def test_send_keeps_slashes_literal_in_path_placeholders() -> None:
+    """``{path:path}`` spans segments: ``/`` stays literal, everything else is encoded."""
+    mock_http = MagicMock(spec=httpx.Client)
+    mock_http.request.return_value = httpx.Response(
+        200,
+        request=httpx.Request("GET", f"{BASE}/apis/test/v2/items/a%2Fb/-/dir/sub%20dir/file%3F.txt"),
+        json={"id": 1, "name": "file"},
+    )
+
+    client = NemoClient(base_url=BASE, http_client=mock_http)
+    client.send(GET_ITEM_FILE(name="a/b", path="dir/sub dir/file?.txt"))
+
+    assert mock_http.request.call_args.args[1] == f"{BASE}/apis/test/v2/items/a%2Fb/-/dir/sub%20dir/file%3F.txt"
+
+
+@pytest.mark.parametrize(("path", "sent"), [("v1/models/", "v1/models/"), ("/x", "x")])
+def test_send_normalizes_leading_and_trailing_slash_in_path_placeholders(path: str, sent: str) -> None:
+    """One trailing ``/`` is kept (a distinct target); a leading ``/`` is dropped, not rejected."""
+    mock_http = MagicMock(spec=httpx.Client)
+    mock_http.request.return_value = httpx.Response(
+        200, request=httpx.Request("GET", BASE), json={"id": 1, "name": "x"}
+    )
+
+    NemoClient(base_url=BASE, http_client=mock_http).send(GET_ITEM_FILE(name="a", path=path))
+
+    assert mock_http.request.call_args.args[1] == f"{BASE}/apis/test/v2/items/a/-/{sent}"
+
+
+@pytest.mark.parametrize("path", ["../x", "a/../b", "./x", "a//b", "//x", "x//", "/"])
+def test_send_rejects_dot_and_empty_segments_in_path_placeholders(path: str) -> None:
+    """With literal ``/``, ``path="../../victim"`` would hit a sibling route, so reject before sending."""
+    client = NemoClient(
+        base_url=BASE, http_client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200)))
+    )
+
+    with pytest.raises(ValueError, match="must not contain empty"):
+        client.send(GET_ITEM_FILE(name="a", path=path))
+    with pytest.raises(TypeError, match="must be {name} or {name:path}"):
+        get("/apis/test/v2/items/{name:int}")(lambda *, name: None)
 
 
 def test_send_url_encodes_default_workspace() -> None:

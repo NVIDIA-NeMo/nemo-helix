@@ -203,7 +203,7 @@ def test_update_all_tasks_ignores_warning_events_for_a_running_pod(
     has_errors = update_all_tasks(MagicMock(), MagicMock(), "ns", test_step_active)
 
     assert has_errors is False
-    body = jobs_client.update_job_step_task.call_args.kwargs["body"]
+    body = jobs_client.update_attempt_step_task.call_args.kwargs["body"]
     assert body.status == HelixJobStatus.ACTIVE
     assert body.error_details == {}
 
@@ -226,7 +226,7 @@ def test_update_all_tasks_keeps_a_retrying_pull_pending(
     has_errors = update_all_tasks(MagicMock(), MagicMock(), "ns", test_step_active)
 
     assert has_errors is False
-    body = jobs_client.update_job_step_task.call_args.kwargs["body"]
+    body = jobs_client.update_attempt_step_task.call_args.kwargs["body"]
     assert body.status == HelixJobStatus.PENDING
     assert body.error_details == {}
 
@@ -251,7 +251,7 @@ def test_update_all_tasks_reports_error_when_a_sibling_container_failed(
     has_errors = update_all_tasks(MagicMock(), MagicMock(), "ns", test_step_active)
 
     assert has_errors is True
-    body = jobs_client.update_job_step_task.call_args.kwargs["body"]
+    body = jobs_client.update_attempt_step_task.call_args.kwargs["body"]
     assert body.status == HelixJobStatus.ERROR
     assert body.error_details["failed"] == "sidecar exited 1"
 
@@ -273,7 +273,7 @@ def test_update_all_tasks_reports_error_when_an_active_sibling_container_failed(
     has_errors = update_all_tasks(MagicMock(), MagicMock(), "ns", test_step_active)
 
     assert has_errors is True
-    body = jobs_client.update_job_step_task.call_args.kwargs["body"]
+    body = jobs_client.update_attempt_step_task.call_args.kwargs["body"]
     assert body.status == HelixJobStatus.ERROR
     assert body.error_details["failed"] == "sidecar exited 1"
 
@@ -295,9 +295,35 @@ def test_update_all_tasks_reports_error_for_a_pending_pod_that_is_not_retrying(
     has_errors = update_all_tasks(MagicMock(), MagicMock(), "ns", test_step_active)
 
     assert has_errors is True
-    body = jobs_client.update_job_step_task.call_args.kwargs["body"]
+    body = jobs_client.update_attempt_step_task.call_args.kwargs["body"]
     assert body.status == HelixJobStatus.ERROR
     assert body.error_details["inspect_failed"] == "no such image"
+
+
+@patch.object(JobsClient, "from_client")
+@patch("nhx.core.jobs.controllers.backends.kubernetes.common.list_pod_status")
+def test_update_all_tasks_keeps_pod_details_under_their_own_key(
+    mock_list_pod_status: MagicMock,
+    mock_jobs_from_client: MagicMock,
+    test_step_active: HelixJobStepWithContext,
+) -> None:
+    """Tasks report their own ``phase``, ``name`` and so on; a pod key at the top level would overwrite them."""
+    mock_list_pod_status.return_value = [_pod(phase="Running", active={"nemo-job-task"})]
+    core_v1 = MagicMock()
+    core_v1.read_namespaced_pod.return_value = client.V1Pod(
+        metadata=client.V1ObjectMeta(name="pod-1", namespace="ns"),
+        status=client.V1PodStatus(phase="Running"),
+    )
+    core_v1.list_namespaced_event.return_value.items = []
+    jobs_client = MagicMock()
+    mock_jobs_from_client.return_value = jobs_client
+
+    update_all_tasks(MagicMock(), core_v1, "ns", test_step_active)
+
+    body = jobs_client.update_attempt_step_task.call_args.kwargs["body"]
+    assert body.status_details.keys() == {"pod"}
+    assert body.status_details["pod"]["name"] == "pod-1"
+    assert body.status_details["pod"]["phase"] == "Running"
 
 
 # ---------------------------------------------------------------------------

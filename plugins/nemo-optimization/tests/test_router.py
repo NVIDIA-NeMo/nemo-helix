@@ -233,6 +233,31 @@ def test_dispatch_real_prompt_config_failure_skips_numeric_preflight(ctx: JobCon
 
 
 @pytest.mark.integration
+def test_dispatch_missing_prompt_purpose_attributes_preflight_failure_to_prompt(ctx: JobContext) -> None:
+    """NVBug 6922850: preserve the prompt phase through numeric preflight wrappers."""
+    payload = _real_backend_payload()
+    del payload["optimizer"]["search_space"]["system_prompt"]["purpose"]
+
+    result = OptimizeRouter.dispatch_payload(payload, ctx=ctx)
+
+    assert result["status"] == "failed"
+    assert result["trial_number_range"] == {"start": 0, "end_exclusive": 0, "count": 0}
+
+    out_dir = ctx.storage.persistent / "results" / "optimizer_results"
+    assert not (out_dir / "final_optimized_config.yml").exists()
+    assert not (out_dir / "intermediate_numeric_config.yml").exists()
+    phase_results = json.loads((out_dir / "phase_results.json").read_text(encoding="utf-8"))
+    assert [phase["trial_number_range"]["count"] for phase in phase_results] == [0, 0]
+    assert any(
+        phase["summary"].get("error") == "Prompt search-space entry 'system_prompt' requires non-empty 'purpose'."
+        for phase in phase_results
+    )
+    assert [phase["status"] for phase in phase_results] == ["skipped", "failed"]
+    assert [phase["status"] for phase in result["phases"]] == ["skipped", "failed"]
+    assert (out_dir / "prompt_phase_failure.json").is_file()
+
+
+@pytest.mark.integration
 def test_dispatch_real_failed_numeric_reports_executed_trial_range(
     ctx: JobContext,
     monkeypatch: pytest.MonkeyPatch,
@@ -288,6 +313,69 @@ def test_dispatch_orchestrates_numeric_then_prompt_with_payload_handoff(
     assert (out_dir / "final_optimized_payload.json").is_file()
     summary = json.loads((out_dir / "optimization_summary.json").read_text(encoding="utf-8"))
     assert [phase["phase"] for phase in summary["phases"]] == ["numeric", "prompt"]
+
+
+def test_preflight_uses_config_error_phase_for_failure_attribution(
+    ctx: JobContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class NumericPreflightSeesPromptError:
+        name = "numeric-test"
+        capabilities = OptimizationBackendCapabilities(phases=(OptimizationPhase.NUMERIC,))
+
+        def validate_phase(self, request: OptimizationPhaseRequest, *, ctx: JobContext, sdk=None) -> None:  # noqa: ANN001
+            del request, ctx, sdk
+            raise OptimizerConfigError("prompt population_size is invalid", phase="prompt")
+
+        def run_phase(
+            self,
+            request: OptimizationPhaseRequest,
+            *,
+            ctx: JobContext,
+            sdk=None,  # noqa: ANN001
+        ) -> OptimizationPhaseResult:
+            del request, ctx, sdk
+            raise AssertionError("preflight failure should prevent phase execution")
+
+    class PromptBackend:
+        name = "prompt-test"
+        capabilities = OptimizationBackendCapabilities(phases=(OptimizationPhase.PROMPT,))
+
+        def validate_phase(self, request: OptimizationPhaseRequest, *, ctx: JobContext, sdk=None) -> None:  # noqa: ANN001
+            del request, ctx, sdk
+
+        def run_phase(
+            self,
+            request: OptimizationPhaseRequest,
+            *,
+            ctx: JobContext,
+            sdk=None,  # noqa: ANN001
+        ) -> OptimizationPhaseResult:
+            del request, ctx, sdk
+            raise AssertionError("preflight failure should prevent phase execution")
+
+    monkeypatch.setattr(
+        router_module,
+        "_phase_plan",
+        lambda payload: [
+            router_module._PhasePlan(OptimizationPhase.NUMERIC, "numeric-test", NumericPreflightSeesPromptError()),
+            router_module._PhasePlan(OptimizationPhase.PROMPT, "prompt-test", PromptBackend()),
+        ],
+    )
+
+    result = OptimizeRouter.dispatch_payload(_combined_payload(), ctx=ctx)
+
+    assert result["status"] == "failed"
+    assert result["trial_number_range"] == {"start": 0, "end_exclusive": 0, "count": 0}
+    assert [phase["phase"] for phase in result["phases"]] == ["numeric", "prompt"]
+    assert [phase["status"] for phase in result["phases"]] == ["skipped", "failed"]
+    assert [phase["trial_number_range"]["count"] for phase in result["phases"]] == [0, 0]
+    assert result["phases"][1]["backend"] == "prompt-test"
+    assert result["phases"][1]["summary"]["error"] == "prompt population_size is invalid"
+
+    out_dir = ctx.storage.persistent / "results" / "optimizer_results"
+    assert (out_dir / "prompt_phase_failure.json").is_file()
+    assert not (out_dir / "numeric_phase_failure.json").exists()
 
 
 def test_dispatch_stops_after_failed_prompt_but_keeps_numeric_artifacts(

@@ -210,6 +210,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Data Designer
+      summary: Update Job
+      operationId: update_job_apis_data_designer_v2_workspaces__workspace__jobs_create__name__patch
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateJobUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
     delete:
       tags:
       - Data Designer
@@ -235,6 +272,108 @@ paths:
           description: Job not Found
         '409':
           description: Job is not in a terminal state
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/data-designer/v2/workspaces/{workspace}/jobs/create/{name}/attempts:
+    get:
+      tags:
+      - Data Designer
+      summary: List Job Attempts
+      operationId: list_job_attempts_apis_data_designer_v2_workspaces__workspace__jobs_create__name__attempts_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 25
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          enum:
+          - seq
+          - -seq
+          type: string
+          default: -seq
+          title: Sort
+      - name: filter
+        in: query
+        required: false
+        schema:
+          title: Filter
+          type: string
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateJobAttemptsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/data-designer/v2/workspaces/{workspace}/jobs/create/{name}/attempts/{attempt}:
+    get:
+      tags:
+      - Data Designer
+      summary: Get Job Attempt
+      operationId: get_job_attempt_apis_data_designer_v2_workspaces__workspace__jobs_create__name__attempts__attempt__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateJobAttempt'
         '422':
           description: Validation Error
           content:
@@ -312,6 +451,24 @@ paths:
           type: integer
           maximum: 10000
           exclusiveMinimum: 0
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
+      - name: step_id
+        in: query
+        required: false
+        schema:
+          title: Step Id
+          type: string
+      - name: task_id
+        in: query
+        required: false
+        schema:
+          title: Task Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -344,6 +501,12 @@ paths:
         schema:
           type: string
           title: Name
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -596,6 +759,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Data Designer
+      summary: Update Job
+      operationId: update_job_apis_data_designer_v2_workspaces__workspace__jobs_retrieval_generate__name__patch
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetrievalGenerateJobUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrievalGenerateJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
     delete:
       tags:
       - Data Designer
@@ -621,6 +821,108 @@ paths:
           description: Job not Found
         '409':
           description: Job is not in a terminal state
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/data-designer/v2/workspaces/{workspace}/jobs/retrieval-generate/{name}/attempts:
+    get:
+      tags:
+      - Data Designer
+      summary: List Job Attempts
+      operationId: list_job_attempts_apis_data_designer_v2_workspaces__workspace__jobs_retrieval_generate__name__attempts_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 25
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          enum:
+          - seq
+          - -seq
+          type: string
+          default: -seq
+          title: Sort
+      - name: filter
+        in: query
+        required: false
+        schema:
+          title: Filter
+          type: string
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrievalGenerateJobAttemptsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/data-designer/v2/workspaces/{workspace}/jobs/retrieval-generate/{name}/attempts/{attempt}:
+    get:
+      tags:
+      - Data Designer
+      summary: Get Job Attempt
+      operationId: get_job_attempt_apis_data_designer_v2_workspaces__workspace__jobs_retrieval_generate__name__attempts__attempt__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrievalGenerateJobAttempt'
         '422':
           description: Validation Error
           content:
@@ -698,6 +1000,24 @@ paths:
           type: integer
           maximum: 10000
           exclusiveMinimum: 0
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
+      - name: step_id
+        in: query
+        required: false
+        schema:
+          title: Step Id
+          type: string
+      - name: task_id
+        in: query
+        required: false
+        schema:
+          title: Task Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -730,6 +1050,12 @@ paths:
         schema:
           type: string
           title: Name
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -982,6 +1308,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Data Designer
+      summary: Update Job
+      operationId: update_job_apis_data_designer_v2_workspaces__workspace__jobs_retrieval_prepare__name__patch
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetrievalPrepareJobUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrievalPrepareJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
     delete:
       tags:
       - Data Designer
@@ -1007,6 +1370,108 @@ paths:
           description: Job not Found
         '409':
           description: Job is not in a terminal state
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/data-designer/v2/workspaces/{workspace}/jobs/retrieval-prepare/{name}/attempts:
+    get:
+      tags:
+      - Data Designer
+      summary: List Job Attempts
+      operationId: list_job_attempts_apis_data_designer_v2_workspaces__workspace__jobs_retrieval_prepare__name__attempts_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 25
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          enum:
+          - seq
+          - -seq
+          type: string
+          default: -seq
+          title: Sort
+      - name: filter
+        in: query
+        required: false
+        schema:
+          title: Filter
+          type: string
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrievalPrepareJobAttemptsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/data-designer/v2/workspaces/{workspace}/jobs/retrieval-prepare/{name}/attempts/{attempt}:
+    get:
+      tags:
+      - Data Designer
+      summary: Get Job Attempt
+      operationId: get_job_attempt_apis_data_designer_v2_workspaces__workspace__jobs_retrieval_prepare__name__attempts__attempt__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrievalPrepareJobAttempt'
         '422':
           description: Validation Error
           content:
@@ -1084,6 +1549,24 @@ paths:
           type: integer
           maximum: 10000
           exclusiveMinimum: 0
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
+      - name: step_id
+        in: query
+        required: false
+        schema:
+          title: Step Id
+          type: string
+      - name: task_id
+        in: query
+        required: false
+        schema:
+          title: Task Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -1116,6 +1599,12 @@ paths:
         schema:
           type: string
           title: Name
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -1368,6 +1857,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Data Designer
+      summary: Update Job
+      operationId: update_job_apis_data_designer_v2_workspaces__workspace__jobs_retrieval_run__name__patch
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetrievalRunJobUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrievalRunJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
     delete:
       tags:
       - Data Designer
@@ -1393,6 +1919,108 @@ paths:
           description: Job not Found
         '409':
           description: Job is not in a terminal state
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/data-designer/v2/workspaces/{workspace}/jobs/retrieval-run/{name}/attempts:
+    get:
+      tags:
+      - Data Designer
+      summary: List Job Attempts
+      operationId: list_job_attempts_apis_data_designer_v2_workspaces__workspace__jobs_retrieval_run__name__attempts_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 25
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          enum:
+          - seq
+          - -seq
+          type: string
+          default: -seq
+          title: Sort
+      - name: filter
+        in: query
+        required: false
+        schema:
+          title: Filter
+          type: string
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrievalRunJobAttemptsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/data-designer/v2/workspaces/{workspace}/jobs/retrieval-run/{name}/attempts/{attempt}:
+    get:
+      tags:
+      - Data Designer
+      summary: Get Job Attempt
+      operationId: get_job_attempt_apis_data_designer_v2_workspaces__workspace__jobs_retrieval_run__name__attempts__attempt__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrievalRunJobAttempt'
         '422':
           description: Validation Error
           content:
@@ -1470,6 +2098,24 @@ paths:
           type: integer
           maximum: 10000
           exclusiveMinimum: 0
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
+      - name: step_id
+        in: query
+        required: false
+        schema:
+          title: Step Id
+          type: string
+      - name: task_id
+        in: query
+        required: false
+        schema:
+          title: Task Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -1502,6 +2148,12 @@ paths:
         schema:
           type: string
           title: Name
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -1977,6 +2629,9 @@ components:
         id:
           title: Id
           type: string
+        attempt_id:
+          title: Attempt Id
+          type: string
         name:
           type: string
           title: Name
@@ -2017,16 +2672,101 @@ components:
           title: Custom Fields
           additionalProperties: true
           type: object
+        control:
+          $ref: '#/components/schemas/JobControl'
       type: object
       required:
       - name
       - spec
       title: CreateJob
+    CreateJobAttempt:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        seq:
+          type: integer
+          title: Seq
+        spec:
+          $ref: '#/components/schemas/DataDesignerStepConfig'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        is_current:
+          type: boolean
+          title: Is Current
+      type: object
+      required:
+      - id
+      - name
+      - job
+      - workspace
+      - seq
+      - spec
+      - status
+      - created_at
+      - updated_at
+      - is_current
+      title: CreateJobAttempt
+    CreateJobAttemptsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/CreateJobAttempt'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: CreateJobAttemptsPage
     CreateJobRequest:
       properties:
         name:
           title: Name
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -2057,6 +2797,17 @@ components:
       required:
       - spec
       title: CreateJobRequest
+    CreateJobUpdate:
+      properties:
+        description:
+          title: Description
+          nullable: true
+          type: string
+        spec:
+          $ref: '#/components/schemas/DataDesignerJobConfig'
+      additionalProperties: false
+      type: object
+      title: CreateJobUpdate
     CreateJobsListFilter:
       additionalProperties: false
       properties:
@@ -2759,6 +3510,9 @@ components:
         project:
           title: Project
           type: string
+        attempt_id:
+          title: Attempt Id
+          type: string
         created_at:
           type: string
           format: date-time
@@ -3115,6 +3869,30 @@ components:
       - gt
       - ge
       title: InequalityOperator
+    JobControl:
+      properties:
+        pause_ttl_seconds:
+          title: Pause Ttl Seconds
+          description: How long this job keeps storage after it pauses, measured from
+            stopped_at. When the job has no value, the platform paused-storage TTL
+            applies. Cannot exceed the platform maximum. 0 reclaims on the next retention
+            pass. In a control update, an omitted or null value keeps the current
+            value. Changing this value does not move the start time.
+          nullable: true
+          type: integer
+          minimum: 0.0
+      type: object
+      title: JobControl
+      description: 'Mutable job behavior, stored on the job and kept off the execution
+        spec.
+
+
+        The attempt spec stays the immutable snapshot of what a run executes. Rerun
+
+        copies the job spec into the next attempt and keeps using this object. In
+        a
+
+        control update, an omitted or null value keeps the job''s current value.'
     JudgeScoreProfilerConfig:
       properties:
         model_alias:
@@ -4034,6 +4812,9 @@ components:
         id:
           title: Id
           type: string
+        attempt_id:
+          title: Attempt Id
+          type: string
         name:
           type: string
           title: Name
@@ -4074,11 +4855,90 @@ components:
           title: Custom Fields
           additionalProperties: true
           type: object
+        control:
+          $ref: '#/components/schemas/JobControl'
       type: object
       required:
       - name
       - spec
       title: RetrievalGenerateJob
+    RetrievalGenerateJobAttempt:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        seq:
+          type: integer
+          title: Seq
+        spec:
+          $ref: '#/components/schemas/RetrievalGenerateStepConfig'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        is_current:
+          type: boolean
+          title: Is Current
+      type: object
+      required:
+      - id
+      - name
+      - job
+      - workspace
+      - seq
+      - spec
+      - status
+      - created_at
+      - updated_at
+      - is_current
+      title: RetrievalGenerateJobAttempt
+    RetrievalGenerateJobAttemptsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/RetrievalGenerateJobAttempt'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: RetrievalGenerateJobAttemptsPage
     RetrievalGenerateJobConfig:
       properties:
         corpus:
@@ -4248,6 +5108,12 @@ components:
         name:
           title: Name
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -4278,6 +5144,17 @@ components:
       required:
       - spec
       title: RetrievalGenerateJobRequest
+    RetrievalGenerateJobUpdate:
+      properties:
+        description:
+          title: Description
+          nullable: true
+          type: string
+        spec:
+          $ref: '#/components/schemas/RetrievalGenerateJobConfig'
+      additionalProperties: false
+      type: object
+      title: RetrievalGenerateJobUpdate
     RetrievalGenerateJobsListFilter:
       additionalProperties: false
       properties:
@@ -4409,6 +5286,9 @@ components:
         id:
           title: Id
           type: string
+        attempt_id:
+          title: Attempt Id
+          type: string
         name:
           type: string
           title: Name
@@ -4449,11 +5329,90 @@ components:
           title: Custom Fields
           additionalProperties: true
           type: object
+        control:
+          $ref: '#/components/schemas/JobControl'
       type: object
       required:
       - name
       - spec
       title: RetrievalPrepareJob
+    RetrievalPrepareJobAttempt:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        seq:
+          type: integer
+          title: Seq
+        spec:
+          $ref: '#/components/schemas/RetrievalPrepareStepConfig'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        is_current:
+          type: boolean
+          title: Is Current
+      type: object
+      required:
+      - id
+      - name
+      - job
+      - workspace
+      - seq
+      - spec
+      - status
+      - created_at
+      - updated_at
+      - is_current
+      title: RetrievalPrepareJobAttempt
+    RetrievalPrepareJobAttemptsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/RetrievalPrepareJobAttempt'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: RetrievalPrepareJobAttemptsPage
     RetrievalPrepareJobConfig:
       properties:
         sdg_input:
@@ -4601,6 +5560,12 @@ components:
         name:
           title: Name
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -4631,6 +5596,17 @@ components:
       required:
       - spec
       title: RetrievalPrepareJobRequest
+    RetrievalPrepareJobUpdate:
+      properties:
+        description:
+          title: Description
+          nullable: true
+          type: string
+        spec:
+          $ref: '#/components/schemas/RetrievalPrepareJobConfig'
+      additionalProperties: false
+      type: object
+      title: RetrievalPrepareJobUpdate
     RetrievalPrepareJobsListFilter:
       additionalProperties: false
       properties:
@@ -4739,6 +5715,9 @@ components:
         id:
           title: Id
           type: string
+        attempt_id:
+          title: Attempt Id
+          type: string
         name:
           type: string
           title: Name
@@ -4779,11 +5758,90 @@ components:
           title: Custom Fields
           additionalProperties: true
           type: object
+        control:
+          $ref: '#/components/schemas/JobControl'
       type: object
       required:
       - name
       - spec
       title: RetrievalRunJob
+    RetrievalRunJobAttempt:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        seq:
+          type: integer
+          title: Seq
+        spec:
+          $ref: '#/components/schemas/RetrievalRunJobConfig'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        is_current:
+          type: boolean
+          title: Is Current
+      type: object
+      required:
+      - id
+      - name
+      - job
+      - workspace
+      - seq
+      - spec
+      - status
+      - created_at
+      - updated_at
+      - is_current
+      title: RetrievalRunJobAttempt
+    RetrievalRunJobAttemptsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/RetrievalRunJobAttempt'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: RetrievalRunJobAttemptsPage
     RetrievalRunJobConfig:
       properties:
         generate:
@@ -4801,6 +5859,12 @@ components:
         name:
           title: Name
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -4831,6 +5895,17 @@ components:
       required:
       - spec
       title: RetrievalRunJobRequest
+    RetrievalRunJobUpdate:
+      properties:
+        description:
+          title: Description
+          nullable: true
+          type: string
+        spec:
+          $ref: '#/components/schemas/RetrievalRunJobConfig'
+      additionalProperties: false
+      type: object
+      title: RetrievalRunJobUpdate
     RetrievalRunJobsListFilter:
       additionalProperties: false
       properties:

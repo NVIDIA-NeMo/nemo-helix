@@ -3,6 +3,7 @@
 
 # nemo-helix-plugin
 
+[![NeMo Helix on GitHub](https://img.shields.io/badge/github-NVIDIA--NeMo%2Fnemo--helix-181717?style=flat-square&logo=github)](https://github.com/NVIDIA-NeMo/nemo-helix)
 [![License](https://img.shields.io/badge/license-Apache_2.0-D22128?style=flat-square)](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12--3.14-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Docs](https://img.shields.io/static/v1?label=docs&message=docs.nvidia.com%2Fnemo-helix&color=76B900&style=flat-square&logo=readthedocs&logoColor=white)](https://docs.nvidia.com/nemo-helix)

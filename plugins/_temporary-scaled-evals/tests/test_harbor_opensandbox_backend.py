@@ -17,7 +17,7 @@ import yaml
 
 pytest.importorskip("scaled_evals")
 
-from scaled_evals import harbor_opensandbox_cleanup as cleanup
+from nhx_sandbox import harbor_opensandbox_cleanup as cleanup
 from scaled_evals.api.failure_diagnostics import failure_category_for_code
 from scaled_evals.api.framework_versions import resolve_framework_runner
 from scaled_evals.api.settings import Settings, settings
@@ -70,11 +70,11 @@ def _write_task(task_dir: Path, environment: str = "") -> None:
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
-        ({"framework_version": "0.13.2"}, "requires Harbor 0.20.0"),
+        ({"framework_version": "0.6.4"}, "requires Harbor 0.13.2 or 0.20.0"),
         ({"network_policy": "unrestricted"}, "supports network_policy default_deny"),
         ({"network_policy": "scoped_egress"}, "supports network_policy default_deny"),
         ({"network_policy_config": {"allowed_hosts": ["x"]}}, "omit network_policy_config"),
-        ({"agent_bundle": {"object_key": "b"}}, "agent bundles"),
+        ({"agent_bundle": {"object_key": "b"}}, "agent bundles support only claude-code"),
         ({"image_digest": None}, "recorded digest"),
         ({"tarball_object_key": None}, "uploaded task pack"),
         ({"framework": "gym"}, "Harbor evaluations only"),
@@ -85,8 +85,10 @@ def test_preflight_rejects_what_it_cannot_isolate(overrides: dict[str, Any], mes
         backend.preflight(_spec(**overrides))
 
 
-def test_preflight_accepts_supported_evaluation() -> None:
-    backend.preflight(_spec())
+@pytest.mark.parametrize("version", ["0.13.2", "0.20.0"])
+def test_preflight_accepts_supported_evaluation(version: str) -> None:
+    """Launch-time preflight accepts every Harbor runner the runtime supports."""
+    backend.preflight(_spec(framework_version=version))
 
 
 COMPOSE_PROFILE = {"services": [{"name": "db", "image": "nvcr.io/org/postgres:16"}]}
@@ -290,7 +292,7 @@ def test_trusted_hosts_put_model_endpoint_first_without_duplicates() -> None:
 
 def test_sandbox_lifetime_default_matches_the_environment() -> None:
     """The deployment setting and the environment's own default agree on the sandbox lifetime."""
-    environment = pytest.importorskip("scaled_evals.harbor_opensandbox_environment")
+    environment = pytest.importorskip("nhx_sandbox.harbor_opensandbox_environment")
     environment_default = (
         inspect.signature(environment.NemoOpenSandboxEnvironment.__init__).parameters["sandbox_timeout_sec"].default
     )
@@ -329,6 +331,8 @@ def test_render_owns_environment_block(tmp_path: Path) -> None:
         "sandbox_timeout_sec": settings.harbor_opensandbox_sandbox_timeout_seconds,
         "trusted_allowed_hosts": ["igw", "pypi.org"],
         "egress_verification": "default_action",
+        "enforce_disk_limit": True,
+        "max_disk_mb": 131072,
         "metadata": {
             cleanup.DEPLOYMENT_METADATA_KEY: DEPLOYMENT,
             cleanup.EVALUATION_METADATA_KEY: "ev_os1",
@@ -456,6 +460,174 @@ def test_submit_stages_binds_renders_and_spawns(tmp_path: Path, monkeypatch: pyt
     assert handle.raw["provenance"]["task_image_digest"] == DIGEST
     assert handle.raw["provenance"]["verifier_image_ref"] is None
     assert handle.raw["provenance"]["verifier_image_digest"] is None
+    assert handle.raw["provenance"]["agent_bundle_image"] is None
+    assert handle.raw["provenance"]["agent_bundle_delivery"] is None
+
+
+AGENT_BUNDLE = {
+    "bundle_id": "ab_claude",
+    "bundle_name": "claude-code-native",
+    "agent_name": "claude-code",
+    "agent_version": "2.1.301",
+    "image_ref": "nvcr.io/org/agent-bundles/claude-code:2.1.301",
+    "image_digest": f"nvcr.io/org/agent-bundles/claude-code@{DIGEST}",
+    "entrypoint": "bin/claude",
+    "platform": "linux/amd64",
+    "runtime_abi": "glibc",
+    "bundle_layout_version": 1,
+    "builder_profile": "claude-native-v1",
+    "source_lock_digest": VERIFIER_DIGEST,
+    "fingerprint": VERIFIER_DIGEST,
+}
+
+
+@pytest.fixture
+def bundle_registry_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Approve AGENT_BUNDLE's registry: the bundle gets the task image registry policy."""
+    monkeypatch.setattr(settings, "task_image_allowed_registries", "nvcr.io")
+
+
+@pytest.mark.usefixtures("bundle_registry_allowed")
+def test_preflight_accepts_a_registered_bundle() -> None:
+    backend.preflight(_spec(agent_bundle=AGENT_BUNDLE))
+
+
+def test_preflight_rejects_a_bundle_from_an_unapproved_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "task_image_allowed_registries", "registry.example.com")
+
+    with pytest.raises(ValueError, match="agent bundle image: task image registry 'nvcr.io' is not approved"):
+        backend.preflight(_spec(agent_bundle=AGENT_BUNDLE))
+
+
+@pytest.mark.usefixtures("bundle_registry_allowed")
+def test_render_passes_the_bundle_pinned_by_digest(tmp_path: Path) -> None:
+    config = backend.render_harbor_config(
+        "agents: [{name: claude-code}]\n",
+        _spec(agent_bundle=AGENT_BUNDLE),
+        task_path=tmp_path,
+        jobs_dir="j",
+        trusted_hosts=[],
+    )
+
+    bundle = config["environment"]["kwargs"]["agent_bundle"]
+    assert bundle["image"] == f"nvcr.io/org/agent-bundles/claude-code@{DIGEST}"
+    assert bundle["installer"] == settings.agent_bundle_installer_path
+    assert bundle["entrypoint"] == "bin/claude"
+    assert "env" not in bundle
+
+
+@pytest.fixture
+def hosted_tag_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hosted admission: signed tag-form references only, as the settings validator requires."""
+    monkeypatch.setattr(settings, "task_image_hosted_mode", True)
+    monkeypatch.setattr(settings, "sandbox_k8s_task_image_reference_mode", "tag")
+
+
+@pytest.mark.usefixtures("bundle_registry_allowed", "hosted_tag_mode")
+def test_hosted_mode_passes_the_bundle_by_its_signed_tag(tmp_path: Path) -> None:
+    backend.preflight(_spec(agent_bundle=AGENT_BUNDLE))
+    config = backend.render_harbor_config(
+        "agents: [{name: claude-code}]\n",
+        _spec(agent_bundle=AGENT_BUNDLE),
+        task_path=tmp_path,
+        jobs_dir="j",
+        trusted_hosts=[],
+    )
+
+    assert config["environment"]["kwargs"]["agent_bundle"]["image"] == "nvcr.io/org/agent-bundles/claude-code:2.1.301"
+
+
+@pytest.mark.usefixtures("bundle_registry_allowed")
+def test_preflight_rejects_a_bundle_for_an_unverified_agent() -> None:
+    # Codex's install would skip for a bundle too, but no Codex bundle has been run end to end.
+    with pytest.raises(ValueError, match="agent bundles support only claude-code, not 'codex'"):
+        backend.preflight(_spec(agent_bundle={**AGENT_BUNDLE, "agent_name": "codex"}))
+
+
+@pytest.mark.parametrize(
+    "agents",
+    [
+        "[{name: oracle}]",
+        # A custom agent isn't the bundle's agent, whatever it loads.
+        "[{import_path: 'my.agents:ClaudeCode'}]",
+        "[]",
+    ],
+)
+@pytest.mark.usefixtures("bundle_registry_allowed")
+def test_render_rejects_an_evaluation_that_does_not_run_the_bundle_agent(tmp_path: Path, agents: str) -> None:
+    with pytest.raises(ValueError, match="the agent bundle provides 'claude-code', but the evaluation doesn't run"):
+        backend.render_harbor_config(
+            f"agents: {agents}\n", _spec(agent_bundle=AGENT_BUNDLE), task_path=tmp_path, jobs_dir="j", trusted_hosts=[]
+        )
+
+
+@pytest.mark.usefixtures("bundle_registry_allowed")
+def test_bundle_without_an_immutable_digest_is_rejected() -> None:
+    with pytest.raises(ValueError, match="agent bundle image: the bundle has no immutable digest"):
+        backend.preflight(_spec(agent_bundle={**AGENT_BUNDLE, "image_digest": "nvcr.io/org/agent-bundles/claude-code"}))
+
+
+@pytest.mark.parametrize(("mode", "verified"), [("tag", True), ("digest", False)])
+def test_launch_verifies_a_tag_delivered_bundle(monkeypatch: pytest.MonkeyPatch, mode: str, verified: bool) -> None:
+    monkeypatch.setattr(settings, "sandbox_k8s_task_image_reference_mode", mode)
+    calls: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(backend, "verify_stored_task_image", lambda ref, digest: calls.append((ref, digest)))
+
+    backend.verify_agent_bundle_image(AGENT_BUNDLE)
+
+    # A digest-delivered bundle can't drift, so only tag delivery goes to the registry.
+    expected = [(AGENT_BUNDLE["image_ref"], AGENT_BUNDLE["image_digest"])] if verified else []
+    assert calls == expected
+
+
+@pytest.mark.usefixtures("bundle_registry_allowed", "hosted_tag_mode")
+def test_submit_fails_when_the_bundle_tag_moved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def moved(_ref: str, _digest: str | None) -> None:
+        raise backend.TaskImageIdentityError("task image tag moved")
+
+    monkeypatch.setattr(backend, "verify_stored_task_image", moved)
+
+    with pytest.raises(ValueError, match="agent bundle image: task image tag moved"):
+        _submit(tmp_path, monkeypatch, spec=_spec(agent_bundle=AGENT_BUNDLE))
+
+
+def test_render_without_a_bundle_sends_none(tmp_path: Path) -> None:
+    config = backend.render_harbor_config("agents: []\n", _spec(), task_path=tmp_path, jobs_dir="j", trusted_hosts=[])
+
+    assert "agent_bundle" not in config["environment"]["kwargs"]
+
+
+@pytest.mark.parametrize(
+    ("agents", "rejected"),
+    [
+        ("[{name: claude-code, kwargs: {version: 2.0.0}}]", True),
+        ("[{name: claude-code, kwargs: {version: 2.1.301}}]", False),
+        ("[{name: claude-code}]", False),
+        # Only the bundle's own agent is checked.
+        ("[{name: claude-code}, {name: codex, kwargs: {version: 0.1.0}}]", False),
+    ],
+)
+@pytest.mark.usefixtures("bundle_registry_allowed")
+def test_render_rejects_a_version_pin_the_bundle_does_not_provide(tmp_path: Path, agents: str, rejected: bool) -> None:
+    def render() -> None:
+        backend.render_harbor_config(
+            f"agents: {agents}\n", _spec(agent_bundle=AGENT_BUNDLE), task_path=tmp_path, jobs_dir="j", trusted_hosts=[]
+        )
+
+    if rejected:
+        with pytest.raises(ValueError, match="pinned to version '2.0.0', but the agent bundle provides '2.1.301'"):
+            render()
+    else:
+        render()
+
+
+@pytest.mark.usefixtures("bundle_registry_allowed")
+def test_submit_records_the_bundle_delivery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    profile = {"harbor_config": yaml.safe_dump({"agents": [{"name": "claude-code"}]})}
+    handle, _ = _submit(tmp_path, monkeypatch, spec=_spec(agent_bundle=AGENT_BUNDLE, harbor_config=profile))
+
+    assert handle.raw["provenance"]["agent_bundle_image"] == f"nvcr.io/org/agent-bundles/claude-code@{DIGEST}"
+    assert handle.raw["provenance"]["agent_bundle_delivery"] == "init_container"
 
 
 def test_submit_binds_pinned_verifier_image_and_records_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -519,7 +691,15 @@ def _write_applied(tmp_path: Path, trial: str, sha: str, *, sandbox_id: str | No
     trial_dir = tmp_path / "harbor" / "jobs" / "ev_os1" / trial
     trial_dir.mkdir(parents=True, exist_ok=True)
     sandbox_id = sandbox_id or f"sb-{trial}"
-    record = {"sandbox_id": sandbox_id, "role": role, "network_mode": "public", "policy_sha256": sha, "policy": {}}
+    record = {
+        "sandbox_id": sandbox_id,
+        "role": role,
+        "network_mode": "public",
+        "policy_sha256": sha,
+        "policy": {},
+        "disk_requested_mb": 10240,
+        "disk_limit_mb": 10240,
+    }
     (trial_dir / cleanup.applied_egress_filename(sandbox_id)).write_text(json.dumps(record))
 
 
@@ -571,6 +751,8 @@ def test_terminator_runs_scoped_cleanup_in_harbor_venv_and_writes_applied_egress
             "role": "agent",
             "network_mode": "public",
             "policy_sha256": "1" * 64,
+            "disk_requested_mb": 10240,
+            "disk_limit_mb": 10240,
         },
         {
             "trial": "trial-b",
@@ -578,6 +760,8 @@ def test_terminator_runs_scoped_cleanup_in_harbor_venv_and_writes_applied_egress
             "role": "agent",
             "network_mode": "public",
             "policy_sha256": "1" * 64,
+            "disk_requested_mb": 10240,
+            "disk_limit_mb": 10240,
         },
     ]
 
@@ -691,9 +875,15 @@ def test_enabled_backend_requires_config(monkeypatch: pytest.MonkeyPatch) -> Non
         backend.build_backend()
 
 
-def test_runtime_pins_harbor_020() -> None:
-    assert resolve_framework_runner("harbor", None, runtime="harbor_opensandbox").version == "0.20.0"
-    with pytest.raises(ValueError, match="supports only Harbor 0.20.0"):
-        resolve_framework_runner("harbor", "0.13.2", runtime="harbor_opensandbox")
+def test_runtime_accepts_the_supported_harbor_runners() -> None:
+    """Submission accepts 0.13.2 and 0.20.0, defaults this runtime to 0.20.0, and rejects other runners."""
+    # An omitted version gets this runtime's default, not the catalog's, and is still recorded as omitted.
+    omitted = resolve_framework_runner("harbor", None, runtime="harbor_opensandbox")
+    assert (omitted.version, omitted.requested_version) == ("0.20.0", None)
+    assert resolve_framework_runner("harbor", None).version == "0.13.2"
+    assert resolve_framework_runner("harbor", "stable", runtime="harbor_opensandbox").version == "0.13.2"
+    assert resolve_framework_runner("harbor", "0.20.0", runtime="harbor_opensandbox").version == "0.20.0"
+    with pytest.raises(ValueError, match="supports Harbor 0.13.2, 0.20.0, not 0.6.4"):
+        resolve_framework_runner("harbor", "0.6.4", runtime="harbor_opensandbox")
     with pytest.raises(ValueError, match="requires framework 'harbor'"):
         resolve_framework_runner("gym", None, runtime="harbor_opensandbox")

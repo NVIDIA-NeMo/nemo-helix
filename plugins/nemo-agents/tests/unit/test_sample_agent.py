@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from nemo_agents_plugin.api.v2 import sample_agent as sample
 from nemo_helix_plugin.agents.types import Agent, AgentDeployment, CreateSampleAgentRequest, SampleAgentStreamEvent
 from nemo_helix_plugin.files.types import FilesetPurpose
@@ -26,6 +27,15 @@ class _Page:
     async def items(self):
         for item in self._items:
             yield item
+
+
+async def _frames(response: StreamingResponse) -> list[SampleAgentStreamEvent]:
+    """Parse the streamed events; the endpoint writes each one as a text frame."""
+    frames: list[SampleAgentStreamEvent] = []
+    async for chunk in response.body_iterator:
+        assert isinstance(chunk, str)
+        frames.append(SampleAgentStreamEvent.model_validate_json(chunk))
+    return frames
 
 
 def _wire(value):
@@ -70,7 +80,8 @@ async def test_existing_sample_uses_marker_and_owner() -> None:
             ]
         )
     )
-    assert (await sample._existing_sample(workspaces, "alice", auth_enabled=True)).name == "sample-owned"
+    existing = await sample._existing_sample(workspaces, "alice", auth_enabled=True)
+    assert existing is not None and existing.name == "sample-owned"
 
 
 @pytest.mark.asyncio
@@ -78,7 +89,8 @@ async def test_existing_sample_is_shared_without_auth() -> None:
     workspaces = MagicMock()
     workspaces.list_workspaces = AsyncMock(return_value=_Page([_workspace("sample-shared", owner="other")]))
 
-    assert (await sample._existing_sample(workspaces, "alice", auth_enabled=False)).name == "sample-shared"
+    existing = await sample._existing_sample(workspaces, "alice", auth_enabled=False)
+    assert existing is not None and existing.name == "sample-shared"
 
 
 @pytest.mark.asyncio
@@ -89,7 +101,7 @@ async def test_model_change_allowed_before_deployment() -> None:
     agents.list_deployments = AsyncMock(return_value=_Page([]))
     agents.get_agent = AsyncMock(return_value=_wire(Agent(name=sample._AGENT_NAME, config=_config(old_model))))
     agents.delete_agent = AsyncMock()
-    agents.create_agent = AsyncMock()
+    agents.register_agent = AsyncMock()
     agents.create_deployment = AsyncMock(return_value=_wire(AgentDeployment(name="dep-new", agent=sample._AGENT_NAME)))
 
     deployment, agent_created, deployment_submitted = await sample._agent_and_deployment(
@@ -98,7 +110,7 @@ async def test_model_change_allowed_before_deployment() -> None:
 
     assert agent_created and deployment_submitted and deployment.name == "dep-new"
     agents.delete_agent.assert_awaited_once()
-    agents.create_agent.assert_awaited_once()
+    agents.register_agent.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -173,7 +185,7 @@ async def test_incomplete_workspace_resumes_without_creating_another(monkeypatch
         principal_id="alice",
         authorize=authorize,
     )
-    frames = [SampleAgentStreamEvent.model_validate_json(chunk) async for chunk in response.body_iterator]
+    frames = await _frames(response)
 
     assert [(frame.kind, frame.component) for frame in frames] == [
         ("progress", "workspace"),
@@ -224,7 +236,7 @@ async def test_failure_preserves_workspace_for_retry(monkeypatch: pytest.MonkeyP
         principal_id="alice",
         authorize=AsyncMock(),
     )
-    frames = [SampleAgentStreamEvent.model_validate_json(chunk) async for chunk in response.body_iterator]
+    frames = await _frames(response)
 
     assert response.status_code == 200
     assert frames[-2].component == "dataset"
@@ -258,7 +270,7 @@ async def test_model_conflict_ends_stream_without_uploading_files(monkeypatch: p
         principal_id="alice",
         authorize=AsyncMock(),
     )
-    frames = [SampleAgentStreamEvent.model_validate_json(chunk) async for chunk in response.body_iterator]
+    frames = await _frames(response)
 
     assert frames[-1].kind == "error"
     assert frames[-1].status_code == 409

@@ -5,14 +5,14 @@ import {
   ROW_SELECTION_COLUMN_SIZE,
   StudioDataView,
 } from '@nemo/common/src/components/DataView/StudioDataView';
+import { ElapsedTime } from '@nemo/common/src/components/ElapsedTime';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
-import { useLiveSeconds } from '@nemo/common/src/hooks/useLiveSeconds';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { formatDurationMs, formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
+import { utcToLocalDate } from '@nemo/common/src/utils/date';
 import {
   deleteEvaluation,
   getListEvaluationsQueryKey,
@@ -22,7 +22,6 @@ import { type EvalJobRow, evalDurationMs } from '@studio/api/evaluation/utils';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { EvalRunOutcomeBadge } from '@studio/components/evaluation/EvalRunOutcomeBanner';
 import { evaluationFilesetName } from '@studio/components/evaluation/experimentEvalConfig';
-import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
 import {
   type EvaluatorScore,
   evaluatorScores,
@@ -31,7 +30,11 @@ import {
   type AgentEvaluationRow,
   primaryExperimentName,
 } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
-import { getEvaluationDetailRoute, getWorkspaceJobDetailRoute } from '@studio/routes/utils';
+import {
+  getAgentRunEvaluationRoute,
+  getEvaluationDetailRoute,
+  getWorkspaceJobDetailRoute,
+} from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
 import { FlaskConical, Trash } from 'lucide-react';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
@@ -79,24 +82,6 @@ const mergeRows = (evaluations: AgentEvaluationRow[], jobs: EvalJobRow[]): Agent
   }
 
   return rows.sort((a, b) => createdAtMs(b) - createdAtMs(a));
-};
-
-/** Elapsed time for one row: a live counter while its job runs, the recorded duration once it does
- *  not.
- *
- *  A completed job's own `updated_at` is not an end time — the job row is written at create and on
- *  rerun only, never on a status transition — so the duration has to come from the evaluation. */
-const DurationCell: FC<{ job: EvalJobRow | null; durationMs?: number }> = ({ job, durationMs }) => {
-  const runningJob = job && !isTerminalJob(job) ? job : null;
-  // `enabled` is what actually stops the timer: the hook's interval effect keys off its *locked*
-  // start date, so clearing `startDate` alone leaves a row that finished mid-poll ticking (and
-  // re-rendering the table) once a second forever.
-  const liveSeconds = useLiveSeconds({
-    startDate: utcToLocalDate(runningJob?.created_at),
-    enabled: runningJob != null,
-  });
-  if (runningJob) return <Text>{formatTimeInSeconds(liveSeconds) || '0s'}</Text>;
-  return <Text>{formatDurationMs(durationMs, { hideMsAboveMinute: true })}</Text>;
 };
 
 /** A row has room for two lines of chips. Two evaluators fit as they are; past that, the first
@@ -150,7 +135,6 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
   const [deleteRows, setDeleteRows] = useState<AgentEvaluationRow[]>([]);
   // The evaluation a "New evaluation from this configuration" click is re-running, or null when
   // the form is closed.
-  const [rerunSource, setRerunSource] = useState<AgentEvaluationRow | null>(null);
   const rows = useMemo(() => mergeRows(evaluations, jobs), [evaluations, jobs]);
   // StudioDataView is `dataMode="manual"`, so it renders exactly the rows it is handed and leaves
   // paging to the caller. Both source lists are already in memory, so slice here rather than
@@ -314,15 +298,17 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
           id: 'duration',
           header: 'Duration',
           enableSorting: false,
-          // Keyed by job: an evaluation row outlives the job it shows, and `useLiveSeconds` locks
-          // its start date once, so a rerun would otherwise tick from the previous job's start.
-          cell: ({ row }) => (
-            <DurationCell
-              key={row.original.job?.id}
-              job={row.original.job}
-              durationMs={evalDurationMs(row.original.evaluation?.metadata)}
-            />
-          ),
+          // Duration comes from the evaluation because a row may have no job.
+          cell: ({ row }) => {
+            const { job, evaluation } = row.original;
+            return (
+              <ElapsedTime
+                start={job?.created_at}
+                durationMs={evalDurationMs(evaluation?.metadata)}
+                running={job != null && !isTerminalJob(job)}
+              />
+            );
+          },
         }),
         accessor(createdAtMs, {
           id: 'created_at',
@@ -352,14 +338,18 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
         rowActionsColumn({
           rowActions: (row) => {
             const { evaluation, job } = row;
+            const rerunAgent = agentName ?? evaluation?.agent_names?.[0];
             const actions = [
               // Only offered for a row that carries a reusable eval config; without one the form
               // would open on an evaluation it has to reject.
-              ...(evaluation && evaluationFilesetName(evaluation)
+              ...(evaluation && evaluationFilesetName(evaluation) && rerunAgent
                 ? [
                     {
                       children: 'New evaluation from this configuration',
-                      onSelect: () => setRerunSource(evaluation),
+                      onSelect: () =>
+                        navigate(
+                          getAgentRunEvaluationRoute(workspace, rerunAgent, evaluation.name)
+                        ),
                     },
                   ]
                 : []),
@@ -376,7 +366,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
           },
         }),
       ],
-      [navigate, workspace]
+      [agentName, navigate, workspace]
     );
 
   return (
@@ -419,16 +409,6 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
           },
         }}
       />
-
-      {rerunSource && (
-        <SubmitEvaluationModal
-          open
-          onClose={() => setRerunSource(null)}
-          workspace={workspace}
-          agent={agentName ?? rerunSource.agent_names?.[0]}
-          sourceEvaluation={rerunSource.name}
-        />
-      )}
 
       <BulkDeleteModal
         items={deleteRows}

@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator, Generator
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 import httpx
 
@@ -36,6 +36,7 @@ class AsyncTokenProvider(Protocol):
     async def get_access_token_async(self) -> str: ...
 
 
+@runtime_checkable
 class AsyncClientTokenProvider(Protocol):
     """Async client auth provider normalized for per-request token resolution."""
 

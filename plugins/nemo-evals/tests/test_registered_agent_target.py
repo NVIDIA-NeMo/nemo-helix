@@ -82,7 +82,7 @@ def _async_platform() -> AsyncNemoClient:
 
 
 def _calculator_config() -> dict[str, Any]:
-    """The shipped calculator example, as ``nemo agents create`` stores it."""
+    """The shipped calculator example, as ``nemo agents register`` stores it."""
     return {
         "config_format": "nemo-agents-spec-v1",
         "name": "calculator-agent",
@@ -144,10 +144,14 @@ def _platform(mocker: MockerFixture, agent: object, *, ethos_fileset: bool = Fal
 
 
 def _agent(config: dict[str, Any] | None = None, *, config_format: str = "nemo-agents-spec-v1") -> Any:
-    return SimpleNamespace(name="calculator-agent", config_format=config_format, config=config or _calculator_config())
+    return SimpleNamespace(
+        name="calculator-agent",
+        config_format=config_format,
+        config=config if config is not None else _calculator_config(),
+    )
 
 
-async def _resolve(target: FabricRunnerTarget | HarborRunnerTarget, workspace: str = "dev") -> Any:
+async def _resolve(target: FabricRunnerTarget | GymRunnerTarget | HarborRunnerTarget, workspace: str = "dev") -> Any:
     return await resolve_registered_agent(target, workspace=workspace, async_sdk=_async_platform())
 
 
@@ -262,6 +266,15 @@ async def test_a_legacy_nat_agent_is_rejected_rather_than_guessed_at(mocker: Moc
         await _resolve(_by_agent())
 
 
+async def test_an_agent_without_config_is_rejected_before_staging_files(mocker: MockerFixture) -> None:
+    agents = _platform(mocker, _agent({}))
+
+    with pytest.raises(ValueError, match="Agent 'dev/calculator-agent' has no configuration"):
+        await _resolve(_by_agent())
+
+    agents.files.get_fileset.assert_not_called()
+
+
 async def test_the_published_agent_name_survives_resolution(mocker: MockerFixture) -> None:
     """The canonical spec demands an Intake agent name; the kept ref supplies it without a pin."""
     _platform(mocker, _agent())
@@ -292,6 +305,41 @@ async def test_inline_targets_pass_through_untouched() -> None:
     resolved = _by_agent(AgentRef(root="dev/calc"), resolved_config={"harness": {"adapter_id": "x"}})
     assert await resolve_registered_agent(resolved, workspace="dev", async_sdk=None) is resolved
     assert await resolve_registered_agent(None, workspace="dev", async_sdk=None) is None
+
+
+def _config_resolved_under_fabric(relay_observability_version: int) -> dict[str, Any]:
+    return {
+        "harness": {"adapter_id": "x"},
+        "relay": {"observability": {"version": relay_observability_version, "atif": {"enabled": True}}},
+    }
+
+
+async def test_a_config_resolved_under_an_older_fabric_is_raised_to_the_running_ones_relay_version() -> None:
+    """A pending job re-parses the config it persisted at submit under whatever Fabric now runs the platform."""
+    persisted, raised = _config_resolved_under_fabric(3), _config_resolved_under_fabric(4)
+
+    fabric = await resolve_registered_agent(
+        _by_agent(AgentRef(root="dev/calc"), resolved_config=persisted), workspace="dev", async_sdk=None
+    )
+    assert isinstance(fabric, FabricRunnerTarget)
+    assert fabric.resolved_config == raised
+
+    harbor = await resolve_registered_agent(
+        HarborRunnerTarget(
+            source=RegisteredAgentSource(agent=AgentRef(root="dev/calc")),
+            agent_kwargs={"fabric_config": persisted, "fabric_workspace": "/app"},
+        ),
+        workspace="dev",
+        async_sdk=None,
+    )
+    assert isinstance(harbor, HarborRunnerTarget)
+    assert harbor.agent_kwargs == {"fabric_config": raised, "fabric_workspace": "/app"}
+
+    gym = await resolve_registered_agent(
+        _gym_by_agent(AgentRef(root="dev/calc"), resolved_config=persisted), workspace="dev", async_sdk=None
+    )
+    assert isinstance(gym, GymRunnerTarget)
+    assert gym.resolved_config == raised
 
 
 # --- Environment overlay ------------------------------------------------------------------------------
@@ -466,6 +514,33 @@ async def test_harbor_target_by_agent_selects_the_installed_fabric_agent_with_th
     assert kwargs["fabric_workspace"] == "/app"
     # Resolution is idempotent: a resolved target is left alone.
     assert await _resolve(resolved) is resolved
+
+
+async def test_harbor_rebases_gateway_models_without_changing_external_models_or_host_targets(
+    mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("NEMO_BASE_URL", raising=False)
+    monkeypatch.setenv("NHX_BASE_URL", "http://127.0.0.1:8080")
+    config = _calculator_config()
+    config["models"]["external"] = {
+        "provider": "openai",
+        "model": "external-model",
+        "base_url": "https://provider.example/v1",
+    }
+    _platform(mocker, _agent(config))
+
+    harbor = await _resolve(_harbor_by_agent())
+    fabric = await _resolve(_by_agent())
+
+    models = harbor.agent_kwargs["fabric_config"]["models"]
+    assert models["default"]["base_url"] == (
+        "http://host.docker.internal:8080/apis/inference-gateway/v2/workspaces/dev/openai/-/v1"
+    )
+    assert models["external"]["base_url"] == "https://provider.example/v1"
+    assert fabric.config["models"]["default"]["base_url"] == (
+        "http://127.0.0.1:8080/apis/inference-gateway/v2/workspaces/dev/openai/-/v1"
+    )
+    assert "base_url" not in config["models"]["default"]
 
 
 def test_every_harness_extra_the_resolver_names_exists_in_the_installed_fabric() -> None:
@@ -688,6 +763,37 @@ async def test_a_submitter_supplied_policy_setting_wins_over_the_derived_one(moc
     assert isinstance(resolved, GymRunnerTarget)
     assert resolved.hydra_params["policy_api_key"] == "from-the-spec"
     assert resolved.hydra_params["policy_model_name"] == resolved.resolved_config["models"]["default"]["model"]
+
+
+async def test_a_gym_stdio_template_the_job_does_not_set_is_refused_at_submit(mocker: MockerFixture) -> None:
+    """Gym's component leaves an unfilled template literal, so the MCP server would fail its auth mid-rollout."""
+    config = _calculator_with_mcp_config()
+    config["mcp"]["servers"]["calculator"] = {
+        "transport": "stdio",
+        "url": "/usr/bin/python3",
+        "env": {"CALC_TOKEN": "${CALC_TOKEN}", "MODE": "${MODE}"},
+    }
+    _platform(mocker, _agent(config))
+
+    with pytest.raises(
+        ValueError,
+        match=r"server 'calculator' reads CALC_TOKEN, MODE .*`env_secrets` \(or `env_vars` for a non-secret value\)",
+    ):
+        await _resolve(_gym_by_agent())
+
+    by_target = await _resolve(
+        _gym_by_agent(env_secrets={"CALC_TOKEN": SecretRef(root="dev/t")}, env_vars={"MODE": "x"})
+    )
+    del config["mcp"]["servers"]["calculator"]["env"]  # the source binding writes the templates itself
+    _platform(mocker, _agent(config))
+    environment = EnvironmentSpecInline(
+        mcp={"calculator": McpFulfillment(url="/usr/bin/python3", secrets={"CALC_TOKEN": "dev/t", "MODE": "dev/m"})}
+    )
+    by_source = await _resolve(
+        GymRunnerTarget(source=RegisteredAgentSource(agent=_AGENT, environment=environment), resources_server="mcqa")
+    )
+    for resolved in (by_target, by_source):
+        assert resolved.resolved_config["mcp"]["servers"]["calculator"]["env"]["CALC_TOKEN"] == "${CALC_TOKEN}"
 
 
 def test_a_registered_gym_agent_refuses_colocated_execution(tmp_path: Path) -> None:

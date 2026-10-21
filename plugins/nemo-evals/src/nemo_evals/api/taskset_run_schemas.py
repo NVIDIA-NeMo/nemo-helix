@@ -6,30 +6,37 @@
 import hashlib
 import json
 from datetime import datetime
-from typing import Annotated, Literal, Self
+from typing import Literal, Self
 
 from nemo_evals.api.fields import TasksetRef
+from nemo_evals.harbor.remote.profile import SandboxSelection
 from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, HarborRunnerTarget
-from nemo_evals.taskset_runs.entities import ResultState, TasksetRunEntity, TasksetRunPhase
-from nemo_evals.taskset_runs.specs import MissingPrebuiltImagePolicy
+from nemo_evals.taskset_runs.entities import (
+    MemberPhase,
+    ResultState,
+    TasksetRunEntity,
+    TasksetRunMemberEntity,
+    TasksetRunPhase,
+)
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class HarborTaskJobsExecutionInput(BaseModel):
     """Settings that run a Harbor taskset as many independent task Jobs instead of one Job.
 
-    Passing it as ``execution`` switches to the Kubernetes path: submit pins the
-    taskset revision, registers one Jobs Service Job per task, and returns a single taskset
-    run that tracks progress and combines the per-task results.
+    Passing it as ``execution`` selects the Kubernetes taskset-run path: submit pins
+    the taskset revision and returns a durable run handle. Later execution stages
+    register one Jobs Service Job per task and combine the per-task results.
 
     It exists because these settings mean nothing on the Docker path: where task Jobs are
-    placed, which sandbox they may use, and when to give up on a run. Keeping them in their
+    placed, which sandbox they may use, and how many run at once. Keeping them in their
     own model, selected by ``kind``, lets future execution strategies add new models rather
     than new ``submit`` methods. It never changes benchmark content or which agent runs.
 
-    Submit validates this input, resolves the percent form of ``max_failed_tasks`` into a
-    count, and freezes the result into the run's stored plan; later changes to operator
-    profiles or defaults do not affect an accepted run.
+    Submit validates this input and freezes the ``sandbox`` profile, with its resource
+    overrides checked against the profile's ceilings, the ``dispatcher_profile``, the pinned
+    dispatcher image and the concurrency cap into the run's plan, so operator config edits
+    never reach a running run. Earlier development runs are deleted rather than migrated.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -38,33 +45,13 @@ class HarborTaskJobsExecutionInput(BaseModel):
         default="harbor-task-jobs",
         description="Execution strategy: one Kubernetes Job per Harbor task. Future strategies add new kinds.",
     )
-    sandbox_policy: str = Field(
-        description=(
-            "Name of an operator-approved sandbox policy: which sandbox provider and isolation policy "
-            "each task's agent and environment run under, meaning the security and isolation boundary. "
-            "It does not control compute resources; see dispatcher_profile. Operators define the available policies."
-        ),
-        examples=["harbor-standard"],
-    )
-    dispatcher_profile: str = Field(
-        default="local-k8s",
+    dispatcher_profile: str | None = Field(
+        default=None,
         description=(
             "Name of a Jobs Service profile that decides where task Jobs run and what resources they get. "
-            "Operators define the available profiles; defaults to local-k8s, the profile the Helm chart ships."
+            "Operators define the available profiles; omitted uses the first one they list."
         ),
         examples=["local-k8s"],
-    )
-    missing_prebuilt_image: MissingPrebuiltImagePolicy = Field(
-        default="fail",
-        description=(
-            "What to do when a task pins a prebuilt image (its docker_image) and that image is no longer "
-            "in the registry. 'fail' (default) fails that task with image_unavailable. 'build' builds the "
-            "image from the task's Dockerfile instead and records the substitution; the result may differ "
-            "from the image the task author benchmarked, and a task without a Dockerfile still fails. "
-            "Does not apply to tasks without a pinned image, which are always built from their Dockerfile, "
-            "or to an image this run built that disappears mid-run, which is always rebuilt."
-        ),
-        examples=["fail", "build"],
     )
     max_concurrent_task_jobs: int | None = Field(
         default=None,
@@ -75,28 +62,58 @@ class HarborTaskJobsExecutionInput(BaseModel):
         ),
         examples=[5],
     )
-    max_failed_tasks: Annotated[int, Field(ge=0)] | Annotated[str, Field(pattern=r"^(100|[1-9]?\d)%$")] | None = Field(
+    sandbox: SandboxSelection | None = Field(
         default=None,
         description=(
-            "Failed tasks the run tolerates, as a count or a percent of the taskset's tasks. "
-            "Once exceeded, the run fails and its remaining task Jobs are cancelled. "
-            "Submit resolves a percent into a count. Omit for no limit."
+            "Sandbox for every task. profile names an operator sandbox profile: isolation, egress and "
+            "resource ceilings; omitted uses the operator's default. cpus, memory_mb and storage_mb size each "
+            "task's agent sandbox, over its task.toml [environment]; a separate verifier keeps task.toml's "
+            "resources. Unset cpus and memory_mb default to 1 CPU and 2048 MB, capped by the ceilings. Every "
+            "sandbox's values must stay within the profile's ceilings, or submit fails with 422. Omit the "
+            "whole object for the default profile and each task's own resources."
         ),
-        examples=[3, "10%"],
+        examples=[{"cpus": 4, "memory_mb": 8192, "storage_mb": 20480}, {"profile": "harbor-open", "memory_mb": 4096}],
     )
 
-    def resolve_max_failed_tasks(self, task_count: int) -> int | None:
-        """Convert a percentage tolerance to a floored task count.
 
-        Args:
-            task_count: Number of resolved tasks, including zero for pure arithmetic.
+class TasksetRunIntakeInput(BaseModel):
+    """Publish the run's trials to an existing Intake Experiment, as one Evaluation named after the run."""
 
-        Returns:
-            The count tolerance, or None when the run has no failure limit.
-        """
-        if isinstance(self.max_failed_tasks, str):
-            return int(self.max_failed_tasks[:-1]) * task_count // 100
-        return self.max_failed_tasks
+    model_config = ConfigDict(extra="forbid")
+
+    experiment: str = Field(
+        min_length=1,
+        description="Name of an existing Intake Experiment. Submit creates one Evaluation in it per run, "
+        "named after the run; each task Job publishes its trials there when it finishes.",
+        examples=["swe-agent-tuning"],
+    )
+    agent_name: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Agent name recorded on each published trajectory. Defaults to the Harbor agent.",
+    )
+    dataset_name: str | None = Field(
+        default=None,
+        min_length=1,
+        description="The Evaluation's dataset, such as the Harbor Hub dataset the tasks came from. "
+        "Defaults to the taskset (workspace/name).",
+        examples=["datacurve/deep-swe"],
+    )
+    dataset_version: str | None = Field(
+        default=None,
+        min_length=1,
+        description="The dataset's version, such as a Harbor Hub dataset digest. "
+        "Defaults to the pinned taskset's content digest.",
+        examples=["sha256:aaa82ceb8404dccc17689c9383f93dbcbc8f029a7601d2e3856a416f2cb89269"],
+    )
+
+
+class TasksetRunPublicationInput(BaseModel):
+    """Where the run publishes its results, beyond its result bundle and record."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    intake: TasksetRunIntakeInput = Field(description="Publish trials and scores to an Intake Experiment.")
 
 
 class TasksetRunInput(BaseModel):
@@ -116,15 +133,19 @@ class TasksetRunInput(BaseModel):
         "Inline tasks and precomputed trials are not supported for Kubernetes runs."
     )
     execution: HarborTaskJobsExecutionInput = Field(
-        description="Kubernetes task Job settings: sandbox policy, dispatcher profile, "
-        "run-wide task Job concurrency and failure tolerance."
+        description="Kubernetes task Job settings: sandbox profile and resources, dispatcher profile and "
+        "run-wide task Job concurrency."
     )
     idempotency_key: str | None = Field(
         default=None,
         min_length=1,
         max_length=256,
-        description="Optional caller-supplied key, scoped to workspace and caller, "
-        "so retries of the same request return the accepted run. Omit for a new keyless run.",
+        description="Optional key, scoped to workspace and caller, so retries of the same request return the "
+        "accepted run. When omitted, submit generates one and returns it as the run's idempotency_key.",
+    )
+    publication: TasksetRunPublicationInput | None = Field(
+        default=None,
+        description="Publish the run's trials to an Intake Experiment. Omit to publish nowhere.",
     )
     timeout_seconds: int | None = Field(
         default=None,
@@ -146,6 +167,23 @@ class TasksetRunInput(BaseModel):
         if not isinstance(self.spec.tasks, TasksetRef):
             raise ValueError(
                 "Kubernetes runs take a stored taskset reference in spec.tasks; publish the tasks as a taskset first"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _reject_spec_publication(self) -> Self:
+        """Refuse ``spec.publication``: every task Job would publish to it with the wrong settings.
+
+        It would publish under a random run id, fail the task Job (and drop its result) on any Intake
+        error, and race sibling Jobs on the Evaluation's metadata. ``publication.intake`` avoids all three.
+
+        Raises:
+            ValueError: The spec carries its own publication.
+        """
+        if self.spec.publication is not None:
+            raise ValueError(
+                "spec.publication isn't supported for Kubernetes runs; "
+                "set publication.intake.experiment to publish the run to an Intake Experiment"
             )
         return self
 
@@ -190,9 +228,11 @@ def request_digest(req: TasksetRunInput) -> str:
         req: Validated caller request, with model defaults filled.
 
     Returns:
-        SHA-256 of compact JSON with sorted keys and only idempotency_key excluded.
+        SHA-256 of compact JSON with sorted keys and only idempotency_key excluded. An omitted
+        ``publication`` is left out too, so requests from before the field existed keep their digest.
     """
-    body = req.model_dump(mode="json", exclude={"idempotency_key"})
+    exclude = {"idempotency_key"} if req.publication is not None else {"idempotency_key", "publication"}
+    body = req.model_dump(mode="json", exclude=exclude)
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -230,10 +270,59 @@ class TasksetRunStatus(BaseModel):
         default=None,
         description="Principal ID of the caller who created the run; None when creator metadata is unavailable.",
     )
-    idempotency_key: str | None = Field(default=None, description="Caller-supplied submit key; None for a keyless run.")
+    idempotency_key: str | None = Field(
+        default=None, description="Submit key: the caller's, or the one submit generated when the request omitted it."
+    )
 
 
 _INTERNAL_FIELDS = {"plan_ref", "plan_digest", "request_digest"}
+
+
+class TasksetRunTask(BaseModel):
+    """Expose one stored member's task identity, progress and optional Job/error.
+
+    Construction takes the five public fields only. Instances contain no parent,
+    persistence metadata or reconstructed Job state; read routes omit unset details.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    task: str = Field(description="Member name within the run, for example task-7.")
+    task_index: int = Field(ge=0, description="Zero-based index of the task in the run's resolved task list.")
+    phase: MemberPhase = Field(description="Stored image preparation and execution progress of this task.")
+    job: str | None = Field(
+        default=None,
+        description="Name of this task's Jobs Service Job; omitted until registered.",
+    )
+    error: str | None = Field(default=None, description="Stored reason the task failed, was cancelled or expired.")
+
+
+def to_task(member: TasksetRunMemberEntity) -> TasksetRunTask:
+    """Copy a stored member's public state without accessing its plan or Job.
+
+    Args:
+        member: Persisted child record with an optional task Job name and error.
+
+    Returns:
+        Five-field task DTO with task_job renamed to job and absent values retained
+        as None until HTTP serialization.
+    """
+    return TasksetRunTask(
+        task=member.name,
+        task_index=member.task_index,
+        phase=member.phase,
+        job=member.task_job,
+        error=member.error,
+    )
+
+
+class TasksetRunSubmitResponse(TasksetRunStatus):
+    """Return the accepted run with advisory warnings for this submission only."""
+
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Advisory notices about this caller's overlapping active runs on the same taskset revision.",
+    )
 
 
 def to_status(run: TasksetRunEntity) -> TasksetRunStatus:

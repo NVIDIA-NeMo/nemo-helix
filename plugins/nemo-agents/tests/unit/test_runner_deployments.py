@@ -215,16 +215,19 @@ def test_rewrite_fabric_config_base_urls_leaves_third_party_base_url() -> None:
     assert result["models"]["default"]["base_url"] == "https://api.openai.com/v1"
 
 
-def test_rewrite_fabric_config_base_urls_preserves_https_atif_endpoint() -> None:
+def test_rewrite_fabric_config_base_urls_rebases_any_intake_atif_endpoint_onto_the_rewrite_target() -> None:
+    """Keyed on the Intake route, not the host, like the gateway and OTLP rewrites: an authored public
+    platform URL has to reach the sidecar too, and the sidecar is plaintext."""
     config = {
         "telemetry": {
             "atif": {
                 "storage": [
                     {
                         "type": "http",
-                        "endpoint": "https://localhost:8080/apis/intake/v2/workspaces/default/ingest/atif",
+                        "endpoint": "https://helix.example.com/apis/intake/v2/workspaces/default/ingest/atif",
                         "header_env": {"Authorization": "ATIF_AUTHORIZATION"},
-                    }
+                    },
+                    {"type": "http", "endpoint": "http://localhost:4318/atif"},
                 ]
             }
         }
@@ -232,11 +235,88 @@ def test_rewrite_fabric_config_base_urls_preserves_https_atif_endpoint() -> None
 
     result = rewrite_fabric_config_base_urls(config, "http://nhx-api:8080")
 
-    assert result["telemetry"]["atif"]["storage"][0] == {
-        "type": "http",
-        "endpoint": "https://nhx-api:8080/apis/intake/v2/workspaces/default/ingest/atif",
-        "header_env": {"Authorization": "ATIF_AUTHORIZATION"},
+    assert result["telemetry"]["atif"]["storage"] == [
+        {
+            "type": "http",
+            "endpoint": "http://nhx-api:8080/apis/intake/v2/workspaces/default/ingest/atif",
+            "header_env": {"Authorization": "ATIF_AUTHORIZATION"},
+        },
+        {"type": "http", "endpoint": "http://localhost:4318/atif"},
+    ]
+
+
+def test_rewrite_fabric_config_base_urls_rebases_platform_otlp_endpoints() -> None:
+    config = {
+        "telemetry": {
+            "opentelemetry": {
+                "enabled": True,
+                "endpoints": [
+                    {
+                        "type": "gen_ai",
+                        "endpoint": "http://localhost:8080/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces",
+                    },
+                    {
+                        "type": "gen_ai",
+                        "endpoint": "http://release-nhx-api:8080/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces",
+                    },
+                    {"type": "gen_ai", "endpoint": "http://localhost:4318/v1/traces"},
+                    {"type": "gen_ai", "endpoint": "https://otel.example.com/v1/traces"},
+                ],
+                "logs": {
+                    "enabled": True,
+                    "endpoints": [
+                        {"endpoint": "http://localhost:8080/apis/intake/v2/workspaces/default/ingest/otlp/v1/logs"}
+                    ],
+                },
+                "metrics": {
+                    "enabled": True,
+                    "endpoints": [
+                        {"endpoint": "http://localhost:8080/apis/intake/v2/workspaces/default/ingest/otlp/v1/metrics"}
+                    ],
+                },
+            }
+        }
     }
+
+    result = rewrite_fabric_config_base_urls(config, "http://127.0.0.1:9019")
+
+    opentelemetry = result["telemetry"]["opentelemetry"]
+    assert [endpoint["endpoint"] for endpoint in opentelemetry["endpoints"]] == [
+        "http://127.0.0.1:9019/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces",
+        "http://127.0.0.1:9019/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces",
+        "http://localhost:4318/v1/traces",
+        "https://otel.example.com/v1/traces",
+    ]
+    assert opentelemetry["logs"]["endpoints"][0]["endpoint"] == (
+        "http://127.0.0.1:9019/apis/intake/v2/workspaces/default/ingest/otlp/v1/logs"
+    )
+    assert opentelemetry["metrics"]["endpoints"][0]["endpoint"] == (
+        "http://127.0.0.1:9019/apis/intake/v2/workspaces/default/ingest/otlp/v1/metrics"
+    )
+    assert "localhost:8080" in config["telemetry"]["opentelemetry"]["endpoints"][0]["endpoint"]
+
+
+def test_rewrite_fabric_config_base_urls_takes_the_rewrite_targets_scheme_for_otlp_endpoints() -> None:
+    """The auth-proxy sidecar and the in-cluster API are plaintext; keeping the authored https would make
+    every export fail the TLS handshake against them."""
+    config = {
+        "telemetry": {
+            "opentelemetry": {
+                "endpoints": [
+                    {
+                        "type": "gen_ai",
+                        "endpoint": "https://helix.example.com/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces",
+                    }
+                ]
+            }
+        }
+    }
+
+    result = rewrite_fabric_config_base_urls(config, "http://127.0.0.1:9019")
+
+    assert result["telemetry"]["opentelemetry"]["endpoints"][0]["endpoint"] == (
+        "http://127.0.0.1:9019/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces"
+    )
 
 
 def test_executor_for_mode_prefers_mode_specific() -> None:

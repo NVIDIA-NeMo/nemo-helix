@@ -5,6 +5,8 @@ description: >-
   injection mapping, FastAPI build env markers, and optional Helm config. Use when
   the user asks for a new feature flag, VITE_FF_ variable, studio.feature_flags
   setting, toggling UI behind a flag, or preview/boolean flags for Studio.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Add a Studio feature flag

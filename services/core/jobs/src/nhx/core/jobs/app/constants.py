@@ -23,6 +23,8 @@ JOB_EXECUTION_BACKEND_LABEL = "nhx.nvidia.com/job_execution_backend"
 JOB_EXECUTION_PROFILE_LABEL = "nhx.nvidia.com/job_execution_profile"
 
 NEMO_JOB_TASK_CONTAINER_NAME = "nemo-job-task"
+DEFAULT_PROVIDER = "cpu"
+DEFAULT_PROFILE = "default"
 DEFAULT_VOLUME_PERMISSIONS_IMAGE = "docker.io/library/busybox:stable"
 
 KUBE_JOB_SELECTOR_LABELS = {
@@ -32,3 +34,48 @@ KUBE_JOB_SELECTOR_LABELS = {
 
 JOB_MULTINODE_NETWORKING_ANNOTATION = "nhx.nvidia.com/enable-multi-node-networking"
 JOB_NUM_NODES_ANNOTATION = "nhx.nvidia.com/num-nodes"
+
+PAUSE_REQUESTED_AT = "pause_requested_at"
+RESUMED_AT = "resumed_at"
+STOPPED_AT = "stopped_at"
+STORAGE_RECLAIMED_AT = "storage_reclaimed_at"
+# Written on a stopped step once the storage sweep has nothing left to do for it: the job's
+# storage is queued for reclaim, the job has none, or a newer attempt owns it.
+STORAGE_SWEPT_AT = "storage_swept_at"
+IMAGE_DIGEST = "image_digest"
+IMAGE_DIGEST_AT_SAVE = "image_digest_at_save"
+# Step spec name whose image produced ``image_digest_at_save``. A rerun compares on that step only.
+IMAGE_DIGEST_STEP = "image_digest_step"
+IMAGE_DIGEST_WARNING = "image_digest_warning"
+RERUN_WARNING = "rerun_warning"
+RESUMABLE = "resumable"
+NON_RESUMABLE_REASON = "non_resumable_reason"
+
+# Progress copied onto a rerun. Pod status, pause clocks, and storage flags stay on the failed attempt.
+RERUN_EXCLUDED_STATUS_DETAILS = frozenset(
+    {
+        RESUMABLE,
+        NON_RESUMABLE_REASON,
+        STORAGE_RECLAIMED_AT,
+        PAUSE_REQUESTED_AT,
+        RESUMED_AT,
+        STOPPED_AT,
+        IMAGE_DIGEST,
+        IMAGE_DIGEST_WARNING,
+        RERUN_WARNING,
+        "events",
+        "containers",
+        "conditions",
+        "exit_code",
+        "message",
+        "pid",
+        "pgid",
+        "subprocess_work_dir",
+        "subprocess_persistent_storage_path",
+        "name",
+        "restart_count",
+        "ready",
+        "error",
+    }
+)
+POD_PHASES = frozenset({"Pending", "Running", "Succeeded", "Failed", "Unknown"})

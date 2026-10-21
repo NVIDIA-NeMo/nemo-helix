@@ -60,7 +60,8 @@ async def test_inject_exec_retrieve_roundtrip(tmp_path: Path) -> None:
         (tmp_path / "extra").mkdir()
         (tmp_path / "extra" / "note.md").write_text("uploaded", encoding="utf-8")
         await sandbox.upload_dir(tmp_path / "extra", "/work/extra")
-        assert (await sandbox.exec("cat /work/extra/note.md")).stdout.strip() == "uploaded"  # type: ignore[union-attr]
+        note = (await sandbox.exec("cat /work/extra/note.md")).stdout
+        assert note is not None and note.strip() == "uploaded"
 
         out_dir = tmp_path / "out"
         await sandbox.download_dir("/out", out_dir)

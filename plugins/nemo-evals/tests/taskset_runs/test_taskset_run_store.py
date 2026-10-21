@@ -13,14 +13,13 @@ from unittest.mock import Mock
 
 import httpx
 import pytest
-from nemo_evals.taskset_runs.entities import TasksetRunEntity, TasksetRunPhase
+from nemo_evals.taskset_runs.entities import MemberPhase, TasksetRunEntity, TasksetRunMemberEntity, TasksetRunPhase
 from nemo_evals.taskset_runs.identifiers import derive_run_id
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
 from nemo_evals.taskset_runs.store import (
     _ACCEPT_RETRY_POLICY,
     PlanDigestMismatchError,
     PlanStorageError,
-    RunIdExhausted,
     RunRequestConflict,
     TasksetRunStore,
 )
@@ -32,7 +31,7 @@ from nemo_helix_plugin.entities.types import Entity, EntityCreateInput
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
-from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperator, LogicalOperation
+from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from pydantic import ValidationError
 
 
@@ -467,16 +466,15 @@ async def test_accept_same_key_different_scope(store, entity_store, files_servic
     assert len(set(runs)) == len(entity_store.entities) == len(plan_filesets(files_service)) == 3
 
 
-@pytest.mark.parametrize("key", ["key", None])
-async def test_accept_lost_reply(store, entity_store, files_service, acceptance, monkeypatch, key) -> None:
-    """Recover this attempt's committed create for keyed and keyless inputs.
+async def test_accept_lost_reply(store, entity_store, files_service, acceptance, monkeypatch) -> None:
+    """Recover this attempt's committed create.
 
-    Store/client/acceptance fixtures own a snapshot, ``key`` selects retry mode,
-    and monkeypatch makes create commit before reporting conflict. Assertions
-    require created=True and no deletion, proving own-plan equality recovers the
-    lost reply before keyless collision handling or loser cleanup can run.
+    Store/client/acceptance fixtures own a snapshot, and monkeypatch makes create
+    commit before reporting conflict. Assertions require created=True and no
+    deletion, proving own-plan equality recovers the lost reply before loser
+    cleanup can run.
     """
-    acceptance = with_snapshot(replace(acceptance, idempotency_key=key), files_service, "snapshot")
+    acceptance = with_snapshot(acceptance, files_service, "snapshot")
     original_create = entity_store.create
 
     async def lost_reply(entity):
@@ -490,54 +488,6 @@ async def test_accept_lost_reply(store, entity_store, files_service, acceptance,
     assert len(entity_store.entities) == len(plan_filesets(files_service)) == 1
     assert all(op != "delete" for op, _, _ in files_service.calls)
     assert ("default", "snapshot") in files_service.filesets
-
-
-async def test_accept_keyless_collision(store, entity_store, files_service, acceptance, monkeypatch) -> None:
-    """Retry one keyless name collision with a fresh plan binding and preserved snapshot.
-
-    Store/client/acceptance fixtures seed the colliding record; monkeypatch fixes
-    the next random ID. Assertions require the new run/plan ID, an untouched
-    existing record, retained snapshot, and deletion of only the first plan.
-    """
-    existing = await entity_store.create(make_run(acceptance))
-    acceptance = with_snapshot(replace(acceptance, idempotency_key=None), files_service, "snapshot")
-    monkeypatch.setattr("nemo_evals.taskset_runs.store.random_run_id", lambda: "run-1111111111111111")
-    accepted = await store.accept(acceptance)
-    assert accepted.created is True
-    assert accepted.run.name == "run-1111111111111111"
-    assert await store.find(existing.workspace, existing.name) == existing
-    stored_plan = await store.load_plan(accepted.run)
-    assert stored_plan.run_id == accepted.run.name
-    assert stored_plan.spec == acceptance.plan.spec
-    assert len(entity_store.entities) == 2
-    assert len(plan_filesets(files_service)) == 1
-    assert ("default", "snapshot") in files_service.filesets
-    assert len([op for op, _, _ in files_service.calls if op == "delete"]) == 1
-
-
-async def test_accept_two_keyless_collisions(store, entity_store, files_service, acceptance, monkeypatch) -> None:
-    """Bound keyless collision handling to two attempts and discard exhausted inputs.
-
-    Store/client/acceptance fixtures seed both names and monkeypatch forces the
-    second collision. Assertions require RunIdExhausted, exactly two creates,
-    cleaned request storage, and unchanged existing records, preventing an
-    unbounded retry loop or deletion of another run's resources.
-    """
-    existing = await entity_store.create(make_run(acceptance))
-    second = make_run(acceptance)
-    second.name = "run-1111111111111111"
-    second = await entity_store.create(second)
-    monkeypatch.setattr("nemo_evals.taskset_runs.store.random_run_id", lambda: second.name)
-    create = Mock(wraps=entity_store.create)
-    monkeypatch.setattr(entity_store, "create", create)
-    acceptance = with_snapshot(replace(acceptance, idempotency_key=None), files_service, "snapshot")
-    with pytest.raises(RunIdExhausted):
-        await store.accept(acceptance)
-    assert create.call_count == 2
-    assert not files_service.filesets
-    assert len(entity_store.entities) == 2
-    assert await store.find(existing.workspace, existing.name) == existing
-    assert await store.find(second.workspace, second.name) == second
 
 
 @pytest.mark.parametrize("different_digest", [False, True])
@@ -735,14 +685,15 @@ async def test_list_active_filters_and_paginates(
     query = Mock(wraps=entity_store.list)
     monkeypatch.setattr(entity_store, "list", query)
     runs = await store.list_active("default", "user:alice", taskset_ref)
-    assert [run.name for run in runs] == sorted(expected)
+    assert [run.name for run in runs] == list(reversed(expected))
     assert query.call_count == (3 if taskset_ref is None else 2)
     for page, call in enumerate(query.call_args_list, start=1):
         assert call.args == (TasksetRunEntity,)
         assert call.kwargs == {
             "workspace": "default",
-            "sort": "name",
+            "sort": "-created_at",
             "page": page,
+            "page_size": 100,
             "filter_operation": LogicalOperation(
                 operator=FilterOperator.AND,
                 operations=[
@@ -773,3 +724,206 @@ async def test_list_active_empty_and_errors(store, entity_store, monkeypatch) ->
     monkeypatch.setattr(entity_store, "list", fail)
     with pytest.raises(RuntimeError, match="list unavailable"):
         await store.list_active("default", "user:alice")
+
+
+@pytest.mark.parametrize("caller", [None, "user:alice", "user:bob"])
+@pytest.mark.parametrize("active", [False, True])
+@pytest.mark.parametrize("taskset_ref", [None, "default/suite#3", "default/suite#4"])
+async def test_list_runs_independent_filters_before_pagination(
+    store, entity_store, files_service, acceptance, monkeypatch, caller, active, taskset_ref
+):
+    """Interleaved creators, phases, revisions and workspaces must not distort filtered totals or pages."""
+    expected = []
+    for index, (owner, phase, ref) in enumerate(
+        (owner, phase, ref)
+        for owner in ["user:alice", "user:bob"]
+        for phase in TasksetRunPhase
+        for ref in ["default/suite#3", "default/suite#4"]
+    ):
+        for workspace in ["default", "other"]:
+            entity_store.caller = owner
+            run = make_run(acceptance, phase=phase)
+            run.name, run.workspace, run.taskset_ref = f"run-{index}", workspace, ref
+            await entity_store.create(run)
+            if (
+                workspace == "default"
+                and (caller is None or owner == caller)
+                and (not active or phase.value in ["accepted", "running"])
+                and (taskset_ref is None or ref == taskset_ref)
+            ):
+                expected.append(run.name)
+    query = Mock(wraps=entity_store.list)
+    monkeypatch.setattr(entity_store, "list", query)
+    page = await store.list_runs("default", caller=caller, active=active, taskset_ref=taskset_ref, page=2, page_size=3)
+    assert [run.name for run in page.data] == list(reversed(expected))[3:6]
+    assert page.pagination.model_dump() == {
+        "page": 2,
+        "page_size": 3,
+        "current_page_size": len(page.data),
+        "total_pages": (len(expected) + 2) // 3,
+        "total_results": len(expected),
+    }
+    conditions: list[FilterOperation] = []
+    if caller is not None:
+        conditions.append(ComparisonOperation(field="created_by", operator=FilterOperator.EQ, value=caller))
+    if active:
+        conditions.append(
+            ComparisonOperation(field="data.phase", operator=FilterOperator.IN, value=["accepted", "running"])
+        )
+    if taskset_ref is not None:
+        conditions.append(ComparisonOperation(field="data.taskset_ref", operator=FilterOperator.EQ, value=taskset_ref))
+    query.assert_called_once_with(
+        TasksetRunEntity,
+        workspace="default",
+        sort="-created_at",
+        page=2,
+        page_size=3,
+        filter_operation=LogicalOperation(operator=FilterOperator.AND, operations=conditions) if conditions else None,
+    )
+    assert page.sort == "-created_at"
+    assert not files_service.calls
+
+
+async def test_list_runs_later_pages_empty_pages_and_failures(
+    store, entity_store, files_service, acceptance, monkeypatch
+):
+    """More than 100 matching rows remain pageable; empty results differ from storage failures."""
+    for index in range(150):
+        for owner in ["user:alice", "user:bob"]:
+            entity_store.caller = owner
+            run = make_run(acceptance)
+            run.name = f"{owner.split(':')[1]}-{index}"
+            await entity_store.create(run)
+    page = await store.list_runs("default", caller="user:alice", page=3, page_size=50)
+    assert [run.name for run in page.data] == [f"alice-{index}" for index in range(49, -1, -1)]
+    assert page.pagination.model_dump() == {
+        "page": 3,
+        "page_size": 50,
+        "current_page_size": 50,
+        "total_pages": 3,
+        "total_results": 150,
+    }
+    outside = await store.list_runs("default", caller="user:alice", page=4, page_size=50)
+    assert outside.data == [] and outside.pagination.total_results == 150
+    assert outside.pagination.total_pages == 3 and outside.pagination.current_page_size == 0
+    empty = await store.list_runs("other")
+    assert empty.data == [] and empty.pagination.total_pages == empty.pagination.total_results == 0
+    monkeypatch.setattr(entity_store, "list", Mock(side_effect=RuntimeError("list unavailable")))
+    with pytest.raises(RuntimeError, match="list unavailable"):
+        await store.list_runs("default")
+    assert not files_service.calls
+
+
+@pytest.mark.parametrize("phase", [None, *MemberPhase])
+async def test_list_members_parent_workspace_phase_and_numeric_pages(
+    store, entity_store, files_service, acceptance, monkeypatch, phase
+):
+    """Identical member names under different parents must never mix, even on filtered pages."""
+    parents = []
+    for name, workspace in [("selected", "default"), ("other", "default"), ("selected", "other")]:
+        run = make_run(acceptance)
+        run.name, run.workspace = name, workspace
+        parents.append(await entity_store.create(run))
+    for run in parents:
+        for index in [100, 0, 10, 2, 1]:
+            member = TasksetRunMemberEntity(
+                name=f"task-{index}",
+                workspace=run.workspace,
+                task_index=index,
+                phase=phase or MemberPhase.REGISTERED,
+                task_job=f"{run.name}-job-{index}",
+            )
+            member._parent = run.id
+            await entity_store.create(member)
+    if phase is not None:
+        excluded = TasksetRunMemberEntity(
+            name="task-3",
+            workspace="default",
+            task_index=3,
+            phase=MemberPhase.FAILED if phase != MemberPhase.FAILED else MemberPhase.SUCCEEDED,
+        )
+        excluded._parent = parents[0].id
+        await entity_store.create(excluded)
+    query = Mock(wraps=entity_store.list)
+    monkeypatch.setattr(entity_store, "list", query)
+    result = await store.list_members(parents[0], phase=phase, page=2, page_size=2)
+    assert [member.task_index for member in result.data] == [2, 10]
+    assert all(member._parent == parents[0].id for member in result.data)
+    assert [member.task_job for member in result.data] == ["selected-job-2", "selected-job-10"]
+    assert result.pagination.model_dump() == {
+        "page": 2,
+        "page_size": 2,
+        "current_page_size": 2,
+        "total_pages": 3,
+        "total_results": 5,
+    }
+    conditions: list[FilterOperation] = [
+        ComparisonOperation(field="parent", operator=FilterOperator.EQ, value=parents[0].id)
+    ]
+    if phase is not None:
+        conditions.append(ComparisonOperation(field="data.phase", operator=FilterOperator.EQ, value=phase))
+    query.assert_called_once_with(
+        TasksetRunMemberEntity,
+        workspace="default",
+        sort="task_index",
+        page=2,
+        page_size=2,
+        filter_operation=LogicalOperation(operator=FilterOperator.AND, operations=conditions),
+    )
+    assert result.sort == "task_index"
+    assert not files_service.calls
+
+
+async def test_list_members_empty_pages_and_failure(store, entity_store, acceptance, monkeypatch):
+    """A persisted run with no members has zero pages, while a failed list remains an error."""
+    run = await entity_store.create(make_run(acceptance))
+    empty = await store.list_members(run, phase=None, page=2, page_size=1)
+    assert empty.data == []
+    assert empty.pagination.model_dump() == {
+        "page": 2,
+        "page_size": 1,
+        "current_page_size": 0,
+        "total_pages": 0,
+        "total_results": 0,
+    }
+    monkeypatch.setattr(entity_store, "list", Mock(side_effect=RuntimeError("members unavailable")))
+    with pytest.raises(RuntimeError, match="members unavailable"):
+        await store.list_members(run, phase=None, page=1, page_size=100)
+
+
+async def test_list_members_typed_client_wire_filters_and_sort(files_client, files_service, acceptance):
+    """The production client must send parent scope and numeric data.task_index ordering to Entity Store."""
+    run = make_run(acceptance)
+    run._id = "taskset_run-parent"
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "data": [],
+                "pagination": {
+                    "page": 3,
+                    "page_size": 2,
+                    "current_page_size": 0,
+                    "total_pages": 0,
+                    "total_results": 0,
+                },
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http_client:
+        store = TasksetRunStore(
+            AsyncEntitiesClient(base_url="http://entities.test", http_client=http_client), files_client
+        )
+        page = await store.list_members(run, phase=MemberPhase.FAILED, page=3, page_size=2)
+    assert len(requests) == 1 and page.data == []
+    request = requests[0]
+    assert request.url.path == "/apis/entities/v2/workspaces/default/entities/taskset_run_member"
+    assert request.url.params["sort"] == "data.task_index"
+    assert request.url.params["page"] == "3" and request.url.params["page_size"] == "2"
+    assert json.loads(request.url.params["filter"]) == {
+        "$and": [{"parent": {"$eq": "taskset_run-parent"}}, {"data.phase": {"$eq": "failed"}}],
+    }
+    assert not files_service.calls

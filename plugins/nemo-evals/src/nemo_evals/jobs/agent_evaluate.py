@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Literal
@@ -59,12 +59,23 @@ from nemo_evals.jobs.gym_submission import gym_runtime_target, prepare_gym_submi
 from nemo_evals.jobs.kinds.registry import KIND_ADAPTERS, get_adapter
 from nemo_evals.jobs.kinds.types import PrepareContext, SubmitContext, TaskKindAdapter
 from nemo_evals.jobs.publication import publish_agent_eval_result
-from nemo_evals.jobs.registered_agent_resolution import expand_mcp_secret_env, resolve_registered_agent
+from nemo_evals.jobs.registered_agent_resolution import (
+    expand_mcp_secret_env,
+    resolve_registered_agent,
+    upgrade_registered_agent_config,
+)
 from nemo_evals.jobs.result_persistence import persist_agent_eval_result
-from nemo_evals.jobs.run_outcome import STATUS_DETAILS_KEY, agent_eval_outcome, report_run_outcome
+from nemo_evals.jobs.run_outcome import (
+    PUBLICATION_STATUS_KEY,
+    STATUS_DETAILS_KEY,
+    agent_eval_outcome,
+    report_run_outcome,
+    report_status_details,
+)
 from nemo_evals.jobs.secret_env import JobEnvSecretSource
 from nemo_evals.jobs.token_usage import capture_agent_evaluation_usage, capture_evaluator_request_logs
-from nemo_evals.jobs.utils import async_client_from_sync_client
+from nemo_evals.jobs.utils import async_client_from_sync_client, require_platform_client
+from nemo_evals.source_authorization import SourceReadAuthorizer
 from nemo_evals.task_refs import (
     groupby_kind,
     load_tasks,
@@ -101,7 +112,7 @@ from nhx_evals_sdk.agent_eval.evaluator import AgentEvaluator
 from nhx_evals_sdk.agent_eval.results import AgentEvalResult
 from nhx_evals_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
-from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig
+from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTarget
 from nhx_evals_sdk.values import RunConfigOnline, RunConfigOnlineModel
 from pydantic import BaseModel
@@ -199,6 +210,12 @@ class _AgentEvalJobBase(NemoJob):
     spec_schema: ClassVar[type[BaseModel] | None] = AgentEvalSpec
     job_collection_path: ClassVar[str | None] = "/agent-evaluate/jobs"
     adapters: ClassVar[Mapping[str, TaskKindAdapter]] = KIND_ADAPTERS
+    #: Delete a registered agent's files snapshot after a successful run. A taskset run's task Jobs
+    #: share one snapshot, so they keep it. TODO(M4 story 8): the run controller deletes it.
+    discard_agent_files: ClassVar[bool] = True
+    #: Stamp the run's and the publish's durations onto the Evaluation after publishing. A taskset run's
+    #: task Jobs share one Evaluation, so they leave it to the run controller.
+    record_publication_durations: ClassVar[bool] = True
 
     @classmethod
     async def to_spec(
@@ -209,8 +226,12 @@ class _AgentEvalJobBase(NemoJob):
         entity_client: object,
         async_sdk: AsyncHelixClient | None,
         is_local: bool,
+        authorize: SourceReadAuthorizer | None = None,
     ) -> BaseModel:
-        """Resolve each task's metric references into inline metrics for the canonical spec."""
+        """Resolve each task's metric references into inline metrics for the canonical spec.
+
+        ``authorize``, when set, checks each stored task, metric and model as the caller before it is read.
+        """
         del is_local
         submit_spec = (
             input_spec.model_copy(deep=True)
@@ -222,6 +243,7 @@ class _AgentEvalJobBase(NemoJob):
             entity_client=entity_client if isinstance(entity_client, EntityClient) else None,
             async_client=async_sdk,
             adapters=cls.adapters,
+            authorize=authorize,
         )
         loaded_tasks = await load_tasks(submit_spec.tasks, ctx)
         resolved_tasks = await map_with_limited_concurrency(lambda task: snapshot_task(task, ctx), loaded_tasks)
@@ -243,7 +265,7 @@ class _AgentEvalJobBase(NemoJob):
                 if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
                 else None
             )
-            if snapshot is not None:
+            if snapshot is not None and async_sdk is not None:
                 await discard_registered_agent_files(client_from_platform(async_sdk, AsyncFilesClient), snapshot)
             raise
 
@@ -331,8 +353,11 @@ class _AgentEvalJobBase(NemoJob):
         require_pvc_storage: bool = False,
     ) -> BaseExecutionProfile | None:
         """Resolve the profile that Jobs will use for this submission."""
+        jobs_client = client_from_platform(
+            require_platform_client(async_client, f"resolving execution profile {profile!r}"), AsyncJobsClient
+        )
         try:
-            profiles = (await client_from_platform(async_client, AsyncJobsClient).get_execution_profiles()).data()
+            profiles = (await jobs_client.get_execution_profiles()).data()
         except (NemoTransportError, NemoResponseValidationError, InternalServerError) as exc:
             raise _profile_dependency_unavailable(profile) from exc
         if require_pvc_storage:
@@ -365,8 +390,11 @@ class _AgentEvalJobBase(NemoJob):
     ) -> SubprocessExecutionProviderSpec:
         """Resolve Harbor's selected profile to an explicit host subprocess executor."""
         profile = executor.profile
+        jobs_client = client_from_platform(
+            require_platform_client(async_client, f"resolving execution profile {profile!r}"), AsyncJobsClient
+        )
         try:
-            profiles = (await client_from_platform(async_client, AsyncJobsClient).get_execution_profiles()).data()
+            profiles = (await jobs_client.get_execution_profiles()).data()
         except (NemoTransportError, NemoResponseValidationError, InternalServerError) as exc:
             raise _profile_dependency_unavailable(profile) from exc
 
@@ -441,12 +469,17 @@ class _AgentEvalJobBase(NemoJob):
 
     @staticmethod
     def _resolve_target(
-        target: Target | None, ctx: JobContext
+        target: Target | None,
+        ctx: JobContext,
+        *,
+        configure_harbor: Callable[[HarborRuntimeConfig], HarborRuntimeConfig] | None = None,
     ) -> tuple[AgentEvalTarget | None, str | dict[str, Any] | None, RunConfigOnline | RunConfigOnlineModel | None]:
         """Resolve a target spec to ``(runtime target, prompt_template, params)`` for the SDK run config.
 
         Endpoint targets carry their own request config; a runner is instantiated to its runtime and
         shapes its own request, so it contributes neither a prompt template nor inference params.
+        ``configure_harbor`` adjusts a Harbor runner's config last (a Kubernetes task Job selects its
+        sandbox environment there).
         """
         if isinstance(target, ModelTarget):
             return target.model, target.prompt_template, target.params or RunConfigOnlineModel()
@@ -454,6 +487,7 @@ class _AgentEvalJobBase(NemoJob):
             return target.agent, None, target.params or RunConfigOnline()
         if isinstance(target, FabricRunnerTarget):
             _require_fabric_env_secrets_resolved(target)
+            target = upgrade_registered_agent_config(target)
             assert target.config is not None  # canonical spec guarantees resolution ran
             fabric_runtime = FabricAgentRuntime(
                 config=expand_mcp_secret_env(target.config, os.environ),
@@ -468,6 +502,7 @@ class _AgentEvalJobBase(NemoJob):
         if isinstance(target, GymRunnerTarget):
             return gym_runtime_target(target, ctx), None, None
         if isinstance(target, HarborRunnerTarget):
+            target = upgrade_registered_agent_config(target)
             agent_kwargs = dict(target.agent_kwargs)
             staged = _staged_agent_files(target, ctx)
             if staged is not None:
@@ -490,6 +525,8 @@ class _AgentEvalJobBase(NemoJob):
             )
             if target.n_concurrent_trials is not None:
                 harbor_config.n_concurrent_trials = target.n_concurrent_trials
+            if configure_harbor is not None:
+                harbor_config = configure_harbor(harbor_config)
             harbor_runtime = HarborAgentTaskRunner(
                 config=harbor_config,
                 secret_resolver=JobEnvSecretSource(workspace=ctx.workspace),
@@ -542,7 +579,10 @@ class _AgentEvalJobBase(NemoJob):
             for kind, group in groupby_kind(spec.tasks)
             for task in get_adapter(kind, prepare_ctx.adapters).prepare(group, prepare_ctx)
         ]
-        target, prompt_template, params = self._resolve_target(spec.target, ctx)
+        self._prepared_tasks(tasks)
+        target, prompt_template, params = self._resolve_target(
+            spec.target, ctx, configure_harbor=lambda harbor_config: self._configure_harbor_runtime(harbor_config, ctx)
+        )
         bundle_dir = ctx.storage.persistent / AGENT_BUNDLE_DIR
         if bundle_dir.exists():
             shutil.rmtree(bundle_dir)
@@ -553,6 +593,7 @@ class _AgentEvalJobBase(NemoJob):
             labels=spec.labels,
             fail_fast=spec.fail_fast,
             work_dir=bundle_dir,
+            run_id=self._run_id(),
         )
         evaluator = self._build_evaluator(platform_client, spec.target)
         include_trial_measurements = not isinstance(spec.target, ModelTarget | AgentTarget)
@@ -608,8 +649,15 @@ class _AgentEvalJobBase(NemoJob):
                 target=spec.target,
                 workspace=ctx.workspace,
                 intake=intake,
+                record_durations=self.record_publication_durations,
             )
             output["publication"] = publication_outcome.model_dump(exclude_none=True)
+            # The job output isn't persisted; status details are, so `runs status` can say what was published.
+            report_status_details(
+                {PUBLICATION_STATUS_KEY: publication_outcome.model_dump(mode="json", exclude_none=True)},
+                ctx=ctx,
+                async_client=async_client,
+            )
 
         # The run is complete and its bundle durable; the files snapshot taken at submit has served its
         # purpose (the staged copy stays on job storage). A failed run keeps it for the retry.
@@ -618,10 +666,21 @@ class _AgentEvalJobBase(NemoJob):
             if isinstance(spec.target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
             else None
         )
-        if snapshot is not None:
+        if snapshot is not None and self.discard_agent_files:
             discard_registered_agent_files_sync(platform_client, snapshot)
 
         return output
+
+    def _run_id(self) -> str | None:
+        """Hook: the SDK run id, which keys published sessions (``run_id:trial_id``). None generates one."""
+        return None
+
+    def _prepared_tasks(self, tasks: list[AgentEvalTask]) -> None:
+        """Hook: inspect or adjust materialized tasks before they run. Does nothing by default."""
+
+    def _configure_harbor_runtime(self, config: HarborRuntimeConfig, ctx: JobContext) -> HarborRuntimeConfig:
+        """Hook: adjust a Harbor runner's config before it runs. Returns it unchanged by default."""
+        return config
 
 
 class AgentEvalJob(_AgentEvalJobBase):

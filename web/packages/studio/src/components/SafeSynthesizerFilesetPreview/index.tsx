@@ -47,6 +47,7 @@ export const SafeSynthesizerFilesetPreview: FC<SafeSynthesizerFilesetPreviewProp
   const { data: jobResultsList } = useListJobResultsV1beta1GenerateJobsJobIdResultsGet(
     workspace,
     safeSynthesizerJobName,
+    undefined,
     {
       query: {
         enabled: isSuccessful,

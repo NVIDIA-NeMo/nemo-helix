@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
-import type { InsightListItem } from '@nemo/sdk/generated/insights/schema';
+import type { InsightListItem } from '@nemo/sdk/generated/compass/schema';
 import { Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import type { FC } from 'react';
 
@@ -16,7 +16,7 @@ interface OpenInsightRowProps {
  * problem is and when it was last seen.
  */
 export const OpenInsightRow: FC<OpenInsightRowProps> = ({ insight, onOpen }) => {
-  const traceCount = insight.trace_refs?.length ?? 0;
+  const traceCount = insight.evidence?.length ?? 0;
 
   return (
     <Button

@@ -909,6 +909,7 @@ async def test_recovering_container_deployment_reports_starting() -> None:
     assert dep.status == "starting"
     assert "recovering" in dep.error
     ctrl._reconcile_deployment_sessions_after_restart.assert_awaited_once_with(dep)
+    assert isinstance(ctrl._save, AsyncMock)
     ctrl._save.assert_awaited()
 
 

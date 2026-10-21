@@ -40,7 +40,11 @@ from collections.abc import Generator, Iterator
 from pathlib import Path
 
 import pytest
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.models.types import CreateModelProviderRequest
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 from nhx.testing.notebooks import cleanup_temp_venv_and_kernel, create_temp_venv_with_kernel
+from pydantic import SecretStr
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +121,50 @@ def notebook_kernel(request: pytest.FixtureRequest) -> Iterator[str]:
         os.environ["PATH"] = old_path
         cleanup_temp_venv_and_kernel(kernel_name, venv_dir, kernel_spec_dir)
         logger.info("Cleaned up sandbox kernel %r", kernel_name)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def nvidia_build_provider(request: pytest.FixtureRequest, nhx_base_url: str) -> None:
+    """Create the system/nvidia-build provider used by provider-backed docs notebooks.
+
+    Quickstart does not run ``nemo setup``, so docs E2E must register the
+    provider explicitly before notebooks call Data Designer or Inference
+    Gateway examples that reference ``system/nvidia-build``.
+    """
+    nvidia_api_key = os.environ.get("NVIDIA_API_KEY")
+    if not nvidia_api_key:
+        return
+
+    client = request.getfixturevalue("client")
+    workspace = "system"
+    secret_name = "nvidia-build-api-key"
+    provider_name = "nvidia-build"
+
+    try:
+        client.secrets.create_secret(
+            workspace=workspace,
+            body=HelixSecretCreateRequest(
+                name=secret_name,
+                value=SecretStr(nvidia_api_key),
+                description="NVIDIA Build API key for docs notebook E2E",
+            ),
+        )
+    except ConflictError:
+        pass
+
+    provider_names = {provider.name for provider in client.models.list_providers(workspace=workspace).items()}
+    if provider_name in provider_names:
+        return
+
+    client.models.create_provider(
+        workspace=workspace,
+        body=CreateModelProviderRequest(
+            name=provider_name,
+            host_url="https://integrate.api.nvidia.com",
+            api_key_secret_name=secret_name,
+            description="NVIDIA Build provider for docs notebook E2E",
+        ),
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)

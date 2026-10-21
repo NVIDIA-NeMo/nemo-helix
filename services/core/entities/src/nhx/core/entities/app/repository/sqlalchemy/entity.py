@@ -15,7 +15,8 @@ from nhx.core.entities.app.repository.sqlalchemy.filter import SQLAlchemyFilterR
 from nhx.core.entities.app.repository.sqlalchemy.models import DBEntity
 from nhx.core.entities.entities import Entity
 from nhx.core.entities.utils.identifiers import generate_entity_id
-from sqlalchemy import func, select
+from sqlalchemy import cast, func, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -52,7 +53,21 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
                 else:
                     yield new_session
 
-    def _get_sort_key(self, sort: str) -> Any:
+    def _get_sort_key(self, sort: str, *, dialect_name: str) -> Any:
+        """Build an ORDER BY expression that preserves JSON scalar types.
+
+        Args:
+            sort: Base column or dotted data path, prefixed with '-' for descending.
+            dialect_name: SQLAlchemy backend name for JSON scalar extraction.
+
+        Returns:
+            An ascending or descending SQL expression. SQLite extracts dynamically
+            typed scalars; PostgreSQL compares JSONB values with its native NULL
+            ordering. Base columns and other dialects retain their existing behavior.
+
+        Raises:
+            ValueError: The requested base column does not exist.
+        """
         reverse = sort.startswith("-")
         sort_key = sort.lstrip("-")
 
@@ -61,6 +76,13 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
             result = DBEntity.data
             for key in path:
                 result = result[key]
+            if dialect_name == "sqlite":
+                # Avoid JSON_QUOTE, which would sort numbers as quoted text.
+                result = result.as_string()
+            elif dialect_name == "postgresql":
+                # The stored JSON type has no ordering operator; JSONB preserves
+                # numeric comparisons without converting the value to text.
+                result = cast(result, JSONB)
             return result.desc() if reverse else result.asc()
 
         if hasattr(DBEntity, sort_key):
@@ -188,7 +210,7 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
             total = total_result.scalar() or 0
 
             if sort is not None:
-                query = query.order_by(self._get_sort_key(sort))
+                query = query.order_by(self._get_sort_key(sort, dialect_name=sess.get_bind().dialect.name))
             else:
                 query = query.order_by(DBEntity.created_at.desc())
 

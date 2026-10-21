@@ -79,7 +79,7 @@ image-loading path can replace push. Kubernetes private images need gateway-side
 Register if the agent does not already exist:
 
 ```bash
-nemo agents create --name "$AGENT_NAME" \
+nemo agents register --name "$AGENT_NAME" \
   --agent-config "$AGENT_CONFIG" --workspace "$WORKSPACE"
 ```
 

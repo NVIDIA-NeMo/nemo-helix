@@ -1,0 +1,86 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# UNSUPPORTED LEGACY NAT INPUT — historical reference only, not a runnable bundle.
+# The NAT ReAct agent cannot be passed to Fabric config-tuning. Renaming commands
+# or supplying --agent does not translate llms/per-LLM search spaces or evaluators.
+# Dataset paths below retain their old parent-directory context.
+# See ../README.md for the separate supported Fabric example and limitations.
+
+llms:
+  # LLM used by the agent workflow — its hyperparameters are optimised.
+  # base_url and api_key are injected automatically by the platform
+  # (routes through the Inference Gateway).  For local runs without the
+  # platform, override via `nemo --base-url` or NHX_BASE_URL.
+  llm:
+    _type: openai
+    model_name: nvidia-nemotron-3-5-lightning-30b-a3b
+    temperature: 0.0
+    optimizable_params:
+      - temperature
+      - top_p
+    search_space:
+      temperature:
+        low: 0.0
+        high: 0.8
+        step: 0.2
+      top_p:
+        low: 0.5
+        high: 1.0
+        step: 0.1
+
+  # Judge LLM used by the evaluator — not optimised.
+  judge_llm:
+    _type: openai
+    model_name: nvidia-nemotron-3-super-120b-a12b
+    temperature: 0.0
+    max_tokens: 1024
+
+# Evaluation section — used by the optimizer to score each trial.
+eval:
+  general:
+    max_concurrency: 4
+    output_dir: eval/react-agent
+    dataset:
+      _type: json
+      file_path: react-eval-data.json
+  evaluators:
+    accuracy:
+      _type: tunable_rag_evaluator
+      llm_name: judge_llm
+      default_scoring: true
+      default_score_weights:
+        coverage: 0.5
+        correctness: 0.3
+        relevance: 0.2
+      judge_llm_prompt: >
+        You are an evaluator. Score whether the generated answer correctly
+        addresses the question compared to the expected answer description.
+        Rules:
+        - Score is a float between 0.0 and 1.0.
+        - 1.0 means the answer fully satisfies the expected answer criteria.
+        - Provide a 1-2 sentence reasoning.
+
+# Optimizer section — controls the tuning strategy.
+optimizer:
+  output_path: optimizer_results/react-agent
+
+  # Numeric (Optuna) hyperparameter search over temperature and top_p.
+  numeric:
+    enabled: true
+    n_trials: 3
+
+  # Prompt GA is disabled for this example; enable and add
+  # prompt-type search spaces to optimise system prompts.
+  prompt:
+    enabled: false
+
+  # Run the workflow 3 times per parameter set for stable scoring.
+  reps_per_param_set: 3
+
+  # Metrics the optimizer tries to maximise / minimise.
+  eval_metrics:
+    accuracy:
+      evaluator_name: accuracy
+      direction: maximize
+      weight: 1.0

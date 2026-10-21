@@ -221,6 +221,18 @@ def test_repository_assets_are_valid() -> None:
     assert discover_assets(assets_dir)
 
 
+def test_repository_assets_link_repo_root() -> None:
+    assets_dir = Path(__file__).parents[2] / "assets" / "ngc"
+
+    missing = [
+        asset.name
+        for asset in discover_assets(assets_dir)
+        if "](https://github.com/NVIDIA-NeMo/nemo-helix)" not in asset.overview
+    ]
+
+    assert not missing
+
+
 def test_sync_container_updates_existing_asset(tmp_path: Path) -> None:
     asset = load_asset(_write_overview(tmp_path / "nhx-api.md"), "container")
     client = MagicMock()

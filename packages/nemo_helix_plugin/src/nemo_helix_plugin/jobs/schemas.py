@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Any
 
 from nemo_helix_plugin.schema import Value
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class FileStorageType(str, Enum):
@@ -14,8 +14,16 @@ class FileStorageType(str, Enum):
 
 
 class HelixJobResultCreateRequest(BaseModel):
+    attempt_id: str = Field(description="Concrete ID of the attempt that produced the result")
     artifact_url: str
     artifact_storage_type: FileStorageType
+
+    @field_validator("attempt_id")
+    @classmethod
+    def require_concrete_attempt_id(cls, attempt_id: str) -> str:
+        if not attempt_id or attempt_id == "current":
+            raise ValueError("attempt_id must be a concrete attempt ID")
+        return attempt_id
 
 
 class HelixJobResultResponse(BaseModel):
@@ -23,6 +31,7 @@ class HelixJobResultResponse(BaseModel):
     job: str
     workspace: str
     project: str | None = None
+    attempt_id: str | None = None
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
     artifact_url: str
@@ -111,7 +120,12 @@ class HelixJobStatus(str, Enum):
                 HelixJobStatus.CANCELLING,
             },
             HelixJobStatus.CANCELLING: {HelixJobStatus.CANCELLED, HelixJobStatus.ERROR},
-            HelixJobStatus.PAUSING: {HelixJobStatus.PAUSED, HelixJobStatus.ERROR},
+            HelixJobStatus.PAUSING: {
+                HelixJobStatus.PAUSED,
+                HelixJobStatus.ERROR,
+                HelixJobStatus.CANCELLING,
+                HelixJobStatus.COMPLETED,
+            },
             HelixJobStatus.RESUMING: {
                 HelixJobStatus.PENDING,
                 HelixJobStatus.ACTIVE,

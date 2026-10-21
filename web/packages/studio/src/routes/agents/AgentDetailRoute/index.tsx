@@ -4,6 +4,7 @@
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
+import type { OptimizationStrategy } from '@nemo/sdk/generated/agent-optimization/schema/OptimizationStrategy';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import {
   Badge,
@@ -20,7 +21,6 @@ import { hasAgentConfig } from '@studio/api/agents/hasAgentConfig';
 import { FABRIC_CONFIG_FORMAT } from '@studio/api/agents/packageAgent';
 import { agentSpecSource, useAgentSpecFileset } from '@studio/api/agents/useAgentSpecFileset';
 import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
-import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
 import { ImportTracesModal } from '@studio/components/ImportTracesModal';
 import {
   AGENT_CONTAINER_DEPLOYMENTS_ENABLED,
@@ -67,10 +67,10 @@ import {
   isAgentWalkthroughPending,
 } from '@studio/routes/agents/AgentDetailRoute/walkthroughStorage';
 import { NewAgentModal } from '@studio/routes/agents/AgentsListRoute/NewAgentModal';
-import { getAgentsListRoute } from '@studio/routes/utils';
+import { getAgentRunEvaluationRoute, getAgentsListRoute } from '@studio/routes/utils';
 import { GitCommitHorizontal } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 
 export const AgentDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
@@ -80,9 +80,9 @@ export const AgentDetailRoute: FC = () => {
   const [logsDeploymentName, setLogsDeploymentName] = useState<string | undefined>();
   const [createDeploymentOpen, setCreateDeploymentOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [submitEvalOpen, setSubmitEvalOpen] = useState(false);
   const [importTracesOpen, setImportTracesOpen] = useState(false);
   const [launchOptimizeOpen, setLaunchOptimizeOpen] = useState(false);
+  const [launchStrategy, setLaunchStrategy] = useState<OptimizationStrategy | undefined>();
   const [deleteDeploymentTarget, setDeleteDeploymentTarget] = useState<AgentDeployment | null>(
     null
   );
@@ -208,14 +208,21 @@ export const AgentDetailRoute: FC = () => {
   );
 
   const canRunEvaluation = !!agentName && canDeploy;
+  const navigate = useNavigate();
+  const runEvaluation = () => {
+    if (agentName) navigate(getAgentRunEvaluationRoute(workspace, agentName));
+  };
 
   const actionFromUrl = searchParams.get(ACTION_SEARCH_PARAM);
-  // Waits for the agent query to settle so both modals are gated on a real agent, then strips the
+  // Waits for the agent query to settle so the modal is gated on a real agent, then strips the
   // param either way: a link that cannot open its modal still lands on its tab. `isPending`, not
   // `isLoading`: a paused retry (hidden tab, offline) is not loading, but has not settled either.
   useEffect(() => {
     if (!actionFromUrl || isAgentPending) return;
-    if (actionFromUrl === 'run-evaluation' && canRunEvaluation) setSubmitEvalOpen(true);
+    if (actionFromUrl === 'run-evaluation' && canRunEvaluation && agentName) {
+      navigate(getAgentRunEvaluationRoute(workspace, agentName), { replace: true });
+      return;
+    }
     const optimizeRequested =
       actionFromUrl === 'optimize' && AGENT_OPTIMIZATIONS_ENABLED && !!agent;
     if (optimizeRequested && !AGENT_OPTIMIZATION_FORM_ENABLED) setLaunchOptimizeOpen(true);
@@ -231,7 +238,16 @@ export const AgentDetailRoute: FC = () => {
       },
       { replace: true }
     );
-  }, [actionFromUrl, isAgentPending, canRunEvaluation, agent, setSearchParams]);
+  }, [
+    actionFromUrl,
+    isAgentPending,
+    agent,
+    setSearchParams,
+    canRunEvaluation,
+    agentName,
+    workspace,
+    navigate,
+  ]);
 
   const status = healthyDeployments.length > 0 ? 'running' : agentDeployments[0]?.status;
   const statusPillLabel =
@@ -281,7 +297,7 @@ export const AgentDetailRoute: FC = () => {
               canOptimize={!isCreatingOptimization}
               deployButtonRef={deployButtonRef}
               onDeploy={onDeploy}
-              onRunEvaluation={() => setSubmitEvalOpen(true)}
+              onRunEvaluation={runEvaluation}
               onOptimize={openOptimize}
               onImportTraces={() => setImportTracesOpen(true)}
             />
@@ -317,7 +333,7 @@ export const AgentDetailRoute: FC = () => {
                 evals={agentEvals}
                 isEvalsPending={isAgentEvalsPending}
                 onRunAgent={() => setSelectedTab('chat')}
-                onRunEvaluation={canRunEvaluation ? () => setSubmitEvalOpen(true) : undefined}
+                onRunEvaluation={canRunEvaluation ? runEvaluation : undefined}
               />
             </TabsContent>
           )}
@@ -341,6 +357,7 @@ export const AgentDetailRoute: FC = () => {
                 onOptimize={openOptimize}
                 onViewChange={setOptimizationView}
                 onUploadConfig={() => setLaunchOptimizeOpen(true)}
+                onRunStrategy={setLaunchStrategy}
               />
             </TabsContent>
           )}
@@ -408,12 +425,6 @@ export const AgentDetailRoute: FC = () => {
           </TabsContent>
         </TabsRoot>
       </Stack>
-      <SubmitEvaluationModal
-        open={submitEvalOpen}
-        onClose={() => setSubmitEvalOpen(false)}
-        workspace={workspace}
-        agent={agentName}
-      />
       {agentName && importTracesOpen && (
         <ImportTracesModal
           open
@@ -428,6 +439,16 @@ export const AgentDetailRoute: FC = () => {
           onClose={() => setLaunchOptimizeOpen(false)}
           workspace={workspace}
           agentName={agentName}
+        />
+      )}
+      {agentName && launchStrategy && (
+        <LaunchOptimizeModal
+          key={launchStrategy.name}
+          open
+          onClose={() => setLaunchStrategy(undefined)}
+          workspace={workspace}
+          agentName={agentName}
+          strategy={launchStrategy}
         />
       )}
       {agentName && AGENT_CONTAINER_DEPLOYMENTS_ENABLED ? (

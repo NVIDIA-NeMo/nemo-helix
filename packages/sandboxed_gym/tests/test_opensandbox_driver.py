@@ -116,7 +116,7 @@ def test_output_is_the_message_text_rejoined_into_lines(texts: tuple[str, ...], 
     ``text`` leaks the message model's repr, timestamp included, into the stdout callers compare
     against. A bare ``echo`` did write output, so it is ``""``, not ``None``.
     """
-    assert _joined_output(_sdk_messages(*texts)) == expected  # ty: ignore[invalid-argument-type]
+    assert _joined_output(_sdk_messages(*texts)) == expected
 
 
 @requires_opensandbox

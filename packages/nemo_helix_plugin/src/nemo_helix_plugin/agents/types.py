@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal, NotRequired, TypeAlias, TypedDict
+from typing import Any, Literal, NotRequired, Self, TypeAlias, TypedDict
 
 from nemo_helix_plugin.jobs.schemas import (
     HelixJobListResultResponse,
@@ -16,7 +16,7 @@ from nemo_helix_plugin.jobs.schemas import (
     HelixJobStatusResponse,
 )
 from nemo_helix_plugin.schema import Page
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 JsonMap: TypeAlias = dict[str, Any]
 JsonObject: TypeAlias = JsonMap
@@ -295,13 +295,33 @@ class AgentSession(EntityMetadata):
     expires_at: datetime | None = Field(default=None, description="UTC rolling idle deadline.")
 
 
-class CreateAgentRequest(BaseModel):
+class RegisterAgentRequest(BaseModel):
     """Request body for ``POST /v2/workspaces/{workspace}/agents``."""
 
     name: str = Field(description="Unique agent name within the workspace.")
     description: str = Field(default="", description="Human-readable description.")
-    config: JsonMap = Field(description="Agent config dict interpreted according to config_format.")
-    config_format: str = Field(default=NAT_WORKFLOW_CONFIG_FORMAT, description="Config format identifier.")
+    config: JsonMap = Field(
+        default_factory=dict, description="Agent config dict interpreted according to config_format."
+    )
+    config_format: str = Field(
+        default_factory=lambda data: (
+            data["config"].get("config_format", NAT_WORKFLOW_CONFIG_FORMAT)
+            if data.get("config")
+            else NEMO_AGENTS_SPEC_CONFIG_FORMAT
+        ),
+        validate_default=True,
+        description=(
+            "Config format identifier. Uses config.config_format when present; otherwise defaults to "
+            "nemo-agents-spec-v1 for an empty config or nat-workflow-v1 for a nonempty config. "
+            "An explicit value must match config.config_format."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_config_format(self) -> Self:
+        if self.config.get("config_format", self.config_format) != self.config_format:
+            raise ValueError("config_format must match config.config_format")
+        return self
 
 
 class CreateSampleAgentRequest(BaseModel):

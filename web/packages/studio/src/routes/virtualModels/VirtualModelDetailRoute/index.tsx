@@ -3,7 +3,7 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { PageHeader, Stack, Tabs } from '@nvidia/foundations-react-core';
-import { Loading } from '@studio/components/Layouts/Loading';
+import { SuspenseOutlet } from '@studio/components/Layouts/SuspenseOutlet';
 import { ROUTE_PARAMS, ROUTES } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
@@ -13,8 +13,8 @@ import {
   getWorkspaceVirtualModelsRoute,
 } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
-import { type FC, Suspense } from 'react';
-import { Link, Outlet, matchPath, useLocation } from 'react-router';
+import { type FC } from 'react';
+import { Link, matchPath, useLocation } from 'react-router';
 
 /**
  * Detail page for a single virtual model. Replaces the former details side panel: the name lives
@@ -71,9 +71,7 @@ export const VirtualModelDetailRoute: FC = () => {
           renderLink={(item) => <Link to={item.href!}>{item.children}</Link>}
         />
 
-        <Suspense fallback={<Loading description="Loading..." />}>
-          <Outlet />
-        </Suspense>
+        <SuspenseOutlet />
       </Stack>
     </AccessibleTitle>
   );

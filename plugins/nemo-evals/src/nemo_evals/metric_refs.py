@@ -20,6 +20,7 @@ from nemo_evals.api.schemas import MetricRef, MetricRefOrInline
 from nemo_evals.entities import MetricBundleEntity
 from nemo_evals.metric_storage import load_bundle
 from nemo_evals.shared.metric_bundles.bundles import MetricBundle
+from nemo_evals.source_authorization import SourceReadAuthorizer, authorize_source_read
 from nemo_helix_plugin.entity_client import NemoEntityGetterProtocol, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.refs import parse_entity_ref
@@ -43,14 +44,19 @@ async def resolve_metric_ref(
     workspace: str,
     entity_client: NemoEntityGetterProtocol[MetricBundleEntity] | None,
     files_client: AsyncFilesClient | None,
+    authorize: SourceReadAuthorizer | None = None,
 ) -> MetricBundle:
-    """Load and reconstruct the stored metric a reference points at."""
+    """Load and reconstruct the stored metric a reference points at.
+
+    ``authorize`` runs before the read, so a denied caller cannot learn whether the metric exists.
+    """
     if entity_client is None or files_client is None:
         raise ValueError(
             "MetricRef metrics require a platform connection (entity store and Files service) to resolve; "
             "pass an inline metric instead."
         )
     ref_workspace, name = parse_metric_ref(ref.root, workspace)
+    await authorize_source_read(authorize, "metric", ref_workspace, name)
     try:
         entity = await entity_client.get(MetricBundleEntity, name=name, workspace=ref_workspace)
     except NemoEntityNotFoundError as exc:
@@ -68,6 +74,7 @@ async def resolve_metric_specs(
     workspace: str,
     entity_client: NemoEntityGetterProtocol[MetricBundleEntity] | None,
     files_client: AsyncFilesClient | None,
+    authorize: SourceReadAuthorizer | None = None,
 ) -> list[MetricBundle]:
     """Resolve a wire metric list into runtime bundles.
 
@@ -84,6 +91,7 @@ async def resolve_metric_specs(
                     workspace=workspace,
                     entity_client=entity_client,
                     files_client=files_client,
+                    authorize=authorize,
                 )
             )
         else:

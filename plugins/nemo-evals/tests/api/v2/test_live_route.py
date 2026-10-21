@@ -11,13 +11,15 @@ would block the worker for the whole of generation plus judging.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
-from typing import Any
+from collections.abc import AsyncGenerator, Iterator
+from contextlib import asynccontextmanager
+from typing import Any, NoReturn
 
 import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from nemo_evals.api import dependencies as api_dependencies
 from nemo_evals.api.schemas import MetricInline
 from nemo_evals.api.v2 import live as live_routes
 from nemo_evals.entities import MetricBundleEntity
@@ -26,8 +28,10 @@ from nemo_evals.metric_storage import parse_bundle_ref
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.dependencies import get_nemo_client
-from nemo_helix_plugin.entities import EntityClient
+from nemo_helix_plugin.entities import EntityClient, parse_qualified_name
 from nemo_helix_plugin.entity_client import get_entity_client
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.testing.files import InMemoryFilesService
@@ -403,6 +407,119 @@ def test_missing_judge_secret_fails_instead_of_scoring(monkeypatch: pytest.Monke
     assert secrets_service.lookups == [("default", "judge-key")]
 
 
+_EDITOR = AuthContext(principal_id="sub-123", principal_email="editor@ex.com", principal_groups=["team-a"])
+
+
+def _delegated_service_client(monkeypatch: pytest.MonkeyPatch, service_secrets_client) -> list[dict[str, Any]]:
+    """Make the route see ``_EDITOR`` as the caller and hand it ``service_secrets_client`` as its service client."""
+    calls: list[dict[str, Any]] = []
+
+    @asynccontextmanager
+    async def fake_get_async_nemo_client(**kwargs: Any) -> AsyncGenerator[object, None]:
+        calls.append(kwargs)
+        yield service_secrets_client
+
+    monkeypatch.setattr(api_dependencies, "current_auth_context", lambda: _EDITOR)
+    monkeypatch.setattr(api_dependencies, "get_async_nemo_client", fake_get_async_nemo_client)
+    return calls
+
+
+def test_judge_secret_is_read_by_evals_on_behalf_of_the_caller(
+    monkeypatch: pytest.MonkeyPatch, make_secrets_service
+) -> None:
+    """Secrets serves values only to service principals, so the caller's own client must never read one.
+
+    The request-scoped client here holds the same secret: if the route read through it, the lookup
+    would land there instead and the service client would see nothing.
+    """
+    seen_keys: list[str | None] = []
+
+    async def fake_judge_inference(model, request, max_retries=3, **kwargs) -> dict[str, Any]:
+        del model, request, max_retries
+        judge_client = kwargs.get("client")
+        seen_keys.append(kwargs.get("api_key") if judge_client is None else judge_client.api_key)
+        return _chat_response('{"helpfulness": 4}')
+
+    monkeypatch.setattr(sdk_inference, "make_inference_request", fake_judge_inference)
+    service_secrets = make_secrets_service({("default", "judge-key"): "sk-judge-secret"})
+    calls = _delegated_service_client(monkeypatch, service_secrets.client())
+
+    request_secrets = make_secrets_service({("default", "judge-key"): "sk-judge-secret"})
+    app = _build_app()
+    app.dependency_overrides[get_nemo_client] = request_secrets.client
+    with TestClient(app) as client:
+        resp = client.post(
+            _BASE,
+            json={
+                "dataset": [{"question": "Capital of France?", "output": "Paris"}],
+                "metrics": [_judge_metric("judge-key")],
+                "field_mapping": {"output": "output"},
+            },
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert "sk-judge-secret" not in resp.text
+    assert request_secrets.lookups == []
+    assert service_secrets.lookups == [("default", "judge-key")]
+    assert seen_keys and set(seen_keys) == {"sk-judge-secret"}
+    [call] = calls
+    assert call["as_service"] == "evals"
+    assert call["internal"] is True
+    delegated = call["on_behalf_of"]
+    assert (delegated.id, delegated.email, list(delegated.groups)) == ("sub-123", "editor@ex.com", ["team-a"])
+
+
+class _DenyingSecretsClient(AsyncSecretsClient):
+    """Stands in for Secrets refusing the delegated caller ``secrets.read`` in the secret's workspace."""
+
+    def __init__(self) -> None:
+        super().__init__(base_url="http://secrets.invalid", workspace="default")
+        self.lookups: list[tuple[str, str]] = []
+
+    async def access_secret(self, *, workspace: str | None = None, name: str) -> NoReturn:
+        self.lookups.append((workspace or "default", name))
+        raise PermissionDeniedError(
+            httpx.Response(403, json={"detail": "Forbidden"}, request=httpx.Request("GET", "/"))
+        )
+
+
+def test_cross_workspace_secret_denied_to_the_caller_fails_before_inference(
+    monkeypatch: pytest.MonkeyPatch, make_secrets_service
+) -> None:
+    """A ref into a workspace the caller cannot read is asked for there, refused, and never reaches a judge.
+
+    A denial must not degrade to "no such secret" or fall back to another client: either would let the
+    judge run with whatever key it found elsewhere.
+    """
+
+    async def fake_judge_inference(model, request, max_retries=3, **kwargs) -> dict[str, Any]:
+        del model, request, max_retries, kwargs
+        raise AssertionError("inference must not run when the caller may not read the judge key")
+
+    monkeypatch.setattr(sdk_inference, "make_inference_request", fake_judge_inference)
+    service_secrets = _DenyingSecretsClient()
+    _delegated_service_client(monkeypatch, service_secrets)
+
+    request_secrets = make_secrets_service({("team-b", "judge-key"): "sk-team-b"})
+    app = _build_app()
+    app.dependency_overrides[get_nemo_client] = request_secrets.client
+    with TestClient(app) as client:
+        resp = client.post(
+            _BASE,
+            json={
+                "dataset": [{"question": "Capital of France?", "output": "Paris"}],
+                "metrics": [_judge_metric("team-b/judge-key")],
+                "field_mapping": {"output": "output"},
+            },
+        )
+
+    assert resp.status_code == 502, resp.text
+    assert "403" in resp.text
+    assert "sk-team-b" not in resp.text
+    assert service_secrets.lookups == [("team-b", "judge-key")]
+    assert request_secrets.lookups == []
+
+
 def test_one_failing_metric_does_not_hide_the_others(client: TestClient) -> None:
     """A broken metric reports its own error; its siblings still return scores.
 
@@ -470,9 +587,9 @@ class _FakeBundleEntities(EntityClient):
         self._entity = entity
         self.lookups: list[tuple[str, str]] = []
 
-    async def get(self, entity_type, *, name: str, workspace: str, parent: str | None = None):
+    async def get(self, entity_type, name: str, *, workspace: str | None = None, parent: str | None = None):
         del entity_type, parent
-        self.lookups.append((workspace, name))
+        self.lookups.append(parse_qualified_name(name, default_workspace=workspace))
         return self._entity
 
 
@@ -601,6 +718,7 @@ def test_stored_cloudpickle_metric_is_rejected_by_default(
 ) -> None:
     """A cloudpickle metric stored before the deployment disabled them is refused when referenced."""
     bundle = MetricInline.model_validate(detonating_cloudpickle_metric)
+    assert bundle.payload.digest is not None
     entity = MetricBundleEntity(
         name="stored-custom",
         workspace="default",

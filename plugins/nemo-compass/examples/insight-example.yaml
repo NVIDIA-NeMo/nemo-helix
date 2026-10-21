@@ -1,0 +1,89 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+insights:
+- id: insight-b3adbc1b909843cf83dfd35a4bfa5e3d
+  workspace: default
+  title: Spurious refusal on benign terminal-bench tasks
+  agent: codex
+  description: 'Failure mode: codex aborts a task by emitting the canned refusal "I''m
+    sorry, but I cannot assist with that request." as its final assistant message,
+    scoring 0 on the task verifier. Affected component: the final LLM/assistant
+    turn (model aws/anthropic/bedrock-claude-opus-4-6 under the codex harness) — the
+    refusal appears AFTER the agent has already begun work (2–5 shell_command/update_plan
+    calls), not at the outset. Trigger conditions: entirely benign coding/ops prompts
+    — constraint scheduling, generating a [regex, replacement] JSON file, implementing
+    a headless terminal interface. The same task ids pass in other trials, so the
+    refusal is non-deterministic. Hypothesis: an over-aggressive safety/instruction-following
+    layer mis-classifies these benign tasks as disallowed and short-circuits an in-progress
+    trajectory.'
+  status: open
+  severity: high
+  # When Compass last added supporting trace evidence.
+  updated_date: '2026-06-05T22:28:00.691135+00:00'
+  evidence:
+  # URLs and span IDs below are illustrative; use values from the trace provider.
+  - trace_id: constraints-scheduling-xhsKy3g
+    url: https://provider.example/traces/constraints-scheduling-xhsKy3g
+    spans:
+    - span_id: example-shell-command
+    - span_id: example-final-assistant-refusal
+      url: https://provider.example/spans/example-final-assistant-refusal
+  # Omitting spans cites the whole trace.
+  - trace_id: regex-chess-HfzhtaZ
+  - trace_id: headless-terminal-DzYqtUy
+  created_at: '2026-06-05T22:28:00.691135+00:00'
+  updated_at: '2026-06-05T22:28:00.691135+00:00'
+- id: insight-c0bbadce52c34656a0e61b215142f291
+  workspace: default
+  title: Declares success against self-authored tests that don't meet the real spec
+  agent: codex
+  description: 'Failure mode: codex finishes with a confident completion claim — "The
+    implementation is complete and all tests pass", "I have successfully implemented...",
+    "passes the required tests" — yet the task verifier scores 0. Affected component:
+    the agent''s self-verification step. In the trajectories it writes and runs its
+    OWN tests (e.g. `Rscript -e ''source("ars.R"); test()''`) and treats their passing
+    as task completion, instead of validating against the task''s stated acceptance
+    criteria. Trigger conditions: open-ended implementation tasks where the agent
+    can author its own tests (adaptive-rejection-sampler fails 5/6 trials this way;
+    also SAM cell-segmentation, regex-chess, Raman fitting, mailman setup). Hypothesis:
+    the agent anchors on self-invented success criteria and never reconciles them
+    with the real spec, producing overconfident but incorrect completions.'
+  status: open
+  evidence:
+  - trace_id: adaptive-rejection-sampler-sCQXPuA
+  - trace_id: adaptive-rejection-sampler-qYLBFwo
+  - trace_id: adaptive-rejection-sampler-Fgeag3m
+  - trace_id: sam-cell-seg-XVe4VSi
+  - trace_id: regex-chess-mbr83he
+  - trace_id: raman-fitting-4TkuEBg
+  - trace_id: mailman-Aw7evCn
+  created_at: '2026-06-05T22:28:00.691135+00:00'
+  updated_at: '2026-06-05T22:28:00.691135+00:00'
+- id: insight-78d54712121d416192b9aa04bc78d375
+  workspace: default
+  title: Trajectory truncated mid-debugging on long environment-heavy tasks
+  agent: codex
+  description: 'Failure mode: on long-horizon, environment-heavy tasks the codex trajectory
+    terminates with its last recorded action being a shell_command and no closing
+    completion summary; the task verifier scores 0. The final tool output frequently
+    still shows a live failure (segfault exit 139, gcc/compile errors, exit 1 tracebacks,
+    or ''No SSH banner after 60s''), i.e. the solution was never finalized. Affected
+    component: the agent loop / step-budget — this end-on-tool-call-without-summary
+    pattern occurs in ~56% of failures vs ~11% of passes, and the affected runs cluster
+    at high tool-call counts (50+: qemu, path-tracing, make-mips, protein-assembly).
+    Trigger conditions: tasks involving builds, emulation, ML training/setup, or long
+    iterative debugging (qemu+ssh boot, custom compressor, MIPS interpreter, Caffe
+    CIFAR-10 build, path-tracing reverse-engineering). Hypothesis: the agent exhausts
+    its turn/step budget (or is cut off) before converging, leaving a broken solution
+    and never delivering or verifying a result.'
+  status: open
+  evidence:
+  - trace_id: qemu-alpine-ssh-Z9EtcT7
+  - trace_id: write-compressor-U9gsqTF
+  - trace_id: path-tracing-reverse-XKeZn2P
+  - trace_id: make-mips-interpreter-vgGbWQh
+  - trace_id: caffe-cifar-10-mZcR43P
+  - trace_id: polyglot-c-py-jcceToH
+  created_at: '2026-06-05T22:28:00.691135+00:00'
+  updated_at: '2026-06-05T22:28:00.691135+00:00'

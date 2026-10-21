@@ -221,6 +221,12 @@ def _build_profile() -> DatasetProfile:
     )
 
 
+def _item_field(feature: FeatureSchema, index: int) -> FeatureSchema:
+    """Return field *index* of *feature*'s element struct, failing if either level is missing."""
+    assert feature.items is not None and feature.items.fields is not None
+    return feature.items.fields[index]
+
+
 def test_schema_version_defaults_to_constant():
     profile = _build_profile()
     assert profile.profile_schema_version == PROFILE_SCHEMA_VERSION == "1.0"
@@ -252,13 +258,16 @@ def test_openmathreasoning_locks_contract_shape():
     assert prompt_feature.name == "prompt"
     assert prompt_feature.dtype == "messages"
     assert prompt_feature.semantic_role == "prompt"
-    assert prompt_feature.items.fields[0].name == "role"
+    assert _item_field(prompt_feature, 0).name == "role"
     # Verifiability carries its own coverage + scoped evidence.
     verify = part.classification.verifiability
+    assert verify is not None
     assert verify.method == "extractable_final_answer"
     assert verify.coverage == pytest.approx(0.81)
     # Message stats fold into the messages block.
+    assert part.stats["prompt"].messages is not None
     assert part.stats["prompt"].messages.ends_with_assistant_rate == 0.0
+    assert part.stats["completion"].messages is not None
     assert part.stats["completion"].messages.roles_seen == ["assistant"]
 
 
@@ -273,7 +282,9 @@ def test_helpsteer2_flat_schema_and_no_verifiability():
     response_feature = next(f for f in part.features if f.name == "response")
     assert response_feature.semantic_role == "completion"
     # Bounded rating scale corroborated by cardinality.
+    assert part.stats["helpfulness"].categorical is not None
     assert part.stats["helpfulness"].categorical.distinct_count == 5
+    assert part.stats["helpfulness"].numeric is not None
     assert part.stats["helpfulness"].numeric.max == 4.0
     # card_metadata evidence survives (declared card tags corroborate, never override).
     kinds = {e.kind for e in part.classification.evidence}
@@ -295,10 +306,10 @@ def test_semantic_role_reachable_at_any_depth():
             ],
         ),
     )
-    assert answers.items.fields[2].semantic_role == "rank"
+    assert _item_field(answers, 2).semantic_role == "rank"
     # Round-trips through JSON without losing the nested marker.
     restored = FeatureSchema.model_validate_json(answers.model_dump_json())
-    assert restored.items.fields[2].semantic_role == "rank"
+    assert _item_field(restored, 2).semantic_role == "rank"
 
 
 def test_vocabularies_are_open():

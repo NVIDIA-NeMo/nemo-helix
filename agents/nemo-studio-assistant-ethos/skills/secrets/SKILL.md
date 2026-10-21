@@ -4,6 +4,8 @@
 
 name: secrets
 description: NeMo Helix secret CRUD lifecycle through the platform SDK.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 # Secret tasks
 

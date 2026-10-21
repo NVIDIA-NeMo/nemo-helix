@@ -44,7 +44,7 @@ export const DEFAULT_MAX_CONCURRENT_TASKS = 1;
  *  ``ignore_request_failure`` and the job would still report success. Raise parallelism
  *  further only alongside retries, and only if the endpoint keeps up. */
 const AGENT_RUN_PARAMS = {
-  parallelism: 4,
+  parallelism: 1,
   request_timeout: 300,
   max_retries: 5,
   ignore_request_failure: true,

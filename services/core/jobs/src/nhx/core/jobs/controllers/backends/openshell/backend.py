@@ -70,6 +70,7 @@ from nhx.core.jobs.controllers.backends.base import (
     JobUpdate,
     get_job_runtime_shared_envvars,
     get_logs_endpoint_from_fileset,
+    step_ttl_seconds_active,
 )
 from nhx.core.jobs.controllers.backends.openshell.policy import (
     DEFAULT_EGRESS_BINARIES,
@@ -78,8 +79,8 @@ from nhx.core.jobs.controllers.backends.openshell.policy import (
     build_sandbox_policy,
     generate_policy_dict,
     inject_platform_egress,
+    layer_policy_dict,
     load_policy_dict,
-    normalize_loaded_policy,
 )
 
 if TYPE_CHECKING:
@@ -244,11 +245,12 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
     def _build_executor_policy(self) -> Any:
         """The SandboxPolicy applied to created sandboxes.
 
-        A hand-written YAML (``policy_path``) if given, else a generated default-deny
-        policy. The platform egress rule is always injected as mandatory so a job can
-        never lose its path back to the platform. When ``platform_egress`` is null the
-        sandbox gets no direct egress at all, which breaks the launcher's config and
-        secrets fetch and OTLP log export; the profile default sets it.
+        A generated default-deny policy, with the hand-written YAML (``policy_path``)
+        layered over it when given (see ``layer_policy_dict``). The platform egress rule
+        is always injected as mandatory so a job can never lose its path back to the
+        platform. When ``platform_egress`` is null the sandbox gets no direct egress at
+        all, which breaks the launcher's config and secrets fetch and OTLP log export;
+        the profile default sets it.
         """
         cfg = self._executor_config.platform_egress
         egress = (
@@ -263,14 +265,10 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
             if cfg is not None
             else None
         )
+        policy_dict = generate_policy_dict(filesystem=SandboxFilesystem(), egress=egress)
         path = self._executor_config.policy_path
         if path:
-            policy_dict = normalize_loaded_policy(load_policy_dict(path))
-        else:
-            policy_dict = generate_policy_dict(
-                filesystem=SandboxFilesystem(),
-                egress=egress,
-            )
+            policy_dict = layer_policy_dict(policy_dict, load_policy_dict(path))
         if egress is not None:
             inject_platform_egress(policy_dict, egress)
         return build_sandbox_policy(policy_dict)
@@ -517,7 +515,8 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
         """The exceeded TTL in seconds for a non-terminal sandbox, or None."""
         config = self._execution_profile_config
         if step_status == HelixJobStatus.ACTIVE:
-            return config.ttl_seconds_active if self.check_step_ttl(step, config.ttl_seconds_active) else None
+            ttl_seconds = step_ttl_seconds_active(step, config.ttl_seconds_active)
+            return ttl_seconds if self.check_step_ttl(step, ttl_seconds) else None
         not_started = _PHASE_TO_STATUS.get(_phase_name(phase)) == HelixJobStatus.PENDING
         if (
             step_status == HelixJobStatus.PENDING
@@ -542,13 +541,19 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
                 continue
             workspace = labels.get(JOB_WORKSPACE_ID_LABEL)
             job = labels.get(JOB_ID_LABEL)
+            attempt_id = labels.get(JOB_ATTEMPT_ID_LABEL)
             step_name = labels.get(JOB_STEP_NAME_LABEL)
             if not workspace or not job or not step_name:
                 continue
 
             # Verify the step is terminal before cleaning up, so a resource that was
             # marked active is never reclaimed early and then reported as error.
-            step = self.get_step_safe(job=job, step_name=step_name, workspace=workspace)
+            step = self.get_step_safe(
+                job=job,
+                step_name=step_name,
+                workspace=workspace,
+                attempt_id=attempt_id,
+            )
             if step is not None and step.status not in ("cancelled", "error", "completed"):
                 continue
 

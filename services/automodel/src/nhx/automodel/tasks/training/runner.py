@@ -17,6 +17,7 @@ from types import TracebackType
 
 import yaml
 from nhx.automodel.app.constants import DEFAULT_TRAINING_RESULT_FILE_NAME
+from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.service.context import NHXJobContext
 from nhx.customization_common.service.path_utils import remap_job_storage_path
 
@@ -26,6 +27,7 @@ from .errors.converter import create_error_details
 from .progress import JobsServiceProgressReporter
 from .protocol import LibraryConfig
 from .schemas import (
+    FinetuningType,
     GPUInfo,
     TrainingMetrics,
     TrainingResult,
@@ -153,7 +155,7 @@ class TrainingRunner:
         config_path = self._get_library_config_path()
 
         if self._dist_ctx.is_coordinator:
-            self._progress.report_running("compiling_config")
+            self._progress.report_running(TrainingPhase.COMPILING_CONFIG)
             config_dict = self._backend.compile_config(self._config, self._workspace_path)
             config_path.parent.mkdir(parents=True, exist_ok=True)
             with open(config_path, "w") as f:
@@ -191,7 +193,11 @@ class TrainingRunner:
                 training_duration_seconds=self._progress.training_duration_seconds,
             )
 
-        self._progress.report_running("processing_checkpoint")
+        self._progress.report_running(
+            TrainingPhase.MERGING_ADAPTER
+            if self._config.training.finetuning_type == FinetuningType.LORA_MERGED
+            else TrainingPhase.FINALIZING_CHECKPOINT
+        )
         checkpoints = self._backend.find_checkpoints(self._workspace_path, self._config)
         checkpoint_info = self._backend.process_checkpoints(
             checkpoints,

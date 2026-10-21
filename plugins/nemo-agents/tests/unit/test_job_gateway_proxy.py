@@ -121,6 +121,42 @@ def test_only_gateway_models_ask_for_a_proxy() -> None:
     assert gateway_proxy.rewrite_gateway_models(direct, "http://127.0.0.1:1") is direct
 
 
+def test_intake_otlp_endpoints_are_rebased_onto_the_proxy_like_everything_else_platform_bound() -> None:
+    """The same spec exports through the auth-proxy sidecar when deployed; a job must not post it to the
+    literal URL from inside a pod where that URL is unreachable or unauthenticated."""
+    intake = "/apis/intake/v2/workspaces/team-a/ingest/otlp/v1"
+    config = _config()
+    config.telemetry.opentelemetry = {
+        "enabled": True,
+        "endpoints": [
+            {"type": "gen_ai", "endpoint": f"https://helix.example.com{intake}/traces"},
+            {"type": "gen_ai", "endpoint": "https://otel.example.com/v1/traces"},
+        ],
+        "logs": {"enabled": True, "endpoints": [{"endpoint": f"http://localhost:8080{intake}/logs"}]},
+        "metrics": {"enabled": True, "endpoints": [{"endpoint": f"http://localhost:8080{intake}/metrics"}]},
+    }
+    before = config.model_dump()
+    assert gateway_proxy.exports_otlp_to_intake(config)
+
+    runtime = gateway_proxy.rewrite_intake_otlp_endpoints(config, "http://127.0.0.1:9019")
+
+    opentelemetry = runtime.telemetry.opentelemetry
+    assert opentelemetry is not None
+    assert [e["endpoint"] for e in opentelemetry["endpoints"]] == [
+        f"http://127.0.0.1:9019{intake}/traces",
+        "https://otel.example.com/v1/traces",
+    ]
+    assert opentelemetry["logs"]["endpoints"][0]["endpoint"] == f"http://127.0.0.1:9019{intake}/logs"
+    assert opentelemetry["metrics"]["endpoints"][0]["endpoint"] == f"http://127.0.0.1:9019{intake}/metrics"
+    assert config.model_dump() == before
+    assert gateway_proxy.rewrite_intake_otlp_endpoints(config, None) is config
+
+    own_collector = _config()
+    own_collector.telemetry.opentelemetry = {"endpoints": [{"type": "gen_ai", "endpoint": "https://mine/otlp"}]}
+    assert not gateway_proxy.exports_otlp_to_intake(own_collector)
+    assert gateway_proxy.rewrite_intake_otlp_endpoints(own_collector, "http://127.0.0.1:1") is own_collector
+
+
 @pytest.mark.parametrize(
     "failure", [RuntimeError("invoke failed"), TimeoutError("invoke timed out"), asyncio.CancelledError()]
 )
@@ -130,6 +166,7 @@ def test_proxy_closes_on_invocation_failure(workload: Mock, failure: BaseExcepti
             proxy_url = gateway_proxy.rewrite_gateway_models(_config(), origin).models["default"].base_url
             assert proxy_url is not None
             raise failure
+    assert proxy_url is not None
     _assert_closed(proxy_url)
 
 

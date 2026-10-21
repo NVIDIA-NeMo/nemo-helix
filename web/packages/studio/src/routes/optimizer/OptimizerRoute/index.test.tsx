@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
-import { getInsightsListInsightsQueryKey } from '@nemo/sdk/generated/insights/insights-insights';
-import type { InsightListItem } from '@nemo/sdk/generated/insights/schema';
+import { getCompassListInsightsQueryKey } from '@nemo/sdk/generated/compass/compass-insights';
+import type { InsightListItem } from '@nemo/sdk/generated/compass/schema';
 import { ROUTES } from '@studio/constants/routes';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
@@ -12,7 +12,7 @@ import { getOptimizerRoute } from '@studio/routes/utils';
 import { renderRoute, screen, within } from '@studio/tests/util/render';
 import { http, HttpResponse } from 'msw';
 
-const INSIGHTS_URL = mockApiUrl(getInsightsListInsightsQueryKey, ':workspace');
+const INSIGHTS_URL = mockApiUrl(getCompassListInsightsQueryKey, ':workspace');
 const EXPERIMENTS_URL = '*/apis/intake/v2/workspaces/:workspace/experiments';
 
 const makeInsight = (id: string, title: string): InsightListItem => ({
@@ -26,7 +26,7 @@ const makeInsight = (id: string, title: string): InsightListItem => ({
   description: `${title} description`,
   agent: 'research-agent',
   status: 'open',
-  trace_refs: ['trace-1'],
+  evidence: [{ trace_id: 'trace-1' }],
   created_at: '2026-07-20T12:00:00Z',
   created_by: 'user@example.com',
   updated_at: '2026-07-20T12:00:00Z',
@@ -61,6 +61,21 @@ const findCell = async (insightTitle: string, columnName: string): Promise<HTMLE
 };
 
 describe('OptimizerRoute', () => {
+  it('does not declare an empty row actions column for insights', async () => {
+    server.use(
+      http.get(INSIGHTS_URL, () =>
+        HttpResponse.json(insightsPage([makeInsight('insight-1', 'Investigate latency')]))
+      )
+    );
+
+    renderList();
+
+    const row = await screen.findByRole('row', { name: /Investigate latency/ });
+    expect(within(row).queryByRole('button', { name: 'Row Actions' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Row Actions' })).not.toBeInTheDocument();
+    expect(within(row).getAllByRole('cell')).toHaveLength(7);
+  });
+
   it('renders server-provided list metadata without per-row requests', async () => {
     const experimentRequest = vi.fn(() => HttpResponse.json({}));
     const insights = [

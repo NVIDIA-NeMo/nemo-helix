@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import ClassVar, Literal
 
@@ -25,8 +26,16 @@ from nemo_builder_plugin.completion import (
 )
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import ContainerImage
+from nemo_builder_plugin.identity import ImageReference
 from nemo_builder_plugin.schema import BuildSet, SubmitBuildResponse
-from nemo_builder_plugin.submit import BuildConflict, InvalidBuildRequest, MissingSecrets, submit_build_set
+from nemo_builder_plugin.submit import (
+    BuildConflict,
+    InvalidBuildRequest,
+    MissingSecrets,
+    UpstreamUnavailable,
+    submit_build_set,
+)
+from nemo_builder_plugin.upstream import UpstreamRegistry
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NotFoundError, PermissionDeniedError
@@ -104,6 +113,13 @@ def _build_router() -> APIRouter:
                 return False
             return True
 
+        async def resolve_upstream(reference: ImageReference, platform: str) -> str:
+            registry = UpstreamRegistry()
+            try:
+                return (await asyncio.to_thread(registry.resolve, reference, platform=platform)).manifest_digest
+            finally:
+                registry.close()
+
         try:
             # The sandbox runs where the build's profiles put its steps.
             backend = load_backend(BuilderConfig.get(), await jobs_client.list_execution_profiles())
@@ -115,11 +131,14 @@ def _build_router() -> APIRouter:
                 create_job=create_job,
                 get_job_fields=get_job_fields,
                 secret_readable=secret_readable,
+                resolve_upstream=resolve_upstream,
             )
         except InvalidBuildRequest as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except (BackendRejectedError, BuildConflict, MissingSecrets) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except UpstreamUnavailable as exc:
+            raise HTTPException(status_code=502, detail=f"Couldn't resolve an image to copy: {exc}") from exc
         except PermissionDeniedError as exc:
             # From Jobs, which lists the profiles and creates the job as the caller. A refused listing writes nothing;
             # a refused job leaves the rows written before it pending.

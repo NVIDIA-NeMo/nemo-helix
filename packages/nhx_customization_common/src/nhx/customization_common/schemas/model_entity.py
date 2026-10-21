@@ -8,12 +8,20 @@ Shared by both the unsloth and automodel backends.
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Optional
 
 from nemo_helix_plugin.deployment import DeploymentParams
 from nhx.customization_common.schemas.file_io import FileSetRef
 from nhx.customization_common.schemas.values import FinetuningType
 from pydantic import BaseModel, Field
+
+
+class ModelEntityPhase(StrEnum):
+    """What the model_entity task reports as ``phase`` in its task ``status_details``."""
+
+    REGISTERING_MODEL = "registering_model"
+    COMPLETED = "completed"
 
 
 class PEFTConfig(BaseModel):
@@ -48,7 +56,8 @@ class ModelEntityTaskConfig(BaseModel):
         default=None,
         description=(
             "Deployment configuration. A string references an existing ModelDeploymentConfig "
-            "by name. An object provides inline NIM deployment parameters. Omit to skip deployment."
+            "by name. An object provides inline deployment parameters, deployed with vLLM unless engine is 'nim'. "
+            "Omit to skip deployment."
         ),
     )
 

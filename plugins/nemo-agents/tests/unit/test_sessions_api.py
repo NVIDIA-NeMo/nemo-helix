@@ -402,6 +402,7 @@ class TestNoAuthSessionLifecycle:
     def test_service_owned_session_remains_accessible_without_a_principal(
         self, client: TestClient, mock_entity_client: AsyncMock
     ) -> None:
+        assert isinstance(client.app, FastAPI)
         client.app.dependency_overrides[get_effective_principal_id] = lambda: ""
         deployment = _make_deployment()
         session = _make_session(created_by="service:platform")

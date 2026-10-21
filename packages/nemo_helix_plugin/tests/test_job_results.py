@@ -180,6 +180,7 @@ def test_result_manager_factory_explicit_workspace_overrides_client_workspace() 
 
     manager = result_manager_factory(
         job_name="j",
+        attempt_id="attempt-1",
         workspace="explicit-ws",
         files_client=files_client,
         jobs_client=JobsClient.from_client(files_client),
@@ -195,6 +196,7 @@ def test_result_manager_factory_ignores_job_env_and_uses_client_workspace(monkey
 
     manager = result_manager_factory(
         job_name="j",
+        attempt_id="attempt-1",
         files_client=files_client,
         jobs_client=JobsClient.from_client(files_client),
     )
@@ -211,6 +213,7 @@ async def test_async_result_manager_factory_ignores_job_env_and_uses_client_work
 
     manager = async_result_manager_factory(
         job_name="j",
+        attempt_id="attempt-1",
         files_client=files_client,
         jobs_client=AsyncJobsClient.from_client(files_client),
     )
@@ -224,7 +227,7 @@ class TestHelixJobResults:
         client = NemoClient(base_url="http://platform.test", workspace="ws")
         with patch("nemo_helix_plugin.job_results.result_manager_factory") as factory:
             factory.return_value = MagicMock()
-            sink = HelixJobResults(job_name="j", workspace="ws", client=client)
+            sink = HelixJobResults(job_name="j", workspace="ws", client=client, attempt_id="attempt-1")
         assert isinstance(sink, JobResults)
 
     def test_platform_job_results_uses_typed_client_transport(self) -> None:
@@ -233,7 +236,7 @@ class TestHelixJobResults:
 
         with patch("nemo_helix_plugin.job_results.result_manager_factory") as factory:
             factory.return_value = MagicMock()
-            HelixJobResults(job_name="j", workspace="ws", client=client)
+            HelixJobResults(job_name="j", workspace="ws", client=client, attempt_id="attempt-1")
 
         files_client = factory.call_args.kwargs["files_client"]
         jobs_client = factory.call_args.kwargs["jobs_client"]
@@ -278,7 +281,7 @@ class TestHelixJobResults:
         manager = MagicMock()
         manager.create_result.return_value = _platform_record()
         with patch("nemo_helix_plugin.job_results.result_manager_factory", return_value=manager):
-            sink = HelixJobResults(job_name="j", workspace="ws", client=client)
+            sink = HelixJobResults(job_name="j", workspace="ws", client=client, attempt_id="attempt-1")
             sink.save("artifacts", payload_dir, ignore_patterns=["cache.db", "cache/"])
         call = manager.create_result.call_args
         assert call.kwargs["artifact_local_path"] == payload_dir
@@ -289,7 +292,7 @@ class TestHelixJobResults:
         manager = MagicMock()
         manager.create_result.side_effect = RuntimeError("boom")
         with patch("nemo_helix_plugin.job_results.result_manager_factory", return_value=manager):
-            sink = HelixJobResults(job_name="j", workspace="ws", client=client)
+            sink = HelixJobResults(job_name="j", workspace="ws", client=client, attempt_id="attempt-1")
             with pytest.raises(RuntimeError, match="boom"):
                 sink.save("metrics", Path("/tmp/whatever"))
 
@@ -327,8 +330,38 @@ def test_result_manager_fetches_metadata_from_typed_task_client() -> None:
     manager = ResultManager(
         job_name="test-job",
         workspace="test-ws",
+        attempt_id="att-123",
         files_client=FilesClient.from_client(client),
         jobs_client=JobsClient.from_client(client),
     )
 
     assert manager._fetch_job_metadata() == ("att-123", "test-fileset", "shared-fs")
+
+
+def test_result_manager_uses_explicit_runtime_attempt_for_path_and_registration(tmp_path: Path) -> None:
+    artifact = tmp_path / "metrics.json"
+    artifact.write_text("{}")
+    jobs_client = MagicMock()
+    current_job = MagicMock(attempt_id="attempt-b", fileset="results", output_location=None)
+    jobs_client.get_job.return_value.data.return_value = current_job
+    jobs_client.create_job_result.return_value.data.return_value = _platform_record(
+        url="fileset://ws/results#results/attempt-a/metrics"
+    )
+    file_manager = MagicMock()
+    file_manager.upload.return_value = "fileset://ws/results#results/attempt-a/metrics"
+    file_manager.storage_type.return_value = "fileset"
+    manager = ResultManager(
+        job_name="job-a",
+        workspace="ws",
+        attempt_id="attempt-a",
+        files_client=MagicMock(),
+        jobs_client=jobs_client,
+    )
+
+    with patch.object(manager, "_create_file_manager", return_value=file_manager):
+        manager.create_result("metrics", artifact)
+
+    assert file_manager.upload.call_args.kwargs["remote_path"] == "results/attempt-a/metrics"
+    jobs_client.create_job_result.assert_called_once()
+    call = jobs_client.create_job_result.call_args
+    assert call.kwargs["body"].attempt_id == "attempt-a"

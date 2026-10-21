@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from nhx.intake.config import ClickHouseConfig, IntakeConfig
 from nhx.intake.service import IntakeService
 from nhx.intake.spans.clickhouse_client import ClickHouseSettings
+from nhx.intake.spans.storage import stable_id
 from nhx.testing import create_test_client
 
 _HISTORICAL_GTE = "2024-01-01T00:00:00Z"
@@ -358,7 +359,7 @@ def test_atif_ingest_expands_embedded_subagent_trajectory_into_the_parent_trace(
         "worker-agent",
         "worker-agent",
     ]
-    assert {span["trace_id"] for span in spans} == {session_id}
+    assert {span["trace_id"] for span in spans} == {stable_id(session_id, "root-trajectory", prefix="trace")}
     assert {span["session_id"] for span in spans} == {session_id}
     assert delegation["parent_span_id"] == root["span_id"]
     assert delegation["agent_name"] == "orchestrator"
@@ -368,6 +369,45 @@ def test_atif_ingest_expands_embedded_subagent_trajectory_into_the_parent_trace(
     assert worker_step["agent_name"] == "worker-agent"
     assert root["started_at"] == _span_started_at(root_started_at)
     assert root["ended_at"] == _span_ended_at(subagent_ended_at)
+
+
+def test_atif_ingest_lists_each_turn_of_a_shared_session_as_its_own_trace(client: TestClient):
+    session_id = "atif-shared-session-turns"
+    for turn in range(2):
+        started_at = _BASE_TIME + timedelta(minutes=turn)
+        body = {
+            "schema_version": "ATIF-v1.7",
+            "session_id": session_id,
+            "trajectory_id": f"turn-{turn}",
+            "agent": {"name": "chat-agent", "version": "1.0"},
+            "steps": [
+                {
+                    "step_id": 1,
+                    "timestamp": _atif_timestamp(started_at),
+                    "source": "user",
+                    "message": f"question {turn}",
+                },
+                {
+                    "step_id": 2,
+                    "timestamp": _atif_timestamp(started_at + timedelta(seconds=1)),
+                    "source": "agent",
+                    "message": f"answer {turn}",
+                    "metrics": {"prompt_tokens": 10, "completion_tokens": 5},
+                },
+            ],
+        }
+        ingest_response = client.post("/apis/intake/v2/workspaces/default/ingest/atif", json=body)
+        assert ingest_response.status_code == 201, ingest_response.text
+
+    traces_response = client.get(
+        "/apis/intake/v2/workspaces/default/traces",
+        params={"filter[session_id]": session_id, "filter[started_at][gte]": _HISTORICAL_GTE},
+    )
+    assert traces_response.status_code == 200, traces_response.text
+    traces = traces_response.json()["data"]
+    assert len(traces) == 2
+    assert {trace["session_id"] for trace in traces} == {session_id}
+    assert [trace["input_tokens"] for trace in traces] == [10, 10]
 
 
 def test_atif_ingest_rejects_subagent_tree_over_configured_depth(shallow_atif_client: TestClient):

@@ -236,12 +236,15 @@ opensandbox_ext_no_capable=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER
 grep -Fq "opensandbox.composeServices.enabled needs sandboxClusterCapable" <<<"${opensandbox_ext_no_capable}"
 
 # Validate the Helm chart by rendering templates with all values files in ci/ directory
+VAP_API_VERSION=admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy
 shopt -s nullglob
 for value_file in "${HELM_FOLDER}"/ci/*.yaml; do
   echo "Validating Helm chart templating with values file: ${value_file}"
-  helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" -f "${value_file}" > "${value_file}.output"
+  helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" -f "${value_file}" \
+    --api-versions "${VAP_API_VERSION}" > "${value_file}.output"
   echo "Validating Helm chart kubeconform with values file: ${value_file}"
   helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" -f "${value_file}" \
+    --api-versions "${VAP_API_VERSION}" \
     | kubeconform -cache "${KUBECONFORM_CACHE}" -schema-location default \
       -schema-location "https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json" \
       -schema-location "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/{{.NormalizedKubernetesVersion}}/{{.ResourceKind}}.json" \

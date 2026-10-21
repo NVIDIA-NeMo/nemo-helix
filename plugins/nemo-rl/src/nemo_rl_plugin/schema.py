@@ -18,6 +18,7 @@ from nemo_helix_plugin.deployment import (
     ToolCallParams,
     reject_lora_without_lora_enabled,
 )
+from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH
 from nemo_helix_plugin.integrations import IntegrationsSpec
 from nhx.rl.schemas import (
     DPOTraining,
@@ -50,7 +51,7 @@ __all__ = [
 class OutputRequest(RlSchema):
     """Submitter-facing output preferences. ``name`` is auto-derived if omitted."""
 
-    name: str | None = Field(default=None, max_length=255)
+    name: str | None = Field(default=None, max_length=NAME_MAX_LENGTH)
 
 
 class RlJobInput(RlSchema):

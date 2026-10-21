@@ -20,6 +20,7 @@ from nemo_helix_plugin.client.errors import (
 from nemo_helix_plugin.client.errors import (
     NotFoundError as ClientNotFoundError,
 )
+from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
@@ -45,6 +46,7 @@ from nemo_helix_plugin.jobs.api_factory import (
 from nemo_helix_plugin.jobs.exceptions import HelixJobDependencyUnavailableError
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.jobs.types import HelixJobResponse as HelixJob
+from nemo_helix_plugin.jobs.types import JobControl
 from nhx.common.errors.sdk_exception_handlers import register_sdk_exception_handlers
 from nhx.common.jobs.exceptions import HelixJobCompilationError
 from nhx.common.jobs.schemas import (
@@ -93,7 +95,7 @@ def test_api_factory_routes():
         service_name="foo",
         job_type="Foo",
         job_input=FooJobConfig,
-        route_options=[JobRouteOption.CORE, JobRouteOption.PAUSE_RESUME],
+        route_options=[JobRouteOption.CORE, JobRouteOption.PAUSE_RESUME, JobRouteOption.RERUN],
         platform_job_config_compiler=foo_job_config_compiler,
     )
 
@@ -104,11 +106,16 @@ def test_api_factory_routes():
         ("get", "/jobs"),
         ("post", "/jobs"),
         ("get", "/jobs/{name}"),
+        ("patch", "/jobs/{name}"),
+        ("get", "/jobs/{name}/attempts"),
+        ("get", "/jobs/{name}/attempts/{attempt}"),
         ("get", "/jobs/{name}/status"),
         ("delete", "/jobs/{name}"),
         ("post", "/jobs/{name}/cancel"),
         ("post", "/jobs/{name}/pause"),
         ("post", "/jobs/{name}/resume"),
+        ("post", "/jobs/{name}/rerun"),
+        ("patch", "/jobs/{name}/control"),
         ("get", "/jobs/{name}/logs"),
         ("get", "/jobs/{name}/results"),
         ("get", "/jobs/{job}/results/{name}"),
@@ -357,12 +364,14 @@ def _job_routes_app():
     mock_sdk = MagicMock()
     mock_jobs = MagicMock()
     mock_jobs.with_retry.return_value = mock_jobs
+    # Routes that act on a job first check that it is one of this service's jobs.
+    mock_jobs.get_job = AsyncMock(return_value=_resp(create_mock_platform_job("my-job")))
     router = job_route_factory(
         service_name="test_service",
         job_type="TestJob",
         job_input=FooJobConfig,
         platform_job_config_compiler=foo_job_config_compiler,
-        route_options=[JobRouteOption.CORE, JobRouteOption.PAUSE_RESUME],
+        route_options=[JobRouteOption.CORE, JobRouteOption.PAUSE_RESUME, JobRouteOption.RERUN],
     )
     app = FastAPI()
     register_sdk_exception_handlers(app)
@@ -854,6 +863,18 @@ def test_list_jobs_with_results(mock_service_with_job_routes):
     )
 
 
+def test_update_job_control_returns_the_new_control(mock_service_with_job_routes):
+    """A plugin's control route returns the updated settings, like the core jobs route."""
+    app, mock_jobs = mock_service_with_job_routes
+    job = create_mock_platform_job("job-1", "paused").model_copy(update={"control": JobControl(pause_ttl_seconds=600)})
+    mock_jobs.update_job_control = AsyncMock(return_value=_resp(job))
+
+    response = TestClient(app).patch("/v2/workspaces/default/test/jobs/job-1/control", json={"pause_ttl_seconds": 600})
+
+    assert response.status_code == 200
+    assert response.json()["control"] == {"pause_ttl_seconds": 600}
+
+
 def test_list_jobs_with_multiple_pages(mock_service_with_job_routes):
     app, mock_jobs = mock_service_with_job_routes
 
@@ -1075,8 +1096,25 @@ def test_list_job_results_empty_list(mock_service_with_job_routes):
     mock_jobs.list_job_results.assert_called_once_with(name="test-job-456", workspace="default")
 
 
+def test_list_job_results_forwards_attempt_filter(mock_service_with_job_routes):
+    app, mock_jobs = mock_service_with_job_routes
+    mock_jobs.list_job_results = AsyncMock(return_value=_resp(HelixJobListResultResponse(data=[])))
+
+    response = TestClient(app).get(
+        "/v2/workspaces/default/test/jobs/test-job/results",
+        params={"attempt_id": "current"},
+    )
+
+    assert response.status_code == 200
+    mock_jobs.list_job_results.assert_awaited_once_with(
+        name="test-job",
+        workspace="default",
+        query_params={"attempt_id": "current"},
+    )
+
+
 def test_get_job_result_includes_download_url(mock_service_with_job_routes):
-    """Test that get_job_result includes download_url in the response."""
+    """Test that a job-owned result includes its download URL."""
     app, mock_jobs = mock_service_with_job_routes
     client = TestClient(app)
 
@@ -1113,7 +1151,7 @@ def test_get_job_result_includes_download_url(mock_service_with_job_routes):
     assert response_data["artifact_url"] == "default/test-fileset#test_result"
 
     # Verify the jobs client was called correctly
-    mock_jobs.get_job_result.assert_called_once_with(name="test_result", job="test-job-789", workspace="default")
+    mock_jobs.get_job_result.assert_awaited_once_with(name="test_result", job="test-job-789", workspace="default")
 
 
 def test_get_job_result_download_url_format(mock_service_with_job_routes):
@@ -1148,7 +1186,7 @@ def test_get_job_result_download_url_format(mock_service_with_job_routes):
     )
 
     # Verify the jobs client was called correctly
-    mock_jobs.get_job_result.assert_called_once_with(
+    mock_jobs.get_job_result.assert_awaited_once_with(
         name="evaluation_report_v1", job="test-job-abc", workspace="default"
     )
 
@@ -1189,7 +1227,7 @@ def test_list_job_results_download_url_different_job_ids(mock_service_with_job_r
 
 
 def test_get_job_result_not_found(mock_service_with_job_routes):
-    """Test that get_job_result handles not found errors correctly."""
+    """Test that job-owned result lookup handles not found errors correctly."""
     app, mock_jobs = mock_service_with_job_routes
     client = TestClient(app)
 
@@ -1205,9 +1243,26 @@ def test_get_job_result_not_found(mock_service_with_job_routes):
     assert "Result not found" in response_data["detail"]
 
     # Verify the jobs client was called
-    mock_jobs.get_job_result.assert_called_once_with(
+    mock_jobs.get_job_result.assert_awaited_once_with(
         name="nonexistent-result", job="nonexistent-job", workspace="default"
     )
+
+
+def test_get_job_result_needs_no_attempt_selector(mock_service_with_job_routes):
+    app, mock_jobs = mock_service_with_job_routes
+    mock_result = HelixJobResultResponse(
+        name="output",
+        job="test-job",
+        workspace="default",
+        artifact_storage_type=FileStorageType.FILESET,
+        artifact_url="default/test-fileset#output",
+    )
+    mock_jobs.get_job_result = AsyncMock(return_value=_resp(mock_result))
+
+    response = TestClient(app).get("/v2/workspaces/default/test/jobs/test-job/results/output")
+
+    assert response.status_code == 200
+    mock_jobs.get_job_result.assert_awaited_once_with(name="output", job="test-job", workspace="default")
 
 
 # Tests for entity_client injection
@@ -1755,9 +1810,7 @@ class TestCompileHelixSpec:
         def compiler(workspace, input_spec, output_spec, entity_client, job_name, sdk):
             return expected
 
-        result = await _compile_platform_spec(
-            compiler, "ws", spec, spec, MagicMock(), "name", "svc", MagicMock(), None, None
-        )
+        result = await _compile_platform_spec(compiler, "ws", spec, spec, MagicMock(), "name", "svc", MagicMock())
         assert result is expected
 
     @pytest.mark.anyio
@@ -1769,9 +1822,7 @@ class TestCompileHelixSpec:
         async def compiler(workspace, input_spec, output_spec, entity_client, job_name, sdk):
             return expected
 
-        result = await _compile_platform_spec(
-            compiler, "ws", spec, spec, MagicMock(), "name", "svc", MagicMock(), None, None
-        )
+        result = await _compile_platform_spec(compiler, "ws", spec, spec, MagicMock(), "name", "svc", MagicMock())
         assert result is expected
 
     @pytest.mark.anyio
@@ -1784,9 +1835,7 @@ class TestCompileHelixSpec:
 
         spec = FooJobConfig(foo="a", bar=1)
         with pytest.raises(HTTPException) as exc_info:
-            await _compile_platform_spec(
-                bad_compiler, "ws", spec, spec, MagicMock(), "name", "my_svc", MagicMock(), None, None
-            )
+            await _compile_platform_spec(bad_compiler, "ws", spec, spec, MagicMock(), "name", "my_svc", MagicMock())
         assert exc_info.value.status_code == 422
         assert "my_svc" in exc_info.value.detail
         assert "missing field" in exc_info.value.detail
@@ -1812,8 +1861,6 @@ class TestCompileHelixSpec:
                 "name",
                 "my_svc",
                 MagicMock(),
-                None,
-                None,
             )
         assert exc_info.value.status_code == 503
         assert "my_svc" in exc_info.value.detail
@@ -1843,9 +1890,7 @@ class TestCompileHelixSpec:
 
         spec = FooJobConfig(foo="a", bar=1)
         with pytest.raises(HTTPException) as exc_info:
-            await _compile_platform_spec(
-                compiler_bad_config, "ws", spec, spec, MagicMock(), "name", "svc", MagicMock(), None, None
-            )
+            await _compile_platform_spec(compiler_bad_config, "ws", spec, spec, MagicMock(), "name", "svc", MagicMock())
         assert exc_info.value.status_code == 422
         assert "not json serializable" in exc_info.value.detail.lower()
 
@@ -1921,6 +1966,69 @@ class TestSDKExceptionHandling:
 
         assert response.status_code == 409
         assert response.json()["detail"] == error_detail
+
+    @pytest.mark.parametrize(
+        "operation,error_detail",
+        [
+            ("resume", "Cannot resume job 'my-job': this job failed rather than paused, use rerun."),
+            ("rerun", "Cannot rerun job 'my-job': this job is paused, use resume."),
+        ],
+    )
+    def test_resume_and_rerun_return_the_jobs_api_reason(self, mock_service_with_job_routes, operation, error_detail):
+        app, mock_jobs = mock_service_with_job_routes
+        client = TestClient(app, raise_server_exceptions=False)
+        setattr(
+            mock_jobs, f"{operation}_job", AsyncMock(side_effect=_client_error(ClientConflictError, 409, error_detail))
+        )
+
+        response = client.post(f"/v2/workspaces/default/test/jobs/my-job/{operation}")
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == error_detail
+
+    def test_rerun_is_sent_once(self, mock_service_with_job_routes):
+        """A retried rerun would find the attempt the first one created, and fail with 409."""
+        app, mock_jobs = mock_service_with_job_routes
+        client = TestClient(app, raise_server_exceptions=False)
+        mock_jobs.rerun_job = AsyncMock(side_effect=_client_error(ClientConflictError, 409, "conflict"))
+
+        client.post("/v2/workspaces/default/test/jobs/my-job/rerun")
+
+        mock_jobs.with_retry.assert_called_once_with(RetryPolicy(max_retries=0))
+        mock_jobs.rerun_job.assert_awaited_once()
+
+    @pytest.mark.parametrize(
+        "method,operation,client_method",
+        [
+            ("post", "pause", "pause_job"),
+            ("post", "resume", "resume_job"),
+            ("post", "rerun", "rerun_job"),
+            ("patch", "control", "update_job_control"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "stored",
+        [
+            {"source": "other_service"},
+            # Customization trainers share a source, so another trainer's job differs only by spec.
+            {"spec": {"model": "llama"}},
+        ],
+    )
+    def test_actions_refuse_another_services_job(
+        self, mock_service_with_job_routes, method, operation, client_method, stored
+    ):
+        app, mock_jobs = mock_service_with_job_routes
+        client = TestClient(app, raise_server_exceptions=False)
+        mock_jobs.get_job = AsyncMock(return_value=_resp(create_mock_platform_job("my-job").model_copy(update=stored)))
+        action = AsyncMock()
+        setattr(mock_jobs, client_method, action)
+        body = {"json": {"pause_ttl_seconds": 600}} if method == "patch" else {}
+
+        response = getattr(client, method)(f"/v2/workspaces/default/test/jobs/my-job/{operation}", **body)
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Job 'my-job' was not found among TestJob jobs in workspace 'default'."
+        action.assert_not_awaited()
 
     def test_resume_job_returns_clean_error(self, mock_service_with_job_routes):
         app, mock_jobs = mock_service_with_job_routes

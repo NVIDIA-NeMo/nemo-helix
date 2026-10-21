@@ -24,11 +24,12 @@ context behind the current choices isn't lost. Architecture rationale lives in
 - **Multiple build approaches behind one queue.** The same finalize queue can
   run image-builder-service builds, Google Cloud Build builds from GCS to GAR,
   prebuilt-image registry verification, or local BuildKit fallback.
-- **Scheduling is durable.** Finalize stores backend parameters and credential
-  IDs on `task_revisions`; the NeMo Helix Jobs controller claims rows with
-  `FOR UPDATE SKIP LOCKED` and binds each attempt to a deterministic Job.
-  Decrypted credentials never enter the queue. Stale leases are reclaimed and
-  failures retry up to the configured attempt limit.
+- **Scheduling is durable.** Finalize stores backend parameters and Secret
+  references on the task revision in the `scaled_evals_task` entity; the NeMo
+  Helix Jobs controller claims a revision by rewriting that entity under
+  compare-and-swap and binds each attempt to a deterministic Job. Credential
+  values never enter the queue. Stale leases are reclaimed and failures retry
+  up to the configured attempt limit.
 
 ## Current deployment shape
 

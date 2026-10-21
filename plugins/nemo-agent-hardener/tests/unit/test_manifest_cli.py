@@ -259,7 +259,7 @@ def test_manifest_set_stores_a_usable_model(monkeypatch: pytest.MonkeyPatch) -> 
 def test_manifest_set_probes_each_group_against_its_own_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     """The probe must target the endpoint the run will use, or it verifies the wrong thing."""
     from nemo_agent_hardener_plugin.cli import main as cli_main
-    from nemo_agent_hardener_plugin.model_config import ANALYSIS_DEFAULT_BASE_URL, ATTACK_DEFAULT_BASE_URL
+    from nemo_agent_hardener_plugin.model_config import ANALYSIS_DEFAULT_BASE_URL, SAFETY_DEFAULT_BASE_URL
 
     probes: list[dict[str, Any]] = []
     app = _patch_cli(
@@ -273,8 +273,104 @@ def test_manifest_set_probes_each_group_against_its_own_endpoint(monkeypatch: py
     assert result.exit_code == 0, result.output
     by_url = {p["model"]: p["base_url"] for p in probes}
     assert by_url["a"] == ANALYSIS_DEFAULT_BASE_URL
-    # agent-hardener pins the guardrail LLM to the attack endpoint, not the analysis one.
-    assert by_url["s"] == ATTACK_DEFAULT_BASE_URL
+    assert by_url["s"] == SAFETY_DEFAULT_BASE_URL
+
+
+def test_manifest_set_probes_safety_on_its_own_endpoint_and_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+
+    probes: list[dict[str, Any]] = []
+    captured: dict[str, Any] = {}
+    app = _patch_cli(
+        cli_main,
+        monkeypatch,
+        _manifests(probes=probes, update=lambda name, *, workspace, **body: captured.update(body) or {"name": name}),
+    )
+    result = CliRunner().invoke(
+        app,
+        [
+            "manifest",
+            "set",
+            "finance",
+            "--safety-model",
+            "s",
+            "--safety-base-url",
+            "http://10.0.0.5:8000/v1",
+            "--safety-key-secret",
+            "safety-key",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert probes == [{"model": "s", "base_url": "http://10.0.0.5:8000/v1", "api_key_secret": "safety-key"}]
+    assert captured["models"]["safety"] == {
+        "model": "s",
+        "base_url": "http://10.0.0.5:8000/v1",
+        "api_key_secret": "safety-key",
+    }
+
+
+def test_manifest_set_probes_safety_on_the_stored_analysis_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Setting only the safety model must probe where the judge will go: the stored analysis endpoint and key."""
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+
+    stored = {"analysis": {"base_url": "http://10.0.0.9/v1", "api_key_secret": "analysis-key"}}
+    probes: list[dict[str, Any]] = []
+    app = _patch_cli(
+        cli_main,
+        monkeypatch,
+        _manifests(
+            probes=probes,
+            get=lambda name, *, workspace: {"models": stored},
+            update=lambda name, *, workspace, **body: {"name": name},
+        ),
+    )
+    result = CliRunner().invoke(app, ["manifest", "set", "finance", "--safety-model", "s"])
+
+    assert result.exit_code == 0, result.output
+    assert probes == [{"model": "s", "base_url": "http://10.0.0.9/v1", "api_key_secret": "analysis-key"}]
+
+
+def test_manifest_set_reprobes_a_stored_safety_model_when_analysis_moves(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stored safety model inherits the analysis endpoint and key, so moving analysis moves the judge too."""
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+
+    stored = {"safety": {"model": "s"}}
+    probes: list[dict[str, Any]] = []
+    app = _patch_cli(
+        cli_main,
+        monkeypatch,
+        _manifests(
+            probes=probes,
+            get=lambda name, *, workspace: {"models": stored},
+            update=lambda name, *, workspace, **body: {"name": name},
+        ),
+    )
+    result = CliRunner().invoke(
+        app, ["manifest", "set", "finance", "--analysis-base-url", "http://10.0.0.9/v1", "--analysis-key-secret", "k"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert {"model": "s", "base_url": "http://10.0.0.9/v1", "api_key_secret": "k"} in probes
+
+
+def test_manifest_set_probes_a_safety_key_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A key with no model or endpoint still reaches the judge, so it is checked against the built-in judge model."""
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+    from nemo_agent_hardener_plugin.model_config import SAFETY_DEFAULT_BASE_URL, SAFETY_DEFAULT_MODEL
+
+    probes: list[dict[str, Any]] = []
+    app = _patch_cli(
+        cli_main,
+        monkeypatch,
+        _manifests(probes=probes, update=lambda name, *, workspace, **body: {"name": name}),
+    )
+    result = CliRunner().invoke(app, ["manifest", "set", "finance", "--safety-key-secret", "guard-key"])
+
+    assert result.exit_code == 0, result.output
+    assert probes == [
+        {"model": SAFETY_DEFAULT_MODEL, "base_url": SAFETY_DEFAULT_BASE_URL, "api_key_secret": "guard-key"}
+    ]
 
 
 def test_cli_init_rejects_an_unusable_model(monkeypatch: pytest.MonkeyPatch) -> None:

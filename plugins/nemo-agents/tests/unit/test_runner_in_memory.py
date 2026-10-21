@@ -943,10 +943,11 @@ def test_spawn_fabric_inherits_socket_after_parent_closes(tmp_path: Path) -> Non
     backend = _backend(tmp_path)
     popen = subprocess.Popen
 
-    def spawn_probe(cmd: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+    def spawn_probe(
+        cmd: list[str], *, stdout: object, stderr: int, env: dict[str, str], pass_fds: tuple[int, ...]
+    ) -> subprocess.Popen[bytes]:
+        # Keep the real call's environment and inherited socket, but pipe stdin/stdout to the probe.
         fd = cmd[cmd.index("--socket-fd") + 1]
-        kwargs["stdin"] = subprocess.PIPE
-        kwargs["stdout"] = subprocess.PIPE
         return popen(
             [
                 sys.executable,
@@ -956,7 +957,11 @@ def test_spawn_fabric_inherits_socket_after_parent_closes(tmp_path: Path) -> Non
                 "print(s.getsockname()[1])",
                 fd,
             ],
-            **kwargs,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=stderr,
+            env=env,
+            pass_fds=pass_fds,
         )
 
     proc = None

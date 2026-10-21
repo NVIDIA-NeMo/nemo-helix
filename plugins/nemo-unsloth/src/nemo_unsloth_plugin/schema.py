@@ -88,8 +88,8 @@ class UnslothJobInput(UnslothSchema):
         description=(
             "Deployment configuration for auto-deploying the model after training. "
             "Pass a string to reference an existing ModelDeploymentConfig by name "
-            "('my-config' or 'workspace/my-config'). An object provides inline NIM "
-            "deployment parameters. Omit to skip deployment."
+            "('my-config' or 'workspace/my-config'). An object provides inline "
+            "deployment parameters, deployed with vLLM unless engine is 'nim'. Omit to skip deployment."
         ),
     )
 

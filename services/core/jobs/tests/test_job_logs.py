@@ -145,6 +145,27 @@ class TestJobLogsAPI:
             artifact_base_path=None,
         )
 
+    async def test_get_job_logs_by_id_uses_canonical_job_name(
+        self, test_client, dispatcher, mock_logs_client, sample_logs, sample_platform_job_request
+    ):
+        job = await dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+        mock_logs_client.query_logs.return_value = HelixJobLogPage(
+            data=sample_logs, total=3, next_page=None, prev_page=None
+        )
+
+        response = test_client.get(f"/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/{job.id}/logs")
+
+        assert response.status_code == 200
+        mock_logs_client.query_logs.assert_called_once_with(
+            job.fileset,
+            workspace=DEFAULT_WORKSPACE,
+            filters={"job": job.name, "job_attempt": job.attempt_id},
+            page_size=100,
+            page_cursor=None,
+            tail=None,
+            artifact_base_path=None,
+        )
+
     async def test_get_job_logs_with_tail(
         self, test_client, dispatcher, mock_logs_client, sample_logs, sample_platform_job_request
     ):

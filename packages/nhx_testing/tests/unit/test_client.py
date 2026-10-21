@@ -3,9 +3,12 @@
 
 """Unit tests for nhx_testing client utilities."""
 
+import asyncio
+import threading
+
 import httpx
 import pytest
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request, Response
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
@@ -166,21 +169,145 @@ def test_create_test_client_creates_default_workspace():
 
 
 def test_create_test_client_async_client_reaches_app():
-    """Test that the async typed client routes through the in-process ASGI transport."""
-    import asyncio
-
+    """Async callers and nested requests share the application's lifespan loop."""
     with create_test_client(EntitiesService, client_type=ClientContext) as ctx:
+        app = ctx.test_client.app
+        assert isinstance(app, FastAPI)
+        assert ctx.test_client.portal is not None
+        service_loop = ctx.test_client.portal.call(asyncio.get_running_loop)
 
-        async def _get() -> str:
-            return (await AsyncWorkspacesClient.from_client(ctx.async_client).get_workspace(name="default")).data().name
+        @app.get("/test-loop")
+        async def get_loop():
+            assert asyncio.get_running_loop() is service_loop
+            workspace = await AsyncWorkspacesClient.from_client(ctx.async_client).get_workspace(name="default")
+            return {"name": workspace.data().name}
 
-        assert asyncio.run(_get()) == "default"
+        async def get_concurrently():
+            responses = await asyncio.gather(*(ctx.async_client._http.get("/test-loop") for _ in range(4)))
+            assert [response.json() for response in responses] == [{"name": "default"}] * 4
+
+        asyncio.run(get_concurrently())
+        asyncio.run(get_concurrently())
+
+
+@pytest.mark.asyncio
+async def test_async_request_stream_is_consumed_on_the_callers_loop():
+    caller_loop = asyncio.get_running_loop()
+    with create_test_client(EntitiesService, client_type=ClientContext) as ctx:
+        app = ctx.test_client.app
+        assert isinstance(app, FastAPI)
+
+        @app.post("/test-body")
+        async def echo_body(request: Request):
+            return {"body": (await request.body()).decode()}
+
+        async def body():
+            assert asyncio.get_running_loop() is caller_loop
+            yield b"hello"
+            await asyncio.sleep(0)
+            yield b" world"
+
+        response = await ctx.async_client._http.post("/test-body", content=body())
+        assert response.json() == {"body": "hello world"}
+
+
+@pytest.mark.asyncio
+async def test_async_upload_stops_reading_after_early_response():
+    with create_test_client(EntitiesService, client_type=ClientContext) as ctx:
+        app = ctx.test_client.app
+        assert isinstance(app, FastAPI)
+
+        @app.post("/test-body-limit")
+        async def reject_large_body(request: Request):
+            async for chunk in request.stream():
+                assert len(chunk) > 8
+                return Response(status_code=413)
+            raise AssertionError("The application did not receive the first chunk")
+
+        async def body():
+            yield b"123456789"
+            raise AssertionError("The transport read beyond the rejected chunk")
+
+        response = await ctx.async_client._http.post("/test-body-limit", content=body())
+        assert response.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_server_upload_timeout_cancels_body_on_callers_loop():
+    caller_loop = asyncio.get_running_loop()
+    body_stalled = threading.Event()
+    body_closed = asyncio.Event()
+    with create_test_client(EntitiesService, client_type=ClientContext) as ctx:
+        app = ctx.test_client.app
+        assert isinstance(app, FastAPI)
+
+        @app.post("/test-body-timeout")
+        async def read_with_timeout(request: Request):
+            pending_read = asyncio.create_task(request.body())
+            try:
+                assert await asyncio.to_thread(body_stalled.wait, 5)
+                await asyncio.wait_for(pending_read, 0.05)
+            except TimeoutError:
+                return Response(status_code=408)
+            finally:
+                pending_read.cancel()
+                await asyncio.gather(pending_read, return_exceptions=True)
+            raise AssertionError("The stalled upload unexpectedly completed")
+
+        async def body():
+            try:
+                yield b"first chunk"
+                body_stalled.set()
+                await asyncio.Event().wait()
+            finally:
+                assert asyncio.get_running_loop() is caller_loop
+                body_closed.set()
+
+        response = await asyncio.wait_for(ctx.async_client._http.post("/test-body-timeout", content=body()), 5)
+        assert response.status_code == 408
+        await asyncio.wait_for(body_closed.wait(), 5)
+
+
+@pytest.mark.asyncio
+async def test_cancelling_async_upload_cancels_handler_and_body_read():
+    caller_loop = asyncio.get_running_loop()
+    body_started = asyncio.Event()
+    body_closed = asyncio.Event()
+    handler_cancelled = threading.Event()
+    with create_test_client(EntitiesService, client_type=ClientContext) as ctx:
+        app = ctx.test_client.app
+        assert isinstance(app, FastAPI)
+
+        @app.post("/test-body-cancellation")
+        async def read_body(request: Request):
+            try:
+                await request.body()
+            except asyncio.CancelledError:
+                handler_cancelled.set()
+                raise
+
+        async def body():
+            try:
+                yield b"first chunk"
+                body_started.set()
+                await asyncio.Event().wait()
+            finally:
+                assert asyncio.get_running_loop() is caller_loop
+                body_closed.set()
+
+        request = asyncio.create_task(ctx.async_client._http.post("/test-body-cancellation", content=body()))
+        try:
+            await asyncio.wait_for(body_started.wait(), 5)
+        finally:
+            request.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await request
+        await asyncio.wait_for(body_closed.wait(), 5)
+        assert await asyncio.to_thread(handler_cancelled.wait, 5)
 
 
 def test_create_test_client_injects_provider_transport_for_typed_service_clients():
     """Test that DependencyProvider typed clients route through the in-process transport."""
-    import asyncio
-
     with create_test_client(EntitiesService, client_type=ClientContext) as ctx:
         app = ctx.test_client.app
         assert isinstance(app, FastAPI)

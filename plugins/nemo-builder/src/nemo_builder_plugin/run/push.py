@@ -275,6 +275,8 @@ def _push_one(
     row: ContainerImage, image: PushImage, layout: Path, *, builder: _Builder, sign: Sign | None, plain_http: bool
 ) -> None:
     digest = validate_layout(layout)
+    if image.expected_digest is not None and digest != image.expected_digest:
+        raise Refused(f"{image.image} copies {image.expected_digest}, but its layout holds {digest}")
 
     # Destinations come from the compiler: nothing read off the volume reaches this list.
     for ref in image.refs:

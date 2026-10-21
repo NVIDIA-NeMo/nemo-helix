@@ -666,6 +666,18 @@ jobs:
           IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
         run: e2e/k8s/scripts/prepull_kind_images.sh "${IMAGE_REGISTRY}/nhx-gym-tasks:${IMAGE_TAG}"
 
+      - name: Run GRPO sandbox workspace permissions regression
+        shell: bash
+        env:
+          NHX_GYM_WORKSPACE_KIND: ${{ env.KIND_CLUSTER_NAME }}
+        run: |
+          uv run --frozen pytest \
+            -c pytest.ini \
+            services/rl/tests/test_gym_workspace_kubernetes_integration.py \
+            -v -s \
+            --no-cov \
+            --junitxml=report-kubernetes-gym-workspace.xml
+
       - name: Run Gym agent-evaluate e2e test
         shell: bash
         env:
@@ -688,7 +700,7 @@ jobs:
         with:
           kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
           artifact-name: kind-gym-e2e-kubernetes-artifacts
-          junit-report: report-kubernetes-gym-e2e.xml
+          junit-report: report-kubernetes-gym-*.xml
           services-log-dir: ${{ runner.temp }}/e2e-services-logs
   
   kind-customizer-auth-e2e:
@@ -1206,6 +1218,27 @@ jobs:
         run: uv run --frozen --group scaled-evals pytest plugins/_temporary-scaled-evals/tests -v
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
+      # The workspace venv carries a single Harbor release, but NemoOpenSandboxEnvironment must run on
+      # every runner harbor_opensandbox accepts: those whose requirements pin the OpenSandbox SDK.
+      # Build each runner's venv from its own requirements, as the image does, and run the tests there.
+      - name: Run harbor_opensandbox environment tests on each supported Harbor runner
+        working-directory: packages/nhx_sandbox
+        run: |
+          set -eu
+          for requirements in harbor-runners/*.txt; do
+            grep -q '^opensandbox==' "$requirements" || continue
+            version="$(basename "$requirements" .txt)"
+            venv="$RUNNER_TEMP/harbor-$version"
+            uv venv --python 3.12 "$venv"
+            # --python, not VIRTUAL_ENV: setup-uv exports UV_PYTHON, which would otherwise send the
+            # install to the workspace .venv.
+            uv pip install --python "$venv/bin/python" -r "$requirements" . pytest pytest-asyncio
+            echo "::group::Harbor $version"
+            "$venv/bin/python" -m pytest -p no:cacheprovider -v \
+              tests/test_harbor_opensandbox_environment.py tests/test_harbor_opensandbox_driver.py \
+              tests/test_harbor_opensandbox_compose_services.py
+            echo "::endgroup::"
+          done
 
   # WHY THIS JOB EXISTS (it looks redundant, it isn't): `--extra fabric` appears nowhere else in this
   # file and there is no `--all-extras`, so no other job installs nemo-fabric. Every other Fabric test
@@ -1514,7 +1547,7 @@ jobs:
           helm dependency build k8s/helm
           helm dependency build contrib/auth/authentik/helm
           helm dependency build contrib/auth/zitadel/helm
-          uv run --frozen pytest tests/auth_idp/static -v
+          uv run --frozen --group auth-idp-e2e pytest tests/auth_idp/static -v
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
       - name: Upload test artifacts
@@ -1665,10 +1698,7 @@ jobs:
           NHX_ZITADEL_K8S_JUNIT_XML: report-auth-idp-${{ matrix.runtime }}.xml
           NHX_ZITADEL_K8S_IMAGE_PULL_SECRET: ${{ env.NHX_ZITADEL_K8S_IMAGE_PULL_SECRET }}
           NHX_ZITADEL_K8S_SKIP_IMAGE_LOAD: ${{ needs.build-cpu-smoke-images.outputs.publish_images == 'true' && '1' || '0' }}
-      - name: Collect Kubernetes logs
-        if: always() && matrix.backend == 'kubernetes'
-        shell: bash
-        run: e2e/k8s/scripts/collect_k8s_logs.sh
+      # run.sh writes cluster diagnostics into E2E_SERVICES_LOG_DIR before it deletes the cluster.
       - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1677,7 +1707,6 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
           path: |
-            k8s-logs/
             report-auth-idp-${{ matrix.runtime }}.xml
             ${{ runner.temp }}/e2e-services-logs/
       - name: Delete kind cluster

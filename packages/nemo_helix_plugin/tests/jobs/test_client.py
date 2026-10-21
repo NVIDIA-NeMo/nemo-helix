@@ -42,6 +42,21 @@ _STATUS_JSON = {
     "updated_at": "2026-01-01T00:00:00Z",
 }
 
+_ATTEMPT_JSON = {
+    "id": "att-1",
+    "name": "attempt-1",
+    "job": "job-1",
+    "workspace": "default",
+    "seq": 0,
+    "spec": {},
+    "platform_spec": _JOB_JSON["platform_spec"],
+    "status": "created",
+    "status_details": {},
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z",
+    "is_current": True,
+}
+
 
 def _mock_http(response: httpx.Response) -> MagicMock:
     mock = MagicMock(spec=httpx.Client)
@@ -111,6 +126,51 @@ def test_list_jobs_paginated_items() -> None:
 
     assert len(jobs) == 1
     assert jobs[0].name == "my-job"
+
+
+def test_list_job_attempts_parses_page_and_selector_path() -> None:
+    mock_http = _mock_http(
+        httpx.Response(
+            200,
+            request=httpx.Request("GET", f"{BASE}/apis/jobs/v2/workspaces/default/jobs/my-job/attempts"),
+            json={
+                "data": [_ATTEMPT_JSON],
+                "pagination": {
+                    "page": 1,
+                    "page_size": 25,
+                    "current_page_size": 1,
+                    "total_pages": 1,
+                    "total_results": 1,
+                },
+            },
+        )
+    )
+    client = JobsClient(base_url=BASE, workspace="default", http_client=mock_http)
+
+    attempts = list(client.list_job_attempts(job="my-job").items())
+
+    assert attempts[0].id == "att-1"
+    assert attempts[0].is_current is True
+
+
+@pytest.mark.asyncio
+async def test_async_attempt_status_details_uses_concrete_attempt_path() -> None:
+    mock_http = MagicMock(spec=httpx.AsyncClient)
+    mock_http.request = AsyncMock(
+        return_value=httpx.Response(
+            200,
+            request=httpx.Request(
+                "PATCH",
+                f"{BASE}/apis/jobs/v2/workspaces/default/jobs/my-job/attempts/att-1/status-details",
+            ),
+        )
+    )
+    client = AsyncJobsClient(base_url=BASE, workspace="default", http_client=mock_http)
+
+    await client.update_attempt_status_details("my-job", "att-1", body={"progress": 50})
+
+    request_url = str(mock_http.request.call_args.args[1])
+    assert request_url.endswith("/jobs/my-job/attempts/att-1/status-details")
 
 
 def test_delete_job_returns_none() -> None:

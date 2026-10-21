@@ -21,6 +21,7 @@ from nemo_agents_plugin.fabric.validation import (
     validate_fabric_config,
     validate_platform_agent_config,
 )
+from nemo_fabric import FabricConfig
 
 
 class _FakeFabricConfigError(Exception):
@@ -83,6 +84,11 @@ def fake_fabric_stack(fake_fabric_client: None) -> None:
     pass
 
 
+def _fabric_config() -> FabricConfig:
+    """A minimal real Fabric config; the fake Fabric only records it."""
+    return FabricConfig.model_validate({"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}})
+
+
 def _example_platform_config() -> dict[str, Any]:
     return {
         "config_format": "nemo-agents-spec-v1",
@@ -119,7 +125,7 @@ def _example_platform_config() -> dict[str, Any]:
 @pytest.mark.asyncio
 class TestValidateFabricConfig:
     async def test_plan_only_does_not_run_doctor(self, fake_fabric_client: None) -> None:
-        fabric_config = object()
+        fabric_config = _fabric_config()
         fabric = _FakeFabric(plan={"plan": "ok"})
 
         result = await plan_fabric_config(fabric_config, base_dir=Path("/tmp/agent"), fabric=fabric)
@@ -129,7 +135,7 @@ class TestValidateFabricConfig:
         assert fabric.doctor_calls == []
 
     async def test_doctor_only_does_not_run_plan(self, fake_fabric_client: None) -> None:
-        fabric_config = object()
+        fabric_config = _fabric_config()
         doctor_report = _FakeDoctorReport({"status": "pass", "checks": []})
         fabric = _FakeFabric(doctor_report=doctor_report)
 
@@ -140,7 +146,7 @@ class TestValidateFabricConfig:
         assert fabric.doctor_calls == [{"fabric_config": fabric_config, "base_dir": Path("/tmp/agent")}]
 
     async def test_returns_plan_and_doctor_report(self, fake_fabric_client: None) -> None:
-        fabric_config = object()
+        fabric_config = _fabric_config()
         doctor_report = _FakeDoctorReport({"status": "pass", "checks": [{"name": "adapter", "status": "pass"}]})
         fabric = _FakeFabric(plan={"plan": "ok"}, doctor_report=doctor_report)
 
@@ -155,7 +161,7 @@ class TestValidateFabricConfig:
         main_thread_id = threading.get_ident()
         fabric = _FakeFabric()
 
-        await validate_fabric_config(object(), base_dir=Path("/tmp/agent"), fabric=fabric)
+        await validate_fabric_config(_fabric_config(), base_dir=Path("/tmp/agent"), fabric=fabric)
 
         assert fabric.plan_thread_ids
         assert fabric.plan_thread_ids[0] != main_thread_id
@@ -164,20 +170,20 @@ class TestValidateFabricConfig:
         fabric = _FakeFabric(plan_error=_FakeFabricConfigError("bad config"))
 
         with pytest.raises(FabricValidationError, match="Fabric plan failed: bad config"):
-            await validate_fabric_config(object(), base_dir=Path("/tmp/agent"), fabric=fabric)
+            await validate_fabric_config(_fabric_config(), base_dir=Path("/tmp/agent"), fabric=fabric)
 
     async def test_wraps_doctor_errors(self, fake_fabric_client: None) -> None:
         fabric = _FakeFabric(doctor_error=RuntimeError("doctor exploded"))
 
         with pytest.raises(FabricValidationError, match="Fabric doctor failed: doctor exploded"):
-            await validate_fabric_config(object(), base_dir=Path("/tmp/agent"), fabric=fabric)
+            await validate_fabric_config(_fabric_config(), base_dir=Path("/tmp/agent"), fabric=fabric)
 
     async def test_wraps_doctor_timeout(self, fake_fabric_client: None, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(validation, "FABRIC_VALIDATION_TIMEOUT_SECONDS", 0.01)
         fabric = _FakeFabric(doctor_delay=1.0)
 
         with pytest.raises(FabricValidationError, match="Fabric doctor timed out after 0.01s"):
-            await validate_fabric_config(object(), base_dir=Path("/tmp/agent"), fabric=fabric)
+            await validate_fabric_config(_fabric_config(), base_dir=Path("/tmp/agent"), fabric=fabric)
 
     async def test_preflight_failure_reports_failed_checks(self, fake_fabric_client: None) -> None:
         doctor_report = _FakeDoctorReport(
@@ -193,7 +199,7 @@ class TestValidateFabricConfig:
         fabric = _FakeFabric(doctor_report=doctor_report)
 
         with pytest.raises(FabricPreflightError) as error_info:
-            await validate_fabric_config(object(), base_dir=Path("/tmp/agent"), fabric=fabric)
+            await validate_fabric_config(_fabric_config(), base_dir=Path("/tmp/agent"), fabric=fabric)
 
         assert error_info.value.status == "fail"
         assert error_info.value.failed_checks == [
@@ -206,12 +212,12 @@ class TestValidateFabricConfig:
         fabric = _FakeFabric(doctor_report=doctor_report)
 
         with pytest.raises(FabricPreflightError, match="No failing subsection was reported"):
-            await validate_fabric_config(object(), base_dir=Path("/tmp/agent"), fabric=fabric)
+            await validate_fabric_config(_fabric_config(), base_dir=Path("/tmp/agent"), fabric=fabric)
 
     async def test_dict_doctor_report_is_supported(self, fake_fabric_client: None) -> None:
         fabric = _FakeFabric(doctor_report={"status": "pass", "checks": []})
 
-        result = await validate_fabric_config(object(), base_dir=Path("/tmp/agent"), fabric=fabric)
+        result = await validate_fabric_config(_fabric_config(), base_dir=Path("/tmp/agent"), fabric=fabric)
 
         assert result.doctor_report == {"status": "pass", "checks": []}
 
@@ -230,6 +236,7 @@ class TestValidateHelixAgentConfig:
 
         assert result.agent_config.name == "example-agent"
         assert result.fabric_config.metadata.name == "example-agent"
+        assert result.fabric_config.harness is not None
         assert result.fabric_config.harness.adapter_id == "nvidia.fabric.hermes"
         assert result.fabric_validation_result.plan == {"plan": "ok"}
         assert result.fabric_validation_result.doctor_report is doctor_report
@@ -251,6 +258,7 @@ class TestValidateHelixAgentConfig:
             fabric=_FakeFabric(),
         )
 
+        assert result.fabric_config.harness is not None
         assert result.fabric_config.harness.adapter_id == "nvidia.fabric.codex"
         assert result.fabric_config.models["default"].model == "openai/gpt-5.4"
 

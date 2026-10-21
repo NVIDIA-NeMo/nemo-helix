@@ -68,6 +68,10 @@ class TunableRagEvaluatorMetric(HooksBase, TunableRagEvaluator):
     def inference_fn(self) -> InferenceFn:
         return self._inference_fn or inference.make_inference_request
 
+    def set_inference_fn(self, inference_fn: InferenceFn) -> None:
+        """Set the inference function to use for judge calls."""
+        self._inference_fn = inference_fn
+
     def apply_evaluation_job_params(self, params: RunConfig) -> None:
         """Apply online job params; ``max_retries`` lives on ``RunConfigOnline``, not InferenceParams."""
         self.job_type = SupportedJobTypes.ONLINE if isinstance(params, RunConfigOnline) else SupportedJobTypes.OFFLINE

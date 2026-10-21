@@ -50,7 +50,7 @@ const DEFAULT_OPTION_BUILDER = (column: Column<IntentionalAny>): FilterItem[] =>
 
 export function rowActionsColumn<TData>(
   options?: Partial<DisplayColumnDef<TData>> & {
-    cellProps?: Partial<DropdownProps>;
+    cellProps?: Partial<Omit<DropdownProps, 'items'>>;
     rowActions?: RowActionsCellProps<TData>['rowActions'];
   }
 ): DisplayColumnDef<TData> {

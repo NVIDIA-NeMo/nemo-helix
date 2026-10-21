@@ -66,19 +66,18 @@ def compile_training_step(
         output_path=DEFAULT_OUTPUT_MODEL_PATH,
     )
 
-    executor: GPUExecutionProviderSpec = {
-        "provider": "gpu",
-        "container": ContainerSpec(
+    executor = GPUExecutionProviderSpec(
+        container=ContainerSpec(
             image=get_training_image(),
             entrypoint=UNSLOTH_PYTHON_ENTRYPOINT,
             command=["-m", "nhx.unsloth.tasks.training"],
         ),
         # Resources are provider-decided; the platform's GPU executor
         # selects a node based on the profile.
-        "resources": ResourcesSpec(),
-    }
+        resources=ResourcesSpec(),
+    )
     if profile is not None:
-        executor["profile"] = profile
+        executor.profile = profile
 
     warn_incomplete_integrations(job_spec.integrations)
     return HelixJobStep(

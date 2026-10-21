@@ -41,6 +41,7 @@ class HarborTaskAdapter(TaskKindAdapter):
             workspace=head.workspace,
             entity_client=ctx.entity_client,
             async_client=ctx.async_client,
+            authorize=ctx.authorize,
         )
         return ResolvedHarborTaskDefinition(
             **member.definition.model_dump(exclude={"metrics"}),

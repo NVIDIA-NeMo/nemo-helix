@@ -52,7 +52,9 @@ def test_named_proxy_routes(endpoint: Any, http_method: str, surface: str) -> No
     prepared = endpoint(**kwargs)
 
     assert prepared.method == http_method
-    assert prepared.path_template == f"{BASE}/{surface}/{{name}}/-/{{trailing_uri}}"
+    # Model names span segments (``workspace/name``), provider names do not; both match the gateway routes.
+    name_placeholder = "{name:path}" if surface == "model" else "{name}"
+    assert prepared.path_template == f"{BASE}/{surface}/{name_placeholder}/-/{{trailing_uri:path}}"
     assert prepared.path_params == {"workspace": "ws", "name": "nvidia-build", "trailing_uri": "v1/chat/completions"}
     if "body" in kwargs:
         assert _json_body(prepared) == {"model": "m"}
@@ -73,7 +75,7 @@ def test_openai_proxy_routes(endpoint: Any, http_method: str) -> None:
     prepared = endpoint(**kwargs)
 
     assert prepared.method == http_method
-    assert prepared.path_template == f"{BASE}/openai/-/{{trailing_uri}}"
+    assert prepared.path_template == f"{BASE}/openai/-/{{trailing_uri:path}}"
     assert prepared.path_params == {"workspace": "ws", "trailing_uri": "v1/models"}
     assert prepared.response_type is Any
 
@@ -91,7 +93,7 @@ def test_stream_openai_returns_raw_bytes() -> None:
     prepared = endpoints.stream_openai(trailing_uri="v1/chat/completions", body=JsonBody({"stream": True}))
 
     assert prepared.method == "POST"
-    assert prepared.path_template == f"{BASE}/openai/-/{{trailing_uri}}"
+    assert prepared.path_template == f"{BASE}/openai/-/{{trailing_uri:path}}"
     assert prepared.response_type is BinaryContent
 
 
@@ -110,7 +112,7 @@ def test_openai_model_listing_routes() -> None:
 
     assert listing.path_template == f"{BASE}/openai/-/v1/models"
     assert listing.response_type is OpenAIModelList
-    assert single.path_template == f"{BASE}/openai/-/v1/models/{{name}}"
+    assert single.path_template == f"{BASE}/openai/-/v1/models/{{name:path}}"
     assert single.path_params == {"workspace": "ws", "name": "default/vm"}
     assert single.response_type is OpenAIModel
 
@@ -150,31 +152,41 @@ def _client(recorder: _Recorder) -> InferenceGatewayClient:
     )
 
 
-def test_trailing_uri_slashes_are_percent_encoded_on_the_wire() -> None:
-    """The gateway declares ``{trailing_uri:path}`` and decodes before routing.
-
-    Every path parameter is encoded with ``quote(safe="")``, so the caller-supplied
-    provider path travels as one segment. This pins the wire form the server is
-    known to accept; ``request.url.path`` would decode it and pass vacuously.
-    """
+def test_trailing_uri_slashes_are_literal_on_the_wire() -> None:
+    """``raw_path`` pins the wire form; ``url.path`` would decode ``%2F`` and pass vacuously."""
     recorder = _Recorder()
 
     _client(recorder).openai_post(trailing_uri="v1/chat/completions", body=JsonBody({"model": "m"}))
 
-    assert recorder.requests[0].url.raw_path == (
-        b"/apis/inference-gateway/v2/workspaces/default/openai/-/v1%2Fchat%2Fcompletions"
-    )
+    raw_path = recorder.requests[0].url.raw_path
+    assert raw_path == b"/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions"
+    assert b"%2F" not in raw_path
 
 
-def test_named_route_encodes_both_name_and_trailing_uri() -> None:
+def test_named_route_encodes_name_and_keeps_trailing_uri_literal() -> None:
     recorder = _Recorder()
 
     _client(recorder).provider_get(name="my provider", trailing_uri="v1/models")
 
     assert recorder.requests[0].method == "GET"
     assert recorder.requests[0].url.raw_path == (
-        b"/apis/inference-gateway/v2/workspaces/default/provider/my%20provider/-/v1%2Fmodels"
+        b"/apis/inference-gateway/v2/workspaces/default/provider/my%20provider/-/v1/models"
     )
+
+
+def test_model_name_slashes_are_literal_on_the_wire() -> None:
+    recorder = _Recorder()
+
+    _client(recorder).model_get(name="a/b", trailing_uri="v1/models")
+
+    raw_path = recorder.requests[0].url.raw_path
+    assert raw_path == b"/apis/inference-gateway/v2/workspaces/default/model/a/b/-/v1/models"
+    assert b"%2F" not in raw_path
+
+
+def test_trailing_uri_rejects_traversal() -> None:
+    with pytest.raises(ValueError, match="must not contain empty"):
+        _client(_Recorder()).provider_get(name="p", trailing_uri="../x")
 
 
 def test_untyped_proxy_response_is_returned_as_parsed_json() -> None:

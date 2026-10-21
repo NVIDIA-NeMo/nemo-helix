@@ -5,10 +5,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 
-from nemo_builder_plugin.schema import JOB_NAME_PREFIX, BuildSet, BuildSpec
+from nemo_builder_plugin.identity import ImageReference, normalize_reference
+from nemo_builder_plugin.schema import JOB_NAME_PREFIX, BuildSet, BuildSpec, FileSetSource, ImageSource
 from nemo_builder_plugin.steps import ContextSource
 
 
@@ -33,14 +34,32 @@ class PlannedImage:
     #: The ``ContainerImage`` name.
     name: str
     destination: Destination | None = None
+    #: For a copy, the manifest digest its image named for the spec's platform when the build was submitted.
+    upstream_digest: str | None = None
+
+    @property
+    def upstream(self) -> ImageReference | None:
+        """For a copy, the image it copies; None for a build."""
+        source = self.spec.source
+        return normalize_reference(source.image) if isinstance(source, ImageSource) else None
+
+    @property
+    def pinned_upstream(self) -> str:
+        """``<registry>/<repository>@<manifest digest>``, the one manifest a copy pulls."""
+        upstream = self.upstream
+        if upstream is None or self.upstream_digest is None:
+            raise ValueError(f"{self.name} copies no resolved image; call plan.with_upstream() first")
+        return f"{upstream.registry}/{upstream.repository}@{self.upstream_digest}"
 
     @property
     def source(self) -> ContextSource:
-        fileset = self.spec.source.fileset
+        source = self.spec.source
+        if not isinstance(source, FileSetSource):
+            raise ValueError(f"{self.name} copies an image and has no build context")
         return ContextSource(
-            fileset=fileset if "/" in fileset else f"{self.workspace}/{fileset}",
-            archive=self.spec.source.archive or None,
-            context_path=self.spec.source.context_path or None,
+            fileset=source.fileset if "/" in source.fileset else f"{self.workspace}/{source.fileset}",
+            archive=source.archive or None,
+            context_path=source.context_path or None,
         )
 
     @property
@@ -91,10 +110,26 @@ class BuildPlan:
             seen[ref] = image.name
         return replace(self, images=placed)
 
+    def with_upstream(self, manifest_digests: Mapping[str, str]) -> BuildPlan:
+        """Pin each copy to the manifest digest resolved for it, keyed by image name."""
+        return replace(
+            self,
+            images=tuple(
+                replace(image, upstream_digest=manifest_digests[image.name]) if image.upstream else image
+                for image in self.images
+            ),
+        )
+
+    @property
+    def copies(self) -> tuple[PlannedImage, ...]:
+        return tuple(image for image in self.images if image.upstream is not None)
+
     def groups(self) -> list[tuple[ContextSource, tuple[PlannedImage, ...]]]:
         """Each group builds in its own sandbox, so a Dockerfile never sees another source's context."""
         grouped: dict[tuple[str, str | None, str | None], list[PlannedImage]] = {}
         for image in self.images:
+            if image.upstream is not None:
+                continue
             source = image.source
             grouped.setdefault((source.fileset, source.archive, source.context_path), []).append(image)
         return [

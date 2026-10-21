@@ -19,8 +19,10 @@ from nemo_helix_plugin.integrations import IntegrationsSpec, MlflowIntegration, 
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.models.types import ModelEntity
 from nhx.common.entities.utils import get_random_id
+from nhx.customization_common.schemas.file_io import model_upload_lifecycle
 from nhx.customization_common.schemas.values import OutputNameType
 from nhx.customization_common.service.platform_client import AsyncCustomizationHelixClients
+from nhx.rl.app.constants import NHX_BROKER_PORT_ENVVAR, NHX_VLLM_PORT_ENVVAR
 from nhx.rl.app.jobs.compiler import (
     _build_download_config,
     _build_model_entity_config,
@@ -37,6 +39,7 @@ from nhx.rl.schemas import (
     ParallelismParams,
     RlJobOutput,
 )
+from sandboxed_gym.config import JOB_ID_METADATA_KEY
 
 
 def _adapter_lookup(platform: AsyncCustomizationHelixClients) -> AsyncMock:
@@ -270,16 +273,34 @@ def test_single_node_uses_gpu_executor() -> None:
     assert _container(step)["command"] == ["-m", "nhx.rl.tasks.training"]
     resources = step["executor"]["resources"]
     actual = resources.shm_size if hasattr(resources, "shm_size") else resources["shm_size"]
-    assert actual == "8Gi"
+    assert actual == "64Gi"
 
 
-def test_multi_node_gpu_shm_scales_with_gpus_per_node(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_multi_node_gpu_shm_is_flat(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("nhx.rl.app.jobs.compiler.config.multinode_shared_storage_path", "/shared", raising=False)
     job = _make_job_output(DPOTraining(type="dpo", parallelism=ParallelismParams(num_nodes=2, num_gpus_per_node=2)))
     step = _build_training_step(job, [], trust_remote_code=False, profile=None)
     resources = step["executor"]["resources"]
     actual = resources.shm_size if hasattr(resources, "shm_size") else resources["shm_size"]
-    assert actual == "16Gi"
+    assert actual == "64Gi"
+
+
+def test_grpo_lora_uses_adapter_shm(sandbox_capable: None) -> None:
+    job = RlJobOutput(
+        model="default/base-model",
+        dataset="default/prefs",
+        environment="default/env",
+        training=GRPOTraining(
+            type="grpo",
+            finetuning_type="lora",
+            parallelism=ParallelismParams(num_nodes=1, num_gpus_per_node=1),
+        ),
+        output=OutputResponse(name="my-lora", type=OutputNameType.ADAPTER, fileset="my-lora-fs"),
+    )
+    step = _build_training_step(job, [], trust_remote_code=False, profile=None)
+    resources = step["executor"]["resources"]
+    actual = resources.shm_size if hasattr(resources, "shm_size") else resources["shm_size"]
+    assert actual == "8Gi"
 
 
 def test_multi_node_requires_shared_storage(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -308,6 +329,25 @@ def test_explicit_profile_overrides_default() -> None:
     assert step["executor"]["profile"] == "custom-gpu"
 
 
+def test_grpo_training_step_admits_sandboxes_only_on_vllm_and_broker(sandbox_capable: None) -> None:
+    job = _make_job_output(GRPOTraining(type="grpo"), environment="default/env")
+    step = _build_training_step(job, [], trust_remote_code=False, profile=None)
+
+    assert step.network is not None
+    (rule,) = step.network.ingress
+    assert rule.job_id_label == JOB_ID_METADATA_KEY
+    assert rule.tcp_ports == [51234]
+    assert [(span.low, span.high) for span in rule.tcp_port_ranges] == [(3000, 4998)]
+    env = {e.name: e.value for e in step.environment or []}
+    assert env[NHX_VLLM_PORT_ENVVAR] == "8000"
+    assert env[NHX_BROKER_PORT_ENVVAR] == "51234"
+
+
+def test_dpo_training_step_declares_no_network() -> None:
+    step = _build_training_step(_make_job_output(), [], trust_remote_code=False, profile=None)
+    assert step.network is None
+
+
 # --------------------------------------------------------------------------- #
 # platform_job_config_compiler: full 4-step spec
 # --------------------------------------------------------------------------- #
@@ -327,6 +367,7 @@ async def test_compiler_emits_four_steps(
     steps = _steps(spec)
     names = [s["name"] for s in steps]
     assert names == ["model-and-dataset-download", "dpo-training", "model-upload", "model-entity-creation"]
+    assert steps[2]["lifecycle"] == model_upload_lifecycle()
 
     # CPU task steps share the lighter customizer-tasks image; the GPU step uses the training image.
     assert "nhx-customizer-tasks" in _container(steps[0])["image"]

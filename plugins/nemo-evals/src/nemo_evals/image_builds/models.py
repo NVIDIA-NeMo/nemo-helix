@@ -9,13 +9,14 @@ import hashlib
 from datetime import datetime
 from typing import ClassVar, Literal
 
+from nemo_builder_plugin.identity import ImageIdentityError, normalize_registry
 from nemo_evals.content_hash import DIGEST_LENGTH, DIGEST_PATTERN
 from nemo_helix_plugin.entities import EntityBase
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 BuildStatus = Literal["pending", "running", "ready", "failed"]
 ImageStatus = Literal["pending", "building", "ready", "failed"]
-ImageSource = Literal["dockerfile", "prebuilt"]
+BuildImageSource = Literal["dockerfile", "prebuilt"]
 
 TERMINAL_BUILD_STATUSES: frozenset[BuildStatus] = frozenset({"ready", "failed"})
 TERMINAL_IMAGE_STATUSES: frozenset[ImageStatus] = frozenset({"ready", "failed"})
@@ -35,8 +36,11 @@ class BuildImage(BaseModel):
             "service's own name; or `verifier`, for a separate verifier."
         )
     )
-    source: ImageSource = Field(
-        description="`dockerfile` when built from the task archive, `prebuilt` when the task names an image."
+    source: BuildImageSource = Field(
+        description=(
+            "`dockerfile` when built from the task archive, `prebuilt` when the task names an image, which is "
+            "copied unchanged into the platform's registry."
+        )
     )
     context_path: str | None = Field(
         default=None, description="Build context inside the task archive, for a `dockerfile` image."
@@ -77,10 +81,19 @@ class ImageBuildRequest(BaseModel):
     allowed_registries: list[str] = Field(
         default_factory=list,
         description=(
-            "Registry hosts a prebuilt image named by the task may be copied from, e.g. `docker.io`. "
-            "A prebuilt image from any other registry fails the build."
+            "Registry hosts, such as `docker.io`, that a prebuilt image named by the task may be copied from. "
+            "Narrows the registries the deployment allows; empty allows all of those. A prebuilt image from "
+            "any other registry fails the build."
         ),
     )
+
+    @field_validator("allowed_registries")
+    @classmethod
+    def _registries_are_hosts(cls, value: list[str]) -> list[str]:
+        try:
+            return [normalize_registry(host) for host in value]
+        except ImageIdentityError as exc:
+            raise ValueError(f"allowed_registries must be registry hosts: {exc}") from exc
 
 
 class ImageBuild(BaseModel):

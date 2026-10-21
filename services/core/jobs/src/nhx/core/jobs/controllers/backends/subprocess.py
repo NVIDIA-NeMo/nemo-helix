@@ -35,6 +35,7 @@ from nhx.common.jobs.constants import (
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
 )
 from nhx.common.jobs.schemas import HelixJobStatus
+from nhx.core.jobs.app.lifecycle import describe_paused_exit, pause_deadline_exceeded
 from nhx.core.jobs.app.providers import SubprocessExecutionProvider
 from nhx.core.jobs.app.schemas import BaseExecutionProfile
 from nhx.core.jobs.controllers.backends.base import (
@@ -42,6 +43,7 @@ from nhx.core.jobs.controllers.backends.base import (
     JobExecutionProfileConfig,
     JobUpdate,
     get_logs_endpoint_config_from_fileset,
+    step_ttl_seconds_active,
 )
 from nhx.core.jobs.controllers.backends.subprocess_runtime import (
     SubprocessOtelLogger,
@@ -253,10 +255,11 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         self._start_log_capture(step, metadata, "stderr")
 
         status_details = {"message": "Subprocess scheduled", **self._task_status_details(metadata)}
-        self._jobs.update_job_step_task(
+        self._jobs.update_attempt_step_task(
             name=metadata.task_id,
             workspace=step.workspace,
             job=step.job,
+            attempt=step.attempt_id,
             step=step.name,
             body=HelixJobTaskUpdate(
                 status=HelixJobStatus.PENDING,
@@ -278,6 +281,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
                     status_details={"message": "Subprocess not found, job cancelled"},
                 )
             if step.status == HelixJobStatus.PAUSING:
+                # Nothing is running, so there is nothing for the pause deadline to stop.
                 return JobUpdate(
                     status=HelixJobStatus.PAUSED,
                     status_details={"message": "Subprocess not found, job paused"},
@@ -308,11 +312,33 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         if step.status == HelixJobStatus.CANCELLING and metadata.process.poll() is None:
             self._terminate_process(metadata)
 
-        if step.status == HelixJobStatus.PAUSING and metadata.process.poll() is None:
-            self._terminate_process(metadata)
+        # A process still running at the pause deadline is stopped and fails the step. One that
+        # already exited stopped on its own: this backend sees an exit within one tick, so its
+        # exit code decides below, as it would have a tick earlier.
+        if step.status == HelixJobStatus.PAUSING and pause_deadline_exceeded(step) and metadata.process.poll() is None:
+            message = "Pause deadline exceeded"
+            self._terminate_process(metadata, force=True)
+            self._finish_logs(metadata)
+            self._update_task(
+                step,
+                metadata,
+                HelixJobStatus.ERROR,
+                {"message": message, **self._task_status_details(metadata)},
+                {"message": message},
+                self._tail_log_file(metadata.log_path),
+            )
+            return JobUpdate(
+                status=HelixJobStatus.ERROR,
+                status_details={"message": message},
+                error_details={"message": message},
+            )
 
+        # The TTLs bound running and scheduling time. A pausing step is bounded by its pause
+        # deadline, and a cancelling step was just terminated above, so neither is timed out here.
+        if step.status not in (HelixJobStatus.ACTIVE, HelixJobStatus.PENDING):
+            return self._create_step_update(step, metadata)
         ttl_seconds = (
-            self._execution_profile_config.ttl_seconds_active
+            step_ttl_seconds_active(step, self._execution_profile_config.ttl_seconds_active)
             if step.status == HelixJobStatus.ACTIVE
             else self._execution_profile_config.ttl_seconds_before_active
         )
@@ -335,12 +361,24 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
 
         return self._create_step_update(step, metadata)
 
+    def reclaim_persistent_storage(self, workspace: str, job: str) -> bool:
+        try:
+            shutil.rmtree(self._root_dir / workspace / job)
+        except FileNotFoundError:
+            pass
+        return True
+
     def cleanup_steps(self) -> None:
         for key, metadata in self._process_registry.items():
             if metadata.process.poll() is None:
                 continue
 
-            step = self.get_step_safe(job=key.job, step_name=key.step, workspace=key.workspace)
+            step = self.get_step_safe(
+                job=key.job,
+                step_name=key.step,
+                workspace=key.workspace,
+                attempt_id=key.attempt_id,
+            )
             should_cleanup = step is None
             if step is not None and step.status in ("cancelled", "error", "completed"):
                 should_cleanup = self._execution_profile_config.cleanup_completed_jobs_immediately
@@ -359,9 +397,10 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
 
     def _get_task_fallback_update(self, step: HelixJobStepWithContext) -> JobUpdate | None:
         try:
-            tasks = self._jobs.list_job_step_tasks(
-                name=step.name,
+            tasks = self._jobs.list_attempt_step_tasks(
+                step=step.name,
                 job=step.job,
+                attempt=step.attempt_id,
                 workspace=step.workspace,
             ).data()
         except Exception:
@@ -400,12 +439,14 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
     @staticmethod
     def _cleanup_failed_startup_dirs(work_dir: Path, persistent_dir: Path) -> None:
         shutil.rmtree(work_dir, ignore_errors=True)
+        # Drop empty attempt and step directories. Leave job storage in place when
+        # a previous attempt already wrote into it.
         for path in (
             work_dir.parent,
+            work_dir.parent.parent,
             persistent_dir,
             persistent_dir.parent,
             persistent_dir.parent.parent,
-            persistent_dir.parent.parent.parent,
         ):
             try:
                 path.rmdir()
@@ -414,11 +455,13 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
 
     def _prepare_runtime(self, step: HelixJobStepWithContext) -> tuple[dict[str, str], str, Path, Path, Path]:
         task_id = f"task-{uuid.uuid4().hex}"
-        job_attempt_dir = self._root_dir / step.workspace / step.job / str(step.attempt_id)
+        job_dir = self._root_dir / step.workspace / step.job
+        job_attempt_dir = job_dir / str(step.attempt_id)
         work_dir = job_attempt_dir / step.name / task_id
         config_dir = work_dir / "config"
         ephemeral_dir = work_dir / "scratch"
-        persistent_dir = job_attempt_dir / "job-storage"
+        # Persistent storage is per job so a resume or rerun finds the checkpoint.
+        persistent_dir = job_dir / "job-storage"
         config_dir.mkdir(parents=True, exist_ok=True)
         ephemeral_dir.mkdir(parents=True, exist_ok=True)
         persistent_dir.mkdir(parents=True, exist_ok=True)
@@ -558,12 +601,12 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         # Check pausing/cancelling before treating a non-zero exit as an error.
         # The process was killed as part of pause/cancel — the exit code is expected.
         if step.status == HelixJobStatus.PAUSING:
-            return (
-                HelixJobStatus.PAUSED,
-                {"message": f"Job paused with exit code {exit_code}", **status_details},
-                {},
-                "",
+            status, message, error_details = describe_paused_exit(
+                exit_code, paused_message=f"Job paused with exit code {exit_code}"
             )
+            if status == HelixJobStatus.ERROR:
+                error_stack = self._tail_log_file(metadata.log_path)
+            return status, {"message": message, **status_details}, error_details, error_stack
         if step.status == HelixJobStatus.CANCELLING:
             return (
                 HelixJobStatus.CANCELLED,
@@ -597,10 +640,11 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         error_details: dict,
         error_stack: str = "",
     ) -> None:
-        self._jobs.update_job_step_task(
+        self._jobs.update_attempt_step_task(
             name=metadata.task_id,
             workspace=step.workspace,
             job=step.job,
+            attempt=step.attempt_id,
             step=step.name,
             body=HelixJobTaskUpdate(
                 status=status,

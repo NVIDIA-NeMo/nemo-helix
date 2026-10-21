@@ -1,6 +1,8 @@
 ---
 name: create-release-notes
 description: Draft or audit NeMo Helix release notes by comparing a release ref with a candidate ref, reconciling forward-merged release-line changes, checking published documentation coverage, and recording verified CLI or Studio entry points. Use when asked to create, update, compare, review, or check release notes for a NeMo Helix release. Not for publishing artifacts or running the release workflow.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
@@ -14,14 +16,14 @@ Create evidence-backed product release notes from local Git history. Work at the
 
 Require a release ref. Resolve it locally; do not fetch or require GitHub access. The candidate ref defaults to `HEAD`.
 
-- **Draft** is the default. Require a target version and release date. When the target version is a new release, first cut over the prior release note: copy the existing `current-release.mdx` content to `docs/about/release-notes/release-<major>-<minor>-<patch>.mdx` (dashed version, matching the existing archive naming), add it to `docs/about/release-notes/index.mdx`, and add its Fern nav entry in `docs/fern/versions/latest.yml`. Skip the cutover when the target version is still the current page. Then update `docs/about/release-notes/current-release.mdx` with the new release content and finish with a coverage report.
-- **Audit** is read-only. Check an existing release note, defaulting to `docs/about/release-notes/current-release.mdx`, and return the coverage report without editing it.
+- **Draft** is the default. Require a target version and release date. Create or update `docs/about/release-notes/release-<major>-<minor>-<patch>.mdx` (dashed version, for example `release-0-8-0.mdx`) for that version only. Add its version-number link to `docs/about/release-notes/index.mdx` and its Fern nav entry to `docs/fern/versions/latest.yml`, in descending semantic-version order. Use a version label such as `v0.8.0` and an explicit slug such as `release-0-8-0`. Preserve all other versions' notes and entries; there is no rolling page to overwrite or archive. Finish with a coverage report.
+- **Audit** is read-only. Check the explicitly requested versioned note or alternate path. If neither is supplied, use the highest semantic-version release-note page listed in `docs/fern/versions/latest.yml` at the candidate ref; stop and ask if none can be resolved. Return the coverage report without editing it.
 
 If a required draft input is missing, ask for it before editing. Accept an explicit alternate notes path. Never publish a release, create a tag, or run the release workflow as part of this skill.
 
 ## 1. Load repository policy and examples
 
-Read the root `AGENTS.md`, `AGENTS.local.md` when present, `docs/AGENTS.md`, and `RELEASING.md`. Read the current release note and the two most recent versioned notes in `docs/about/release-notes/` to preserve current terminology and release-level context.
+Read the root `AGENTS.md`, `AGENTS.local.md` when present, `docs/AGENTS.md`, and `RELEASING.md`. Read the target version's note when it exists and the two most recent preceding versioned notes in `docs/about/release-notes/` to preserve terminology and release-level context. For historical refs that still use a rolling release-note page, inspect that page as coverage evidence without recreating it in the working tree.
 
 Read [references/note-contract.md](references/note-contract.md) before classifying or writing entries.
 
@@ -110,7 +112,7 @@ Separately, inspect the candidate-side merge result against its first parent, si
 git diff --find-renames '<first-parent>..<merge>'
 ```
 
-Do not create an entry for the merge wrapper. Add the underlying change to the evidence ledger only if it is user-visible and is not already described in the applicable current, patch, or prior release note. This second coverage pass is mandatory even when the release ref is an ancestor of the candidate and the ordinary three-dot diff contains none of the release-line commits.
+Do not create an entry for the merge wrapper. Add the underlying change to the evidence ledger only if it is user-visible and is not already described in the applicable target, patch, or prior release note. This second coverage pass is mandatory even when the release ref is an ancestor of the candidate and the ordinary three-dot diff contains none of the release-line commits.
 
 Also audit user-visible cherry-equivalent groups from the comparison step even when they did not travel through a detectable forward merge. A patch being present on both refs is a code deduplication fact, not release-note coverage. Check the release-note diff and the actual note text before assigning `already documented`.
 

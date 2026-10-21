@@ -41,8 +41,13 @@ import { KindTag } from '@studio/components/dataViews/CustomModelsDataView/KindT
 import { BaseModelSearchFilterField } from '@studio/components/FilterFields';
 import type { ModelPanelTab } from '@studio/components/sidePanels/ModelPanels/ModelPanel';
 import { INTAKE_ENABLED } from '@studio/constants/environment';
+import { useCustomizationJobsForModels } from '@studio/hooks/useCustomizationJobsForModels';
 import { useModelDeploymentStatuses } from '@studio/hooks/useModelDeploymentStatuses';
-import { getIntakeTracesRoute, getNewCustomizationJobRoute } from '@studio/routes/utils';
+import {
+  getIntakeTracesRoute,
+  getNewCustomizationJobRoute,
+  getWorkspaceCustomizationJobDetailsRoute,
+} from '@studio/routes/utils';
 import { keepPreviousData } from '@tanstack/react-query';
 import { Trash } from 'lucide-react';
 import { ComponentProps, FC, useCallback, useMemo, useState } from 'react';
@@ -202,6 +207,17 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
   }, [modelsResponse?.data]);
 
   /**
+   * Every visible row's output name. A top-level row carries the model's own name; an
+   * adapter sub-row carries the adapter's, which is what a LoRA run records as its
+   * output -- so one flat list of `row.name` covers both kinds.
+   */
+  const outputNames = useMemo(
+    () => tableData.flatMap((row) => [row.name, ...(row.subRows ?? []).map((sub) => sub.name)]),
+    [tableData]
+  );
+  const { jobsByOutputName } = useCustomizationJobsForModels(workspace, outputNames);
+
+  /**
    * Resolved once for the whole table: the row-actions menu is a plain callback
    * and may not call hooks, so the badge and the Deploy action have to read the
    * same precomputed answer rather than resolving separately.
@@ -353,6 +369,21 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
               ? [{ children: deployAction.label, onSelect: () => navigate(deployAction.href) }]
               : [];
 
+            // Keyed on the row's own name either way: an adapter row links to the run that
+            // produced the adapter, never to whatever produced its base model. Omitted
+            // rather than disabled when nothing matched -- a model can be registered
+            // outside a customization run, and then there is no job to show.
+            const jobName = jobsByOutputName.get(row.name);
+            const jobEntries: DropdownEntry[] = jobName
+              ? [
+                  {
+                    children: 'Job details',
+                    onSelect: () =>
+                      navigate(getWorkspaceCustomizationJobDetailsRoute(workspace, jobName)),
+                  },
+                ]
+              : [];
+
             if (isAdapter && parentModel) {
               return [
                 {
@@ -362,6 +393,7 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
                     onRowClick?.(parentModel, 'model-details', adapter);
                   },
                 },
+                ...jobEntries,
                 ...deployEntries,
                 { kind: 'divider' as const },
                 {
@@ -386,6 +418,7 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
                 children: 'Chat Playground',
                 onSelect: () => onRowClick?.(row, 'chat-playground'),
               },
+              ...jobEntries,
               ...deployEntries,
               ...(INTAKE_ENABLED
                 ? [
@@ -407,7 +440,15 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
           },
         }),
       ],
-      [adapterMap, deploymentStatuses, handleKindClick, navigate, onRowClick, workspace]
+      [
+        adapterMap,
+        deploymentStatuses,
+        handleKindClick,
+        jobsByOutputName,
+        navigate,
+        onRowClick,
+        workspace,
+      ]
     );
 
   const hasActiveFilters =

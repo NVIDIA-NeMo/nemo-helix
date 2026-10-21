@@ -18,7 +18,7 @@ worked before you promote it. A run probes a sandboxed copy of the agent with
 adversarial input, generates guardrail and sandbox-policy fixes for whatever got
 through, and then replays the original attacks against those fixes.
 
-The engine behind it is Agent Hardener, which drives garak, NeMo Guardrails and
+The engine behind it is the Agent hardening plugin, which drives garak, NeMo Guardrails and
 OpenShell as a single cycle. You reach it through the `nemo agent-hardener` CLI.
 
 ## What a Run Produces
@@ -103,19 +103,23 @@ Before running a war-game, make sure you have:
 1. The OpenShell gateway installed with its native installer. Installing
    OpenShell as a standalone CLI tool gives you the command without the gateway
    service, and a war-game needs the gateway.
-1. Agent Hardener provisioned once per machine with `nemo agent-hardener setup`, which
+1. Agent hardening plugin provisioned once per machine with `nemo agent-hardener setup`, which
    creates its virtual environments and the inference credential. Confirm
    everything with `nemo agent-hardener doctor`.
 1. At least one [Inference Gateway](/documentation/models-and-inference) model
    provider, so the attackers, defenders and the agent under test can all reach
    models.
-1. An agent registered with `nemo agents create`. Unlike the other agent
+1. An agent registered with `nemo agents register`. Unlike the other agent
    workflows, Agent Governance does not need the agent deployed: it reads the
    stored config and builds its own sandboxed copy. You can also point a run at
    a local agent project directory instead of registering anything.
 
 ## Scope
 
+- **Local deployments only.** Agent Governance runs on a platform started from
+  source with `nemo services run`. The Helm chart and container images do not
+  include it, so the Agent hardening plugin API and the Studio Agent Hardening
+  page are absent there.
 - **Attacks focus on agent behavior.** Probes exercise how the agent responds to
   adversarial input, including prompt injection, indirect injection through tool
   output and jailbreaks. Network reach is covered on the defense side, where the
@@ -128,14 +132,14 @@ Before running a war-game, make sure you have:
   later runs.
 - **Agent Governance runs before you ship.** The fixes it generates keep working
   once applied. For signals from an agent already serving traffic, see
-  [Observe Agents](/documentation/agents/observe-agents).
+  [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces).
 
 <Warning>
 
 Declare the hosts your agent's tools call when you create the manifest. The
 sandbox drops any outbound traffic the manifest does not allow-list, and a
 blocked tool usually looks like a passing run, because the model answers from
-its own knowledge instead of calling the tool. Agent Hardener can only discover
+its own knowledge instead of calling the tool. The Agent hardening plugin can only discover
 hosts by scanning a project's source, so an agent whose tools live in an
 installed package needs its hosts declared explicitly.
 

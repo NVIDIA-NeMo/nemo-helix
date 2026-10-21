@@ -12,7 +12,6 @@ import pytest
 pytest.importorskip("scaled_evals")
 
 from api_test_fixture import app, client, v1
-from cryptography.fernet import Fernet
 from pydantic import ValidationError
 from scaled_evals.api import auth
 from scaled_evals.api.db import get_db
@@ -47,7 +46,6 @@ def _clear_http_metrics() -> None:
     ("path", "repository"),
     [
         ("/v1/tasks", "tasks"),
-        ("/v1/credentials", "credentials"),
         ("/v1/config-profiles", "config_profiles"),
         ("/v1/benchmarks", "benchmarks"),
         ("/v1/benchmark-runs", "benchmark_runs"),
@@ -254,178 +252,15 @@ def test_users_me_reports_owner_backed_capacity(
     _user_db_override.users.quota_usage.assert_called_once_with("dev")
 
 
-def test_admin_usage_reports_actor_counts(
-    monkeypatch: pytest.MonkeyPatch,
-    _user_db_override: MagicMock,
-) -> None:
-    monkeypatch.setattr(settings, "control_plane_admin_subjects", "dev")
-    v1.dependency_overrides[auth.current_principal] = lambda: auth.CurrentPrincipal(
-        owner_type="USER", owner_id="dev", source="starfleet_jwt"
-    )
-    _user_db_override.users.usage_by_actor.return_value = {
-        "total_runs": 3,
-        "total_tasks": 12,
-        "total_tasks_run": 9,
-        "total_evaluation_jobs": 34,
-        "total_executions": 39,
-        "total_trials": 81,
-        "total_benchmark_runs": 4,
-        "queued_runs": 1,
-        "active_runs": 1,
-        "succeeded_runs": 1,
-        "failed_runs": 0,
-        "cancelled_runs": 0,
-        "total_parallelism": 5,
-        "avg_runtime_seconds": 12.5,
-        "max_runtime_seconds": 12.5,
-        "actors": [
-            {
-                "owner_id": "dev",
-                "email": "dev@example.com",
-                "username": "dev",
-                "display_name": "Dev User",
-                "total_runs": 3,
-                "queued_runs": 1,
-                "active_runs": 1,
-                "succeeded_runs": 1,
-                "failed_runs": 0,
-                "cancelled_runs": 0,
-                "total_parallelism": 5,
-                "avg_runtime_seconds": 12.5,
-                "max_runtime_seconds": 12.5,
-                "last_run_at": "2026-07-10T00:00:00Z",
-            }
-        ],
-    }
-
-    response = client.get("/v1/admin/usage")
-
-    assert response.status_code == 200, response.text
-    assert response.json()["total_tasks"] == 12
-    assert response.json()["total_tasks_run"] == 9
-    assert response.json()["total_evaluation_jobs"] == 34
-    assert response.json()["total_executions"] == 39
-    assert response.json()["total_trials"] == 81
-    assert response.json()["total_benchmark_runs"] == 4
-    assert response.json()["actors"][0]["owner_id"] == "dev"
-    _user_db_override.users.usage_by_actor.assert_called_once_with(limit=20)
-
-
-def test_admin_failures_reports_categorized_examples(
-    monkeypatch: pytest.MonkeyPatch,
-    _user_db_override: MagicMock,
-) -> None:
-    monkeypatch.setattr(settings, "control_plane_admin_subjects", "dev")
-    v1.dependency_overrides[auth.current_principal] = lambda: auth.CurrentPrincipal(
-        owner_type="USER", owner_id="dev", source="starfleet_jwt"
-    )
-    _user_db_override.users.failure_summary.return_value = {
-        "window_days": 7,
-        "window_start": "2026-08-01T00:00:00Z",
-        "window_end": "2026-08-08T00:00:00Z",
-        "total_failures": 2,
-        "timeline": [
-            {
-                "date": "2026-08-07",
-                "total": 2,
-                "counts": {"inference_http_504": 2},
-                "codes": {"inference_http_504": {"APIStatusError": 2}},
-            }
-        ],
-        "categories": [
-            {
-                "key": "inference_http_504",
-                "count": 2,
-                "examples": [
-                    {
-                        "evaluation_id": "ev_504",
-                        "evaluation_name": "gateway failure",
-                        "task_id": "task_1",
-                        "owner_id": "dev",
-                        "owner_label": "Dev User",
-                        "runtime": "sandbox_k8s",
-                        "failure_code": "APIStatusError",
-                        "detail": "inference request returned HTTP 504",
-                        "occurred_at": "2026-08-07T00:00:00Z",
-                    }
-                ],
-            }
-        ],
-    }
-
-    response = client.get("/v1/admin/failures?days=7&examples=1")
-
-    assert response.status_code == 200, response.text
-    assert response.json()["total_failures"] == 2
-    assert response.json()["categories"][0]["label"] == "Inference HTTP 504"
-    assert response.json()["timeline"][0]["counts"] == {"inference_http_504": 2}
-    assert response.json()["timeline"][0]["codes"] == {"inference_http_504": {"APIStatusError": 2}}
-    assert response.json()["categories"][0]["examples"][0]["evaluation_id"] == "ev_504"
-    call = _user_db_override.users.failure_summary.call_args.kwargs
-    assert call["window_days"] == 7
-    assert call["examples_per_category"] == 1
-    assert call["window_start"] < call["window_end"]
-
-
-def test_admin_compute_reports_coverage_and_actual_usage(
-    monkeypatch: pytest.MonkeyPatch,
-    _user_db_override: MagicMock,
-) -> None:
-    monkeypatch.setattr(settings, "control_plane_admin_subjects", "dev")
-    v1.dependency_overrides[auth.current_principal] = lambda: auth.CurrentPrincipal(
-        owner_type="USER", owner_id="dev", source="starfleet_jwt"
-    )
-    _user_db_override.users.compute_summary.return_value = {
-        "runtime": "all",
-        "window_days": 7,
-        "window_start": "2026-08-01T00:00:00Z",
-        "window_end": "2026-08-08T00:00:00Z",
-        "evaluations": 10,
-        "sampled_evaluations": 4,
-        "samples": 52,
-        "avg_cpu_cores": 0.25,
-        "peak_cpu_cores": 1.5,
-        "avg_cpu_request_cores": 1.0,
-        "avg_cpu_limit_cores": 2.0,
-        "avg_cpu_request_utilization_percent": 25.0,
-        "avg_memory_bytes": 268435456.0,
-        "peak_memory_bytes": 536870912,
-        "avg_memory_request_bytes": 1073741824.0,
-        "avg_memory_limit_bytes": 2147483648.0,
-        "avg_memory_request_utilization_percent": 25.0,
-        "requested_gpus": 2.0,
-        "gpu_utilization_available": False,
-        "runtimes": [],
-        "timeline": [],
-    }
-
-    response = client.get("/v1/admin/compute?days=7")
-
-    assert response.status_code == 200, response.text
-    assert response.json()["sampled_evaluations"] == 4
-    assert response.json()["avg_cpu_cores"] == 0.25
-    assert response.json()["gpu_utilization_available"] is False
-    call = _user_db_override.users.compute_summary.call_args.kwargs
-    assert call["window_days"] == 7
-    assert call["window_start"] < call["window_end"]
-
-
 @pytest.mark.parametrize("query", ["days=0", "days=91"])
-def test_admin_compute_validates_window(query: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "control_plane_admin_subjects", "dev")
-
+def test_admin_compute_validates_window(query: str) -> None:
     response = client.get(f"/v1/admin/compute?{query}")
 
     assert response.status_code == 422
 
 
 @pytest.mark.parametrize("query", ["days=0", "days=91", "examples=0", "examples=11"])
-def test_admin_failures_validates_window_and_example_limits(
-    query: str,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings, "control_plane_admin_subjects", "dev")
-
+def test_admin_failures_validates_window_and_example_limits(query: str) -> None:
     response = client.get(f"/v1/admin/failures?{query}")
 
     assert response.status_code == 422
@@ -440,12 +275,7 @@ def test_admin_failures_validates_window_and_example_limits(
         "from=2026-08-01T00%3A00%3A00&to=2026-08-02T00%3A00%3A00",
     ],
 )
-def test_admin_failures_validates_custom_datetime_window(
-    query: str,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings, "control_plane_admin_subjects", "dev")
-
+def test_admin_failures_validates_custom_datetime_window(query: str) -> None:
     response = client.get(f"/v1/admin/failures?{query}")
 
     assert response.status_code == 422
@@ -458,7 +288,6 @@ def test_hosted_task_image_settings_require_tag_runtime_references() -> None:
     ):
         Settings.model_validate(
             {
-                "credentials_encryption_key": Fernet.generate_key().decode(),
                 "task_image_hosted_mode": True,
                 "task_image_validation_mode": "resolve",
                 "task_image_allowed_registries": "artifactory.nvidia.com",
@@ -470,7 +299,6 @@ def test_hosted_task_image_settings_require_tag_runtime_references() -> None:
 def test_hosted_task_image_settings_accept_tag_references() -> None:
     configured = Settings.model_validate(
         {
-            "credentials_encryption_key": Fernet.generate_key().decode(),
             "task_image_hosted_mode": True,
             "task_image_validation_mode": "resolve",
             "task_image_allowed_registries": "artifactory.nvidia.com",

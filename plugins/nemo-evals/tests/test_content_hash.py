@@ -69,11 +69,13 @@ def _task(
     )
 
 
-def _harbor_task(*, config: dict[str, Any] | None = None, files_hash: str = "a" * 64) -> TaskEntity:
+def _harbor_task(
+    *, config: dict[str, Any] | None = None, files_hash: str = "a" * 64, native_task_id: str = "task"
+) -> TaskEntity:
     return TaskEntity(
         spec=HarborTaskDefinition(
             kind="harbor",
-            native_task_id="task",
+            native_task_id=native_task_id,
             harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
             source=HarborArchiveSource(
                 fileset_ref="default/harbor#packages/o-n/abc/files",
@@ -113,6 +115,7 @@ def test_harbor_scoring_fields_are_part_of_canonical_content():
     metrics_digest = content_hash(restored)
     restored.spec.views = _DEFAULT_VIEWS
     assert content_hash(restored) != metrics_digest
+    assert isinstance(restored.spec, HarborTaskDefinition) and isinstance(entity.spec, HarborTaskDefinition)
     assert restored.spec.source == entity.spec.source
 
 
@@ -120,8 +123,7 @@ def test_harbor_native_identity_participates_in_revision_hash():
     entity = _harbor_task()
     original = content_hash(entity)
     assert json.loads(canonical_payload(entity))["spec"]["native_task_id"] == "task"
-    entity.spec.native_task_id = "other"
-    assert content_hash(entity) != original
+    assert content_hash(_harbor_task(native_task_id="other")) != original
 
 
 def test_canonical_payload_is_compact_and_key_sorted() -> None:

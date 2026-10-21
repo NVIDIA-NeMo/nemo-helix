@@ -26,6 +26,9 @@ Parameter conventions:
 - ``query_params`` — query parameters (dict or TypedDict)
 - Blessed client options (e.g. ``exist_ok``) — client-side behavior (stripped before sending)
 - All other keyword parameters — path parameters (matched to ``{placeholders}`` in the path template)
+
+A ``{name}`` placeholder is one URL segment and is fully percent-encoded.
+A ``{name:path}`` placeholder spans segments and keeps ``/`` literal, like Starlette's ``:path`` converter.
 """
 
 from __future__ import annotations
@@ -38,6 +41,7 @@ from typing import get_type_hints
 
 from nemo_helix_plugin.client.types import (
     BLESSED_CLIENT_PARAMS,
+    PATH_SPEC,
     RESERVED_PARAM_NAMES,
     ConflictResolver,
     P,
@@ -169,6 +173,18 @@ def _build_prepared_request(
     )
 
 
+def _path_param_names(path: str) -> set[str]:
+    """Placeholder names in a path template; each must be ``{name}`` or ``{name:path}``."""
+    names: set[str] = set()
+    for _, field_name, format_spec, conversion in string.Formatter().parse(path):
+        if field_name is None:
+            continue
+        if format_spec not in ("", PATH_SPEC) or conversion is not None:
+            raise TypeError(f"Endpoint path {path!r}: placeholder {{{field_name}}} must be {{name}} or {{name:path}}")
+        names.add(field_name)
+    return names
+
+
 def _make_endpoint(
     http_method: str,
     path: str,
@@ -178,7 +194,7 @@ def _make_endpoint(
 ) -> Callable[P, PreparedRequest[ResponseT]]:
     """Create a callable that builds PreparedRequests from the function's signature."""
     sig = inspect.signature(fn)
-    path_param_names = {field_name for _, field_name, _, _ in string.Formatter().parse(path) if field_name}
+    path_param_names = _path_param_names(path)
     client_option_names = _identify_client_option_params(fn)
     _validate_params(fn, path_param_names, client_option_names)
 

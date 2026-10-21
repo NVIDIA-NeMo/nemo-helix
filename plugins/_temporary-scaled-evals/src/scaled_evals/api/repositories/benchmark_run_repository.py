@@ -11,6 +11,8 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Json
 
+from scaled_evals.api import config_profile_store
+from scaled_evals.api.benchmark_store import BenchmarkStore
 from scaled_evals.api.failure_diagnostics import failure_category_for_code, is_retryable_failure
 from scaled_evals.api.repositories.base_repository import (
     created_at_cursor_clause,
@@ -23,6 +25,7 @@ from scaled_evals.api.repositories.evaluation_repository import (
     EVALUATION_COLUMNS,
     EvaluationRepository,
 )
+from scaled_evals.api.task_store import TaskStore
 
 # benchmark_runs stores only identity + run config + the explicit-cancel marker.
 # status / reward / per-task breakdown are derived on read from member
@@ -64,29 +67,6 @@ _DERIVED_STATUS_SQL = """
     END
 """
 
-# Resolved member tasks of a benchmark revision, in benchmark order. A member's
-# NULL task_revision floats to the task's current revision (COALESCE); the
-# LEFT JOIN yields status for the resolved revision (NULL when the task has no
-# revision yet — the router validates `ready`).
-_LOAD_MEMBERS_SQL = """
-    SELECT
-        m.task_id,
-        m.position,
-        COALESCE(m.task_revision, t.current_revision) AS task_revision,
-        t.slug AS task_slug,
-        r.status AS revision_status,
-        r.image_ref,
-        r.image_digest,
-        r.tarball_object_key
-    FROM benchmark_revision_tasks m
-    JOIN tasks t ON t.id = m.task_id
-    LEFT JOIN task_revisions r
-        ON r.task_id = m.task_id
-       AND r.revision = COALESCE(m.task_revision, t.current_revision)
-    WHERE m.benchmark_id = %s AND m.revision = %s
-    ORDER BY m.position, m.task_id
-"""
-
 # Member executions of one or more runs (for derive_run_view). Ordered by
 # task_id for a stable per-task breakdown.
 _MEMBERS_FOR_RUNS_SQL = """
@@ -97,10 +77,8 @@ _MEMBERS_FOR_RUNS_SQL = """
         e.max_infrastructure_retries, e.next_retry_at,
         e.last_failure_code, e.last_failure_category,
         e.cancel_teardown_status, e.cancel_teardown_error,
-        e.finished_at, e.task_id, e.task_revision,
-        t.slug AS task_slug, t.name AS task_name
+        e.finished_at, e.task_id, e.task_revision
     FROM evaluations e
-    JOIN tasks t ON t.id = e.task_id
     WHERE e.benchmark_run_id = ANY(%s) AND e.deleted_at IS NULL
     ORDER BY e.task_id, e.id
 """
@@ -328,36 +306,6 @@ class BenchmarkRunRepository:
     def __init__(self, conn: psycopg.Connection) -> None:
         self.conn = conn
 
-    def benchmark_revision_for_run(self, benchmark_id: str, revision: int | None = None) -> dict[str, Any] | None:
-        """Resolve a live benchmark revision and its advisory qualification state."""
-        with self.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT current_revision, qualification_status,
-                       qualification_evidence, qualified_at
-                FROM benchmarks
-                WHERE id = %s AND deleted_at IS NULL
-                """,
-                (benchmark_id,),
-            )
-            row = cur.fetchone()
-            if row is None:
-                return None
-            resolved_revision = revision if revision is not None else row["current_revision"]
-            if revision is not None:
-                cur.execute(
-                    "SELECT 1 FROM benchmark_revisions WHERE benchmark_id = %s AND revision = %s",
-                    (benchmark_id, revision),
-                )
-                if cur.fetchone() is None:
-                    return None
-            return {
-                "revision": resolved_revision,
-                "qualification_status": row.get("qualification_status"),
-                "qualification_evidence": row.get("qualification_evidence") or {},
-                "qualified_at": row.get("qualified_at"),
-            }
-
     def load_experiment_identity(self, benchmark_run_id: str) -> dict | None:
         """Resolve a benchmark run to its intake Experiment identity.
 
@@ -366,22 +314,35 @@ class BenchmarkRunRepository:
         the run (or its benchmark) is missing.
         """
         with self.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT b.slug AS benchmark_slug, br.name AS run_name
-                FROM benchmark_runs br
-                JOIN benchmarks b ON b.id = br.benchmark_id
-                WHERE br.id = %s
-                """,
-                (benchmark_run_id,),
-            )
-            return cur.fetchone()
+            cur.execute("SELECT benchmark_id, name AS run_name FROM benchmark_runs WHERE id = %s", (benchmark_run_id,))
+            row = cur.fetchone()
+        if row is None:
+            return None
+        slug = BenchmarkStore().slug(row["benchmark_id"])
+        return {"benchmark_slug": slug, "run_name": row["run_name"]} if slug else None
 
     def load_members(self, benchmark_id: str, revision: int) -> builtins.list[dict]:
-        """Member tasks of a benchmark revision, each resolved to a task revision."""
-        with self.conn.cursor() as cur:
-            cur.execute(_LOAD_MEMBERS_SQL, (benchmark_id, revision))
-            return cur.fetchall()
+        """Member tasks of a benchmark revision, each resolved to a task revision.
+
+        `revision_status` and the image fields are None when the resolved
+        revision does not exist, and `revision_status` is ``deleted`` for a
+        soft-deleted task, which can't be run; the router validates `ready`.
+        """
+        rows = BenchmarkStore().members(benchmark_id, revision)
+        return [
+            {
+                "task_id": member["task_id"],
+                "position": member["position"],
+                "task_revision": revision["revision"] if revision else task["current_revision"],
+                "task_slug": task["slug"],
+                "revision_status": "deleted" if task["deleted"] else revision["status"] if revision else None,
+                **{
+                    field: revision[field] if revision else None
+                    for field in ("image_ref", "image_digest", "tarball_object_key")
+                },
+            }
+            for member, task, revision in TaskStore().resolve_members(rows, include_deleted=True)
+        ]
 
     def create_run(
         self,
@@ -424,6 +385,16 @@ class BenchmarkRunRepository:
         run row.
         """
         evaluations = EvaluationRepository(self.conn)
+        profiles_by_id = config_profile_store.ConfigProfileStore().get_many(
+            profile_id
+            for profile_id in (
+                framework_profile_id,
+                harbor_profile_id,
+                intake_profile_id,
+                *(member.get("framework_profile_id") for member in members),
+            )
+            if profile_id
+        )
         with self.conn.transaction(), self.conn.cursor() as cur:
             cur.execute(
                 """
@@ -508,6 +479,7 @@ class BenchmarkRunRepository:
                     visibility=visibility,
                     benchmark_run_id=run_id,
                     owner_id=owner_id,
+                    profiles_by_id=profiles_by_id,
                 )
         return run
 
@@ -578,7 +550,13 @@ class BenchmarkRunRepository:
             return []
         with self.conn.cursor() as cur:
             cur.execute(_MEMBERS_FOR_RUNS_SQL, (run_ids,))
-            return cur.fetchall()
+            rows = cur.fetchall()
+        tasks = TaskStore().tasks(row["task_id"] for row in rows)
+        return [
+            {**row, "task_slug": task["slug"], "task_name": task["name"]}
+            for row in rows
+            if (task := tasks.get(row["task_id"]))
+        ]
 
     def cancel(self, run_id: str) -> tuple[dict | None, bool, builtins.list[dict]]:
         """Cancel a run (stamp cancelled_at) and its active members (soft cancel).

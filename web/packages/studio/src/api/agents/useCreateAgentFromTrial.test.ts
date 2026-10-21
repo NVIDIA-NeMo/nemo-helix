@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { agentsCreateAgent, agentsGetAgent } from '@nemo/sdk/generated/agents/agents';
+import { agentsRegisterAgent, agentsGetAgent } from '@nemo/sdk/generated/agents/agents';
 import {
   filesCreateFileset,
   filesDeleteFileset,
@@ -13,7 +13,7 @@ import { copyFilesetFiles } from '@studio/api/files/uploadFilesetEntries';
 
 vi.mock('@nemo/sdk/generated/agents/agents', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@nemo/sdk/generated/agents/agents')>()),
-  agentsCreateAgent: vi.fn(),
+  agentsRegisterAgent: vi.fn(),
   agentsGetAgent: vi.fn(),
 }));
 
@@ -53,7 +53,7 @@ const params = (replaceOrphanedFileset = false) => ({
 
 beforeEach(() => {
   vi.mocked(agentsGetAgent).mockRejectedValue(httpError(404));
-  vi.mocked(agentsCreateAgent).mockResolvedValue({ name: 'hermes-trial-4' } as never);
+  vi.mocked(agentsRegisterAgent).mockResolvedValue({ name: 'hermes-trial-4' } as never);
   vi.mocked(filesCreateFileset).mockResolvedValue({} as never);
   vi.mocked(filesDeleteFileset).mockResolvedValue(undefined as never);
   vi.mocked(copyFilesetFiles).mockResolvedValue();
@@ -78,7 +78,7 @@ describe('createAgentFromTrial', () => {
       { workspace: 'src', name: 'hermes-ethos' },
       { workspace: 'ws', name: 'hermes-trial-4-ethos' }
     );
-    expect(agentsCreateAgent).toHaveBeenCalledWith('ws', {
+    expect(agentsRegisterAgent).toHaveBeenCalledWith('ws', {
       name: 'hermes-trial-4',
       description: 'Hermes',
       config: { name: 'hermes-trial-4' },
@@ -104,7 +104,7 @@ describe('createAgentFromTrial', () => {
     await createAgentFromTrial(params());
 
     expect(filesCreateFileset).not.toHaveBeenCalled();
-    expect(agentsCreateAgent).toHaveBeenCalled();
+    expect(agentsRegisterAgent).toHaveBeenCalled();
   });
 
   it('refuses an orphaned fileset under the new name unless told to replace it', async () => {
@@ -113,16 +113,16 @@ describe('createAgentFromTrial', () => {
     await expect(createAgentFromTrial(params())).rejects.toBeInstanceOf(
       AgentSpecFilesetOrphanError
     );
-    expect(agentsCreateAgent).not.toHaveBeenCalled();
+    expect(agentsRegisterAgent).not.toHaveBeenCalled();
 
     await createAgentFromTrial(params(true));
     expect(filesDeleteFileset).toHaveBeenCalledWith('ws', 'hermes-trial-4-ethos');
-    expect(agentsCreateAgent).toHaveBeenCalled();
+    expect(agentsRegisterAgent).toHaveBeenCalled();
   });
 
   it('rolls back the copied fileset when the agent is not created', async () => {
     mockFilesets({ 'src/hermes-ethos': { storage: { type: 'local', path: '/data' } } });
-    vi.mocked(agentsCreateAgent).mockRejectedValue(new Error('invalid config'));
+    vi.mocked(agentsRegisterAgent).mockRejectedValue(new Error('invalid config'));
 
     await expect(createAgentFromTrial(params())).rejects.toThrow('invalid config');
     expect(filesDeleteFileset).toHaveBeenCalledWith('ws', 'hermes-trial-4-ethos');

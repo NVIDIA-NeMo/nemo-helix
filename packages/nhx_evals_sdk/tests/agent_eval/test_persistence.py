@@ -47,8 +47,10 @@ def test_read_trials_loads_trial_and_keeps_valid_evidence_ref(tmp_path: Path) ->
 
     (trial,) = read_trials(tmp_path)
     assert trial.task_id == "taskA" and trial.status == AgentEvalTrialStatus.COMPLETED
+    assert trial.evidence is not None
     ws = trial.evidence.require("workspace")
-    assert ws.kind == "filesystem" and Path(ws.ref).is_dir()  # type: ignore[arg-type]
+    assert ws.ref is not None
+    assert ws.kind == "filesystem" and Path(ws.ref).is_dir()
 
 
 def test_read_trials_rebuilds_evidence_ref_for_a_moved_bundle(tmp_path: Path) -> None:
@@ -60,8 +62,10 @@ def test_read_trials_rebuilds_evidence_ref_for_a_moved_bundle(tmp_path: Path) ->
     _write_trial(tmp_path, _trial_with_workspace(stale))
 
     (trial,) = read_trials(tmp_path)
+    assert trial.evidence is not None
     ws = trial.evidence.require("workspace")
-    assert Path(ws.ref) == workspace and Path(ws.ref).is_dir()  # type: ignore[arg-type]
+    assert ws.ref is not None
+    assert Path(ws.ref) == workspace and Path(ws.ref).is_dir()
 
 
 def test_persist_run_writes_bundle_relative_refs_that_survive_a_move(tmp_path: Path) -> None:
@@ -87,7 +91,10 @@ def test_persist_run_writes_bundle_relative_refs_that_survive_a_move(tmp_path: P
     moved = tmp_path / "moved-bundle"
     shutil.copytree(bundle, moved)
     (trial,) = read_trials(moved)
-    resolved = Path(trial.evidence.require("workspace").ref)  # type: ignore[arg-type]
+    assert trial.evidence is not None
+    resolved_ref = trial.evidence.require("workspace").ref
+    assert resolved_ref is not None
+    resolved = Path(resolved_ref)
     assert resolved.is_dir() and resolved == moved / "evidence" / "fabric" / "r" / "000000-taskA" / "workspace"
 
 
@@ -188,6 +195,7 @@ def test_read_trials_rejects_evidence_ref_that_escapes_the_bundle(tmp_path: Path
 
     (trial,) = read_trials(bundle)
     # left as the stored ref — never rewritten to the escaped (but existing) outside path
+    assert trial.evidence is not None
     assert trial.evidence.require("workspace").ref == escaping
 
 
@@ -213,6 +221,7 @@ def test_persist_and_read_keep_external_evidence_refs_absolute(tmp_path: Path) -
     assert stored["evidence"]["descriptors"]["workspace"]["ref"] == external_ref  # absolute, unchanged
 
     (trial,) = read_trials(bundle)
+    assert trial.evidence is not None
     assert trial.evidence.require("workspace").ref == external_ref  # retained as-is
 
 

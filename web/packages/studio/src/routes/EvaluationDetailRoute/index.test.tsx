@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getInsightsGetInsightQueryKey } from '@nemo/sdk/generated/insights/insights-insights';
+import { getCompassGetInsightQueryKey } from '@nemo/sdk/generated/compass/compass-insights';
 import { getGetEvaluationQueryKey } from '@nemo/sdk/generated/platform/evaluations';
 import {
   getGetExperimentQueryKey,
@@ -62,7 +62,7 @@ describe('EvaluationDetailRoute with Optimizer enabled', () => {
           },
         })
       ),
-      http.get(mockApiUrl(getInsightsGetInsightQueryKey, ':workspace', ':insightId'), () =>
+      http.get(mockApiUrl(getCompassGetInsightQueryKey, ':workspace', ':insightId'), () =>
         HttpResponse.json({
           id: 'insight-id',
           name: 'insight',
@@ -70,7 +70,7 @@ describe('EvaluationDetailRoute with Optimizer enabled', () => {
           description: 'Actual insight description',
           agent: 'agent',
           status: 'open',
-          trace_refs: [],
+          evidence: [],
         })
       )
     );

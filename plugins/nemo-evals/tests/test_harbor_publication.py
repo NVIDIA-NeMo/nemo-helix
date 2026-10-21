@@ -119,7 +119,7 @@ async def test_registration_rejects_before_persistence(root, entity_store, bad):
         yield chunks()
 
     client = Mock(download_file=AsyncMock(return_value=Mock(stream=stream)))
-    service = TaskService(entity_store, AsyncMock(), client)
+    service = TaskService(entity_store, AsyncMock(), client, authorize_metric_read=AsyncMock())
     definition = HarborTaskDefinition(
         kind="harbor",
         native_task_id="task",
@@ -166,7 +166,7 @@ async def test_registration_root_does_not_collide_with_download(root, entity_sto
         yield chunks()
 
     client = Mock(download_file=AsyncMock(return_value=Mock(stream=stream)))
-    service = TaskService(entity_store, AsyncMock(), client)
+    service = TaskService(entity_store, AsyncMock(), client, authorize_metric_read=AsyncMock())
     definition = HarborTaskDefinition(
         kind="harbor",
         native_task_id=name,

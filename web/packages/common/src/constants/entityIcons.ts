@@ -91,6 +91,7 @@ export const ENTITY_ICONS = {
 
   // System
   jobs: ListChecks,
+  recentJobs: ListChecks,
   secrets: LockKeyhole,
   members: UsersRound,
 } as const satisfies Record<string, LucideIcon>;

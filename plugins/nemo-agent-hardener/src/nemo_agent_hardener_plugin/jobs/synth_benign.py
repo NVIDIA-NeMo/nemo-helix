@@ -6,7 +6,7 @@
 The single entry point for benign-suite synthesis, selected by ``driver``:
 
 - ``native`` (CLI): shell out to native ``agent-hardener synth-benign`` (its own TTY interview), run locally.
-- ``service`` (Studio): drive ``agent-hardener serve`` + the interview/review HITL over the platform job's
+- ``service`` (Studio): drive ``agent-hardener serve`` + the interview/review HITL over the platform attempt's
   ``status_details`` — the exact serve path the war-game uses, via
   :func:`~nemo_agent_hardener_plugin.jobs.execution._run_service_driven` with ``stop_after_synth=True``.
 
@@ -77,9 +77,10 @@ class AgentHardenerSynthBenignJob(NemoJob):
     ) -> HelixJobSpec:
         """A single subprocess step running the synth task on the provisioned host (mirrors the war-game).
 
-        The ``service`` driver's HITL is relayed through the platform job's ``status_details``, so it must run
-        as a submitted job (``ctx.job_id`` set). The run record is created at runtime by ``_run_service_driven``
-        (as the war-game ``stop_after_synth`` path does), so no pre-creation is needed here.
+        The ``service`` driver's HITL is relayed through the platform attempt's ``status_details``, so it must run
+        as a submitted job attempt (``ctx.job_id`` and ``ctx.attempt_id`` set). The run record is created at
+        runtime by ``_run_service_driven`` (as the war-game ``stop_after_synth`` path does), so no pre-creation
+        is needed here.
         """
         del workspace, entity_client, job_name, async_sdk, profile, options
         synth = SynthBenignSpec.model_validate(spec)

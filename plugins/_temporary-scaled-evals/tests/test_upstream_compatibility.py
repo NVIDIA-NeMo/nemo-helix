@@ -12,11 +12,13 @@ from pathlib import Path
 import pytest
 
 try:
+    from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_HARBOR_VERSIONS
     from scaled_evals.harbor_runners import resolve_harbor_runner, supported_harbor_versions
 except ImportError as exc:
     pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+HARBOR_RUNNERS_DIR = PLUGIN_ROOT.parents[1] / "packages/nhx_sandbox/harbor-runners"
 
 
 def test_harbor_catalog_and_compose_image_advertise_the_same_runners() -> None:
@@ -48,18 +50,14 @@ def test_harbor_catalog_and_compose_image_advertise_the_same_runners() -> None:
     assert "COPY packages/nhx_sandbox /tmp/nhx_sandbox" in harbor_target
     assert "uv pip install /tmp/nhx_sandbox" in harbor_target
     assert "sandboxed_gym" not in harbor_target
-    assert "src/scaled_evals/harbor_opensandbox_environment.py" in harbor_target
-    assert "src/scaled_evals/harbor_opensandbox_driver.py" in harbor_target
-    assert "src/scaled_evals/harbor_opensandbox_cleanup.py" in harbor_target
-    assert "src/scaled_evals/harbor_opensandbox_services.py" in harbor_target
-    assert 'nemo-extensions" > "${site}/nemo-extensions.pth"' in harbor_target
-    assert "from scaled_evals.harbor_opensandbox_environment import NemoOpenSandboxEnvironment" in harbor_target
+    assert "nemo-extensions" not in harbor_target
+    assert "from nhx_sandbox.harbor_opensandbox_environment import NemoOpenSandboxEnvironment" in harbor_target
 
 
 def test_harbor_runner_requirements_match_the_catalog() -> None:
     catalog = json.loads((PLUGIN_ROOT / "src/scaled_evals/data/harbor_runner_qualifications.json").read_text())
     selectable = {version for version, release in catalog["releases"].items() if release["selectable"]}
-    requirements_dir = PLUGIN_ROOT / "harbor-runners"
+    requirements_dir = HARBOR_RUNNERS_DIR
 
     assert {path.stem for path in requirements_dir.glob("*.txt")} == selectable
     for version in selectable:
@@ -69,9 +67,19 @@ def test_harbor_runner_requirements_match_the_catalog() -> None:
             for line in (requirements_dir / f"{version}.txt").read_text().splitlines()
             if line and not line.startswith("#")
         ]
+        # Packages pinned beside Harbor: each Harbor extra's package, then plain additions.
+        packages = catalog["releases"][version].get("packages", [])
         harbor = f"harbor[{','.join(extras)}]" if extras else "harbor"
         assert lines[0] == f"{harbor}=={version}"
-        assert [line.split("==", 1)[0] for line in lines[1:]] == extras
+        assert [line.split("==", 1)[0] for line in lines[1:]] == [*extras, *packages]
+
+
+def test_harbor_opensandbox_runners_carry_the_sdk() -> None:
+    """Every runner harbor_opensandbox accepts gets the SDK, so the Dockerfile installs its environment there."""
+    for version in HARBOR_OPENSANDBOX_HARBOR_VERSIONS:
+        assert version in supported_harbor_versions()
+        lines = (HARBOR_RUNNERS_DIR / f"{version}.txt").read_text().splitlines()
+        assert "opensandbox==0.1.16" in lines, version
 
 
 def test_generic_harbor_020_patches_cover_langgraph_and_pi(tmp_path: Path) -> None:

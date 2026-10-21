@@ -236,6 +236,7 @@ describe('SafeSynthesizerFilesetPreview', () => {
       expect(mockUseListJobResults).toHaveBeenCalledWith(
         'test-workspace',
         'test-job-id',
+        undefined,
         expect.objectContaining({
           query: expect.objectContaining({
             enabled: true,
@@ -251,6 +252,7 @@ describe('SafeSynthesizerFilesetPreview', () => {
       expect(mockUseListJobResults).toHaveBeenCalledWith(
         'test-workspace',
         'test-job-id',
+        undefined,
         expect.objectContaining({
           query: expect.objectContaining({
             enabled: false,
@@ -266,6 +268,7 @@ describe('SafeSynthesizerFilesetPreview', () => {
       expect(mockUseListJobResults).toHaveBeenCalledWith(
         'test-workspace',
         'test-job-id',
+        undefined,
         expect.objectContaining({
           query: expect.objectContaining({
             enabled: false,
@@ -281,6 +284,7 @@ describe('SafeSynthesizerFilesetPreview', () => {
       expect(mockUseListJobResults).toHaveBeenCalledWith(
         'test-workspace',
         'test-job-id',
+        undefined,
         expect.objectContaining({
           query: expect.objectContaining({
             enabled: true,

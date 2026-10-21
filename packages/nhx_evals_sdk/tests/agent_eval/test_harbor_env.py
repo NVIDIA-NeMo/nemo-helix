@@ -47,11 +47,11 @@ def test_missing_secret_is_named_with_its_key() -> None:
     ("env_vars", "message"),
     [
         ({"X": "${WORKER_VAR}"}, "looks like a ${NAME} template"),
-        ({"TOKENIZERS_PARALLELISM": "false"}, "Harbor treats keys matching"),
-        ({"MAX_TOKENS": "4096"}, "Harbor treats keys matching"),
-        ({"AUTH_ENABLED": "1"}, "Harbor treats keys matching"),
-        ({"max_tokens": "4096"}, "Harbor treats keys matching"),
+        ({"TOKENIZERS_PARALLELISM": "false"}, "Harbor treats keys containing"),
+        ({"AUTH_ENABLED": "1"}, "Harbor treats keys containing"),
         ({"MODEL_CREDS": "sk-not-a-real-key-0123456789"}, "look like plaintext credentials"),
+        # Harbor's own scrubber exempts every *TOKENS key, so a credential under one would persist in plaintext.
+        ({"API_TOKENS": "an-opaque-bearer-value-0123456789"}, "look like plaintext credentials"),
         ({"LLM_API_KEY": "x"}, "appear in both env_vars and env_secrets"),
     ],
 )
@@ -61,7 +61,16 @@ def test_invalid_env_vars_are_refused(env_vars: dict[str, str], message: str) ->
 
 
 def test_non_secret_env_vars_are_accepted() -> None:
-    validate_harbor_env({"FABRIC_LOG": "debug", "AGENT_MODE": "fast", "AWS_REGION": "us-east-1"}, {})
+    validate_harbor_env(
+        {
+            "FABRIC_LOG": "debug",
+            "AGENT_MODE": "fast",
+            "AWS_REGION": "us-east-1",
+            "MAX_TOKENS": "4096",
+            "max_tokens": "4096",
+        },
+        {},
+    )
 
 
 def test_sensitive_key_regex_matches_harbor() -> None:

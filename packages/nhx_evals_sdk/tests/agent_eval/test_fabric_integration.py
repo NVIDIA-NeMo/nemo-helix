@@ -252,11 +252,16 @@ def _codex_adapter_installed() -> bool:
     """Whether the codex harness adapter is installed (the ``fabric`` extra, not the base SDK).
 
     ``nemo_fabric`` itself is a base dependency, so importing it proves nothing about harnesses:
-    without the adapters Fabric resolves none and fails with ``available adapters: []``. ``find_spec``
-    raises rather than returning None when the parent package is missing, hence the guard.
+    without the adapters Fabric resolves none and fails with ``available adapters: []``. Answered with
+    ``find_spec`` so collection never imports the adapter and its SDK: an import error there would take
+    the whole module's collection down rather than skip the one live test. ``find_spec`` raises rather
+    than returning None when the parent package is missing, hence the guard.
     """
     try:
-        return importlib.util.find_spec("nemo_fabric_adapters.codex") is not None
+        return all(
+            importlib.util.find_spec(name) is not None
+            for name in ("nemo_fabric_adapters.codex.adapter", "openai_codex")
+        )
     except ModuleNotFoundError:
         return False
 

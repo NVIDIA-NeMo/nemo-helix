@@ -4,6 +4,7 @@
 import logging
 import subprocess
 from pathlib import Path
+from types import ModuleType
 
 from nhx.common.errors import ExceptionConverter, RulesLoader
 
@@ -22,7 +23,7 @@ _ERROR_RULES_PATH = Path(__file__).parent / "error_rules.yaml"
 
 # Additional modules to search for exception types not in the registry
 # subprocess.TimeoutExpired is used for training timeout detection
-_FALLBACK_MODULES = [subprocess]
+_FALLBACK_MODULES: list[ModuleType] = [subprocess]
 
 # Module-level singleton converter
 _converter: ExceptionConverter | None = None

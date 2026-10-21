@@ -4,8 +4,10 @@
 
 name: secrets
 description: NeMo Helix secret CRUD lifecycle through the platform SDK.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
-Secret tasks
+# Secret tasks
 
 - Use `nemo_api` with resource `secrets`, passing
   `workspace="<active request workspace>"` on every call.

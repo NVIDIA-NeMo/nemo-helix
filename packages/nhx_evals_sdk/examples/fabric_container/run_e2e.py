@@ -19,7 +19,7 @@ from pathlib import Path
 
 # nemo_fabric is a dev-installed native dep (see script/dev-install-fabric.sh); this example uses its
 # typed config. A plain mapping works too — that's what the plugin passes — if you'd rather not import it.
-from nemo_fabric import FabricConfig, HarnessConfig, MetadataConfig, RuntimeConfig  # ty: ignore[unresolved-import]
+from nemo_fabric import FabricConfig, HarnessConfig, MetadataConfig, RuntimeConfig
 from nhx_evals_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 from nhx_evals_sdk.agent_eval.runtimes.sandbox.providers.docker import DockerSandboxProvider
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask

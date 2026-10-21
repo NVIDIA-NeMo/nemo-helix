@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 from nemo_builder_plugin import completion as completion_module
 from nemo_builder_plugin.completion import Caller, CompletionConflict, caller_refusal, complete, current_caller
-from nemo_builder_plugin.entities import ContainerImage, Provenance
+from nemo_builder_plugin.entities import ContainerImage, Provenance, UpstreamImage
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entities import EntityConflictError
 
@@ -132,3 +132,25 @@ class TestComplete:
         twin = await _complete(FakeRows(_row()))
         rows.interfere = twin
         assert (await _complete(rows)).status == "ready"
+
+
+class TestCompletingACopy:
+    UPSTREAM = "sha256:" + "e" * 64
+
+    def _copy(self) -> ContainerImage:
+        row = _row()
+        row.provenance.upstream = UpstreamImage(image="docker.io/library/ubuntu:24.04", manifest_digest=self.UPSTREAM)
+        return row
+
+    @pytest.mark.asyncio
+    async def test_a_copy_completes_at_the_manifest_it_copies(self) -> None:
+        ready = await _complete(FakeRows(self._copy()), digest=self.UPSTREAM)
+        assert (ready.status, ready.digest) == ("ready", self.UPSTREAM)
+
+    @pytest.mark.asyncio
+    async def test_a_copy_completed_at_any_other_digest_is_a_conflict_and_writes_nothing(self) -> None:
+        """Anything in the cluster can call complete, so the server holds a copy to the digest it resolved."""
+        rows = FakeRows(self._copy())
+        with pytest.raises(CompletionConflict, match="copies"):
+            await _complete(rows, digest=DIGEST)
+        assert rows.writes == 0

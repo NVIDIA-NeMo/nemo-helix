@@ -533,7 +533,7 @@ class TestLaunchModel:
         config_body = config_call.kwargs["body"]
         assert isinstance(config_body, CreateModelDeploymentConfigRequest)
         assert config_body.name == "sft-cfg-x"
-        assert config_body.engine is Engine.NIM
+        assert config_body.engine is Engine.VLLM
         assert config_body.model_spec.model_name == "x"
         assert config_body.model_spec.model_namespace == "other"
         assert config_body.executor_config.gpu == 1
@@ -587,8 +587,47 @@ class TestLaunchModel:
         assert update_call.kwargs["name"] == "sft-cfg-x"
         body = update_call.kwargs["body"]
         assert isinstance(body, UpdateModelDeploymentConfigRequest)
-        assert body.engine is Engine.NIM
+        assert body.engine is Engine.VLLM
         assert body.executor_config.gpu == 2
+        models.create_deployment.assert_called_once()
+
+    def test_inline_nim_engine_creates_a_nim_config(self) -> None:
+        from nemo_helix_plugin.deployment import DeploymentParams
+        from nhx.customization_common.schemas.file_io import FileSetRef
+        from nhx.customization_common.schemas.model_entity import ModelEntityTaskConfig
+
+        models, files = _make_clients()
+        models.create_deployment_config.return_value = _response(
+            types.SimpleNamespace(workspace="default", name="sft-cfg-x")
+        )
+        models.create_deployment.return_value = _response(
+            types.SimpleNamespace(workspace="default", name="sft-deploy-x")
+        )
+        models.get_deployment.return_value = _response(
+            types.SimpleNamespace(workspace="default", name="sft-deploy-x", status=ModelDeploymentStatus.PENDING)
+        )
+
+        runner = _make_runner(models, files)
+        me = _model_entity(
+            name="x",
+            spec=types.SimpleNamespace(family="llama", base_num_parameters=1_000_000_000),
+        )
+        config = ModelEntityTaskConfig(
+            name="x",
+            workspace="default",
+            fileset=FileSetRef(workspace="default", name="x"),
+            model_entity="default/base",
+            deployment_config=DeploymentParams(engine="nim", gpu=1),
+        )
+
+        runner.launch_model(config, me)
+
+        body = models.create_deployment_config.call_args.kwargs["body"]
+        assert isinstance(body, CreateModelDeploymentConfigRequest)
+        assert body.engine is Engine.NIM
+        # No image pinned: the deployments backend resolves the platform's NIM default.
+        assert body.executor_config.image_name is None
+        assert body.executor_config.image_tag is None
         models.create_deployment.assert_called_once()
 
     def test_string_ref_resolves_existing_config(self) -> None:

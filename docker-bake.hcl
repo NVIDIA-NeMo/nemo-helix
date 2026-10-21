@@ -36,7 +36,7 @@ variable "NHX_COLLECT_SOURCES" {
 }
 
 variable "NHX_PYTHON_IMAGE" {
-  default = "python:3.13.15-slim-trixie"
+  default = "python:3.13.16-slim-trixie"
 }
 
 variable "DISTROLESS_BASE_3_13" {
@@ -105,7 +105,7 @@ variable "BAKE_TAG" {
 }
 
 # Tag for a published nhx-python-base image. Bake builds that target from
-# NHX_PYTHON_IMAGE (currently python:3.13.15-slim-trixie); this SHA is not
+# NHX_PYTHON_IMAGE (currently python:3.13.16-slim-trixie); this SHA is not
 # wired as a FROM pin. Rebuild the target in CI after changing NHX_PYTHON_IMAGE.
 variable "BASE_TAG_PYTHON" {
   default = "d9e1851f309d3cf5389c0fc0e1049bd3c87593f8"

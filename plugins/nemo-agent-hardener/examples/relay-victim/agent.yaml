@@ -3,7 +3,7 @@
 
 # The war-game victim, as a NeMo Helix agent.
 #
-#   nemo agents create --name ledger --agent-config examples/relay-victim/agent.yaml
+#   nemo agents register --name ledger --agent-config examples/relay-victim/agent.yaml
 #   nemo agent-hardener init --agent ledger --name ledger
 #
 # This is the production input shape: Agent Hardener war-games an agent the platform registered, not an

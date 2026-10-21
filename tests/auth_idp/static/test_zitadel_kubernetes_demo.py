@@ -131,6 +131,7 @@ def test_zitadel_kubernetes_runtime_is_in_auth_idp_ci_matrix() -> None:
     assert "helm dependency build contrib/auth/zitadel/helm" in job
     assert "helm lint --strict contrib/auth/zitadel/helm" in job
     assert "helm show chart zitadel --repo https://charts.zitadel.com --version 10.0.6" in job
+    assert "playwright install --with-deps chromium" in job
     assert 'kind delete cluster --name "${AUTH_IDP_K8S_CLUSTER_NAME}"' in job
 
     workflow_document = _load_yaml(Path(".github/workflows/ci.yaml"))
@@ -205,6 +206,9 @@ def test_zitadel_kubernetes_test_action_runs_host_contracts() -> None:
     assert "--timeout 20m" in output
     assert "port-forward svc/nemo-helix-envoy 19084:8080" in output
     assert "uv run --frozen nemo config set" in output
+    assert "playwright install chromium" in output
+    assert "NHX_AUTH_IDP_BROWSER_ARTIFACTS_DIR=" in output
+    assert "--group auth-idp-e2e pytest" in output
     assert "tests/auth_idp/contracts" in output
     assert "--auth-idp-context" in output
 
@@ -216,6 +220,16 @@ def test_zitadel_kubernetes_test_action_uses_k3d_compatible_fresh_cluster_name()
     assert match is not None, output
     assert match.group(1).startswith("nhx-zt-e2e-")
     assert len(match.group(1)) <= 32
+
+
+def test_zitadel_kubernetes_test_action_collects_pod_logs_before_deleting_the_cluster() -> None:
+    output = _run_zitadel_script("test", "k8s", "--dry-run")
+
+    collect = output.find("logs --all-containers --prefix --timestamps")
+    delete = output.find("kind delete cluster")
+    assert collect != -1, output
+    assert delete != -1, output
+    assert collect < delete
 
 
 def test_zitadel_kubernetes_runner_builds_with_direct_buildx_bake() -> None:

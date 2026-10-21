@@ -14,6 +14,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import TypeVar
+from unittest.mock import patch
 
 import pytest
 from nemo_evals.api.schemas import LATEST_TAG, EvaluatorTaskDefinition, MetricRef, TaskInputs, TaskRef
@@ -59,6 +60,12 @@ class FakeStore:
     def _key(self, entity_type: type[EntityBase], name: str, workspace: str, parent: str | None):
         return (entity_type.__entity_type__, workspace, name, parent)
 
+    def stored_head(self, name: str = "task-1", workspace: str = "default") -> TaskEntity:
+        """The stored head record itself (not a copy), for asserting what was written to it."""
+        stored = self.records[self._key(TaskEntity, name, workspace, None)]
+        assert isinstance(stored, TaskEntity)
+        return stored
+
     async def create(self, entity: _E) -> _E:
         key = self._key(type(entity), entity.name, entity.workspace, entity._parent)
         if key in self.records:
@@ -70,6 +77,7 @@ class FakeStore:
             raise NemoEntityConflictError(f"{entity.name} taken by a concurrent publisher")
         if ordinal in self.contend_identically:
             self.contend_identically.discard(ordinal)
+            assert isinstance(entity, TaskRevisionEntity), "only revisions carry an ordinal"
             self._win_race(entity, ordinal, digest=entity.content_hash, advance_head=False)
             raise NemoEntityConflictError(f"{entity.name} taken by a concurrent publisher")
         self._next_id += 1
@@ -104,7 +112,7 @@ class FakeStore:
         if not advance_head:
             return
         head = self.records.get(self._key(TaskEntity, "task-1", winner.workspace, None))
-        if head is not None:
+        if isinstance(head, TaskEntity):
             head.latest_revision = max(head.latest_revision, ordinal)
             head.tags = {**head.tags, LATEST_TAG: ordinal}
 
@@ -119,6 +127,7 @@ class FakeStore:
         if key not in self.records:
             raise NemoEntityNotFoundError(f"{name} not found")
         stored = self.records[key]
+        assert isinstance(stored, entity_type), f"{key} holds a {type(stored).__name__}, not a {entity_type.__name__}"
         copy = stored.model_copy(deep=True)
         copy._parent, copy._id, copy._db_version = stored._parent, stored._id, stored._db_version
         return copy
@@ -199,9 +208,22 @@ class FakeStore:
         """Simulate another publisher committing to the head between our read and our write."""
         key = self._key(type(head), head.name, head.workspace, None)
         stored = self.records[key]
+        assert isinstance(stored, TaskEntity)
         stored.tags = {**stored.tags, **tags}
         stored.latest_revision = max([stored.latest_revision, *tags.values()], default=stored.latest_revision)
         stored._db_version += 1
+
+
+def _intent(task: TaskEntity | TaskRevisionEntity) -> str:
+    """Read an evaluator task's content, which is what these revision tests publish."""
+    assert isinstance(task.spec, EvaluatorTaskDefinition)
+    return task.spec.intent
+
+
+def _set_intent(task: TaskEntity | TaskRevisionEntity, intent: str) -> None:
+    """Edit an evaluator task's content in place, the change these revision tests publish."""
+    assert isinstance(task.spec, EvaluatorTaskDefinition)
+    task.spec.intent = intent
 
 
 def _head(store: FakeStore, *, intent: str = "Answer the question.") -> TaskEntity:
@@ -317,7 +339,7 @@ async def test_changed_content_allocates_the_next_ordinal() -> None:
     store = FakeStore()
     head = _head(store)
     first, _ = await _publish(store, head)
-    head.spec.intent = "Do something else."
+    _set_intent(head, "Do something else.")
     second, created = await _publish(store, head)
     assert created
     assert second.revision == 2
@@ -335,7 +357,7 @@ async def test_contended_ordinal_is_retried() -> None:
     store = FakeStore()
     head = _head(store)
     await _publish(store, head)
-    head.spec.intent = "Changed."
+    _set_intent(head, "Changed.")
     store.contend_ordinals = {2}
     revision, created = await _publish(store, head)
     assert created
@@ -356,7 +378,7 @@ async def test_identical_contended_publish_adopts_the_winners_revision() -> None
     head = _head(store)
     await _publish(store, head)
 
-    head.spec.intent = "Changed."
+    _set_intent(head, "Changed.")
     store.contend_identically = {2}
     revision, created = await _publish(store, head)
 
@@ -382,7 +404,7 @@ async def test_contended_publish_of_different_content_still_allocates_a_new_ordi
     head = _head(store)
     await _publish(store, head)
 
-    head.spec.intent = "Changed."
+    _set_intent(head, "Changed.")
     store.contend_ordinals = {2}  # winner publishes *different* content
     revision, created = await _publish(store, head)
 
@@ -410,7 +432,7 @@ async def test_publishing_recovers_when_a_revision_exists_but_the_head_never_adv
     assert isinstance(stored, TaskEntity)
     stored.latest_revision, stored.tags = 0, {}
 
-    head.spec.intent = "Changed."
+    _set_intent(head, "Changed.")
     revision, created = await _publish(store, head)
 
     assert created
@@ -432,7 +454,8 @@ async def test_losing_the_head_race_does_not_leave_the_head_on_an_older_revision
 
     a = await store.get(TaskEntity, name="task-1", workspace="default")
     b = await store.get(TaskEntity, name="task-1", workspace="default")
-    a.spec.intent, b.spec.intent = "A's content.", "B's content."
+    _set_intent(a, "A's content.")
+    _set_intent(b, "B's content.")
 
     async def b_publishes() -> None:
         await publish_revision(store, store, b, TaskRevisionEntity)
@@ -440,18 +463,17 @@ async def test_losing_the_head_race_does_not_leave_the_head_on_an_older_revision
     store.before_head_update = b_publishes
     a_revision, _, _ = await publish_revision(store, store, a, TaskRevisionEntity)
 
-    stored = store.records[store._key(TaskEntity, "task-1", "default", None)]
-    assert isinstance(stored, TaskEntity)
+    stored = store.stored_head()
     latest = await get_revision(store, TaskRevisionEntity, stored, LATEST_TAG)
 
     assert stored.tags[LATEST_TAG] == 3
-    assert stored.spec.intent == latest.spec.intent == "B's content."
+    assert _intent(stored) == _intent(latest) == "B's content."
     assert stored.latest_revision == latest.revision, "the reported revision must describe the content served"
 
     # A's publish is not lost — it is a real revision, still resolvable by digest.
     assert a_revision.revision == 2
     pinned = await get_revision(store, TaskRevisionEntity, stored, a_revision.content_hash)
-    assert pinned.spec.intent == "A's content."
+    assert _intent(pinned) == "A's content."
 
 
 @pytest.mark.asyncio
@@ -474,13 +496,13 @@ async def test_latest_revision_never_rewinds() -> None:
     store = FakeStore()
     head = _head(store)
     first, _ = await _publish(store, head)
-    head.spec.intent = "Changed."
+    _set_intent(head, "Changed.")
     await _publish(store, head)
 
     head = await store.get(TaskEntity, "task-1", workspace="default")
     await apply_tag(store, store, TaskRevisionEntity, head, "rollback", first.content_hash)
 
-    stored = store.records[store._key(TaskEntity, "task-1", "default", None)]
+    stored = store.stored_head()
     assert stored.tags["rollback"] == first.revision
     assert stored.latest_revision == 2, "the watermark must not follow a backwards tag"
     assert stored.tags[LATEST_TAG] == 2
@@ -495,7 +517,7 @@ async def test_head_update_retries_on_optimistic_lock_conflict() -> None:
     store.concurrent_head_write(head, tags={"other": 1})
     revision, created = await _publish(store, head)
     assert created
-    stored = store.records[store._key(TaskEntity, "task-1", "default", None)]
+    stored = store.stored_head()
     assert stored.tags["other"] == 1, "the winner's tag must survive our retry"
     assert stored.tags[LATEST_TAG] == revision.revision
 
@@ -512,8 +534,7 @@ async def test_persistent_head_contention_raises() -> None:
         store.concurrent_head_write(entity, tags={})
         return await original_update(entity, original_name=original_name)
 
-    store.update = always_stale  # type: ignore[method-assign]
-    with pytest.raises(RevisionConflictError):
+    with patch.object(store, "update", always_stale), pytest.raises(RevisionConflictError):
         await _publish(store, head)
 
 
@@ -532,7 +553,7 @@ async def test_latest_does_not_regress_when_writes_interleave() -> None:
     revision, created = await _publish(store, head)
 
     assert created and revision.revision == 1
-    stored = store.records[store._key(TaskEntity, "task-1", "default", None)]
+    stored = store.stored_head()
     assert stored.tags[LATEST_TAG] == 2, "latest must not regress onto A's older revision"
     assert stored.latest_revision == 2
 
@@ -544,13 +565,13 @@ async def test_user_tags_may_be_moved_backwards() -> None:
     store = FakeStore()
     head = _head(store)
     older, _ = await _publish(store, head, tags={"blessed"})
-    head.spec.intent = "Newer content."
+    _set_intent(head, "Newer content.")
     await _publish(store, head)
 
     head = await store.get(TaskEntity, "task-1", workspace="default")
     await apply_tag(store, store, TaskRevisionEntity, head, "blessed", older.content_hash)
 
-    stored = store.records[store._key(TaskEntity, "task-1", "default", None)]
+    stored = store.stored_head()
     assert stored.tags["blessed"] == older.revision
     assert stored.tags[LATEST_TAG] == 2, "only the user tag moves; latest stays put"
 
@@ -566,10 +587,10 @@ async def test_reverting_to_earlier_content_publishes_a_new_revision() -> None:
     store = FakeStore()
     head = _head(store)
     await _publish(store, head)  # rev.1: "Answer the question."
-    head.spec.intent = "Changed."
+    _set_intent(head, "Changed.")
     await _publish(store, head)  # rev.2
 
-    head.spec.intent = "Answer the question."  # back to rev.1's content
+    _set_intent(head, "Answer the question.")  # back to rev.1's content
     revision, created = await _publish(store, head)
 
     assert created, "a revert is a publish, not a no-op"
@@ -577,7 +598,7 @@ async def test_reverting_to_earlier_content_publishes_a_new_revision() -> None:
     assert head.tags[LATEST_TAG] == 3
 
     latest = await get_revision(store, TaskRevisionEntity, head, LATEST_TAG)
-    assert latest.spec.intent == head.spec.intent, "the head and #latest must describe the same content"
+    assert _intent(latest) == _intent(head), "the head and #latest must describe the same content"
 
 
 @pytest.mark.asyncio
@@ -588,9 +609,9 @@ async def test_a_digest_shared_by_two_revisions_resolves_to_the_newer_one() -> N
     store = FakeStore()
     head = _head(store)
     first, _ = await _publish(store, head)  # rev.1
-    head.spec.intent = "Changed."
+    _set_intent(head, "Changed.")
     await _publish(store, head)  # rev.2
-    head.spec.intent = "Answer the question."
+    _set_intent(head, "Answer the question.")
     third, _ = await _publish(store, head)  # rev.3, same digest as rev.1
 
     assert third.content_hash == first.content_hash
@@ -620,7 +641,7 @@ async def test_resolves_latest_by_default() -> None:
     store = FakeStore()
     head = _head(store)
     await _publish(store, head)
-    head.spec.intent = "Changed."
+    _set_intent(head, "Changed.")
     second, _ = await _publish(store, head)
     assert (await get_revision(store, TaskRevisionEntity, head)).content_hash == second.content_hash
 
@@ -630,7 +651,7 @@ async def test_resolves_a_digest_to_its_revision() -> None:
     store = FakeStore()
     head = _head(store)
     first, _ = await _publish(store, head)
-    head.spec.intent = "Changed."
+    _set_intent(head, "Changed.")
     await _publish(store, head)
     resolved = await get_revision(store, TaskRevisionEntity, head, first.content_hash)
     assert resolved.revision == 1
@@ -712,7 +733,7 @@ async def test_reading_a_revision_whose_content_was_tampered_with_is_refused() -
 
     stored = store.records[store._key(TaskRevisionEntity, revision_name(1), "default", head.id)]
     assert isinstance(stored, TaskRevisionEntity)
-    stored.spec.intent = "Tampered with after publication."
+    _set_intent(stored, "Tampered with after publication.")
 
     with pytest.raises(RevisionContentMismatchError, match="does not match its recorded digest"):
         await get_revision(store, TaskRevisionEntity, head, LATEST_TAG)
@@ -728,7 +749,7 @@ async def test_a_digest_pinned_read_is_verified_too() -> None:
 
     stored = store.records[store._key(TaskRevisionEntity, revision_name(1), "default", head.id)]
     assert isinstance(stored, TaskRevisionEntity)
-    stored.spec.intent = "Tampered with after publication."
+    _set_intent(stored, "Tampered with after publication.")
 
     with pytest.raises(RevisionContentMismatchError):
         await get_revision(store, TaskRevisionEntity, head, revision.content_hash)
@@ -825,7 +846,7 @@ async def test_service_response_is_own_revision_during_head_race(kind):
     from nemo_evals.api.service.taskset_service import TasksetService
 
     store = FakeStore()
-    tasks = TaskService(store, AsyncMock())
+    tasks = TaskService(store, AsyncMock(), authorize_metric_read=AsyncMock())
     if kind == "task":
         create, replace, get = tasks.create_task, tasks.replace_task, tasks.get_task
 
@@ -856,5 +877,6 @@ async def test_service_response_is_own_revision_during_head_race(kind):
     assert result.revision == 2
     assert label(result) == "A"
     latest = await get("default", "race")
+    assert latest is not None
     assert latest.revision == 3
     assert label(latest) == "B"

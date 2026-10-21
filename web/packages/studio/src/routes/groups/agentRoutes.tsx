@@ -28,6 +28,13 @@ const AgentDetailRoute =
       default: m.AgentDetailRoute,
     }))
   );
+const AgentEvaluationNewRoute =
+  AGENTS_ENABLED &&
+  lazy(() =>
+    import('@studio/routes/agents/AgentEvaluationNewRoute').then((m) => ({
+      default: m.AgentEvaluationNewRoute,
+    }))
+  );
 const AgentMonitorRoute = lazy(() =>
   import('@studio/routes/agents/AgentMonitorRoute').then((m) => ({
     default: m.AgentMonitorRoute,
@@ -78,6 +85,11 @@ export const agentRoutes: RouteObject[] = agentsRoutes([
         },
       ]
     : []),
+  {
+    path: ROUTES.workspace.agentEvaluationNew,
+    element: AgentEvaluationNewRoute ? <AgentEvaluationNewRoute /> : null,
+    errorElement: <RouteErrorPanel title="Run Agent Evaluation" />,
+  },
   {
     path: ROUTES.workspace.agentDetail,
     element: AgentDetailRoute ? <AgentDetailRoute /> : null,

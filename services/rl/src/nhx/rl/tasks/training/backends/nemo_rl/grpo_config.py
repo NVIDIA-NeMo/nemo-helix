@@ -19,7 +19,7 @@ from nhx.customization_common.service.constants import (
     SANDBOX_WORK_PATH,
 )
 from nhx.customization_common.service.context import NHXJobContext
-from nhx.rl.app.constants import NHX_JOB_STORAGE_PVC_ENVVAR
+from nhx.rl.app.constants import DEFAULT_BROKER_PORT, NHX_JOB_STORAGE_PVC_ENVVAR
 from nhx.rl.app.jobs.training.schemas import BatchingStrategy, GRPOConfig, PolicyBackend, TrainingStepConfig
 from nhx.rl.entities.values import FinetuningType
 from nhx.rl.tasks.training.backends.nemo_rl.dpo_config import (
@@ -36,6 +36,7 @@ from nhx.rl.tasks.training.backends.nemo_rl.sandbox_config import (
     SandboxNetworkPolicy,
     assemble_master_egress_allow,
     build_sandbox_mounts,
+    prepare_sandbox_workspace,
     resolve_job_storage_pvc_claim,
 )
 from nhx.rl.tasks.training.chat_templates import resolve_chat_template
@@ -302,6 +303,7 @@ def _build_nemo_gym_env_config(
     nemo_gym: dict[str, Any] = {
         "port_range_low": 5000,
         "port_range_high": 5999,
+        "episode_broker": {"port": DEFAULT_BROKER_PORT},
     }
     env_block: dict[str, Any] = {
         "should_use_nemo_gym": True,
@@ -355,6 +357,7 @@ def _build_nemo_gym_env_config(
                 f"can mount the environment and dataset; {NHX_JOB_STORAGE_PVC_ENVVAR} is unset. "
                 "Set NHX_RL_JOB_STORAGE_PVC_CLAIM on the rl service."
             )
+        prepare_sandbox_workspace(job_ctx.storage_path)
         mounts = build_sandbox_mounts(
             pvc_claim=pvc_claim,
             workspace=job_ctx.workspace,

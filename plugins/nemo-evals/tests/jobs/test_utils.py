@@ -5,15 +5,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+import asyncio
+from functools import partial
 
 import httpx
 from nemo_evals.jobs.utils import async_client_from_sync_client, run_with_isolated_async_client
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from pytest_mock import MockerFixture
-
-type AsyncRequestHook = Callable[[httpx.Request], Awaitable[None]]
 
 
 def test_run_with_isolated_async_client_passes_cloned_client(mocker: MockerFixture) -> None:
@@ -59,14 +58,10 @@ def test_run_with_isolated_async_client_preserves_request_event_hooks(mocker: Mo
         http_client=source_http_client,
     )
     async_client_cls = httpx.AsyncClient
-
-    def make_isolated_http_client(event_hooks: dict[str, list[AsyncRequestHook]] | None = None) -> httpx.AsyncClient:
-        return async_client_cls(
-            transport=httpx.MockTransport(record),
-            event_hooks=event_hooks,
-        )
-
-    mocker.patch("nemo_evals.jobs.utils.httpx.AsyncClient", side_effect=make_isolated_http_client)
+    mocker.patch(
+        "nemo_evals.jobs.utils.httpx.AsyncClient",
+        side_effect=partial(async_client_cls, transport=httpx.MockTransport(record)),
+    )
 
     async def fn(client: AsyncFilesClient) -> int:
         http_client = client._client
@@ -79,17 +74,22 @@ def test_run_with_isolated_async_client_preserves_request_event_hooks(mocker: Mo
     assert seen_authorization == ["Bearer refreshed"]
 
 
-def test_async_client_from_sync_client_preserves_headers_and_request_event_hooks(mocker: MockerFixture) -> None:
+def test_async_client_from_sync_client_preserves_headers_timeout_and_request_event_hooks(
+    mocker: MockerFixture,
+) -> None:
     seen_authorization: list[str | None] = []
+    seen_timeouts: list[dict[str, float | None]] = []
 
     def refresh(request: httpx.Request) -> None:
         request.headers["Authorization"] = "Bearer refreshed"
 
     async def record(request: httpx.Request) -> httpx.Response:
         seen_authorization.append(request.headers.get("Authorization"))
+        seen_timeouts.append(request.extensions["timeout"])
         return httpx.Response(200, request=request)
 
-    source_http_client = httpx.Client(event_hooks={"request": [refresh]})
+    timeout = httpx.Timeout(60.0, connect=5.0)
+    source_http_client = httpx.Client(timeout=timeout, event_hooks={"request": [refresh]})
     sync_client = NemoClient(
         base_url="http://platform.test",
         workspace="default",
@@ -97,14 +97,10 @@ def test_async_client_from_sync_client_preserves_headers_and_request_event_hooks
         http_client=source_http_client,
     )
     async_client_cls = httpx.AsyncClient
-
-    def make_isolated_http_client(event_hooks: dict[str, list[AsyncRequestHook]] | None = None) -> httpx.AsyncClient:
-        return async_client_cls(
-            transport=httpx.MockTransport(record),
-            event_hooks=event_hooks,
-        )
-
-    mocker.patch("nemo_evals.jobs.utils.httpx.AsyncClient", side_effect=make_isolated_http_client)
+    mocker.patch(
+        "nemo_evals.jobs.utils.httpx.AsyncClient",
+        side_effect=partial(async_client_cls, transport=httpx.MockTransport(record)),
+    )
 
     with async_client_from_sync_client(sync_client) as async_client:
         assert isinstance(async_client, AsyncNemoClient)
@@ -119,6 +115,20 @@ def test_async_client_from_sync_client_preserves_headers_and_request_event_hooks
         assert run_with_isolated_async_client(async_client, fn) == 200
 
     assert seen_authorization == ["Bearer refreshed"]
+    assert seen_timeouts == [timeout.as_dict()]
+
+
+def test_async_client_from_sync_client_adapts_a_sync_only_token_provider() -> None:
+    class SyncOnlyToken:
+        def get_access_token(self) -> str:
+            return "sync-token"
+
+    sync_client = NemoClient(base_url="http://platform.test", workspace="default", auth=SyncOnlyToken())
+
+    with async_client_from_sync_client(sync_client) as async_client:
+        auth = async_client._auth
+        assert auth is not None
+        assert asyncio.run(auth.get_access_token_async()) == "sync-token"
 
 
 def test_async_client_from_sync_client_ignores_missing_event_hook_mapping(mocker: MockerFixture) -> None:
@@ -136,4 +146,4 @@ def test_async_client_from_sync_client_ignores_missing_event_hook_mapping(mocker
         assert isinstance(async_client, AsyncNemoClient)
         assert async_client._client is isolated_http_client
 
-    async_client_ctor.assert_called_once_with(event_hooks={})
+    assert async_client_ctor.call_args.kwargs["event_hooks"] == {}

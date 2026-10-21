@@ -43,7 +43,14 @@ def test_workspaces_lifecycle(runner, assert_exit_code) -> None:
 
     result = runner.invoke(app, ["workspaces", "delete", name])
     assert_exit_code(result, 0)
-    assert "Deleted successfully" in result.stdout
+    assert "Workspace marked for deletion" in result.stdout
+
+    result = runner.invoke(app, ["workspaces", "deletion-status", name])
+    assert_exit_code(result, 0)
+    deletion = json.loads(result.stdout)
+    assert deletion["name"] == name
+    assert deletion["deletion_stage"] == "pending"
+    assert deletion["deletion_error"] is None
 
     result = runner.invoke(app, ["workspaces", "get", name])
     assert_exit_code(result, 3)

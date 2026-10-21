@@ -24,7 +24,7 @@ ANSWER = os.environ.get("STUB_ANSWER", "A")
 
 
 class Handler(BaseHTTPRequestHandler):
-    def log_message(self, *args: object) -> None:
+    def log_message(self, format: str, *args: object) -> None:
         return
 
     def _json(self, status: int, payload: dict) -> None:

@@ -87,10 +87,25 @@ class WorkLayout:
         return self.outputs / _relative(image)
 
 
+class FetchImport(BaseModel):
+    """A published image to pull, unchanged, into its image's OCI layout slot."""
+
+    image: str = Field(description="The `ContainerImage` row name.")
+    ref: str = Field(description="`<registry>/<repository>@<manifest digest>`: the one manifest to pull.")
+    platform: str
+
+
 class FetchStepConfig(BaseModel):
     sources: list[ContextSource] = Field(
-        min_length=1, description="Each distinct source, once. An archive is listed once, to unpack whole."
+        default_factory=list, description="Each distinct source, once. An archive is listed once, to unpack whole."
     )
+    imports: list[FetchImport] = Field(default_factory=list, description="Each image a copy pulls.")
+
+    @model_validator(mode="after")
+    def _fetches_something(self) -> FetchStepConfig:
+        if not self.sources and not self.imports:
+            raise ValueError("fetch needs a source or an import")
+        return self
 
 
 class SandboxSpec(BaseModel):
@@ -135,6 +150,9 @@ class PushImage(BaseModel):
     system_ref: str = Field(description="`<registry>/<repository>:<system tag>`, which every build pushes.")
     caller_ref: str | None = Field(
         default=None, description="`<registry>/<repository>:<output.tag>`, when the spec names an output."
+    )
+    expected_digest: str | None = Field(
+        default=None, description="For a copy, the digest its layout must have: the manifest it pulled."
     )
 
     @property

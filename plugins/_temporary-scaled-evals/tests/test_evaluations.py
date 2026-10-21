@@ -16,15 +16,19 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 
 pytest.importorskip("scaled_evals")
 from api_test_fixture import client, v1
+from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
+from scaled_evals.api.config_profile_store import ConfigProfileStore
 from scaled_evals.api.db import Database, get_conn, get_stream_database_factory
 from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
 from scaled_evals.api.routers import evaluations as evaluations_router
+from scaled_evals.api.runnability import caller_secret_readable
 from scaled_evals.api.schemas.common import decode_cursor
-from scaled_evals.api.schemas.evaluations import CreateEvaluationRequest
+from scaled_evals.api.schemas.evaluations import CreateEvaluationRequest, Framework
 from scaled_evals.api.settings import settings
 from scaled_evals.dispatch import (
     LaunchHandle,
@@ -35,6 +39,7 @@ from scaled_evals.dispatch import (
 from scaled_evals.dispatch.worker import (
     Dispatcher,
 )
+from task_fixtures import seed_task_revision
 
 NOW = datetime(2026, 6, 6, tzinfo=UTC)
 
@@ -119,6 +124,10 @@ def _archive_row(**overrides) -> dict:
     return row
 
 
+def _profile(profile_id: str, profile_type: str, config: dict | None = None) -> None:
+    ConfigProfileStore().create(profile_id, name=profile_id, type=profile_type, config=config or {})
+
+
 def _conn_with_fetchone(*results) -> MagicMock:
     """Mock connection whose successive fetchone() calls return `results`."""
     conn = MagicMock()
@@ -128,12 +137,19 @@ def _conn_with_fetchone(*results) -> MagicMock:
     return conn
 
 
+def _create_conn(revision: dict | None, *results) -> MagicMock:
+    """Seed `task_abc` revisions 1 and 2 with `revision`'s fields (absent when None); mock the rest."""
+    if revision is not None:
+        for number in (1, 2):
+            seed_task_revision("task_abc", number, **revision)
+    return _conn_with_fetchone(*results)
+
+
 def _conn(fetchone=(), fetchall=()) -> MagicMock:  # noqa: ANN001
     """Mock connection with explicit fetchone() and fetchall() sequences.
 
     For the POST path: fetchone serves the revision-status check then the
-    INSERT ... RETURNING; fetchall serves the config_profiles then credentials
-    existence queries (skipped when there are no such references).
+    INSERT ... RETURNING.
     """
     conn = MagicMock()
     cur = conn.cursor.return_value.__enter__.return_value
@@ -241,7 +257,7 @@ def test_create_commits_before_returning() -> None:
     runs in a SAVEPOINT (the validation SELECTs already opened a txn), so
     without an explicit commit the worker can't see the queued row promptly.
     """
-    conn = _conn_with_fetchone({"status": "ready"}, _eval_row())
+    conn = _create_conn({"status": "ready"}, _eval_row())
     _override_conn(conn)
 
     response = client.post(
@@ -254,7 +270,7 @@ def test_create_commits_before_returning() -> None:
 
 
 def test_preflight_reports_runnable_without_creating_evaluation() -> None:
-    conn = _conn_with_fetchone({"status": "ready"})
+    conn = _create_conn({"status": "ready"})
     _override_conn(conn)
 
     response = client.post(
@@ -273,7 +289,7 @@ def test_preflight_reports_runnable_without_creating_evaluation() -> None:
 
 
 def test_preflight_reports_create_blocker_with_http_200() -> None:
-    conn = _conn_with_fetchone({"status": "building"})
+    conn = _create_conn({"status": "building"})
     _override_conn(conn)
 
     response = client.post(
@@ -311,8 +327,36 @@ def test_create_rejects_initial_user_turns_for_non_harbor_framework() -> None:
         )
 
 
+@pytest.mark.parametrize("runtime", ["sandbox_k8s", "harbor_opensandbox"])
+def test_create_accepts_agent_bundle_on_bundle_runtimes(runtime: str) -> None:
+    request = CreateEvaluationRequest(
+        name="x",
+        task_id="task_abc",
+        task_revision=1,
+        framework_profile_id="cfg_h",
+        agent_bundle_id="ab_claude",
+        runtime=runtime,
+    )
+
+    assert request.agent_bundle_id == "ab_claude"
+
+
+@pytest.mark.parametrize(("framework", "runtime"), [("harbor", "docker"), ("nemo_gym", "harbor_opensandbox")])
+def test_create_rejects_agent_bundle_elsewhere(framework: Framework, runtime: str) -> None:
+    with pytest.raises(ValueError, match="agent_bundle currently requires"):
+        CreateEvaluationRequest(
+            name="x",
+            task_id="task_abc",
+            task_revision=1,
+            framework=framework,
+            framework_profile_id="cfg_h",
+            agent_bundle_id="ab_claude",
+            runtime=runtime,
+        )
+
+
 def test_create_409_when_revision_not_ready() -> None:
-    conn = _conn_with_fetchone({"status": "building"})
+    conn = _create_conn({"status": "building"})
     _override_conn(conn)
 
     response = client.post(
@@ -334,7 +378,7 @@ def test_create_allows_ready_gcs_revision_when_pack_exists(
         "scaled_evals.api.routers.evaluations.artifacts.object_exists",
         lambda key: checked.append(key) or True,
     )
-    conn = _conn_with_fetchone(
+    conn = _create_conn(
         {
             "status": "ready",
             "image_ref": "us-central1-docker.pkg.dev/project/repo/task:rev1",
@@ -359,7 +403,7 @@ def test_create_409_when_ready_revision_pack_missing_local_rustfs(
 ) -> None:
     monkeypatch.setattr(settings, "object_store_backend", "artifacts")
     monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.object_exists", lambda _key: False)
-    conn = _conn_with_fetchone(
+    conn = _create_conn(
         {
             "status": "ready",
             "image_ref": "registry.example/task_abc:rev1",
@@ -400,7 +444,7 @@ def test_create_rejects_task_image_from_unapproved_registry(
 ) -> None:
     monkeypatch.setattr(settings, "task_image_validation_mode", "resolve")
     monkeypatch.setattr(settings, "task_image_allowed_registries", "us-central1-docker.pkg.dev")
-    conn = _conn_with_fetchone(
+    conn = _create_conn(
         {
             "status": "ready",
             "image_ref": "artifactory.nvidia.com/team/task:rev2",
@@ -444,9 +488,9 @@ def test_create_422_on_malformed_profile_id() -> None:
 
 
 def test_create_records_default_deny() -> None:
+    _create_conn({"status": "ready"})
     conn = _conn(
         fetchone=[
-            {"status": "ready"},
             _eval_row(network_policy="default_deny"),
         ],
         fetchall=[[]],
@@ -472,9 +516,9 @@ def test_create_records_default_deny() -> None:
 
 
 def test_create_resolves_harbor_version_before_queueing() -> None:
+    _create_conn({"status": "ready"})
     conn = _conn(
         fetchone=[
-            {"status": "ready"},
             _eval_row(
                 requested_framework_version="stable",
                 framework_version="0.13.2",
@@ -522,9 +566,9 @@ def test_create_gym_runtime_persists_runtime_runner_identity(monkeypatch) -> Non
     monkeypatch.setattr(settings, "gym_runner_image_digest", digest)
     monkeypatch.setattr(settings, "gym_source_revision", source_revision)
     monkeypatch.setattr(settings, "gym_package_version", "0.4.0")
+    _create_conn({"status": "ready"})
     conn = _conn(
         fetchone=[
-            {"status": "ready"},
             _eval_row(
                 runtime="gym_daytona",
                 runner_image_ref="registry.example/gym:0.4.0",
@@ -556,15 +600,14 @@ def test_create_gym_runtime_persists_runtime_runner_identity(monkeypatch) -> Non
     assert runner_metadata["framework_artifact"]["image_ref"] == "scaled-evals-api:dev"
 
 
-def test_create_resolves_and_persists_agent_bundle(monkeypatch) -> None:
-    conn = _conn(
-        fetchone=[
-            {"status": "ready"},
-            {"config": {}},
-            _eval_row(framework_profile_id="cfg_h", harbor_profile_id="cfg_h"),
-        ],
-        fetchall=[[{"id": "cfg_h", "type": "harbor"}]],
-    )
+@pytest.mark.parametrize(
+    ("runtime", "network_policy"),
+    # harbor_opensandbox never runs unrestricted.
+    [("sandbox_k8s", "unrestricted"), ("harbor_opensandbox", "default_deny")],
+)
+def test_create_resolves_and_persists_agent_bundle(monkeypatch, runtime: str, network_policy: str) -> None:
+    _profile("cfg_h", "harbor")
+    conn = _create_conn({"status": "ready"}, _eval_row(framework_profile_id="cfg_h", harbor_profile_id="cfg_h"))
     _override_conn(conn)
     resolved = {
         "bundle_id": "ab_claude",
@@ -576,7 +619,7 @@ def test_create_resolves_and_persists_agent_bundle(monkeypatch) -> None:
     }
     monkeypatch.setattr(
         "scaled_evals.api.routers.evaluations.accessible_bundle_for_run",
-        lambda db, principal, bundle_id: resolved,
+        lambda db, principal, bundle_id, **_: resolved,
     )
 
     response = client.post(
@@ -587,6 +630,8 @@ def test_create_resolves_and_persists_agent_bundle(monkeypatch) -> None:
             "task_revision": 1,
             "framework_profile_id": "cfg_h",
             "agent_bundle_id": "ab_claude",
+            "runtime": runtime,
+            "network_policy": network_policy,
         },
     )
 
@@ -645,12 +690,8 @@ def test_create_rejects_zero_parallelism() -> None:
 
 
 def test_create_202_with_valid_profile_and_credential() -> None:
-    # fetchone: ready revision, then the inserted row.
-    # fetchall: config_profiles existence, then credentials existence.
-    conn = _conn(
-        fetchone=[{"status": "ready"}, {"config": {}}, _eval_row()],
-        fetchall=[[{"id": "cfg_h", "type": "harbor"}], [{"id": "cred_a"}]],
-    )
+    _profile("cfg_h", "harbor")
+    conn = _create_conn({"status": "ready"}, _eval_row())
     _override_conn(conn)
 
     response = client.post(
@@ -660,7 +701,7 @@ def test_create_202_with_valid_profile_and_credential() -> None:
             "task_id": "task_abc",
             "task_revision": 2,
             "harbor_profile_id": "cfg_h",
-            "credentials": {"anthropic": "cred_a"},
+            "credentials": {"anthropic": "team-a/anthropic-key"},
         },
     )
 
@@ -668,13 +709,8 @@ def test_create_202_with_valid_profile_and_credential() -> None:
 
 
 def test_create_202_with_nemo_gym_framework_profile() -> None:
-    conn = _conn(
-        fetchone=[
-            {"status": "ready"},
-            _eval_row(framework="nemo_gym", framework_profile_id="cfg_g"),
-        ],
-        fetchall=[[{"id": "cfg_g", "type": "gym"}]],
-    )
+    _profile("cfg_g", "gym")
+    conn = _create_conn({"status": "ready"}, _eval_row(framework="nemo_gym", framework_profile_id="cfg_g"))
     _override_conn(conn)
 
     response = client.post(
@@ -692,14 +728,8 @@ def test_create_202_with_nemo_gym_framework_profile() -> None:
 
 
 def test_create_202_treats_framework_profile_as_harbor_alias() -> None:
-    conn = _conn(
-        fetchone=[
-            {"status": "ready"},
-            {"config": {}},
-            _eval_row(framework_profile_id="cfg_h", harbor_profile_id="cfg_h"),
-        ],
-        fetchall=[[{"id": "cfg_h", "type": "harbor"}]],
-    )
+    _profile("cfg_h", "harbor")
+    conn = _create_conn({"status": "ready"}, _eval_row(framework_profile_id="cfg_h", harbor_profile_id="cfg_h"))
     _override_conn(conn)
 
     response = client.post(
@@ -716,8 +746,7 @@ def test_create_202_treats_framework_profile_as_harbor_alias() -> None:
 
 
 def test_create_422_when_profile_missing() -> None:
-    # Revision ready, but the config_profiles lookup returns no row.
-    conn = _conn(fetchone=[{"status": "ready"}], fetchall=[[]])
+    conn = _create_conn({"status": "ready"})
     _override_conn(conn)
 
     response = client.post(
@@ -736,10 +765,8 @@ def test_create_422_when_profile_missing() -> None:
 
 def test_create_422_when_profile_wrong_type() -> None:
     # harbor_profile_id points at an intake-typed profile.
-    conn = _conn(
-        fetchone=[{"status": "ready"}],
-        fetchall=[[{"id": "cfg_sw", "type": "intake"}]],
-    )
+    _profile("cfg_sw", "intake")
+    conn = _create_conn({"status": "ready"})
     _override_conn(conn)
 
     response = client.post(
@@ -757,10 +784,8 @@ def test_create_422_when_profile_wrong_type() -> None:
 
 
 def test_create_422_when_nemo_gym_profile_wrong_type() -> None:
-    conn = _conn(
-        fetchone=[{"status": "ready"}],
-        fetchall=[[{"id": "cfg_h", "type": "harbor"}]],
-    )
+    _profile("cfg_h", "harbor")
+    conn = _create_conn({"status": "ready"})
     _override_conn(conn)
 
     response = client.post(
@@ -812,23 +837,48 @@ def test_create_422_when_harbor_alias_used_for_nemo_gym() -> None:
     assert response.status_code == 422
 
 
-def test_create_422_when_credential_missing() -> None:
-    # No profiles, so the only existence query is credentials, which misses.
-    conn = _conn(fetchone=[{"status": "ready"}], fetchall=[[]])
-    _override_conn(conn)
+def test_create_422_when_credential_secret_unusable() -> None:
+    _override_conn(_create_conn({"status": "ready"}))
+    body = {"name": "x", "task_id": "task_abc", "task_revision": 1}
 
-    response = client.post(
-        "/v1/evaluations",
-        json={
-            "name": "x",
-            "task_id": "task_abc",
-            "task_revision": 1,
-            "credentials": {"anthropic": "cred_ghost"},
-        },
-    )
+    unqualified = client.post("/v1/evaluations", json={**body, "credentials": {"anthropic": "cred_ghost"}})
+    assert unqualified.status_code == 422
+    assert "workspace/name" in unqualified.text
+
+    checked: list[str] = []
+    previous = v1.dependency_overrides[caller_secret_readable]
+    v1.dependency_overrides[caller_secret_readable] = lambda: lambda ref: checked.append(ref) and False
+    try:
+        response = client.post("/v1/evaluations", json={**body, "credentials": {"anthropic": "team-a/ghost"}})
+    finally:
+        v1.dependency_overrides[caller_secret_readable] = previous
 
     assert response.status_code == 422
     assert response.json()["detail"]["error"]["code"] == "invalid_reference"
+    assert checked == ["team-a/ghost"]
+    assert "team-a/ghost" in response.json()["detail"]["error"]["message"]
+
+
+def test_caller_secret_readable_maps_platform_denials_to_false(monkeypatch) -> None:  # noqa: ANN001
+    request = httpx.Request("GET", "http://platform/secrets")
+    outcomes = {
+        "team-a/ok": None,
+        "team-a/gone": NotFoundError(httpx.Response(404, request=request)),
+        "team-b/theirs": PermissionDeniedError(httpx.Response(403, request=request)),
+    }
+    seen: list[tuple[str, str]] = []
+
+    class _Secrets:
+        def get_secret(self, *, workspace: str, name: str) -> None:
+            seen.append((workspace, name))
+            if error := outcomes[f"{workspace}/{name}"]:
+                raise error
+
+    monkeypatch.setattr("scaled_evals.api.runnability.SecretsClient.from_client", lambda _client: _Secrets())
+    readable = caller_secret_readable(object())
+
+    assert [readable(ref) for ref in outcomes] == [True, False, False]
+    assert seen == [("team-a", "ok"), ("team-a", "gone"), ("team-b", "theirs")]
 
 
 # ---------- list / get ----------------------------------------------------
@@ -1023,7 +1073,7 @@ def test_reproduce_returns_safe_rerun_request_and_command() -> None:
                 framework_profile_id="cfg_h",
                 harbor_profile_id="cfg_h",
                 intake_profile_id="cfg_i",
-                credentials={"openai": "cred_openai"},
+                credentials={"openai": "team-a/openai-key"},
                 n_attempts=3,
                 extra_skill_object_keys=["skills/review/SKILL.md"],
                 instruction_prefix="inspect first",
@@ -1050,7 +1100,7 @@ def test_reproduce_returns_safe_rerun_request_and_command() -> None:
         "framework_profile_id": "cfg_h",
         "harbor_profile_id": "cfg_h",
         "intake_profile_id": "cfg_i",
-        "credentials": {"openai": "cred_openai"},
+        "credentials": {"openai": "team-a/openai-key"},
         "agent_bundle_id": None,
         "extra_skill_object_keys": ["skills/review/SKILL.md"],
         "instruction_prefix": "inspect first",
@@ -1065,7 +1115,7 @@ def test_reproduce_returns_safe_rerun_request_and_command() -> None:
     }
     assert body["cli_command"][:4] == ["scaled-evals", "evaluation", "create", "--name"]
     assert "--credential" in body["cli_command"]
-    assert "openai=cred_openai" in body["cli_command"]
+    assert "openai=team-a/openai-key" in body["cli_command"]
     assert "--extra-skill-object-key" in body["cli_command"]
     assert "--instruction-prefix" in body["cli_command"]
     assert "--instruction-postfix" in body["cli_command"]
@@ -1073,6 +1123,19 @@ def test_reproduce_returns_safe_rerun_request_and_command() -> None:
     assert body["cli_command"][body["cli_command"].index("--n-attempts") + 1] == "3"
     assert "sk-do-not-return" not in response.text
     assert any("Secret material is not exported" in note for note in body["notes"])
+
+
+def test_reproduce_omits_legacy_credential_ids_and_says_so() -> None:
+    credentials = {"openai": "team-a/openai-key", "anthropic": "cred_legacy"}
+    _override_conn(_conn_with_fetchone(_eval_row(status="failed", credentials=credentials)))
+
+    response = client.get("/v1/evaluations/ev_test123/reproduce")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["request"]["credentials"] == {"openai": "team-a/openai-key"}
+    assert "cred_legacy" not in response.text
+    assert any("--credential anthropic=workspace/name" in note for note in body["notes"])
 
 
 def test_reproduce_404_when_missing() -> None:
@@ -1092,7 +1155,7 @@ def test_retry_queues_next_execution_on_same_benchmark_member() -> None:
         current_execution=2,
         max_executions=3,
     )
-    conn = _conn_with_fetchone(row)
+    conn = _conn_with_fetchone(_eval_row(status="failed", benchmark_run_id="bmr_1"), row)
     _override_conn(conn)
 
     response = client.post("/v1/evaluations/ev_test123/retry")
@@ -1105,18 +1168,18 @@ def test_retry_queues_next_execution_on_same_benchmark_member() -> None:
     assert body["current_execution"] == 2
     assert body["links"]["retry"] == "/evaluations/ev_test123/retry"
     cur = conn.cursor.return_value.__enter__.return_value
-    retry_sql = cur.execute.call_args_list[0].args[0]
+    retry_sql = cur.execute.call_args_list[1].args[0]
     assert "UPDATE evaluations" in retry_sql
     assert "status = 'failed'" in retry_sql
     assert "current_execution = current_execution + 1" in retry_sql
     assert "INSERT INTO evaluations" not in retry_sql
-    event_call = cur.execute.call_args_list[1]
+    event_call = cur.execute.call_args_list[2]
     assert event_call.args[1][1:3] == ("retry", "queued")
     conn.commit.assert_called_once()
 
 
 def test_retry_rejects_non_failed_evaluation() -> None:
-    conn = _conn_with_fetchone(None, _eval_row(status="running"))
+    conn = _conn_with_fetchone(_eval_row(status="running"), None)
     _override_conn(conn)
 
     response = client.post("/v1/evaluations/ev_test123/retry")
@@ -1127,8 +1190,8 @@ def test_retry_rejects_non_failed_evaluation() -> None:
 
 def test_retry_reports_terminal_artifact_finalization() -> None:
     conn = _conn_with_fetchone(
-        None,
         _eval_row(status="failed"),
+        None,
         {"reason": "terminal_artifacts_finalizing"},
     )
     _override_conn(conn)
@@ -1143,8 +1206,8 @@ def test_retry_reports_terminal_artifact_finalization() -> None:
 
 def test_retry_reports_unavailable_benchmark() -> None:
     conn = _conn_with_fetchone(
-        None,
         _eval_row(status="failed", benchmark_run_id="bmr_cancelled"),
+        None,
         {"reason": "benchmark_unavailable"},
     )
     _override_conn(conn)
@@ -1155,6 +1218,32 @@ def test_retry_reports_unavailable_benchmark() -> None:
     error = response.json()["detail"]["error"]
     assert error["code"] == "evaluation_not_retryable"
     assert "benchmark run is cancelled or unavailable" in error["message"]
+
+
+def test_retry_rejects_unusable_credentials_before_requeueing() -> None:
+    legacy = _conn_with_fetchone(_eval_row(status="failed", credentials={"openai": "cred_legacy"}))
+    _override_conn(legacy)
+    response = client.post("/v1/evaluations/ev_test123/retry")
+    assert response.status_code == 422
+    assert response.json()["detail"]["error"]["code"] == "invalid_reference"
+    assert "workspace/name" in response.text
+    assert "cred_legacy" not in response.text
+
+    checked: list[str] = []
+    previous = v1.dependency_overrides[caller_secret_readable]
+    v1.dependency_overrides[caller_secret_readable] = lambda: lambda ref: checked.append(ref) and False
+    try:
+        unreadable = _conn_with_fetchone(_eval_row(status="failed", credentials={"openai": "team-b/key"}))
+        _override_conn(unreadable)
+        response = client.post("/v1/evaluations/ev_test123/retry")
+    finally:
+        v1.dependency_overrides[caller_secret_readable] = previous
+    assert response.status_code == 422
+    assert checked == ["team-b/key"]
+    for conn in (legacy, unreadable):
+        cur = conn.cursor.return_value.__enter__.return_value
+        assert not any("UPDATE evaluations" in c.args[0] for c in cur.execute.call_args_list)
+        conn.commit.assert_not_called()
 
 
 def test_retry_404_when_missing() -> None:
@@ -1975,6 +2064,14 @@ class _FakeBackend:
 
 def _worker_conn(row: dict | None) -> tuple[MagicMock, list]:
     """Connection whose load returns `row`; returns (conn, executed-calls)."""
+    if row is not None:
+        seed_task_revision(
+            row["task_id"],
+            row["task_revision"],
+            image_ref=row.get("image_ref"),
+            image_digest=row.get("image_digest"),
+            tarball_object_key=row.get("tarball_object_key"),
+        )
     conn = MagicMock()
     cur = conn.cursor.return_value.__enter__.return_value
     cur.fetchone.return_value = row

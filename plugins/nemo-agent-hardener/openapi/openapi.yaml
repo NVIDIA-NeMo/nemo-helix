@@ -225,6 +225,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Agent Hardener Jobs
+      summary: Update Job
+      operationId: update_job_apis_agent_hardener_v2_workspaces__workspace__jobs__name__patch
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WarGameJobUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarGameJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
     delete:
       tags:
       - Agent Hardener Jobs
@@ -250,6 +287,108 @@ paths:
           description: Job not Found
         '409':
           description: Job is not in a terminal state
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/jobs/{name}/attempts:
+    get:
+      tags:
+      - Agent Hardener Jobs
+      summary: List Job Attempts
+      operationId: list_job_attempts_apis_agent_hardener_v2_workspaces__workspace__jobs__name__attempts_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 25
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          enum:
+          - seq
+          - -seq
+          type: string
+          default: -seq
+          title: Sort
+      - name: filter
+        in: query
+        required: false
+        schema:
+          title: Filter
+          type: string
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarGameJobAttemptsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/jobs/{name}/attempts/{attempt}:
+    get:
+      tags:
+      - Agent Hardener Jobs
+      summary: Get Job Attempt
+      operationId: get_job_attempt_apis_agent_hardener_v2_workspaces__workspace__jobs__name__attempts__attempt__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarGameJobAttempt'
         '422':
           description: Validation Error
           content:
@@ -327,6 +466,24 @@ paths:
           type: integer
           maximum: 10000
           exclusiveMinimum: 0
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
+      - name: step_id
+        in: query
+        required: false
+        schema:
+          title: Step Id
+          type: string
+      - name: task_id
+        in: query
+        required: false
+        schema:
+          title: Task Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -359,6 +516,12 @@ paths:
         schema:
           type: string
           title: Name
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -1312,6 +1475,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Agent Hardener Synth Jobs
+      summary: Update Job
+      operationId: update_job_apis_agent_hardener_v2_workspaces__workspace__synth_benign_jobs__name__patch
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SynthBenignJobUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SynthBenignJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
     delete:
       tags:
       - Agent Hardener Synth Jobs
@@ -1337,6 +1537,108 @@ paths:
           description: Job not Found
         '409':
           description: Job is not in a terminal state
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/synth-benign/jobs/{name}/attempts:
+    get:
+      tags:
+      - Agent Hardener Synth Jobs
+      summary: List Job Attempts
+      operationId: list_job_attempts_apis_agent_hardener_v2_workspaces__workspace__synth_benign_jobs__name__attempts_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 25
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          enum:
+          - seq
+          - -seq
+          type: string
+          default: -seq
+          title: Sort
+      - name: filter
+        in: query
+        required: false
+        schema:
+          title: Filter
+          type: string
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SynthBenignJobAttemptsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/synth-benign/jobs/{name}/attempts/{attempt}:
+    get:
+      tags:
+      - Agent Hardener Synth Jobs
+      summary: Get Job Attempt
+      operationId: get_job_attempt_apis_agent_hardener_v2_workspaces__workspace__synth_benign_jobs__name__attempts__attempt__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SynthBenignJobAttempt'
         '422':
           description: Validation Error
           content:
@@ -1414,6 +1716,24 @@ paths:
           type: integer
           maximum: 10000
           exclusiveMinimum: 0
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
+      - name: step_id
+        in: query
+        required: false
+        schema:
+          title: Step Id
+          type: string
+      - name: task_id
+        in: query
+        required: false
+        schema:
+          title: Task Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -1446,6 +1766,12 @@ paths:
         schema:
           type: string
           title: Name
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -2081,6 +2407,9 @@ components:
         project:
           title: Project
           type: string
+        attempt_id:
+          title: Attempt Id
+          type: string
         created_at:
           type: string
           format: date-time
@@ -2387,6 +2716,30 @@ components:
         between a form that asks
 
         for everything and one that asks for what is genuinely unknowable.'
+    JobControl:
+      properties:
+        pause_ttl_seconds:
+          title: Pause Ttl Seconds
+          description: How long this job keeps storage after it pauses, measured from
+            stopped_at. When the job has no value, the platform paused-storage TTL
+            applies. Cannot exceed the platform maximum. 0 reclaims on the next retention
+            pass. In a control update, an omitted or null value keeps the current
+            value. Changing this value does not move the start time.
+          nullable: true
+          type: integer
+          minimum: 0.0
+      type: object
+      title: JobControl
+      description: 'Mutable job behavior, stored on the job and kept off the execution
+        spec.
+
+
+        The attempt spec stays the immutable snapshot of what a run executes. Rerun
+
+        copies the job spec into the next attempt and keeps using this object. In
+        a
+
+        control update, an omitted or null value keeps the job''s current value.'
     ManifestFilter:
       additionalProperties: false
       description: Query filter for ``GET /v2/workspaces/{workspace}/manifests``.
@@ -2594,10 +2947,13 @@ components:
           $ref: '#/components/schemas/ModelGroupDefault'
         analysis:
           $ref: '#/components/schemas/ModelGroupDefault'
+        safety:
+          $ref: '#/components/schemas/ModelGroupDefault'
       type: object
       required:
       - attack
       - analysis
+      - safety
       title: ModelConfigDefaults
       description: Defaults surfaced to the UI so pickers pre-fill without hardcoding
         agent-hardener's literals.
@@ -2695,6 +3051,9 @@ components:
         id:
           title: Id
           type: string
+        attempt_id:
+          title: Attempt Id
+          type: string
         name:
           type: string
           title: Name
@@ -2735,16 +3094,101 @@ components:
           title: Custom Fields
           additionalProperties: true
           type: object
+        control:
+          $ref: '#/components/schemas/JobControl'
       type: object
       required:
       - name
       - spec
       title: SynthBenignJob
+    SynthBenignJobAttempt:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        seq:
+          type: integer
+          title: Seq
+        spec:
+          $ref: '#/components/schemas/SynthBenignSpec'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        is_current:
+          type: boolean
+          title: Is Current
+      type: object
+      required:
+      - id
+      - name
+      - job
+      - workspace
+      - seq
+      - spec
+      - status
+      - created_at
+      - updated_at
+      - is_current
+      title: SynthBenignJobAttempt
+    SynthBenignJobAttemptsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/SynthBenignJobAttempt'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: SynthBenignJobAttemptsPage
     SynthBenignJobRequest:
       properties:
         name:
           title: Name
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -2775,6 +3219,17 @@ components:
       required:
       - spec
       title: SynthBenignJobRequest
+    SynthBenignJobUpdate:
+      properties:
+        description:
+          title: Description
+          nullable: true
+          type: string
+        spec:
+          $ref: '#/components/schemas/SynthBenignSpec'
+      additionalProperties: false
+      type: object
+      title: SynthBenignJobUpdate
     SynthBenignJobsListFilter:
       additionalProperties: false
       properties:
@@ -2955,6 +3410,9 @@ components:
         id:
           title: Id
           type: string
+        attempt_id:
+          title: Attempt Id
+          type: string
         name:
           type: string
           title: Name
@@ -2995,16 +3453,101 @@ components:
           title: Custom Fields
           additionalProperties: true
           type: object
+        control:
+          $ref: '#/components/schemas/JobControl'
       type: object
       required:
       - name
       - spec
       title: WarGameJob
+    WarGameJobAttempt:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        seq:
+          type: integer
+          title: Seq
+        spec:
+          $ref: '#/components/schemas/WarGameSpec'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        is_current:
+          type: boolean
+          title: Is Current
+      type: object
+      required:
+      - id
+      - name
+      - job
+      - workspace
+      - seq
+      - spec
+      - status
+      - created_at
+      - updated_at
+      - is_current
+      title: WarGameJobAttempt
+    WarGameJobAttemptsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/WarGameJobAttempt'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: WarGameJobAttemptsPage
     WarGameJobRequest:
       properties:
         name:
           title: Name
           type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -3035,6 +3578,17 @@ components:
       required:
       - spec
       title: WarGameJobRequest
+    WarGameJobUpdate:
+      properties:
+        description:
+          title: Description
+          nullable: true
+          type: string
+        spec:
+          $ref: '#/components/schemas/WarGameSpec'
+      additionalProperties: false
+      type: object
+      title: WarGameJobUpdate
     WarGameJobsListFilter:
       additionalProperties: false
       properties:
@@ -3117,9 +3671,8 @@ components:
         safety:
           allOf:
           - $ref: '#/components/schemas/ModelChoice'
-          description: "Guardrail middleware LLM (agent-hardener's `safety_llm`);\
-            \ unset copies the victim's own LLM. Only `model` applies \u2014 agent-hardener\
-            \ pins this LLM's endpoint and key when it writes the guardrail."
+          description: Guardrail judge LLM that runs inside the victim (agent-hardener's
+            `safety_llm`); an unset field falls back to the analysis group's.
       type: object
       title: WarGameModels
       description: The three model groups for a war-game. An unset group uses agent-hardener's

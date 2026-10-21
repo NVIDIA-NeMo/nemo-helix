@@ -54,8 +54,8 @@ def test_member_profile_references_are_validated(monkeypatch: pytest.MonkeyPatch
         == "member_framework_profile_ids[task_0] must be a cfg_ id"
     )
 
-    evaluations = MagicMock()
-    db = MagicMock(evaluations=evaluations)
+    config_profiles = MagicMock()
+    db = MagicMock(config_profiles=config_profiles)
     body = CreateBenchmarkRunRequest(
         name="suite",
         benchmark_id="bm_suite",
@@ -66,21 +66,19 @@ def test_member_profile_references_are_validated(monkeypatch: pytest.MonkeyPatch
         _append_reference_checks(
             db,
             body,
-            CurrentPrincipal(owner_type="DEV", owner_id="dev"),
             [],
+            lambda _ref: True,
         )
         is None
     )
-    evaluations.validate_profile_references.assert_called_once_with(
-        [("cfg_default", "harbor"), ("cfg_member", "harbor")]
-    )
+    config_profiles.validate_references.assert_called_once_with([("cfg_default", "harbor"), ("cfg_member", "harbor")])
 
     monkeypatch.setattr("scaled_evals.api.runnability._append_reference_checks", lambda *_args: None)
     monkeypatch.setattr(
         "scaled_evals.api.runnability._append_runtime_checks",
         lambda *_args: (MagicMock(metadata={}), None),
     )
-    db.benchmark_runs.benchmark_revision_for_run.return_value = {"revision": 1}
+    db.benchmarks.revision_for_run.return_value = {"revision": 1}
     db.benchmark_runs.load_members.return_value = [
         {"task_id": "task_0", "task_revision": 1, "revision_status": "ready"}
     ]
@@ -94,6 +92,7 @@ def test_member_profile_references_are_validated(monkeypatch: pytest.MonkeyPatch
         CurrentPrincipal(owner_type="DEV", owner_id="dev"),
         object_exists=lambda _key: True,
         resolve_bundle=MagicMock(),
+        secret_readable=lambda _ref: True,
     )
     assert isinstance(result, BlockedPreflight)
     assert result.blocker.status_code == 422
@@ -103,8 +102,8 @@ def test_member_profile_references_are_validated(monkeypatch: pytest.MonkeyPatch
 def test_member_dataset_profiles_receive_image_and_builder_checks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    evaluations = MagicMock()
-    db = MagicMock(evaluations=evaluations)
+    config_profiles = MagicMock()
+    db = MagicMock(config_profiles=config_profiles)
     body = CreateBenchmarkRunRequest(
         name="suite",
         benchmark_id="bm_suite",
@@ -120,13 +119,13 @@ def test_member_dataset_profiles_receive_image_and_builder_checks(
             }
         },
     }
-    evaluations.load_framework_profile.side_effect = profiles.get
+    config_profiles.get_typed.side_effect = lambda profile_id, _types: profiles.get(profile_id)
 
     blocker = _append_reference_checks(
         db,
         body,
-        CurrentPrincipal(owner_type="DEV", owner_id="dev"),
         [],
+        lambda _ref: True,
     )
     assert blocker is not None
     assert blocker.code == "managed_dataset_images_required"
@@ -138,12 +137,12 @@ def test_member_dataset_profiles_receive_image_and_builder_checks(
     blocker = _append_reference_checks(
         db,
         body,
-        CurrentPrincipal(owner_type="DEV", owner_id="dev"),
         [],
+        lambda _ref: True,
     )
     assert blocker is not None
     assert blocker.code == "managed_dataset_builder_unavailable"
-    assert {call.args[0] for call in evaluations.load_framework_profile.call_args_list[-2:]} == {
+    assert {call.args[0] for call in config_profiles.get_typed.call_args_list[-2:]} == {
         "cfg_default",
         "cfg_member",
     }
@@ -240,6 +239,8 @@ def test_create_routes_overrides_into_member_dispatch(monkeypatch: pytest.Monkey
         ),
         db,
         CurrentPrincipal(owner_type="DEV", owner_id="dev"),
+        lambda _ref: True,
+        False,
     )
 
     assert result["runner_metadata"] == {

@@ -72,7 +72,7 @@ async def test_default_scoring_emits_weighted_average_and_subscores() -> None:
         default_score_weights={"coverage": 0.5, "correctness": 0.3, "relevance": 0.2},
     )
 
-    async def fake_inference(model, request, max_retries, client=None):  # noqa: ANN001
+    async def fake_inference(model: Model, request: dict, max_retries: int | None, **kwargs: Any) -> dict:
         return _judge_response(
             {
                 "coverage_score": 1.0,
@@ -82,7 +82,7 @@ async def test_default_scoring_emits_weighted_average_and_subscores() -> None:
             }
         )
 
-    metric._inference_fn = fake_inference  # noqa: SLF001
+    metric.set_inference_fn(fake_inference)
 
     result = await compute_scores(
         metric,
@@ -110,7 +110,7 @@ async def test_default_scoring_clamps_scores_to_unit_scale() -> None:
         default_score_weights={"coverage": 0.5, "correctness": 0.3, "relevance": 0.2},
     )
 
-    async def fake_inference(model, request, max_retries, client=None):  # noqa: ANN001
+    async def fake_inference(model: Model, request: dict, max_retries: int | None, **kwargs: Any) -> dict:
         return _judge_response(
             {
                 "coverage_score": 100.0,
@@ -120,7 +120,7 @@ async def test_default_scoring_clamps_scores_to_unit_scale() -> None:
             }
         )
 
-    metric._inference_fn = fake_inference  # noqa: SLF001
+    metric.set_inference_fn(fake_inference)
 
     result = await compute_scores(
         metric,
@@ -139,7 +139,7 @@ async def test_default_scoring_clamps_scores_to_unit_scale() -> None:
 async def test_default_scoring_rejects_non_finite_scores() -> None:
     metric = TunableRagEvaluatorMetric(model=_make_model(), default_scoring=True)
 
-    async def fake_inference(model, request, max_retries, client=None):  # noqa: ANN001
+    async def fake_inference(model: Model, request: dict, max_retries: int | None, **kwargs: Any) -> dict:
         return {
             "choices": [
                 {
@@ -150,7 +150,7 @@ async def test_default_scoring_rejects_non_finite_scores() -> None:
             ]
         }
 
-    metric._inference_fn = fake_inference  # noqa: SLF001
+    metric.set_inference_fn(fake_inference)
 
     result = await compute_scores(
         metric,
@@ -170,7 +170,7 @@ async def test_max_retries_comes_from_run_config_online() -> None:
     metric = TunableRagEvaluatorMetric(model=_make_model(), default_scoring=True)
     captured: dict[str, Any] = {}
 
-    async def fake_inference(model, request, max_retries, client=None):  # noqa: ANN001
+    async def fake_inference(model: Model, request: dict, max_retries: int | None, **kwargs: Any) -> dict:
         captured["max_retries"] = max_retries
         return _judge_response(
             {
@@ -181,7 +181,7 @@ async def test_max_retries_comes_from_run_config_online() -> None:
             }
         )
 
-    metric._inference_fn = fake_inference  # noqa: SLF001
+    metric.set_inference_fn(fake_inference)
     metric.apply_evaluation_job_params(RunConfigOnline(max_retries=7))
 
     await compute_scores(
@@ -209,10 +209,10 @@ async def test_custom_scoring_emits_average_score_only() -> None:
         judge_llm_prompt="Score from 0 to 1.",
     )
 
-    async def fake_inference(model, request, max_retries, client=None):  # noqa: ANN001
+    async def fake_inference(model: Model, request: dict, max_retries: int | None, **kwargs: Any) -> dict:
         return _judge_response({"score": 0.75, "reasoning": "good answer"})
 
-    metric._inference_fn = fake_inference  # noqa: SLF001
+    metric.set_inference_fn(fake_inference)
 
     result = await compute_scores(
         metric,
@@ -230,10 +230,10 @@ async def test_custom_scoring_emits_average_score_only() -> None:
 async def test_parse_failure_returns_zero_scores() -> None:
     metric = TunableRagEvaluatorMetric(model=_make_model(), default_scoring=True)
 
-    async def fake_inference(model, request, max_retries, client=None):  # noqa: ANN001
-        return _judge_response("not-json")
+    async def fake_inference(model: Model, request: dict, max_retries: int | None, **kwargs: Any) -> dict:
+        return {"choices": [{"message": {"content": "not-json"}}]}
 
-    metric._inference_fn = fake_inference  # noqa: SLF001
+    metric.set_inference_fn(fake_inference)
 
     result = await compute_scores(
         metric,

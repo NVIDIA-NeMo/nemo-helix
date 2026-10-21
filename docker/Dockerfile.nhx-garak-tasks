@@ -4,7 +4,7 @@
 # hadolint global ignore=DL3059
 # The final image copies BusyBox shell utilities for parity with the task runtime.
 
-ARG GARAK_PYTHON_IMAGE=python:3.13.15-slim-trixie
+ARG GARAK_PYTHON_IMAGE=python:3.13.16-slim-trixie
 
 ARG CACHE_HOME=/tmp/.cache
 
@@ -66,8 +66,9 @@ RUN uv venv --no-project --python /usr/local/bin/python /app/.garak_venv
 # CVE remediation for garak venv (transitive deps pinned by garak that are below safe versions)
 # litellm: CVE-2026-35029 (affects <1.83.0)
 # langchain-core: CVE-2025-68664 (affects <1.2.5) + GHSA-qh6h-p6c9-ff54 (affects <1.2.22)
+# When bumping garak version here, be sure to update packages/garak-api and docs
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip --no-config install garak==0.17.0 --python /app/.garak_venv/bin/python && \
+    uv pip --no-config install garak==0.17.1 --python /app/.garak_venv/bin/python && \
     uv pip install --python /app/.garak_venv/bin/python "setuptools>=78.1.1" && \
     uv pip install --no-deps --python /app/.garak_venv/bin/python \
     "litellm>=1.83.0" \

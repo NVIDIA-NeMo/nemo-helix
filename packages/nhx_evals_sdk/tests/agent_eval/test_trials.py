@@ -87,7 +87,7 @@ def test_trial_measurements_reject_direct_mutation() -> None:
     measurements = TrialMeasurements(prompt_tokens=8, completion_tokens=2)
 
     with pytest.raises(ValidationError, match="Instance is frozen"):
-        measurements.prompt_tokens = -1
+        setattr(measurements, "prompt_tokens", -1)  # setattr: ty already rejects a direct write to a frozen field
 
 
 @pytest.mark.parametrize(
@@ -280,7 +280,7 @@ def test_trial_error_is_frozen_and_forbids_extras() -> None:
     error = TrialError(type="RuntimeError")
 
     with pytest.raises(ValidationError):
-        error.type = "TimeoutError"
+        setattr(error, "type", "TimeoutError")  # setattr: ty already rejects a direct write to a frozen field
     with pytest.raises(ValidationError):
         TrialError(type="RuntimeError", stack="...")  # ty: ignore[unknown-argument]
 

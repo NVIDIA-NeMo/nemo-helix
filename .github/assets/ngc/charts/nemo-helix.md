@@ -29,6 +29,8 @@ See the [support matrix](https://docs.nvidia.com/nemo-helix/documentation/refere
 
 [Documentation](https://docs.nvidia.com/nemo-helix)
 
+[NeMo Helix on GitHub](https://github.com/NVIDIA-NeMo/nemo-helix)
+
 ### License
 
 This chart is licensed under the [Apache License 2.0](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/LICENSE).

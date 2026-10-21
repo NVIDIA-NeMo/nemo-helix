@@ -1,18 +1,18 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getInsightsGetAnalysisConfigQueryKey } from '@nemo/sdk/generated/insights/insights-analysis-configs';
-import { getInsightsGetStatusesAnalysisRunStatusQueryKey } from '@nemo/sdk/generated/insights/insights-analysis-run-statuses';
+import { getCompassGetAnalysisConfigQueryKey } from '@nemo/sdk/generated/compass/compass-analysis-configs';
+import { getCompassGetStatusesAnalysisRunStatusQueryKey } from '@nemo/sdk/generated/compass/compass-analysis-run-statuses';
 import {
-  getInsightsGetAnalysisRunQueryKey,
-  getInsightsListAnalysisRunsQueryKey,
-} from '@nemo/sdk/generated/insights/insights-analysis-runs';
-import { getInsightsListInsightsQueryKey } from '@nemo/sdk/generated/insights/insights-insights';
+  getCompassGetAnalysisRunQueryKey,
+  getCompassListAnalysisRunsQueryKey,
+} from '@nemo/sdk/generated/compass/compass-analysis-runs';
+import { getCompassListInsightsQueryKey } from '@nemo/sdk/generated/compass/compass-insights';
 import type {
   AnalysisRunResponse,
   CreateAnalysisRunRequest,
   InsightListItem,
-} from '@nemo/sdk/generated/insights/schema';
+} from '@nemo/sdk/generated/compass/schema';
 import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
 import { getFilesDownloadFileQueryKey } from '@nemo/sdk/generated/platform/files';
 import type { EvaluationResponse, HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
@@ -21,16 +21,12 @@ import { AGENT_ETHOS_FILE } from '@studio/routes/agents/AgentsListRoute/NewAgent
 import { agentSpecFilesetName } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
 import { http, HttpResponse } from 'msw';
 
-const INSIGHTS_URL = mockApiUrl(getInsightsListInsightsQueryKey, ':workspace');
-const ANALYSIS_CONFIG_URL = mockApiUrl(
-  getInsightsGetAnalysisConfigQueryKey,
-  ':workspace',
-  ':agent'
-);
-const ANALYSIS_RUNS_URL = mockApiUrl(getInsightsListAnalysisRunsQueryKey, ':workspace');
-const ANALYSIS_RUN_URL = mockApiUrl(getInsightsGetAnalysisRunQueryKey, ':workspace', ':name');
+const INSIGHTS_URL = mockApiUrl(getCompassListInsightsQueryKey, ':workspace');
+const ANALYSIS_CONFIG_URL = mockApiUrl(getCompassGetAnalysisConfigQueryKey, ':workspace', ':agent');
+const ANALYSIS_RUNS_URL = mockApiUrl(getCompassListAnalysisRunsQueryKey, ':workspace');
+const ANALYSIS_RUN_URL = mockApiUrl(getCompassGetAnalysisRunQueryKey, ':workspace', ':name');
 const ANALYSIS_RUN_STATUS_URL = mockApiUrl(
-  getInsightsGetStatusesAnalysisRunStatusQueryKey,
+  getCompassGetStatusesAnalysisRunStatusQueryKey,
   ':workspace',
   ':agent'
 );
@@ -195,7 +191,7 @@ export const mockInsights: InsightListItem[] = [
       'The system prompt does not say which tool owns order lookups, so the agent calls the search tool for questions the orders tool answers.',
     agent: 'react-agent',
     status: 'open',
-    trace_refs: Array.from({ length: 12 }, (_, index) => `trace-a-${index}`),
+    evidence: Array.from({ length: 12 }, (_, index) => ({ trace_id: `trace-a-${index}` })),
     experiment_group_count: 1,
     last_seen_at: '2026-08-14T09:00:00Z',
     created_at: '2026-08-10T09:00:00Z',
@@ -215,7 +211,7 @@ export const mockInsights: InsightListItem[] = [
       'Sessions whose accumulated context passes ~8k tokens take more than three times as long to return.',
     agent: 'react-agent',
     status: 'open',
-    trace_refs: Array.from({ length: 5 }, (_, index) => `trace-b-${index}`),
+    evidence: Array.from({ length: 5 }, (_, index) => ({ trace_id: `trace-b-${index}` })),
     experiment_group_count: 0,
     last_seen_at: '2026-08-12T09:00:00Z',
     created_at: '2026-08-11T09:00:00Z',

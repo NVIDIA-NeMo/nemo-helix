@@ -268,18 +268,20 @@ def _install_fake_fabric(monkeypatch: pytest.MonkeyPatch, handler: Any) -> Any:
     _FakeClient.recorded = []
     _FakeClient.planned = []
     module = types.ModuleType("nemo_fabric")
-    module.Fabric = _FakeClient  # type: ignore[attr-defined]
-    module.FabricConfig = _FakeConfig  # type: ignore[attr-defined]
-    module.EnvironmentConfig = _FakeEnvironment  # type: ignore[attr-defined]
-    module.ModelConfig = _FakeModelConfig  # type: ignore[attr-defined]
-    module.RunRequest = _FakeRunRequest  # type: ignore[attr-defined]
-    # The runtime builds the relay observability config from Fabric's own typed models (lazy import).
-    module.RelayObservabilityConfig = _FakeRelayModel  # type: ignore[attr-defined]
-    module.RelayAtifConfig = _FakeRelayModel  # type: ignore[attr-defined]
-    module.RelayAtofConfig = _FakeRelayModel  # type: ignore[attr-defined]
-    module.RelayAtofFileSinkConfig = _FakeRelayModel  # type: ignore[attr-defined]
-    module.RelayOpenTelemetryConfig = _FakeRelayModel  # type: ignore[attr-defined]
-    module.RelayOpenTelemetryEndpointConfig = _FakeRelayModel  # type: ignore[attr-defined]
+    module.__dict__.update(
+        Fabric=_FakeClient,
+        FabricConfig=_FakeConfig,
+        EnvironmentConfig=_FakeEnvironment,
+        ModelConfig=_FakeModelConfig,
+        RunRequest=_FakeRunRequest,
+        # The runtime builds the relay observability config from Fabric's own typed models (lazy import).
+        RelayObservabilityConfig=_FakeRelayModel,
+        RelayAtifConfig=_FakeRelayModel,
+        RelayAtofConfig=_FakeRelayModel,
+        RelayAtofFileSinkConfig=_FakeRelayModel,
+        RelayOpenTelemetryConfig=_FakeRelayModel,
+        RelayOpenTelemetryEndpointConfig=_FakeRelayModel,
+    )
     monkeypatch.setitem(sys.modules, "nemo_fabric", module)
 
     # ``run_tasks`` fails fast on ``import nemo_relay.observability`` when capture_trajectory is on
@@ -288,7 +290,7 @@ def _install_fake_fabric(monkeypatch: pytest.MonkeyPatch, handler: Any) -> Any:
     # typed models (stubbed above), not from nemo_relay, so this stand-in only needs to be importable.
     relay_mod = types.ModuleType("nemo_relay")
     observability_mod = types.ModuleType("nemo_relay.observability")
-    relay_mod.observability = observability_mod  # type: ignore[attr-defined]
+    relay_mod.__dict__.update(observability=observability_mod)
     monkeypatch.setitem(sys.modules, "nemo_relay", relay_mod)
     monkeypatch.setitem(sys.modules, "nemo_relay.observability", observability_mod)
     return _FakeClient
@@ -328,7 +330,7 @@ async def test_fabric_runtime_maps_succeeded_result_to_completed_trial(
     assert trial.metadata["agent_ok"] is True
     # Evidence: the persisted result envelope + each Fabric artifact by name.
     assert trial.evidence is not None
-    assert trial.evidence.descriptors["result"].ref.endswith("fabric_result.json")
+    assert (trial.evidence.descriptors["result"].ref or "").endswith("fabric_result.json")
     assert trial.evidence.descriptors["stdout"].ref == str(tmp_path / "stdout.txt")
     # Evidence lands under a per-run id subdir (isolates A/B baseline vs. skilled runs sharing a root).
     result_file = next((tmp_path / "fabric").glob("*/000000-task-1/fabric_result.json"))
@@ -1328,7 +1330,10 @@ async def test_fabric_runtime_copies_declared_skills_into_the_workspace_for_deep
     assert trial.status == "completed"
     assert seen["paths"] == ["/.agents/skills"]
     assert "RESULT=<n>" in seen["skill_md"]
-    workspace = Path(trial.evidence.descriptors["workspace"].ref)
+    assert trial.evidence is not None
+    workspace_ref = trial.evidence.descriptors["workspace"].ref
+    assert workspace_ref is not None
+    workspace = Path(workspace_ref)
     assert not (workspace / ".agents").exists(), "the copied bundle must not read as agent output"
 
 

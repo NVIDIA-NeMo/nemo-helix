@@ -1240,7 +1240,7 @@ def test_authentik_kubernetes_runner_uses_helm_not_kustomize() -> None:
     assert "--auth-idp-context" in run_sh
     assert "deployment_context.py" in run_sh
     assert "--run-e2e" in run_sh
-    assert "uv run --frozen pytest tests/auth_idp/static -v" in ci_workflow
+    assert "uv run --frozen --group auth-idp-e2e pytest tests/auth_idp/static -v" in ci_workflow
     assert 'uv run --frozen pytest tests/auth_idp -v -m "auth_idp and not auth_idp_runtime"' not in ci_workflow
     assert "--runtime RUNTIME" in run_sh
     assert "validate_k8s_runtime" in run_sh
@@ -1340,6 +1340,9 @@ def test_authentik_compose_up_key_derives_managed_instance_names() -> None:
 def test_authentik_compose_test_action_runs_host_contracts() -> None:
     output = _run_authentik_script("test", "compose", "--dry-run")
 
+    assert "playwright install chromium" in output
+    assert "NHX_AUTH_IDP_BROWSER_ARTIFACTS_DIR=" in output
+    assert "--group auth-idp-e2e pytest" in output
     assert "tests/auth_idp/contracts" in output
     assert "--auth-idp-context" in output
     assert "deployment_context.py" in output
@@ -1591,8 +1594,26 @@ def test_authentik_kubernetes_test_action_runs_host_contracts() -> None:
     output = _run_authentik_script("test", "k8s", "--dry-run")
 
     assert "--timeout 20m" in output
+    assert "playwright install chromium" in output
+    assert "NHX_AUTH_IDP_BROWSER_ARTIFACTS_DIR=" in output
+    assert "--group auth-idp-e2e pytest" in output
     assert "tests/auth_idp/contracts" in output
     assert "--auth-idp-context" in output
+
+
+def test_authentik_kubernetes_test_action_collects_pod_logs_before_deleting_the_cluster() -> None:
+    output = _run_authentik_script(
+        "test",
+        "k8s",
+        "--dry-run",
+        env={"NHX_AUTHENTIK_K8S_RUNTIME": "kind", "NHX_AUTHENTIK_K8S_KEEP_CLUSTER": "0"},
+    )
+
+    collect = output.find("logs --all-containers --prefix --timestamps")
+    delete = output.find("kind delete cluster")
+    assert collect != -1, output
+    assert delete != -1, output
+    assert collect < delete
 
 
 def test_authentik_down_cleans_reused_compose_and_kubernetes_resources(tmp_path: Path) -> None:

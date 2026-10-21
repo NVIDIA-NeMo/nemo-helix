@@ -5,6 +5,7 @@
 
 import logging
 import threading
+import time
 from abc import abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,8 @@ from nhx.customization_common.tasks.file_io_progress_reporter import ProgressRep
 from nhx.customization_common.tasks.file_io_utils import list_local_files as _list_local_files
 
 logger = logging.getLogger(__name__)
+
+UPLOAD_PROGRESS_INTERVAL_SECONDS = 60.0
 
 
 def get_percentage(current: int, total: int) -> int:
@@ -52,7 +55,8 @@ class TqdmPerFileUploadCallback(Callback):
         self.src_path = src_path
         super().__init__(**kwargs)
 
-    def branched(self, full_src_path: str, full_dest_path: str, **kwargs: Any) -> TqdmCallback:
+    def branched(self, path_1: str, path_2: str, **kwargs: Any) -> TqdmCallback:
+        full_src_path = path_1
         if self.src_path.is_file():
             relative_path = self.src_path.name
         else:
@@ -82,8 +86,8 @@ class TqdmPerFileDownloadCallback(Callback):
         self.file_sizes = file_sizes or {}
         super().__init__(**kwargs)
 
-    def branched(self, full_src_path: str, full_dest_path: str, **kwargs: Any) -> TqdmCallback:
-        dest_full_path = Path(full_dest_path)
+    def branched(self, path_1: str, path_2: str, **kwargs: Any) -> TqdmCallback:
+        full_src_path, dest_full_path = path_1, Path(path_2)
         if self.dest_path.is_file():
             relative_path = dest_full_path.name
         else:
@@ -147,8 +151,11 @@ class BaseProgressCallback(Callback):
         return [FileInfo(path=f.path, size=f.size) for f in _list_local_files(src_path)]
 
     @abstractmethod
-    def branched(self, source_path: str, dest_path: str, **kwargs: Any) -> "BaseSingleFileCallback":
-        """Create a child callback for a single file transfer."""
+    def branched(self, path_1: str, path_2: str, **kwargs: Any) -> "BaseSingleFileCallback":
+        """Create a child callback for copying ``path_1`` to ``path_2``.
+
+        The parameter names are fsspec's ``Callback.branched``, which overrides must keep.
+        """
         ...
 
 
@@ -268,19 +275,51 @@ class FileUploadProgressCallback(BaseProgressCallback):
             },
         )
 
-    def branched(self, source_path: str, dest_path: str, **kwargs: Any) -> "SingleFileUploadCallback":
+    def branched(self, path_1: str, path_2: str, **kwargs: Any) -> "SingleFileUploadCallback":
         return SingleFileUploadCallback(
             parent=self,
-            source_path=source_path,
-            dest_path=dest_path,
+            source_path=path_1,
+            dest_path=path_2,
             **kwargs,
         )
 
 
 class SingleFileUploadCallback(BaseSingleFileCallback):
-    """Per-file upload callback. Notifies parent on completion."""
+    """Per-file upload callback. Reports bytes in flight periodically and notifies parent on completion.
+
+    A single file can take hours to upload, and the step's staleness check reads a silent task as stalled.
+    """
 
     parent: FileUploadProgressCallback
+
+    def __init__(self, parent: FileUploadProgressCallback, source_path: str, dest_path: str, **kwargs: Any):
+        super().__init__(parent=parent, source_path=source_path, dest_path=dest_path, **kwargs)
+        self._started_at = time.monotonic()
+        self._last_reported_at = self._started_at
+
+    def relative_update(self, inc: int = 1) -> None:
+        super().relative_update(inc)
+        now = time.monotonic()
+        if self._completed or now - self._last_reported_at < UPLOAD_PROGRESS_INTERVAL_SECONDS:
+            return
+        self._last_reported_at = now
+
+        parent = self.parent
+        current_file = self._get_file_display_path()
+        with parent._lock:
+            files_count = parent.stats.files_uploaded
+            uploaded_bytes = parent.stats.total_bytes + self.value
+
+        size = self.size or 0
+        rate = self.value / (now - self._started_at)
+        logger.info(
+            f"Uploading {current_file}: {self.value}/{size} bytes "
+            f"({get_percentage(self.value, size)}%) at {rate / 2**20:.1f} MiB/s"
+        )
+        parent.progress_reporter.update_progress(
+            status=HelixJobStatus.ACTIVE,
+            status_details=self._build_status_details(files_count, uploaded_bytes, current_file),
+        )
 
     def _get_phase(self) -> str:
         return TaskPhase.UPLOADING
@@ -305,6 +344,8 @@ class SingleFileUploadCallback(BaseSingleFileCallback):
             "uploaded_files": files_count,
             "uploaded_bytes": total_bytes,
             "current_file": current_file,
+            "current_file_uploaded_bytes": self.value,
+            "current_file_size": self.size,
             "progress_pct": get_percentage(files_count, self.parent.total_files),
         }
 
@@ -346,11 +387,11 @@ class FileDownloadProgressCallback(BaseProgressCallback):
             },
         )
 
-    def branched(self, source_path: str, dest_path: str, **kwargs: Any) -> "SingleFileDownloadCallback":
+    def branched(self, path_1: str, path_2: str, **kwargs: Any) -> "SingleFileDownloadCallback":
         return SingleFileDownloadCallback(
             parent=self,
-            source_path=source_path,
-            dest_path=dest_path,
+            source_path=path_1,
+            dest_path=path_2,
             **kwargs,
         )
 
@@ -409,8 +450,8 @@ class CompositeCallback(Callback):
         for cb in self.callbacks:
             cb.relative_update(inc)
 
-    def branched(self, source_path: str, dest_path: str, **kwargs: Any) -> "CompositeCallback":
-        child_callbacks = [cb.branched(source_path, dest_path, **kwargs) for cb in self.callbacks]
+    def branched(self, path_1: str, path_2: str, **kwargs: Any) -> "CompositeCallback":
+        child_callbacks = [cb.branched(path_1, path_2, **kwargs) for cb in self.callbacks]
         return CompositeCallback(*child_callbacks)
 
     def call(self, hook_name: str | None = None, **kwargs: Any) -> None:

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import atexit
-import concurrent.futures
 import http.client
 import json
 import logging
@@ -35,6 +34,7 @@ from sandboxed_gym.host.models import (
     render_host_error,
 )
 from sandboxed_gym.host.provider import SandboxedGymHostProvider, get_host_provider
+from sandboxed_gym.run_sync import run_coro_sync
 from sandboxed_gym.runtime.gym_host_runtime import (
     ENVIRONMENT_OFFLINE_ENV_KEY,
     ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY,
@@ -53,7 +53,7 @@ LOGGER = logging.getLogger(__name__)
 TERMINATION_SIGNALS = (signal.SIGTERM, signal.SIGINT)
 
 # Registered shutdown hooks for this process.
-_TERMINATION_SHUTDOWNS: list[Callable[[], None]] = []
+_TERMINATION_SHUTDOWNS: list[Callable[[], object]] = []
 
 #: Job ids this process has already armed. A second call must not replace the
 #: signal handler the first one installed.
@@ -122,16 +122,6 @@ def _transit_failure_hint(elapsed: float) -> str:
         "the sandbox proxy caps how long one request may stay open, so lower "
         "sandbox.rollout_chunk_size if this persists"
     )
-
-
-def _run_coro_sync(coro: Coroutine[Any, Any, T]) -> T:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        # `Future.result()` is typed with its own TypeVar, which does not unify with T here.
-        return pool.submit(asyncio.run, coro).result()  # ty: ignore[invalid-return-type]
 
 
 class _SessionAsyncRunner:
@@ -361,7 +351,7 @@ class SandboxedGymSession:
 
     def run_rollouts(self, examples: list[dict[str, Any]]) -> list[Any]:
         """Blocking form of :meth:`arun_rollouts`."""
-        return _run_coro_sync(self.arun_rollouts(examples))
+        return run_coro_sync(self.arun_rollouts(examples))
 
     async def arun_rollouts(self, examples: list[dict[str, Any]]) -> list[Any]:
         """Run ``examples`` on the host as bounded concurrent chunks.
@@ -622,7 +612,7 @@ class SandboxedGymSession:
             if self._async_runner is not None:
                 self._async_runner.run(self._host_provider.destroy_host(self.host))
             else:
-                _run_coro_sync(self._host_provider.destroy_host(self.host))
+                run_coro_sync(self._host_provider.destroy_host(self.host))
         except Exception:
             LOGGER.exception("Failed to destroy sandboxed Gym host")
         finally:
@@ -646,7 +636,7 @@ class EpisodeBroker(Protocol):
     def shutdown(self) -> None: ...
 
 
-def install_termination_cleanup(shutdown: Callable[[], None]) -> None:
+def install_termination_cleanup(shutdown: Callable[[], object]) -> None:
     """Run ``shutdown`` when this process exits without it having been called.
 
     A process that owns a sandbox is the only thing that can name it. Ray tears an actor's worker

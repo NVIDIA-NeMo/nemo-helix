@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import inspect
+from typing import Any
 
 import pytest
 from fastapi import APIRouter
@@ -45,7 +46,7 @@ def test_permission_id_is_joined_from_structured_parts() -> None:
     assert permission.namespace == "agents.deployments"
     assert str(permission) == "agents.deployments.read"
     with pytest.raises(Exception):  # frozen dataclass: FrozenInstanceError
-        permission.id = "other"  # type: ignore[misc]
+        setattr(permission, "id", "other")  # setattr: ty already rejects a direct write to a frozen field
 
 
 def test_service_level_permission_has_no_resource_segment() -> None:
@@ -198,21 +199,26 @@ def test_path_rule_empty_callers_rejected() -> None:
 
 
 def test_path_rule_coerces_and_validates_caller_strings() -> None:
-    # Strings are coerced to CallerKind; unknown values raise.
-    @path_rule(callers=["principal"])  # type: ignore[list-item]
+    # Strings are coerced to CallerKind; unknown values raise. Typed as Any, as an untyped
+    # caller's values would be.
+    principal: Any = "principal"
+    anon: Any = "anon"
+
+    @path_rule(callers=[principal])
     async def ok() -> None: ...
 
     assert get_path_rules(ok)[0].callers == [CallerKind.PRINCIPAL]
 
     with pytest.raises(ValueError):
-        path_rule(callers=["anon"])  # type: ignore[list-item]
+        path_rule(callers=[anon])
 
 
 def test_path_rule_rejects_bare_string_permission() -> None:
     """A permission must be a Permission object. A bare string is rejected at decoration so a
     typo (or a forgotten PermissionSet member) can't silently reach the policy layer."""
+    bare_string: Any = "x.read"  # typed as Any, as an untyped caller's value would be
     with pytest.raises(TypeError, match="must be Permission objects"):
-        path_rule(callers=[CallerKind.PRINCIPAL], permissions=["x.read"])  # type: ignore[list-item]
+        path_rule(callers=[CallerKind.PRINCIPAL], permissions=[bare_string])
 
 
 def test_get_path_rules_empty_for_undecorated() -> None:

@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 
-# require >= 1.26.7 for current Go stdlib security fixes
-FROM golang:1.26.7 AS build
+# require >= 1.26.9 for GO-2026-6603 through GO-2026-6613 stdlib fixes
+FROM golang:1.26.9 AS build
 COPY ./services/core/jobs/jobs-launcher /app/services/jobs-launcher
 WORKDIR /app/services/jobs-launcher
 RUN go mod download

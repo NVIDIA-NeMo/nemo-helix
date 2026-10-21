@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from scaled_evals.api.schemas.common import validate_scoped_egress_config
+from scaled_evals.api.schemas.common import CredentialRefs, validate_scoped_egress_config
 from scaled_evals.api.schemas.tasks import Visibility
 from scaled_evals.models.evaluations import RewardValue
 
@@ -24,6 +24,8 @@ ArchiveStatus = Literal["missing", "building", "ready"]
 
 Framework = Literal["harbor", "nemo_gym"]
 NetworkPolicyMode = Literal["unrestricted", "default_deny", "scoped_egress"]
+# Runtimes that can deliver a registered agent bundle into the task container.
+AGENT_BUNDLE_RUNTIMES = ("sandbox_k8s", "harbor_opensandbox")
 OutcomeCategory = Literal[
     "in_progress",
     "completed",
@@ -135,8 +137,7 @@ class CreateEvaluationRequest(BaseModel):
         default=None,
         description="Optional intake config profile id.",
     )
-    # role -> credential id, e.g. {"anthropic": "cred_…", "intake": "cred_…"}.
-    credentials: dict[str, str] = Field(default_factory=dict)
+    credentials: CredentialRefs = Field(default_factory=dict)
     agent_bundle_id: str | None = Field(
         default=None,
         description=(
@@ -176,8 +177,12 @@ class CreateEvaluationRequest(BaseModel):
 
     @model_validator(mode="after")
     def _resolve_framework_profile_alias(self) -> "CreateEvaluationRequest":
-        if self.agent_bundle_id is not None and (self.framework != "harbor" or self.runtime != "sandbox_k8s"):
-            raise ValueError("agent_bundle currently requires framework='harbor' and runtime='sandbox_k8s'")
+        if self.agent_bundle_id is not None and (
+            self.framework != "harbor" or self.runtime not in AGENT_BUNDLE_RUNTIMES
+        ):
+            raise ValueError(
+                "agent_bundle currently requires framework='harbor' and runtime='sandbox_k8s' or 'harbor_opensandbox'"
+            )
         if self.agent_bundle_id is not None and self.framework_profile_id is None:
             raise ValueError("agent_bundle_id requires a Harbor framework_profile_id")
         if self.initial_user_turns and self.framework != "harbor":

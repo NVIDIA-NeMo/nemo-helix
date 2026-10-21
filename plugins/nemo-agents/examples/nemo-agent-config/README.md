@@ -97,7 +97,7 @@ curl -fsS --connect-timeout 2 --max-time 5 \
 # If setup does not create a usable NVIDIA inference provider, follow
 # Step 2 in plugins/nemo-agents/README.md before deploying.
 
-nemo agents create \
+nemo agents register \
   --name platform-agent \
   --agent-config plugins/nemo-agents/examples/nemo-agent-config/agent-codex.yaml
 
@@ -288,4 +288,4 @@ Then open `http://localhost:5173/studio/workspaces/default/intake/traces`.
 
 - [Package the calculator agent as a container image](../../README.md#packaging-agents-as-container-images).
 - [Deploy an agent](../../../../docs/agents/deploy-agents.mdx).
-- [Review the agent configuration contract](../../../../docs/agents/index.mdx#agent-definition).
+- [Review the agent configuration contract](../../../../docs/agents/register-agents.mdx#register-with-code).

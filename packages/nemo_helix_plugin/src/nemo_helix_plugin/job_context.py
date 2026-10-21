@@ -10,6 +10,7 @@ in-container runtime sets:
 
 - ``workspace``         ← ``NEMO_JOB_WORKSPACE``
 - ``job_id``            ← ``NEMO_JOB_ID`` (``None`` for local runs)
+- ``attempt_id``        ← ``NEMO_JOB_ATTEMPT_ID`` (``None`` for local runs)
 - ``storage.ephemeral``  ← ``NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH``
 - ``storage.persistent`` ← ``NEMO_JOB_PERSISTENT_JOB_STORAGE_PATH``
 
@@ -90,6 +91,7 @@ class JobContext:
             retains the latest report in memory; platform execution publishes
             it to the current job attempt.
         job_id: Platform job UUID, or ``None`` for a local run.
+        attempt_id: Concrete platform attempt UUID, or ``None`` for a local run.
     """
 
     workspace: str
@@ -97,6 +99,7 @@ class JobContext:
     results: JobResults
     usage: JobUsageReporter = field(default_factory=LocalJobUsageReporter)
     job_id: str | None = None
+    attempt_id: str | None = None
 
 
 __all__ = [

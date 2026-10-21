@@ -33,6 +33,7 @@ from nemo_deployments_plugin.backends.k8s.compiler import (
 )
 from nemo_deployments_plugin.backends.k8s.jobs import (
     newest_pod,
+    read_pod_log_text,
     resolve_deployment_namespace,
     resolve_k8s_deployment_config,
     trim_log_text,
@@ -830,7 +831,8 @@ async def get_deployment_logs(
             pod = newest_pod(list(pods.items))
             if pod is None or pod.metadata is None:
                 return ""
-            return core_v1.read_namespaced_pod_log(
+            return read_pod_log_text(
+                core_v1,
                 name=pod.metadata.name,
                 namespace=namespace,
                 tail_lines=tail,

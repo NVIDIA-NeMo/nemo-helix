@@ -13,7 +13,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from nemo_agents_plugin.agent_config import load_agent_config
 from nemo_agents_plugin.fabric.translator import translate_agent_config
-from nemo_fabric import Fabric  # ty: ignore[unresolved-import]
+from nemo_fabric import Fabric
 
 EXAMPLE_DIR = Path(__file__).parents[2] / "examples/nemo-agent-config/calculator-agent"
 BASE_CONFIG_PATH = EXAMPLE_DIR / "agent.yaml"
@@ -25,6 +25,7 @@ def test_base_example_has_no_mcp_servers() -> None:
     fabric_config = translate_agent_config(config)
 
     assert config.name == "calculator-agent"
+    assert fabric_config.harness is not None
     assert fabric_config.harness.adapter_id == "nvidia.fabric.langchain.deepagents"
     assert fabric_config.mcp is not None
     assert fabric_config.mcp.servers == {}
@@ -50,6 +51,7 @@ def test_mcp_example_adds_harness_native_stdio_server() -> None:
     assert calculator.url == "calculator-server"
     assert calculator.exposure == "harness_native"
     assert fabric_config.relay is not None
+    assert fabric_config.relay.observability is not None
     assert fabric_config.relay.observability.atif is None
     assert fabric_config.relay.observability.atof is not None
 

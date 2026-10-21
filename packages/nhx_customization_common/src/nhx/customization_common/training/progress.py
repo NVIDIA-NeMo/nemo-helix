@@ -37,6 +37,7 @@ from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.jobs.types import HelixJobTaskUpdate
 from nhx.common.client_factory import get_task_nemo_client
+from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.service.context import NHXJobContext
 
 logger = logging.getLogger(__name__)
@@ -147,10 +148,11 @@ class JobsServiceProgressReporter:
             return
 
         try:
-            self._jobs.update_job_step_task(
+            self._jobs.update_attempt_step_task(
                 name=self._job_ctx.normalized_task,
                 workspace=self._job_ctx.workspace,
                 job=self._job_ctx.job_id,
+                attempt=self._job_ctx.attempt_id,
                 step=self._job_ctx.step,
                 body=HelixJobTaskUpdate(
                     status=HelixJobStatus(status),
@@ -200,10 +202,11 @@ class JobsServiceProgressReporter:
             return {}
 
         try:
-            task = self._jobs.get_job_step_task(
+            task = self._jobs.get_attempt_step_task(
                 name=self._job_ctx.normalized_task,
                 workspace=self._job_ctx.workspace,
                 job=self._job_ctx.job_id,
+                attempt=self._job_ctx.attempt_id,
                 step=self._job_ctx.step,
             ).data()
             stored = task.status_details or {}
@@ -226,7 +229,7 @@ class JobsServiceProgressReporter:
 
         return {name: list(points) for name, points in metrics.items() if isinstance(points, list)}
 
-    def report_running(self, phase: str, **details: Any) -> None:
+    def report_running(self, phase: TrainingPhase, **details: Any) -> None:
         if "step" in details and "percentage_done" not in details and self._max_steps > 0:
             details["percentage_done"] = self._calculate_percentage_done(details["step"])
 
@@ -234,7 +237,7 @@ class JobsServiceProgressReporter:
         self.update_task(status="active", status_details=status_details)
 
     def report_completed(self, message: str = "Completed") -> None:
-        self.update_task(status="completed", status_details={"message": message, "phase": "completed"})
+        self.update_task(status="completed", status_details={"message": message, "phase": TrainingPhase.COMPLETED})
 
     def report_error(self, error: str | dict[str, Any]) -> None:
         error_details = {"message": error} if isinstance(error, str) else error

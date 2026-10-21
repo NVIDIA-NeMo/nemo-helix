@@ -57,7 +57,7 @@ def main() -> int:
     if raw is None:
         sys.stderr.write(
             "nhx.unsloth.tasks.training requires NEMO_JOB_STEP_CONFIG_FILE_PATH. "
-            "Submit via `nemo customization unsloth submit <job.json>` so the "
+            "Submit via `nemo customization unsloth --job-json <job.json>` so the "
             "platform Jobs runner populates this for you.\n",
         )
         return 2
@@ -65,6 +65,7 @@ def main() -> int:
     # Local imports so the parent process (e.g. CLI discovery, pytest
     # collection) does not pay the ML import cost.
     from nemo_helix_plugin.job_context import JobContext, StoragePaths
+    from nemo_helix_plugin.job_results import LocalJobResults
     from nhx.customization_common.service.path_utils import get_job_storage_path_from_env, remap_job_storage_path
     from nhx.unsloth.app.jobs.training.schemas import TrainingStepConfig
     from nhx.unsloth.tasks.training.backends.unsloth_sft import train_sft
@@ -80,12 +81,12 @@ def main() -> int:
     storage.ephemeral.mkdir(parents=True, exist_ok=True)
     storage.persistent.mkdir(parents=True, exist_ok=True)
 
-    # Container runs don't currently publish ``ctx.results``; ``train_sft``
-    # doesn't touch it today, so passing ``None`` is safe.
+    # Container runs don't currently publish ``ctx.results`` and ``train_sft``
+    # doesn't touch it; anything saved would land under persistent storage.
     ctx = JobContext(
         workspace=os.environ.get("NEMO_JOB_WORKSPACE", "default"),
         storage=storage,
-        results=None,
+        results=LocalJobResults(storage.persistent / "results"),
         job_id=os.environ.get("NEMO_JOB_ID"),
     )
 

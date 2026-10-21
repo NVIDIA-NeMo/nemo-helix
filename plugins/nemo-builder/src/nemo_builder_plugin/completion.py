@@ -121,6 +121,9 @@ async def complete(rows: _Rows, *, workspace: str, name: str, digest: str) -> Co
         row = await rows.get(ContainerImage, name=name, workspace=workspace)
         if settled(row, digest):
             return row
+        upstream = row.provenance.upstream
+        if upstream is not None and digest != upstream.manifest_digest:
+            raise CompletionConflict(f"{name} copies {upstream.manifest_digest}, not {digest}")
         row.digest = digest
         row.status = "ready"
         row.status_detail = None

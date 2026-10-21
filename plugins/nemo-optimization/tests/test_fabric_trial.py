@@ -38,6 +38,7 @@ from nhx_evals_sdk.values.evidence import (
     CandidateEvidence,
     EvidenceDescriptor,
 )
+from nhx_evals_sdk.values.models import Model
 
 
 def test_bounded_diagnostics_truncates_large_values() -> None:
@@ -135,8 +136,10 @@ def test_build_agent_eval_tasks_from_json_dataset(tmp_path: Path) -> None:
     assert tasks[0].id == "1"
     assert tasks[0].inputs == {"instruction": "q?"}
     assert tasks[0].reference == {"answer": "a"}
-    assert isinstance(tasks[0].metrics[0], TunableRagEvaluatorMetric)
-    assert tasks[0].metrics[0].model.format == ModelFormat.OPEN_AI
+    metric = tasks[0].metrics[0]
+    assert isinstance(metric, TunableRagEvaluatorMetric)
+    assert isinstance(metric.model, Model)
+    assert metric.model.format == ModelFormat.OPEN_AI
 
 
 def test_model_from_fabric_maps_providers_to_model_format() -> None:
@@ -224,6 +227,7 @@ def test_build_agent_eval_tasks_preserves_judge_api_key_env(tmp_path: Path) -> N
 
     metric = tasks[0].metrics[0]
     assert isinstance(metric, TunableRagEvaluatorMetric)
+    assert isinstance(metric.model, Model)
     assert metric.model.api_key_secret is not None
     assert metric.model.api_key_secret.root == "NVIDIA_API_KEY"
 

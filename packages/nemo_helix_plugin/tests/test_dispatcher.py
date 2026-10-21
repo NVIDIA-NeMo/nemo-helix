@@ -48,6 +48,7 @@ def _setup_env(
         config_path.write_text(json.dumps(step_config), encoding="utf-8")
     monkeypatch.setenv("NEMO_JOB_STEP_CONFIG_FILE_PATH", str(config_path))
     monkeypatch.setenv("NEMO_JOB_WORKSPACE", workspace)
+    monkeypatch.setenv("NEMO_JOB_ATTEMPT_ID", "attempt-a")
     monkeypatch.setenv("NEMO_JOB_PERSISTENT_JOB_STORAGE_PATH", str(tmp_path / "p"))
     monkeypatch.setenv("NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH", str(tmp_path / "e"))
     if job_id is None:
@@ -304,6 +305,10 @@ class TestTypedTaskDispatch:
 class TestBuildCtxFromEnv:
     """``build_ctx_from_env`` reads the platform-injected env vars."""
 
+    @pytest.fixture(autouse=True)
+    def _attempt_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("NEMO_JOB_ATTEMPT_ID", "attempt-a")
+
     @staticmethod
     def _patch_results(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
         sentinel = MagicMock(name="HelixJobResults")
@@ -333,6 +338,7 @@ class TestBuildCtxFromEnv:
         assert ctx.storage.persistent == persistent
         assert ctx.storage.ephemeral == ephemeral
         assert ctx.job_id == "submitted-job-name"
+        assert ctx.attempt_id == "attempt-a"
 
     def test_results_use_submitted_job_id_not_class_name(
         self,
@@ -359,6 +365,36 @@ class TestBuildCtxFromEnv:
 
         assert captured["job_name"] == "evaluate-agent-abc123"
         assert captured["workspace"] == "ws"
+
+    def test_runtime_attempt_is_propagated_to_context_results_and_usage(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        result_kwargs: dict[str, object] = {}
+        usage_kwargs: dict[str, object] = {}
+
+        def _capture_results(**kwargs: object) -> MagicMock:
+            result_kwargs.update(kwargs)
+            return MagicMock(name="HelixJobResults")
+
+        def _capture_usage(**kwargs: object) -> MagicMock:
+            usage_kwargs.update(kwargs)
+            return MagicMock(name="HelixJobUsageReporter")
+
+        monkeypatch.setattr(dispatcher_module, "HelixJobResults", _capture_results)
+        monkeypatch.setattr(dispatcher_module, "HelixJobUsageReporter", _capture_usage)
+        monkeypatch.setenv("NEMO_JOB_WORKSPACE", "ws")
+        monkeypatch.setenv("NEMO_JOB_PERSISTENT_JOB_STORAGE_PATH", str(tmp_path / "p"))
+        monkeypatch.setenv("NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH", str(tmp_path / "e"))
+        monkeypatch.setenv("NEMO_JOB_ID", "job-a")
+        monkeypatch.setenv("NEMO_JOB_ATTEMPT_ID", "attempt-a")
+
+        ctx = build_ctx_from_env(_sync_client())
+
+        assert ctx.attempt_id == "attempt-a"
+        assert result_kwargs["attempt_id"] == "attempt-a"
+        assert usage_kwargs["attempt_id"] == "attempt-a"
 
     def test_results_default_is_platform_job_results(
         self,
@@ -442,4 +478,24 @@ class TestBuildCtxFromEnv:
         monkeypatch.delenv("NEMO_JOB_ID", raising=False)
 
         with pytest.raises(RuntimeError, match="NEMO_JOB_ID"):
+            build_ctx_from_env(_sync_client())
+
+    def test_missing_attempt_id_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("NEMO_JOB_WORKSPACE", "ws")
+        monkeypatch.setenv("NEMO_JOB_PERSISTENT_JOB_STORAGE_PATH", str(tmp_path / "p"))
+        monkeypatch.setenv("NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH", str(tmp_path / "e"))
+        monkeypatch.setenv("NEMO_JOB_ID", "job-a")
+        monkeypatch.delenv("NEMO_JOB_ATTEMPT_ID", raising=False)
+
+        with pytest.raises(RuntimeError, match="NEMO_JOB_ATTEMPT_ID"):
+            build_ctx_from_env(_sync_client())
+
+    def test_empty_attempt_id_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("NEMO_JOB_WORKSPACE", "ws")
+        monkeypatch.setenv("NEMO_JOB_PERSISTENT_JOB_STORAGE_PATH", str(tmp_path / "p"))
+        monkeypatch.setenv("NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH", str(tmp_path / "e"))
+        monkeypatch.setenv("NEMO_JOB_ID", "job-a")
+        monkeypatch.setenv("NEMO_JOB_ATTEMPT_ID", "")
+
+        with pytest.raises(RuntimeError, match="NEMO_JOB_ATTEMPT_ID"):
             build_ctx_from_env(_sync_client())

@@ -79,6 +79,7 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.tasks import (
 )
 from nhx_evals_sdk.agent_eval.runtimes.harbor.trial_adapter import (
     _HARBOR_EXTRA_REQUIRED_MESSAGE,
+    HARBOR_SPLIT_MARKER,
     _iter_harbor_trial_results,
     _trial_from_harbor_result,
 )
@@ -95,6 +96,10 @@ logger = logging.getLogger(__name__)
 
 # Default reward key inside Harbor's ``verifier_result.rewards`` mapping.
 DEFAULT_REWARD_KEY = "reward"
+#: The Harbor jobs of a split run (see :data:`HARBOR_SPLIT_MARKER`): public tasks with the host-gateway
+#: alias, and network-restricted tasks, where Docker refuses it.
+HOST_ALIAS_JOB = "host-alias"
+NETWORK_RESTRICTED_JOB = "network-restricted"
 # Synthetic sys.modules root a custom ``import_path`` agent package is injected under.
 _AGENT_IMPORT_ROOT = "_nemo_evals_harbor_agents"
 # Guards the sys.modules mutation while injecting/removing scoped agent packages.
@@ -136,6 +141,20 @@ _DRIFT_VALUE_CHARS = 80
 _DIGEST_SKIP_DIRS = frozenset({".git", "__pycache__", ".venv", ".uv", ".mypy_cache", ".pytest_cache"})
 _DIGEST_CHUNK_BYTES = 1 << 20
 RunJob = Callable[[], Awaitable[None]]
+
+
+class HarborEnvironmentConfig(BaseModel):
+    """Select an installed Harbor environment without importing Harbor in the client."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    import_path: str = Field(min_length=1)
+    kwargs: dict[str, JsonValue] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _reject_credentials(self) -> HarborEnvironmentConfig:
+        require_no_plaintext_credentials(self.kwargs, field="environment.kwargs", alternative="worker environment")
+        return self
 
 
 class HarborRuntimeConfig(BaseModel):
@@ -194,8 +213,8 @@ class HarborRuntimeConfig(BaseModel):
         default_factory=dict,
         description=(
             "Non-secret environment variables for the Harbor agent, as literal values. They travel in the "
-            "spec and reach only the agent. Keys Harbor treats as secrets (matching KEY, SECRET, TOKEN, "
-            "PASSWORD, CREDENTIAL or AUTH) are rejected; use ``env_secrets`` for credentials."
+            "spec and reach only the agent. Keys Harbor treats as secrets (matching KEY, SECRET, TOKEN but not "
+            "TOKENS, PASSWORD, CREDENTIAL or AUTH) are rejected; use ``env_secrets`` for credentials."
         ),
     )
     n_attempts: int = Field(default=1, ge=1, description="Number of attempts Harbor runs per task.")
@@ -216,6 +235,9 @@ class HarborRuntimeConfig(BaseModel):
         default=None, description="Environment-build timeout multiplier."
     )
     reward_key: str = Field(default=DEFAULT_REWARD_KEY, description="Key read from Harbor's rewards mapping.")
+    environment: HarborEnvironmentConfig | None = Field(
+        default=None, description="Installed custom environment; omitted uses Harbor's default environment."
+    )
 
     @model_validator(mode="after")
     def _agent_kwargs_carry_no_credentials(self) -> HarborRuntimeConfig:
@@ -1001,6 +1023,10 @@ def _build_native_job(
         # field validator: `model_copy(update=...)` skips validators, and a run that refuses after
         # deleting the job dir has destroyed completed trials to reach the same refusal.
         require_no_plaintext_credentials(config.agent_kwargs, field="agent_kwargs", alternative="env_secrets")
+        if config.environment is not None:
+            require_no_plaintext_credentials(
+                config.environment.kwargs, field="environment.kwargs", alternative="worker environment"
+            )
         validate_harbor_env(config.env_vars, config.env_secrets)
         # Warn rather than refuse: some agents read a fixed variable name the caller can't rename.
         warn_unscrubbed_secret_keys(config.env_secrets)
@@ -1010,6 +1036,7 @@ def _build_native_job(
             from harbor.models.trial.config import (  # ty: ignore[unresolved-import,unused-ignore-comment]
                 AgentConfig,
                 ArtifactConfig,
+                EnvironmentConfig,
                 VerifierConfig,
             )
         except ModuleNotFoundError as exc:
@@ -1037,17 +1064,22 @@ def _build_native_job(
             if value is not None
         }
 
-        async def _create_and_run(agent: Any) -> None:
+        async def _run_harbor_job(
+            agent: Any, *, name: str, parent: Path, selected: Sequence[str] | None, environment: Any
+        ) -> None:
+            """Run one Harbor job, ``parent/name``, over the ``selected`` task folders (all when None)."""
+            harbor_job_dir = parent / name
             job_config = JobConfig(
-                job_name=resolved_name,
-                jobs_dir=jobs_dir,
+                job_name=name,
+                jobs_dir=parent,
                 n_attempts=config.n_attempts,
                 n_concurrent_trials=config.n_concurrent_trials,
                 quiet=config.quiet,
                 retry=RetryConfig(max_retries=config.max_retries),
                 artifacts=artifacts,
+                environment=environment,
                 agents=[agent],
-                datasets=[DatasetConfig(path=dataset_path, task_names=list(task_names) if task_names else None)],
+                datasets=[DatasetConfig(path=dataset_path, task_names=list(selected) if selected else None)],
                 **verifier_kwargs,
                 **timeout_kwargs,
             )
@@ -1074,17 +1106,100 @@ def _build_native_job(
                 # An ordinary "file exists" raised from inside a trial, a hook, or an
                 # environment build must not be mistaken for drift and answered by
                 # destroying the directory.
-                if not (job_dir.exists() and _is_harbor_resume_refusal(exc, job_dir)):
+                if not (harbor_job_dir.exists() and _is_harbor_resume_refusal(exc, harbor_job_dir)):
                     raise
-                drift = _describe_job_config_drift(job_dir, job_config)
+                drift = _describe_job_config_drift(harbor_job_dir, job_config)
                 logger.warning(
                     "Harbor refused to resume job dir %s, so it is being discarded and re-run from scratch: %s%s",
-                    job_dir,
+                    harbor_job_dir,
                     exc,
                     f" Differing config: {drift}." if drift else "",
                 )
-                shutil.rmtree(job_dir)
+                shutil.rmtree(harbor_job_dir)
                 await _attempt()
+
+        def _discard_other_layout(split: bool) -> None:
+            """Start over when a pinned job dir holds the other layout, rather than mixing the two."""
+            marker = job_dir / HARBOR_SPLIT_MARKER
+            other = (job_dir / "config.json").exists() if split else marker.exists()
+            if other:
+                logger.warning(
+                    "Harbor job dir %s was written as %s run; discarding it to run as %s run.",
+                    job_dir,
+                    "a single-job" if split else "a split",
+                    "a split" if split else "a single-job",
+                )
+                shutil.rmtree(job_dir)
+
+        async def _create_and_run(agent: Any) -> None:
+            # A custom environment replaces Harbor's Docker one, and only Docker takes compose overlays.
+            if config.environment:
+                _discard_other_layout(split=False)
+                await _run_harbor_job(
+                    agent,
+                    name=resolved_name,
+                    parent=jobs_dir,
+                    selected=task_names,
+                    environment=config.environment.model_dump(),
+                )
+                return
+            # Linux Docker Engine needs an explicit host-gateway alias (Docker Desktop also accepts it), so
+            # registered Fabric agents in the task container can call the Inference Gateway. A public task's
+            # container takes it directly. Harbor puts a task with restricted network access on its egress
+            # sidecar's network, where Docker refuses the alias but shares the sidecar's hosts file, so there
+            # the alias goes on the sidecar and the task's allowlist still decides reachability. Overlays are
+            # job-wide, so a selection with both kinds runs as two Harbor jobs.
+            container_alias = [Path(__file__).with_name("host-gateway.yaml")]
+            sidecar_alias = [Path(__file__).with_name("host-gateway-sidecar.yaml")]
+            public, restricted, unknown = await _partition_by_egress_control(dataset_path, task_names, agent)
+            if unknown:
+                logger.warning(
+                    "Harbor tasks %s can't be classified by network access, so this job runs without the "
+                    "host.docker.internal -> host-gateway alias.",
+                    unknown,
+                )
+                single: list[Path] | None = []
+            elif not restricted:
+                single = container_alias
+            elif not public:
+                single = sidecar_alias
+            else:
+                single = None
+            if single is not None:
+                _discard_other_layout(split=False)
+                await _run_harbor_job(
+                    agent,
+                    name=resolved_name,
+                    parent=jobs_dir,
+                    selected=task_names,
+                    environment=EnvironmentConfig(extra_docker_compose=single),
+                )
+                return
+            logger.info(
+                "Harbor tasks %s restrict network access: running them as a separate Harbor job, with the "
+                "host.docker.internal -> host-gateway alias on Harbor's egress sidecar.",
+                restricted,
+            )
+            _discard_other_layout(split=True)
+            job_dir.mkdir(parents=True, exist_ok=True)
+            (job_dir / HARBOR_SPLIT_MARKER).write_text(
+                json.dumps({"jobs": [HOST_ALIAS_JOB, NETWORK_RESTRICTED_JOB]}), encoding="utf-8"
+            )
+            await _run_harbor_job(
+                agent,
+                name=HOST_ALIAS_JOB,
+                parent=job_dir,
+                # Harbor matches task names as fnmatch patterns; these are literal folder names.
+                selected=[glob.escape(name) for name in public],
+                environment=EnvironmentConfig(extra_docker_compose=container_alias),
+            )
+            await _run_harbor_job(
+                agent,
+                name=NETWORK_RESTRICTED_JOB,
+                parent=job_dir,
+                selected=[glob.escape(name) for name in restricted],
+                environment=EnvironmentConfig(extra_docker_compose=sidecar_alias),
+            )
 
         agent_options: dict[str, Any] = {
             "model_name": config.agent_model_name,
@@ -1110,6 +1225,70 @@ def _build_native_job(
             await _create_and_run(AgentConfig(import_path=config.agent_import_path, **agent_options))
 
     return job_dir, run_job
+
+
+async def _partition_by_egress_control(
+    dataset_path: Path, task_names: Sequence[str] | None, agent: Any
+) -> tuple[list[str], list[str], list[str]]:
+    """Split the selected task folders by whether Harbor attaches their container to its egress sidecar's network.
+
+    Returns ``(public, restricted, unknown)``. ``unknown`` names the tasks that can't be classified: one with no
+    local folder, or one Harbor's task model can't load. The caller gives those no alias at all, since a
+    sidecar overlay on a task Harbor runs without a sidecar would break its compose project.
+
+    Mirrors Harbor's own decision (``Trial._init_agent_environment`` feeding
+    ``DockerEnvironment._requires_egress_control``) through Harbor's network planner: per step, the
+    ``[environment]`` baseline, the agent phase, and the verifier phase when the verifier shares the agent's
+    container. If any of these is not public, Harbor sets the main service's ``network_mode`` to the sidecar's,
+    and Docker refuses ``extra_hosts`` on such a service.
+    """
+    # Before importing Harbor: there is nothing to inspect without a dataset directory.
+    if not Path(dataset_path).is_dir():
+        return [], [], []
+    from harbor.job import DatasetConfig  # ty: ignore[unresolved-import,unused-ignore-comment]
+    from harbor.models.task.config import NetworkMode  # ty: ignore[unresolved-import,unused-ignore-comment]
+    from harbor.models.task.task import Task  # ty: ignore[unresolved-import,unused-ignore-comment]
+    from harbor.models.task.verifier_mode import (  # ty: ignore[unresolved-import,unused-ignore-comment]
+        resolve_step_verifier_mode,
+        resolve_task_verifier_mode,
+    )
+    from harbor.models.trial.config import EnvironmentConfig  # ty: ignore[unresolved-import,unused-ignore-comment]
+    from harbor.trial.network_policy import (  # ty: ignore[unresolved-import,unused-ignore-comment]
+        resolve_trial_network_plan,
+    )
+
+    selected = await DatasetConfig(
+        path=dataset_path, task_names=list(task_names) if task_names else None
+    ).get_task_configs()
+    public: list[str] = []
+    restricted: list[str] = []
+    unknown: list[str] = []
+    for entry in selected:
+        if entry.path is None:  # not a local task directory, so its network policy can't be read here
+            unknown.append(str(entry))
+            continue
+        name = entry.path.name
+        try:
+            task_config = Task(entry.path).config
+            for step in task_config.steps or [None]:
+                mode = (
+                    resolve_task_verifier_mode(task_config)
+                    if step is None
+                    else resolve_step_verifier_mode(task_config, step)
+                )
+                plan = resolve_trial_network_plan(task_config, agent, EnvironmentConfig(), step, verifier_mode=mode)
+                policies = [plan.agent_env_baseline, plan.agent_phase]
+                if plan.verifier_env_baseline is None:
+                    policies.append(plan.verifier_phase)
+                if any(policy.network_mode != NetworkMode.PUBLIC for policy in policies):
+                    restricted.append(name)
+                    break
+            else:
+                public.append(name)
+        except Exception:  # Harbor reports a broken task itself; here it only drops the alias
+            logger.debug("Could not read Harbor task %s's network policy", name, exc_info=True)
+            unknown.append(name)
+    return public, restricted, unknown
 
 
 def _is_harbor_resume_refusal(exc: FileExistsError, job_dir: Path) -> bool:

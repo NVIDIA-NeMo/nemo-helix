@@ -51,6 +51,8 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.records import NG_ATTEMPT_INDEX, NG_R
 from nhx_evals_sdk.agent_eval.runtimes.gym.results import (
     _INPUT_TOKEN_KEYS,
     _TOKEN_USAGE_KEYS,
+    AGENT_NEVER_RAN_ERROR_TYPE,
+    GYM_FAILURE_RECORD,
     _agent_never_ran,
     _aggregate_metrics_path_for,
     _usage_measurements,
@@ -60,7 +62,7 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.results import (
     require_full_coverage,
     trials_from_rollouts,
 )
-from nhx_evals_sdk.agent_eval.trials import AgentEvalTrialStatus, TrialMeasurements
+from nhx_evals_sdk.agent_eval.trials import UNKNOWN_ERROR_TYPE, AgentEvalTrialStatus, TrialError, TrialMeasurements
 from nhx_evals_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
 from nhx_evals_sdk.values import SecretRef
 from pydantic import ValidationError
@@ -399,6 +401,136 @@ def test_failures_sidecar_yields_failed_trials(tmp_path: Path) -> None:
     assert failed.measurements.total_tokens == 5
     assert failed.metadata["reward"] is None
     assert failed.metadata["gym_failure"] == "boom"
+    assert failed.metadata[GYM_FAILURE_RECORD] == {"error": "boom"}
+
+
+@pytest.mark.parametrize(
+    ("failure", "error"),
+    [
+        pytest.param(
+            {
+                "_ng_failure_class": "agent_run_error",
+                "_ng_failure_type": "ClientResponseError",
+                "_ng_failure_message": "500, message='Internal Server Error'",
+                "_ng_failure_http_status": 500,
+                "_ng_failure_response_body": json.dumps("RuntimeError('NeMo Fabric invocation failed: overloaded')"),
+            },
+            TrialError(
+                type="ClientResponseError",
+                message="500, message='Internal Server Error'\n"
+                "RuntimeError('NeMo Fabric invocation failed: overloaded')",
+            ),
+            id="gym-0.6-request-failure",
+        ),
+        pytest.param(
+            {
+                "_ng_failure_class": "agent_request_failed",
+                "_ng_failure_type": "ClientResponseError",
+                "_ng_failure_message": "502, message='Bad Gateway'",
+                "_ng_failure_http_status": 502,
+                "_ng_failure_response_body": "<html>Bad Gateway</html>",
+            },
+            TrialError(type="ClientResponseError", message="502, message='Bad Gateway'\n<html>Bad Gateway</html>"),
+            id="gateway-page",
+        ),
+        pytest.param(
+            {
+                "_ng_failure_class": "agent_run_error",
+                "_ng_failure_type": "ClientResponseError",
+                "_ng_failure_message": "404, message='Not Found'",
+                "_ng_failure_http_status": 404,
+                "_ng_failure_response_body": '{"detail": "Not Found"}',
+            },
+            TrialError(type="ClientResponseError", message='404, message=\'Not Found\'\n{"detail": "Not Found"}'),
+            id="json-object-reply",
+        ),
+        pytest.param(
+            {
+                "_ng_failure_class": "agent_request_failed",
+                "_ng_failure_type": "TimeoutError",
+                "_ng_failure_message": "TimeoutError()",
+                "_ng_failure_http_status": None,
+                "_ng_failure_response_body": None,
+            },
+            TrialError(type="TimeoutError", message="TimeoutError()"),
+            id="gym-0.6-timeout",
+        ),
+        pytest.param(
+            {
+                "_ng_failure_class": "environment_server_failed",
+                "_ng_failure_terminal": False,
+                "_ng_failure_message": "sandbox unreachable",
+                "_ng_failure_stage": "agent",
+            },
+            TrialError(type="environment_server_failed", message="sandbox unreachable"),
+            id="gym-0.7-environment-server",
+        ),
+        pytest.param(
+            {"_ng_failure_class": "agent_run_error", "_ng_failure_response_body": json.dumps("ValueError('x')")},
+            TrialError(type="agent_run_error", message="ValueError('x')"),
+            id="reply-without-message",
+        ),
+        pytest.param(
+            {"_ng_failure_class": "agent_run_error", "_ng_failure_response_body": "503"},
+            TrialError(type="agent_run_error", message="503"),
+            id="json-scalar-reply",
+        ),
+        pytest.param(
+            {"_ng_failure_class": "judge_failed", "_ng_failure_judge_error": "judge 503"},
+            TrialError(type="judge_failed", message="judge 503"),
+            id="gym-0.5-judge-failsafe",
+        ),
+        pytest.param(
+            {"_ng_failure_class": "transient", "error_message": "rate limited"},
+            TrialError(type="transient", message="rate limited"),
+            id="agent-error-message",
+        ),
+        pytest.param(
+            {"error": "boom", "_ng_failure_message": "gym"},
+            TrialError(type=UNKNOWN_ERROR_TYPE, message="boom\ngym"),
+            id="every-message-kept",
+        ),
+        pytest.param(
+            {"error": "boom", "error_message": " boom "},
+            TrialError(type=UNKNOWN_ERROR_TYPE, message="boom"),
+            id="repeat-dropped",
+        ),
+        pytest.param(
+            {"_ng_failure_type": " ", "_ng_failure_class": 7, "error": 503, "exception": []},
+            TrialError(type=UNKNOWN_ERROR_TYPE),
+            id="odd-diagnostic",
+        ),
+        pytest.param(
+            {"error": {"status": 503}, "_ng_failure_type": "ClientResponseError", "_ng_failure_message": "503"},
+            TrialError(type="ClientResponseError", message='{"status": 503}\n503'),
+            id="structured-agent-error-kept",
+        ),
+    ],
+)
+def test_a_failed_attempt_keeps_its_diagnostic_and_model_calls(
+    tmp_path: Path, failure: dict[str, Any], error: TrialError
+) -> None:
+    # Gym records why an attempt failed and captures the model calls it made first. The FAILED trial
+    # must carry both, not only the sidecar every failure shares.
+    tasks = discover_gym_tasks(EXAMPLE)
+    _, index_map = _index_map(tasks, tmp_path)
+    bundle = tmp_path / "rollouts.jsonl"
+    bundle.write_text("", encoding="utf-8")
+    failures = tmp_path / "rollouts_failures.jsonl"
+    failures.write_text(json.dumps({NG_TASK_INDEX: 0, NG_ROLLOUT_INDEX: 0, **failure}) + "\n", encoding="utf-8")
+    captures = model_call_capture_dir(tmp_path)
+    captures.mkdir(parents=True)
+    (captures / "0-0.capture.jsonl").write_text(json.dumps({"model_call_id": "c0"}) + "\n", encoding="utf-8")
+
+    (trial,) = trials_from_rollouts(bundle, tasks, index_map, capture_dir=captures)
+
+    assert trial.error == error
+    # The record keeps every diagnostic verbatim, including what the error drops or is too odd to hold.
+    assert trial.metadata[GYM_FAILURE_RECORD] == failure
+    assert trial.evidence is not None
+    # No OTLP trace: that would move publication off the ATIF fallback, which records the agent identity.
+    assert trial.evidence.descriptors.keys() == {"rollout_failures", "ng_trajectory"}
+    assert trial.evidence.require("rollout_failures").ref == str(failures)
 
 
 def test_ensure_fresh_output_rejects_reused_dir(tmp_path: Path) -> None:
@@ -1456,7 +1588,10 @@ def test_some_rollouts_empty_fails_only_those_trials(tmp_path: Path) -> None:
     assert empty.metadata["reward"] is None
     # ...but the reason is recorded.
     assert "never called" in empty.metadata["gym_failure"]
+    # Without an error the summary leaves the trial out of error_trial_ids and Intake shows it as a success.
+    assert empty.error == TrialError(type=AGENT_NEVER_RAN_ERROR_TYPE, message=empty.metadata["gym_failure"])
     assert real.status is AgentEvalTrialStatus.COMPLETED
+    assert real.error is None
     assert real.measurements == TrialMeasurements(prompt_tokens=1, completion_tokens=1)
     assert real.metadata["reward"] == 1.0
 
@@ -1499,6 +1634,28 @@ def test_startup_timeout_says_so_when_gym_never_reported_readiness(tmp_path: Pat
     assert "never reported server readiness" in message
     # Still names the environment, which is the one thing the reader always needs.
     assert "mcqa" in message
+
+
+def test_startup_timeout_includes_errors_before_repeated_readiness_polls(tmp_path: Path) -> None:
+    error = "(mcqa) PermissionError: cannot create server environment"
+    poll = "0 / 4 servers ready. Waiting for servers to spin up: ['simple_agent', 'mcqa', 'mcqa_simple_agent', 'policy_model']"
+    transcript = error + "\n" + (poll + "\n") * 100
+
+    message = GymAgentTaskRunner(config=_config())._startup_timeout_message(transcript, tmp_path / "gym_env.log")
+
+    assert error in message
+    assert "0 of 4" in message
+    assert poll not in message
+
+
+def test_startup_timeout_bounds_inline_startup_output(tmp_path: Path) -> None:
+    transcript = "old diagnostic\n" + "\n".join("x" * 1000 for _ in range(LOG_TAIL_LINES + 1))
+
+    message = GymAgentTaskRunner(config=_config())._startup_timeout_message(transcript, tmp_path / "gym_env.log")
+    startup_output = message.split("characters) ---\n", 1)[1]
+
+    assert "old diagnostic" not in startup_output
+    assert len(startup_output) == 16000
 
 
 @pytest.mark.asyncio

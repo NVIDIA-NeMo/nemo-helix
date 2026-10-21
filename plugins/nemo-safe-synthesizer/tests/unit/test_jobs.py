@@ -34,7 +34,7 @@ def _patch_jobs_client(jobs_client: MagicMock, files_client: MagicMock) -> Gener
 
     The compiler validates the ``data_source`` fileset via
     ``AsyncFilesClient.from_client(client).get_fileset(...)`` and then resolves
-    the pretrained-model adapter via ``AsyncJobsClient.from_client(client).get_job_result(...)``.
+    the pretrained-model adapter via an attempt-scoped Jobs client lookup.
     """
     with (
         patch("nemo_safe_synthesizer_plugin.jobs.generate.AsyncFilesClient.from_client", return_value=files_client),
@@ -208,6 +208,7 @@ async def test_job_config_compiler_validates_pretrained_model_job(mock_sdk, mock
     with _patch_jobs_client(jobs_client, mock_files_client):
         await _compile(spec, mock_sdk)
 
+    jobs_client.get_job_attempt.assert_not_called()
     jobs_client.get_job_result.assert_awaited_once_with(
         name="adapter",
         job="prior-safe-synth-job",

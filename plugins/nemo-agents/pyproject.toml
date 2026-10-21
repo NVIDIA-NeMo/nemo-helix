@@ -33,17 +33,19 @@ dependencies = [
     # and the plugin advertises `agents.package-agent` unconditionally.
     "jinja2>=3.1",
     "python-on-whales>=0.60",
-    "nemo-fabric[relay,streaming]>=0.4.0,<0.5.0",
-    "nemo-fabric-adapters-claude>=0.4.0,<0.5.0",
-    "nemo-fabric-adapters-codex>=0.4.0,<0.5.0",
-    "nemo-fabric-adapters-deepagents>=0.4.0,<0.5.0",
-    "nemo-fabric-adapters-mini-swe-agent>=0.4.0,<0.5.0",
-    "nemo-fabric-adapters-nooa>=0.4.0,<0.5.0; python_version >= '3.12' and python_version < '3.14'",
+    "nemo-fabric[relay,streaming]>=0.5.0,<0.6.0",
+    "nemo-fabric-adapters-claude>=0.5.0,<0.6.0",
+    "nemo-fabric-adapters-codex>=0.5.0,<0.6.0",
+    "nemo-fabric-adapters-deepagents>=0.5.0,<0.6.0",
+    "nemo-fabric-adapters-mini-swe-agent>=0.5.0,<0.6.0",
+    "nemo-fabric-adapters-nooa>=0.5.0,<0.6.0; python_version >= '3.12' and python_version < '3.14'",
     # Remote Agent only needs its HTTP client; the service is deployed independently.
-    "nemo-fabric-adapters-remote-agent>=0.4.0,<0.5.0",
+    "nemo-fabric-adapters-remote-agent>=0.5.0,<0.6.0",
     # Fabric's Hermes adapter intentionally excludes the harness. Platform manages
     # the compatible Hermes Agent installation separately.
-    "nemo-fabric-adapters-hermes>=0.4.0,<0.5.0; python_version < '3.14'",
+    "nemo-fabric-adapters-hermes>=0.5.0,<0.6.0; python_version < '3.14'",
+    # The deepagents adapter caps langchain-mcp-adapters below 0.3, whose 0.2.x releases break on mcp 2.
+    "mcp>=1.28.1,<2",
 ]
 version = "0.0.0"
 
@@ -72,11 +74,11 @@ agents = "nemo_agents_plugin.skills:skills_dir"
 nemo_agents_files_telemetry = "nemo_agents_plugin.telemetry.files_service_exporter"
 
 [project.optional-dependencies]
-claude = ["nemo-fabric-adapters-claude[harness]>=0.4.0,<0.5.0"]
-codex = ["nemo-fabric-adapters-codex[harness]>=0.4.0,<0.5.0"]
-deepagents = ["nemo-fabric-adapters-deepagents[harness]>=0.4.0,<0.5.0"]
-mini-swe-agent = ["nemo-fabric-adapters-mini-swe-agent[harness]>=0.4.0,<0.5.0"]
-nooa = ["nemo-fabric-adapters-nooa[harness]>=0.4.0,<0.5.0; python_version >= '3.12' and python_version < '3.14'"]
+claude = ["nemo-fabric-adapters-claude[harness]>=0.5.0,<0.6.0"]
+codex = ["nemo-fabric-adapters-codex[harness]>=0.5.0,<0.6.0"]
+deepagents = ["nemo-fabric-adapters-deepagents[harness]>=0.5.0,<0.6.0"]
+mini-swe-agent = ["nemo-fabric-adapters-mini-swe-agent[harness]>=0.5.0,<0.6.0"]
+nooa = ["nemo-fabric-adapters-nooa[harness]>=0.5.0,<0.6.0; python_version >= '3.12' and python_version < '3.14'"]
 # Moved to [project] dependencies; kept so older install instructions resolve.
 container = []
 test = [
@@ -97,6 +99,9 @@ packages = [
     "src/nemo_agents_plugin",
 ]
 
+# Host-side mirror of the adapter's contract; refresh when PI_ADAPTER_NPM_SPEC in container/template.py is bumped.
+[tool.hatch.build.targets.wheel.shared-data]
+"pi.fabric-adapter.json" = "share/nemo-fabric/adapters/pi/pi.fabric-adapter.json"
 
 [tool.uv.sources]
 

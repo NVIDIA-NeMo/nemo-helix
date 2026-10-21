@@ -612,8 +612,8 @@ nemo files filesets create "$ENV" --workspace default --purpose environment --ex
 nemo files upload ./ascii-tree-pkg/ "$ENV" --workspace default
 nemo files list "$ENV" --workspace default
 
-DATA=ascii-tree-env-dataset
-nemo files filesets create "$DATA" --workspace default --purpose dataset --exist-ok
+DATA=ascii-tree-env-dataset   # new name when the data changes (no --exist-ok — see references/gotchas.md)
+nemo files filesets create "$DATA" --workspace default --purpose dataset
 nemo files upload ./ascii-tree-data/ "$DATA" --workspace default
 ```
 

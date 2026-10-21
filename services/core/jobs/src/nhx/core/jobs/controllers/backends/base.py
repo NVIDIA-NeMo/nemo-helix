@@ -13,6 +13,7 @@ from typing import Generic, Literal, Optional, TypeVar
 from urllib.parse import SplitResult, quote, urlsplit
 
 import nhx.common.auth.workload_identity as _workload_identity
+from kubernetes.utils import parse_quantity
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.jobs import execution_profiles as _execution_profiles
@@ -44,6 +45,9 @@ from nhx.common.jobs.constants import (
     TASK_CONFIG_ENVVAR,
 )
 from nhx.common.platform_endpoint import parse_platform_endpoint
+from nhx.core.jobs.app.constants import DEFAULT_PROFILE as DEFAULT_PROFILE
+from nhx.core.jobs.app.constants import DEFAULT_PROVIDER as DEFAULT_PROVIDER
+from nhx.core.jobs.app.lifecycle import active_ttl_anchor, ensure_aware, step_provider_profile
 from nhx.core.jobs.app.providers import ComputeResources
 from nhx.core.jobs.entities import get_step_spec_name, is_final_platform_step
 from pydantic import BaseModel, model_validator
@@ -59,8 +63,6 @@ is_workload_identity_token_exchange_enabled = _workload_identity.is_workload_ide
 ExecutionProviderConfigT = TypeVar("ExecutionProviderConfigT")
 ExecutionProfileConfigT = TypeVar("ExecutionProfileConfigT")
 
-DEFAULT_PROFILE = "default"
-DEFAULT_PROVIDER = "cpu"
 
 # The base ``JobExecutionProfileConfig`` lives in the shared plugin leaf node
 # (imported above) so that both the server and the typed HTTP client agree on
@@ -210,11 +212,11 @@ def resolve_gpu_job_shm_size(
     profile_resources: ComputeResources | None,
     num_gpus: int,
 ) -> str:
-    """Pick SHM size for GPU workloads: explicit shm_size on executor, then profile, then 1Gi x GPU count."""
-    for res in (executor_resources, profile_resources):
-        if res is not None and res.shm_size:
-            return res.shm_size
-    return f"{max(1, num_gpus)}Gi"
+    """Pick SHM size for GPU workloads: the larger of the executor and profile shm_size, then 8Gi x GPU count."""
+    sizes = [res.shm_size for res in (executor_resources, profile_resources) if res is not None and res.shm_size]
+    if sizes:
+        return max(sizes, key=parse_quantity)
+    return f"{8 * max(1, num_gpus)}Gi"
 
 
 def _split_url(url: str) -> SplitResult | None:
@@ -357,6 +359,14 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
     @abstractmethod
     def shutdown(self): ...
 
+    def reclaim_persistent_storage(self, workspace: str, job: str) -> bool:
+        """Delete a job's persistent storage. Backends with durable storage override this.
+
+        Return True once the storage is gone, and False while its removal is still running, so the
+        caller calls again later. Raise if the removal failed.
+        """
+        return True
+
     def __str__(self) -> str:
         return self.BACKEND_NAME
 
@@ -378,27 +388,36 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
                 env_var_str += f"{envvar.name}={secret_ref.workspace}/{secret_ref.name}"
         return env_var_str
 
-    def get_step(self, job: str, step_name: str, workspace: str) -> HelixJobStepResponse:
+    def get_step(self, job: str, step_name: str, workspace: str, attempt_id: str | None = None) -> HelixJobStepResponse:
         """Fetch the latest state of a job step via the typed Jobs client."""
+        if attempt_id is not None:
+            return self._jobs.get_attempt_step(
+                name=step_name,
+                workspace=workspace,
+                job=job,
+                attempt=attempt_id,
+            ).data()
         return self._jobs.get_job_step(name=step_name, workspace=workspace, job=job).data()
 
-    def get_step_safe(self, job: str, step_name: str, workspace: str) -> Optional[HelixJobStepResponse]:
+    def get_step_safe(
+        self, job: str, step_name: str, workspace: str, attempt_id: str | None = None
+    ) -> Optional[HelixJobStepResponse]:
         """Fetch the job step, or None if not found (e.g. 404, workspace deleted)."""
         try:
-            return self.get_step(job=job, step_name=step_name, workspace=workspace)
+            return self.get_step(job=job, step_name=step_name, workspace=workspace, attempt_id=attempt_id)
         except ClientNotFoundError:
             return None
         except Exception as e:
             raise e
 
-    def check_step_is_terminal(self, job: str, step_name: str, workspace: str) -> bool:
+    def check_step_is_terminal(self, job: str, step_name: str, workspace: str, attempt_id: str | None = None) -> bool:
         """Return True if the job step is terminal (cancelled/error/completed) or the step entity is not found (e.g. 404).
 
         Used by cleanup: when the entity is missing (e.g. workspace deleted) but the backend job is terminal and
         has our labels, we treat as terminal so we can clean up backend resources.
         """
         try:
-            step = self.get_step(job=job, step_name=step_name, workspace=workspace)
+            step = self.get_step(job=job, step_name=step_name, workspace=workspace, attempt_id=attempt_id)
             return step.status in ("cancelled", "error", "completed")
         except ClientNotFoundError:
             # If the job step entity is not found, we treat it as terminal so cleanup can proceed.
@@ -406,22 +425,13 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
         except Exception as e:
             raise RuntimeError(f"Could not fetch job step '{job}/{step_name}' to check if terminal") from e
 
-    def check_job_is_terminal(self, job: str, workspace: str) -> bool:
-        """Check if a job is in a terminal state."""
-        try:
-            job_response = self._jobs.get_job(name=job, workspace=workspace).data()
-            return job_response.status in ("cancelled", "error", "completed")
-        except ClientNotFoundError:
-            # If the job entity is not found, we treat it as terminal so cleanup can proceed.
-            return True
-        except Exception as e:
-            raise RuntimeError(f"Failed to fetch job '{workspace}/{job}' to check if terminal") from e
-
-    def check_job_persistent_storage_cleanup_allowed(self, job: str, step_name: str, workspace: str) -> bool:
+    def check_job_persistent_storage_cleanup_allowed(
+        self, job: str, step_name: str, workspace: str, attempt_id: str | None = None
+    ) -> bool:
         """Return whether a completed step may delete persistent job storage.
 
-        The jobs controller owns aggregate terminal-state transitions. Backend cleanup only checks that the
-        successful resource belongs to the final configured step before deleting storage shared by the attempt.
+        Persistent storage is shared by every attempt of a job, so cleanup requires the current job and selected
+        attempt to be terminal. The selected attempt's spec determines whether the resource belongs to its final step.
         """
         try:
             job_response = self._jobs.get_job(name=job, workspace=workspace).data()
@@ -432,11 +442,32 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
             raise RuntimeError(f"Failed to fetch job '{workspace}/{job}' to check storage cleanup eligibility") from e
 
         job_status = getattr(job_response.status, "value", job_response.status)
-        if job_status not in ("cancelled", "error", "completed"):
+        # Failed jobs keep storage until the retention pass. Completed and cancelled jobs reclaim here.
+        if job_status not in ("cancelled", "completed"):
+            return False
+
+        execution = job_response
+        if attempt_id is not None:
+            try:
+                execution = self._jobs.get_job_attempt(
+                    job=job,
+                    attempt=attempt_id,
+                    workspace=workspace,
+                ).data()
+            except ClientNotFoundError:
+                return True
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to fetch attempt '{attempt_id}' for job '{workspace}/{job}' "
+                    "to check storage cleanup eligibility"
+                ) from e
+
+        execution_status = getattr(execution.status, "value", execution.status)
+        if execution_status not in ("cancelled", "error", "completed"):
             return False
 
         try:
-            step = self.get_step(job=job, step_name=step_name, workspace=workspace)
+            step = self.get_step(job=job, step_name=step_name, workspace=workspace, attempt_id=attempt_id)
         except ClientNotFoundError:
             return True
         except Exception as e:
@@ -444,10 +475,10 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
                 f"Could not fetch job step '{job}/{step_name}' to check storage cleanup eligibility"
             ) from e
 
-        step_spec_name = get_step_spec_name(step.config, getattr(step, "name", None) or step_name)
+        step_spec_name = get_step_spec_name(step.config, step.name or step_name)
 
-        platform_spec = getattr(job_response, "platform_spec", None)
-        steps = getattr(platform_spec, "steps", None) or []
+        platform_spec = execution.platform_spec
+        steps = platform_spec.steps
         if not steps:
             return True
 
@@ -466,16 +497,23 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
         )
         return False
 
-    def check_step_ttl(self, step: HelixJobStepWithContext, ttl_seconds: int) -> bool:
-        # Ensure created_at is timezone-aware (assume UTC if naive)
-        if step.created_at is None:
+    def check_step_ttl(
+        self,
+        step: HelixJobStepWithContext,
+        ttl_seconds: int,
+        now: datetime.datetime | None = None,
+    ) -> bool:
+        """Return whether the step exceeded ``ttl_seconds`` of active time.
+
+        The clock is ``max(created_at, resumed_at)``, so time spent paused does
+        not count. Kubernetes ``activeDeadlineSeconds`` restarts with each pod;
+        this clock is for backends that measure the TTL themselves.
+        """
+        anchor = active_ttl_anchor(step)
+        if anchor is None:
             return False
-
-        created_at = step.created_at
-        if created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=datetime.timezone.utc)
-
-        return (created_at + datetime.timedelta(seconds=ttl_seconds)) < datetime.datetime.now(datetime.timezone.utc)
+        current = ensure_aware(now) or datetime.datetime.now(datetime.timezone.utc)
+        return (anchor + datetime.timedelta(seconds=ttl_seconds)) < current
 
     @staticmethod
     def should_enforce_before_active_ttl(step: HelixJobStepWithContext) -> bool:
@@ -528,9 +566,10 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
             return False
 
         try:
-            tasks = self._jobs.list_job_step_tasks(
-                name=step.name,
+            tasks = self._jobs.list_attempt_step_tasks(
+                step=step.name,
                 job=step.job,
+                attempt=step.attempt_id,
                 workspace=step.workspace,
             ).data()
         except Exception:
@@ -583,19 +622,18 @@ def require_staleness_timeout_seconds(step: HelixJobStepWithContext) -> int:
     return staleness_timeout
 
 
+def step_ttl_seconds_active(step: HelixJobStepWithContext, profile_ttl_seconds_active: int) -> int:
+    """The step's own active TTL when its lifecycle sets one, else the execution profile's."""
+    if step.step_spec is None or step.step_spec.lifecycle is None:
+        return profile_ttl_seconds_active
+    return step.step_spec.lifecycle.ttl_seconds_active or profile_ttl_seconds_active
+
+
 def extract_provider_profile(step: HelixJobStepWithContext) -> tuple[str, str]:
     step_spec = step.step_spec
     if step_spec is None:
         raise ValueError("Job step requires a step_spec")
-
-    profile = DEFAULT_PROFILE
-    if isinstance(step_spec.executor, str):
-        provider = step_spec.executor
-    else:
-        provider = step_spec.executor.provider or DEFAULT_PROVIDER
-        profile = step_spec.executor.profile or profile
-
-    return provider, profile
+    return step_provider_profile(step_spec)
 
 
 def get_logs_endpoint_from_fileset(

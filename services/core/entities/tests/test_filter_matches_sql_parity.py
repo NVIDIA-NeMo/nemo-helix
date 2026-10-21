@@ -246,6 +246,7 @@ CASES = [
     ("elem_match_key_starts_with", C(FilterOperator.ELEM_MATCH, "data.meta", {"key": {"$startsWith": "le"}})),
     # A missing or null JSON value renders as the text "null"; it must not match these.
     ("starts_with_missing_or_null", C(FilterOperator.STARTS_WITH, "data.k", "n")),
+    ("nin_missing_or_null", C(FilterOperator.NIN, "data.k", ["x"])),
     (
         "elem_match_value_starts_with_null",
         C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "owner", "value": {"$startsWith": "n"}}),

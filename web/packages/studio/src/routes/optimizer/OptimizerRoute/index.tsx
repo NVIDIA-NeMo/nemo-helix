@@ -3,25 +3,15 @@
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
-import {
-  ROW_ACTIONS_COLUMN_SIZE,
-  StudioDataView,
-} from '@nemo/common/src/components/DataView/StudioDataView';
+import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { useInsightsListInsights } from '@nemo/sdk/generated/insights/insights-insights';
-import type { InsightListItem } from '@nemo/sdk/generated/insights/schema';
-import {
-  type DropdownEntry,
-  Flex,
-  PageHeader,
-  Stack,
-  Tag,
-  Text,
-} from '@nvidia/foundations-react-core';
+import { useCompassListInsights } from '@nemo/sdk/generated/compass/compass-insights';
+import type { InsightListItem } from '@nemo/sdk/generated/compass/schema';
+import { Flex, PageHeader, Stack, Tag, Text } from '@nvidia/foundations-react-core';
 import { FeatureFlagBadge } from '@studio/components/FeatureFlagBadge';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
@@ -46,7 +36,7 @@ export const OptimizerRoute: FC = () => {
   const sortState = dataViewState.sorting.state[0];
   const sortParam = sortState ? `${sortState.desc ? '-' : ''}${sortState.id}` : '-created_at';
 
-  const { data, isFetching, error } = useInsightsListInsights(
+  const { data, isFetching, error } = useCompassListInsights(
     workspace,
     {
       page: dataViewState.pagination.state.pageIndex + 1,
@@ -56,10 +46,9 @@ export const OptimizerRoute: FC = () => {
     { query: { placeholderData: keepPreviousData } }
   );
 
-  const makeColumns: ComponentProps<typeof StudioDataView<InsightListItem>>['makeColumns'] = (
-    { accessor },
-    { rowActionsColumn }
-  ) => [
+  const makeColumns: ComponentProps<typeof StudioDataView<InsightListItem>>['makeColumns'] = ({
+    accessor,
+  }) => [
     accessor('status', {
       header: 'Status',
       enableSorting: false,
@@ -89,13 +78,13 @@ export const OptimizerRoute: FC = () => {
         return <Text className="truncate">{row.original.agent || '—'}</Text>;
       },
     }),
-    accessor('trace_refs', {
+    accessor('evidence', {
       id: 'traces',
       header: 'Traces',
       enableSorting: false,
       size: 80,
       cell({ row }) {
-        return <Text>{row.original.trace_refs?.length ?? 0}</Text>;
+        return <Text>{row.original.evidence?.length ?? 0}</Text>;
       },
     }),
     accessor('experiment_group_count', {
@@ -129,11 +118,6 @@ export const OptimizerRoute: FC = () => {
           <Text>—</Text>
         );
       },
-    }),
-    rowActionsColumn({
-      size: ROW_ACTIONS_COLUMN_SIZE,
-      enableResizing: false,
-      rowActions: (): DropdownEntry[] => [],
     }),
   ];
 

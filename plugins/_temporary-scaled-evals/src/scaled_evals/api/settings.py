@@ -5,7 +5,6 @@ import re
 from typing import Any, Literal
 from urllib.parse import quote
 
-from cryptography.fernet import Fernet
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -181,10 +180,6 @@ class Settings(BaseSettings):
         default="",
         validation_alias="SCALED_EVALS_PLATFORM_JOBS_POSTGRES_PASSWORD_SECRET",
     )
-    platform_jobs_credentials_encryption_key_secret: str = Field(
-        default="",
-        validation_alias="SCALED_EVALS_PLATFORM_JOBS_CREDENTIALS_ENCRYPTION_KEY_SECRET",
-    )
     platform_jobs_registry_auth_secret: str = Field(
         default="",
         validation_alias="SCALED_EVALS_PLATFORM_JOBS_REGISTRY_AUTH_SECRET",
@@ -231,7 +226,8 @@ class Settings(BaseSettings):
         default="default",
         validation_alias="SCALED_EVALS_ENTITY_STORE_WORKSPACE",
     )
-    # Holds execution inputs (prompts, private snapshots). The service creates it,
+    # Holds execution inputs (prompts, private snapshots), config profiles, and agent
+    # bundles. The service creates it,
     # so with auth on no user can read it without an explicit role binding.
     entity_store_private_workspace: str = Field(
         default="scaled-evals-internal",
@@ -269,22 +265,6 @@ class Settings(BaseSettings):
     task_image_registry_auth_json: str = ""
     task_image_registry_timeout_seconds: float = 10.0
     task_image_hosted_mode: bool = False
-    # Primary Fernet key for BYOK credential payloads. There is deliberately no
-    # source-code default: every process that reads credentials must receive it
-    # from deployment secret configuration. During rotation, comma-separated
-    # previous keys remain decrypt-only fallbacks until ciphertext migration is
-    # complete. See docs/API.md § Security, BYOK.
-    credentials_encryption_key: str
-    credentials_encryption_key_previous: str = ""
-
-    @field_validator("credentials_encryption_key")
-    @classmethod
-    def validate_credentials_encryption_key(cls, value: str) -> str:
-        try:
-            Fernet(value.encode())
-        except (TypeError, ValueError) as exc:
-            raise ValueError("must be a valid Fernet key") from exc
-        return value
 
     @model_validator(mode="after")
     def validate_hosted_task_image_policy(self) -> "Settings":
@@ -306,42 +286,12 @@ class Settings(BaseSettings):
             raise ValueError("must be a full 40-character hex commit")
         return normalized
 
-    @field_validator("credentials_encryption_key_previous")
-    @classmethod
-    def validate_previous_credentials_encryption_keys(cls, value: str) -> str:
-        for key in value.split(","):
-            if not key.strip():
-                continue
-            try:
-                Fernet(key.strip().encode())
-            except (TypeError, ValueError) as exc:
-                raise ValueError("must contain only comma-separated Fernet keys") from exc
-        return value
-
-    # Optional live BYOK verification probes. These are low-cost metadata
-    # endpoints; set a URL to an empty value to make that provider inconclusive.
-    credential_verify_timeout_seconds: float = 10.0
-    credential_verify_openai_models_url: str | None = "https://api.openai.com/v1/models"
     # The ``anthropic`` runtime credential is sent to NVIDIA's
     # Anthropic-compatible endpoint by dispatch.credentials.
-    credential_verify_anthropic_models_url: str | None = "https://inference-api.nvidia.com/v1/models"
-    credential_verify_nvidia_models_url: str | None = "https://inference-api.nvidia.com/v1/models"
     nvidia_inference_base_url: str = "https://inference-api.nvidia.com/v1"
     nvidia_anthropic_base_url: str = "https://inference-api.nvidia.com"
 
-    # --- Control-plane ownership --------------------------------------------
-    # The plugin does not authenticate callers; the platform does that before a
-    # plugin route runs. Leaving this false resolves every caller to the shared
-    # development owner. Setting it true makes scaled_evals.api.auth fail closed
-    # with 401 until platform identity is bridged into the ownership model.
-    control_plane_auth_enabled: bool = False
-    # Comma-separated stable subjects are preferred. Verified email fallback
-    # supports initial onboarding while an administrator discovers a colleague's
-    # subject via /users/me; neither list grants team membership.
-    control_plane_admin_subjects: str = ""
-    control_plane_admin_emails: str = ""
-    control_plane_admin_groups: str = ""
-    control_plane_admin_roles: str = ""
+    # --- Control-plane admission --------------------------------------------
     # Weighted sandbox-slot admission. Submissions may queue beyond these
     # limits; dispatch only claims work when its requested parallelism fits.
     control_plane_cluster_run_limit: int = 500
@@ -481,7 +431,7 @@ class Settings(BaseSettings):
     # Named Docker volume shared by api and gym-runner containers (compose).
     gym_sandbox_opensandbox_docker_volume: str = "scaled-evals-gym-opensandbox-work"
 
-    # --- harbor_opensandbox (Harbor 0.20 + NemoOpenSandboxEnvironment) ------
+    # --- harbor_opensandbox (Harbor + NemoOpenSandboxEnvironment) -----------
     # Off by default. Harbor runs as a child process of the dispatcher and
     # creates one OpenSandbox sandbox per trial. OPENSANDBOX_DOMAIN and
     # OPENSANDBOX_API_KEY (or OPEN_SANDBOX_*) come from the process environment,
@@ -516,6 +466,12 @@ class Settings(BaseSettings):
     harbor_opensandbox_allowed_hosts: str = ""
     # How strictly each sandbox's applied egress policy is checked; "off" is deliberately not allowed.
     harbor_opensandbox_egress_verification: Literal["default_action", "strict"] = "default_action"
+    # Cap each sandbox's ephemeral storage at its task's storage_mb. Kubernetes evicts a pod that
+    # exceeds it. Turn off only where the sandbox runtime doesn't enforce the limit.
+    harbor_opensandbox_enforce_disk_limit: bool = True
+    # Ceiling on that limit, in MB, so a task asking for more than any node holds can't leave its
+    # pod unschedulable. Unset applies each task's value as given.
+    harbor_opensandbox_max_disk_mb: int | None = Field(default=131072, gt=0)
     # Identifies this deployment in sandbox ownership metadata so cleanup never
     # matches another deployment's sandboxes on a shared control plane.
     harbor_opensandbox_deployment_id: str = "scaled-evals"
@@ -589,7 +545,7 @@ class _LazySettings:
 
     The platform loads this plugin through a `nemo.services` entry point and
     swallows any exception raised during import, so an import-time
-    ValidationError (a missing CREDENTIALS_ENCRYPTION_KEY, say) makes the whole
+    ValidationError (an invalid TASK_IMAGE_VALIDATION_MODE, say) makes the whole
     plugin vanish with one log line. Deferring means the plugin always loads and
     misconfiguration surfaces as a real error on the request that needs it.
     """
@@ -600,9 +556,7 @@ class _LazySettings:
         # ponytail: unsynchronized; a startup race builds Settings twice and
         # discards one. Add a lock if construction ever gains side effects.
         if self._instance is None:
-            # Required fields without a source-code default come from the
-            # environment, which a type checker reading the signature cannot see.
-            self._instance = Settings()  # ty: ignore[missing-argument]
+            self._instance = Settings()
         return self._instance
 
     # Any, not object: callers use the real Settings surface through this proxy,

@@ -6,7 +6,7 @@ import json
 import uuid
 from types import SimpleNamespace
 from typing import Iterator
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import httpx
 import pytest
@@ -60,12 +60,14 @@ from nhx.core.jobs.app.schemas import (
     HelixJobEnvironmentVariable,
     HelixJobSecretEnvironmentVariableRef,
     HelixJobStepSpec,
+    StepLifecycle,
 )
 from nhx.core.jobs.controllers.backends.base import (
     NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR,
     WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
     WORKLOAD_IDENTITY_TOKEN_FILE_PATH,
     WORKLOAD_IDENTITY_VOLUME_PATH,
+    JobUpdate,
 )
 from nhx.core.jobs.controllers.backends.docker import (
     DEFAULT_VOLUME_PERMISSIONS_IMAGE,
@@ -496,7 +498,7 @@ def test_docker_job_sync_active_missing_container_uses_terminal_task_fallback(
     assert update.status == HelixJobStatus.COMPLETED
     assert update.status_details == {"message": "Download complete"}
     assert update.error_details == {}
-    mock_jobs_client.update_job_step_task.assert_not_called()
+    mock_jobs_client.update_attempt_step_task.assert_not_called()
 
 
 def test_docker_job_sync_active_missing_container_prefers_terminal_task_over_ttl(
@@ -527,17 +529,21 @@ def test_docker_job_sync_active_missing_container_prefers_terminal_task_over_ttl
 
     assert update.status == HelixJobStatus.COMPLETED
     assert update.error_details == {}
-    mock_jobs_client.update_job_step_task.assert_not_called()
+    mock_jobs_client.update_attempt_step_task.assert_not_called()
 
 
 def test_docker_job_sync_pausing_sigterm(docker_job, docker_client_mock, test_job_step):
-    """Test that the cancel method stops the container."""
+    """A clean exit while pausing becomes paused without stopping the container again."""
 
     test_job_step.status = HelixJobStatus.PAUSING
+    test_job_step.status_details = {
+        "pause_requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    test_job_step.step_spec.lifecycle = StepLifecycle(pause_deadline_seconds=3600)
     container_mock = MagicMock()
     container_mock.id = "16-character-uid"
     container_mock.status = "exited"
-    container_mock.attrs = {"State": {"ExitCode": 0}}  # SIGTERM will set exit code 0 if exited gracefully
+    container_mock.attrs = {"State": {"ExitCode": 75}}
     task_id = uuid.uuid4().hex
     container_mock.labels = owned_container_labels(
         {
@@ -556,6 +562,204 @@ def test_docker_job_sync_pausing_sigterm(docker_job, docker_client_mock, test_jo
     assert update.status == "paused"
     docker_client_mock.containers.get.assert_called_with("job-test-job-id-test-step")
     container_mock.remove.assert_not_called()
+    container_mock.stop.assert_not_called()
+    container_mock.kill.assert_not_called()
+
+
+def _docker_pausing_step(step, *, requested_ago_seconds: int = 0, deadline_seconds: int = 3600):
+    step.status = HelixJobStatus.PAUSING
+    requested_at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=requested_ago_seconds)
+    step.status_details = {"pause_requested_at": requested_at.isoformat()}
+    step.step_spec.lifecycle = StepLifecycle(pause_deadline_seconds=deadline_seconds)
+    return step
+
+
+@pytest.mark.parametrize("exit_code,expected", [(0, HelixJobStatus.COMPLETED), (1, HelixJobStatus.ERROR)])
+def test_docker_job_sync_pausing_exit_code(docker_job, docker_client_mock, test_job_step, exit_code, expected):
+    """Exit 0 while pausing means training finished. Any code other than 0 or 75 is an error."""
+    step = _docker_pausing_step(test_job_step)
+    container_mock = MagicMock()
+    container_mock.status = "exited"
+    container_mock.attrs = {"State": {"ExitCode": exit_code}}
+    container_mock.logs.return_value = b""
+    docker_client_mock.containers.get.side_effect = None
+    docker_client_mock.containers.get.return_value = container_mock
+
+    update = docker_job.sync(step)
+
+    assert update.status == expected
+    container_mock.kill.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "exit_code,expected",
+    [(75, HelixJobStatus.PAUSED), (0, HelixJobStatus.COMPLETED), (1, HelixJobStatus.ERROR)],
+)
+def test_docker_job_sync_pausing_exit_updates_the_task(
+    docker_job, docker_client_mock, mock_jobs_client, test_job_step, exit_code, expected
+):
+    """The exited container's task gets the step's outcome, with the log tail when it failed."""
+    step = _docker_pausing_step(test_job_step)
+    container_mock = MagicMock()
+    container_mock.status = "exited"
+    container_mock.attrs = {"State": {"ExitCode": exit_code}}
+    container_mock.labels = owned_container_labels({JOB_TASK_ID_LABEL: "task-1"})
+    container_mock.logs.return_value = b"Traceback: out of memory"
+    docker_client_mock.containers.get.side_effect = None
+    docker_client_mock.containers.get.return_value = container_mock
+
+    update = docker_job.sync(step)
+
+    task_update = mock_jobs_client.update_attempt_step_task.call_args.kwargs
+    assert task_update["name"] == "task-1"
+    assert task_update["body"].status == expected
+    assert task_update["body"].status_details == update.status_details
+    assert task_update["body"].error_details == (update.error_details or {})
+    expected_stack = "Traceback: out of memory" if expected == HelixJobStatus.ERROR else ""
+    assert task_update["body"].error_stack == expected_stack
+
+
+def test_docker_job_sync_pausing_deadline_kills_container(
+    docker_job, docker_client_mock, mock_jobs_client, test_job_step
+):
+    """The deadline kills an owned container and fails its task as well as the step."""
+    step = _docker_pausing_step(test_job_step, requested_ago_seconds=120, deadline_seconds=60)
+    container_mock = MagicMock()
+    container_mock.status = "running"
+    container_mock.labels = owned_container_labels({JOB_TASK_ID_LABEL: "task-1"})
+    docker_client_mock.containers.get.side_effect = None
+    docker_client_mock.containers.get.return_value = container_mock
+
+    update = docker_job.sync(step)
+
+    assert update.status == HelixJobStatus.ERROR
+    container_mock.kill.assert_called_once()
+    task_update = mock_jobs_client.update_attempt_step_task.call_args.kwargs
+    assert task_update["name"] == "task-1"
+    assert task_update["body"].status == HelixJobStatus.ERROR
+
+
+def test_docker_job_sync_pausing_without_a_container_is_paused(docker_job, docker_client_mock, test_job_step):
+    """A step paused before its container exists has nothing to wait for."""
+    step = _docker_pausing_step(test_job_step)
+    docker_client_mock.containers.get.side_effect = NotFound("Container not found")
+
+    update = docker_job.sync(step)
+
+    assert update.status == HelixJobStatus.PAUSED
+
+
+def test_docker_job_sync_pausing_without_a_container_is_paused_after_the_deadline(
+    docker_job, docker_client_mock, test_job_step
+):
+    """A missing container has nothing left to stop, so the deadline does not turn it into an error."""
+    step = _docker_pausing_step(test_job_step, requested_ago_seconds=120, deadline_seconds=60)
+    docker_client_mock.containers.get.side_effect = NotFound("Container not found")
+
+    assert docker_job.sync(step).status == HelixJobStatus.PAUSED
+
+
+@pytest.mark.parametrize(
+    "exited_after_request_seconds,expected",
+    [(30, HelixJobStatus.PAUSED), (90, HelixJobStatus.ERROR)],
+)
+def test_docker_job_sync_pausing_judges_an_exit_seen_late_by_its_exit_time(
+    docker_job, docker_client_mock, test_job_step, exited_after_request_seconds, expected
+):
+    """Exit 75 seen after the deadline still pauses when the container exited before it."""
+    step = _docker_pausing_step(test_job_step, requested_ago_seconds=120, deadline_seconds=60)
+    requested_at = datetime.datetime.fromisoformat(step.status_details["pause_requested_at"])
+    exited_at = requested_at + datetime.timedelta(seconds=exited_after_request_seconds)
+    container_mock = MagicMock()
+    container_mock.status = "exited"
+    container_mock.attrs = {"State": {"ExitCode": 75, "FinishedAt": exited_at.isoformat()}}
+    docker_client_mock.containers.get.side_effect = None
+    docker_client_mock.containers.get.return_value = container_mock
+
+    update = docker_job.sync(step)
+
+    assert update.status == expected
+    container_mock.kill.assert_not_called()
+
+
+def test_docker_job_sync_pausing_leaves_running_container(docker_job, docker_client_mock, test_job_step):
+    test_job_step.status = HelixJobStatus.PAUSING
+    test_job_step.status_details = {
+        "pause_requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    test_job_step.step_spec.lifecycle = StepLifecycle(pause_deadline_seconds=3600)
+    container_mock = MagicMock()
+    container_mock.status = "running"
+    container_mock.attrs = {"State": {"ExitCode": 0}, "Image": "sha256:running"}
+    # Reading the image through the container would look it up again and fail once it is pruned.
+    type(container_mock).image = PropertyMock(side_effect=AssertionError("image lookup"))
+    docker_client_mock.containers.get.side_effect = None
+    docker_client_mock.containers.get.return_value = container_mock
+
+    update = docker_job.sync(test_job_step)
+
+    assert update.status == HelixJobStatus.PAUSING
+    assert update.status_details["image_digest"] == "sha256:running"
+    container_mock.stop.assert_not_called()
+    container_mock.kill.assert_not_called()
+
+
+def _stopped_container(docker_client_mock, *, owned: bool) -> MagicMock:
+    stopped = MagicMock()
+    stopped.status = "exited"
+    stopped.name = "job-test-job-id-test-step"
+    labels = {JOB_WORKSPACE_ID_LABEL: "default", JOB_ID_LABEL: "test-job-id", JOB_TASK_ID_LABEL: "old-task"}
+    stopped.labels = owned_container_labels(labels) if owned else labels
+    stopped.remove.side_effect = lambda **_: setattr(stopped, "status", "removed")
+    original = docker_client_mock.containers.get.side_effect
+
+    def get_container(name):
+        if name == "docker123":
+            return original(name)
+        if stopped.status == "removed":
+            raise NotFound("Container not found")
+        return stopped
+
+    docker_client_mock.containers.get.side_effect = get_container
+    return stopped
+
+
+def test_docker_schedule_removes_stopped_container_before_creating(docker_job, docker_client_mock, test_job_step):
+    """The stopped container and its task volumes are removed before the same-name container is created."""
+    stopped = _stopped_container(docker_client_mock, owned=True)
+
+    docker_job.schedule(test_job_step.step_spec.executor, test_job_step)
+    docker_job._container_run_threadpool.shutdown(wait=True)
+    docker_job._container_run_threadpool = MagicMock()
+
+    stopped.remove.assert_called_once_with(force=True)
+    removed_volumes = [volume_call.args[0] for volume_call in docker_client_mock.volumes.get.call_args_list]
+    assert "task-storage-default-test-job-id-old-task" in removed_volumes
+    assert docker_client_mock.containers.create.call_count == 2
+
+
+def test_docker_schedule_defers_when_the_stopped_container_cannot_be_removed(
+    docker_job, docker_client_mock, test_job_step
+):
+    """A failed removal is retried on a later tick instead of failing the create with a name conflict."""
+    stopped = _stopped_container(docker_client_mock, owned=True)
+    stopped.remove.side_effect = APIError("removal failed")
+
+    with pytest.raises(SchedulingDeferred):
+        docker_job.schedule(test_job_step.step_spec.executor, test_job_step)
+
+    docker_client_mock.containers.create.assert_not_called()
+
+
+def test_docker_schedule_does_not_remove_another_controllers_container(docker_job, docker_client_mock, test_job_step):
+    """A same-name container from another jobs controller is left alone and the step cannot start."""
+    stopped = _stopped_container(docker_client_mock, owned=False)
+
+    with pytest.raises(FailedToScheduleError, match="another jobs controller"):
+        docker_job.schedule(test_job_step.step_spec.executor, test_job_step)
+
+    stopped.remove.assert_not_called()
+    docker_client_mock.containers.create.assert_not_called()
 
 
 def test_docker_job_sync_cancelling_sigterm(docker_job, docker_client_mock, test_job_step):
@@ -617,7 +821,7 @@ def test_docker_job_sync_cancelling_nonzero_exit(
     assert update.status_details == {"message": f"Job was cancelled successfully with exit code {exit_code}"}
     assert update.error_details == {}
     docker_client_mock.containers.get.assert_called_with("job-test-job-id-test-step")
-    task_update = mock_jobs_client.update_job_step_task.call_args.kwargs["body"]
+    task_update = mock_jobs_client.update_attempt_step_task.call_args.kwargs["body"]
     assert task_update.status == HelixJobStatus.CANCELLED
     assert task_update.error_stack == ""
     # Container removed as part of cleanup_steps
@@ -997,6 +1201,24 @@ def test_docker_workload_delegation_expiry_covers_active_ttl(docker_job, test_jo
     assert delegation.revoked_at is None
 
 
+def test_docker_workload_delegation_expiry_covers_the_step_ttl(docker_job, test_job_step_with_auth_context):
+    """A step that may outlive the profile's TTL keeps its credentials for as long as it may run."""
+    docker_job._execution_profile_config.ttl_seconds_active = 900
+    test_job_step_with_auth_context.step_spec.lifecycle = StepLifecycle(ttl_seconds_active=7200)
+    before = datetime.datetime.now(datetime.timezone.utc)
+    workload_delegation_store = workload_delegation_store_mock()
+    docker_job._workload_delegation_store = workload_delegation_store
+
+    with patch.object(docker_job, "_write_workload_identity_subject_token"):
+        docker_job._prepare_workload_identity_for_step(
+            step=test_job_step_with_auth_context,
+            workload_identity_volume_name="workload-token-volume",
+        )
+
+    delegation = workload_delegation_store.register.call_args.args[0]
+    assert delegation.expires_at >= before + datetime.timedelta(seconds=7200 + WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS)
+
+
 def test_docker_schedule_cleans_task_volumes_when_workload_identity_proof_token_fails(
     docker_job, docker_client_mock, test_job_step_with_auth_context
 ):
@@ -1350,13 +1572,13 @@ def test_schedule_docker_gpu(mock_nemo_client, docker_client_mock):
     assert len(job_containers) == 2
 
     assert job_containers[0]["entrypoint"] == ["c1"]
-    assert job_containers[0]["shm_size"] == "2g"
+    assert job_containers[0]["shm_size"] == "16g"
     device_requests_0 = job_containers[0]["device_requests"]
     assert len(device_requests_0) == 1
     assert len(device_requests_0[0]["DeviceIDs"]) == 2
 
     assert job_containers[1]["entrypoint"] == ["c1"]
-    assert job_containers[1]["shm_size"] == "2g"
+    assert job_containers[1]["shm_size"] == "16g"
     device_requests_1 = job_containers[1]["device_requests"]
     assert len(device_requests_1) == 1
     assert len(device_requests_1[0]["DeviceIDs"]) == 2
@@ -1743,6 +1965,12 @@ def test_gpu_pool_released_when_deleted_step_stops_scheduling(mock_nemo_client, 
     executor.get_step_safe = MagicMock(return_value=None)
 
     assert executor.cancel_scheduling(step) is True
+    executor.get_step_safe.assert_called_once_with(
+        step_name=step.name,
+        job=step.job,
+        workspace=step.workspace,
+        attempt_id=step.attempt_id,
+    )
     assert executor.gpu_pool.gpu_to_workload_id[0] is None
     executor._jobs.update_job_step_status.assert_not_called()
 
@@ -1817,6 +2045,30 @@ def test_gpu_pool_released_when_cancel_scheduling_status_update_loses_step(mock_
     assert executor.cancel_scheduling(step) is True
     assert executor.gpu_pool.gpu_to_workload_id[0] is None
     executor._jobs.update_job_step_status.assert_called_once()
+
+
+def test_gpu_sync_releases_allocation_when_step_pauses(mock_nemo_client, docker_client_mock):
+    """A paused step has no container, so its GPU allocation has to be released before resume."""
+    step_id = "paused-step-id"
+    with patch("nhx.core.jobs.controllers.backends.docker.SharedResourceManager") as mock_srm:
+        mock_pool = DockerGPUPool(reserved_gpu_device_ids=[0])
+        mock_srm.get_instance.return_value.get_gpu_pool.return_value = mock_pool
+        executor = GPUDockerJobBackend(
+            nemo_client=mock_nemo_client,
+            execution_profile_config=DockerJobExecutionProfileConfig(
+                storage=DockerJobStorageConfig(volume_name="test_jobs_storage"),
+            ),
+            profile_name="default",
+        )
+        executor._client = docker_client_mock
+
+    executor.gpu_pool.allocate_gpu(step_id)
+    assert executor.gpu_pool.gpu_to_workload_id[0] == step_id
+    step = MagicMock()
+    step.id = step_id
+    with patch.object(executor, "_sync", return_value=JobUpdate(status=HelixJobStatus.PAUSED)):
+        executor.sync(step)
+    assert executor.gpu_pool.gpu_to_workload_id[0] is None
 
 
 def test_gpu_cleanup_releases_deleted_step_container_without_terminal_sync(mock_nemo_client, docker_client_mock):
@@ -2278,7 +2530,10 @@ def test_cancel_scheduling(
 
     # Verify the step was fetched via the typed client (get_step -> get_job_step)
     mock_jobs_client.get_job_step.assert_called_once_with(
-        name=test_job_step.name, workspace=test_job_step.workspace, job=test_job_step.job
+        name=test_job_step.name,
+        workspace=test_job_step.workspace,
+        job=test_job_step.job,
+        attempt=test_job_step.attempt_id,
     )
 
     if should_update_status:
@@ -2548,6 +2803,35 @@ def test_cleanup_job_persistent_storage_labels_cleanup_container_owner(docker_jo
     assert cleanup_args["labels"][JOB_TYPE_LABEL] == JOB_TYPE_STORAGE_CLEANUP
 
 
+def _cleanup_container(docker_client_mock, exit_code: int = 0, wait_error: Exception | None = None) -> None:
+    container = MagicMock()
+    container.wait.return_value = {"StatusCode": exit_code}
+    container.wait.side_effect = wait_error
+    docker_client_mock.containers.create.side_effect = None
+    docker_client_mock.containers.create.return_value = container
+
+
+def test_reclaim_reports_storage_removed_by_the_cleanup_container(docker_job, docker_client_mock):
+    _cleanup_container(docker_client_mock)
+
+    assert docker_job.reclaim_persistent_storage("default", "job-1") is True
+
+
+@pytest.mark.parametrize("failure", ["exit", "create", "wait"])
+def test_reclaim_raises_when_the_cleanup_container_fails(docker_job, docker_client_mock, failure):
+    """The reconciler keeps the reclaim record on a raise, and retries on a later tick."""
+    _cleanup_container(
+        docker_client_mock,
+        exit_code=1 if failure == "exit" else 0,
+        wait_error=APIError("daemon unavailable") if failure == "wait" else None,
+    )
+    if failure == "create":
+        docker_client_mock.containers.create.side_effect = APIError("daemon unavailable")
+
+    with pytest.raises(JobStorageError):
+        docker_job.reclaim_persistent_storage("default", "job-1")
+
+
 def test_created_step_does_not_ttl_before_backend_acceptance(docker_job, docker_client_mock, test_job_step):
     """CREATED age should not fail a step before the backend accepts it."""
     ttl_seconds = docker_job._execution_profile_config.ttl_seconds_before_active
@@ -2643,7 +2927,7 @@ def test_terminal_step_update_revokes_workload_delegation(docker_job, test_job_s
 
     assert update.status == HelixJobStatus.COMPLETED
     workload_delegation_store.revoke.assert_called_once_with(expected_delegation_name)
-    docker_job._jobs.update_job_step_task.assert_called_once()
+    docker_job._jobs.update_attempt_step_task.assert_called_once()
 
 
 def test_resuming_step_skips_before_active_ttl_enforcement(docker_job, test_job_step):
@@ -2708,8 +2992,8 @@ def test_cleanup_pending_created_container_by_ttl(docker_job, docker_client_mock
     container_mock.kill.assert_called_once()
 
     # Verify that the task was updated via the API
-    mock_jobs_client.update_job_step_task.assert_called_once()
-    task_call = mock_jobs_client.update_job_step_task.call_args
+    mock_jobs_client.update_attempt_step_task.assert_called_once()
+    task_call = mock_jobs_client.update_attempt_step_task.call_args
     assert task_call.kwargs["name"] == task_id
     assert task_call.kwargs["workspace"] == test_job_step.workspace
     assert task_call.kwargs["job"] == test_job_step.job
@@ -2824,8 +3108,8 @@ def test_cleanup_active_by_ttl(docker_job, docker_client_mock, mock_jobs_client,
     container_mock.kill.assert_called_once()
 
     # Verify that the task was updated via the API
-    mock_jobs_client.update_job_step_task.assert_called_once()
-    task_call = mock_jobs_client.update_job_step_task.call_args
+    mock_jobs_client.update_attempt_step_task.assert_called_once()
+    task_call = mock_jobs_client.update_attempt_step_task.call_args
     assert task_call.kwargs["name"] == task_id
     assert task_call.kwargs["workspace"] == test_job_step.workspace
     assert task_call.kwargs["job"] == test_job_step.job
@@ -2889,8 +3173,8 @@ def test_ttl_enforcement_handles_409_when_kill_races_with_stopped_container(
     container_mock.kill.assert_called_once()
 
     # Verify that the task was updated via the API despite the 409 error
-    mock_jobs_client.update_job_step_task.assert_called_once()
-    task_call = mock_jobs_client.update_job_step_task.call_args
+    mock_jobs_client.update_attempt_step_task.assert_called_once()
+    task_call = mock_jobs_client.update_attempt_step_task.call_args
     assert task_call.kwargs["name"] == task_id
     assert task_call.kwargs["workspace"] == test_job_step.workspace
     assert task_call.kwargs["job"] == test_job_step.job
@@ -2943,8 +3227,8 @@ def test_sync_stop_container_already_stopped(docker_job, docker_client_mock, moc
     assert result.error_details == {}
 
     # Verify that the task was updated via the API
-    mock_jobs_client.update_job_step_task.assert_called_once()
-    task_call = mock_jobs_client.update_job_step_task.call_args
+    mock_jobs_client.update_attempt_step_task.assert_called_once()
+    task_call = mock_jobs_client.update_attempt_step_task.call_args
     assert task_call.kwargs["name"] == task_id
     assert task_call.kwargs["workspace"] == test_job_step.workspace
     assert task_call.kwargs["job"] == test_job_step.job
@@ -3194,7 +3478,7 @@ def test_cleanup_single_container_checks_storage_cleanup_allowed(docker_job, doc
 
     # Verify persistent storage cleanup eligibility was checked
     docker_job.check_job_persistent_storage_cleanup_allowed.assert_called_once_with(
-        job="test-job-id", step_name="test-step", workspace="default"
+        job="test-job-id", step_name="test-step", workspace="default", attempt_id=None
     )
 
     # Reset mocks
@@ -3217,7 +3501,7 @@ def test_cleanup_single_container_checks_storage_cleanup_allowed(docker_job, doc
 
     # Verify persistent storage cleanup eligibility was checked
     docker_job.check_job_persistent_storage_cleanup_allowed.assert_called_once_with(
-        job="test-job-id", step_name="test-step", workspace="default"
+        job="test-job-id", step_name="test-step", workspace="default", attempt_id=None
     )
 
 
@@ -3264,6 +3548,56 @@ def test_persistent_storage_cleanup_allows_final_step_when_job_is_terminal(docke
 
     assert docker_job.check_job_persistent_storage_cleanup_allowed(
         job="customizer-job", step_name="training-1", workspace="default"
+    )
+
+
+def test_persistent_storage_cleanup_rejects_old_attempt_while_current_job_is_active(docker_job):
+    docker_job._jobs.get_job.return_value = data_response(
+        SimpleNamespace(
+            status=HelixJobStatus.ACTIVE,
+            platform_spec=SimpleNamespace(steps=[SimpleNamespace(name="new-final-step")]),
+        )
+    )
+    docker_job._jobs.get_job_attempt.return_value = data_response(
+        SimpleNamespace(
+            status=HelixJobStatus.COMPLETED,
+            platform_spec=SimpleNamespace(steps=[SimpleNamespace(name="attempt-final-step")]),
+        )
+    )
+    docker_job._jobs.get_attempt_step.return_value = data_response(
+        SimpleNamespace(name="attempt-final-step-1", config={STEP_SPEC_NAME_CONFIG_KEY: "attempt-final-step"})
+    )
+
+    assert not docker_job.check_job_persistent_storage_cleanup_allowed(
+        job="customizer-job", step_name="attempt-final-step-1", workspace="default", attempt_id="attempt-1"
+    )
+    docker_job._jobs.get_job_attempt.assert_not_called()
+
+
+def test_persistent_storage_cleanup_uses_attempt_snapshot(docker_job):
+    docker_job._jobs.get_job.return_value = data_response(
+        SimpleNamespace(
+            status=HelixJobStatus.COMPLETED,
+            platform_spec=SimpleNamespace(steps=[SimpleNamespace(name="new-final-step")]),
+        )
+    )
+    docker_job._jobs.get_job_attempt.return_value = data_response(
+        SimpleNamespace(
+            status=HelixJobStatus.COMPLETED,
+            platform_spec=SimpleNamespace(steps=[SimpleNamespace(name="attempt-final-step")]),
+        )
+    )
+    docker_job._jobs.get_attempt_step.return_value = data_response(
+        SimpleNamespace(name="attempt-final-step-1", config={STEP_SPEC_NAME_CONFIG_KEY: "attempt-final-step"})
+    )
+
+    assert docker_job.check_job_persistent_storage_cleanup_allowed(
+        job="customizer-job", step_name="attempt-final-step-1", workspace="default", attempt_id="attempt-1"
+    )
+    docker_job._jobs.get_job_attempt.assert_called_once_with(
+        job="customizer-job",
+        attempt="attempt-1",
+        workspace="default",
     )
 
 
@@ -3385,7 +3719,7 @@ def test_cleanup_single_container_step_terminal_but_job_has_more_steps(docker_jo
 
     # Verify persistent storage cleanup eligibility was checked
     docker_job.check_job_persistent_storage_cleanup_allowed.assert_called_once_with(
-        job="multi-step-job", step_name="step1", workspace="default"
+        job="multi-step-job", step_name="step1", workspace="default", attempt_id=None
     )
 
     # Verify persistent storage cleanup was NOT called (job is not terminal yet)
@@ -3409,7 +3743,7 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(docker_job, 
 
     # Mock check_step_is_terminal to return True for step1 (terminal)
     # and False for step2 (non-terminal)
-    def check_step_side_effect(job, step_name, workspace):
+    def check_step_side_effect(job, step_name, workspace, attempt_id=None):
         if step_name == "step1":
             return True
         return False
@@ -3491,7 +3825,7 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(docker_job, 
 
     # Verify persistent storage cleanup eligibility was checked for step 1
     docker_job.check_job_persistent_storage_cleanup_allowed.assert_called_once_with(
-        job="multi-step-job", step_name="step1", workspace="default"
+        job="multi-step-job", step_name="step1", workspace="default", attempt_id=None
     )
 
     # Verify persistent storage cleanup was NOT called

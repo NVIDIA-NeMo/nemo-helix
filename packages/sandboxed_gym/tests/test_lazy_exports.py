@@ -77,7 +77,7 @@ def test_the_parallel_export_lists_agree_with_all(label: str, getter) -> None:
 
 def test_an_unknown_attribute_raises_rather_than_importing_something_unexpected() -> None:
     with pytest.raises(AttributeError, match="has no attribute 'NotAThing'"):
-        sandboxed_gym.NotAThing  # ty: ignore[unresolved-attribute]
+        sandboxed_gym.NotAThing
 
 
 def test_a_resolved_export_is_cached_in_module_globals() -> None:

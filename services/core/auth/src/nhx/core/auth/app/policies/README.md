@@ -84,6 +84,13 @@ Used by services to check if a principal has a specific role in a workspace. Pri
 | `extract.rego` | Input extraction (path, method, workspace) |
 | `scopes.rego` | OAuth scope validation |
 
+## Derived data: `data.authz.scope_families`
+
+`scopes.rego` checks whether a scope belongs to a configured family with one lookup in `data.authz.scope_families`
+(e.g. `{"platform": true, "models": true}`). The auth service derives it from `data.authz.endpoints` when it builds
+the data document (`app/scope_families.py`). If it is missing, scope validation is skipped, so Rego tests that mock
+`data.authz.endpoints` must also supply it.
+
 ## Testing
 
 ```bash

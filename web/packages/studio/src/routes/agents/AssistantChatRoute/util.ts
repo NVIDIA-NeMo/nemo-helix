@@ -6,9 +6,11 @@ import { COMPLETE_STATUS } from '@nemo/common/src/components/AssistantChat/const
 import {
   createAssistantThinkingPart,
   createAssistantToolCallPart,
-  getAssistantCompletedMessageParts,
   groupConsecutiveAssistantSubtleToolCalls,
   mergeConsecutiveAssistantSubtleToolMessages,
+} from '@nemo/common/src/components/AssistantChat/toolParts';
+import {
+  getAssistantCompletedMessageParts,
   STUDIO_MESSAGE_SUMMARY_START,
 } from '@studio/routes/agents/AssistantChatRoute/toolParts';
 import type {

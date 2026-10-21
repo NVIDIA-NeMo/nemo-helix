@@ -200,12 +200,19 @@ _DEFAULT_BLUEPRINT_PROVIDING = {
 }
 
 
+# Objects authentik creates on server startup rather than from a blueprint, so nemo.yaml cannot
+# apply them first. A `created` entry for each fails the apply until the server has created it.
+_CREATED_ON_SERVER_STARTUP = {
+    ("authentik_crypto.certificatekeypair", "authentik Self-signed Certificate"),
+}
+
+
 def _found_defaults(value: object) -> set[tuple[str, str]]:
     if isinstance(value, TaggedYamlValue):
         if value.tag != "!Find":
             return set()
         model, (_, key) = value.value
-        return {(model, key)} if model in {"authentik_flows.flow", "authentik_providers_oauth2.scopemapping"} else set()
+        return {(model, key)}
     if isinstance(value, Mapping):
         return set().union(*(_found_defaults(item) for item in value.values()))
     if isinstance(value, list):
@@ -228,8 +235,28 @@ def test_authentik_blueprint_applies_the_defaults_it_finds_before_using_them() -
     }
 
     for position, entry in enumerate(entries):
-        for found in _found_defaults(entry.get("attrs")):
+        for found in _found_defaults(entry.get("attrs")) - _CREATED_ON_SERVER_STARTUP:
             assert found in _DEFAULT_BLUEPRINT_PROVIDING, f"map {found} to the default blueprint that creates it"
             providing = _DEFAULT_BLUEPRINT_PROVIDING[found]
             assert providing in required_meta_positions, f"apply {providing!r} as a required meta entry"
             assert required_meta_positions[providing] < position, f"apply {providing!r} before entry {position}"
+
+
+def test_authentik_blueprint_waits_for_the_startup_objects_it_finds_before_using_them() -> None:
+    """The server creates its self-signed keypair on startup, after it already reports healthy.
+
+    A signing_key !Find that runs first leaves the providers signing HS256 tokens with no kid and
+    an empty JWKS, so NeMo rejects every token. A `created` entry for the keypair, before its
+    first use, fails the apply until the server has created it.
+    """
+    entries = _entries(_load_blueprint())
+    guard_positions = {
+        (entry["model"], entry["identifiers"]["name"]): position
+        for position, entry in enumerate(entries)
+        if entry.get("state") == "created" and set(entry.get("identifiers", {})) == {"name"} and "attrs" not in entry
+    }
+
+    for position, entry in enumerate(entries):
+        for found in _found_defaults(entry.get("attrs")) & _CREATED_ON_SERVER_STARTUP:
+            assert found in guard_positions, f"guard {found} with a `created` entry that has only a name"
+            assert guard_positions[found] < position, f"guard {found} before entry {position}"

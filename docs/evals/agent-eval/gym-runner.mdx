@@ -422,7 +422,7 @@ adds `stage-environment` before `agent-evaluate` on a sandbox-enabled deployment
 
 ## Run a registered agent
 
-An agent registered on the platform with `nemo agents create` can be the Gym target's `source`, in
+An agent registered on the platform with `nemo agents register` can be the Gym target's `source`, in
 place of a Gym `component`:
 
 ```json
@@ -478,7 +478,8 @@ wheelhouse offline and runs the component like any package-supplied agent: the r
 identity, harness, instructions, tools, MCP servers and skills are what run; only its default model is
 rebound to Gym's policy model server. Secrets bound to the agent's environment travel as
 `env_secrets` and reach the component's process, where a stdio MCP server's `${NAME}` templates are
-filled.
+filled. A submission is rejected when a template names a variable that neither `env_secrets` nor
+`env_vars` sets.
 
 What this requires:
 

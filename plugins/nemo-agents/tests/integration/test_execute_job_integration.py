@@ -121,8 +121,10 @@ def test_execute_job_materializes_layered_input_workspace(tmp_path: Path) -> Non
                 job_name=job_name,
                 workspace="default",
                 client=ctx.client,
+                attempt_id=job["attempt_id"],
             ),
             job_id=job["id"],
+            attempt_id=job["attempt_id"],
         )
 
         async def _invoke(request: Any) -> FabricRuntimeResult:
@@ -228,8 +230,10 @@ def test_execute_job_saves_error_results_when_fabric_raises(tmp_path: Path) -> N
                 job_name=job_name,
                 workspace="default",
                 client=ctx.client,
+                attempt_id=job["attempt_id"],
             ),
             job_id=job["id"],
+            attempt_id=job["attempt_id"],
         )
 
         async def _invoke(request: Any) -> FabricRuntimeResult:

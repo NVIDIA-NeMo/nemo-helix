@@ -35,7 +35,7 @@ export const useDataDesignerJobAnalysis = (
     isLoading: isResultsLoading,
     isError: isResultsError,
     error: resultsError,
-  } = useDataDesignerListCreateJobResults(workspace, jobName, {
+  } = useDataDesignerListCreateJobResults(workspace, jobName, undefined, {
     query: { enabled: enabled && Boolean(workspace && jobName) },
   });
 

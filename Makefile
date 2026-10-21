@@ -120,9 +120,8 @@ docs-check: ## Validate the Fern docs (fern check + validate-mdx + gated-link ch
 	cd docs/fern && npm run check
 
 DOCS_TYPED_SNIPPET_PATHS := \
-	docs/agents/add-guardrails.mdx \
 	docs/agents/deploy-agents.mdx \
-	docs/agents/optimization.mdx \
+	docs/agents/optimize-agents.mdx \
 	docs/anonymizer/tutorials/preview.mdx \
 	docs/garak/targets/index.mdx \
 	docs/garak/targets/inference-gateway.mdx \
@@ -149,6 +148,7 @@ DOCS_TYPED_SNIPPET_PATHS := \
 	docs/run-inference/about.mdx \
 	docs/run-inference/tutorials/deploy-models.mdx \
 	docs/run-inference/tutorials/run-inference.mdx \
+	docs/run-inference/virtual-models.mdx \
 	docs/safe-synthesizer/about/jobs.mdx \
 	docs/safe-synthesizer/about/reference.mdx \
 	docs/safe-synthesizer/tutorials/differential-privacy.mdx \
@@ -156,9 +156,17 @@ DOCS_TYPED_SNIPPET_PATHS := \
 	docs/troubleshooting/studio.mdx
 
 .PHONY: docs-lint-snippets
-docs-lint-snippets: docs-check-base-url ## Syntax-check all Python fenced snippets, type-check curated executable docs, and check NHX_BASE_URL usage
+docs-lint-snippets: docs-check-base-url docs-lint-helm-snippets docs-lint-api-examples ## Check Python snippets, Helm YAML, API examples, and CLI context usage
 	$(UV) run --frozen python docs/_scripts/lint_python_snippets.py docs --no-type-check
 	$(UV) run --frozen python docs/_scripts/lint_python_snippets.py $(DOCS_TYPED_SNIPPET_PATHS)
+
+.PHONY: docs-lint-helm-snippets
+docs-lint-helm-snippets: ## Validate Helm docs YAML syntax, duplicate keys, and chart values nesting
+	$(UV) run --frozen python docs/_scripts/lint_helm_snippets.py
+
+.PHONY: docs-lint-api-examples
+docs-lint-api-examples: ## Validate OpenAPI examples and bodyless response code samples
+	$(UV) run --frozen python docs/_scripts/lint_api_examples.py
 
 .PHONY: docs-check-base-url
 docs-check-base-url: ## Flag doc snippets that bypass the CLI context with NHX_BASE_URL
@@ -584,7 +592,7 @@ test-deployments-openshell: ## Run OpenShell deployment backend unit tests with 
 	# The openshell extra is not part of the default sync (platform-restricted
 	# wheel), so the shared unit-test job skips these. Install it just here and
 	# run the backend's tests for real (mirrors the nemo-guardrails --extra bench job).
-	$(UV) run --frozen --package nemo-deployments-plugin --extra openshell \
+	$(UV) run --frozen --all-packages --extra openshell \
 		pytest -v plugins/nemo-deployments/tests/unit/backends/openshell/
 
 .PHONY: test-jobs-openshell

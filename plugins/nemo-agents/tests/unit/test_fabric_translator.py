@@ -12,7 +12,11 @@ from typing import Any
 import pytest
 from nemo_agents_plugin.agent_config import AgentConfig, load_agent_config
 from nemo_agents_plugin.fabric.gateway_credentials import PLATFORM_IGW_API_KEY_ENV, PLATFORM_IGW_API_KEY_PLACEHOLDER
-from nemo_agents_plugin.fabric.translator import FabricTranslationError, translate_agent_config
+from nemo_agents_plugin.fabric.translator import (
+    FabricTranslationError,
+    translate_agent_config,
+    upgrade_relay_observability_version,
+)
 from nemo_agents_plugin.telemetry.intake_export import configure_intake_atif_export
 from nemo_fabric.models import RelayAtifConfig, RelayHttpStorageConfig
 
@@ -596,7 +600,7 @@ class TestTranslateAgentConfig:
         assert relay.project == "example-agent"
         assert relay.output_dir == "./artifacts/relay"
         assert observability.model_dump(exclude_none=True) == {
-            "version": 3,
+            "version": 4,
             "enable_full_payloads": False,
             "atif": {
                 "enabled": True,
@@ -631,6 +635,7 @@ class TestTranslateAgentConfig:
 
         # The Pi adapter hard-requires relay_extension_path when Relay is active; the
         # translator defaults it to the image-staged copy so telemetry does not fail.
+        assert fabric_config.harness is not None
         assert fabric_config.harness.settings["relay_extension_path"] == PI_RELAY_EXTENSION_PATH
 
     def test_relay_preserves_explicit_pi_extension_path(self) -> None:
@@ -646,6 +651,7 @@ class TestTranslateAgentConfig:
         fabric_config = translate_agent_config(config)
 
         # An explicitly configured path is never overwritten by the default.
+        assert fabric_config.harness is not None
         assert fabric_config.harness.settings["relay_extension_path"] == "/custom/pi-extension"
 
     def test_relay_extension_default_only_applies_to_pi(self) -> None:
@@ -657,6 +663,7 @@ class TestTranslateAgentConfig:
 
         # Only the Pi adapter consumes relay_extension_path; a non-Pi harness (hermes
         # here) must not have it injected.
+        assert fabric_config.harness is not None
         assert "relay_extension_path" not in fabric_config.harness.settings
 
     def test_relay_extension_default_skipped_when_telemetry_disabled(self) -> None:
@@ -670,6 +677,7 @@ class TestTranslateAgentConfig:
 
         # No Relay, no extension-path default — a plain Pi agent is untouched.
         assert fabric_config.relay is None
+        assert fabric_config.harness is not None
         assert "relay_extension_path" not in fabric_config.harness.settings
 
     def test_relay_telemetry_prefers_platform_registered_agent_name(self) -> None:
@@ -886,3 +894,25 @@ def test_mini_swe_agent_example(kind: str) -> None:
     assert translated.runtime is not None
     assert translated.runtime.max_turns == 50
     assert translated.runtime.timeout_seconds == 1800
+
+
+def test_a_relay_config_persisted_under_fabric_0_4_is_raised_to_the_current_observability_version() -> None:
+    """Only the number changed between 3 and 4 for what this translator emits; nothing else is touched."""
+    persisted = {"metadata": {"name": "a"}, "relay": {"observability": {"version": 3, "atif": {"enabled": True}}}}
+
+    upgraded = upgrade_relay_observability_version(persisted)
+
+    assert upgraded["relay"]["observability"] == {"version": 4, "atif": {"enabled": True}}
+    assert persisted["relay"]["observability"]["version"] == 3
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"metadata": {"name": "a"}},
+        {"metadata": {"name": "a"}, "relay": {"project": "a"}},
+        {"metadata": {"name": "a"}, "relay": {"observability": {"version": 4}}},
+    ],
+)
+def test_a_config_with_nothing_to_raise_is_returned_as_is(config: dict[str, Any]) -> None:
+    assert upgrade_relay_observability_version(config) is config

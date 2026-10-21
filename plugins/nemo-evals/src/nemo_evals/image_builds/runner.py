@@ -12,11 +12,20 @@ import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from nemo_evals.api.task_definitions.harbor import HarborTaskDefinition
+from nemo_builder_plugin.identity import normalize_reference
+from nemo_builder_plugin.schema import FileSetSource, ImageSource
+from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskDefinition
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
 from nemo_evals.harbor.archive import MAX_ARCHIVE_BYTES
 from nemo_evals.harbor.archive_io import download_verified_async
-from nemo_evals.image_builds.builder import ImageBuilder, archive_source, builder_name, ensure_build
+from nemo_evals.image_builds.builder import (
+    ENDED_JOB_STATUSES,
+    ImageBuilder,
+    archive_source,
+    builder_name,
+    copy_builder_name,
+    ensure_build,
+)
 from nemo_evals.image_builds.models import (
     TERMINAL_BUILD_STATUSES,
     TERMINAL_IMAGE_STATUSES,
@@ -106,21 +115,10 @@ async def _build(
     definition = revision.spec
 
     try:
-        archive = await _read_archive(files, definition)
+        archive = await read_task_archive(files, definition.source)
         images = plan_images(definition.config, archive, allowed_registries=build.allowed_registries)
     except ImagePlanError as exc:
         return await _fail(entities, build, str(exc))
-
-    prebuilt = [image.role for image in images if image.source == "prebuilt"]
-    if prebuilt:
-        for image in images:
-            image.status = "failed"
-            if image.source == "prebuilt":
-                image.error = "copying prebuilt images into the platform registry isn't supported yet"
-            else:
-                image.error = "not built: another image of this task can't be built"
-        build.images = images
-        return await _fail(entities, build, f"prebuilt_import_unsupported: {', '.join(prebuilt)}")
 
     build.status = "running"
     build.images = images
@@ -153,32 +151,36 @@ def _settled(images: list[BuildImage]) -> bool:
     )
 
 
-async def _read_archive(files: AsyncFilesClient, definition: HarborTaskDefinition) -> TaskArchive:
+async def read_task_archive(files: AsyncFilesClient, source: HarborArchiveSource) -> TaskArchive:
+    """Download a task archive, check its digest, and list its files."""
     with tempfile.TemporaryDirectory(prefix="task-image-build-") as scratch:
         path = Path(scratch) / "task_archive"
         with path.open("wb") as output:
             await download_verified_async(
                 files,
-                definition.source.fileset_ref,
+                source.fileset_ref,
                 output,
                 limit=MAX_ARCHIVE_BYTES,
-                expected_digest=definition.source.files_hash,
+                expected_digest=source.files_hash,
             )
         return await asyncio.to_thread(TaskArchive.read, path)
 
 
 async def _submit(builder: ImageBuilder, image: BuildImage, definition: HarborTaskDefinition) -> None:
-    assert image.context_path is not None and image.dockerfile is not None
-    name = builder_name(
-        archive_digest=definition.source.files_hash, context_path=image.context_path, dockerfile=image.dockerfile
-    )
-    try:
-        submitted = await ensure_build(
-            builder,
-            name=name,
-            source=archive_source(definition.source.fileset_ref, image.context_path),
-            dockerfile=image.dockerfile,
+    source: FileSetSource | ImageSource
+    dockerfile: str | None
+    if image.image is not None:
+        reference = str(normalize_reference(image.image))
+        name = copy_builder_name(reference)
+        source, dockerfile = ImageSource(image=reference), None
+    else:
+        assert image.context_path is not None and image.dockerfile is not None
+        name = builder_name(
+            archive_digest=definition.source.files_hash, context_path=image.context_path, dockerfile=image.dockerfile
         )
+        source, dockerfile = archive_source(definition.source.fileset_ref, image.context_path), image.dockerfile
+    try:
+        submitted = await ensure_build(builder, name=name, source=source, dockerfile=dockerfile)
     except NemoClientError as exc:
         image.status = "failed"
         image.error = f"Builder refused the build: {exc}"
@@ -197,6 +199,16 @@ async def _refresh(builder: ImageBuilder, images: list[BuildImage]) -> bool:
             continue
         try:
             current = await builder.get_image(image.builder_image)
+            if current is not None and current.status == "pending" and image.build_job is not None:
+                status = await builder.job_status(image.build_job)
+                if status in ENDED_JOB_STATUSES or status is None:
+                    # Builder never fails a row whose build failed: read it once more, after its job ended.
+                    current = await builder.get_image(image.builder_image)
+                    if current is not None and current.status == "pending":
+                        image.status = "failed"
+                        image.error = f"Builder job {image.build_job} ended ({status or 'gone'}) without the image"
+                        changed = True
+                        continue
         except (NemoTransportError, InternalServerError) as exc:
             logger.warning("Builder unavailable reading %s; retrying: %s", image.builder_image, exc)
             continue

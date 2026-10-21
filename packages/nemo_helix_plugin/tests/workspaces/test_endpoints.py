@@ -17,6 +17,7 @@ from nemo_helix_plugin.workspaces.types import (
     UpdateWorkspaceMemberRequest,
     UpdateWorkspaceRequest,
     Workspace,
+    WorkspaceDeletionStatus,
     WorkspaceMember,
     WorkspaceMemberListResponse,
 )
@@ -96,6 +97,15 @@ def test_delete_workspace() -> None:
     assert prepared.path_params == {"name": "ml-team"}
     assert prepared.content is None
     assert prepared.response_type is DeleteResponse
+
+
+def test_get_workspace_deletion() -> None:
+    prepared = endpoints.get_workspace_deletion(name="ml-team")
+
+    assert prepared.method == "GET"
+    assert prepared.path_template == "/apis/entities/v2/workspace-deletions/{name}"
+    assert prepared.path_params == {"name": "ml-team"}
+    assert prepared.response_type is WorkspaceDeletionStatus
 
 
 def test_list_workspace_members() -> None:

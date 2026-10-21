@@ -11,7 +11,7 @@ from unittest.mock import Mock
 import httpx
 import pytest
 from nemo_builder_plugin.entities import ContainerImage, Provenance
-from nemo_builder_plugin.schema import FileSetSource, SubmitBuildResponse
+from nemo_builder_plugin.schema import FileSetSource, ImageSource, SubmitBuildResponse
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
 from nemo_evals.image_builds.models import ImageBuildRequest, TaskImageBuildEntity
 from nemo_evals.image_builds.planning import TaskArchive
@@ -60,11 +60,12 @@ class _Jobs:
 class _Builder:
     """Builder whose images finish with ``outcomes[context_path]`` on the first read after submit."""
 
-    def __init__(self, outcomes: dict[str, Outcome], *, refuse: bool = False) -> None:
+    def __init__(self, outcomes: dict[str, Outcome], *, refuse: bool = False, job: str = "active") -> None:
         self.outcomes = outcomes
         self.refuse = refuse
+        self.job = job
         self.images: dict[str, str] = {}
-        self.submits = 0
+        self.submits: list[FileSetSource | ImageSource] = []
 
     async def get_image(self, name: str) -> ContainerImage | None:
         context = self.images.get(name)
@@ -73,13 +74,19 @@ class _Builder:
         outcome = self.outcomes[context]
         return _container_image(name, outcome, detail="kaniko exited 1" if outcome == "failed" else None)
 
-    async def submit(self, *, name: str, revision: int, source: FileSetSource, dockerfile: str) -> SubmitBuildResponse:
+    async def submit(
+        self, *, name: str, revision: int, source: FileSetSource | ImageSource, dockerfile: str | None
+    ) -> SubmitBuildResponse:
         if self.refuse:
             raise PermissionDeniedError(httpx.Response(403, json={"detail": "not allowed to build"}))
-        assert source.context_path is not None
-        self.submits += 1
-        self.images[f"{name}-{revision}"] = source.context_path
+        what = source.image if isinstance(source, ImageSource) else source.context_path
+        assert what is not None
+        self.submits.append(source)
+        self.images[f"{name}-{revision}"] = what
         return _submitted(name, revision)
+
+    async def job_status(self, job: str) -> str | None:
+        return self.job
 
 
 async def _no_sleep(seconds: float) -> None:
@@ -97,7 +104,7 @@ def archive(monkeypatch) -> list[str]:
     async def read(files_client, definition):
         return TaskArchive(root="sort-task", files=frozenset(f"sort-task/{f}" for f in files), compose=None)
 
-    monkeypatch.setattr("nemo_evals.image_builds.runner._read_archive", read)
+    monkeypatch.setattr("nemo_evals.image_builds.runner.read_task_archive", read)
     return files
 
 
@@ -143,20 +150,44 @@ async def test_one_failed_image_fails_the_build_with_its_reason(entity_store, st
     assert build.error == "verifier: kaniko exited 1"
 
 
-async def test_prebuilt_images_fail_the_build_without_submitting_anything(entity_store, store_task, archive) -> None:
+async def test_a_prebuilt_image_is_copied_alongside_built_ones(entity_store, store_task, archive) -> None:
     config = {"environment": {"docker_image": "ghcr.io/org/sort:1"}, "verifier": {"environment": {"cpus": 1}}}
-    spec = await _start(entity_store, store_task, config=config, allowed=["ghcr.io"])
-    builder = _Builder({})
+    spec = await _start(entity_store, store_task, config=config)
+    builder = _Builder({"ghcr.io/org/sort:1": "ready", "sort-task/tests": "ready"})
 
     build = await _run(entity_store, spec, builder)
 
+    assert build.status == "ready"
+    assert builder.submits[0] == ImageSource(image="ghcr.io/org/sort:1")
+    main = build.images[0]
+    assert (main.source, main.status) == ("prebuilt", "ready")
+    assert main.builder_image is not None and main.builder_image.startswith("harbor-img-")
+
+
+async def test_a_copy_is_submitted_by_its_fully_qualified_reference(entity_store, store_task, archive) -> None:
+    """Two spellings of one image share a Builder name, so they must send the same request."""
+    spec = await _start(entity_store, store_task, config={"environment": {"docker_image": "ubuntu:24.04"}})
+    builder = _Builder({"docker.io/library/ubuntu:24.04": "ready"})
+
+    await _run(entity_store, spec, builder)
+
+    assert builder.submits == [ImageSource(image="docker.io/library/ubuntu:24.04")]
+
+
+async def test_an_image_whose_builder_job_ended_without_it_fails(entity_store, store_task, archive) -> None:
+    """Builder leaves a failed build's image pending, so its ended job is what says it won't finish."""
+    spec = await _start(entity_store, store_task, config={})
+
+    class _Abandoned(_Builder):
+        async def get_image(self, name: str) -> ContainerImage | None:
+            return None if name not in self.images else _container_image(name)
+
+    ticks = iter(range(0, 10_000, 100))
+    build = await _run(entity_store, spec, _Abandoned({}, job="error"), timeout=250, clock=lambda: next(ticks))
+
     assert build.status == "failed"
-    assert build.error == "prebuilt_import_unsupported: main"
-    assert builder.submits == 0
-    assert [(image.role, image.source, image.status, image.error) for image in build.images] == [
-        ("main", "prebuilt", "failed", "copying prebuilt images into the platform registry isn't supported yet"),
-        ("verifier", "dockerfile", "failed", "not built: another image of this task can't be built"),
-    ]
+    assert build.error is not None and build.error.startswith("main: Builder job builder-harbor-env-")
+    assert build.error.endswith("ended (error) without the image")
 
 
 async def test_an_unbuildable_task_fails_with_the_plan_error(entity_store, store_task, archive) -> None:
@@ -186,7 +217,7 @@ async def test_an_unexpected_error_fails_the_build_instead_of_leaving_it_running
     async def corrupt(files_client, definition):
         raise ValueError("Downloaded object checksum mismatch")
 
-    monkeypatch.setattr("nemo_evals.image_builds.runner._read_archive", corrupt)
+    monkeypatch.setattr("nemo_evals.image_builds.runner.read_task_archive", corrupt)
 
     build = await _run(entity_store, spec, _Builder({}))
 
@@ -217,7 +248,7 @@ async def test_a_finished_build_is_left_alone(entity_store, store_task, archive)
     again = await _run(entity_store, spec, builder)
 
     assert again == first
-    assert builder.submits == 0
+    assert builder.submits == []
 
 
 @pytest.mark.parametrize(("status", "job_status"), [("ready", "completed"), ("failed", "failed")])

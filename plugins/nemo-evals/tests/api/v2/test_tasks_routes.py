@@ -9,7 +9,7 @@ Covers route wiring, the get_task_service dependency, and status-code mapping (2
 
 from __future__ import annotations
 
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import FastAPI
@@ -28,6 +28,7 @@ from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTa
 from nemo_evals.api.v2 import tasks as tasks_routes
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricsDisabledError
 from nemo_helix_plugin.entity_client import NemoEntityConflictError
+from pydantic import BaseModel
 
 
 class _FakeMetricService:
@@ -56,7 +57,7 @@ def verified_archive_projection(monkeypatch):
 def client(entity_store) -> TestClient:
     app = FastAPI()
     app.include_router(tasks_routes.router, prefix="/v2/workspaces/{workspace}")
-    service = TaskService(entity_store, _FakeMetricService(), files_client=Mock())
+    service = TaskService(entity_store, _FakeMetricService(), files_client=Mock(), authorize_metric_read=AsyncMock())
     app.dependency_overrides[get_task_service] = lambda: service
     return TestClient(app)
 
@@ -136,7 +137,7 @@ def test_write_without_a_spec_kind_returns_422(client: TestClient, method: str) 
 
 
 @pytest.mark.parametrize("definition", [EvaluatorTaskDefinition, HarborTaskDefinition])
-def test_published_schema_requires_the_kind_discriminator(definition: type) -> None:
+def test_published_schema_requires_the_kind_discriminator(definition: type[BaseModel]) -> None:
     """The generated spec has to agree with the validator above: a default on ``kind`` would leave
     it out of ``required``, and a client generated from that spec would omit it."""
     assert "kind" in definition.model_json_schema()["required"]
@@ -322,7 +323,7 @@ def test_concurrent_replace_returns_409_not_500(entity_store) -> None:
 
     app = FastAPI()
     app.include_router(tasks_routes.router, prefix="/v2/workspaces/{workspace}")
-    service = TaskService(entity_store, _FakeMetricService(), files_client=Mock())
+    service = TaskService(entity_store, _FakeMetricService(), files_client=Mock(), authorize_metric_read=AsyncMock())
     app.dependency_overrides[get_task_service] = lambda: service
     client = TestClient(app)
 

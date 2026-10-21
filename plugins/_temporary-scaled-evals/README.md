@@ -33,7 +33,6 @@ Restart `nemo services run` after install.
 |---|---|
 | `SCALED_EVALS_DATABASE_URL` | scaled-evals' own Postgres. **Not** `DATABASE_URL` — the platform injects that into the same process, and reusing it would run these migrations and claim queues inside the platform database. |
 | `SCALED_EVALS_DATABASE_SCHEMA` | Default `scaled_evals`. Every table lives here. Redundant in a dedicated database, but it keeps the vendored SQL safe to point at a shared one. |
-| `CREDENTIALS_ENCRYPTION_KEY` | Fernet key for BYOK credentials. |
 | `SCALED_EVALS_RUN_MIGRATIONS` | Default `true`. Set `false` where an external Job owns schema rollout. |
 | `HARBOR_DATASET_UPSTREAM_ALLOWED_REGISTRIES` | Comma-separated registries allowed as public source images for dataset-only Harbor imports. Defaults to `docker.io,ghcr.io`; this is separate from the managed destination-image allowlist. |
 
@@ -112,6 +111,16 @@ Dataset-only image imports perform unauthenticated registry reads and reject
 registries outside `HARBOR_DATASET_UPSTREAM_ALLOWED_REGISTRIES` before network
 I/O. Bearer-token challenges must remain on the registry host; Docker Hub may
 also use `auth.docker.io`.
+
+Evaluation and benchmark-run `credentials` map a provider (`openai`,
+`anthropic`, `nvidia`, `nhx`, `openshift`) to a platform Secret reference
+`workspace/name`. Create the Secret with the platform Secrets API; preflight
+and create reject a reference the caller cannot read. The value never touches
+scaled-evals storage: the evaluation Job resolves it from the platform at
+launch.
+
+**Removed:** the `/v1/credentials` store and its encryption key. Credentials
+are platform Secrets referenced by name.
 
 **Removed:** OAuth client discovery (`/v1/auth/config`), which existed only to
 hand the CLI login flow the coordinates of a fixed internal identity provider.
@@ -238,13 +247,20 @@ on — `CurrentPrincipal.owner_id` — and one function that produces it.
 
 Consequences worth knowing before you rely on this:
 
-- **`/v1` is single-tenant.** Every caller resolves to owner `dev`, so all
-  callers share one view of tasks, evaluations, and credentials. Bridging
-  platform identity means setting `request.state.principal` upstream; no route
-  changes.
-- **`CONTROL_PLANE_AUTH_ENABLED=true` now fails closed with 401** rather than
-  gating on a provider. There is nothing left to consult, and silently falling
-  back to the shared owner would hand one caller another caller's data.
+- **Ownership is the platform principal.** With platform auth enabled, the owner
+  of every row is the authenticated principal, or the user a service acts on
+  behalf of. With platform auth disabled every caller is owner `dev`.
+- **Admin is a platform permission.** `scaled-evals.admin` gates the
+  `/v1/admin/*` routes and image qualification and promotion. The platform
+  grants it, and `HelixAdmin` in the `system` workspace holds it implicitly.
+  Admins also see every owner's agent bundles and can edit any config profile.
+  Non-admins get 403 from the platform. There is no plugin allowlist.
+- **Admin analytics come from Intake.** Each terminal evaluation records one
+  span (source `scaled-evals-executions`) in the platform jobs workspace.
+  `/v1/admin/usage`, `/compute`, and `/failures` aggregate those spans over a
+  window of at most 90 days. Queued and active counts still come from the
+  evaluation store. A span that fails to record is logged and skipped, so
+  analytics can undercount during an Intake outage.
 - **The CLI takes a token, it does not obtain one.** `--token` /
   `SCALED_EVALS_TOKEN` is the only credential source; `scaled-evals auth
   login|status|logout` are gone and `auth whoami` is now top-level
@@ -283,12 +299,10 @@ docker run -d --name scaled-evals-pg \
 ```
 
 **3. Run the platform.** The platform keeps its own default store (SQLite locally);
-only scaled-evals is pointed at Postgres. Generating the key via command substitution
-keeps it out of shell history.
+only scaled-evals is pointed at Postgres.
 
 ```bash
 export SCALED_EVALS_DATABASE_URL="postgresql://scaled_evals:scaled_evals@127.0.0.1:5434/scaled_evals"
-export CREDENTIALS_ENCRYPTION_KEY="$(uv run python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
 
 uv run nemo services run --services scaled-evals --port 8080
 ```
@@ -355,6 +369,37 @@ the private execution snapshot, they are stored in
 The service creates that workspace itself, so only the service has a role in
 it, and it refuses to use a workspace of that name that someone else created.
 
+Config profiles (`scaled_evals_config_profile`) and agent bundles
+(`scaled_evals_agent_bundle`) are also stored as entities in that workspace,
+so the plugin's owner and admin checks cannot be bypassed through the Entities
+API. Deleting either one removes the entity. Editing a profile or bundle that
+changed since it was read returns `409 profile_changed` or
+`409 agent_bundle_changed`. A profile referenced by a non-terminal evaluation
+can be renamed, but its config cannot change and it cannot be deleted
+(`409 profile_in_use`).
+
+Tasks are `scaled_evals_task` entities in the same workspace, with their
+revisions and build state embedded. The build queue claims a revision by
+rewriting its task entity, so build heartbeats also move the task's
+`updated_at`. A write that loses a concurrent update retries, then returns
+`409 task_changed`. Slug uniqueness is checked before the write, and of two
+simultaneous creates with the same slug the later one is withdrawn with
+`409 slug_conflict`; a simultaneous rename onto a taken slug can still land. A
+task referenced by
+a non-terminal evaluation cannot be deleted (`409 task_in_use`). Benchmark and
+benchmark-run member lists skip tasks or revisions that no longer exist.
+
+Benchmarks are `scaled_evals_benchmark` entities with their revisions and
+member pins embedded; a write that loses a concurrent update returns
+`409 benchmark_changed`, and slugs are kept unique as for tasks. A benchmark
+run's preflight blocks a member whose task was deleted. Benchmark imports are
+`scaled_evals_benchmark_import` entities whose id is derived from the owner,
+manifest digest, and visibility, so a repeated create resumes the existing
+import. A create racing an identical one returns
+`409 benchmark_import_in_progress` until the first has finished populating it.
+A create that fails partway deletes its import; task revisions it already
+allocated remain as unused uploads.
+
 Each evaluation Job may run for every sequential trial wave
 (`ceil(n_attempts / parallelism)`) times the profile's sandbox
 `lifecycle_timeout` plus a grace, and never less than
@@ -367,6 +412,29 @@ snapshot-pinned Gym runner image, set `GYM_RUNNER_MODE=process`, or mount
 `/dev/shm`. With the default `GYM_RUNNER_MODE=docker` the run fails, because
 the Job pod has no Docker daemon. Gym evaluations are still accepted, so leave
 `GYM_SANDBOX_OPENSANDBOX_ENABLED` off on hosted deployments until AALGO-906 lands.
+
+## Harbor runners for `harbor_opensandbox`
+
+The `harbor_opensandbox` runtime runs Harbor **0.13.2** and **0.20.0**. An
+evaluation that omits `framework_version` gets 0.20.0, not the catalog default:
+Harbor 0.13.2 accepts task files written for 0.20 but silently ignores the
+features 0.20 added, such as `[[verifier.collect]]` hooks, so pick 0.13.2 only for
+tasks that don't use them. Other selectable runners are rejected at submission
+with `422 unsupported_framework_version`.
+
+Harbor loads `NemoOpenSandboxEnvironment` through `environment.import_path`. It
+is a plain Harbor `BaseEnvironment` written on the OpenSandbox SDK
+(`nhx_sandbox.harbor_opensandbox_driver`), not a subclass of Harbor's own
+OpenSandbox environment, so it uses only the environment API both releases share.
+Harbor's task model sets one difference: a task's `allowlist` may name hostnames
+and `*.` wildcards on 0.13.2, and also IP addresses and CIDRs on 0.20.0. The
+operator allowlist accepts all of them on both.
+
+To support another runner, pin `opensandbox==0.1.16` in its
+`packages/nhx_sandbox/harbor-runners/<version>.txt` and list `opensandbox` under that release's
+`packages` in `data/harbor_runner_qualifications.json` (the image then installs the
+environment into that venv, and CI runs the environment tests against it), then
+add the version to `HARBOR_OPENSANDBOX_HARBOR_VERSIONS`.
 
 ## Licensing
 

@@ -4,7 +4,7 @@
 """``nemo inference gateway`` command group, backed by the typed Inference Gateway client.
 
 The ``provider`` and ``model`` sub-groups proxy raw HTTP verbs to a provider or
-model-entity route (``.../-/{trailing_uri}``); ``openai v1 models`` exposes the
+model-entity route (``.../-/{trailing_uri:path}``); ``openai v1 models`` exposes the
 workspace's OpenAI-compatible model catalog.
 """
 

@@ -16,14 +16,14 @@ Supervised fine-tuning (SFT) is a traditional technique for customizing a pre-tr
 
 ### Deploying Full SFT Models
 
-Full SFT models require a NIM deployment to serve inference. The Deployment Management Service supports two deployment modes:
+Full SFT models need a deployment to serve inference. We recommend the vLLM engine (`engine: vllm`), which is also the default when a Customizer job deploys with inline parameters; see [Deploy with vLLM](/documentation/models-and-inference/deploy-models#deploy-with-vllm). Deploy with NIM only if you know that the NIM image you use supports the model, or that the model works with the default multi-LLM NIM. The Deployment Management Service supports two NIM deployment modes:
 
-| Deployment Mode         | Image Type              | Weight Loading                        | Best For                                                                    |
-| ----------------------- | ----------------------- | ------------------------------------- | --------------------------------------------------------------------------- |
-| **Multi-LLM** (Default) | Generic multi-model NIM | On-the-fly download via Files service | Supported Hugging Face architectures, custom fine-tuned models, development |
-| **Model-Specific NIM**  | Dedicated model image   | Pre-download via model puller         | Production, optimized performance and latency                               |
+| Deployment Mode             | Image Type                                             | Weight Loading                        | Best For                                                                    |
+| --------------------------- | ------------------------------------------------------ | ------------------------------------- | --------------------------------------------------------------------------- |
+| **Multi-LLM NIM** (Default) | Generic multi-model NIM (`nvcr.io/nim/nvidia/llm-nim`) | On-the-fly download via Files service | Supported Hugging Face architectures, custom fine-tuned models, development |
+| **Model-Specific NIM**      | Dedicated model image                                  | Pre-download via model puller         | Production, optimized performance and latency                               |
 
-- **Multi-LLM Image**: Can deploy Hugging Face checkpoints whose architectures are supported by the image's inference engine, providing flexibility for custom fine-tuned models. Importing a checkpoint does not guarantee training or deployment compatibility; for example, Automodel LoRA does not support Conv1D-based architectures. It also does not guarantee optimized inference performance.
+- **Multi-LLM NIM Image**: The [multi-LLM NIM](https://docs.nvidia.com/nim/large-language-models/1.15.0/introduction.html) (`nvcr.io/nim/nvidia/llm-nim:latest`) can deploy Hugging Face checkpoints whose architectures are in its [supported architectures list](https://docs.nvidia.com/nim/large-language-models/1.15.0/supported-architectures.html), providing flexibility for custom fine-tuned models.
 
 - **Model-Specific NIM**: Provides optimized inference performance and latency through model-specific optimizations. Recommended for production deployments where performance is critical.
 

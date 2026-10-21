@@ -94,7 +94,7 @@ class FabricConfigSource(BaseModel):
 
 
 class RegisteredAgentSource(BaseModel):
-    """An agent registered on the platform (``nemo agents create``), resolved at submit.
+    """An agent registered on the platform (``nemo agents register``), resolved at submit.
 
     The model is part of what the agent is, so there is no model override; what an evaluation shapes is
     the ``environment`` the agent runs in.
@@ -285,14 +285,15 @@ class HarborRunnerTarget(BaseModel):
     env_vars: dict[str, str] = Field(
         default_factory=dict,
         description="Non-secret environment variables for the Harbor agent, as literal values that travel in the "
-        "spec and reach only the agent. Keys Harbor treats as secrets (matching KEY, SECRET, TOKEN, PASSWORD, "
-        "CREDENTIAL or AUTH) are rejected; use `env_secrets` for credentials.",
+        "spec and reach only the agent. Keys Harbor treats as secrets (matching KEY, SECRET, TOKEN but not "
+        "TOKENS, PASSWORD, CREDENTIAL or AUTH) are rejected; use `env_secrets` for credentials.",
     )
     n_attempts: int = Field(default=1, ge=1, description="Number of attempts Harbor runs per task.")
     n_concurrent_trials: int | None = Field(
         default=None,
         ge=1,
-        description="Maximum concurrent Harbor trials. Unset or null: the runner default (4) on Docker. "
+        description="Maximum concurrent Harbor trials. Native Harbor's default parallelism is 4; "
+        "unset or null uses that default on Docker. "
         "Must be unset or null on Kubernetes runs, which run trials one at a time.",
         json_schema_extra={"nullable": True},
     )
@@ -813,8 +814,7 @@ class _AgentEvalSpecCommon(BaseModel):
     fail_fast: bool = Field(
         default=False,
         description="Fail on the first metric error instead of recording an errored score. "
-        "On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks "
-        "budget can also fail the run and cancel remaining task Jobs.",
+        "On Kubernetes runs it fails that task's Job.",
     )
     labels: dict[str, str] = Field(
         default_factory=dict,
@@ -919,3 +919,15 @@ class AgentEvalSpec(_AgentEvalSpecCommon):
         validate_task_collection(self.tasks)
         validate_single_kind(self.tasks)
         return self
+
+    def only_task(self, index: int) -> AgentEvalSpec:
+        """A new validated spec running only ``tasks[index]``; everything else equal. Never mutates this spec.
+
+        Raises:
+            IndexError: ``index`` is outside ``tasks``.
+        """
+        if not 0 <= index < len(self.tasks):
+            raise IndexError(f"task index {index} is outside 0..{len(self.tasks) - 1}")
+        data = self.model_dump(mode="json")
+        data["tasks"] = [data["tasks"][index]]
+        return AgentEvalSpec.model_validate(data)

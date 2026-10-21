@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import pydoc
+from types import FunctionType
 from unittest.mock import AsyncMock, MagicMock, create_autospec
 
 import pytest
@@ -116,6 +117,7 @@ def test_descriptor_carries_endpoint_identity() -> None:
     assert descriptor.__name__ == "delete_deployment"
     assert descriptor.__doc__ == descriptor.endpoint.__doc__
     assert descriptor.__doc__  # the endpoint really does carry one
+    assert isinstance(descriptor.endpoint, FunctionType)
     assert descriptor.endpoint.__name__ == "delete_deployment"
 
 
@@ -133,11 +135,13 @@ def test_async_descriptor_unwraps_to_a_coroutine_function() -> None:
     ``inspect.unwrap`` instead of ``getattr``, so it never sees the async stub that ``__get__``
     hands out. Unwrapping has to terminate at a coroutine function or every endpoint on an async
     client specs as a sync ``MagicMock`` and cannot be awaited. The endpoint itself stays reachable
-    via ``.endpoint``.
+    via ``.endpoint``. ``unwrap`` starts from the descriptor's ``__wrapped__`` here because the
+    descriptor itself is not callable, which is all ``unwrap``'s signature admits.
     """
     descriptor = _descriptor("delete_deployment")
 
-    assert inspect.iscoroutinefunction(inspect.unwrap(descriptor))
+    assert inspect.iscoroutinefunction(inspect.unwrap(descriptor.__wrapped__))
+    assert isinstance(descriptor.endpoint, FunctionType)
     assert descriptor.endpoint.__name__ == "delete_deployment"
 
 

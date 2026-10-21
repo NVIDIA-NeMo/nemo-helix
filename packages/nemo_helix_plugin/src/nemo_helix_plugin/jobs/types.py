@@ -19,8 +19,9 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, NotRequired, Optional, TypedDict
+from typing import Annotated, Any, NotRequired, Optional, Protocol, Self, TypedDict
 
+from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN, NAME_PATTERN_DESCRIPTION
 from nemo_helix_plugin.files.types import MAX_LENGTH as FILESET_NAME_MAX_LENGTH
 from nemo_helix_plugin.files.types import NAME_PATTERN as FILESET_NAME_PATTERN
 from nemo_helix_plugin.files.types import NAME_PATTERN_DESCRIPTION as FILESET_NAME_DESCRIPTION
@@ -30,7 +31,7 @@ from nemo_helix_plugin.jobs.schemas import (
 )
 from nemo_helix_plugin.jobs.spec import HelixJobSpec, HelixJobStepSpec
 from nemo_helix_plugin.schema import Value
-from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, model_validator
 
 _FILESET_NAME_RE = re.compile(FILESET_NAME_PATTERN)
 
@@ -55,6 +56,45 @@ def validate_output_location(value: str | None) -> str | None:
     if not _FILESET_NAME_RE.match(stripped):
         raise ValueError(f"output_location is not a valid fileset name. {FILESET_NAME_DESCRIPTION}")
     return stripped
+
+
+JOB_FILESET_NAME_PREFIX = "job-fileset-"
+JOB_NAME_MAX_LENGTH_WITH_DERIVED_FILESET = NAME_MAX_LENGTH - len(JOB_FILESET_NAME_PREFIX)
+
+
+JobName = Annotated[
+    str,
+    Field(
+        pattern=NAME_PATTERN,
+        max_length=NAME_MAX_LENGTH,
+        description=(
+            f"Job name. {NAME_PATTERN_DESCRIPTION} At most {JOB_NAME_MAX_LENGTH_WITH_DERIVED_FILESET} characters "
+            "when output_location is not set. Auto-generated when omitted."
+        ),
+    ),
+]
+
+
+class _NamedJobRequest(Protocol):
+    @property
+    def name(self) -> str | None: ...
+
+    @property
+    def output_location(self) -> str | None: ...
+
+
+def validate_job_name_fits_derived_fileset[RequestT: _NamedJobRequest](request: RequestT) -> RequestT:
+    """Reject a ``name`` too long for the ``job-fileset-<name>`` fileset created when ``output_location`` is unset."""
+    if (
+        request.name is not None
+        and request.output_location is None
+        and len(request.name) > JOB_NAME_MAX_LENGTH_WITH_DERIVED_FILESET
+    ):
+        raise ValueError(
+            f"name must be at most {JOB_NAME_MAX_LENGTH_WITH_DERIVED_FILESET} characters when output_location is "
+            f"not set, because the job's artifact fileset is named '{JOB_FILESET_NAME_PREFIX}<name>'"
+        )
+    return request
 
 
 # Root folder for job artifacts inside a caller-supplied ``output_location`` fileset, so a
@@ -181,6 +221,25 @@ class HelixJobAttemptSortField(str, Enum):
 # ---------------------------------------------------------------------------
 
 
+class JobControl(BaseModel):
+    """Mutable job behavior, stored on the job and kept off the execution spec.
+
+    The attempt spec stays the immutable snapshot of what a run executes. Rerun
+    copies the job spec into the next attempt and keeps using this object. In a
+    control update, an omitted or null value keeps the job's current value.
+    """
+
+    pause_ttl_seconds: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="How long this job keeps storage after it pauses, measured from stopped_at. "
+        "When the job has no value, the platform paused-storage TTL applies. Cannot exceed the platform "
+        "maximum. 0 reclaims on the next retention pass. In a control update, an omitted or null value "
+        "keeps the current value. Changing this value does not move the start time.",
+        json_schema_extra={"nullable": True},
+    )
+
+
 class HelixJobResponse(BaseModel):
     """Response model for a platform job."""
 
@@ -193,6 +252,10 @@ class HelixJobResponse(BaseModel):
     source: str
     spec: dict[str, Any] = Field(default_factory=dict, description="Job Spec")
     platform_spec: HelixJobSpec
+    control: JobControl = Field(
+        default_factory=JobControl,
+        description="Mutable job behavior. This is not part of the execution spec.",
+    )
     fileset: str = Field(..., description="Fileset ID for storing job artifacts")
     output_location: Optional[str] = Field(
         default=None, description="Caller-supplied artifact fileset; None when the fileset was auto-created"
@@ -204,6 +267,24 @@ class HelixJobResponse(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     ownership: Optional[dict[str, Any]] = None
     custom_fields: Optional[dict[str, Any]] = Field(default=None, description="Custom Fields")
+
+
+class HelixJobAttemptResponse(BaseModel):
+    """Response model for one execution attempt of a platform job."""
+
+    id: str
+    name: str
+    job: str = Field(..., description="Parent job ID")
+    workspace: str
+    seq: int
+    spec: dict[str, Any] = Field(default_factory=dict)
+    platform_spec: HelixJobSpec
+    status: HelixJobStatus
+    status_details: dict[str, Any] = Field(default_factory=dict)
+    error_details: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime
+    is_current: bool = False
 
 
 class HelixJobStepResponse(BaseModel):
@@ -292,6 +373,7 @@ class CreateHelixJobRequest(BaseModel):
     """Request model for creating a new platform job."""
 
     model_config = ConfigDict(
+        regex_engine="python-re",
         json_schema_extra={
             "examples": [
                 {
@@ -312,20 +394,48 @@ class CreateHelixJobRequest(BaseModel):
                     "source": "api-reference",
                 }
             ]
-        }
+        },
     )
 
-    name: Optional[str] = None
+    name: Optional[JobName] = None
     description: Optional[str] = None
     project: Optional[str] = None
     spec: dict
     platform_spec: HelixJobSpec
+    control: Optional[JobControl] = Field(
+        default=None,
+        description="Mutable job behavior, including how long storage is kept after a pause. "
+        "When omitted, the platform paused-storage TTL applies.",
+    )
     source: str
     ownership: Optional[dict] = None
     custom_fields: Optional[dict] = None
     output_location: Optional[str] = None
 
     _validate_output_location = field_validator("output_location")(validate_output_location)
+    _validate_name_fits_derived_fileset = model_validator(mode="after")(validate_job_name_fits_derived_fileset)
+
+
+class UpdateHelixJobRequest(BaseModel):
+    """Validated partial update for a job description or definition."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: str | None = Field(default=None, json_schema_extra={"nullable": True})
+    spec: dict[str, Any] | None = None
+    platform_spec: HelixJobSpec | None = None
+
+    @model_validator(mode="after")
+    def validate_paired_specs(self) -> Self:
+        if not self.model_fields_set:
+            raise ValueError("at least one mutable job field is required")
+        spec_supplied = "spec" in self.model_fields_set
+        platform_spec_supplied = "platform_spec" in self.model_fields_set
+        if spec_supplied != platform_spec_supplied:
+            raise ValueError("spec and platform_spec must be supplied together")
+        if spec_supplied and (self.spec is None or self.platform_spec is None):
+            raise ValueError("spec and platform_spec cannot be null")
+        return self
 
 
 class HelixJobTaskUpdate(BaseModel):
@@ -358,7 +468,7 @@ HelixJobStatusDetailsUpdateRequest = dict[str, Any]
 
 
 class JobStatusDetailsUpdate(RootModel[dict[str, Any]]):
-    """Client request body for ``update_job_status_details`` (a bare JSON object)."""
+    """Client request body for attempt status-details updates (a bare JSON object)."""
 
 
 # NB: list *filter* models (``HelixJobsListFilter`` etc.) are intentionally
@@ -386,14 +496,22 @@ class ListStepsQueryParams(TypedDict, total=False):
     filter: NotRequired[str | dict[str, Any]]
 
 
+class ListAttemptsQueryParams(TypedDict, total=False):
+    page: NotRequired[int]
+    page_size: NotRequired[int]
+    sort: NotRequired[str]
+    filter: NotRequired[str | dict[str, Any]]
+
+
 class ListJobResultsQueryParams(TypedDict, total=False):
     sort: NotRequired[str]
+    attempt_id: NotRequired[str]
 
 
 class JobLogsQueryParams(TypedDict, total=False):
     limit: NotRequired[int]
     page_cursor: NotRequired[str]
-    attempt_id: NotRequired[int]
+    attempt_id: NotRequired[str | int]
     step_id: NotRequired[str]
     task_id: NotRequired[str]
     tail: NotRequired[int]

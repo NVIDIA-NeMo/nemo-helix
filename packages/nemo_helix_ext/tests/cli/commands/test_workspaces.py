@@ -139,7 +139,33 @@ def test_delete() -> None:
     assert result.exit_code == 0, result.output
     assert recorder.last.method == "DELETE"
     assert recorder.last.url.path == "/apis/entities/v2/workspaces/ml-team"
-    assert "Deleted successfully" in result.stdout
+    assert result.stdout.strip() == "deleted"
+
+
+def test_deletion_status_prints_the_stored_error() -> None:
+    recorder = Recorder(
+        [
+            httpx.Response(
+                200,
+                json={
+                    "name": "team-a",
+                    "deletion_stage": "failed",
+                    "deletion_error": "shared-weights: HTTP 409: Cannot delete fileset",
+                    "updated_at": "2026-10-19T17:00:00Z",
+                },
+            )
+        ]
+    )
+    runner, state = make_runner(recorder)
+
+    result = runner.invoke(app, ["workspaces", "deletion-status", "team-a"], obj=state)
+
+    assert result.exit_code == 0, result.output
+    assert recorder.last.method == "GET"
+    assert recorder.last.url.path == "/apis/entities/v2/workspace-deletions/team-a"
+    body = json.loads(result.stdout)
+    assert body["deletion_stage"] == "failed"
+    assert body["deletion_error"] == "shared-weights: HTTP 409: Cannot delete fileset"
 
 
 def test_delete_not_found_maps_to_remote_error_exit_code() -> None:

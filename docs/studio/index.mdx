@@ -24,6 +24,8 @@ The pages visible in your workspace depend on the installed plugins, enabled ser
 
 NeMo Studio is included with the platform. Follow the [Setup guide](/documentation/get-started) to start NeMo Helix, then access Studio at `/studio` on your running server.
 
+When you sign in through the direct OIDC flow, Studio attempts to create a workspace using your email prefix; see [Workspace creation on login](/documentation/get-started/core-concepts/workspaces#workspace-creation-on-login).
+
 ## Features
 
 ### Current Workspace Navigation
@@ -41,7 +43,7 @@ The current sidebar groups related pages under expandable parents. Selecting a p
 | **Data** | **Datasets > Data Designer** | Build and monitor synthetic-data jobs. Other installed data plugins can appear below **Datasets**. |
 | **Data** | **Datasets > Safe Synthesizer** | Create and monitor privacy-preserving synthetic tabular data jobs. Enabled by default. |
 | **Governance** | **Guardrails** | Manage guardrail configurations. Disabled by default; see [Studio Guardrail Configs](/documentation/studio/guardrail-configs). |
-| **Governance** | **Agent Hardening** | Plugin-provided agent hardening UI. Appears only when the Agent Hardener plugin is installed; see [Studio Plugin UIs](/documentation/studio/plugins). |
+| **Governance** | **Agent Hardening** | Plugin-provided agent hardening UI. Appears only when the Agent hardening plugin is installed; see [Studio Plugin UIs](/documentation/studio/plugins). |
 | **System** | **Filesets** | Organize and manage files used by agents and jobs. |
 | **System** | **Jobs** | Monitor jobs across enabled platform capabilities. |
 | **System** | **Settings** | View workspace settings and open **Secrets** and inference provider management. Enabled by default. |
@@ -56,7 +58,7 @@ For the full workflow, see [Studio Agents](/documentation/studio/agents).
 
 ### Insights
 
-Use **Observability > Insights** to review optimization insights the analyst agent generates from observed agent sessions and traces, and drill into an insight's linked experiments and observed sessions. Use **Resolve** or **Delete** to close an open insight, and **Reopen** to restore a resolved or deleted one.
+Use **Observability > Insights** to review optimization insights Compass generates from observed agent sessions and traces, and drill into an insight's linked experiments and observed sessions. Use **Resolve** or **Delete** to close an open insight, and **Reopen** to restore a resolved or deleted one.
 
 For the full workflow, see [Studio Insights](/documentation/studio/insights).
 

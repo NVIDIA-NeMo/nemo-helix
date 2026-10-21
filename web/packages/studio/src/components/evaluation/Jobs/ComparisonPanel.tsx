@@ -6,6 +6,7 @@ import { renderMultipleSelectedValues } from '@nemo/common/src/utils/form';
 import { getColorsFromLength } from '@nemo/common/src/utils/formatters';
 import { useEvalsListEvaluateJobResults } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import type { EvaluateJob } from '@nemo/sdk/generated/evals/schema';
+import { platformFetch } from '@nemo/sdk/src/utils/platformRequest';
 import {
   Flex,
   Panel,
@@ -39,6 +40,7 @@ export const ComparisonPanel = ({ job, workspace, jobName }: ComparisonPanelProp
   const { data: resultsPage, isLoading: isLoadingMetadata } = useEvalsListEvaluateJobResults(
     workspace,
     jobName,
+    undefined,
     {
       query: {
         enabled: !!workspace && !!jobName,
@@ -59,7 +61,7 @@ export const ComparisonPanel = ({ job, workspace, jobName }: ComparisonPanelProp
       if (!aggregateScoresResult?.download_url) {
         throw new Error('No download URL available');
       }
-      const response = await fetch(aggregateScoresResult.download_url);
+      const response = await platformFetch(aggregateScoresResult.download_url);
       if (!response.ok) {
         throw new Error(`Failed to download results: ${response.statusText}`);
       }

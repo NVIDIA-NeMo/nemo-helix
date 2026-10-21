@@ -28,7 +28,7 @@ export NHX_BASE_URL=http://localhost:8080
 nemo agents package --agent plugins/nemo-agent-hardener/examples/hermes-victim/agent.yaml \
                     --dockerfile plugins/nemo-agent-hardener/examples/hermes-victim/Dockerfile \
                     --tag ledger-hermes:v1
-nemo agents create  --name ledger-hermes --agent-config plugins/nemo-agent-hardener/examples/hermes-victim/agent.yaml
+nemo agents register  --name ledger-hermes --agent-config plugins/nemo-agent-hardener/examples/hermes-victim/agent.yaml
 nemo agents deploy  --agent ledger-hermes --image ledger-hermes:v1
 
 nemo agent-hardener init --agent ledger-hermes --name ledger-hermes --harness hermes

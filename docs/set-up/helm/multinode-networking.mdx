@@ -40,9 +40,9 @@ Injects [Elastic Fabric Adapter](https://docs.aws.amazon.com/AWSEC2/latest/UserG
 
 ```yaml
 multinodeNetworking:
- aws:
- enabled: true
- efaDevicesPerGPU: 4 # must match your instance type
+  aws:
+    enabled: true
+    efaDevicesPerGPU: 4 # must match your instance type
 ```
 
 | Parameter | Description |
@@ -64,10 +64,10 @@ Injects RDMA device requests, `IPC_LOCK` capability, NCCL topology, and UCX envi
 
 ```yaml
 multinodeNetworking:
- azure:
- enabled: true
- rdmaDevicesPerGPU: 1
- rdmaDeviceName: "hca_shared_devices_a"
+  azure:
+    enabled: true
+    rdmaDevicesPerGPU: 1
+    rdmaDeviceName: "hca_shared_devices_a"
 ```
 
 | Parameter | Description |
@@ -87,8 +87,8 @@ Injects a GPUDirect-TCPXO sidecar daemon, multi-NIC annotations, and NCCL Fastra
 
 ```yaml
 multinodeNetworking:
- gcp:
- enabled: true
+  gcp:
+    enabled: true
 ```
 
 **Cluster prerequisites:**
@@ -103,9 +103,9 @@ Injects Mellanox NIC device requests (`nvidia.com/mlnxnics`), SR-IOV network ann
 
 ```yaml
 multinodeNetworking:
- oci:
- enabled: true
- rdmaDevicesPerGPU: 8
+  oci:
+    enabled: true
+    rdmaDevicesPerGPU: 8
 ```
 
 | Parameter | Description |

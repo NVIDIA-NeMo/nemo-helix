@@ -28,6 +28,7 @@ from nemo_evals.jobs.gym_sandbox import (
 )
 from nemo_evals.jobs.kinds.types import SubmitContext
 from nemo_evals.jobs.secret_env import JobEnvSecretSource
+from nemo_evals.jobs.utils import require_platform_client
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.files.client import AsyncFilesClient
@@ -57,7 +58,7 @@ async def resolve_gym_environment(
     if file_path:
         raise ValueError("Gym environment FileSet references must not include a file fragment")
 
-    files = client_from_platform(async_client, AsyncFilesClient)
+    files = client_from_platform(require_platform_client(async_client, "resolving a Gym environment"), AsyncFilesClient)
     try:
         environment = (
             await files.get_fileset(

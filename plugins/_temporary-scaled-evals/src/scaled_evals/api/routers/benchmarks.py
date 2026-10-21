@@ -5,11 +5,12 @@ import re
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from nemo_scaled_evals_plugin.authz import admin_only
 
-from scaled_evals.api.auth import CurrentPrincipal
+from scaled_evals.api.auth import CurrentPrincipal, current_principal
+from scaled_evals.api.benchmark_store import TaskRef
 from scaled_evals.api.db import Database, get_db
 from scaled_evals.api.repositories.base_repository import Conflict, InvalidReference
-from scaled_evals.api.repositories.benchmark_repository import TaskRef
 from scaled_evals.api.schemas.benchmarks import (
     SLUG_MAX_LEN,
     Benchmark,
@@ -29,13 +30,12 @@ from scaled_evals.api.schemas.common import (
     ListEnvelope,
     page_from_rows,
 )
-from scaled_evals.api.tenancy import require_admin
 from scaled_evals.api.utils import make_id
 
 router = APIRouter(prefix="/benchmarks", tags=["benchmarks"])
 
 Db = Annotated[Database, Depends(get_db)]
-Admin = Annotated[CurrentPrincipal, Depends(require_admin)]
+Principal = Annotated[CurrentPrincipal, Depends(current_principal)]
 
 _SLUG_NORMALIZE = re.compile(r"[^a-z0-9]+")
 
@@ -308,11 +308,12 @@ def patch_benchmark(benchmark_id: str, body: BenchmarkUpdate, db: Db) -> Benchma
 
 
 @router.post("/{benchmark_id}/qualification", response_model=Benchmark)
+@admin_only
 def set_benchmark_qualification(
     benchmark_id: str,
     body: BenchmarkQualificationUpdate,
     db: Db,
-    current: Admin,
+    current: Principal,
 ) -> Benchmark:
     row = db.benchmarks.set_qualification(
         benchmark_id,
@@ -326,7 +327,8 @@ def set_benchmark_qualification(
 
 
 @router.post("/{benchmark_id}/promote", response_model=Benchmark)
-def promote_benchmark(benchmark_id: str, db: Db, current: Admin) -> Benchmark:
+@admin_only
+def promote_benchmark(benchmark_id: str, db: Db, current: Principal) -> Benchmark:
     row = db.benchmarks.promote(benchmark_id, qualified_by=current.owner_id)
     if row is None:
         existing = db.benchmarks.get(benchmark_id)

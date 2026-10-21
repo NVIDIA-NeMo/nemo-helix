@@ -7,6 +7,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
+from nemo_evals.config import HarborTaskJobsConfig
+from nemo_evals.harbor.remote.images import PreparedHarborEnvironment, PreparedImage
+from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy
 from nemo_evals.jobs.agent_spec import AgentEvalSpec, FabricConfigSource, FabricRunnerTarget, ResolvedTask
 from nemo_evals.jobs.metric_resolution import to_inline
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
@@ -15,24 +18,13 @@ from nemo_evals.taskset_runs.identifiers import derive_run_id
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
 from nemo_evals.taskset_runs.store import RunAcceptance, TasksetRunStore
 from nemo_helix_plugin.files.client import AsyncFilesClient
-from nhx.testing.files import InMemoryFilesService
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 
 
 @pytest.fixture
-def files_service() -> InMemoryFilesService:
-    """Return fresh isolated Files storage for each test's resource assertions."""
-    return InMemoryFilesService()
-
-
-@pytest.fixture
-def files_client(files_service: InMemoryFilesService) -> AsyncFilesClient:
-    """Return a real Files client backed by the test's in-memory Files service."""
-    return files_service.client()
-
-
-@pytest.fixture
-def plan(resolved_spec: AgentEvalSpec) -> TasksetRunPlan:
+def plan(
+    resolved_spec: AgentEvalSpec, sandbox_policy: ResolvedHarborSandboxPolicy, harbor_config: HarborTaskJobsConfig
+) -> TasksetRunPlan:
     """Bind the resolved-spec fixture to a fixed keyed run and pinned taskset revision.
 
     The returned plan has explicit unlimited caps and a fail-on-missing-image
@@ -43,9 +35,18 @@ def plan(resolved_spec: AgentEvalSpec) -> TasksetRunPlan:
         workspace="default",
         taskset_ref="default/suite#3",
         spec=resolved_spec,
-        missing_prebuilt_image="fail",
         max_concurrent_task_jobs=None,
-        max_failed_tasks=None,
+        sandbox_policy=sandbox_policy,
+        dispatcher_image=harbor_config.dispatcher_image,
+        dispatcher_profile="local-k8s",
+        task_environments=[
+            PreparedHarborEnvironment(
+                task_revision_digest="r" * 64,
+                archive_digest="a" * 64,
+                agent=PreparedImage(image_ref=f"registry.invalid/task@sha256:{'b' * 64}", preparation_key="b" * 64),
+            )
+            for _ in resolved_spec.tasks
+        ],
     )
 
 

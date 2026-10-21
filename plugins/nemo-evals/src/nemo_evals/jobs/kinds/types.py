@@ -12,6 +12,7 @@ from typing import Protocol
 
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
 from nemo_evals.jobs.agent_spec import AgentEvalTaskInput, ResolvedTask, ResolvedTaskDefinition, Target
+from nemo_evals.source_authorization import SourceReadAuthorizer
 from nemo_helix_plugin.client.adapter import AsyncHelixClient
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.entities import EntityClient
@@ -62,6 +63,8 @@ class SubmitContext:
     entity_client: EntityClient | None
     async_client: AsyncHelixClient | None
     adapters: Mapping[str, TaskKindAdapter]
+    #: Caller-scoped check run before each stored task, metric and model reference is read.
+    authorize: SourceReadAuthorizer | None = None
 
 
 @dataclass(frozen=True)
