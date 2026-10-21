@@ -2,17 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Moves the signed-in user's own items (`created_by === ownerId`) ahead of everyone else's.
- * Stable: each group keeps the order it arrived in, so a newest-first list stays newest-first.
- * Returns the list untouched when there is no signed-in user.
+ * Puts `owned` ahead of `all`, dropping the copies of owned items that `all` also contains
+ * (matched by `id`). Each list keeps its own order, so newest-first inputs stay newest-first.
+ * An owned item that `all` missed (for example it fell off the end of a page) is still included.
  */
-export const ownedFirst = <T extends { created_by?: string | null }>(
-  items: readonly T[],
-  ownerId: string | undefined
-): T[] =>
-  ownerId
-    ? [
-        ...items.filter((item) => item.created_by === ownerId),
-        ...items.filter((item) => item.created_by !== ownerId),
-      ]
-    : [...items];
+export const ownedFirst = <T extends { id: string }>(
+  owned: readonly T[],
+  all: readonly T[]
+): T[] => {
+  const ownedIds = new Set(owned.map((item) => item.id));
+  return [...owned, ...all.filter((item) => !ownedIds.has(item.id))];
+};

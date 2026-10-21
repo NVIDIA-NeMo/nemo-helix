@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getEntityReference } from '@nemo/common/src/namedEntity';
-import { useFilesListFilesets as useListDatasets } from '@nemo/sdk/generated/platform/files';
 import { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Flex, Select, Text } from '@nvidia/foundations-react-core';
 import {
@@ -11,9 +10,8 @@ import {
 } from '@studio/components/DatasetSelect/constants';
 import { ValueWithLabel } from '@studio/components/ValueWithLabel';
 import { DEFAULT_LARGE_PAGE_SIZE } from '@studio/constants/constants';
+import { useOwnedFirstDatasets } from '@studio/hooks/useOwnedFirstDatasets';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { useAuthProfile } from '@studio/providers/auth/useAuthProfile';
-import { ownedFirst } from '@studio/util/ownedFirst';
 import { FC, useMemo } from 'react';
 
 interface Props {
@@ -30,23 +28,12 @@ const datasetToOption = (dataset: FilesetOutput) => ({
 
 export const DatasetSelect: FC<Props> = ({ onChange, selectedDatasetId, errorText, disabled }) => {
   const workspace = useWorkspaceFromPath();
+  // Pickers fetch a large page so search can run client-side; the user's own datasets come first.
   const {
-    data: datasetsResponse,
-    isLoading,
+    datasets,
+    isPending: isLoading,
     isError,
-  } = useListDatasets(workspace, {
-    /**
-     * For now, we use an arbitrarily large page size to fetch all datasets, to enable client-side search.
-     * When DataStore implements server-side search, update this implementation to leverage
-     * server-side search and pagination.
-     */
-    page_size: DEFAULT_LARGE_PAGE_SIZE,
-    sort: '-created_at',
-    filter: { purpose: 'dataset' },
-  });
-
-  const { data: datasets } = datasetsResponse || {};
-  const ownerId = useAuthProfile()?.id;
+  } = useOwnedFirstDatasets(workspace, DEFAULT_LARGE_PAGE_SIZE);
 
   const selectedDatasetOption = useMemo(() => {
     const selectedDataset = datasets?.find(
@@ -62,9 +49,8 @@ export const DatasetSelect: FC<Props> = ({ onChange, selectedDatasetId, errorTex
       return [LOADING_DATASETS_ERROR_OPTION];
     }
 
-    // Newest first, with the signed-in user's own datasets ahead of the rest.
-    return ownedFirst(datasets ?? [], ownerId).map(datasetToOption);
-  }, [datasets, ownerId, isLoading, isError]);
+    return datasets?.map(datasetToOption) ?? [];
+  }, [datasets, isLoading, isError]);
 
   return (
     <Flex direction="col" gap="density-xs">

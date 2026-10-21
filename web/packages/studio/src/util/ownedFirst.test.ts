@@ -3,19 +3,22 @@
 
 import { ownedFirst } from '@studio/util/ownedFirst';
 
-describe('ownedFirst', () => {
-  const newestFirst = [
-    { name: 'a', created_by: 'other' },
-    { name: 'b', created_by: 'me' },
-    { name: 'c', created_by: null },
-    { name: 'd', created_by: 'me' },
-  ];
+const item = (id: string) => ({ id });
 
-  it('puts the user’s items first and keeps each group’s order', () => {
-    expect(ownedFirst(newestFirst, 'me').map((i) => i.name)).toEqual(['b', 'd', 'a', 'c']);
+describe('ownedFirst', () => {
+  it('puts owned items first, without repeating them, and keeps each list’s order', () => {
+    const newestFirst = ['a', 'b', 'c', 'd'].map(item);
+    const owned = ['d', 'b'].map(item); // also newest first
+    expect(ownedFirst(owned, newestFirst).map((i) => i.id)).toEqual(['d', 'b', 'a', 'c']);
   });
 
-  it('leaves the order alone when signed out', () => {
-    expect(ownedFirst(newestFirst, undefined).map((i) => i.name)).toEqual(['a', 'b', 'c', 'd']);
+  it('keeps an owned item the page of all items missed (an older dataset beyond the first page)', () => {
+    const firstPage = ['a', 'b'].map(item);
+    const owned = [item('old-mine')];
+    expect(ownedFirst(owned, firstPage).map((i) => i.id)).toEqual(['old-mine', 'a', 'b']);
+  });
+
+  it('returns the list as is when the user owns nothing', () => {
+    expect(ownedFirst([], ['a', 'b'].map(item)).map((i) => i.id)).toEqual(['a', 'b']);
   });
 });
