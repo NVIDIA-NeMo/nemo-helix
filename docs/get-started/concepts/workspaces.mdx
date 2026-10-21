@@ -22,6 +22,12 @@ The platform automatically creates two built-in workspaces during initialization
 - **`default`** — General-purpose workspace for experimentation, editable by all authenticated users.
 - **`system`** — Reserved for platform-provided resources (for example, evaluation targets, customization templates). Read-only for regular users; only platform administrators can modify.
 
+## Workspace creation on login
+
+When you sign in to Studio, it checks for a workspace named after your email prefix—for example, `alice` from `alice@example.com`. If the workspace is missing or inaccessible, Studio attempts to create it. Creation requires workspace creation permission, and the creator becomes the workspace Admin.
+
+Studio repeats this check on subsequent logins, so a deleted workspace may be recreated.
+
 ## Create a Workspace
 
 To create a workspace, provide a `name` and optionally a `description`. The `name` must be unique within your deployment.
