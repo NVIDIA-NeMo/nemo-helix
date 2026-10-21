@@ -47,7 +47,7 @@ Requires an interactive terminal (TTY). In non-interactive contexts
 
 Use --auto for non-interactive setup from environment variables
 (NEMO_DEFAULT_INFERENCE_KEY with optional NEMO_DEFAULT_INFERENCE_BASE_URL,
-NVIDIA_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY).
+OPENROUTER_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY).
 Override the provider URL with --inference-base-url. Override the selected
 pair with NEMO_DEFAULT_MODEL and NEMO_FAST_MODEL.
 
