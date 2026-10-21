@@ -75,7 +75,7 @@ jobs:
       WHEEL_INDEX: ${{ needs.prepare.outputs.wheel_index }}
       NVIDIA_INFERENCE_URL: ${{ secrets.NVIDIA_INFERENCE_URL }}
       NVIDIA_INFERENCE_KEY: ${{ secrets.NVIDIA_INFERENCE_KEY }}
-      SMOKE_INFERENCE_MODEL: intentional-unavailable-smoke-model
+      SMOKE_INFERENCE_MODEL: ${{ vars.SMOKE_INFERENCE_MODEL }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -127,7 +127,7 @@ jobs:
       CHART_REPOSITORY: ${{ needs.prepare.outputs.chart_repository }}
       NVIDIA_INFERENCE_URL: ${{ secrets.NVIDIA_INFERENCE_URL }}
       NVIDIA_INFERENCE_KEY: ${{ secrets.NVIDIA_INFERENCE_KEY }}
-      SMOKE_INFERENCE_MODEL: intentional-unavailable-smoke-model
+      SMOKE_INFERENCE_MODEL: ${{ vars.SMOKE_INFERENCE_MODEL }}
       NGC_REGISTRY_READ_TOKEN: ${{ secrets.NGC_REGISTRY_READ_TOKEN }}
       GH_TOKEN: ${{ github.token }}
       KIND_CLUSTER_NAME: release-smoke
