@@ -39,6 +39,7 @@ from nemo_helix_plugin.jobs.api_factory import (
     ResourcesLimitsSpec,
     ResourcesRequestsSpec,
     ResourcesSpec,
+    StepLifecycle,
 )
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.spec import StepIngressRule, StepNetwork, TcpPortRange
@@ -55,6 +56,7 @@ from nhx.customization_common.schemas.file_io import (
     FileIOTaskConfig,
     FileSetRef,
     UploadItem,
+    model_upload_lifecycle,
 )
 from nhx.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
 from nhx.customization_common.service.platform_client import (
@@ -724,6 +726,7 @@ async def platform_job_config_compiler(
         name: str,
         command: list[str],
         task_config: FileIOTaskConfig | ModelEntityTaskConfig,
+        lifecycle: StepLifecycle | None = None,
     ) -> HelixJobStep:
         return HelixJobStep(
             name=name,
@@ -738,6 +741,7 @@ async def platform_job_config_compiler(
             ),
             environment=base_env,
             config=task_config.model_dump(mode="json"),
+            lifecycle=lifecycle or StepLifecycle(),
         )
 
     steps: list[HelixJobStep] = [
@@ -749,7 +753,12 @@ async def platform_job_config_compiler(
             _build_download_config(job_spec, me, workspace=workspace),
         ),
         _build_training_step(job_spec, base_env, trust_remote_code=trust_remote_code, profile=profile),
-        _cpu_task_step("model-upload", FILE_IO_TASK_COMMAND, _build_upload_config(job_spec, me)),
+        _cpu_task_step(
+            "model-upload",
+            FILE_IO_TASK_COMMAND,
+            _build_upload_config(job_spec, me),
+            lifecycle=model_upload_lifecycle(),
+        ),
         _cpu_task_step(
             "model-entity-creation",
             MODEL_ENTITY_TASK_COMMAND,

@@ -5,6 +5,7 @@
 
 from typing import Annotated, Optional, Union
 
+import pytest
 from fastapi import Depends, FastAPI
 from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -350,6 +351,13 @@ class TestMakeFilterDep:
         resp = client.get("/items", params={"filter[bogus]": "value"})
         assert resp.status_code == 400
         assert "bogus" in resp.json()["detail"]
+
+    @pytest.mark.parametrize("field", ["created_by", "updated_by"])
+    def test_principal_base_field_stays_at_entity_root(self, field):
+        client = TestClient(_make_app(SampleFilter))
+        resp = client.get("/items", params={f"filter[{field}]": "alice@example.com"})
+        assert resp.status_code == 200
+        assert resp.json()["operation"] == {field: {"$eq": "alice@example.com"}}
 
     def test_operation_is_full_tree(self):
         """The operation should contain ALL fields — nothing extracted away."""

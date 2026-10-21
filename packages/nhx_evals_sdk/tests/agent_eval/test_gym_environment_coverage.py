@@ -554,21 +554,23 @@ async def test_gym_environment_runs_end_to_end(case: GymEnvironmentCase, tmp_pat
             _prime_stub(stub, case, tasks)
 
         runner = GymAgentTaskRunner(
-            config=GymRuntimeConfig(
-                agent=case.agent,
-                agent_config=case.agent_config,
-                resources_server=case.resources_server,
-                num_repeats=1,
-                bind_resources_server=case.bind_resources_server,
-                # Omit rather than pass None, so the runner's own default stays the single source of
-                # truth for every environment that does not need more.
-                **({"startup_timeout_s": case.startup_timeout_s} if case.startup_timeout_s else {}),
-                hydra_params={
-                    "policy_base_url": policy_base_url,
-                    "policy_api_key": "stub-key",
-                    "policy_model_name": "stub-model",
-                    **_case_overrides(case, tmp_path),
-                },
+            config=GymRuntimeConfig.model_validate(
+                {
+                    "agent": case.agent,
+                    "agent_config": case.agent_config,
+                    "resources_server": case.resources_server,
+                    "num_repeats": 1,
+                    "bind_resources_server": case.bind_resources_server,
+                    # Omit rather than pass None, so the runner's own default stays the single source
+                    # of truth for every environment that does not need more.
+                    **({"startup_timeout_s": case.startup_timeout_s} if case.startup_timeout_s else {}),
+                    "hydra_params": {
+                        "policy_base_url": policy_base_url,
+                        "policy_api_key": "stub-key",
+                        "policy_model_name": "stub-model",
+                        **_case_overrides(case, tmp_path),
+                    },
+                }
             )
         )
 

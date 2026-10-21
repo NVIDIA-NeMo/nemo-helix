@@ -11,6 +11,7 @@ files for more specific fixtures.
 
 import logging
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -280,7 +281,9 @@ def _arm_timeout_stack_dump(timeout_seconds: float | None) -> None:
         return
     import faulthandler
 
-    faulthandler.dump_traceback_later(timeout_seconds - _TIMEOUT_DUMP_LEAD_SECONDS, file=_CRASH_DUMP_FILE, exit=False)
+    # faulthandler treats file=None as stderr; say so, since it doesn't accept None by type.
+    dump_file = _CRASH_DUMP_FILE if _CRASH_DUMP_FILE is not None else sys.stderr
+    faulthandler.dump_traceback_later(timeout_seconds - _TIMEOUT_DUMP_LEAD_SECONDS, file=dump_file, exit=False)
     _arm_asyncio_task_dump(timeout_seconds)
 
 

@@ -58,11 +58,20 @@ def test_sandboxed_codex_disables_web_search_by_default(tmp_path):
 
 
 def test_a_gateway_alias_has_no_price_unless_a_pricing_model_names_one(tmp_path):
-    tokens = {"prompt_tokens": 1_000_000, "completion_tokens": 1_000, "cached_tokens": 0, "cache_write_tokens": 0}
     alias = "azure-openai-gpt-6-luna"  # what codex calls through the gateway; not in LiteLLM's table
-    assert SandboxedCodex(logs_dir=tmp_path, model_name=alias)._compute_cost_from_pricing(**tokens) is None
+
+    def cost_of(agent: SandboxedCodex, model_name: str | None = None) -> float | None:
+        return agent._compute_cost_from_pricing(
+            prompt_tokens=1_000_000,
+            completion_tokens=1_000,
+            cached_tokens=0,
+            cache_write_tokens=0,
+            model_name=model_name,
+        )
+
+    assert cost_of(SandboxedCodex(logs_dir=tmp_path, model_name=alias)) is None
     priced = SandboxedCodex(logs_dir=tmp_path, model_name=alias, pricing_model="azure/gpt-6-luna")
-    cost = priced._compute_cost_from_pricing(**tokens, model_name=alias)
+    cost = cost_of(priced, model_name=alias)
     assert cost is not None and cost > 0
     assert "azure/gpt-6-luna" not in priced.build_cli_flags()  # codex still calls the gateway alias
 

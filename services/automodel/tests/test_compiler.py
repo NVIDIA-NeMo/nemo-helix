@@ -33,6 +33,7 @@ from nhx.automodel.entities.values import CheckpointSelection, OutputNameType
 from nhx.automodel.images import get_tasks_image, get_training_image
 from nhx.common.entities.utils import get_random_id
 from nhx.common.jobs.exceptions import HelixJobCompilationError
+from nhx.customization_common.schemas.file_io import model_upload_lifecycle
 from nhx.customization_common.service.platform_client import AsyncCustomizationHelixClients
 
 
@@ -495,6 +496,7 @@ async def test_platform_job_config_compiler_sft_lora(
     training_step = steps[1]
     training_name = training_step.name if hasattr(training_step, "name") else training_step["name"]
     assert training_name == "training"
+    assert steps[2]["lifecycle"] == model_upload_lifecycle()
     training_cmd = _executor_container(training_step).command
     assert "nhx.automodel.tasks.training" in " ".join(training_cmd)
     download_cmd = _executor_container(steps[0]).command

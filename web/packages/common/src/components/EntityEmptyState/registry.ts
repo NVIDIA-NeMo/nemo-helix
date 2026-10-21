@@ -140,6 +140,11 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     subheading:
       'Jobs from customization, evaluation, anonymization, and data generation appear here once submitted.',
   },
+  recentJobs: {
+    heading: 'No recent active or finished jobs',
+    subheading: 'Jobs show here while they run and for 48 hours after they finish.',
+    createAction: { label: 'Fine-tune a Model' },
+  },
   anonymizerJobs: {
     heading: 'No anonymizer jobs yet',
     subheading:

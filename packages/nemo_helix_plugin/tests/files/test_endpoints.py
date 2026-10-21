@@ -144,6 +144,7 @@ def test_create_fileset_with_project() -> None:
 
     import json
 
+    assert isinstance(prepared.content, bytes)
     content = json.loads(prepared.content)
     assert content["project"] == "my-project"
 
@@ -155,6 +156,7 @@ def test_update_fileset_excludes_unset_fields() -> None:
 
     import json
 
+    assert isinstance(prepared.content, bytes)
     content = json.loads(prepared.content)
     assert content == {"description": "updated"}
     assert "purpose" not in content
@@ -187,5 +189,6 @@ def test_query_otlp_logs() -> None:
     assert prepared.method == "POST"
     assert prepared.path_template == "/apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs/query"
     assert prepared.path_params == {"workspace": "default", "name": "my-fileset"}
+    assert isinstance(prepared.content, bytes)
     assert json.loads(prepared.content) == {"limit": 10, "artifact_base_path": "logs/run-1"}
     assert prepared.content_type == "application/json"

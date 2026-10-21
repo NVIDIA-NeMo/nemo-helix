@@ -70,6 +70,7 @@ from nhx.core.jobs.controllers.backends.base import (
     JobUpdate,
     get_job_runtime_shared_envvars,
     get_logs_endpoint_from_fileset,
+    step_ttl_seconds_active,
 )
 from nhx.core.jobs.controllers.backends.openshell.policy import (
     DEFAULT_EGRESS_BINARIES,
@@ -517,7 +518,8 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
         """The exceeded TTL in seconds for a non-terminal sandbox, or None."""
         config = self._execution_profile_config
         if step_status == HelixJobStatus.ACTIVE:
-            return config.ttl_seconds_active if self.check_step_ttl(step, config.ttl_seconds_active) else None
+            ttl_seconds = step_ttl_seconds_active(step, config.ttl_seconds_active)
+            return ttl_seconds if self.check_step_ttl(step, ttl_seconds) else None
         not_started = _PHASE_TO_STATUS.get(_phase_name(phase)) == HelixJobStatus.PENDING
         if (
             step_status == HelixJobStatus.PENDING

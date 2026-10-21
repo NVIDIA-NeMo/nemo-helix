@@ -4,6 +4,8 @@
 
 name: ui-design
 description: Reference hub for implementing UI changes in Studio. Use whenever building or modifying Studio frontend UI — pages, components, tables, panels, empty states, and other shared patterns. Routes to the standardized references below.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # UI Design

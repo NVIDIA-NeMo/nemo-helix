@@ -510,9 +510,9 @@ def finalize_task(
 def revise_task(task_id: str, db: Db) -> TaskRevisionCreateResponse:
     """Create a new immutable revision on an existing task.
 
-    Allocates `revision = max(revision) + 1`, inserts a fresh
-    `task_revisions` row in `uploading` status with its own tarball
-    object key, and bumps `tasks.current_revision`. Mirrors the create
+    Allocates `revision = max(revision) + 1`, adds a fresh revision in
+    `uploading` status with its own tarball object key, and bumps the
+    task's `current_revision`. Mirrors the create
     flow: returns the new `revision`, an `upload` block (Files upload target) for
     the new tarball, and `links` (self, finalize).
 
@@ -627,10 +627,8 @@ def delete_task(task_id: str, db: Db) -> DeleteResponse:
     Errors: 404 if not found or already deleted; 409 if an active evaluation
     still references it.
     """
-    try:
-        deleted = db.tasks.soft_delete(task_id)
-    except Conflict as exc:
-        raise _http_error(409, exc.code, exc.message) from exc
-    if not deleted:
+    if db.evaluations.task_in_active_use(task_id):
+        raise _http_error(409, "task_in_use", "task is referenced by an active evaluation")
+    if not db.tasks.soft_delete(task_id):
         raise _http_error(404, "not_found", "task not found")
     return DeleteResponse(id=task_id)

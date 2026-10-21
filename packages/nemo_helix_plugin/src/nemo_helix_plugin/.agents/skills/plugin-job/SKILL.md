@@ -3,7 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: plugin-job
-description: Creates schedulable NemoJob surfaces for NeMo Helix plugins. Use when adding a job, declaring spec_schema / input_spec_schema / to_spec / compile, mounting job routes with add_job_routes, understanding generated job CLI shape, or running jobs in containers. Trigger keywords - job, NemoJob, spec_schema, input_spec_schema, to_spec, compile, add_job_routes, nemo_helix_plugin.jobs, generated job CLI, explain, NemoJobScheduler.
+description: 'Creates schedulable NemoJob surfaces for NeMo Helix plugins. Use when adding a job, declaring spec_schema / input_spec_schema / to_spec / compile, mounting job routes with add_job_routes, understanding generated job CLI shape, or running jobs in containers. Trigger keywords - job, NemoJob, spec_schema, input_spec_schema, to_spec, compile, add_job_routes, nemo_helix_plugin.jobs, generated job CLI, explain, NemoJobScheduler.'
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Plugin Jobs (NemoJob)

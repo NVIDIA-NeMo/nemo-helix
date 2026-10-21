@@ -5,7 +5,6 @@ import asyncio
 import json
 from collections.abc import Callable
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -14,6 +13,7 @@ from deepagents.backends import FilesystemBackend
 from deepagents.middleware.skills import _list_skills_with_errors
 from nemo_agents_plugin.agent_config import load_agent_config
 from nemo_agents_plugin.fabric.translator import translate_agent_config
+from nemo_fabric_adapter_contract.models import AgentMcpServerConfig
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_studio_assistant import register
 from nemo_studio_assistant.fabric_compat import (
@@ -253,7 +253,7 @@ def test_fabric_stdio_mcp_inherits_platform_environment(monkeypatch: pytest.Monk
 
     connection = adapter._mcp_connection(
         "nemo_studio",
-        SimpleNamespace(
+        AgentMcpServerConfig(
             transport="stdio",
             url="nemo-studio-assistant-mcp",
             args=[],

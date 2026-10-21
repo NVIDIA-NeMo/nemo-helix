@@ -43,6 +43,7 @@ from nhx.core.jobs.controllers.backends.base import (
     JobExecutionProfileConfig,
     JobUpdate,
     get_logs_endpoint_config_from_fileset,
+    step_ttl_seconds_active,
 )
 from nhx.core.jobs.controllers.backends.subprocess_runtime import (
     SubprocessOtelLogger,
@@ -336,7 +337,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         if step.status not in (HelixJobStatus.ACTIVE, HelixJobStatus.PENDING):
             return self._create_step_update(step, metadata)
         ttl_seconds = (
-            self._execution_profile_config.ttl_seconds_active
+            step_ttl_seconds_active(step, self._execution_profile_config.ttl_seconds_active)
             if step.status == HelixJobStatus.ACTIVE
             else self._execution_profile_config.ttl_seconds_before_active
         )

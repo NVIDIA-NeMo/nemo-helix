@@ -19,6 +19,7 @@ from nemo_helix_plugin.integrations import IntegrationsSpec, MlflowIntegration, 
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.models.types import ModelEntity
 from nhx.common.entities.utils import get_random_id
+from nhx.customization_common.schemas.file_io import model_upload_lifecycle
 from nhx.customization_common.schemas.values import OutputNameType
 from nhx.customization_common.service.platform_client import AsyncCustomizationHelixClients
 from nhx.rl.app.constants import NHX_BROKER_PORT_ENVVAR, NHX_VLLM_PORT_ENVVAR
@@ -366,6 +367,7 @@ async def test_compiler_emits_four_steps(
     steps = _steps(spec)
     names = [s["name"] for s in steps]
     assert names == ["model-and-dataset-download", "dpo-training", "model-upload", "model-entity-creation"]
+    assert steps[2]["lifecycle"] == model_upload_lifecycle()
 
     # CPU task steps share the lighter customizer-tasks image; the GPU step uses the training image.
     assert "nhx-customizer-tasks" in _container(steps[0])["image"]

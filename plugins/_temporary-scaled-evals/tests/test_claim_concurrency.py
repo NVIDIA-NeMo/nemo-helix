@@ -18,8 +18,8 @@ try:
     from nemo_scaled_evals_plugin.migrations import apply_sql
     from psycopg.rows import dict_row
     from psycopg.sql import SQL, Identifier
-    from scaled_evals.api.repositories.build_repository import TaskBuildRepository
     from scaled_evals.api.repositories.evaluation_repository import DISPATCH_STATE_COLUMNS, EvaluationRepository
+    from scaled_evals.api.task_store import TaskStore
     from scaled_evals.dispatch.worker import Dispatcher
     from scaled_evals.models.evaluations import EvaluationResultSummary, EvaluationResultWrite
 except ImportError as exc:
@@ -72,12 +72,10 @@ def dsn() -> Iterator[str]:
         conn.execute(SQL("CREATE DATABASE {}").format(Identifier(scratch)))
     try:
         apply_sql(dsn, schema="scaled_evals")
+        TaskStore().create_with_initial_revision(
+            "t1", name="t1", slug="t1", description=None, visibility="private", object_key="k"
+        )
         with psycopg.connect(dsn) as conn:
-            conn.execute("INSERT INTO tasks (id, name, slug) VALUES ('t1', 't1', 't1')")
-            conn.execute(
-                "INSERT INTO task_revisions (task_id, revision, tarball_object_key, status, build_backend)"
-                " VALUES ('t1', 1, 'k', 'building', 'prebuilt')"
-            )
             conn.execute(
                 "INSERT INTO evaluations (id, name, task_id, task_revision, status, parallelism)"
                 " VALUES ('e1', 'e1', 't1', 1, 'queued', 1)"
@@ -126,12 +124,6 @@ def test_claims_have_exactly_one_winner_without_row_locks(dsn: str) -> None:
             " WHERE id = 'e1' RETURNING id"
         ).fetchone(),
     )
-
-    build = _loses_to_an_uncommitted_claim(
-        dsn,
-        lambda conn: TaskBuildRepository(conn).claim_next(worker_id="w", claim_timeout=60, max_attempts=3),
-    )
-    assert (build.task_id, build.revision) == ("t1", 1)
 
     # e1 holds one of the owner's slots, so a 50-slot evaluation waits for a 51-slot cap.
     with psycopg.connect(dsn, row_factory=dict_row) as conn:

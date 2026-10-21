@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from nhx_evals_sdk.execution.utils import unique_metric_keys
+from nhx_evals_sdk.metrics.protocol import MetricInput, MetricOutputSpec, MetricResult
 
 
 @dataclass
@@ -15,6 +16,12 @@ class _TypedMetric:
     """A metric identified by a plain string type, one of the shapes `metric_type_name` accepts."""
 
     type: str
+
+    def output_spec(self) -> list[MetricOutputSpec]:
+        return []
+
+    async def compute_scores(self, input: MetricInput) -> MetricResult:
+        raise NotImplementedError("only the metric type matters for key assignment")
 
 
 def _keys(*types: str) -> list[str]:

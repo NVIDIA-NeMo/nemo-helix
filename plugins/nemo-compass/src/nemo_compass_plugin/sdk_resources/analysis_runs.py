@@ -49,7 +49,8 @@ class _HTTPResponse(Protocol):
 
 
 class _TypedResponse(Protocol):
-    http_response: _HTTPResponse
+    @property
+    def http_response(self) -> _HTTPResponse: ...
 
 
 class _PaginatedTypedResponse(_TypedResponse, Protocol):

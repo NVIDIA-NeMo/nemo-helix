@@ -73,7 +73,6 @@ def _to_fabric_agent_package(agent_config: dict[str, Any], *, label: str) -> dic
 
     try:
         from nemo_agents_plugin.agent_config import AgentConfig
-        from nemo_agents_plugin.fabric.gateway_credentials import bind_platform_gateway_model_credential
         from nemo_agents_plugin.fabric.translator import translate_agent_config
     except ImportError as exc:  # pragma: no cover - agents plugin always present for CLI path
         raise LocalRunError(
@@ -82,14 +81,4 @@ def _to_fabric_agent_package(agent_config: dict[str, Any], *, label: str) -> dic
         ) from exc
 
     platform_cfg = AgentConfig.model_validate(agent_config)
-    fabric_mapping = translate_agent_config(platform_cfg).to_mapping()
-    # Translator emits models.default from the selected harness; keep any extra
-    # named models (e.g. judge) from the platform agent for eval overlays.
-    extras = {
-        name: bind_platform_gateway_model_credential(model.model_dump(exclude_none=True))
-        for name, model in platform_cfg.models.items()
-        if name != "default"
-    }
-    if extras:
-        fabric_mapping.setdefault("models", {}).update(extras)
-    return fabric_mapping
+    return translate_agent_config(platform_cfg).to_mapping()

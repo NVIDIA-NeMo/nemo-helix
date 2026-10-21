@@ -1331,7 +1331,9 @@ async def test_fabric_runtime_copies_declared_skills_into_the_workspace_for_deep
     assert seen["paths"] == ["/.agents/skills"]
     assert "RESULT=<n>" in seen["skill_md"]
     assert trial.evidence is not None
-    workspace = Path(trial.evidence.descriptors["workspace"].ref)
+    workspace_ref = trial.evidence.descriptors["workspace"].ref
+    assert workspace_ref is not None
+    workspace = Path(workspace_ref)
     assert not (workspace / ".agents").exists(), "the copied bundle must not read as agent output"
 
 

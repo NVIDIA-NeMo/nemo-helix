@@ -18,6 +18,7 @@ pytest.importorskip("scaled_evals")
 from api_test_fixture import client, v1
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
 from scaled_evals.api.db import get_conn
+from task_fixtures import seed_task_revision
 
 
 def _conn_returning(fetchones: list, fetchall=None) -> MagicMock:
@@ -98,6 +99,8 @@ def test_list_tasks_returns_404_when_benchmark_missing() -> None:
 
 
 def test_list_tasks_returns_paginated_envelope() -> None:
+    seed_task_revision("task_a", slug="task-a", name="Task A")
+    seed_task_revision("task_b", 2, slug="task-b", name="Task B")
     conn = _conn_returning(
         [_benchmark_row(current_revision=1)],
         fetchall=[
@@ -232,8 +235,8 @@ def test_create_with_no_tasks_returns_201_revision_1() -> None:
 
 
 def test_create_with_floating_task_member() -> None:
-    # INSERT benchmark RETURNING row, then SELECT-1 task-exists for the member.
-    _use_conn(_conn_returning([_benchmark_row(), {"?column?": 1}]))
+    seed_task_revision("task_a")
+    _use_conn(_conn_returning([_benchmark_row()]))
     response = client.post(
         "/v1/benchmarks",
         json={"name": "Suite", "tasks": [{"task_id": "task_a"}]},
@@ -242,7 +245,8 @@ def test_create_with_floating_task_member() -> None:
 
 
 def test_create_pinned_task_member_validates_revision() -> None:
-    _use_conn(_conn_returning([_benchmark_row(), {"?column?": 1}, {"?column?": 1}]))
+    seed_task_revision("task_a", 2)
+    _use_conn(_conn_returning([_benchmark_row()]))
     response = client.post(
         "/v1/benchmarks",
         json={"name": "Suite", "tasks": [{"task_id": "task_a", "task_revision": 2}]},
@@ -284,6 +288,7 @@ def test_create_422_on_duplicate_member() -> None:
 
 
 def test_get_detail_includes_member_tasks() -> None:
+    seed_task_revision("task_a", slug="nemo-secrets-crud-cli-easy", name="NeMo secrets-crud (cli-easy)")
     conn = _conn_returning(
         [
             _benchmark_row(current_revision=1),

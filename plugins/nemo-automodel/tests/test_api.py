@@ -16,8 +16,10 @@ def _route_paths(app: FastAPI) -> set[str]:
     queue = list(app.routes)
     while queue:
         route = queue.pop()
-        if hasattr(route, "path"):
-            paths.add(route.path)
+        # Route types differ (APIRoute, Mount, included routers); any with a string path counts.
+        path = getattr(route, "path", None)
+        if isinstance(path, str):
+            paths.add(path)
         fn = getattr(route, "effective_candidates", None)
         if callable(fn):
             queue.extend(fn())  # type: ignore[arg-type]

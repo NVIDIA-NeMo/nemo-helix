@@ -12,6 +12,7 @@ import httpx
 import pytest
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.models.types import ModelEntity
+from nhx.customization_common.schemas.file_io import model_upload_lifecycle
 from nhx.unsloth.app.constants import DEFAULT_DATASET_PATH, DEFAULT_VALIDATION_DATASET_PATH
 from nhx.unsloth.app.jobs.compiler import platform_job_config_compiler
 from nhx.unsloth.schemas import (
@@ -136,6 +137,7 @@ async def test_upload_step_stamps_output_metadata() -> None:
 
     upload = next(s for s in job["steps"] if s["name"] == "model-upload")
     assert upload["config"]["upload"][0]["metadata"] is None
+    assert upload["lifecycle"] == model_upload_lifecycle()
 
 
 @pytest.mark.asyncio

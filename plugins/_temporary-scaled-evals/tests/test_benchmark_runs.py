@@ -11,6 +11,7 @@ the worker is not involved. Cluster-free: TestClient + mocked psycopg connection
 
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -23,6 +24,7 @@ from scaled_evals.api.db import get_conn
 from scaled_evals.api.repositories.benchmark_run_repository import derive_run_view
 from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
 from scaled_evals.api.settings import settings
+from task_fixtures import seed_task_revision
 
 NOW = datetime(2026, 6, 29, tzinfo=UTC)
 
@@ -97,15 +99,22 @@ def _run_row(**overrides) -> dict:
 
 
 def _member(position: int, **overrides) -> dict:
-    """A resolved benchmark member (load_members shape)."""
-    m = {
+    """A resolved benchmark member (load_members shape), with its task stored."""
+    m: dict[str, Any] = {
         "task_id": f"task_{position}",
         "position": position,
         "task_revision": 1,
-        "task_slug": f"task-{position}",
+        "task_slug": f"nemo-task-{position}",
         "revision_status": "ready",
     }
     m.update(overrides)
+    seed_task_revision(
+        m["task_id"],
+        m["task_revision"],
+        slug=m["task_slug"],
+        status=m["revision_status"],
+        **{field: m[field] for field in ("image_ref", "image_digest", "tarball_object_key") if field in m},
+    )
     return m
 
 
@@ -136,6 +145,7 @@ def _member_eval(position: int, **overrides) -> dict:
         "finished_at": None,
     }
     row.update(overrides)
+    seed_task_revision(row["task_id"], row["task_revision"], slug=row["task_slug"], name=row["task_name"])
     return row
 
 

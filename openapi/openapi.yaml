@@ -13578,6 +13578,18 @@ components:
           allOf:
           - $ref: '#/components/schemas/StorageConfigType'
           description: Filter by the storage backend type (e.g., 'local', 'ngc').
+        created_by:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Filter by the principal id that created the fileset.
+          title: Created By
+        updated_by:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Filter by the principal id that last updated the fileset.
+          title: Updated By
         created_at:
           allOf:
           - $ref: '#/components/schemas/DatetimeFilter'
@@ -13639,9 +13651,19 @@ components:
         created_at:
           type: string
           title: Created At
+        created_by:
+          title: Created By
+          description: Principal id for the fileset creator.
+          nullable: true
+          type: string
         updated_at:
           type: string
           title: Updated At
+        updated_by:
+          title: Updated By
+          description: Principal id for the last fileset update.
+          nullable: true
+          type: string
       type: object
       required:
       - id
@@ -20499,6 +20521,14 @@ components:
           title: Pause Deadline Seconds
           description: How long a pause may stay in progress before the workload is
             deleted and the step fails. A value of 0 means this step cannot be paused.
+          default: 0
+        ttl_seconds_active:
+          type: integer
+          minimum: 0.0
+          title: Ttl Seconds Active
+          description: How long the step may stay active before it is terminated,
+            in place of the execution profile's `ttl_seconds_active`. A value of 0
+            uses the profile's value.
           default: 0
       type: object
       title: StepLifecycle

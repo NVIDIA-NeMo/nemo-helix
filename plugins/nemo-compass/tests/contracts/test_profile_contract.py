@@ -134,10 +134,10 @@ def test_load_env_file_wraps_permission_errors(
     path.write_text("KEY=value\n", encoding="utf-8")
     original_read_text = Path.read_text
 
-    def deny(candidate: Path, *args: object, **kwargs: object) -> str:
+    def deny(candidate: Path, encoding: str | None = None, errors: str | None = None) -> str:
         if candidate == path:
             raise PermissionError("permission denied")
-        return original_read_text(candidate, *args, **kwargs)
+        return original_read_text(candidate, encoding=encoding, errors=errors)
 
     monkeypatch.setattr(Path, "read_text", deny)
 

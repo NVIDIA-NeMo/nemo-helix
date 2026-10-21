@@ -1,7 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { formatDurationMs, formatTimeInSeconds, utcToLocalDate } from './date';
+import {
+  formatDurationMs,
+  formatTimeInSeconds,
+  getElapsedSeconds,
+  utcToLocalDate,
+} from '@nemo/common/src/utils/date';
 
 describe('formatTimeInSeconds', () => {
   it('Returns empty string when seconds is undefined', () => {
@@ -135,5 +140,24 @@ describe('utcToLocalDate', () => {
     // With microseconds (JavaScript will truncate to milliseconds)
     const result3 = utcToLocalDate('2025-11-17T21:53:35.123456');
     expect(result3?.toISOString()).toBe('2025-11-17T21:53:35.123Z');
+  });
+});
+
+describe('getElapsedSeconds', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('Returns whole seconds between start and end', () => {
+    expect(getElapsedSeconds(0, 0)).toBe(0);
+    expect(getElapsedSeconds(1_000, 4_000)).toBe(3);
+    expect(getElapsedSeconds(0, 61_999)).toBe(61);
+  });
+
+  it('Defaults the end to now', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2025-11-17T21:53:35.900Z'));
+    const start = new Date('2025-11-17T21:52:30.000Z').getTime();
+    expect(getElapsedSeconds(start)).toBe(65);
   });
 });

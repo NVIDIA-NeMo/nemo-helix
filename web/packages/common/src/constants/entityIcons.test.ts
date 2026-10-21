@@ -19,6 +19,7 @@ const INTENTIONAL_ALIASES: Record<string, string> = {
   insightExperiments: 'experiments',
   // A config and its tests are one thing to the user.
   guardrailChecks: 'guardrails',
+  recentJobs: 'jobs',
 };
 
 describe('ENTITY_ICONS', () => {

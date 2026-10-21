@@ -84,6 +84,7 @@ describe('useModelDeploymentStatuses', () => {
     ]);
     await waitFor(() => expect(result.current.get('row-model')?.kind).toBe('served'));
     expect(result.current.get('row-adapter')?.kind).toBe('served');
+    expect(result.current.get('row-model')).toMatchObject({ deploymentRef: 'ws/dep-a' });
   });
 
   it('marks an adapter not-loaded when only its base is served', async () => {

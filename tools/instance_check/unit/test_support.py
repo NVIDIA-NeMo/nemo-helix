@@ -6,6 +6,7 @@
 from types import SimpleNamespace
 
 import pytest
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.jobs.watch_types import JobLogEvent, JobStatusEvent, JobWarningEvent
 from support import (
     accept_report,
@@ -16,6 +17,11 @@ from support import (
     wait_for_deployment,
     wait_for_job,
 )
+
+
+def _client() -> NemoClient:
+    """A client that is never called: each test replaces the service client built from it."""
+    return NemoClient(base_url="http://platform.test", workspace="default")
 
 
 def test_chat_target_uses_the_model_workspace() -> None:
@@ -52,9 +58,9 @@ def test_default_task_image_does_not_borrow_another_profile(
             return profiles
 
     monkeypatch.setattr("support.JobsClient.from_client", lambda client: Jobs())
-    assert default_task_image(SimpleNamespace(), "default") is None
-    assert default_task_image(SimpleNamespace(), "missing") is None
-    assert default_task_image(SimpleNamespace(), None) == "registry.example/nhx-tasks:gpu"
+    assert default_task_image(_client(), "default") is None
+    assert default_task_image(_client(), "missing") is None
+    assert default_task_image(_client(), None) == "registry.example/nhx-tasks:gpu"
 
 
 def test_report_path_is_unique_to_the_run() -> None:
@@ -102,7 +108,7 @@ def test_wait_for_job_prints_watch_events(monkeypatch: pytest.MonkeyPatch, capsy
             return events
 
     monkeypatch.setattr("support.JobsClient.from_client", lambda client: Jobs())
-    assert wait_for_job(SimpleNamespace(), "ws", "job-1", 5) is job
+    assert wait_for_job(_client(), "ws", "job-1", 5) is job
     output = capsys.readouterr().out
     assert "watching job job-1" in output
     assert "job job-1: pending" in output
@@ -127,7 +133,7 @@ def test_wait_for_deployment_prints_status_history(
             return SimpleNamespace(data=lambda: deployment)
 
     monkeypatch.setattr("support.DeploymentsClient.from_client", lambda client: Deployments())
-    assert wait_for_deployment(SimpleNamespace(), "ws", "dep-1", 5) is deployment
+    assert wait_for_deployment(_client(), "ws", "dep-1", 5) is deployment
     output = capsys.readouterr().out
     assert "watching deployment dep-1" in output
     assert "deployment dep-1: PENDING scheduled" in output
