@@ -317,10 +317,12 @@ describe('FilesetListRoute', () => {
       const classes = purposes.map((p) => screen.getAllByTestId(`purpose-pill-${p}`)[0].className);
       expect(new Set(classes).size).toBe(purposes.length);
 
-      // Purpose is a checkbox filter: nothing is checked by default (generic stays off)
-      await user.click(screen.getByRole('button', { name: /filter/i }));
-      const names = ['Dataset', 'Environment', 'Model', 'Generic'];
-      names.forEach((name) => expect(screen.getByRole('checkbox', { name })).not.toBeChecked());
+      // Purpose is a checkbox filter: the default purposes are checked, generic is off
+      await user.click(screen.getByRole('button', { name: /^filter$/i }));
+      ['Dataset', 'Environment', 'Model'].forEach((name) =>
+        expect(screen.getByRole('checkbox', { name })).toBeChecked()
+      );
+      expect(screen.getByRole('checkbox', { name: 'Generic' })).not.toBeChecked();
 
       // checking Generic opts those filesets in
       await user.click(screen.getByRole('checkbox', { name: 'Generic' }));

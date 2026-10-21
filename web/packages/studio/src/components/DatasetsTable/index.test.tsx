@@ -507,7 +507,8 @@ describe('DatasetsTable', () => {
       expect(
         screen.getByText('No items match your current search or filters.')
       ).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /Clear filters/i })).toBeInTheDocument();
+      // the applied-filters bar (default purposes) also offers one, so expect at least the empty state's
+      expect(screen.getAllByRole('button', { name: /Clear filters/i }).length).toBeGreaterThan(0);
     });
   });
 
