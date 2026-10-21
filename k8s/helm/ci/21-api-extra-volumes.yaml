@@ -5,6 +5,7 @@
 # Exercises API extra volume/mount rendering with workload token exchange config.
 
 api:
+  internalBaseUrl: https://helix.internal.example.test
   extraVolumes:
     - name: workload-token-signing-key
       secret:
@@ -15,6 +16,7 @@ api:
       readOnly: true
 platformConfig:
   auth:
+    enabled: true
     oidc:
       workload:
         client_id: nemo-workload

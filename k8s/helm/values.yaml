@@ -497,7 +497,11 @@ baseHelixConfig: |
     runtime: kubernetes
 
     # Base URLs for various Helix services
-    base_url: "{{ printf "http://%s:%s" (include "nhx-api.api-servicename" . ) (toString .Values.api.service.port) }}"
+    base_url: {{ include "nemo-helix.internalBaseUrl" . | quote }}
+    {{- if .Values.api.internalBaseUrl }}
+    # Keep token discovery/issuer URLs stable even when the API connects over loopback.
+    advertised_base_url: {{ include "nemo-helix.internalBaseUrl" . | quote }}
+    {{- end }}
 
     # Image configuration for launching containers via the platform
     image_registry: nvcr.io/nvidia/nemo-helix
@@ -522,7 +526,7 @@ baseHelixConfig: |
   auth:
     enabled: false
     policy_decision_point_provider: embedded
-    policy_decision_point_base_url: "{{ printf "http://%s:%s" (include "nhx-api.api-servicename" . ) (toString .Values.api.service.port) }}"
+    policy_decision_point_base_url: {{ include "nemo-helix.internalBaseUrl" . | quote }}
     policy_data_refresh_interval: 5
     bundle_cache_seconds: 5
     admin_email: "admin@example.com"
@@ -782,6 +786,9 @@ api:
   componentLabel: nhx-api
   # -- Specifies whether to enable the api deployment.
   enabled: true
+
+  # -- Cluster-reachable API URL for controllers and managed workloads. Empty uses the HTTP API Service. Set to an HTTPS ingress/gateway URL when enabling auth.oidc.workload; this does not enable TLS on the API server.
+  internalBaseUrl: ""
 
   # -- Container image configuration for the api deployment.
   # @default -- This object has the following default values for the image configuration.

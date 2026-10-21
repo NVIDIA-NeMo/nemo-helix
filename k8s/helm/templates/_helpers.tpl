@@ -135,7 +135,35 @@ Bind address for in-cluster platform runner pods.
 Internal API URL for pods that need to call the platform API service.
 */}}
 {{- define "nemo-helix.internalBaseUrl" -}}
+{{- if .Values.api.internalBaseUrl -}}
+{{- tpl .Values.api.internalBaseUrl . | trimSuffix "/" -}}
+{{- else -}}
 {{- printf "http://%s:%s" (include "nhx-api.api-servicename" .) (toString .Values.api.service.port) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Workload bearer tokens require a TLS-protected route between pods. Validate before
+installation instead of leaving the controller stuck at its startup probe.
+Do not call this from calculatedConfig: its defaults use internalBaseUrl.
+*/}}
+{{- define "nemo-helix.validateWorkloadTransport" -}}
+{{- $config := include "nemo-helix.calculatedConfig" . | fromYaml -}}
+{{- $oidc := dig "auth" "oidc" (dict) $config -}}
+{{- if and (dig "auth" "enabled" false $config) (hasKey $oidc "workload") (ne (get $oidc "workload") nil) -}}
+{{- $internalUrl := include "nemo-helix.internalBaseUrl" . -}}
+{{- if not (regexMatch "^https://[^/?#[:space:]@]+(/[^?#[:space:]]*)?$" $internalUrl) -}}
+{{- fail "auth.oidc.workload requires api.internalBaseUrl to be a cluster-reachable HTTPS ingress/gateway URL; the default HTTP API Service cannot carry bearer tokens. This setting does not enable TLS on the API server." -}}
+{{- end -}}
+{{- $platformUrl := dig "platform" "base_url" $internalUrl $config -}}
+{{- if not (regexMatch "^https://[^/?#[:space:]@]+(/[^?#[:space:]]*)?$" $platformUrl) -}}
+{{- fail "auth.oidc.workload requires platformConfig.platform.base_url to use HTTPS; remove the override to inherit api.internalBaseUrl." -}}
+{{- end -}}
+{{- $advertisedUrl := dig "platform" "advertised_base_url" $platformUrl $config | default $platformUrl -}}
+{{- if not (regexMatch "^https://[^/?#[:space:]@]+(/[^?#[:space:]]*)?$" $advertisedUrl) -}}
+{{- fail "auth.oidc.workload requires platformConfig.platform.advertised_base_url to use HTTPS; remove the override to inherit api.internalBaseUrl." -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
