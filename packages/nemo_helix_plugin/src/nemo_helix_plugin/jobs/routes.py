@@ -49,7 +49,6 @@ from nemo_helix_plugin.authz import AuthzScope
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.job import job_collection_path_for
 from nemo_helix_plugin.jobs.api_factory import (
-    BaseJobsListFilter,
     HelixJobResultRoute,
     JobRouteOption,
     _submit_control_kwargs,
@@ -131,12 +130,6 @@ def add_job_routes(
     job_output = job_cls.spec_schema if job_cls.input_spec_schema is not None else None
     input_to_output = _adapt_to_spec(job_cls) if job_cls.input_spec_schema is not None else None
 
-    jobs_list_filter = job_cls.jobs_list_filter
-    if jobs_list_filter is not None and not issubclass(jobs_list_filter, BaseJobsListFilter):
-        raise TypeError(
-            f"{job_cls.__name__}.jobs_list_filter must subclass BaseJobsListFilter, got {jobs_list_filter.__name__}"
-        )
-
     router = job_route_factory(
         service_name=resolved_service_name,
         job_type=job_type,
@@ -148,7 +141,7 @@ def add_job_routes(
         job_result_routes=job_result_routes,
         generate_job_name=generate_job_name,
         authz=authz,
-        jobs_list_filter=jobs_list_filter,
+        jobs_list_filter=job_cls.jobs_list_filter,
     )
     return _rebase_job_collection_routes(router, job_collection_path_for(job_cls))
 
