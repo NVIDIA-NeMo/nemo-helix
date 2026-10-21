@@ -4,9 +4,11 @@
 schema-version = "1.14.0"
 
 [install]
-nodejs = { pkg-path = "nodejs_22", version = "22.23.2", pkg-group = "node" }
+# Fixed releases are not in the Flox catalog yet; use the pinned Nixpkgs package.
+nodejs = { flake = "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a#nodejs_22" }
 
 [vars]
+NODE_VERSION="22.23.4"
 PNPM_VERSION = "10.34.5"
 COREPACK_HOME = "${FLOX_ENV_CACHE}/corepack"
 COREPACK_SHIMS = "${FLOX_ENV_CACHE}/corepack/bin"

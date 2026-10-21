@@ -846,6 +846,9 @@ target "nhx-gym-tasks-docker" {
   target     = "runtime"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-gym-tasks"
+  args = {
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+  }
   contexts = {
     nhx-python-base = "target:nhx-python-base"
     nhx-tasks   = "target:nhx-tasks-docker"
@@ -863,6 +866,9 @@ target "nhx-gym-tasks-smoke-test" {
   target     = "smoke-test"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-gym-tasks"
+  args = {
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+  }
   contexts = {
     nhx-python-base = "target:nhx-python-base"
     nhx-tasks   = "target:nhx-tasks-docker"
@@ -884,6 +890,7 @@ target "nhx-gym-host-docker" {
   }
   args = {
     NHX_PYTHON_IMAGE = NHX_PYTHON_IMAGE
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
   }
   cache-to   = maybe_registry_cache_to("nhx-gym-host")
   cache-from = maybe_registry_cache_from("nhx-gym-host")
@@ -902,6 +909,7 @@ target "nhx-gym-host-smoke-test" {
   }
   args = {
     NHX_PYTHON_IMAGE = NHX_PYTHON_IMAGE
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
   }
   cache-from = maybe_registry_cache_from("nhx-gym-host")
   output     = ["type=cacheonly"]

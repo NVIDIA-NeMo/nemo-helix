@@ -25,10 +25,8 @@ ARG USERNAME=ubuntu
 ARG USER_UID=1000
 ARG USER_GID=1000
 
-# Platform glue is pinned to uv <0.10.0 (docker/rl/pyproject.workspace.toml required-version), while
-# the base ships RL's uv 0.11.18. Use a build-only uv 0.9.14 for the editable installs so uv does
-# not reject on required-version; the base's runtime uv is untouched.
-COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /usr/local/bin/uv-glue
+# Use the patched uv for platform glue and the base runtime.
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /uvx /usr/local/bin/-glue
 
 COPY --from=platform-workspace / /app
 WORKDIR /app
@@ -98,6 +96,13 @@ EOF
 
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+# Update each installed Python environment and rebuild embedded Go TLS clients.
+RUN --mount=from=golang:1.27.3,source=/usr/local/go,target=/usr/local/go,readonly \
+    --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=bind,source=docker/scripts/update-python-trust.py,target=/tmp/update-python-trust.py,readonly \
+    --mount=type=bind,source=docker/scripts/collect-go-module-sources.py,target=/tmp/collect-go-module-sources.py,readonly \
+    GOTOOLCHAIN=local GOROOT=/usr/local/go python3 /tmp/update-python-trust.py
+
 RUN --mount=type=cache,target=/root/.cache/uv \
     UV_BIN=uv-glue uv-glue run --no-project --python /opt/nemo_rl_venv/bin/python \
     /usr/local/bin/collect-python-sdists.py \

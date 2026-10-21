@@ -21,8 +21,7 @@
         "pkg-path": "gnutar"
       },
       "go_1_26": {
-        "pkg-path": "go_1_26",
-        "version": "1.26.5"
+        "flake": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a#go_1_26"
       },
       "gum": {
         "pkg-path": "gum"
@@ -43,9 +42,7 @@
         "version": "4.2.3"
       },
       "nodejs": {
-        "pkg-path": "nodejs_22",
-        "pkg-group": "node",
-        "version": "22.23.2"
+        "flake": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a#nodejs_22"
       },
       "open-policy-agent": {
         "pkg-path": "open-policy-agent",
@@ -63,9 +60,7 @@
         "version": "0.11.0"
       },
       "uv": {
-        "pkg-path": "uv",
-        "pkg-group": "uv",
-        "version": "0.10.10"
+        "flake": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a#uv"
       },
       "yq-go": {
         "pkg-path": "yq-go"
@@ -80,6 +75,7 @@
       "FOREGROUND": "#76B900",
       "GUM_LOG_MESSAGE_FOREGROUND": "#76B900",
       "MARGIN": "1 2",
+      "NODE_VERSION": "22.23.4",
       "PADDING": "1 2",
       "PNPM_VERSION": "10.34.5",
       "UV_CACHE_DIR": "${FLOX_ENV_CACHE}/uv-cache",
@@ -87,6 +83,7 @@
       "UV_PYTHON": "3.13",
       "UV_PYTHON_INSTALL_DIR": "${FLOX_ENV_CACHE}/python",
       "UV_VENV_SEED": "1",
+      "UV_VERSION": "0.13.4",
       "WIDTH": "50"
     },
     "hook": {
@@ -555,93 +552,6 @@
       },
       "system": "x86_64-linux",
       "group": "kubernetes-helm",
-      "priority": 5
-    },
-    {
-      "attr_path": "nodejs_22",
-      "broken": false,
-      "derivation": "/nix/store/98iw9769gchj4vs8vkfvkdnxczaarami-nodejs-22.23.2.drv",
-      "description": "Event-driven I/O framework for the V8 JavaScript engine",
-      "install_id": "nodejs",
-      "license": "MIT",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=f13ff45afd1bb73e640eaa08a7066dbed07e3238",
-      "name": "nodejs-22.23.2",
-      "pname": "nodejs_22",
-      "rev": "f13ff45afd1bb73e640eaa08a7066dbed07e3238",
-      "rev_count": 1049422,
-      "rev_date": "2026-08-07T12:45:23Z",
-      "scrape_date": "2026-08-09T04:55:15.826463Z",
-      "stabilities": [
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "22.23.2",
-      "outputs_to_install": [
-        "out"
-      ],
-      "outputs": {
-        "out": "/nix/store/s0qzknz77k3lzikgywx2piilfp8w0581-nodejs-22.23.2"
-      },
-      "system": "aarch64-darwin",
-      "group": "node",
-      "priority": 5
-    },
-    {
-      "attr_path": "nodejs_22",
-      "broken": false,
-      "derivation": "/nix/store/i9h6nligglciwssrc0zdri9zji0hx20c-nodejs-22.23.2.drv",
-      "description": "Event-driven I/O framework for the V8 JavaScript engine",
-      "install_id": "nodejs",
-      "license": "MIT",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=f13ff45afd1bb73e640eaa08a7066dbed07e3238",
-      "name": "nodejs-22.23.2",
-      "pname": "nodejs_22",
-      "rev": "f13ff45afd1bb73e640eaa08a7066dbed07e3238",
-      "rev_count": 1049422,
-      "rev_date": "2026-08-07T12:45:23Z",
-      "scrape_date": "2026-08-09T05:24:46.217099Z",
-      "stabilities": [
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "22.23.2",
-      "outputs_to_install": [
-        "out"
-      ],
-      "outputs": {
-        "out": "/nix/store/i7dq81ramvcyrzasgv8qbf07rgfiqiai-nodejs-22.23.2"
-      },
-      "system": "aarch64-linux",
-      "group": "node",
-      "priority": 5
-    },
-    {
-      "attr_path": "nodejs_22",
-      "broken": false,
-      "derivation": "/nix/store/1x2rjyk2j93jmsl6myl8nrv7b95viv21-nodejs-22.23.2.drv",
-      "description": "Event-driven I/O framework for the V8 JavaScript engine",
-      "install_id": "nodejs",
-      "license": "MIT",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=f13ff45afd1bb73e640eaa08a7066dbed07e3238",
-      "name": "nodejs-22.23.2",
-      "pname": "nodejs_22",
-      "rev": "f13ff45afd1bb73e640eaa08a7066dbed07e3238",
-      "rev_count": 1049422,
-      "rev_date": "2026-08-07T12:45:23Z",
-      "scrape_date": "2026-08-09T05:59:03.273842Z",
-      "stabilities": [
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "22.23.2",
-      "outputs_to_install": [
-        "out"
-      ],
-      "outputs": {
-        "out": "/nix/store/3vm4j8im8bzdal3dsgmhv9gb5kvanbp1-nodejs-22.23.2"
-      },
-      "system": "x86_64-linux",
-      "group": "node",
       "priority": 5
     },
     {
@@ -1199,93 +1109,6 @@
       "priority": 5
     },
     {
-      "attr_path": "go_1_26",
-      "broken": false,
-      "derivation": "/nix/store/0dxyf0bcag7qxchhh3cny1r08b81mxdh-go-1.26.5.drv",
-      "description": "Go Programming language",
-      "install_id": "go_1_26",
-      "license": "BSD-3-Clause",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=f13ff45afd1bb73e640eaa08a7066dbed07e3238",
-      "name": "go-1.26.5",
-      "pname": "go_1_26",
-      "rev": "f13ff45afd1bb73e640eaa08a7066dbed07e3238",
-      "rev_count": 1049422,
-      "rev_date": "2026-08-07T12:45:23Z",
-      "scrape_date": "2026-08-09T04:54:51.766781Z",
-      "stabilities": [
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "1.26.5",
-      "outputs_to_install": [
-        "out"
-      ],
-      "outputs": {
-        "out": "/nix/store/8g06ffyaas333hzhsjcd50nqbsldqjhh-go-1.26.5"
-      },
-      "system": "aarch64-darwin",
-      "group": "toplevel",
-      "priority": 5
-    },
-    {
-      "attr_path": "go_1_26",
-      "broken": false,
-      "derivation": "/nix/store/4kmvimps8r86phrbzdjs0pi51b4qa3m0-go-1.26.5.drv",
-      "description": "Go Programming language",
-      "install_id": "go_1_26",
-      "license": "BSD-3-Clause",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=f13ff45afd1bb73e640eaa08a7066dbed07e3238",
-      "name": "go-1.26.5",
-      "pname": "go_1_26",
-      "rev": "f13ff45afd1bb73e640eaa08a7066dbed07e3238",
-      "rev_count": 1049422,
-      "rev_date": "2026-08-07T12:45:23Z",
-      "scrape_date": "2026-08-09T05:24:11.398145Z",
-      "stabilities": [
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "1.26.5",
-      "outputs_to_install": [
-        "out"
-      ],
-      "outputs": {
-        "out": "/nix/store/p8wbwrmaqggbg1griwkcjag8lbkgz0qg-go-1.26.5"
-      },
-      "system": "aarch64-linux",
-      "group": "toplevel",
-      "priority": 5
-    },
-    {
-      "attr_path": "go_1_26",
-      "broken": false,
-      "derivation": "/nix/store/mqiiz9f9arjp5kfk3cj1r94k36yjmpka-go-1.26.5.drv",
-      "description": "Go Programming language",
-      "install_id": "go_1_26",
-      "license": "BSD-3-Clause",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=f13ff45afd1bb73e640eaa08a7066dbed07e3238",
-      "name": "go-1.26.5",
-      "pname": "go_1_26",
-      "rev": "f13ff45afd1bb73e640eaa08a7066dbed07e3238",
-      "rev_count": 1049422,
-      "rev_date": "2026-08-07T12:45:23Z",
-      "scrape_date": "2026-08-09T05:58:26.456053Z",
-      "stabilities": [
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "1.26.5",
-      "outputs_to_install": [
-        "out"
-      ],
-      "outputs": {
-        "out": "/nix/store/pwj3x44pp735yb038fnmqckyyra9k29x-go-1.26.5"
-      },
-      "system": "x86_64-linux",
-      "group": "toplevel",
-      "priority": 5
-    },
-    {
       "attr_path": "gum",
       "broken": false,
       "derivation": "/nix/store/qbnsslqpy1phwqia82fnkhnqkz0rlgx3-gum-0.17.0.drv",
@@ -1460,93 +1283,267 @@
       "priority": 5
     },
     {
-      "attr_path": "uv",
-      "broken": false,
-      "derivation": "/nix/store/ca4c5p52xg20k2ygh212fjl0sj027cns-uv-0.10.10.drv",
-      "description": "Extremely fast Python package installer and resolver, written in Rust",
-      "install_id": "uv",
-      "license": "[ Apache-2.0, MIT ]",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=b40629efe5d6ec48dd1efba650c797ddbd39ace0",
-      "name": "uv-0.10.10",
-      "pname": "uv",
-      "rev": "b40629efe5d6ec48dd1efba650c797ddbd39ace0",
-      "rev_count": 964859,
-      "rev_date": "2026-03-18T08:17:15Z",
-      "scrape_date": "2026-03-20T00:42:40.851800Z",
-      "stabilities": [
-        "staging",
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "0.10.10",
-      "outputs_to_install": [
+      "install_id": "go_1_26",
+      "locked-url": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a?narHash=sha256-Jyf1RAg7n1FGKEATWLl2IX0b5oHGv0QCSqk/dGeTfpI%3D",
+      "flake-description": "A collection of packages for the Nix package manager",
+      "locked-flake-attr-path": "legacyPackages.aarch64-darwin.go_1_26",
+      "derivation": "/nix/store/rabbvmmrs2yknqg3qq8ib4bfd6i6qndm-go-1.26.10.drv",
+      "outputs": {
+        "out": "/nix/store/zm3sm3zv21c2jz90bh16jc7rgqfcnivs-go-1.26.10"
+      },
+      "output-names": [
         "out"
       ],
-      "outputs": {
-        "out": "/nix/store/ak82pfbm5lz4n4bgdqw4vi2mz2yjhzva-uv-0.10.10"
-      },
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "aarch64-darwin",
       "system": "aarch64-darwin",
-      "group": "uv",
+      "name": "go-1.26.10",
+      "pname": "go",
+      "version": "1.26.10",
+      "description": "Go Programming language",
+      "licenses": [
+        "BSD-3-Clause"
+      ],
+      "broken": false,
+      "unfree": false,
       "priority": 5
     },
     {
-      "attr_path": "uv",
-      "broken": false,
-      "derivation": "/nix/store/9wlmkw8d5azyg2skikr8d51adp86k2dg-uv-0.10.10.drv",
-      "description": "Extremely fast Python package installer and resolver, written in Rust",
-      "install_id": "uv",
-      "license": "[ Apache-2.0, MIT ]",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=b40629efe5d6ec48dd1efba650c797ddbd39ace0",
-      "name": "uv-0.10.10",
-      "pname": "uv",
-      "rev": "b40629efe5d6ec48dd1efba650c797ddbd39ace0",
-      "rev_count": 964859,
-      "rev_date": "2026-03-18T08:17:15Z",
-      "scrape_date": "2026-03-20T01:15:03.366659Z",
-      "stabilities": [
-        "staging",
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "0.10.10",
-      "outputs_to_install": [
+      "install_id": "go_1_26",
+      "locked-url": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a?narHash=sha256-Jyf1RAg7n1FGKEATWLl2IX0b5oHGv0QCSqk/dGeTfpI%3D",
+      "flake-description": "A collection of packages for the Nix package manager",
+      "locked-flake-attr-path": "legacyPackages.aarch64-linux.go_1_26",
+      "derivation": "/nix/store/6py5pwyazb6fx2ai40s08qyc1w2zzvdg-go-1.26.10.drv",
+      "outputs": {
+        "out": "/nix/store/k2vfr5rajk1gjpsdzgqdfz1gkadrc7v7-go-1.26.10"
+      },
+      "output-names": [
         "out"
       ],
-      "outputs": {
-        "out": "/nix/store/25wyj6wz00gr09kiv2gszh11j2ka2p26-uv-0.10.10"
-      },
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "aarch64-linux",
       "system": "aarch64-linux",
-      "group": "uv",
+      "name": "go-1.26.10",
+      "pname": "go",
+      "version": "1.26.10",
+      "description": "Go Programming language",
+      "licenses": [
+        "BSD-3-Clause"
+      ],
+      "broken": false,
+      "unfree": false,
       "priority": 5
     },
     {
-      "attr_path": "uv",
-      "broken": false,
-      "derivation": "/nix/store/z31wwa66jhm52hnvisy4lmqh9y5bx4dm-uv-0.10.10.drv",
-      "description": "Extremely fast Python package installer and resolver, written in Rust",
-      "install_id": "uv",
-      "license": "[ Apache-2.0, MIT ]",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=b40629efe5d6ec48dd1efba650c797ddbd39ace0",
-      "name": "uv-0.10.10",
-      "pname": "uv",
-      "rev": "b40629efe5d6ec48dd1efba650c797ddbd39ace0",
-      "rev_count": 964859,
-      "rev_date": "2026-03-18T08:17:15Z",
-      "scrape_date": "2026-03-20T02:20:00.125246Z",
-      "stabilities": [
-        "staging",
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "0.10.10",
-      "outputs_to_install": [
+      "install_id": "go_1_26",
+      "locked-url": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a?narHash=sha256-Jyf1RAg7n1FGKEATWLl2IX0b5oHGv0QCSqk/dGeTfpI%3D",
+      "flake-description": "A collection of packages for the Nix package manager",
+      "locked-flake-attr-path": "legacyPackages.x86_64-linux.go_1_26",
+      "derivation": "/nix/store/mxqlh07a9kdcabldzlwwrpacvf4qnnzq-go-1.26.10.drv",
+      "outputs": {
+        "out": "/nix/store/fkz7zn1a0yiryf9kri2yh1s12k1sv557-go-1.26.10"
+      },
+      "output-names": [
         "out"
       ],
-      "outputs": {
-        "out": "/nix/store/lsifgwpalj0dgnjh6raal9gmvcn6m6s5-uv-0.10.10"
-      },
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "x86_64-linux",
       "system": "x86_64-linux",
-      "group": "uv",
+      "name": "go-1.26.10",
+      "pname": "go",
+      "version": "1.26.10",
+      "description": "Go Programming language",
+      "licenses": [
+        "BSD-3-Clause"
+      ],
+      "broken": false,
+      "unfree": false,
+      "priority": 5
+    },
+    {
+      "install_id": "nodejs",
+      "locked-url": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a?narHash=sha256-Jyf1RAg7n1FGKEATWLl2IX0b5oHGv0QCSqk/dGeTfpI%3D",
+      "flake-description": "A collection of packages for the Nix package manager",
+      "locked-flake-attr-path": "legacyPackages.aarch64-darwin.nodejs_22",
+      "derivation": "/nix/store/s1kd274p1n6cbnbqbxmj0hi8bj0ifmk4-nodejs-22.23.4.drv",
+      "outputs": {
+        "out": "/nix/store/dwm5sm9a4287fdim8cxyc5v6v8sq6iww-nodejs-22.23.4"
+      },
+      "output-names": [
+        "out"
+      ],
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "aarch64-darwin",
+      "system": "aarch64-darwin",
+      "name": "nodejs-22.23.4",
+      "pname": "nodejs",
+      "version": "22.23.4",
+      "description": "Event-driven I/O framework for the V8 JavaScript engine",
+      "licenses": [
+        "MIT"
+      ],
+      "broken": false,
+      "unfree": false,
+      "priority": 5
+    },
+    {
+      "install_id": "nodejs",
+      "locked-url": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a?narHash=sha256-Jyf1RAg7n1FGKEATWLl2IX0b5oHGv0QCSqk/dGeTfpI%3D",
+      "flake-description": "A collection of packages for the Nix package manager",
+      "locked-flake-attr-path": "legacyPackages.aarch64-linux.nodejs_22",
+      "derivation": "/nix/store/17rdnkqvjj8lq8l6g5jh0ps1qfidzyxl-nodejs-22.23.4.drv",
+      "outputs": {
+        "out": "/nix/store/bwkaqhf9650zqdk497yifczi89xxg573-nodejs-22.23.4"
+      },
+      "output-names": [
+        "out"
+      ],
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "aarch64-linux",
+      "system": "aarch64-linux",
+      "name": "nodejs-22.23.4",
+      "pname": "nodejs",
+      "version": "22.23.4",
+      "description": "Event-driven I/O framework for the V8 JavaScript engine",
+      "licenses": [
+        "MIT"
+      ],
+      "broken": false,
+      "unfree": false,
+      "priority": 5
+    },
+    {
+      "install_id": "nodejs",
+      "locked-url": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a?narHash=sha256-Jyf1RAg7n1FGKEATWLl2IX0b5oHGv0QCSqk/dGeTfpI%3D",
+      "flake-description": "A collection of packages for the Nix package manager",
+      "locked-flake-attr-path": "legacyPackages.x86_64-linux.nodejs_22",
+      "derivation": "/nix/store/154w5kksq9140bhc4fjjcx0kf50a17dw-nodejs-22.23.4.drv",
+      "outputs": {
+        "out": "/nix/store/lr2c5f2y7q62pzfrkclgsy5yj31hsn5l-nodejs-22.23.4"
+      },
+      "output-names": [
+        "out"
+      ],
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "x86_64-linux",
+      "system": "x86_64-linux",
+      "name": "nodejs-22.23.4",
+      "pname": "nodejs",
+      "version": "22.23.4",
+      "description": "Event-driven I/O framework for the V8 JavaScript engine",
+      "licenses": [
+        "MIT"
+      ],
+      "broken": false,
+      "unfree": false,
+      "priority": 5
+    },
+    {
+      "install_id": "uv",
+      "locked-url": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a?narHash=sha256-Jyf1RAg7n1FGKEATWLl2IX0b5oHGv0QCSqk/dGeTfpI%3D",
+      "flake-description": "A collection of packages for the Nix package manager",
+      "locked-flake-attr-path": "legacyPackages.aarch64-darwin.uv",
+      "derivation": "/nix/store/q1a26xrb313ywl5d6za277f8vw409j1s-uv-0.13.4.drv",
+      "outputs": {
+        "out": "/nix/store/mqcqniddc12lm02ak6axyfn9y3h16myc-uv-0.13.4"
+      },
+      "output-names": [
+        "out"
+      ],
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "aarch64-darwin",
+      "system": "aarch64-darwin",
+      "name": "uv-0.13.4",
+      "pname": "uv",
+      "version": "0.13.4",
+      "description": "Extremely fast Python package installer and resolver, written in Rust",
+      "licenses": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "broken": false,
+      "unfree": false,
+      "priority": 5
+    },
+    {
+      "install_id": "uv",
+      "locked-url": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a?narHash=sha256-Jyf1RAg7n1FGKEATWLl2IX0b5oHGv0QCSqk/dGeTfpI%3D",
+      "flake-description": "A collection of packages for the Nix package manager",
+      "locked-flake-attr-path": "legacyPackages.aarch64-linux.uv",
+      "derivation": "/nix/store/iny23xbn9xmwv0zbyv6nziin9chj0mfn-uv-0.13.4.drv",
+      "outputs": {
+        "out": "/nix/store/wqvfmp8v30wmn39h43gai7p2fy4x8bhi-uv-0.13.4"
+      },
+      "output-names": [
+        "out"
+      ],
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "aarch64-linux",
+      "system": "aarch64-linux",
+      "name": "uv-0.13.4",
+      "pname": "uv",
+      "version": "0.13.4",
+      "description": "Extremely fast Python package installer and resolver, written in Rust",
+      "licenses": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "broken": false,
+      "unfree": false,
+      "priority": 5
+    },
+    {
+      "install_id": "uv",
+      "locked-url": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a?narHash=sha256-Jyf1RAg7n1FGKEATWLl2IX0b5oHGv0QCSqk/dGeTfpI%3D",
+      "flake-description": "A collection of packages for the Nix package manager",
+      "locked-flake-attr-path": "legacyPackages.x86_64-linux.uv",
+      "derivation": "/nix/store/j99d3cz8m58bz6bf7fpfq8rjcqjcvnmp-uv-0.13.4.drv",
+      "outputs": {
+        "out": "/nix/store/lgrjxh2j5dqvdifh2lhrj2w0c0g5i1jg-uv-0.13.4"
+      },
+      "output-names": [
+        "out"
+      ],
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "x86_64-linux",
+      "system": "x86_64-linux",
+      "name": "uv-0.13.4",
+      "pname": "uv",
+      "version": "0.13.4",
+      "description": "Extremely fast Python package installer and resolver, written in Rust",
+      "licenses": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "broken": false,
+      "unfree": false,
       "priority": 5
     }
   ],
@@ -1693,9 +1690,7 @@
           "schema-version": "1.14.0",
           "install": {
             "uv": {
-              "pkg-path": "uv",
-              "pkg-group": "uv",
-              "version": "0.10.10"
+              "flake": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a#uv"
             }
           },
           "vars": {
@@ -1703,7 +1698,8 @@
             "UV_MANAGED_PYTHON": "1",
             "UV_PYTHON": "3.13",
             "UV_PYTHON_INSTALL_DIR": "${FLOX_ENV_CACHE}/python",
-            "UV_VENV_SEED": "1"
+            "UV_VENV_SEED": "1",
+            "UV_VERSION": "0.13.4"
           },
           "hook": {
             "on-activate": "  set -euo pipefail\n\n  export VIRTUAL_ENV=\"$PWD/.venv\"\n  export PATH=\"$VIRTUAL_ENV/bin:$PATH\"\n\n  if uv sync --frozen --all-packages --check; then\n    return 0\n  fi\n\n  echo \"Python environment is out of sync; synchronizing...\"\n  uv sync --frozen --all-packages\n"
@@ -1720,14 +1716,13 @@
           "schema-version": "1.14.0",
           "install": {
             "nodejs": {
-              "pkg-path": "nodejs_22",
-              "pkg-group": "node",
-              "version": "22.23.2"
+              "flake": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a#nodejs_22"
             }
           },
           "vars": {
             "COREPACK_HOME": "${FLOX_ENV_CACHE}/corepack",
             "COREPACK_SHIMS": "${FLOX_ENV_CACHE}/corepack/bin",
+            "NODE_VERSION": "22.23.4",
             "PNPM_VERSION": "10.34.5"
           },
           "hook": {
@@ -1751,8 +1746,7 @@
           "schema-version": "1.14.0",
           "install": {
             "go_1_26": {
-              "pkg-path": "go_1_26",
-              "version": "1.26.5"
+              "flake": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a#go_1_26"
             }
           },
           "options": {

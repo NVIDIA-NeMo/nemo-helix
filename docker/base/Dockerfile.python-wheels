@@ -56,9 +56,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.11 \
     python3.11-dev \
     python3.11-venv \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge "20260816ubuntu0.22.04.1"
 
-COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /uvx /usr/local/bin/
 COPY docker/locks/mamba-wheel-build-py311 /opt/mamba-wheel-build-py311
 
 # Create the Python 3.11 build venv from a committed lockfile.
@@ -112,7 +113,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends software-proper
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /uvx /usr/local/bin/
 
 # special builder for CUDA 13.3 (Automodel/Customizer on NGC 26.07)
 FROM nvcr.io/nvidia/pytorch:26.07-py3 AS mamba-wheel-base-py312-cu13.3
@@ -123,7 +124,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends software-proper
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /uvx /usr/local/bin/
 
 # special builder for CUDA 13.4 (Unsloth on NGC 26.09)
 FROM nvcr.io/nvidia/pytorch:26.09-py3 AS mamba-wheel-base-py312-cu13.4
@@ -134,7 +135,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends software-proper
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /uvx /usr/local/bin/
 
 
 # =============================================================================
@@ -539,7 +540,7 @@ COPY --from=decord2-wheel-builder-py313 /wheels /wheels
 FROM python:${RL_CUDA_EXT_PYTHON}-slim-bookworm AS rl-cuda-ext-cpython
 
 FROM ${RL_CUDA_EXT_BASE} AS rl-cuda-ext-base
-ARG UV_VERSION=0.11.33
+ARG UV_VERSION=0.13.4
 ARG CMAKE_VERSION=4.0.3
 ENV DEBIAN_FRONTEND=noninteractive \
     UV_PYTHON=/opt/cpython/bin/python3.13 \
@@ -590,7 +591,8 @@ RUN chmod -R a+rX /opt/cpython && \
     --index-strategy unsafe-best-match \
     "torch==2.13.0+cu130" \
     ninja packaging "setuptools>=80" wheel psutil einops numpy pybind11 && \
-    mkdir -p /wheels
+    mkdir -p /wheels && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge "20260816ubuntu0.24.04.1"
 
 # causal-conv1d. Installed into the mamba-ssm stage before that build.
 FROM rl-cuda-ext-base AS rl-cuda-ext-causal-conv1d

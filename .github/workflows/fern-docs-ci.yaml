@@ -24,7 +24,7 @@ permissions:
 
 env:
   TOOLCHAIN: system
-  UV_VERSION: 0.10.10
+  UV_VERSION: 0.13.4
 
 jobs:
   check:
