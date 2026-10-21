@@ -3617,9 +3617,7 @@ def test_a_split_job_dir_yields_the_trials_of_both_harbor_jobs(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
-async def test_a_pinned_job_dir_in_the_other_layout_is_discarded(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_a_split_job_dir_rerun_as_one_job_is_discarded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     dataset = tmp_path / "dataset"
     _harbor_task(dataset, "open")
     job_dir = tmp_path / "jobs" / "j"
@@ -3630,6 +3628,26 @@ async def test_a_pinned_job_dir_in_the_other_layout_is_discarded(
 
     assert not (job_dir / HARBOR_SPLIT_MARKER).exists()
     assert not (job_dir / HOST_ALIAS_JOB).exists()
+
+
+@pytest.mark.asyncio
+async def test_a_single_harbor_job_dir_rerun_as_a_split_is_discarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Harbor keeps a single job's config.json and trials at the top of the job dir; the split must not run on top.
+    dataset = tmp_path / "dataset"
+    _harbor_task(dataset, "open")
+    _harbor_task(dataset, "probe", RESTRICTED_TASKS[0])
+    job_dir = tmp_path / "jobs" / "j"
+    (job_dir / "open__old").mkdir(parents=True)
+    (job_dir / "config.json").write_text("{}")
+
+    jobs = await _created_jobs(tmp_path, monkeypatch, dataset)
+
+    assert [name for name, *_ in jobs] == [HOST_ALIAS_JOB, NETWORK_RESTRICTED_JOB]
+    assert not (job_dir / "config.json").exists()
+    assert not (job_dir / "open__old").exists()
+    assert (job_dir / HARBOR_SPLIT_MARKER).exists()
 
 
 @pytest.mark.asyncio
