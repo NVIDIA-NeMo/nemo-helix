@@ -18,6 +18,7 @@ from harbor.models.trial.config import EnvironmentConfig as TrialEnvironmentConf
 from harbor.models.trial.config import ResourceMode
 from harbor.models.trial.paths import TrialPaths
 from nemo_evals.filesets import FilesetRef
+from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT
 from nemo_evals.harbor.remote.profile import ResourceOverrides, resource_defaults
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evals.jobs.agent_spec import AgentEvalSpec, RegisteredAgentSource
@@ -32,7 +33,6 @@ from nemo_evals.jobs.harbor_task_dispatch import (
     check_execution_deadline,
     check_sandbox_server,
     configure_runtime,
-    stage_agent_setup_network,
 )
 from nemo_evals.jobs.harbor_task_spec import (
     HarborTaskJobSpec,
@@ -270,14 +270,52 @@ def test_a_storage_only_task_still_gets_cpu_and_memory_limits(task_spec, tmp_pat
     assert resource == {"cpu": "1", "memory": "2048Mi", "ephemeral-storage": "4096Mi"}
 
 
-def test_runtime_passes_the_frozen_agent_setup_hosts(task_spec, tmp_path):
-    policy = task_spec.sandbox_policy.model_copy(update={"agent_setup_egress": ("registry.npmjs.org",)})
+def _configured_with_setup_hosts(task_spec, tmp_path, hosts: tuple[str, ...], **runtime: Any) -> HarborRuntimeConfig:
+    policy = task_spec.sandbox_policy.model_copy(update={"agent_setup_egress": hosts})
     spec = task_spec.model_copy(update={"sandbox_policy": policy})
     ctx = MagicMock(spec=JobContext)
     ctx.job_id = "run-0123456789abcdef-task-1"
-    configured = configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path), ctx, spec)
+    return configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path, **runtime), ctx, spec)
+
+
+def test_setup_hosts_reach_the_environment_and_wrap_a_builtin_agent(task_spec, tmp_path):
+    configured = _configured_with_setup_hosts(
+        task_spec, tmp_path, ("registry.npmjs.org",), agent_name="claude-code", agent_kwargs={"version": "2.1.0"}
+    )
     assert configured.environment is not None
     assert configured.environment.kwargs["agent_setup_hosts"] == ["registry.npmjs.org"]
+    assert configured.agent_import_path == SETUP_EGRESS_AGENT
+    assert configured.agent_kwargs == {"version": "2.1.0", INNER_AGENT_KWARG: "claude-code"}
+
+
+def test_setup_hosts_wrap_an_importable_custom_agent(task_spec, tmp_path):
+    configured = _configured_with_setup_hosts(
+        task_spec, tmp_path, ("registry.npmjs.org",), agent_import_path="nemo_evals.harbor.agents:SandboxedCodex"
+    )
+    assert configured.agent_import_path == SETUP_EGRESS_AGENT
+    assert configured.agent_kwargs[INNER_AGENT_KWARG] == "nemo_evals.harbor.agents:SandboxedCodex"
+
+
+@pytest.mark.parametrize("agent", ["oracle", "nop"])
+def test_agents_that_install_nothing_are_not_wrapped(task_spec, tmp_path, agent):
+    """Harbor constructs and scores oracle and nop by name, so wrapping them would break them."""
+    configured = _configured_with_setup_hosts(task_spec, tmp_path, ("registry.npmjs.org",), agent_name=agent)
+    assert configured.agent_import_path is None and configured.agent_name == agent
+
+
+def test_without_setup_hosts_the_agent_is_not_wrapped(task_spec, tmp_path):
+    configured = _configured_with_setup_hosts(task_spec, tmp_path, (), agent_name="claude-code")
+    assert configured.agent_import_path is None and configured.agent_name == "claude-code"
+    assert INNER_AGENT_KWARG not in configured.agent_kwargs
+
+
+def test_a_loose_agent_file_runs_unwrapped(task_spec, tmp_path):
+    """The runtime picks a loose file's import path at run time, so it can't be named for the wrapper."""
+    configured = _configured_with_setup_hosts(
+        task_spec, tmp_path, ("registry.npmjs.org",), agent_import_path="wrapper:Agent", agent_dir=tmp_path
+    )
+    assert configured.agent_import_path == "wrapper:Agent"
+    assert INNER_AGENT_KWARG not in configured.agent_kwargs
 
 
 def write_task(root: Path, toml: str, *, compose: bool = False) -> Path:
@@ -314,65 +352,3 @@ def test_bind_rejects_compose_tasks(tmp_path):
     task = write_task(tmp_path / "t", "[environment]\n", compose=True)
     with pytest.raises(ValueError, match="compose tasks"):
         bind_task_image(task, AGENT.image_ref)
-
-
-SETUP_HOSTS = ("registry.npmjs.org", "*.pypi.org")
-
-
-def _phases(task: Path):
-    from harbor.models.task.config import TaskConfig
-
-    config = TaskConfig.model_validate_toml((task / "task.toml").read_text())
-    return (
-        config.environment.resolve_baseline(),
-        config.agent.explicit_phase_policy(),
-        config.verifier.explicit_phase_policy(),
-    )
-
-
-@pytest.mark.parametrize(
-    "environment", ['network_mode = "no-network"', "allow_internet = false"], ids=["network_mode", "allow_internet"]
-)
-def test_setup_network_opens_setup_and_closes_agent_and_verifier(tmp_path, environment):
-    from harbor.models.task.config import NetworkMode
-
-    task = write_task(tmp_path / "t", f"# keep me\n[environment]\n{environment}\n")
-    assert stage_agent_setup_network(task, SETUP_HOSTS) is True
-    baseline, agent, verifier = _phases(task)
-    assert baseline.network_mode == NetworkMode.ALLOWLIST and baseline.allowed_hosts == list(SETUP_HOSTS)
-    assert agent is not None and agent.network_mode == NetworkMode.NO_NETWORK
-    assert verifier is not None and verifier.network_mode == NetworkMode.NO_NETWORK
-    assert (task / "task.toml").read_text().startswith("# keep me")
-
-
-@pytest.mark.parametrize(
-    "toml",
-    [
-        "[environment]\n",
-        '[environment]\nnetwork_mode = "no-network"\n\n[agent]\nnetwork_mode = "no-network"\n',
-        '[environment]\nnetwork_mode = "no-network"\n\n[[steps]]\nname = "one"\n',
-    ],
-    ids=["public", "explicit-agent-phase", "steps"],
-)
-def test_setup_network_leaves_other_tasks_alone(tmp_path, toml):
-    task = write_task(tmp_path / "t", toml)
-    assert stage_agent_setup_network(task, SETUP_HOSTS) is False
-    assert (task / "task.toml").read_text() == toml
-
-
-def test_setup_network_is_off_without_setup_hosts(tmp_path):
-    toml = '[environment]\nnetwork_mode = "no-network"\n'
-    task = write_task(tmp_path / "t", toml)
-    assert stage_agent_setup_network(task, ()) is False
-    assert (task / "task.toml").read_text() == toml
-
-
-def test_setup_network_keeps_an_explicit_verifier_phase(tmp_path):
-    from harbor.models.task.config import NetworkMode
-
-    task = write_task(
-        tmp_path / "t", '[environment]\nnetwork_mode = "no-network"\n\n[verifier]\nnetwork_mode = "public"\n'
-    )
-    assert stage_agent_setup_network(task, SETUP_HOSTS) is True
-    _, _, verifier = _phases(task)
-    assert verifier is not None and verifier.network_mode == NetworkMode.PUBLIC

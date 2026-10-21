@@ -10,23 +10,21 @@ those hosts (the inference gateway) reachable for such tasks; the internet stays
 It also sizes each sandbox as submit checked it: ``agent_resource_overrides`` in the agent sandbox only,
 then task.toml, then ``sandbox_resource_defaults``.
 
-``agent_setup_hosts`` lets an agent that installs itself from the network (apt, npm, PyPI) run on a
-no-network task. The dispatcher rewrites such a task so its sandbox starts on an allowlist of those
-hosts and its agent and verifier phases are no-network; Harbor then calls ``set_network_policy``
-between ``agent.setup()`` and ``agent.run()``. Each switch removes and adds egress rules on the live
-sandbox, kills every process started since the sandbox came up (an install can leave a daemon
-holding a connection, and the sidecar keeps established connections across a policy change), and
-reads the policy back.
+``agent_setup_hosts`` are reachable only inside :meth:`AgentChannelOpenSandboxEnvironment.agent_setup_egress`,
+which :mod:`nemo_evals.harbor.agent_setup_egress` wraps around the agent's ``setup()``. The task's own
+network policy is never widened, so nothing a task declares can reach those hosts.
 """
 
 from __future__ import annotations
 
 import logging
 import shlex
-from typing import Any, override
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from typing import Any, Literal, override
 
-from harbor.environments.capabilities import EnvironmentCapabilities
-from harbor.models.task.config import NetworkMode, NetworkPolicy
+from harbor.environments.base import ExecResult
+from harbor.models.task.config import NetworkMode
 from nemo_evals.harbor.remote.resources import effective_resources
 from nhx_sandbox.egress import EgressAllowlist, EgressPolicy, EgressRule, build_egress_policy
 from nhx_sandbox.harbor_opensandbox_environment import NemoOpenSandboxEnvironment, sandbox_role
@@ -34,16 +32,19 @@ from nhx_sandbox.opensandbox_policy import EgressVerificationError, canonical_eg
 
 logger = logging.getLogger(__name__)
 
-# A process's identity is "<pid>:<start time>", so a PID reused after startup isn't mistaken for the
-# process that had it. Fields are read after the last ")", because a command name may contain spaces.
-# POSIX sh builtins only: task images range from busybox to full distros, and a builtin starts no
-# process the kill loop could hit.
+SHELL = "/bin/sh"
+SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# A process's identity is "<pid>:<start time>", so a PID reused later isn't mistaken for the process
+# that had it. Fields are read after the last ")", because a command name may contain spaces.
 _PROCESS_IDENTITY_FUNCTIONS = """\
 ident() {
   id=
+  state=
   read -r line < "/proc/$1/stat" 2>/dev/null || return 1
   ident_pid=$1
   set -- ${line##*) }
+  state=$1
   id="$ident_pid:${20}"
 }
 """
@@ -60,8 +61,8 @@ done
 """
 )
 
-# Kills every process whose identity isn't in $KEEP, except this command's shell and its ancestors
-# (the execd chain that runs it).
+# Kills every process whose identity isn't in $KEEP, except this shell and its ancestors (the execd chain).
+# Succeeds only once a sweep finds none of them alive, so forked children and slow exits are caught too.
 KILL_NEW_PROCESSES_SCRIPT = (
     _PROCESS_IDENTITY_FUNCTIONS
     + """\
@@ -73,14 +74,26 @@ while [ -n "$p" ] && [ "$p" != 0 ]; do
   set -- ${line##*) }
   p=$2
 done
-for d in /proc/[0-9]*; do
-  pid=${d#/proc/}
-  case "$ancestors" in *" $pid "*) continue ;; esac
-  ident "$pid" || continue
-  case " $KEEP " in *" $id "*) continue ;; esac
-  kill -9 "$pid" 2>/dev/null
+passes=0
+while :; do
+  alive=
+  for d in /proc/[0-9]*; do
+    pid=${d#/proc/}
+    case "$ancestors" in *" $pid "*) continue ;; esac
+    ident "$pid" || continue
+    case " $KEEP " in *" $id "*) continue ;; esac
+    [ "$state" = Z ] && continue
+    alive="$alive $pid"
+    kill -9 "$pid" 2>/dev/null
+  done
+  [ -z "$alive" ] && exit 0
+  passes=$((passes + 1))
+  if [ "$passes" -ge 50 ]; then
+    echo "could not kill:$alive" >&2
+    exit 1
+  fi
+  sleep 0.1 2>/dev/null || sleep 1
 done
-exit 0
 """
 )
 
@@ -93,10 +106,9 @@ def network_rules(rules: list[EgressRule]) -> list[Any]:
 
 
 class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
-    """``NemoOpenSandboxEnvironment`` whose no-network sandboxes may still reach ``agent_channel_hosts``.
+    """``NemoOpenSandboxEnvironment`` whose no-network sandboxes may still reach ``agent_channel_hosts``."""
 
-    With ``agent_setup_hosts``, also switches egress at runtime between agent setup and agent run.
-    """
+    _setup_egress_state: Literal["closed", "open", "closing"] = "closed"
 
     def __init__(
         self,
@@ -110,8 +122,6 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
         # BaseEnvironment.__init__ may validate against the policy, so set the channel first.
         self._agent_channel_hosts = tuple(agent_channel_hosts or ())
         self._agent_setup_hosts = tuple(agent_setup_hosts or ())
-        self._agent_setup_targets = frozenset(canonical_egress_target(host) for host in self._agent_setup_hosts)
-        self._startup_pids: tuple[str, ...] | None = None
         if agent_resource_overrides or sandbox_resource_defaults:
             # Harbor's factory passes these as keywords. A copy: the task's own config must keep task.toml's
             # values, since an inherited separate verifier's config is a copy of it, made after this one.
@@ -131,101 +141,104 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
                 )
         super().__init__(*args, **kwargs)
 
-    @property
-    @override
-    def capabilities(self) -> EnvironmentCapabilities:
-        """The parent's, plus runtime policy switching when there is a setup allowlist to switch away from."""
-        capabilities = super().capabilities
-        if not self._agent_setup_hosts:
-            return capabilities
-        return capabilities.model_copy(update={"dynamic_network_policy": True})
-
-    def _is_setup_policy(self, network_policy: NetworkPolicy) -> bool:
-        """Whether ``network_policy`` is the setup allowlist the dispatcher wrote into the task."""
-        return (
-            bool(self._agent_setup_targets)
-            and network_policy.network_mode == NetworkMode.ALLOWLIST
-            and {canonical_egress_target(host) for host in network_policy.allowed_hosts} == self._agent_setup_targets
-        )
-
-    @override
-    def validate_network_policy_support(self, network_policy: NetworkPolicy | None = None) -> None:
-        """Accept the setup allowlist, which is operator config rather than a task's request."""
-        network_policy = network_policy or self._network_policy
-        if self._is_setup_policy(network_policy):
-            # Harbor's own capability checks still apply; the trusted-allowlist check does not.
-            super(NemoOpenSandboxEnvironment, self).validate_network_policy_support(network_policy)
-            return
-        super().validate_network_policy_support(network_policy)
-
     @override
     def egress_policy(self) -> EgressPolicy:
-        return self._egress_policy_for(self._network_policy)
-
-    def _egress_policy_for(self, network_policy: NetworkPolicy) -> EgressPolicy:
-        """No-network: the agent channel only (empty channel: deny all). Setup: setup hosts plus the channel."""
-        if self._is_setup_policy(network_policy):
-            targets = (*self._agent_setup_hosts, *self._agent_channel_hosts)
-        elif network_policy.network_mode == NetworkMode.NO_NETWORK:
-            if not self._agent_channel_hosts:
-                return EgressPolicy()
-            targets = self._agent_channel_hosts
-        elif network_policy == self._network_policy:
+        """No-network tasks get the agent channel only (empty channel: deny all); other modes are unchanged."""
+        if self._network_policy.network_mode != NetworkMode.NO_NETWORK or not self._agent_channel_hosts:
             return super().egress_policy()
-        else:
-            # Only the dispatcher's setup-then-no-network rewrite switches policy at runtime.
-            raise ValueError(f"cannot switch this sandbox to network policy {network_policy!r}")
-        return build_egress_policy(EgressAllowlist(targets=targets, resolver_addresses=self._resolver_addresses))
+        return build_egress_policy(
+            EgressAllowlist(targets=self._agent_channel_hosts, resolver_addresses=self._resolver_addresses)
+        )
+
+    @asynccontextmanager
+    async def agent_setup_egress(self) -> AsyncGenerator[None, None]:
+        """Let the sandbox reach ``agent_setup_hosts`` for the duration of the block, then close them again.
+
+        The egress sidecar keeps established connections across a rule change, so closing also kills every
+        process started since entry. Until closing has finished, the sandbox refuses every other command:
+        a close that was cancelled or failed must not leave task commands running with the hosts open.
+        """
+        if not self._agent_setup_hosts:
+            yield
+            return
+        sandbox = self._require_sandbox()
+        closed = self.egress_policy()
+        allowed = tuple(rule.target for rule in closed.rules if rule.action == "allow")
+        opened = build_egress_policy(
+            EgressAllowlist(targets=(*allowed, *self._agent_setup_hosts), resolver_addresses=self._resolver_addresses)
+        )
+        label = f"OpenSandbox sandbox for session {self.session_id}"
+        keep = await self._list_processes()
+        try:
+            await self._switch_egress(sandbox, closed, opened, f"{label} (agent setup)")
+            self._setup_egress_state = "open"
+            self.logger.info("Opened agent setup egress for %s", label)
+            yield
+        finally:
+            self._setup_egress_state = "closing"
+            removed = await self._switch_egress(sandbox, opened, closed, f"{label} (after agent setup)", keep=keep)
+            self._setup_egress_state = "closed"
+            self.logger.info("Closed agent setup egress for %s (%d rule(s) removed)", label, len(removed))
+
+    async def _switch_egress(
+        self,
+        sandbox: Any,
+        current: EgressPolicy,
+        wanted: EgressPolicy,
+        label: str,
+        *,
+        keep: tuple[str, ...] | None = None,
+    ) -> list[str]:
+        """Apply ``wanted`` over ``current`` on the live sandbox, then read it back; returns the targets removed.
+
+        With ``keep``, every process not in it is killed after the removed rules are gone, so nothing can
+        reconnect to them in between.
+        """
+        added = [rule for rule in wanted.rules if rule not in current.rules]
+        removed = sorted({rule.target for rule in current.rules} - {rule.target for rule in wanted.rules})
+        if added:
+            await sandbox.patch_egress_rules(network_rules(added))
+        if removed:
+            await sandbox.delete_egress_rules(removed)
+        if keep is not None:
+            await self._kill_processes_except(keep)
+        await verify_applied_egress(sandbox, wanted, mode=self._egress_verification, label=label, require_readback=True)
+        await self._verify_no_longer_allowed(sandbox, removed, label)
+        return removed
 
     @override
-    async def start(self, force_build: bool) -> None:
-        """Start the sandbox, then remember its processes so a policy switch can kill only newer ones."""
-        await super().start(force_build)
-        if self._agent_setup_hosts:
-            self._startup_pids = await self._list_pids()
+    async def exec(
+        self,
+        command: str,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        timeout_sec: int | None = None,
+        user: str | int | None = None,
+    ) -> ExecResult:
+        if self._setup_egress_state == "closing":
+            raise RuntimeError(
+                "the agent setup egress window did not close cleanly; refusing to run more commands in this sandbox"
+            )
+        return await super().exec(command, cwd=cwd, env=env, timeout_sec=timeout_sec, user=user)
 
-    async def _list_pids(self) -> tuple[str, ...]:
-        result = await self.exec(f"sh -c {shlex.quote(LIST_PROCESSES_SCRIPT)}", cwd="/", user="root")
+    async def _list_processes(self) -> tuple[str, ...]:
+        result = await self._exec_cleanup(LIST_PROCESSES_SCRIPT)
         if result.return_code != 0:
             raise RuntimeError(f"could not list sandbox processes (exit {result.return_code}): {result.stderr}")
         return tuple(line.strip() for line in (result.stdout or "").splitlines() if ":" in line)
 
-    async def _kill_processes_since_start(self) -> None:
-        if self._startup_pids is None:
-            raise RuntimeError("the sandbox's startup processes were never recorded")
-        keep = " ".join(self._startup_pids)
-        result = await self.exec(
-            f"KEEP={shlex.quote(keep)} sh -c {shlex.quote(KILL_NEW_PROCESSES_SCRIPT)}", cwd="/", user="root"
-        )
+    async def _kill_processes_except(self, keep: tuple[str, ...]) -> None:
+        result = await self._exec_cleanup(KILL_NEW_PROCESSES_SCRIPT, KEEP=" ".join(keep))
         if result.return_code != 0:
             raise RuntimeError(
                 f"could not stop processes left by agent setup (exit {result.return_code}): {result.stderr}"
             )
 
-    @override
-    async def _apply_network_policy(self, network_policy: NetworkPolicy) -> None:
-        """Move the live sandbox from the current egress policy to ``network_policy``'s.
-
-        Rules leave before leftover processes are killed, so nothing can reconnect in between; rules
-        arrive after, so nothing the previous phase started can use them.
-        """
-        sandbox = self._require_sandbox()
-        current = self.egress_policy()
-        wanted = self._egress_policy_for(network_policy)
-        wanted_targets = {rule.target for rule in wanted.rules}
-        removed = sorted({rule.target for rule in current.rules} - wanted_targets)
-        added = [rule for rule in wanted.rules if rule not in current.rules]
-
-        if removed:
-            await sandbox.delete_egress_rules(removed)
-        await self._kill_processes_since_start()
-        if added:
-            await sandbox.patch_egress_rules(network_rules(added))
-
-        label = f"OpenSandbox sandbox for session {self.session_id} ({network_policy.network_mode.value})"
-        await verify_applied_egress(sandbox, wanted, mode=self._egress_verification, label=label, require_readback=True)
-        await self._verify_no_longer_allowed(sandbox, removed, label)
-        self.logger.info("Switched %s: removed %d egress rule(s), added %d", label, len(removed), len(added))
+    async def _exec_cleanup(self, script: str, **env: str) -> ExecResult:
+        """Runs while every other command is refused, so it goes straight to the parent's ``exec``."""
+        return await NemoOpenSandboxEnvironment.exec(
+            self, f"{SHELL} -c {shlex.quote(script)}", cwd="/", env={"PATH": SYSTEM_PATH, **env}, user="root"
+        )
 
     @staticmethod
     async def _verify_no_longer_allowed(sandbox: Any, removed: list[str], label: str) -> None:
@@ -238,4 +251,4 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
             if getattr(rule, "action", None) == "allow" and canonical_egress_target(str(rule.target)) in gone
         )
         if still_allowed:
-            raise EgressVerificationError(f"{label} still allows {still_allowed} after the policy switch")
+            raise EgressVerificationError(f"{label} still allows {still_allowed} after agent setup")
