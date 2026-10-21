@@ -61,11 +61,46 @@ done
 """
 )
 
-# Kills every process whose identity isn't in $KEEP, except this shell and its ancestors (the execd chain).
-# Succeeds only once a sweep finds none of them alive, so forked children and slow exits are caught too.
-KILL_NEW_PROCESSES_SCRIPT = (
+# Kills every process started since $KEEP was listed that still holds a connection to a non-loopback
+# address, except this shell and its ancestors (the execd chain). Once the setup hosts' rules are gone
+# nothing can open a new connection to them, so only these can still reach one; processes an agent's
+# setup leaves for its run (tmux, a desktop session) hold none and survive. A process whose descriptors
+# can't be read, or every new process when `readlink` is missing, is killed as a holder. Succeeds only
+# once a sweep finds no holder alive, so forked children that inherit a socket are caught too.
+KILL_CONNECTION_HOLDERS_SCRIPT = (
     _PROCESS_IDENTITY_FUNCTIONS
     + """\
+outside_sockets() {
+  sockets=" "
+  for table in /proc/net/tcp /proc/net/tcp6 /proc/net/udp /proc/net/udp6; do
+    [ -r "$table" ] || continue
+    while read -r _ _ remote state _ _ _ _ _ inode _; do
+      case "$remote" in *:*) ;; *) continue ;; esac
+      [ "${remote##*:}" = 0000 ] && continue
+      [ "$state" = 0A ] && continue
+      [ "$inode" = 0 ] && continue
+      case "${remote%:*}" in
+        ??????7F | 0000000000000000FFFF0000??????7F | 00000000000000000000000001000000) continue ;;
+      esac
+      sockets="$sockets$inode "
+    done < "$table"
+  done
+}
+holds_outside_socket() {
+  [ "$inspect" = 1 ] || return 0
+  [ -r "/proc/$1/fd" ] || return 0
+  for fd in /proc/$1/fd/*; do
+    target=$(readlink "$fd" 2>/dev/null) || continue
+    case "$target" in
+      "socket:["*"]")
+        inode=${target#socket:[}
+        case "$sockets" in *" ${inode%]} "*) return 0 ;; esac
+        ;;
+    esac
+  done
+  return 1
+}
+if command -v readlink > /dev/null 2>&1; then inspect=1; else inspect=0; fi
 ancestors=" "
 p=$$
 while [ -n "$p" ] && [ "$p" != 0 ]; do
@@ -76,6 +111,7 @@ while [ -n "$p" ] && [ "$p" != 0 ]; do
 done
 passes=0
 while :; do
+  outside_sockets
   alive=
   for d in /proc/[0-9]*; do
     pid=${d#/proc/}
@@ -83,6 +119,7 @@ while :; do
     ident "$pid" || continue
     case " $KEEP " in *" $id "*) continue ;; esac
     [ "$state" = Z ] && continue
+    holds_outside_socket "$pid" || continue
     alive="$alive $pid"
     kill -9 "$pid" 2>/dev/null
   done
@@ -155,7 +192,7 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
         """Let the sandbox reach ``agent_setup_hosts`` for the duration of the block, then close them again.
 
         The egress sidecar keeps established connections across a rule change, so closing also kills every
-        process started since entry. Until closing has finished, the sandbox refuses every other command:
+        process started since entry that still holds a connection outside the sandbox. Until closing has finished, the sandbox refuses every other command:
         a close that was cancelled or failed must not leave task commands running with the hosts open.
         """
         if not self._agent_setup_hosts:
@@ -201,7 +238,7 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
         if removed:
             await sandbox.delete_egress_rules(removed)
         if keep is not None:
-            await self._kill_processes_except(keep)
+            await self._kill_connection_holders_except(keep)
         await verify_applied_egress(sandbox, wanted, mode=self._egress_verification, label=label, require_readback=True)
         await self._verify_no_longer_allowed(sandbox, removed, label)
         return removed
@@ -227,8 +264,8 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
             raise RuntimeError(f"could not list sandbox processes (exit {result.return_code}): {result.stderr}")
         return tuple(line.strip() for line in (result.stdout or "").splitlines() if ":" in line)
 
-    async def _kill_processes_except(self, keep: tuple[str, ...]) -> None:
-        result = await self._exec_cleanup(KILL_NEW_PROCESSES_SCRIPT, KEEP=" ".join(keep))
+    async def _kill_connection_holders_except(self, keep: tuple[str, ...]) -> None:
+        result = await self._exec_cleanup(KILL_CONNECTION_HOLDERS_SCRIPT, KEEP=" ".join(keep))
         if result.return_code != 0:
             raise RuntimeError(
                 f"could not stop processes left by agent setup (exit {result.return_code}): {result.stderr}"
