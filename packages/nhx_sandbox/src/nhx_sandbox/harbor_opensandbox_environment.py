@@ -536,8 +536,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
     async def _activate_agent_bundle(self, bundle: SandboxAgentBundle) -> None:
         """Put the bundle's executable first on ``PATH`` for every command, then check it runs.
 
-        Harbor's installed agents skip their install when they find the agent on ``PATH``. The
-        image's own ``PATH`` is read as the default user and kept after the bundle's directory;
+        Some of Harbor's installed agents (ex. claude-code) skip their install when they find the agent
+        on ``PATH``. The image's own ``PATH`` is read as the default user and kept after the bundle's directory;
         ``PATH`` set at create would replace it. The runtime always gives a container a ``PATH``,
         so failing to read one means the sandbox can't run commands, and the trial fails here.
         """
