@@ -1144,41 +1144,40 @@ def _build_native_job(
                 )
                 return
             # Linux Docker Engine needs an explicit host-gateway alias (Docker Desktop also accepts it), so
-            # registered Fabric agents in the task container can call the Inference Gateway. Docker refuses
-            # the alias on a container that shares another's network, which is where Harbor puts a task with
-            # restricted network access. The alias is a job-wide overlay, so a selection with both kinds runs
-            # as two Harbor jobs: one with the alias, one without.
-            host_gateway = [Path(__file__).with_name("host-gateway.yaml")]
-            public, restricted, unfilterable = await _partition_by_egress_control(dataset_path, task_names, agent)
-            if not restricted:
-                _discard_other_layout(split=False)
-                await _run_harbor_job(
-                    agent,
-                    name=resolved_name,
-                    parent=jobs_dir,
-                    selected=task_names,
-                    environment=EnvironmentConfig(extra_docker_compose=host_gateway),
+            # registered Fabric agents in the task container can call the Inference Gateway. A public task's
+            # container takes it directly. Harbor puts a task with restricted network access on its egress
+            # sidecar's network, where Docker refuses the alias but shares the sidecar's hosts file, so there
+            # the alias goes on the sidecar and the task's allowlist still decides reachability. Overlays are
+            # job-wide, so a selection with both kinds runs as two Harbor jobs.
+            container_alias = [Path(__file__).with_name("host-gateway.yaml")]
+            sidecar_alias = [Path(__file__).with_name("host-gateway-sidecar.yaml")]
+            public, restricted, unknown = await _partition_by_egress_control(dataset_path, task_names, agent)
+            if unknown:
+                logger.warning(
+                    "Harbor tasks %s can't be classified by network access, so this job runs without the "
+                    "host.docker.internal -> host-gateway alias.",
+                    unknown,
                 )
-                return
-            if not public or unfilterable:
-                if public:
-                    logger.warning(
-                        "Harbor tasks %s restrict network access and some selected tasks can't be told apart, "
-                        "so the whole job runs without the host.docker.internal -> host-gateway alias.",
-                        restricted,
-                    )
+                single: list[Path] | None = []
+            elif not restricted:
+                single = container_alias
+            elif not public:
+                single = sidecar_alias
+            else:
+                single = None
+            if single is not None:
                 _discard_other_layout(split=False)
                 await _run_harbor_job(
                     agent,
                     name=resolved_name,
                     parent=jobs_dir,
                     selected=task_names,
-                    environment=EnvironmentConfig(extra_docker_compose=[]),
+                    environment=EnvironmentConfig(extra_docker_compose=single),
                 )
                 return
             logger.info(
-                "Harbor tasks %s restrict network access, where Docker refuses host aliases: running them as a "
-                "separate Harbor job without the host.docker.internal -> host-gateway alias.",
+                "Harbor tasks %s restrict network access: running them as a separate Harbor job, with the "
+                "host.docker.internal -> host-gateway alias on Harbor's egress sidecar.",
                 restricted,
             )
             _discard_other_layout(split=True)
@@ -1190,15 +1189,16 @@ def _build_native_job(
                 agent,
                 name=HOST_ALIAS_JOB,
                 parent=job_dir,
-                selected=public,
-                environment=EnvironmentConfig(extra_docker_compose=host_gateway),
+                # Harbor matches task names as fnmatch patterns; these are literal folder names.
+                selected=[glob.escape(name) for name in public],
+                environment=EnvironmentConfig(extra_docker_compose=container_alias),
             )
             await _run_harbor_job(
                 agent,
                 name=NETWORK_RESTRICTED_JOB,
                 parent=job_dir,
-                selected=restricted,
-                environment=EnvironmentConfig(extra_docker_compose=[]),
+                selected=[glob.escape(name) for name in restricted],
+                environment=EnvironmentConfig(extra_docker_compose=sidecar_alias),
             )
 
         agent_options: dict[str, Any] = {
@@ -1229,22 +1229,22 @@ def _build_native_job(
 
 async def _partition_by_egress_control(
     dataset_path: Path, task_names: Sequence[str] | None, agent: Any
-) -> tuple[list[str], list[str], bool]:
+) -> tuple[list[str], list[str], list[str]]:
     """Split the selected task folders by whether Harbor attaches their container to its egress sidecar's network.
 
-    Returns ``(public, restricted, unfilterable)``. ``unfilterable`` is True when a selected task has no local
-    folder, so the selection can't be expressed as two folder-name filters.
+    Returns ``(public, restricted, unknown)``. ``unknown`` names the tasks that can't be classified: one with no
+    local folder, or one Harbor's task model can't load. The caller gives those no alias at all, since a
+    sidecar overlay on a task Harbor runs without a sidecar would break its compose project.
 
     Mirrors Harbor's own decision (``Trial._init_agent_environment`` feeding
     ``DockerEnvironment._requires_egress_control``) through Harbor's network planner: per step, the
     ``[environment]`` baseline, the agent phase, and the verifier phase when the verifier shares the agent's
     container. If any of these is not public, Harbor sets the main service's ``network_mode`` to the sidecar's,
-    and Docker refuses ``extra_hosts`` on such a service. A task Harbor can't load is counted as restricted:
-    leaving the alias out never stops a container from starting.
+    and Docker refuses ``extra_hosts`` on such a service.
     """
     # Before importing Harbor: there is nothing to inspect without a dataset directory.
     if not Path(dataset_path).is_dir():
-        return [], [], False
+        return [], [], []
     from harbor.job import DatasetConfig  # ty: ignore[unresolved-import,unused-ignore-comment]
     from harbor.models.task.config import NetworkMode  # ty: ignore[unresolved-import,unused-ignore-comment]
     from harbor.models.task.task import Task  # ty: ignore[unresolved-import,unused-ignore-comment]
@@ -1262,11 +1262,10 @@ async def _partition_by_egress_control(
     ).get_task_configs()
     public: list[str] = []
     restricted: list[str] = []
-    unfilterable = False
+    unknown: list[str] = []
     for entry in selected:
         if entry.path is None:  # not a local task directory, so its network policy can't be read here
-            restricted.append(str(entry))
-            unfilterable = True
+            unknown.append(str(entry))
             continue
         name = entry.path.name
         try:
@@ -1288,8 +1287,8 @@ async def _partition_by_egress_control(
                 public.append(name)
         except Exception:  # Harbor reports a broken task itself; here it only drops the alias
             logger.debug("Could not read Harbor task %s's network policy", name, exc_info=True)
-            restricted.append(name)
-    return public, restricted, unfilterable
+            unknown.append(name)
+    return public, restricted, unknown
 
 
 def _is_harbor_resume_refusal(exc: FileExistsError, job_dir: Path) -> bool:

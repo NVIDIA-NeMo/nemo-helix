@@ -110,7 +110,10 @@ def _harbor_job_dirs(job_dir: Path) -> list[Path]:
     except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
         logger.warning("Ignoring unreadable Harbor split marker %s: %s", marker, exc)
         return [job_dir]
-    return [job_dir / str(name) for name in names]
+    if not isinstance(names, list) or not all(isinstance(name, str) and name for name in names):
+        logger.warning("Ignoring Harbor split marker %s: `jobs` is not a list of job names", marker)
+        return [job_dir]
+    return [job_dir / name for name in names]
 
 
 def _iter_harbor_trial_results(job_dir: Path) -> Iterator[tuple[Path, Mapping[str, Any]]]:
