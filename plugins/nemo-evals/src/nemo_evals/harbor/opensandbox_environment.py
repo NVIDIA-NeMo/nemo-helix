@@ -45,6 +45,7 @@ ident() {
   ident_pid=$1
   set -- ${line##*) }
   state=$1
+  parent=$2
   id="$ident_pid:${20}"
 }
 """
@@ -65,8 +66,9 @@ done
 # address, except this shell and its ancestors (the execd chain). Once the setup hosts' rules are gone
 # nothing can open a new connection to them, so only these can still reach one; processes an agent's
 # setup leaves for its run (tmux, a desktop session) hold none and survive. A process whose descriptors
-# can't be read, or every new process when `readlink` is missing, is killed as a holder. Succeeds only
-# once a sweep finds no holder alive, so forked children that inherit a socket are caught too.
+# can't be read, or every new process when `readlink` is missing, is killed as a holder; the sweep's own
+# children (`readlink`) are skipped like its ancestors. Succeeds only once a sweep finds no holder alive,
+# so forked children that inherit a socket are caught too.
 KILL_CONNECTION_HOLDERS_SCRIPT = (
     _PROCESS_IDENTITY_FUNCTIONS
     + """\
@@ -90,7 +92,10 @@ holds_outside_socket() {
   [ "$inspect" = 1 ] || return 0
   [ -r "/proc/$1/fd" ] || return 0
   for fd in /proc/$1/fd/*; do
-    target=$(readlink "$fd" 2>/dev/null) || continue
+    if ! target=$(readlink "$fd" 2>/dev/null); then
+      [ -L "$fd" ] && return 0
+      continue
+    fi
     case "$target" in
       "socket:["*"]")
         inode=${target#socket:[}
@@ -119,6 +124,7 @@ while :; do
     ident "$pid" || continue
     case " $KEEP " in *" $id "*) continue ;; esac
     [ "$state" = Z ] && continue
+    [ "$parent" = "$$" ] && continue
     holds_outside_socket "$pid" || continue
     alive="$alive $pid"
     kill -9 "$pid" 2>/dev/null

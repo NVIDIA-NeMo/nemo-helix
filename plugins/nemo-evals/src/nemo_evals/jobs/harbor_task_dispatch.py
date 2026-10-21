@@ -13,6 +13,7 @@ TODO(M2 story 6b): replace the agent evaluation with a dedicated dispatcher.
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping, MutableMapping
 from datetime import datetime, timezone
@@ -34,6 +35,8 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborEnvironmentCo
 from nhx_evals_sdk.agent_eval.runtimes.harbor.tasks import HARBOR_TASK_DIR_KEY
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 TASK_JOB_SOURCE = "evals.harbor-task"
 """Jobs ``source`` of every task Job; with the name, spec and platform spec it marks a Job as ours."""
@@ -197,7 +200,10 @@ def configure_runtime(config: HarborRuntimeConfig, ctx: JobContext, spec: Harbor
     )
     update: dict[str, Any] = {"environment": environment, "n_concurrent_trials": 1}
     agent = config.agent_import_path or config.agent_name or "oracle"
-    if policy.agent_setup_egress and config.agent_dir is None and agent not in UNWRAPPED_AGENTS:
+    if policy.agent_setup_egress and (config.agent_dir is not None or agent in UNWRAPPED_AGENTS):
+        reason = "a loose agent file (agent_dir)" if config.agent_dir is not None else "it installs nothing"
+        logger.info("Agent %s runs setup without the agent setup egress window: %s", agent, reason)
+    elif policy.agent_setup_egress:
         update["agent_import_path"] = SETUP_EGRESS_AGENT
         update["agent_kwargs"] = {**config.agent_kwargs, INNER_AGENT_KWARG: agent}
     return config.model_copy(update=update)

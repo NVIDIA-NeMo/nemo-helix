@@ -91,7 +91,7 @@ class ResolvedHarborSandboxPolicy(BaseModel):
         default=(), description="Hosts a no-network task's sandbox may still reach (operator config)."
     )
     agent_setup_egress: tuple[str, ...] = Field(
-        default=(), description="Hosts a no-network task's sandbox may reach during agent setup only (operator config)."
+        default=(), description="Hosts the sandbox may also reach during the agent's setup() only (operator config)."
     )
     override_task_egress: bool = False
     allow_task_egress_extension: bool = False

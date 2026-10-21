@@ -37,9 +37,10 @@ class HarborSandboxProfileConfig(BaseModel):
     agent_setup_egress: tuple[str, ...] = Field(
         default=(),
         description=(
-            "Hosts a no-network task's sandbox may reach only while the agent installs itself (package "
-            "registries, release downloads). They are removed, and processes the install left running are "
-            "killed, before the agent runs. Empty keeps no-network tasks closed during setup too."
+            "Hosts the sandbox may also reach while the agent's setup() runs (package registries, release "
+            "downloads), on top of the task's own policy in any network mode. They are removed before anything "
+            "else runs, and processes started during setup that still hold a connection outside the sandbox are "
+            "killed. Empty adds nothing to the task's policy during setup."
         ),
     )
     egress_verification: Literal["default_action", "strict"] = "strict"
