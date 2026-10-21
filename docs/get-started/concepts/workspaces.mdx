@@ -24,9 +24,9 @@ The platform automatically creates two built-in workspaces during initialization
 
 ## Workspace creation on login
 
-When you sign in to Studio, it checks for a workspace named after your email prefix—for example, `alice` from `alice@example.com`. If the workspace is missing or inaccessible, Studio attempts to create it. Creation requires workspace creation permission, and the creator becomes the workspace Admin.
+When you sign in to Studio through the direct OIDC flow, it checks for a workspace named after your email prefix—for example, `alice` from `alice@example.com`. If the workspace is missing or inaccessible, Studio attempts to create it. Creation requires workspace creation permission, and the creator becomes the workspace Admin. If creation is denied, Studio shows an error but login still completes.
 
-Studio repeats this check on subsequent logins, so a deleted workspace may be recreated.
+Studio repeats this check on subsequent direct OIDC logins, so a deleted workspace may be recreated.
 
 ## Create a Workspace
 
