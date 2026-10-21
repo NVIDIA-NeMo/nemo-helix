@@ -50,6 +50,7 @@ from nhx.core.jobs.app.constants import (
 )
 from nhx.core.jobs.app.lifecycle import (
     attempt_can_transition,
+    clear_image_comparison,
     rerun_status_details,
     saved_image_digest_for_step,
     storage_targets,
@@ -1256,6 +1257,8 @@ class JobDispatcher:
                 step_to_save.status = status
             if error_details:
                 step_to_save.error_details = error_details
+            if status == HelixJobStatus.RESUMING:
+                clear_image_comparison(step_to_save.status_details)
             if status_details:
                 step_to_save.status_details = self._update_status_details_object(
                     step_to_save.status_details, status_details
