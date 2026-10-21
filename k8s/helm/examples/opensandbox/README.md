@@ -46,7 +46,7 @@ Replace `REPLACE_WITH_RELEASE_NAMESPACE` in the server values before install.
 | `opensandbox-server-kata-qemu.yaml` | Kata QEMU server (`[secure_runtime] type=kata`) |
 | `batchsandbox-template.yaml` | ConfigMap — exclude control-plane; pull Secret name `nvcrimagepullsecret`; [Harbor directories](#harbor-directories) |
 | `batchsandbox-template-kata-qemu.yaml` | ConfigMap — example Kata node selectors; same pull Secret name; [Harbor directories](#harbor-directories) |
-| `opensandbox-ext-rbac.yaml` | Role — `pods/exec` and `pods/log` in the release namespace for the [Compose services](#compose-services) extension |
+| `opensandbox-ext-rbac.yaml` | ClusterRole and RoleBinding — `pods/exec` and `pods/log` in the release namespace for the [Compose services](#compose-services) extension; one RoleBinding per [tenant namespace](#multi-tenant-servers) |
 
 `[secure_runtime]` is server-global. Install **one** server for production
 (shared-kernel **or** Kata). Dual releases are only for proving both paths.
@@ -239,6 +239,37 @@ kubectl rollout restart deploy/opensandbox-server -n opensandbox-system
 `configmap.yaml` is generated from the extension's source files by
 `script/generate_opensandbox_ext_configmap.py`, and CI fails if the committed
 copy is out of date. Don't edit it by hand.
+
+If you applied the earlier version of `opensandbox-ext-rbac.yaml`, which had a Role
+instead of a ClusterRole, delete its RoleBinding and Role first
+(`kubectl delete rolebinding,role nemo-opensandbox-ext -n "${NHX_NAMESPACE}"`):
+Kubernetes won't change a RoleBinding's `roleRef` in place.
+
+### Multi-tenant servers
+
+When the server runs with `[tenants]`, each tenant's API key maps to its own
+namespace, and the sandboxes of that tenant are created there. The extension's
+routes look in the caller's tenant namespace, and hide a sandbox labeled for another
+tenant, so the server's service account needs `pods`, `pods/log` and `pods/exec` in
+**every tenant namespace**, not only the release namespace. Without that,
+Kubernetes answers 403 on the extension's exec and services routes.
+
+`opensandbox-ext-rbac.yaml` has one ClusterRole with those rules, which grants
+nothing until it is bound, and a RoleBinding that grants them in a single namespace.
+Apply the ClusterRole once, and add the RoleBinding to each tenant namespace:
+
+```bash
+for ns in sandbox-alpha sandbox-beta; do   # the namespace of each tenant in tenants.toml
+  kubectl create rolebinding nemo-opensandbox-ext -n "${ns}" \
+    --clusterrole=nemo-opensandbox-ext \
+    --serviceaccount=opensandbox-system:opensandbox-server
+done
+```
+
+Add a RoleBinding for a new tenant's namespace when you add the tenant. The chart's
+`composeServices` values cover one sandbox namespace, so bind the others this way.
+A ClusterRoleBinding would also work but grants exec in every namespace in the cluster.
+The extension also works on a server without `[tenants]`, using `[kubernetes] namespace`.
 
 ### Move a manual install to the chart
 
