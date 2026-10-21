@@ -4,6 +4,7 @@
 import {
   type AppendMessage,
   type MessageStatus,
+  type ThreadAssistantMessagePart,
   type ThreadMessageLike,
   SimpleImageAttachmentAdapter,
   useExternalStoreRuntime,
@@ -13,6 +14,10 @@ import {
   getReasoningDelta,
   getUsageCompletionTokens,
 } from '@nemo/common/src/components/AssistantChat/completionMetrics';
+import {
+  appendCompletionDeltaParts,
+  getWorkDetailsMessageParts,
+} from '@nemo/common/src/components/AssistantChat/completionSections';
 import {
   getCompletionImages,
   getCompletionText,
@@ -31,11 +36,26 @@ import {
   getOpenAIMessages,
   getUserMessageContent,
 } from '@nemo/common/src/components/AssistantChat/messageUtils';
+import { groupConsecutiveAssistantSubtleToolCalls } from '@nemo/common/src/components/AssistantChat/toolParts';
 import type { AssistantChatProps } from '@nemo/common/src/components/AssistantChat/types';
 import { useChatCompletion } from '@nemo/common/src/hooks/useChatCompletion';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 const imageAttachmentAdapter = new SimpleImageAttachmentAdapter();
+
+type ImagePart = { type: 'image'; image: string };
+
+const getMessageContent = (
+  parts: readonly ThreadAssistantMessagePart[],
+  images: readonly ImagePart[],
+  status: MessageStatus
+): ThreadMessageLike['content'] => {
+  const content =
+    status.type === 'complete'
+      ? getWorkDetailsMessageParts(parts)
+      : groupConsecutiveAssistantSubtleToolCalls(parts);
+  return [...(content.length ? content : [{ type: 'text' as const, text: '' }]), ...images];
+};
 
 type UseAssistantChatRuntimeOptions = Pick<
   AssistantChatProps,
@@ -85,18 +105,14 @@ export const useAssistantChatRuntime = ({
   const updateAssistantMessage = useCallback(
     (
       assistantMessageId: string,
-      text: string,
-      images: readonly { type: 'image'; image: string }[],
+      parts: readonly ThreadAssistantMessagePart[],
+      images: readonly ImagePart[],
       status: MessageStatus
     ) => {
       setThreadMessages(
         messagesRef.current.map((message) =>
           message.id === assistantMessageId
-            ? {
-                ...message,
-                content: [{ type: 'text', text }, ...images],
-                status,
-              }
+            ? { ...message, content: getMessageContent(parts, images, status), status }
             : message
         )
       );
@@ -117,7 +133,8 @@ export const useAssistantChatRuntime = ({
       setThreadMessages([...conversationMessages, assistantMessage]);
       setIsRunning(true);
       let responseText = '';
-      const responseImages: { type: 'image'; image: string }[] = [];
+      let responseParts: readonly ThreadAssistantMessagePart[] = [];
+      const responseImages: ImagePart[] = [];
       // Timing for per-message metrics (TTFT, total, tokens/sec). Emitted via
       // onMessageComplete so callers (e.g. Studio's Chat route) can render a
       // stats badge without owning the runtime.
@@ -148,7 +165,7 @@ export const useAssistantChatRuntime = ({
         if (runController.signal.aborted || !isCurrentRun()) {
           updateAssistantMessage(
             assistantMessage.id!,
-            responseText,
+            responseParts,
             responseImages,
             CANCELLED_STATUS
           );
@@ -167,28 +184,34 @@ export const useAssistantChatRuntime = ({
             usageTokens = getUsageCompletionTokens(chunk) ?? usageTokens;
             const delta = chunk.choices[0]?.delta.content ?? '';
             const reasoningDelta = getReasoningDelta(chunk);
+            const toolCalls = chunk.choices[0]?.delta.tool_calls ?? [];
             const images = getCompletionImages(chunk);
-            if (reasoningDelta || delta || images.length > 0) {
-              if (firstTokenMs === 0) firstTokenMs = Math.round(performance.now() - startMs);
-              generatedChunkCount += 1;
-            }
+            if (!reasoningDelta && !delta && !toolCalls.length && !images.length) continue;
+
+            if (firstTokenMs === 0) firstTokenMs = Math.round(performance.now() - startMs);
+            generatedChunkCount += 1;
             reasoningChars += reasoningDelta.length;
             if (delta || images.length > 0) {
               if (ttftMs === 0) ttftMs = Math.round(performance.now() - startMs);
               responseText += delta;
               responseImages.push(...images);
               chunkCount += 1;
-              updateAssistantMessage(
-                assistantMessage.id!,
-                responseText,
-                responseImages,
-                RUNNING_STATUS
-              );
             }
+            responseParts = appendCompletionDeltaParts(responseParts, {
+              reasoning: reasoningDelta,
+              text: delta,
+              toolCalls,
+            });
+            updateAssistantMessage(
+              assistantMessage.id!,
+              responseParts,
+              responseImages,
+              RUNNING_STATUS
+            );
           }
           updateAssistantMessage(
             assistantMessage.id!,
-            responseText,
+            responseParts,
             responseImages,
             runController.signal.aborted ? CANCELLED_STATUS : COMPLETE_STATUS
           );
@@ -216,7 +239,13 @@ export const useAssistantChatRuntime = ({
           const text = getCompletionText(result);
           updateAssistantMessage(
             assistantMessage.id!,
-            text,
+            appendCompletionDeltaParts([], {
+              text,
+              toolCalls: result.choices[0]?.message.tool_calls?.map((toolCall, index) => ({
+                ...toolCall,
+                index,
+              })),
+            }),
             getCompletionImages(result),
             COMPLETE_STATUS
           );
@@ -245,7 +274,7 @@ export const useAssistantChatRuntime = ({
         if (runController.signal.aborted || isAbortError(error)) {
           updateAssistantMessage(
             assistantMessage.id!,
-            responseText,
+            responseParts,
             responseImages,
             CANCELLED_STATUS
           );
@@ -258,7 +287,12 @@ export const useAssistantChatRuntime = ({
           reason: 'error',
           error: errorMessage,
         };
-        updateAssistantMessage(assistantMessage.id!, errorMessage, responseImages, status);
+        updateAssistantMessage(
+          assistantMessage.id!,
+          [{ type: 'text', text: errorMessage }],
+          responseImages,
+          status
+        );
         onError?.(error instanceof Error ? error : new Error(errorMessage));
       } finally {
         if (abortControllerRef.current === runController) {

@@ -62,10 +62,12 @@ export const toAssistantToolArgs = (input: unknown): AssistantToolArgs => {
 };
 
 export const createAssistantToolCallPart = ({
+  argsText,
   input,
   toolCallId,
   toolName,
 }: {
+  argsText?: string;
   input: unknown;
   toolCallId: string;
   toolName: string;
@@ -76,7 +78,7 @@ export const createAssistantToolCallPart = ({
     toolCallId,
     toolName,
     args,
-    argsText: JSON.stringify(args),
+    argsText: argsText ?? JSON.stringify(args),
   };
 };
 
@@ -135,14 +137,22 @@ interface SerializedAssistantToolPart {
   readonly type: 'tool-call';
 }
 
-type SerializedAssistantPart = SerializedAssistantTextPart | SerializedAssistantToolPart;
+interface SerializedAssistantReasoningPart {
+  readonly text: string;
+  readonly type: 'reasoning';
+}
+
+type SerializedAssistantPart =
+  | SerializedAssistantReasoningPart
+  | SerializedAssistantTextPart
+  | SerializedAssistantToolPart;
 
 const serializeAssistantPart = (
   part: ThreadAssistantMessagePart
 ): SerializedAssistantPart | undefined => {
-  if (part.type === 'text') {
+  if (part.type === 'text' || part.type === 'reasoning') {
     const text = part.text.trim();
-    return text ? { type: 'text', text } : undefined;
+    return text ? { type: part.type, text } : undefined;
   }
 
   if (part.type !== 'tool-call' || part.toolName === ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME) {

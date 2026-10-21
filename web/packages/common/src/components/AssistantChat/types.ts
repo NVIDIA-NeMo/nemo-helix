@@ -136,6 +136,8 @@ export interface AssistantChatProps {
   };
   /** Overrides used when rendering Markdown inside chat messages. */
   messageContentProps?: AssistantChatMessageContentProps;
+  /** Renders reasoning and tool-call parts streamed by the model; omitted parts are hidden. */
+  toolCallPartComponent?: ToolCallMessagePartComponent;
   composerOverride?: ReactNode;
   /**
    * @default true
