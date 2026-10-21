@@ -311,3 +311,20 @@ def test_rebuild_starts_a_new_attempt_over_a_ready_build(client, store_task, ent
     assert (rebuilt["id"], rebuilt["status"]) == ("2", "pending")
     # A rebuild that's still running is the answer: it isn't started twice.
     assert again["id"] == "2" and plain["id"] == "2"
+
+
+def test_a_platforms_build_older_than_a_page_of_other_builds_is_reused(
+    client, store_task, entity_store, monkeypatch
+) -> None:
+    """A page holds 2 builds here: the arm64 build is on the second page, behind newer builds for other platforms."""
+    monkeypatch.setattr("nemo_evals.image_builds.service._LOOKUP_PAGE_SIZE", 2)
+    digest = _store(store_task)
+    client.post(f"{_BASE}/{digest}/image-builds", json={"platform": "linux/arm64"})
+    _set_status(entity_store, digest, 1, "ready")
+    for attempt, platform in enumerate(("linux/amd64", "linux/riscv64", "linux/s390x"), start=2):
+        client.post(f"{_BASE}/{digest}/image-builds", json={"platform": platform})
+        _set_status(entity_store, digest, attempt, "failed")
+
+    again = client.post(f"{_BASE}/{digest}/image-builds", json={"platform": "linux/arm64"}).json()
+
+    assert (again["id"], again["status"]) == ("1", "ready")
