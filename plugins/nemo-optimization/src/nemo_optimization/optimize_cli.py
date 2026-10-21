@@ -11,7 +11,7 @@ create a fileset, push bytes) stays explicit and re-runnable, and so a bundle ca
 and submitted many times.
 
 Lives with this plugin for now rather than with the generic ``optimize`` group: the bundle it validates
-is a NAT optimize bundle, so the command is only meaningful where this plugin is installed. Future work
+is a Fabric optimize bundle, so the command is only meaningful where this plugin is installed. Future work
 will unify the bundle across all optimization plugins. It reaches the shared group by registering
 :func:`register_prepare_fileset_command` under the ``nemo.cli.agents.optimize`` entry-point group,
 which ``nemo agents optimize`` scans as it assembles itself.
@@ -36,7 +36,7 @@ def register_prepare_fileset_command(group: typer.Typer) -> None:
 
     @group.command(
         name=PREPARE_FILESET_COMMAND,
-        help="Validate a NAT optimize bundle and upload it to a fileset for `optimize run-strategy`.",
+        help="Validate a Fabric optimize bundle and upload it to a fileset for `optimize run-strategy`.",
     )
     def prepare_fileset(
         typer_ctx: typer.Context,

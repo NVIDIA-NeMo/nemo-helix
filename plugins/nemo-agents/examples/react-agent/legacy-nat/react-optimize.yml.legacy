@@ -1,30 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# react-optimize.yml
-#
-# Optimization config for the react agent.
-#
-# This config tunes the agent's LLM hyperparameters (temperature, top_p) using
-# Optuna-based numeric optimization to maximise eval accuracy.  The eval section
-# reuses the same dataset and judge LLM as react-eval-data.json.
-#
-# Usage:
-#
-#   nemo agents optimize prepare-fileset \
-#       --source plugins/nemo-agents/examples/react-agent \
-#       --optimize-config react-optimize.yml \
-#       --fileset react-optimize
-#
-#   nemo agents optimize run-strategy \
-#       --strategy config-tuning \
-#       --optimize-config-fileset default/react-optimize \
-#       --optimize-config react-optimize.yml \
-#       --agent react-agent
-#
-# See the NAT Optimizer Guide for full documentation on search spaces,
-# prompt GA, and multi-objective tuning:
-#   https://docs.nvidia.com/nemo/agent-toolkit/latest/improve-workflows/optimizer.html
+# UNSUPPORTED LEGACY NAT INPUT — historical reference only, not a runnable bundle.
+# The NAT ReAct agent cannot be passed to Fabric config-tuning. Renaming commands
+# or supplying --agent does not translate llms/per-LLM search spaces or evaluators.
+# Dataset paths below retain their old parent-directory context.
+# See ../README.md for the separate supported Fabric example and limitations.
 
 llms:
   # LLM used by the agent workflow — its hyperparameters are optimised.
