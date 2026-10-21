@@ -191,3 +191,45 @@ def test_live_usage_counts_only_unfinished_evaluations() -> None:
     assert usage["total_tasks"] == 1
     [actor] = usage["actors"]
     assert (actor["owner_id"], actor["queued_runs"], actor["active_runs"]) == ("usr_1", 1, 1)
+
+
+def test_list_and_profile_use_filter_members_deleted_and_finished_rows_in_the_store(
+    entity_store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed("ev_solo", status="queued", framework_profile_id="cp_1")
+    _seed("ev_member", status="queued", benchmark_run_id="bmr_1", framework_profile_id="cp_2")
+    _seed("ev_gone", status="queued", deleted_at=datetime(2026, 6, 1, tzinfo=UTC))
+    _seed("ev_done", status="succeeded", framework_profile_id="cp_3")
+    returned: list[str] = []
+    real_list = entity_store.list
+
+    def spy(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        response = real_list(*args, **kwargs)
+        returned.extend(entity.name for entity in response.data)
+        return response
+
+    monkeypatch.setattr(entity_store, "list", spy)
+    store = EvaluationStore()
+
+    rows = store.list(limit=10, cursor=None, order="desc", status=None, task_id=None, shared=False)
+
+    assert sorted(item["id"] for item in rows) == ["ev_done", "ev_solo"]
+    assert "standalone" not in rows[0] and "deleted" not in rows[0]
+    # The store, not Python, drops the run member and the deleted evaluation.
+    assert sorted(returned) == ["ev_done", "ev_solo"]
+    assert [
+        item["id"]
+        for item in store.list(
+            limit=10, cursor=None, order="desc", status=None, task_id=None, shared=False, benchmark_run_id="bmr_1"
+        )
+    ] == ["ev_member"]
+
+    returned.clear()
+    assert store.profile_in_active_use("cp_1") and store.profile_in_active_use("cp_2")
+    assert not store.profile_in_active_use("cp_3")
+    assert "ev_done" not in returned
+
+    assert store.soft_delete("ev_solo")
+    assert [
+        item["id"] for item in store.list(limit=10, cursor=None, order="desc", status=None, task_id=None, shared=False)
+    ] == ["ev_done"]

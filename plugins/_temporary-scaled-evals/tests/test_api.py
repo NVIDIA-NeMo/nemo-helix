@@ -29,6 +29,7 @@ def _user_db_override() -> Iterator[MagicMock]:
     }
     app.dependency_overrides[get_db] = lambda: db
     v1.dependency_overrides[get_db] = lambda: db
+    ops._evaluation_metrics_cache = None
     yield db
     app.dependency_overrides.pop(get_db, None)
     app.dependency_overrides.pop(auth.current_principal, None)
@@ -93,11 +94,13 @@ def test_healthz_responds_when_worker_thread_capacity_is_exhausted() -> None:
 
 
 def test_metrics(monkeypatch) -> None:  # noqa: ANN001
-    monkeypatch.setattr(
-        ops,
-        "_evaluation_status_counts",
-        lambda: dict.fromkeys(ops._KNOWN_EVALUATION_STATUSES, 0),
-    )
+    scans: list[int] = []
+
+    def status_counts() -> dict[str, int]:
+        scans.append(1)
+        return dict.fromkeys(ops._KNOWN_EVALUATION_STATUSES, 0)
+
+    monkeypatch.setattr(ops, "_evaluation_status_counts", status_counts)
     monkeypatch.setattr(ops, "_fleet_totals", lambda: {})
     monkeypatch.setattr(
         ops,
@@ -115,6 +118,9 @@ def test_metrics(monkeypatch) -> None:  # noqa: ANN001
     response = client.get("/v1/metrics")
     assert response.status_code == 200
     assert "scaled_evals_up 1" in response.text
+    # A second scrape inside the cache window does not rescan every evaluation.
+    assert client.get("/v1/metrics").status_code == 200
+    assert len(scans) == 1
 
 
 def test_metrics_scrape_does_not_probe_dependencies(monkeypatch) -> None:  # noqa: ANN001

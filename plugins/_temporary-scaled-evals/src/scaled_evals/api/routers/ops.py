@@ -4,7 +4,7 @@
 from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from time import perf_counter
+from time import monotonic, perf_counter
 
 from fastapi import APIRouter, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -116,10 +116,27 @@ def _platform_jobs_controller_probe() -> None:
             raise RuntimeError("no fresh Platform Jobs controller heartbeat")
 
 
+# ponytail: the evaluation aggregates scan every evaluation in Entity Store, so
+# scrapes inside this window reuse the last result. Each refresh still costs
+# O(evaluations). Upgrade path: range filters in the store, or counters kept
+# on write.
+_EVALUATION_METRICS_TTL_SECONDS = 30.0
+_evaluation_metrics_cache: tuple[float, tuple[dict[str, int], dict[str, int], dict]] | None = None
+
+
+def _evaluation_metrics() -> tuple[dict[str, int], dict[str, int], dict]:
+    global _evaluation_metrics_cache  # noqa: PLW0603 - process-wide scrape cache
+    now = monotonic()
+    if _evaluation_metrics_cache is None or now - _evaluation_metrics_cache[0] >= _EVALUATION_METRICS_TTL_SECONDS:
+        _evaluation_metrics_cache = (
+            now,
+            (_evaluation_status_counts(), _fleet_totals(), _dispatch_observability_snapshot()),
+        )
+    return _evaluation_metrics_cache[1]
+
+
 def render_prometheus_metrics() -> str:
-    evaluation_counts = _evaluation_status_counts()
-    fleet_totals = _fleet_totals()
-    dispatch_snapshot = _dispatch_observability_snapshot()
+    evaluation_counts, fleet_totals, dispatch_snapshot = _evaluation_metrics()
     task_pack_snapshot = _task_pack_observability_snapshot()
     checks = dict(_READINESS_SNAPSHOT.checks)
 

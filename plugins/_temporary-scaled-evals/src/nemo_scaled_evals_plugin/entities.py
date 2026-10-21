@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Any
 
 from nemo_helix_plugin.entity import NemoEntity
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ScaledEvalsEvaluationEvent(BaseModel):
@@ -199,10 +199,21 @@ class ScaledEvalsEvaluation(NemoEntity, entity_type="scaled_evals_evaluation"):
     # Whether any cleanup is not yet deleted, so the cleanup queue lists only
     # evaluations that have work instead of every evaluation ever run.
     cleanup_open: bool = False
+    # Filterable mirrors of `benchmark_run_id is None` and `deleted_at is not
+    # None`: the store does not promise to match a JSON null. Derived on every
+    # load; code that sets `deleted_at` on a loaded entity sets `deleted` too.
+    standalone: bool = True
+    deleted: bool = False
     events: list[ScaledEvalsEvaluationEvent] = Field(default_factory=list)
     telemetry: list[ScaledEvalsExecutionTelemetry] = Field(default_factory=list)
     resource_usage: list[ScaledEvalsResourceUsage] = Field(default_factory=list)
     cleanups: list[ScaledEvalsExecutionCleanup] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _derive_filter_flags(self) -> ScaledEvalsEvaluation:
+        self.standalone = self.benchmark_run_id is None
+        self.deleted = self.deleted_at is not None
+        return self
 
 
 class ScaledEvalsBenchmarkRun(NemoEntity, entity_type="scaled_evals_benchmark_run"):

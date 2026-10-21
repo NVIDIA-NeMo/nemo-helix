@@ -50,7 +50,8 @@ _CHILD_FIELDS = frozenset({"events", "telemetry", "resource_usage", "cleanups", 
 _ROW_FIELDS = tuple(
     field
     for field in ScaledEvalsEvaluation.model_fields
-    if field not in _CHILD_FIELDS | set(NemoEntity.model_fields) | {"display_name", "changed_at"}
+    if field
+    not in _CHILD_FIELDS | set(NemoEntity.model_fields) | {"display_name", "changed_at", "standalone", "deleted"}
 )
 RetryBlockReason = Literal["terminal_artifacts_finalizing", "benchmark_unavailable"]
 
@@ -255,14 +256,14 @@ class EvaluationStore:
     def _scan(
         self, *, include_deleted: bool = False, **where: Iterable[str | bool]
     ) -> builtins.list[ScaledEvalsEvaluation]:
-        # ponytail: every scan lists the matching evaluations through the
+        # ponytail: every scan lists all matching evaluations through the
         # store's pagination; the queue scans filter to rows with work, but the
-        # list endpoints and analytics read every live evaluation. Upgrade path:
-        # push the remaining predicates and the keyset into the store filter.
-        entities = entity_store.list_all(
-            self._client, ScaledEvalsEvaluation, {field: list(values) for field, values in where.items()}
-        )
-        return [entity for entity in entities if include_deleted or entity.deleted_at is None]
+        # list endpoint pages in memory and analytics read every live
+        # evaluation. Upgrade path: push the keyset and limit into the store.
+        filters = {field: list(values) for field, values in where.items()}
+        if not include_deleted:
+            filters["deleted"] = [False]
+        return entity_store.list_all(self._client, ScaledEvalsEvaluation, filters)
 
     def _mutate(
         self,
@@ -330,14 +331,13 @@ class EvaluationStore:
 
     def task_in_active_use(self, task_id: str) -> bool:
         """Return whether an unfinished evaluation runs the task."""
-        return any(entity.status not in TERMINAL_STATUSES for entity in self._scan(task_id=[task_id]))
+        return bool(self._scan(task_id=[task_id], status=_CANCELLABLE))
 
     def profile_in_active_use(self, profile_id: str) -> bool:
         """Return whether an unfinished evaluation references the config profile."""
         return any(
-            entity.status not in TERMINAL_STATUSES
-            and profile_id in (entity.framework_profile_id, entity.harbor_profile_id, entity.intake_profile_id)
-            for entity in self._scan()
+            profile_id in (entity.framework_profile_id, entity.harbor_profile_id, entity.intake_profile_id)
+            for entity in self._scan(status=_CANCELLABLE)
         )
 
     @staticmethod
@@ -547,11 +547,12 @@ class EvaluationStore:
                 where[field] = [value]
         if benchmark_run_id is not None:
             where["benchmark_run_id"] = [benchmark_run_id]
+        else:
+            where["standalone"] = [True]
         rows = [
             row(entity)
             for entity in self._scan(**where)
-            if (benchmark_run_id is not None or entity.benchmark_run_id is None)
-            and (not shared or entity.visibility != "private")
+            if (not shared or entity.visibility != "private")
             and entity_store.contains(
                 q, entity.name, entity.display_name, entity.task_id, entity.status, entity.framework, entity.runtime
             )
@@ -772,7 +773,7 @@ class EvaluationStore:
 
     def soft_delete(self, evaluation_id: str) -> bool:
         def change(entity: ScaledEvalsEvaluation, now: datetime) -> tuple[bool, bool]:
-            entity.deleted_at = now
+            entity.deleted_at, entity.deleted = now, True
             return True, True
 
         return bool(self._mutate(evaluation_id, change))
