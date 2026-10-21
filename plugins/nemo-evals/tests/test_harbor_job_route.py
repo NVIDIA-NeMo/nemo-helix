@@ -80,9 +80,11 @@ async def test_post_snapshots_tasks_before_creating_job(entity_store, monkeypatc
             response = MagicMock()
             response.data.return_value = SimpleNamespace(
                 id="job-1",
+                attempt_id="attempt-1",
                 name="harbor-job",
                 workspace=workspace,
                 description=None,
+                project=None,
                 created_at=datetime(2026, 1, 1),
                 updated_at=datetime(2026, 1, 1),
                 spec=body.spec,

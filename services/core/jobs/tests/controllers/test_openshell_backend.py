@@ -73,6 +73,7 @@ _OWNED_LABELS = {
     "nhx.nvidia.com/job_execution_profile": "default",
     "nhx.nvidia.com/job_workspace_id": "default",
     "nhx.nvidia.com/job_id": "test-job-id",
+    "nhx.nvidia.com/job_attempt_id": "attempt-1",
     "nhx.nvidia.com/job_step_name": "test-step",
 }
 
@@ -540,6 +541,12 @@ class TestCleanup:
 
         backend.cleanup_steps()
 
+        backend.get_step_safe.assert_called_once_with(
+            job="test-job-id",
+            step_name="test-step",
+            workspace="default",
+            attempt_id="attempt-1",
+        )
         backend._client.delete.assert_called_once_with("nhx-digest", workspace="default", allow_missing=True)
         # The immediate path needs no conditions, so it skips the extra GetSandbox.
         assert not backend._client.get_sandbox.called

@@ -3096,7 +3096,7 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(kubernetes_j
     kubernetes_job._execution_profile_config.storage.volume_permissions_image = "busybox"
 
     # Mock check_step_is_terminal: step1 terminal (True), step2 not terminal (False)
-    def check_step_side_effect(job, step_name, workspace):
+    def check_step_side_effect(job, step_name, workspace, attempt_id=None):
         return step_name == "step1"
 
     kubernetes_job.check_step_is_terminal = MagicMock(side_effect=check_step_side_effect)
@@ -3176,12 +3176,12 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(kubernetes_j
         # Verify check_step_is_terminal was called for step 1 (and step 2, but we skip step 2)
         assert kubernetes_job.check_step_is_terminal.call_count >= 1
         kubernetes_job.check_step_is_terminal.assert_any_call(
-            job="multi-step-job", step_name="step1", workspace="default"
+            job="multi-step-job", step_name="step1", workspace="default", attempt_id=None
         )
 
         # Verify persistent storage cleanup eligibility was checked for step 1
         kubernetes_job.check_job_persistent_storage_cleanup_allowed.assert_called_once_with(
-            job="multi-step-job", step_name="step1", workspace="default"
+            job="multi-step-job", step_name="step1", workspace="default", attempt_id=None
         )
 
         # Verify persistent storage cleanup was NOT called
@@ -3372,7 +3372,7 @@ def test_cancel_reports_teardown_completion_to_jobs_service(kubernetes_job):
     update = kubernetes_job.sync_terminate_job(_cancellation_step(), MagicMock())
 
     assert update.status == HelixJobStatus.CANCELLED
-    kubernetes_job._jobs.update_job_step_task.assert_not_called()
+    kubernetes_job._jobs.update_attempt_step_task.assert_not_called()
 
 
 def test_cancel_leaves_tasks_alone_while_step_is_still_cancelling(kubernetes_job):
@@ -3384,7 +3384,7 @@ def test_cancel_leaves_tasks_alone_while_step_is_still_cancelling(kubernetes_job
 
     kubernetes_job.sync_terminate_job(_cancellation_step(), MagicMock())
 
-    kubernetes_job._jobs.update_job_step_task.assert_not_called()
+    kubernetes_job._jobs.update_attempt_step_task.assert_not_called()
 
 
 def test_cancel_missing_job_revokes_delegations(kubernetes_job, test_step_cancelling):

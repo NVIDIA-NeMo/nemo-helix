@@ -64,7 +64,7 @@ class _ResultManager(Protocol):
 def result_manager_factory(
     job_name: str,
     *,
-    attempt_id: str | None = None,
+    attempt_id: str,
     workspace: str | None = None,
     files_client: FilesClient,
     jobs_client: JobsClient | None = None,
@@ -187,8 +187,7 @@ class HelixJobResults(JobResults):
         workspace: Workspace the job lives in.
         client: Typed root client used for both file uploads and the jobs-results
             registration.
-        attempt_id: Optional override for the job attempt id; when
-            omitted, looked up lazily via the typed Jobs client.
+        attempt_id: Concrete platform attempt that produces these results.
     """
 
     def __init__(
@@ -197,7 +196,7 @@ class HelixJobResults(JobResults):
         job_name: str,
         workspace: str,
         client: NemoClient,
-        attempt_id: str | None = None,
+        attempt_id: str,
     ) -> None:
         self._manager: _ResultManager
         self._configure_manager(
@@ -213,7 +212,7 @@ class HelixJobResults(JobResults):
         job_name: str,
         workspace: str,
         client: NemoClient,
-        attempt_id: str | None,
+        attempt_id: str,
     ) -> None:
         self._manager = result_manager_factory(
             job_name=job_name,

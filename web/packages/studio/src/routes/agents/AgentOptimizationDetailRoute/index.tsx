@@ -144,7 +144,7 @@ export const AgentOptimizationDetailRoute: FC = () => {
     data: artifacts,
     isLoading: isLoadingArtifacts,
     error: artifactsError,
-  } = useAgentOptimizationListRunStrategyJobResults(workspace, jobName, {
+  } = useAgentOptimizationListRunStrategyJobResults(workspace, jobName, undefined, {
     query: {
       queryKey: ['optimization-artifacts', workspace, jobName, status],
       enabled: !!job,

@@ -214,10 +214,11 @@ class JobScheduler(HeartbeatMixin, Controller):
         if error_details is not None:
             update_fields["error_details"] = error_details
         try:
-            response = self._jobs.update_job_step_status(
+            response = self._jobs.update_attempt_step_status(
                 name=step.name,
                 workspace=step.workspace,
                 job=step.job,
+                attempt=step.attempt_id,
                 body=HelixJobStatusUpdateRequest(**update_fields),
             ).data()
         except Exception:
@@ -293,10 +294,11 @@ class JobScheduler(HeartbeatMixin, Controller):
         if error.status_code != 409 or update.status != HelixJobStatus.PENDING:
             return False
 
-        current_step = self._jobs.get_job_step(
+        current_step = self._jobs.get_attempt_step(
             name=step.name,
             workspace=step.workspace,
             job=step.job,
+            attempt=step.attempt_id,
         ).data()
         original_status = HelixJobStatus(step.status)
         current_status = HelixJobStatus(current_step.status)

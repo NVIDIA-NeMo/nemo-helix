@@ -35,6 +35,8 @@ from nhx.core.jobs.entities import HelixJobTask
 from pydantic import Field
 
 CreateHelixJobRequest = _types.CreateHelixJobRequest
+UpdateHelixJobRequest = _types.UpdateHelixJobRequest
+HelixJobAttemptResponse = _types.HelixJobAttemptResponse
 HelixJobAttemptSortField = _types.HelixJobAttemptSortField
 HelixJobLogSortField = _types.HelixJobLogSortField
 HelixJobListSortField = _types.HelixJobListSortField
@@ -111,6 +113,13 @@ class HelixJobAttemptsListFilter(Filter):
     """Filter options for listing platform job attempts."""
 
     status: Optional[HelixJobStatus] = Field(None, description="The current status.")
+
+
+class HelixAttemptStepsListFilter(Filter):
+    """Filter options for steps nested under one attempt."""
+
+    status: Optional[List[HelixJobStatus]] = Field(None, description="The list of statuses to filter steps by.")
+    task_cleanup_pending: bool | None = Field(None, description="Whether terminal child-task cleanup is unfinished.")
 
 
 class HelixJobStepsListFilter(Filter):

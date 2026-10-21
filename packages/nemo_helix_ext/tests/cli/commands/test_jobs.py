@@ -13,12 +13,19 @@ from unittest.mock import MagicMock, patch
 import httpx
 from nemo_helix_ext.cli.commands.jobs import (
     _generate_jobs_python_code,
+    create_or_update_tasks,
+    create_results,
     download_results,
     get_logs_jobs,
+    list_attempts,
     list_jobs,
+    list_results,
     list_steps,
     rerun_jobs,
+    retrieve_attempt,
+    retrieve_results,
     tail_platform_job,
+    update_jobs,
     update_status_steps,
 )
 from nemo_helix_plugin.client.client import NemoClient
@@ -257,6 +264,55 @@ def test_download_results_streams_chunks_to_output_file(tmp_path: Path) -> None:
     assert echo.call_args.args[0].endswith(f"Downloaded to {output_file!r}")
 
 
+def test_create_result_sends_required_attempt_association() -> None:
+    platform_client = SimpleNamespace()
+    jobs_client = MagicMock()
+    jobs_client.create_job_result.return_value = _Response(SimpleNamespace(name="metrics"))
+
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
+        patch("nemo_helix_ext.cli.commands.jobs.format_output"),
+    ):
+        create_results(
+            _ctx(platform_client),
+            name="metrics",
+            workspace="test-workspace",
+            job="job-a",
+            attempt_id="att-1",
+            artifact_storage_type="fileset",
+            artifact_url="default/results#metrics",
+        )
+
+    call = jobs_client.create_job_result.call_args
+    assert call.kwargs["workspace"] == "test-workspace"
+    assert call.kwargs["job"] == "job-a"
+    assert call.kwargs["name"] == "metrics"
+    assert call.kwargs["body"].attempt_id == "att-1"
+
+
+def test_list_results_forwards_attempt_filter() -> None:
+    platform_client = SimpleNamespace()
+    jobs_client = MagicMock()
+    jobs_client.list_job_results.return_value = _Response(SimpleNamespace(data=[]))
+
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
+        patch("nemo_helix_ext.cli.commands.jobs.format_output"),
+    ):
+        list_results(
+            _ctx(platform_client),
+            name="job-a",
+            workspace="test-workspace",
+            attempt_id="current",
+        )
+
+    jobs_client.list_job_results.assert_called_once_with(
+        workspace="test-workspace",
+        name="job-a",
+        query_params={"attempt_id": "current"},
+    )
+
+
 def test_get_logs_uses_source_owned_cursor_page() -> None:
     platform_client = SimpleNamespace()
     jobs_client = MagicMock()
@@ -274,7 +330,7 @@ def test_get_logs_uses_source_owned_cursor_page() -> None:
             _ctx(platform_client),
             name="job-a",
             workspace="test-workspace",
-            attempt_id=2,
+            attempt_id="current",
             limit=25,
             page_cursor="cursor-1",
             step_id="step-a",
@@ -286,7 +342,7 @@ def test_get_logs_uses_source_owned_cursor_page() -> None:
         workspace="test-workspace",
         name="job-a",
         query_params={
-            "attempt_id": 2,
+            "attempt_id": "current",
             "limit": 25,
             "page_cursor": "cursor-1",
             "step_id": "step-a",
@@ -315,7 +371,7 @@ def test_tail_platform_job_renders_newest_log_lines() -> None:
             name="job-a",
             lines=50,
             workspace="test-workspace",
-            attempt_id=2,
+            attempt_id="current",
             step_id="step-a",
             task_id="task-a",
         )
@@ -325,7 +381,7 @@ def test_tail_platform_job_renders_newest_log_lines() -> None:
         name="job-a",
         query_params={
             "tail": 50,
-            "attempt_id": 2,
+            "attempt_id": "current",
             "step_id": "step-a",
             "task_id": "task-a",
         },
@@ -365,6 +421,145 @@ def test_update_status_steps_maps_body_to_source_owned_request() -> None:
         output_format=None,
         no_truncate=False,
         timestamp_format=None,
+    )
+
+
+def test_create_or_update_task_defaults_to_current_attempt() -> None:
+    platform_client = SimpleNamespace()
+    jobs_client = MagicMock()
+    updated_task = SimpleNamespace(name="task-a")
+    jobs_client.update_attempt_step_task.return_value = _Response(updated_task)
+
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
+        patch("nemo_helix_ext.cli.commands.jobs.format_output"),
+    ):
+        create_or_update_tasks(
+            _ctx(platform_client),
+            name="task-a",
+            workspace="test-workspace",
+            job="job-a",
+            step="step-a",
+            status="active",
+        )
+
+    jobs_client.update_attempt_step_task.assert_called_once()
+    call_kwargs = jobs_client.update_attempt_step_task.call_args.kwargs
+    assert call_kwargs["workspace"] == "test-workspace"
+    assert call_kwargs["job"] == "job-a"
+    assert call_kwargs["attempt"] == "current"
+    assert call_kwargs["step"] == "step-a"
+    assert call_kwargs["name"] == "task-a"
+    assert call_kwargs["body"].status == "active"
+
+
+def test_list_attempts_uses_paginated_source_owned_route() -> None:
+    platform_client = SimpleNamespace()
+    jobs_client = MagicMock()
+    attempt = SimpleNamespace(id="att-1")
+    jobs_client.list_job_attempts.return_value = _PaginatedResponse(
+        SimpleNamespace(
+            items=[attempt],
+            metadata={
+                "page": 1,
+                "page_size": 25,
+                "current_page_size": 1,
+                "total_pages": 1,
+                "total_results": 1,
+            },
+        )
+    )
+
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
+        patch("nemo_helix_ext.cli.commands.jobs.format_output") as format_output,
+        patch("nemo_helix_ext.cli.commands.jobs.warn_if_more_pages"),
+    ):
+        list_attempts(
+            _ctx(platform_client),
+            job="job-a",
+            workspace="test-workspace",
+            page=1,
+            page_size=25,
+            sort="-seq",
+        )
+
+    jobs_client.list_job_attempts.assert_called_once_with(
+        workspace="test-workspace",
+        job="job-a",
+        query_params={"page": 1, "page_size": 25, "sort": "-seq"},
+    )
+    assert format_output.call_args.args[0].data == [attempt]
+
+
+def test_retrieve_current_attempt_uses_selector() -> None:
+    platform_client = SimpleNamespace()
+    jobs_client = MagicMock()
+    attempt = SimpleNamespace(id="att-1")
+    jobs_client.get_job_attempt.return_value = _Response(attempt)
+
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
+        patch("nemo_helix_ext.cli.commands.jobs.format_output"),
+    ):
+        retrieve_attempt(
+            _ctx(platform_client),
+            attempt="current",
+            job="job-a",
+            workspace="test-workspace",
+        )
+
+    jobs_client.get_job_attempt.assert_called_once_with(
+        workspace="test-workspace",
+        job="job-a",
+        attempt="current",
+    )
+
+
+def test_update_job_preserves_explicit_null_description() -> None:
+    platform_client = SimpleNamespace()
+    jobs_client = MagicMock()
+    updated_job = SimpleNamespace(name="job-a")
+    jobs_client.update_job.return_value = _Response(updated_job)
+
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
+        patch("nemo_helix_ext.cli.commands.jobs.format_output"),
+    ):
+        update_jobs(
+            _ctx(platform_client),
+            name="job-a",
+            workspace="test-workspace",
+            input_data='{"description": null}',
+        )
+
+    call_kwargs = jobs_client.update_job.call_args.kwargs
+    assert call_kwargs["workspace"] == "test-workspace"
+    assert call_kwargs["body"].description is None
+    assert "description" in call_kwargs["body"].model_fields_set
+
+
+def test_retrieve_result_uses_job_owned_route() -> None:
+    platform_client = SimpleNamespace()
+    jobs_client = MagicMock()
+    result = SimpleNamespace(name="metrics")
+    jobs_client.get_job_result.return_value = _Response(result)
+
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
+        patch("nemo_helix_ext.cli.commands.jobs.format_output"),
+    ):
+        retrieve_results(
+            _ctx(platform_client),
+            name="metrics",
+            job="job-a",
+            workspace="test-workspace",
+        )
+
+    jobs_client.get_job_result.assert_called_once_with(
+        workspace="test-workspace",
+        job="job-a",
+        name="metrics",
     )
 
 
@@ -422,3 +617,47 @@ def test_rerun_is_sent_once() -> None:
 
     jobs_client.with_retry.assert_called_once_with(RetryPolicy(max_retries=0))
     jobs_client.rerun_job.assert_called_once_with(job="job-a", workspace="test-workspace")
+
+
+def test_jobs_result_get_code_generation_uses_job_route() -> None:
+    code = _generate_jobs_python_code(
+        resource_path=["jobs", "results"],
+        method="retrieve",
+        args={
+            "workspace": "test-workspace",
+            "job": "job-a",
+            "name": "metrics",
+        },
+        base_url="http://example.test",
+        wait_config=None,
+        wait_options=None,
+        watch_config=None,
+        watch_options=None,
+    )
+
+    assert "get_job_result" in code
+    assert "attempt=" not in code
+
+
+def test_jobs_task_update_code_generation_uses_attempt_route() -> None:
+    code = _generate_jobs_python_code(
+        resource_path=["jobs", "tasks"],
+        method="create_or_update",
+        args={
+            "workspace": "test-workspace",
+            "job": "job-a",
+            "attempt_id": "current",
+            "step": "step-a",
+            "name": "task-a",
+            "status": "active",
+        },
+        base_url="http://example.test",
+        wait_config=None,
+        wait_options=None,
+        watch_config=None,
+        watch_options=None,
+    )
+
+    assert "update_attempt_step_task" in code
+    assert "update_job_step_task" not in code
+    assert "attempt=args['attempt_id']" in code
