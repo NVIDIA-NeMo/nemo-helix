@@ -67,10 +67,12 @@ class _Verdict(Enum):
     MISCONFIGURED = "misconfigured"  # They overlap; authentication fails closed.
 
 
-# How long each verdict is reused before the boundary is checked again. A consistent verdict lasts
-# as long as the validator's cached JWKS, so a key the IdP adds later is still caught. The others
-# are rechecked sooner: a misconfiguration so a fix on the IdP side is picked up, an unverified
-# check so a slow IdP costs one request a timeout rather than every request.
+# How long each verdict is reused before the boundary is checked again; rechecks run in the
+# background, so no request waits on one. A consistent verdict lasts as long as the validator's
+# cached JWKS, so a key the IdP adds later is still caught. The other two are rechecked sooner, so a
+# recovered IdP or a fixed misconfiguration is noticed within about 30s. That figure is a judgement
+# call rather than a derived one: shorter would contact a failing IdP more often (each recheck can
+# take up to two 10s fetch timeouts, and only one runs at a time), longer would delay recovery.
 _REUSE_VERDICT_SECONDS: dict[_Verdict, float] = {
     _Verdict.CONSISTENT: 3600.0,
     _Verdict.UNVERIFIED: 30.0,
