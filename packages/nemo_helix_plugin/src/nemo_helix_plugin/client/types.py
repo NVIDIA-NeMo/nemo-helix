@@ -239,6 +239,9 @@ class Paginated(Generic[PaginatedModelT, StrategyT]):
 # query_params) and are not treated as path parameters.
 RESERVED_PARAM_NAMES: frozenset[str] = frozenset({"self", "body", "content", "query_params"})
 
+# Format spec marking a path placeholder that spans URL segments: ``{name:path}``.
+PATH_SPEC = "path"
+
 
 class ConflictResolver(Protocol):
     """Builds the retrieve request to run when a create hits a 409 Conflict.

@@ -85,19 +85,19 @@ def list_files(
 ) -> ListFilesetFilesResponse: ...
 
 
-@put("/apis/files/v2/workspaces/{workspace}/filesets/{name}/-/{path}")
+@put("/apis/files/v2/workspaces/{workspace}/filesets/{name}/-/{path:path}")
 @abstractmethod
 def upload_file(
     *, workspace: str | None = None, name: str, path: str, content: bytes | Iterable[bytes] | AsyncIterable[bytes]
 ) -> FilesetFileOutput: ...
 
 
-@get("/apis/files/v2/workspaces/{workspace}/filesets/{name}/-/{path}")
+@get("/apis/files/v2/workspaces/{workspace}/filesets/{name}/-/{path:path}")
 @abstractmethod
 def download_file(*, workspace: str | None = None, name: str, path: str) -> BinaryContent: ...
 
 
-@delete("/apis/files/v2/workspaces/{workspace}/filesets/{name}/-/{path}")
+@delete("/apis/files/v2/workspaces/{workspace}/filesets/{name}/-/{path:path}")
 @abstractmethod
 def delete_file(*, workspace: str | None = None, name: str, path: str) -> FilesetFileOutput: ...
 
