@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Literal
 from unittest.mock import Mock
 
@@ -13,10 +14,11 @@ import pytest
 from nemo_builder_plugin.entities import ContainerImage, Provenance
 from nemo_builder_plugin.schema import FileSetSource, ImageSource, SubmitBuildResponse
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
-from nemo_evals.image_builds.models import ImageBuildRequest, TaskImageBuildEntity, build_entity_name
+from nemo_evals.image_builds.models import ImageBuildRequest, TaskImageBuildEntity, build_entity_name, build_job_name
 from nemo_evals.image_builds.planning import TaskArchive
 from nemo_evals.image_builds.runner import TaskImageBuildSpec, run_task_image_build
 from nemo_evals.image_builds.service import BuildJob, ImageBuildService
+from nemo_evals.jobs.task_image_build import is_job_for, task_image_build_job_request
 from nemo_evals.revisions import apply_tag, publish_revision
 from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
@@ -319,3 +321,17 @@ def test_job_fails_when_the_build_fails(monkeypatch, status: str, job_status: st
     )
 
     assert result["status"] == job_status
+
+
+def test_a_job_left_by_a_build_kept_under_its_revision_is_never_adopted() -> None:
+    """Builds used to be kept under a revision; a Job one of them left must not stand in for a build kept by contents.
+
+    Adopted, the old Job would never write the new record, and the next request would fail it as abandoned.
+    """
+    digest = "a" * 64
+    spec = TaskImageBuildSpec(workspace="default", task="sort-task", revision_digest=digest, attempt=1)
+    old_name = f"task-image-build-{hashlib.sha256(f'default/sort-task#{digest}'.encode()).hexdigest()[:16]}-1"
+
+    assert build_job_name("default/sort-task", digest, 1) != old_name
+    assert not is_job_for({"task_image_build": f"default/sort-task#{digest}/1"}, spec)
+    assert is_job_for(task_image_build_job_request(spec, name="any").custom_fields, spec)
