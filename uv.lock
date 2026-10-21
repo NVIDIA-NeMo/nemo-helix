@@ -4952,6 +4952,7 @@ dev = [
 name = "nemo-helix"
 source = { editable = "packages/nemo_helix" }
 dependencies = [
+    { name = "certifi" },
     { name = "nemo-helix-ext" },
     { name = "nemo-helix-plugin" },
     { name = "nhx-common" },
@@ -5964,6 +5965,7 @@ requires-dist = [
     { name = "botocore", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=1.40.46,<1.40.62" },
     { name = "botocore", marker = "extra == 'plugins'", specifier = ">=1.40.46,<1.40.62" },
     { name = "botocore", marker = "extra == 'services'", specifier = ">=1.40.46,<1.40.62" },
+    { name = "certifi", specifier = ">=2026.10.19" },
     { name = "clickhouse-connect", extras = ["async"], marker = "extra == 'all'", specifier = ">=1.10.0,<2" },
     { name = "clickhouse-connect", extras = ["async"], marker = "extra == 'intake-service'", specifier = ">=1.10.0,<2" },
     { name = "clickhouse-connect", extras = ["async"], marker = "extra == 'services'", specifier = ">=1.10.0,<2" },

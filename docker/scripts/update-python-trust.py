@@ -102,7 +102,9 @@ def update_bundles(python: Path) -> None:
         [
             str(python),
             "-c",
-            "import importlib.metadata,json; print(json.dumps([d.metadata['Name'].lower() for d in importlib.metadata.distributions()]))",
+            "import importlib.metadata,json; "
+            "print(json.dumps([name.lower() for d in importlib.metadata.distributions() "
+            "if (name := d.metadata.get('Name'))]))",
         ],
         text=True,
     )

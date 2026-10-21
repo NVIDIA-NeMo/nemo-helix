@@ -6,6 +6,7 @@ import csv
 import hashlib
 import importlib.util
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,27 @@ SPEC = importlib.util.spec_from_file_location(
 assert SPEC is not None and SPEC.loader is not None
 trust = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(trust)
+
+
+def test_update_bundles_skips_unnamed_distributions(tmp_path: Path, monkeypatch) -> None:
+    for index, metadata in enumerate(("", "Version: 1.0\n", "Name: CeRtIfI\nVersion: 1.0\n")):
+        directory = tmp_path / f"package{index}-1.0.dist-info"
+        directory.mkdir()
+        (directory / "METADATA").write_text(metadata)
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+    original_run = trust.subprocess.run
+    installs = []
+
+    def probe(command, **kwargs):
+        return original_run([command[0], "-S", *command[1:]], stdout=trust.subprocess.PIPE, check=True, **kwargs).stdout
+
+    monkeypatch.setattr(trust.subprocess, "check_output", probe)
+    monkeypatch.setattr(trust.subprocess, "run", lambda command, **kwargs: installs.append(command))
+
+    trust.update_bundles(Path(sys.executable))
+
+    assert len(installs) == 1
+    assert installs[0][-1] == "certifi==2026.10.19"
 
 
 @pytest.mark.parametrize("link", ["symlink", "hardlink"])
