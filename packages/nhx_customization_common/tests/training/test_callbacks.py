@@ -18,6 +18,7 @@ import logging
 from typing import Any, ClassVar, cast
 
 import pytest
+from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.training.callbacks import TrainingProgressCallback, is_chartable
 from nhx.customization_common.training.progress import JobsServiceProgressReporter
 
@@ -1235,6 +1236,27 @@ def test_events_are_never_withheld(reporter: _RecordingReporter) -> None:
 
     assert len([r for r in reporter.reports if r["phase"] == "checkpoint_saved"]) == 3
     assert len([r for r in reporter.reports if r["phase"] == "epoch_end"]) == 3
+
+
+def test_a_checkpoint_save_reports_when_it_starts(reporter: _RecordingReporter) -> None:
+    """The final save can outlast many training steps, and until it ends nothing else reports."""
+    _make_callback(reporter).report_checkpoint_saving(step=4, epoch=1)
+
+    assert reporter.reports[-1] == {"phase": "saving_checkpoint", "step": 4, "epoch": 1}
+
+
+def test_a_phase_report_sends_withheld_metrics_first(reporter: _RecordingReporter) -> None:
+    """Flushed by ``close()`` instead, the withheld step would land last and put ``training`` back."""
+    clock = _FakeClock()
+    callback = _make_callback(reporter, min_report_interval_seconds=10, clock=clock)
+    callback.report_train_step(step=1, epoch=1, metrics={"loss": 0.5})
+    callback.report_train_step(step=2, epoch=1, metrics={"loss": 0.4})
+
+    callback.report_phase(TrainingPhase.MERGING_ADAPTER)
+    callback.close()
+
+    assert [r["phase"] for r in reporter.reports] == ["training", "training", "merging_adapter"]
+    assert _train_steps(reporter) == [1, 2]
 
 
 def test_zero_sends_every_report(reporter: _RecordingReporter) -> None:

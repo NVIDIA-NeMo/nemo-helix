@@ -41,6 +41,7 @@ from nemo_helix_plugin.jobs.api_factory import (
     ResourcesSpec,
 )
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+from nemo_helix_plugin.jobs.spec import StepIngressRule, StepNetwork, TcpPortRange
 from nemo_helix_plugin.models.types import ModelDeploymentConfig, ModelEntity
 from nhx.common.auth import auth_client_context
 from nhx.common.entities.utils import parse_entity_ref
@@ -65,10 +66,14 @@ from nhx.customization_common.service.platform_client import (
 from nhx.customization_common.tasks.file_io_metadata import build_output_fileset_metadata_from_model_entity
 from nhx.rl.app.constants import (
     BASE_LOG_DIR_ENVVAR,
+    DEFAULT_BROKER_PORT,
     DEFAULT_DATASET_PATH,
     DEFAULT_ENVIRONMENT_PATH,
     DEFAULT_MODEL_PATH,
     DEFAULT_OUTPUT_MODEL_PATH,
+    DEFAULT_VLLM_PORT,
+    DEFAULT_VLLM_PORT_RANGE_HIGH,
+    DEFAULT_VLLM_PORT_RANGE_LOW,
     NHX_BROKER_HOST_ENVVAR,
     NHX_BROKER_PORT_ENVVAR,
     NHX_JOB_STORAGE_PVC_ENVVAR,
@@ -76,6 +81,7 @@ from nhx.rl.app.constants import (
     NHX_VLLM_PORT_ENVVAR,
     SANDBOX_DATASET_PATH,
     SANDBOX_ENVIRONMENT_PATH,
+    SANDBOX_JOB_ID_LABEL,
 )
 from nhx.rl.app.jobs.training.schemas import (
     DPOConfig,
@@ -101,7 +107,11 @@ from nhx.rl.schemas import DPOTraining, GRPOTraining, RlJobOutput
 logger = logging.getLogger(__name__)
 
 
-GPU_TRAINING_SHM_GIB_PER_GPU = 8
+# NeMo-RL's recommended container shm size. Async checkpoint staging and Ray's
+# object store both live in /dev/shm; LoRA stages only the adapter. Operators
+# raise either through the execution profile's resources.shm_size.
+ALL_WEIGHTS_SHM_SIZE = "64Gi"
+LORA_SHM_SIZE = "8Gi"
 
 
 def _get_cpu_resources() -> ResourcesSpec:
@@ -117,11 +127,11 @@ def _get_cpu_resources() -> ResourcesSpec:
     )
 
 
-def _gpu_training_resources(*, num_nodes: int = 1, num_gpus: int) -> ResourcesSpec:
+def _gpu_training_resources(*, num_nodes: int = 1, num_gpus: int, lora: bool) -> ResourcesSpec:
     return ResourcesSpec(
         num_nodes=num_nodes,
         num_gpus=num_gpus,
-        shm_size=f"{GPU_TRAINING_SHM_GIB_PER_GPU * max(1, num_gpus)}Gi",
+        shm_size=LORA_SHM_SIZE if lora else ALL_WEIGHTS_SHM_SIZE,
     )
 
 
@@ -600,14 +610,28 @@ def _build_training_step(
     warn_incomplete_integrations(job_spec.integrations)
     environment = [*base_env, *collect_integration_secret_envs(job_spec.integrations)]
 
+    network: StepNetwork | None = None
     if job_spec.training_type == TrainingType.GRPO:
         for name, value in (
             (NHX_VLLM_HOST_ENVVAR, "127.0.0.1"),
-            (NHX_VLLM_PORT_ENVVAR, "8000"),
+            (NHX_VLLM_PORT_ENVVAR, str(DEFAULT_VLLM_PORT)),
             (NHX_BROKER_HOST_ENVVAR, "127.0.0.1"),
-            (NHX_BROKER_PORT_ENVVAR, "51234"),
+            (NHX_BROKER_PORT_ENVVAR, str(DEFAULT_BROKER_PORT)),
         ):
             environment.append(EnvironmentVariable(name=name, value=value))
+        # Sandboxes reach the training pods on the broker and on the port range vLLM picks a
+        # generation server from, never on Ray. The span is inclusive; the controller emits each port.
+        network = StepNetwork(
+            ingress=[
+                StepIngressRule(
+                    job_id_label=SANDBOX_JOB_ID_LABEL,
+                    tcp_ports=[DEFAULT_BROKER_PORT],
+                    tcp_port_ranges=[
+                        TcpPortRange(low=DEFAULT_VLLM_PORT_RANGE_LOW, high=DEFAULT_VLLM_PORT_RANGE_HIGH - 1)
+                    ],
+                )
+            ]
+        )
         if config.job_storage_pvc_claim:
             environment.append(EnvironmentVariable(name=NHX_JOB_STORAGE_PVC_ENVVAR, value=config.job_storage_pvc_claim))
 
@@ -626,7 +650,11 @@ def _build_training_step(
         executor = DistributedGPUExecutionProviderSpec(
             provider="gpu_distributed",
             container=container,
-            resources=_gpu_training_resources(num_nodes=num_nodes, num_gpus=num_gpus_per_node),
+            resources=_gpu_training_resources(
+                num_nodes=num_nodes,
+                num_gpus=num_gpus_per_node,
+                lora=job_spec.trains_lora_adapter,
+            ),
             profile=resolved_profile if resolved_profile is not None else "default",
         )
     else:
@@ -634,7 +662,11 @@ def _build_training_step(
         executor = GPUExecutionProviderSpec(
             provider="gpu",
             container=container,
-            resources=_gpu_training_resources(num_gpus=num_gpus_per_node),
+            resources=_gpu_training_resources(
+                num_nodes=1,
+                num_gpus=num_gpus_per_node,
+                lora=job_spec.trains_lora_adapter,
+            ),
             profile=resolved_profile if resolved_profile is not None else "default",
         )
 
@@ -643,6 +675,7 @@ def _build_training_step(
         executor=executor,
         environment=environment,
         config=step_config.model_dump(mode="json"),
+        network=network,
     )
 
 

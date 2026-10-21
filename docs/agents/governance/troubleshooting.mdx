@@ -87,10 +87,10 @@ credentials can actually reach; pick one of those. Built-in defaults are not
 probed.
 
 **The guardrails defender runs but proposes no change.**
-An unreachable safety model does not raise: it hangs the defender until its
-timeout, which reads as "ran, proposed nothing". Preflight catches this whenever
-`--safety-model` is set explicitly, so check that first if you left it at its
-default.
+An unreachable safety model does not raise: the guardrail fails open, which
+reads as "ran, proposed nothing". Preflight catches this whenever `--safety-model`
+or `--safety-base-url` is set explicitly, so check that first if you left them at
+their defaults. Unset safety fields fall back to the analysis endpoint and key.
 
 ## The Victim Sandbox
 
@@ -133,14 +133,14 @@ bundle. Confirm the plugin is registered and the bundle is served:
 
 ```bash
 curl -s "${NHX_BASE_URL:-http://localhost:8080}/apis/plugins"
-curl -sI "${NHX_BASE_URL:-http://localhost:8080}/plugin-ui/agent-hardener/index.js"
+curl -s -o /dev/null -w "%{http_code}\n" "${NHX_BASE_URL:-http://localhost:8080}/plugin-ui/agent-hardener/index.js"
 ```
 
 If your CLI context points at a remote deployment, export its URL as `NHX_BASE_URL` before running
 these commands. For details, refer to [When to use `NHX_BASE_URL`](/documentation/reference/cli-reference/connect-to-deployments#when-to-use-nhx-base-url).
 
-The first should list `agent-hardener` with a `bundleUrl`. Then hard-reload the
-browser.
+The first should list `agent-hardener` with a `bundleUrl`, and the second should print `200`. Then
+hard-reload the browser.
 
 **Applied guardrails have no effect on the running agent.**
 Applying updates the stored agent config without redeploying. Redeploy the agent

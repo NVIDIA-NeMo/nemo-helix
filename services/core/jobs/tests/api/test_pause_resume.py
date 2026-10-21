@@ -441,3 +441,12 @@ async def test_job_control_pause_window(test_client: AsyncClient):
         unchanged = await test_client.patch(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/control", json=body)
         assert unchanged.status_code == 200
         assert unchanged.json()["control"]["pause_ttl_seconds"] == 20
+
+    await test_client.patch(
+        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/status-details",
+        json={"storage_reclaimed_at": "2026-10-08T00:00:00+00:00"},
+    )
+    reclaimed = await test_client.patch(
+        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/control", json={"pause_ttl_seconds": 30}
+    )
+    assert reclaimed.status_code == 409

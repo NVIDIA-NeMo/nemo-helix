@@ -6,7 +6,6 @@ title: "Seeding with External Datasets"
 description: ""
 ---
 {/* @nemo-nb: process */}
-{/* @nemo-nb: skip-test */}
 
 <a id="data-designer-tutorials-seeding"></a>
 
@@ -104,7 +103,7 @@ MODEL_ALIAS = "text"
 
 model_configs = [
     dd.ModelConfig(
-        provider="default/nvidia-build",
+        provider="system/nvidia-build",
         model="nvidia/nemotron-3.5-lightning-30b-a3b",  # Use the `served_model_name` from the provider
         alias=MODEL_ALIAS,
         inference_parameters=dd.ChatCompletionInferenceParams(

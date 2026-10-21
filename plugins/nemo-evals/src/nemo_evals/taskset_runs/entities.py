@@ -83,8 +83,8 @@ class TasksetRunEntity(EntityBase):
     idempotency_key: str | None = Field(
         default=None,
         description=(
-            "Optional caller-supplied key that, with workspace and caller, derives the run name, "
-            "so retries of the same submit return this run. None for keyless submits."
+            "Key that, with workspace and caller, derives the run name, so retries of the same submit "
+            "return this run: the caller's, or one submit generated when the request omitted it."
         ),
     )
     request_digest: str = Field(

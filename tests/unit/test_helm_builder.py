@@ -148,7 +148,13 @@ def test_the_development_registry_needs_a_password() -> None:
 
 
 def test_network_policies_let_the_build_steps_reach_the_api() -> None:
-    documents = _helm_template(*ENABLED, "--set", "networkPolicies.enabled=true")
+    documents = _helm_template(
+        *ENABLED,
+        "--set",
+        "networkPolicies.enabled=true",
+        "--api-versions",
+        "admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy",
+    )
 
     policy = next(
         document

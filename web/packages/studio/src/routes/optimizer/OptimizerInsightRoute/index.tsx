@@ -103,7 +103,7 @@ export const OptimizerInsightRoute: FC = () => {
     );
   }
 
-  const traceRefs = insight.trace_refs ?? [];
+  const traceRefs = (insight.evidence ?? []).map((item) => item.trace_id);
   const status = insight.status ?? 'open';
 
   return (

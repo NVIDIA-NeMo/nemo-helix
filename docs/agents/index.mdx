@@ -3,303 +3,72 @@
 # SPDX-License-Identifier: Apache-2.0
 
 title: "About Agents"
-description: ""
+description: "Register, deploy, observe, and optimize agents on NeMo Helix."
 ---
 
 <a id="agents"></a>
 
-An agent on NeMo Helix calls tools, accesses models through shared NeMo Helix
-infrastructure, and runs as a service you can register, deploy, and
-invoke. New agents use the NeMo Helix-managed `nemo-agents-spec-v1` `agent.yaml`
-contract. Legacy NVIDIA NeMo Agent Toolkit (NAT) workflow configurations remain
-supported, including NAT-specific evaluation and optimization commands. Both
-formats are managed through the `nemo agents` command group.
+An agent on NeMo Helix is an `agent` entity in a workspace. Once registered, the
+platform can deploy it, route requests to it, collect its traces, evaluate it,
+and optimize it. Agents run through
+[NeMo Fabric](https://docs.nvidia.com/nemo/fabric/about-nemo-fabric/overview/),
+which gives every supported harness (DeepAgents, Claude Code, Codex, Hermes,
+NOOA, or a remote agent endpoint) the same configuration, lifecycle, and
+telemetry.
 
 ## How It Works
 
-A platform-managed agent consists of three components:
+```mermaid
+flowchart LR
+ Client --> GW["Agents gateway"]
+ GW --> D["Agent deployment"]
+ D --> IGW["Inference Gateway"]
+ IGW --> Models
+ D -. traces .-> Intake
+```
 
-1. **The agent entity.** `nemo agents create` stores the agent YAML as an entity in the workspace. The same configuration can be redeployed without re-registering it.
-1. **The deployment controller.** `nemo agents deploy` passes the stored config to the Agents service controller. By default it launches a FastAPI server, assigns a port, watches its health, and tears it down on `nemo agents undeploy`. With `--mode docker` or `--mode k8s` it instead runs the agent as a durable container through the deployments plugin — see [Deploy Agents](/documentation/agents/deploy-agents).
-1. **The Agents gateway.** The gateway resolves the agent to its current running deployment and proxies client requests to it, including streaming responses. From a client's perspective, the agent is an OpenAI-compatible endpoint owned by NeMo Helix.
-
-Model traffic from inside the agent process routes back through the Inference Gateway, which resolves model entity names to upstream providers and supplies their credentials. This is why agent configs do not carry `base_url` or `api_key` values — the deployment injects the gateway URL automatically, and the gateway looks up the rest.
-
-A virtual model is a platform-managed wrapper around one or more backend
-models. An agent can point at a virtual model entity while the virtual model
-handles routing, format translation, and [guardrails](/documentation/guardrail-models)
-behind the scenes — no changes to the agent's YAML required.
-
-### Applying Changes Through Candidate Agents
-
-The Agents v2 API has no in-place patch for a stored agent config. When the
-optimize or secure workflows propose a change — a model swap, a routing
-split, a guardrailed virtual model — they apply it by creating a sibling
-agent with the new config, deploying it, and running an evaluation against
-it. The original agent stays untouched until you decide to promote the
-candidate.
-
-The sibling-candidate pattern is the recommended way to apply changes: you
-always have a baseline to compare against, and you can roll back by
-undeploying the candidate.
-
-When you instead want to update an agent **in place** — iterating on your own
-agent's config and pushing the new version to the same name — use
-`nemo agents redeploy`. It wraps the four manual steps (undeploy → delete →
-create → deploy) into one command. Because the agent entity is immutable by
-name, redeploy validates your new config first (a bad config is a safe no-op),
-then tears the old agent down and rebuilds it; the durable `{agent}-ethos`
-fileset is preserved and re-uploaded. Once teardown starts the operation is not
-atomic, but each step is check-first, so it is safe to re-run.
+1. **Register.** `nemo agents create` stores the agent's `agent.yaml` and uploads the
+   files beside it to the agent's `<name>-ethos` fileset.
+1. **Deploy.** `nemo agents deploy` runs the agent as a local subprocess, a Docker
+   container, or a Kubernetes Deployment.
+1. **Invoke.** The Agents gateway routes each request to the agent's active deployment
+   and exposes it as an OpenAI-compatible endpoint, whatever the runtime.
+1. **Call models.** Model traffic from the agent goes through the
+   [Inference Gateway](/documentation/models-and-inference), which resolves model and
+   [virtual model](/documentation/models-and-inference/virtual-models) names and attaches
+   provider credentials. Agent configs never carry provider API keys for platform-routed models.
+1. **Trace.** Deployed agents export trajectories to Intake under the agent's name by default, which
+   feeds [Insights](/documentation/agents/traces-and-insights/insights-from-traces),
+   evaluation, and [optimization](/documentation/agents/optimize-agents).
 
 ## Agent Lifecycle
 
-Agents are managed end-to-end through the `nemo agents` command group:
+| Stage | Command |
+|---|---|
+| Register | `nemo agents create --name <name> --agent-config <path>` |
+| Deploy | `nemo agents deploy --agent <name>` |
+| Invoke | `nemo agents invoke --agent <name> --input "..."` |
+| Chat | `nemo agents chat --agent-deployment <deployment>` |
+| Run once as a job | `nemo agents execute --agent <name> --input "..."` |
+| Analyze traces | `nemo insights analysis-runs create --agent <name>` |
+| Optimize | `nemo agents optimize run-strategy --strategy <strategy> --agent <name>` |
+| Update in place | `nemo agents redeploy --agent <name> --agent-config <path>` |
+| Tear down | `nemo agents undeploy --agent <name>`, then `nemo agents delete <name>` |
 
-| Stage     | Command                                                                                                       | What it does                                                                     |
-| --------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Register  | `nemo agents create --name <name> --agent-config <path>`                                                      | Store the agent configuration as an `agent` entity in a workspace.               |
-| Deploy    | `nemo agents deploy --agent <name>`                                                                           | Start a running service from the stored config.                                  |
-| Redeploy  | `nemo agents redeploy --agent <name> --agent-config <path>`                                                   | Push a changed config to a deployed agent in one step (undeploy → delete → create → deploy). |
-| Wait      | `nemo agents deployments wait --agent <name>`                                                                 | Block until the deployment is `running` or `failed`.                             |
-| Invoke    | `nemo agents invoke --agent <name> --input "..."` or `nemo agents invoke --agent-config <path> --input "..."` | Send a single request through the Agents gateway or run a local config directly. |
-| Optimize  | `nemo agents optimize run-strategy --strategy ...`                                                             | Run various plugin-provided agent optimization strategies. See [Optimize Agents](/documentation/agents/optimize-agents). |
-| Tear down | `nemo agents undeploy --agent <name>` then `nemo agents delete <name>`                                        | Stop the running service and remove the agent entity.                            |
+To try an `agent.yaml` without registering it, run `nemo agents invoke --agent-config <path> --input "..."`.
 
-To run an `agent.yaml` directly without registering it on the platform, pass `--agent-config <path>` to `nemo agents invoke` or `nemo agents run`.
+## Next Steps
 
-Legacy NAT-only commands:
-
-| Stage    | Command                                                            | What it does                                                                 |
-| -------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| Evaluate | `nemo agents evaluate --eval-config <path> --agent <name>`         | Run a NAT evaluation against the deployed agent.                             |
-
-## Agent Definition
-
-### NeMo Helix-managed agents
-
-#### About NeMo Fabric
-
-NeMo Fabric gives users one configurable, observable way to run applications across multiple agent harnesses.
-It standardizes configuration, lifecycle management, and results without requiring a separate integration for every harness.
-To learn more about Fabric, see
-[NeMo Fabric](https://docs.nvidia.com/nemo/fabric/about-nemo-fabric/overview/).
-
-NeMo Helix uses Fabric as the runtime wrapper around your agent so the
-platform can deploy it and route its model traffic
-through shared infrastructure.
-
-### Install Harness Support
-
-The base Agents plugin installs Fabric, Relay support, and adapter implementations
-compatible with the Python version. It does not install the
-third-party harness packages. Choose an extra when the harness should share the
-NeMo Helix environment:
-
-| Harness selection | `nemo-helix` package expression | Source checkout plugin expression | Harness packages installed |
-|---|---|---|---|
-| Adapters only | `nemo-helix[nemo-agents-plugin]` | `nemo-agents-plugin` | None |
-| Claude Code | `nemo-helix[nemo-agents-plugin-claude]` | `nemo-agents-plugin[claude]` | Claude Agent SDK and NeMo Relay CLI |
-| Codex | `nemo-helix[nemo-agents-plugin-codex]` | `nemo-agents-plugin[codex]` | OpenAI Codex and NeMo Relay CLI |
-| DeepAgents | `nemo-helix[nemo-agents-plugin-deepagents]` | `nemo-agents-plugin[deepagents]` | LangChain Deep Agents |
-| Mini-SWE-Agent | `nemo-helix[nemo-agents-plugin-mini-swe-agent]` | `nemo-agents-plugin[mini-swe-agent]` | Mini-SWE-Agent 2.x |
-| NOOA (Python 3.12–3.13) | `nemo-helix[nemo-agents-plugin-nooa]` | `nemo-agents-plugin[nooa]` | NOOA, NOOA CLI, and NOOA Bench |
-| Hermes | `nemo-helix[nemo-agents-plugin]`, then install Hermes separately | `nemo-agents-plugin`, then install Hermes separately | Hermes is not included in an extra |
-
-Install the Agents plugin and one harness with its namespaced NeMo Helix extra.
-For example, install DeepAgents with:
-
-```bash
-uv tool install "nemo-helix[nemo-agents-plugin-deepagents]"
-uv tool update-shell
-# Then restart your shell/ source your profile
-```
-
-In an activated virtual environment, install the same package expression with:
-
-```bash
-uv pip install "nemo-helix[nemo-agents-plugin-deepagents]"
-```
-
-Plain `pip install` also works in an environment you manage yourself.
-Add `all` to the extra list only when the environment must also run every local
-NeMo Helix service: `nemo-helix[all,nemo-agents-plugin-deepagents]`.
-
-From a source checkout, use the standalone plugin extra instead:
-
-```bash
-uv sync --package nemo-agents-plugin --extra deepagents
-```
-
-Hermes Agent 0.20 and later is not distributed through PyPI and has dependency
-conflicts with the NeMo Helix environment. Follow the
-[Hermes Agent installation guide](https://hermes-agent.nousresearch.com/docs/installation)
-to create a separate environment, then install the matching Fabric runtime and
-Hermes adapter into that environment:
-
-```bash
-uv python install 3.12
-uv venv --python 3.12 .venv-hermes
-export ADAPTER_PYTHON="$PWD/.venv-hermes/bin/python"
-
-PLATFORM_PYTHON="$(sed -n '1s/^#!//p' "$(command -v nemo)")"
-FABRIC_VERSION="$("$PLATFORM_PYTHON" -c \
-  'import importlib.metadata as m; print(m.version("nemo-fabric"))')"
-
-uv pip install --python "$ADAPTER_PYTHON" \
-  "nemo-fabric[relay]==$FABRIC_VERSION" \
-  "nemo-fabric-adapters-hermes==$FABRIC_VERSION"
-```
-
-Keep `ADAPTER_PYTHON` set when starting NeMo Helix. Source-checkout users
-can instead run `script/dev-install-hermes.sh`, which performs these steps and
-installs the supported Hermes version in `.venv-hermes`.
-
-Runtime behavior is described by the platform-managed `agent.yaml`:
-
-| Section | Purpose | Example |
-|---------|---------|---------|
-| `config_format` | Selects the versioned NeMo Helix agent contract. Use `nemo-agents-spec-v1`. | `nemo-agents-spec-v1` |
-| `name` | Provides the agent name used in runtime metadata. | `calculator-agent` |
-| `description` | Summarizes the agent's purpose for users and image metadata. | `Calculator agent executed with DeepAgents` |
-| `instructions` | Defines shared instructions for every harness. `instructions.system.content` contains the system prompt. | `system.content: You are a concise calculator agent.` |
-| `default_harness` | Selects the entry under `harnesses` that runs by default. | `deepagents` |
-| `harnesses` | Declares the supported harness adapters and their harness-specific model or runtime settings. | `deepagents.kind: deepagents` |
-| `models` | Declares shared named model bindings. A harness uses `models.default` unless it defines its own model. | `default.provider: nvidia`, `default.model: ${NEMO_DEFAULT_MODEL}` |
-| `skills` | Lists skill directories, relative to `agent.yaml`, that are made available to the harness. | `paths: [./skills/math]` |
-| `mcp` | Configures shared MCP servers that expose tools and resources to the harness. | `servers.github.transport: streamable-http`, `servers.github.url: ${GITHUB_MCP_URL}` |
-| `tools` | Defines shared tool policy, such as tool names that the harness must block. | `blocked: [shell, browser]` |
-| `environment` | Configures the agent's runtime workspace, artifacts directory, provider, and provider-specific settings. | `workspace: ./workspace`, `artifacts: ./artifacts` |
-| `telemetry` | Configures telemetry collection and output, including Relay, ATIF, and ATOF settings. | `provider: relay`, `atif.enabled: true`, `atof.enabled: true` |
-
-The calculator agent uses DeepAgents as its harness and the NeMo Helix Inference
-Gateway for model access. It answers arithmetic and numeric comparison
-requests and records ATIF and ATOF telemetry with NeMo Relay:
-
-```yaml
-config_format: nemo-agents-spec-v1
-name: calculator-agent
-description: Calculator agent executed with DeepAgents
-
-instructions:
-  system:
-    content: |
-      You are a concise calculator agent. Solve arithmetic and numeric
-      comparison requests yourself and return only the answer.
-
-default_harness: deepagents
-
-harnesses:
-  deepagents:
-    kind: deepagents
-    settings:
-      deepagents: {}
-
-models:
-  default:
-    provider: nvidia
-    model: ${NEMO_DEFAULT_MODEL}
-    api_key_env: NVIDIA_API_KEY
-
-skills:
-  paths: []
-
-mcp:
-  servers: {}
-
-tools:
-  blocked: []
-
-environment:
-  workspace: ./workspace
-  artifacts: ./artifacts
-
-telemetry:
-  enabled: true
-  provider: relay
-  output_dir: ./artifacts/relay
-  project: calculator-agent
-  atif:
-    enabled: true
-    filename_template: trajectory-{session_id}.atif.json
-    storage:
-      - type: http
-        endpoint: http://localhost:8080/apis/intake/v2/workspaces/default/ingest/atif
-        timeout_millis: 3000
-  atof:
-    enabled: true
-    filename: events.atof.jsonl
-    mode: append
-```
-
-### NVIDIA Agent Toolkit (NAT) workflows (Legacy)
-
-#### About NeMo Agent Toolkit
-
-NVIDIA NeMo Agent Toolkit is a flexible, lightweight, and unifying library
-that allows you to easily connect existing enterprise agents to data sources
-and tools across any framework.
-
-NeMo Helix uses NAT as the runtime wrapper around your agent so the
-platform can deploy it, evaluate it, optimize it, and route its model traffic
-through shared infrastructure. For the toolkit itself, see the
-[NeMo Agent Toolkit documentation](https://docs.nvidia.com/nemo/agent-toolkit/latest/).
-
-An agent's behavior is described by a NAT workflow YAML with three top-level sections:
-
-| Section     | Purpose                                   | Example                                                   |
-| ----------- | ----------------------------------------- | --------------------------------------------------------- |
-| `functions` | Tools the agent can call                  | `wiki_search`, `current_datetime`, custom MCP tools       |
-| `llms`      | Model bindings the workflow can reference | OpenAI-compatible endpoints, NIM endpoints                |
-| `workflow`  | The agent type and its wiring             | `react_agent`, `tool_calling_agent`, custom NAT workflows |
-
-ReAct is a common agent pattern where the model alternates between a
-reasoning step and a tool call until it has enough information to answer. It
-is a good default when you want the agent to decide which tool to use next
-based on what it has already learned. A minimal ReAct agent looks like this:
-
-```yaml
-functions:
-  wiki:
-    _type: wiki_search
-  clock:
-    _type: current_datetime
-
-llms:
-  llm:
-    _type: openai
-    model_name: nvidia-nemotron-3-5-lightning-30b-a3b
-
-workflow:
-  _type: react_agent
-  tool_names: [wiki, clock]
-  llm_name: llm
-```
-
-The [Inference Gateway](/documentation/models-and-inference) is the local platform's
-model proxy. Agents send model requests to it instead of to provider APIs
-directly, so the platform can resolve model names, attach credentials, and
-route through middleware on the agent's behalf. Two conventions apply when a
-config targets a deployed agent:
-
-- **Model names use the Inference Gateway entity form**, with slashes and dots converted to hyphens (`nvidia/nemotron-3.5-lightning-30b-a3b` becomes `nvidia-nemotron-3-5-lightning-30b-a3b`). The Inference Gateway resolves the entity to the upstream provider that owns it.
-- **Leave `base_url` and `api_key` unset on `openai` and `nim` LLMs.** NeMo Helix injects an Inference Gateway URL when it deploys the agent, and the gateway retrieves upstream credentials from the secrets service. Setting `base_url` explicitly bypasses both.
-
-## Common Tasks
-
-- [Deploy Agents](/documentation/agents/deploy-agents): run an agent as a local subprocess or as a
-  durable container on Docker or Kubernetes, and invoke it through the Agents gateway.
-- [Observe Agents](/documentation/agents/observe-agents): ingest and query agent telemetry with NeMo
-  Intake, then review traces, feedback, and evaluator results.
-- [Optimize Agents](/documentation/agents/optimize-agents): Try various strategies for agent optimization
-  (`nemo agents optimize run-strategy --strategy ...`), including model-routing, skill or prompt improvement, and more.
-- [Analyze Agent Telemetry with Insights](/documentation/agents/optimize-agents/insights-analysis): file
-  evidence-backed Insights about recurring problems in an agent's traces, on demand or on a schedule.
-- [Add Guardrails to an Agent](/documentation/agents/add-guardrails): route an agent's model traffic
-  through input and output rails.
-- [Scan Trace Data](/documentation/agents/scan-trace-data): check recent telemetry for PII and leaked
-  credentials.
-- [Plugins and Skills](/documentation/agents/plugins-and-skills): understand how agent, middleware, and
-  coding-agent integrations extend the local platform.
-- [Agentic Metrics](/documentation/evaluate-models/metrics/agentic-metrics): evaluate tool use, goal completion, topic adherence, answer accuracy, and trajectories.
-- [Agent Configuration](/documentation/evaluate-models/metrics/agent-configuration): use agents as online evaluation targets.
+- [Register Agents](/documentation/agents/register-agents): from code, a container image, a
+  remote endpoint, or traces.
+- [Deploy Agents](/documentation/agents/deploy-agents): choose a runtime, and build and publish
+  agent images.
+- [Execute Agents as Jobs](/documentation/agents/execute-agents-as-jobs): run an agent once, to
+  completion.
+- [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces) and
+  [Insights from Traces](/documentation/agents/traces-and-insights/insights-from-traces): find out
+  what your agent does and where it fails.
+- [Optimize Agents](/documentation/agents/optimize-agents): generate, evaluate, and compare
+  candidate agents.
+- [Agent Governance](/documentation/agents/governance): attack a sandboxed copy of an agent, then
+  generate and validate guardrail and sandbox-policy fixes.

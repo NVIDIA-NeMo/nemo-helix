@@ -71,11 +71,6 @@ spec:
                   key: password
             - name: SCALED_EVALS_DATABASE_URL
               value: postgresql://scaled_evals@postgres:5432/scaled_evals
-            - name: CREDENTIALS_ENCRYPTION_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: scaled-evals-credential-encryption
-                  key: CREDENTIALS_ENCRYPTION_KEY
             # Platform Secrets are stored in Postgres, so their key must outlive
             # the pod. The default generates one on the pod's disk, and a restart
             # leaves every stored secret undecryptable.

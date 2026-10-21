@@ -17,10 +17,12 @@ from nemo_helix_ext.cli.commands.jobs import (
     get_logs_jobs,
     list_jobs,
     list_steps,
+    rerun_jobs,
     tail_platform_job,
     update_status_steps,
 )
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.types import RetryPolicy
 
 
 class _Response:
@@ -404,3 +406,19 @@ def test_jobs_download_code_generation_streams_result() -> None:
     assert "with Path(args['output_file']).open('wb') as output:" in code
     assert "with response.stream() as chunks:" in code
     assert "output.write(chunk)" in code
+
+
+def test_rerun_is_sent_once() -> None:
+    """A retried rerun would find the attempt the first one created, and fail with 409."""
+    jobs_client = MagicMock()
+    jobs_client.with_retry.return_value = jobs_client
+    jobs_client.rerun_job.return_value = _Response(SimpleNamespace(name="job-a"))
+
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
+        patch("nemo_helix_ext.cli.commands.jobs.format_output"),
+    ):
+        rerun_jobs(_ctx(SimpleNamespace()), name="job-a", workspace="test-workspace")
+
+    jobs_client.with_retry.assert_called_once_with(RetryPolicy(max_retries=0))
+    jobs_client.rerun_job.assert_called_once_with(job="job-a", workspace="test-workspace")

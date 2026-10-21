@@ -15,6 +15,10 @@ from sandboxed_gym.egress import EgressAllowlist
 RESERVED_METADATA_PREFIX = "nemo-rl-"
 JOB_ID_METADATA_KEY = "nemo-rl-job-id"
 
+# Platform job-pod labels. A sandbox carrying them would match NetworkPolicies that select the
+# job's own pods, such as the per-step ingress policy that lets job pods reach each other's Ray ports.
+PLATFORM_LABEL_PREFIX = "nhx.nvidia.com/"
+
 # Reserved for anything the broker itself injects into an episode environment. Nothing uses it
 # today; reserving it now means a caller cannot pre-empt a name the broker later needs to own.
 RESERVED_ENV_PREFIX = "NEMO_RL_"

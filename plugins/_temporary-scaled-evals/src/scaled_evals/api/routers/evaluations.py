@@ -6,6 +6,7 @@ import json
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from datetime import datetime
+from functools import partial
 from threading import Lock
 from time import monotonic
 from typing import Annotated, Any
@@ -20,12 +21,15 @@ from scaled_evals.api.agent_bundle_registry import accessible_bundle_for_run
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
 from scaled_evals.api.db import Database, get_db, get_stream_database_factory
 from scaled_evals.api.evaluation_logs import collect_log_lines
-from scaled_evals.api.runnability import BlockedPreflight, preflight_evaluation
+from scaled_evals.api.runnability import BlockedPreflight, SecretReadable, caller_secret_readable, preflight_evaluation
 from scaled_evals.api.schemas.common import (
     DeleteResponse,
     ListEnvelope,
     encode_cursor,
     page_from_rows,
+    qualified_secret_ref,
+    split_stored_credentials,
+    stale_credentials_note,
 )
 from scaled_evals.api.schemas.evaluations import (
     BuildArchiveRequest,
@@ -53,6 +57,7 @@ from scaled_evals.api.schemas.evaluations import (
 )
 from scaled_evals.api.schemas.runnability import RunnabilityReport
 from scaled_evals.api.settings import settings
+from scaled_evals.api.tenancy import IsAdmin
 from scaled_evals.api.utils import list_envelope, make_id
 from scaled_evals.dispatch.registry import get_backend as _resolve_backend
 from scaled_evals.dispatch.registry import get_backend_capabilities
@@ -69,6 +74,7 @@ router = APIRouter(prefix="/evaluations", tags=["evaluations"])
 
 Db = Annotated[Database, Depends(get_db)]
 Principal = Annotated[CurrentPrincipal, Depends(current_principal)]
+Secrets = Annotated[SecretReadable, Depends(caller_secret_readable)]
 StreamDatabaseFactory = Annotated[Callable[[], AbstractContextManager[Database]], Depends(get_stream_database_factory)]
 
 _TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
@@ -208,7 +214,7 @@ def _reproduce_request(row: Mapping[str, Any]) -> CreateEvaluationRequest:
         framework_version=row.get("framework_version"),
         framework_profile_id=row.get("framework_profile_id"),
         intake_profile_id=row.get("intake_profile_id"),
-        credentials=dict(row.get("credentials") or {}),
+        credentials=split_stored_credentials(row.get("credentials"))[0],
         agent_bundle_id=agent_bundle_id,
         extra_skill_object_keys=list(row.get("extra_skill_object_keys") or []),
         instruction_prefix=row.get("instruction_prefix"),
@@ -260,8 +266,8 @@ def _create_command(body: CreateEvaluationRequest) -> list[str]:
     ):
         if value:
             command.extend([option, value])
-    for role, credential_id in sorted(body.credentials.items()):
-        command.extend(["--credential", f"{role}={credential_id}"])
+    for provider, secret_ref in sorted(body.credentials.items()):
+        command.extend(["--credential", f"{provider}={secret_ref}"])
     if body.agent_bundle_id is not None:
         command.extend(["--agent-bundle", body.agent_bundle_id])
     for object_key in body.extra_skill_object_keys:
@@ -278,7 +284,7 @@ def _create_command(body: CreateEvaluationRequest) -> list[str]:
 
 def _reproduce_notes(row: Mapping[str, Any], body: CreateEvaluationRequest) -> list[str]:
     notes = [
-        "Secret material is not exported; credential values remain credential ids.",
+        "Secret material is not exported; credentials remain platform secret references.",
         "The rerun will fail validation if referenced credentials, profiles, task revision, "
         "or runtime backend are unavailable.",
     ]
@@ -296,8 +302,10 @@ def _reproduce_notes(row: Mapping[str, Any], body: CreateEvaluationRequest) -> l
             "this request reruns only this member task."
         )
     if body.credentials:
-        roles = ", ".join(sorted(body.credentials))
-        notes.append(f"Credential references required for roles: {roles}.")
+        providers = ", ".join(sorted(body.credentials))
+        notes.append(f"Readable credential secrets required for providers: {providers}.")
+    if stale := split_stored_credentials(row.get("credentials"))[1]:
+        notes.append(stale_credentials_note(stale))
     return notes
 
 
@@ -473,6 +481,8 @@ def preflight_evaluation_request(
     body: CreateEvaluationRequest,
     db: Db,
     current: Principal,
+    secrets: Secrets,
+    admin: IsAdmin,
 ) -> RunnabilityReport:
     """Check whether an evaluation request is runnable without creating it."""
     result = preflight_evaluation(
@@ -480,7 +490,8 @@ def preflight_evaluation_request(
         body,
         current,
         object_exists=artifacts.object_exists,
-        resolve_bundle=accessible_bundle_for_run,
+        resolve_bundle=partial(accessible_bundle_for_run, include_all=admin),
+        secret_readable=secrets,
     )
     return result.report
 
@@ -490,6 +501,8 @@ def create_evaluation(
     body: CreateEvaluationRequest,
     db: Db,
     current: Principal,
+    secrets: Secrets,
+    admin: IsAdmin,
 ) -> EvaluationResponse:
     """Start an evaluation run over a single task.
 
@@ -505,7 +518,8 @@ def create_evaluation(
         body,
         current,
         object_exists=artifacts.object_exists,
-        resolve_bundle=accessible_bundle_for_run,
+        resolve_bundle=partial(accessible_bundle_for_run, include_all=admin),
+        secret_readable=secrets,
     )
     if isinstance(preflight, BlockedPreflight):
         raise _http_error(
@@ -533,7 +547,7 @@ def create_evaluation(
         framework_profile_id=body.framework_profile_id,
         harbor_profile_id=body.harbor_profile_id,
         intake_profile_id=body.intake_profile_id,
-        credentials=body.credentials,
+        credentials={provider: ref for provider, ref in body.credentials.items()},
         extra_skill_object_keys=body.extra_skill_object_keys,
         instruction_prefix=body.instruction_prefix,
         instruction_postfix=body.instruction_postfix,
@@ -770,23 +784,38 @@ def reproduce_evaluation(evaluation_id: str, db: Db) -> ReproduceEvaluationRespo
 
 
 @router.post("/{evaluation_id}/retry", status_code=202, response_model=EvaluationResponse)
-def retry_evaluation(evaluation_id: str, db: Db) -> EvaluationResponse:
+def retry_evaluation(evaluation_id: str, db: Db, secrets: Secrets) -> EvaluationResponse:
     """Queue another execution of a failed evaluation.
 
     The evaluation id and benchmark_run_id remain unchanged, so retrying a
     benchmark member updates that benchmark run's derived aggregate. Detailed
-    result and artifact paths are reused for the newest execution.
+    result and artifact paths are reused for the newest execution. The caller
+    must be able to read every referenced credential secret (422 `invalid_reference`).
     """
+    existing = db.evaluations.get(evaluation_id)
+    for provider, ref in sorted(((existing or {}).get("credentials") or {}).items()):
+        try:
+            qualified_secret_ref(ref)
+        except ValueError:
+            raise _http_error(
+                422,
+                "invalid_reference",
+                f"credential for {provider} is not a platform secret reference 'workspace/name'; "
+                "create a new evaluation that references a platform secret",
+            ) from None
+        if not secrets(ref):
+            raise _http_error(
+                422, "invalid_reference", f"credential secret for {provider} not found or not readable: {ref}"
+            )
     row = db.evaluations.retry_failed(evaluation_id)
     if row is None:
-        current = db.evaluations.get(evaluation_id)
-        if current is None:
+        if existing is None:
             raise _http_error(404, "not_found", "evaluation not found")
-        if current["status"] != "failed":
+        if existing["status"] != "failed":
             raise _http_error(
                 409,
                 "evaluation_not_failed",
-                f"evaluation status is '{current['status']}', must be 'failed'",
+                f"evaluation status is '{existing['status']}', must be 'failed'",
             )
         block_reason = db.evaluations.retry_block_reason(evaluation_id)
         if block_reason == "terminal_artifacts_finalizing":

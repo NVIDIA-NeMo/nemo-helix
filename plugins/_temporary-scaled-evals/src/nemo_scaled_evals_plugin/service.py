@@ -25,7 +25,6 @@ from scaled_evals.api.routers import (
     benchmark_runs,
     benchmarks,
     config_profiles,
-    credentials,
     evaluations,
     ops,
     tasks,
@@ -42,7 +41,6 @@ _V1_ROUTERS = (
     benchmarks.router,
     benchmark_imports.router,
     benchmark_runs.router,
-    credentials.router,
     config_profiles.router,
     evaluations.router,
     users.router,
@@ -56,10 +54,10 @@ async def _redacted_validation_error(_request: Request, exc: Exception) -> JSONR
     """Return 422s without echoing the submitted request body.
 
     FastAPI's default handler includes the offending value in each error's
-    ``input`` (and sometimes ``ctx``). On ``POST /v1/credentials`` the offending
-    value is the whole submitted model, so a rejected write echoes the plaintext
-    ``key``/``yaml`` back to the caller. Strip those two fields globally and keep
-    the structural ``type``/``loc``/``msg`` that callers actually need.
+    ``input`` (and sometimes ``ctx``), and request bodies such as task build
+    payloads or profile configs may carry secret-looking values. Strip those two
+    fields globally and keep the structural ``type``/``loc``/``msg`` that callers
+    actually need.
     """
     errors = [{k: v for k, v in e.items() if k not in ("input", "ctx")} for e in exc.errors()]  # type: ignore[attr-defined]
     return JSONResponse(status_code=422, content={"detail": errors})
@@ -134,7 +132,7 @@ class ScaledEvalsService(NemoService):
         """
         try:
             # Reading settings has to be inside the guard too: it resolves lazily,
-            # so a bad CREDENTIALS_ENCRYPTION_KEY raises here rather than at import.
+            # so a bad setting raises here rather than at import.
             if not settings.run_migrations:
                 logger.info("scaled-evals: SCALED_EVALS_RUN_MIGRATIONS is off, skipping migrations")
                 return

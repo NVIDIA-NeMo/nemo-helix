@@ -6,7 +6,6 @@ title: "Manage Files"
 description: ""
 ---
 {/* @nemo-nb: process */}
-{/* @nemo-nb: skip-test */}
 
 <a id="manage-files"></a>
 
@@ -271,14 +270,15 @@ filesets = client.files.list_filesets(
 </Tabs>
 ### Deleting Filesets
 
-Delete an entire fileset:
+Create and delete a disposable fileset, leaving `my-files` available for the file-management examples below:
 
 <Tabs>
 
 <Tab title="CLI">
 
 ```bash
-nemo files filesets delete my-files
+nemo files filesets create fileset-to-delete
+nemo files filesets delete fileset-to-delete
 ```
 
 ```text
@@ -289,7 +289,10 @@ nemo files filesets delete my-files
 <Tab title="Python SDK">
 
 ```python
-deleted_fileset = client.files.delete_fileset(name="my-files").data()
+client.files.create_fileset(
+    body=CreateFilesetRequest(name="fileset-to-delete"),
+).data()
+deleted_fileset = client.files.delete_fileset(name="fileset-to-delete").data()
 
 print(f"Deleted fileset: {deleted_fileset.name}")
 ```
@@ -347,6 +350,11 @@ Completed upload to fileset-a1b2c3d4
 <Tab title="Python SDK">
 
 ```python
+from pathlib import Path
+
+# Create a small sample file, or substitute your own training data.
+Path("./data.jsonl").write_text('{"text": "Example training record"}\n', encoding="utf-8")
+
 # Upload a single file
 with open("./data.jsonl", "rb") as f:
     client.files.upload_file(
@@ -465,7 +473,7 @@ Read file content into memory (SDK only):
 ```python
 content = client.files.download_file(
     name="my-files",
-    path="config.json",
+    path="training/data.jsonl",
 ).read()
 print(content.decode("utf-8"))
 ```
@@ -479,11 +487,11 @@ Delete files from a fileset:
 <Tab title="CLI">
 
 ```bash
-nemo files delete my-files --remote-path training/old-data.jsonl
+nemo files delete my-files --remote-path training/data.jsonl
 ```
 
 ```text
-Deleted my-files#training/old-data.jsonl
+Deleted my-files#training/data.jsonl
 ```
 
 </Tab>
@@ -492,7 +500,7 @@ Deleted my-files#training/old-data.jsonl
 ```python
 client.files.delete_file(
     name="my-files",
-    path="training/old-data.jsonl",
+    path="training/data.jsonl",
 ).data()
 ```
 
@@ -515,6 +523,12 @@ from nemo_helix_plugin.files.client import FilesClient
 files = client.files
 assert isinstance(files, FilesClient)
 fs = FilesetFileSystem(client=files)
+
+# Create a small directory for the upload example.
+Path("./large_dataset").mkdir(exist_ok=True)
+Path("./large_dataset/sample.jsonl").write_text(
+    '{"text": "Example training record"}\n', encoding="utf-8"
+)
 
 # Upload a directory with progress bar
 with RichProgressCallback(description="Uploading dataset") as callback:

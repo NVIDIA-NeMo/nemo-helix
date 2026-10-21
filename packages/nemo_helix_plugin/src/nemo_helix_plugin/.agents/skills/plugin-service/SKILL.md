@@ -3,7 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: plugin-service
-description: Builds HTTP service surfaces for NeMo Helix plugins using NemoService, RouterSpec, NemoListResponse, and NemoFilter. Use when adding REST API routes to a plugin, implementing CRUD endpoints, handling pagination and filtering, or testing FastAPI routes. Trigger keywords: HTTP routes, REST API, FastAPI, CRUD, endpoint, router, NemoService, pagination, filter, list endpoint, NemoListResponse, RouterSpec.
+description: 'Builds HTTP service surfaces for NeMo Helix plugins using NemoService, RouterSpec, NemoListResponse, and NemoFilter. Use when adding REST API routes to a plugin, implementing CRUD endpoints, handling pagination and filtering, or testing FastAPI routes. Trigger keywords: HTTP routes, REST API, FastAPI, CRUD, endpoint, router, NemoService, pagination, filter, list endpoint, NemoListResponse, RouterSpec.'
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Plugin HTTP Service (NemoService)

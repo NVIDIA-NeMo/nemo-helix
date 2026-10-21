@@ -14,11 +14,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.routing import APIRoute
 from nemo_evals.api.dependencies import get_taskset_run_service
 from nemo_evals.api.v2.taskset_runs import router
+from nemo_evals.harbor.remote.preparation import ImagePreparationUnavailableError
 from nemo_evals.jobs.agent_spec import registered_agent_source
 from nemo_evals.service import EvaluatorPluginService
 from nemo_evals.taskset_runs import store as store_module
 from nemo_evals.taskset_runs.entities import TasksetRunEntity
-from nemo_evals.taskset_runs.store import PlanStorageError, RunIdExhausted, TasksetRunStore
+from nemo_evals.taskset_runs.store import PlanStorageError, TasksetRunStore
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import get_effective_principal_id
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
@@ -48,12 +49,12 @@ async def test_taskset_run_create_replay_and_conflict(run_client, published, req
     assert first.status_code == 201, first.text
     assert first.json()["phase"] == "accepted" and first.json()["result_state"] == "pending"
     assert first.json()["created_by"] == "user:alice"
-    assert first.json()["warnings"] == []
+    assert first.json()["warnings"] == [f"task 0 (task-1): Job {first.json()['run_id']}-task-0"]
     assert not {"plan_ref", "plan_digest", "request_digest", "db_version"} & first.json().keys()
     before = list(files_service.calls)
     replay = await run_client.post(PATH, json=request_body)
     assert replay.status_code == 200 and replay.json() == first.json()
-    assert files_service.calls == before
+    assert not [call for call in files_service.calls[len(before) :] if call[0] != "download"]
     request_body["timeout_seconds"] = 1
     conflict = await run_client.post(PATH, json=request_body)
     assert conflict.status_code == 409
@@ -62,6 +63,22 @@ async def test_taskset_run_create_replay_and_conflict(run_client, published, req
         conflict.json()["detail"]
         == f"run {first.json()['run_id']} exists for this idempotency_key with a different request"
     )
+
+
+async def test_taskset_run_resent_with_other_sandbox_overrides_conflicts(run_client, published, request_body):
+    request_body["execution"]["sandbox"] = {"cpus": 2}
+    first = await run_client.post(PATH, json=request_body)
+    assert first.status_code == 201, first.text
+    request_body["execution"]["sandbox"] = {"cpus": 4}
+    conflict = await run_client.post(PATH, json=request_body)
+    assert conflict.status_code == 409, conflict.text
+
+
+async def test_taskset_run_sandbox_override_over_the_disk_limit_is_422(run_client, published, request_body):
+    request_body["execution"]["sandbox"] = {"storage_mb": 262_144}
+    response = await run_client.post(PATH, json=request_body)
+    assert response.status_code == 422, response.text
+    assert "execution.sandbox.storage_mb=262144 exceeds" in response.json()["detail"]
 
 
 async def test_taskset_run_timeout_validation_shape_matches_invalid_body(
@@ -108,13 +125,12 @@ async def test_taskset_run_invalid_source_returns_422(run_client, request_body, 
     assert response.status_code == 422, response.text
 
 
-@pytest.mark.parametrize(
-    "error", [RuntimeError("sensitive outage"), RunIdExhausted("secret collision"), PlanStorageError("secret upload")]
-)
+@pytest.mark.parametrize("error", [RuntimeError("sensitive outage"), PlanStorageError("secret upload")])
 async def test_taskset_run_unexpected_failure_is_sanitized(run_client, service, monkeypatch, request_body, error):
     monkeypatch.setattr(service, "submit", AsyncMock(side_effect=error))
     response = await run_client.post(PATH, json=request_body)
     assert response.status_code == 500 and response.json() == {"detail": "Internal server error"}
+    assert "x-idempotency-key" not in response.headers
 
 
 @pytest.mark.parametrize("different_body", [False, True])
@@ -254,3 +270,124 @@ async def test_taskset_run_lost_create_reply_through_production_store(
             assert tuple(snapshot_ref.split("/")) in files_service.filesets
             if mode != "uncommitted-exhausted":
                 assert len(files_service.filesets) == 2
+
+
+async def test_taskset_run_missing_task_job_is_retryable_503(run_client, published, request_body, fake_task_jobs):
+    fake_task_jobs.refuse = {"run-11f77762178b0e05-task-0"}
+    response = await run_client.post(PATH, json=request_body)
+    assert response.status_code == 503, response.text
+    assert response.headers["x-should-retry"] == "true"
+    assert "task 0" in response.json()["detail"]
+    assert response.json()["detail"].endswith("retry the same submit with its idempotency_key")
+    fake_task_jobs.refuse = set()
+    retry = await run_client.post(PATH, json=request_body)
+    assert retry.status_code == 200 and len(fake_task_jobs.created) == 1
+
+
+@pytest.mark.parametrize("key", ["ci-run", None], ids=["keyed", "keyless"])
+async def test_intake_failing_before_acceptance_is_a_retryable_503(
+    run_client, published, request_body, fake_evaluations, entity_store, key
+):
+    body = request_body | {"idempotency_key": key, "publication": {"intake": {"experiment": "swe-agent-tuning"}}}
+    fake_evaluations.fail = {"experiment"}
+    response = await run_client.post(PATH, json=body)
+    assert response.status_code == 503, response.text
+    # Nothing was accepted yet, so even a keyless retry can't start a second run.
+    assert response.headers["x-should-retry"] == "true"
+    assert "nothing was accepted" in response.json()["detail"]
+    assert not (await entity_store.list(TasksetRunEntity, workspace="default")).data
+    fake_evaluations.fail = set()
+    assert (await run_client.post(PATH, json=body)).status_code == 201
+
+
+@pytest.mark.parametrize("key", ["ci-run", None], ids=["keyed", "keyless"])
+async def test_an_evaluation_denied_after_acceptance_is_a_nonretryable_403_naming_the_run(
+    run_client, published, request_body, fake_evaluations, fake_task_jobs, key
+):
+    body = request_body | {"idempotency_key": key, "publication": {"intake": {"experiment": "swe-agent-tuning"}}}
+    fake_evaluations.fail = {"create-denied"}
+    response = await run_client.post(PATH, json=body)
+    assert response.status_code == 403, response.text
+    assert response.headers["x-should-retry"] == "false"
+    used = key or response.headers["x-idempotency-key"]
+    detail = response.json()["detail"]
+    assert detail.startswith("run run-") and detail.endswith(f"resubmit with idempotency_key={used}")
+    assert not fake_task_jobs.created
+    fake_evaluations.fail = set()
+    retry = await run_client.post(PATH, json=body | {"idempotency_key": used})
+    assert retry.status_code == 200, retry.text
+    assert detail.startswith(f"run {retry.json()['run_id']}:") and len(fake_task_jobs.created) == 1
+
+
+async def test_an_unreadable_experiment_is_403(run_client, published, request_body, fake_evaluations):
+    fake_evaluations.deny_experiments = True
+    body = request_body | {"publication": {"intake": {"experiment": "swe-agent-tuning"}}}
+    response = await run_client.post(PATH, json=body)
+    assert response.status_code == 403, response.text
+    assert "swe-agent-tuning" in response.json()["detail"]
+
+
+class _Everything(set):
+    def __contains__(self, item: object) -> bool:
+        return True
+
+
+async def test_keyless_missing_task_job_503_names_the_generated_key(
+    run_client, published, request_body, fake_task_jobs
+):
+    """The SDK would resend the keyless request and accept a second run, so the 503 names the key instead."""
+    fake_task_jobs.refuse = _Everything()
+    response = await run_client.post(PATH, json=request_body | {"idempotency_key": None})
+    assert response.status_code == 503, response.text
+    assert response.headers["x-should-retry"] == "false"
+    key = response.headers["x-idempotency-key"]
+    assert response.json()["detail"].endswith(f"retry with idempotency_key={key}")
+    fake_task_jobs.refuse = set()
+    retry = await run_client.post(PATH, json=request_body | {"idempotency_key": key})
+    assert retry.status_code == 200, retry.text
+    assert retry.json()["idempotency_key"] == key
+    assert {job.name for job in fake_task_jobs.created} == {f"{retry.json()['run_id']}-task-0"}
+
+
+async def test_keyless_failure_after_acceptance_names_the_generated_key(
+    run_client, service, published, request_body, entity_store, monkeypatch
+):
+    monkeypatch.setattr(service._store, "load_plan", AsyncMock(side_effect=RuntimeError("secret read failure")))
+    response = await run_client.post(PATH, json=request_body | {"idempotency_key": None})
+    assert response.status_code == 500, response.text
+    key = response.headers["x-idempotency-key"]
+    assert response.json() == {"detail": f"Internal server error; retry with idempotency_key={key}"}
+    assert response.headers["x-should-retry"] == "false"
+    (run,) = (await entity_store.list(TasksetRunEntity, workspace="default")).data
+    assert run.idempotency_key == key
+
+
+@pytest.mark.parametrize("key", ["ci-run", None])
+async def test_an_unavailable_build_service_is_a_retryable_503(run_client, service, monkeypatch, request_body, key):
+    """Raised before acceptance, so resending the same request is safe even without a key."""
+    error = ImagePreparationUnavailableError("could not start an image build for task task-1: jobs is down")
+    monkeypatch.setattr(service, "submit", AsyncMock(side_effect=error))
+    response = await run_client.post(PATH, json=request_body | {"idempotency_key": key})
+    assert response.status_code == 503 and response.headers["x-should-retry"] == "true"
+    assert response.json() == {"detail": str(error)} and "x-idempotency-key" not in response.headers
+
+
+async def test_keyless_evaluation_failure_names_the_generated_key(
+    run_client, published, request_body, fake_evaluations, fake_task_jobs
+):
+    body = request_body | {"idempotency_key": None, "publication": {"intake": {"experiment": "swe-agent-tuning"}}}
+    fake_evaluations.fail = {"create"}
+    response = await run_client.post(PATH, json=body)
+    assert response.status_code == 503 and response.headers["x-should-retry"] == "false"
+    key = response.headers["x-idempotency-key"]
+    assert "creating its Intake Evaluation failed" in response.json()["detail"] and not fake_task_jobs.created
+    fake_evaluations.fail = set()
+    retry = await run_client.post(PATH, json=body | {"idempotency_key": key})
+    assert retry.status_code == 200 and len(fake_evaluations.created) == len(fake_task_jobs.created) == 1
+
+
+async def test_keyless_submits_get_distinct_generated_keys(run_client, published, request_body):
+    first, second = [await run_client.post(PATH, json=request_body | {"idempotency_key": None}) for _ in range(2)]
+    assert first.status_code == second.status_code == 201
+    assert first.json()["run_id"] != second.json()["run_id"]
+    assert len({first.json()["idempotency_key"], second.json()["idempotency_key"]}) == 2

@@ -7,7 +7,6 @@ from datetime import datetime, timezone, tzinfo
 from zoneinfo import ZoneInfo
 
 import pytest
-from nemo_evals.api.taskset_run_schemas import HarborTaskJobsExecutionInput
 from nemo_evals.config import EvaluatorConfig, TasksetRunsConfig
 from nemo_evals.taskset_runs.submission import TimeoutAboveMaximumError, check_timeout, resolve_deadlines
 from pydantic import ValidationError
@@ -34,26 +33,6 @@ class _TimezoneWithoutOffset(tzinfo):
     def dst(self, dt: datetime | None) -> None:
         """Return no DST offset; ``tzinfo`` leaves this abstract."""
         return None
-
-
-@pytest.mark.parametrize(
-    "threshold,task_count,expected",
-    [
-        (None, 100, None),
-        (10, 100, 10),
-        ("10%", 100, 10),
-        ("10%", 74, 7),
-        ("10%", 5, 0),
-        ("100%", 74, 74),
-        (0, 74, 0),
-        ("0%", 74, 0),
-        (100, 5, 100),
-        ("10%", 0, 0),
-    ],
-)
-def test_failure_threshold_resolves_to_count(threshold, task_count, expected):
-    execution = HarborTaskJobsExecutionInput(sandbox_policy="harbor-standard", max_failed_tasks=threshold)
-    assert execution.resolve_max_failed_tasks(task_count) == expected
 
 
 def test_operator_budget_defaults():

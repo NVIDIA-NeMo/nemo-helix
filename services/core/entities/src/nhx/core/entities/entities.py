@@ -33,6 +33,7 @@ class Workspace(BaseModel):
     updated_by: str | None = Field(default=None, description="Principal id for last workspace update")
 
     _deletion_stage: WorkspaceDeletionStage | None = PrivateAttr(None)
+    _deletion_error: str | None = PrivateAttr(None)
 
     model_config = ConfigDict(extra="forbid", from_attributes=True)
 

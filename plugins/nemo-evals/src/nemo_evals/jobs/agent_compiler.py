@@ -265,9 +265,13 @@ def _environment_stage_step(
     profile: str | None,
     *,
     use_subprocess: bool,
+    image: str | None = None,
 ) -> HelixJobStep:
-    """Stage FileSets, and a registered Gym agent's package, into the job PVC before evaluation."""
-    image = get_qualified_image(AGENT_EVAL_IMAGE)
+    """Stage FileSets, and a registered Gym agent's package, into the job PVC before evaluation.
+
+    ``image`` defaults to the platform tasks image; a taskset run's task Job passes its pinned dispatcher image.
+    """
+    image = image or get_qualified_image(AGENT_EVAL_IMAGE)
     return HelixJobStep(
         name=ENVIRONMENT_STAGE_STEP_NAME,
         executor=_executor(

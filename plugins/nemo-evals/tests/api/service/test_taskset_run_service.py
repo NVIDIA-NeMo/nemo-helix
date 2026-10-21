@@ -88,7 +88,6 @@ async def test_accept_freezes_resolved_harbor_content(
     service, published, request_body, run_store, entity_store, files_client, files_service
 ):
     request_body["spec"].update(max_concurrent_tasks=8, fail_fast=True)
-    request_body["execution"]["max_failed_tasks"] = "100%"
     result = await service.submit(
         TasksetRunInput.model_validate(request_body), workspace="default", caller="user:alice"
     )
@@ -105,9 +104,10 @@ async def test_accept_freezes_resolved_harbor_content(
     assert plan.spec.tasks[0].spec.kind == "harbor"
     assert plan.spec.tasks[0].spec.provenance.revision_digest
     assert plan.spec.max_concurrent_tasks == 8 and plan.spec.fail_fast is True
-    assert plan.max_failed_tasks == 1
-    # M2 Story 3 adds these required fields and discards earlier development runs.
-    assert "sandbox_policy" not in plan.model_dump() and "dispatcher_profile" not in plan.model_dump()
+    assert plan.sandbox_policy.profile == "harbor-standard"
+    assert plan.sandbox_policy.connection.domain == "opensandbox.opensandbox-system.svc.cluster.local"
+    assert plan.dispatcher_profile == "local-k8s" and plan.dispatcher_image.endswith("1" * 64)
+    assert result.status.warnings == [f"task 0 (task-1): Job {result.status.run_id}-task-0"]
     assert len(files_service.filesets) == 1
     assert not (await entity_store.list(TasksetRunMemberEntity, workspace="default")).data
 
@@ -128,8 +128,8 @@ async def test_authorized_replay_preserves_original_run_without_resolution(
     assert replay.status.run_id == first.status.run_id
     assert replay.status.accepted_at == first.status.accepted_at
     assert replay.status.phase == TasksetRunPhase.COMPLETED
-    assert replay.status.warnings == []
-    assert files_service.calls == before
+    assert first.status.warnings and replay.status.warnings == []  # an ended run's task Jobs aren't touched
+    assert not [call for call in files_service.calls[len(before) :] if call[0] != "download"]
 
 
 async def test_conflicting_retry_fails_before_resolution(service, published, request_body, monkeypatch):
@@ -168,14 +168,27 @@ async def test_retry_rechecks_lowered_operator_maximum(service, published, reque
         await service.submit(request, workspace="default", caller="user:alice")
 
 
-async def test_keyless_requests_create_distinct_runs_and_warn(service, published, request_body):
-    request_body["idempotency_key"] = None
-    request = TasksetRunInput.model_validate(request_body)
-    first = await service.submit(request, workspace="default", caller="user:alice")
-    second = await service.submit(request, workspace="default", caller="user:alice")
+async def test_submit_needs_a_key_from_the_route(service, published, request_body):
+    request = TasksetRunInput.model_validate(request_body | {"idempotency_key": None})
+    with pytest.raises(ValueError, match="idempotency_key"):
+        await service.submit(request, workspace="default", caller="user:alice")
+
+
+async def test_requests_with_new_keys_create_distinct_runs_and_warn(service, published, request_body):
+    first, second = [
+        await service.submit(
+            TasksetRunInput.model_validate(request_body | {"idempotency_key": key}),
+            workspace="default",
+            caller="user:alice",
+        )
+        for key in ("first", "second")
+    ]
     assert first.created and second.created
     assert first.status.run_id != second.status.run_id
-    assert second.status.warnings == [f"{first.status.run_id} is already running {first.status.taskset_ref}"]
+    assert second.status.warnings == [
+        f"{first.status.run_id} is already running {first.status.taskset_ref}",
+        f"task 0 (task-1): Job {second.status.run_id}-task-0",
+    ]
 
 
 async def test_warning_failure_preserves_acceptance(service, published, request_body, monkeypatch, caplog):
@@ -184,7 +197,7 @@ async def test_warning_failure_preserves_acceptance(service, published, request_
         TasksetRunInput.model_validate(request_body), workspace="default", caller="user:alice"
     )
     assert outcome.created
-    assert outcome.status.warnings == []
+    assert outcome.status.warnings == [f"task 0 (task-1): Job {outcome.status.run_id}-task-0"]
     assert "listing failed" in caplog.text
 
 
@@ -312,24 +325,6 @@ async def test_submit_freezes_agent_and_inline_metric_without_compiling(
     )
     assert plan.spec.target.source.agent.root == "agents/coder"
     compile_job.assert_not_awaited()
-
-
-async def test_submit_percentage_uses_resolved_task_count(service, published, request_body, monkeypatch):
-    request_body["execution"]["max_failed_tasks"] = "10%"
-    request = TasksetRunInput.model_validate(request_body)
-    pinned, spec = await service._resolve(request, "default")
-    tasks = []
-    for index in range(74):
-        task = spec.tasks[0].model_copy(deep=True)
-        task.id = task.spec.native_task_id = f"task-{index}"
-        task.spec.provenance.entity_name = f"default/task-{index}"
-        tasks.append(task)
-    spec.tasks = tasks
-    monkeypatch.setattr(service, "_resolve", AsyncMock(return_value=(pinned, spec)))
-    result = await service.submit(request, workspace="default", caller="user:alice")
-    run = await service._store.find("default", result.status.run_id)
-    plan = await service._store.load_plan(run)
-    assert plan.max_failed_tasks == 7 and len(plan.spec.tasks) == 74
 
 
 def _deny(*paths: str):

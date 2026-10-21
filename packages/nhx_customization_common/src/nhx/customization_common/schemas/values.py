@@ -24,3 +24,25 @@ class OutputNameType(StrEnum):
 
     ADAPTER = "adapter"
     MODEL = "model"
+
+
+class TrainingPhase(StrEnum):
+    """What the training task reports as ``phase`` in its task ``status_details``.
+
+    In the order a run normally passes through them. ``validation``,
+    ``saving_checkpoint``, ``checkpoint_saved`` and ``epoch_end`` repeat during
+    ``training``. After the last step, ``merging_adapter`` (LoRA merged) or
+    ``finalizing_checkpoint`` (everything else) covers preparing the output
+    model, before ``completed``.
+    """
+
+    CONVERSIONS = "conversions"
+    COMPILING_CONFIG = "compiling_config"
+    TRAINING = "training"
+    VALIDATION = "validation"
+    SAVING_CHECKPOINT = "saving_checkpoint"
+    CHECKPOINT_SAVED = "checkpoint_saved"
+    EPOCH_END = "epoch_end"
+    MERGING_ADAPTER = "merging_adapter"
+    FINALIZING_CHECKPOINT = "finalizing_checkpoint"
+    COMPLETED = "completed"

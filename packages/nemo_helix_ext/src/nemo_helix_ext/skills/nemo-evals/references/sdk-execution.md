@@ -137,7 +137,7 @@ metric = ExactMatchMetric(reference="{{item.expected}}")
 target = Model(
     url="https://provider.example/v1",
     name="<model-id>",
-    api_key_secret="<secret-or-env-name>",
+    api_key_secret="<your-secret-or-env-name>",
 )
 
 result = Evaluator().run_sync(
@@ -173,7 +173,7 @@ from nhx_evals_sdk import Evaluator, JSONScoreParser, LLMJudgeMetric, Model, Ran
 judge_model = Model(
     url="https://provider.example/v1",
     name="<judge-model-id>",
-    api_key_secret="<secret-or-env-name>",
+    api_key_secret="<your-secret-or-env-name>",
 )
 
 metric = LLMJudgeMetric(

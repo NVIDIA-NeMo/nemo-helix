@@ -33,7 +33,6 @@ Restart `nemo services run` after install.
 |---|---|
 | `SCALED_EVALS_DATABASE_URL` | scaled-evals' own Postgres. **Not** `DATABASE_URL` — the platform injects that into the same process, and reusing it would run these migrations and claim queues inside the platform database. |
 | `SCALED_EVALS_DATABASE_SCHEMA` | Default `scaled_evals`. Every table lives here. Redundant in a dedicated database, but it keeps the vendored SQL safe to point at a shared one. |
-| `CREDENTIALS_ENCRYPTION_KEY` | Fernet key for BYOK credentials. |
 | `SCALED_EVALS_RUN_MIGRATIONS` | Default `true`. Set `false` where an external Job owns schema rollout. |
 | `HARBOR_DATASET_UPSTREAM_ALLOWED_REGISTRIES` | Comma-separated registries allowed as public source images for dataset-only Harbor imports. Defaults to `docker.io,ghcr.io`; this is separate from the managed destination-image allowlist. |
 
@@ -112,6 +111,16 @@ Dataset-only image imports perform unauthenticated registry reads and reject
 registries outside `HARBOR_DATASET_UPSTREAM_ALLOWED_REGISTRIES` before network
 I/O. Bearer-token challenges must remain on the registry host; Docker Hub may
 also use `auth.docker.io`.
+
+Evaluation and benchmark-run `credentials` map a provider (`openai`,
+`anthropic`, `nvidia`, `nhx`, `openshift`) to a platform Secret reference
+`workspace/name`. Create the Secret with the platform Secrets API; preflight
+and create reject a reference the caller cannot read. The value never touches
+scaled-evals storage: the evaluation Job resolves it from the platform at
+launch.
+
+**Removed:** the `/v1/credentials` store and its encryption key. Credentials
+are platform Secrets referenced by name.
 
 **Removed:** OAuth client discovery (`/v1/auth/config`), which existed only to
 hand the CLI login flow the coordinates of a fixed internal identity provider.
@@ -238,13 +247,20 @@ on — `CurrentPrincipal.owner_id` — and one function that produces it.
 
 Consequences worth knowing before you rely on this:
 
-- **`/v1` is single-tenant.** Every caller resolves to owner `dev`, so all
-  callers share one view of tasks, evaluations, and credentials. Bridging
-  platform identity means setting `request.state.principal` upstream; no route
-  changes.
-- **`CONTROL_PLANE_AUTH_ENABLED=true` now fails closed with 401** rather than
-  gating on a provider. There is nothing left to consult, and silently falling
-  back to the shared owner would hand one caller another caller's data.
+- **Ownership is the platform principal.** With platform auth enabled, the owner
+  of every row is the authenticated principal, or the user a service acts on
+  behalf of. With platform auth disabled every caller is owner `dev`.
+- **Admin is a platform permission.** `scaled-evals.admin` gates the
+  `/v1/admin/*` routes and image qualification and promotion. The platform
+  grants it, and `HelixAdmin` in the `system` workspace holds it implicitly.
+  Admins also see every owner's agent bundles and can edit any config profile.
+  Non-admins get 403 from the platform. There is no plugin allowlist.
+- **Admin analytics come from Intake.** Each terminal evaluation records one
+  span (source `scaled-evals-executions`) in the platform jobs workspace.
+  `/v1/admin/usage`, `/compute`, and `/failures` aggregate those spans over a
+  window of at most 90 days. Queued and active counts still come from the
+  evaluation store. A span that fails to record is logged and skipped, so
+  analytics can undercount during an Intake outage.
 - **The CLI takes a token, it does not obtain one.** `--token` /
   `SCALED_EVALS_TOKEN` is the only credential source; `scaled-evals auth
   login|status|logout` are gone and `auth whoami` is now top-level
@@ -283,12 +299,10 @@ docker run -d --name scaled-evals-pg \
 ```
 
 **3. Run the platform.** The platform keeps its own default store (SQLite locally);
-only scaled-evals is pointed at Postgres. Generating the key via command substitution
-keeps it out of shell history.
+only scaled-evals is pointed at Postgres.
 
 ```bash
 export SCALED_EVALS_DATABASE_URL="postgresql://scaled_evals:scaled_evals@127.0.0.1:5434/scaled_evals"
-export CREDENTIALS_ENCRYPTION_KEY="$(uv run python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
 
 uv run nemo services run --services scaled-evals --port 8080
 ```
@@ -354,6 +368,15 @@ the private execution snapshot, they are stored in
 `SCALED_EVALS_ENTITY_STORE_PRIVATE_WORKSPACE` (default `scaled-evals-internal`).
 The service creates that workspace itself, so only the service has a role in
 it, and it refuses to use a workspace of that name that someone else created.
+
+Config profiles (`scaled_evals_config_profile`) and agent bundles
+(`scaled_evals_agent_bundle`) are also stored as entities in that workspace,
+so the plugin's owner and admin checks cannot be bypassed through the Entities
+API. Deleting either one removes the entity. Editing a profile or bundle that
+changed since it was read returns `409 profile_changed` or
+`409 agent_bundle_changed`. A profile referenced by a non-terminal evaluation
+can be renamed, but its config cannot change and it cannot be deleted
+(`409 profile_in_use`).
 
 Each evaluation Job may run for every sequential trial wave
 (`ceil(n_attempts / parallelism)`) times the profile's sandbox

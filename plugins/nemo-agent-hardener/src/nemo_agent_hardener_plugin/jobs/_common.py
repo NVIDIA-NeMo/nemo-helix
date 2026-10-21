@@ -95,14 +95,16 @@ def warn_shadowed_operator_env(plugin_config: AgentHardenerConfig) -> list[str]:
 
 # Map each model group to agent-hardener's native env knobs. attack → garak's red-team + detector (name/uri
 # + NIM_API_KEY); analysis → the shared llm factory default (AGENT_HARDENER_MODEL/BASE_URL + INFERENCE_API_KEY).
-# The safety (guardrail) model is not an env knob — it travels in the manifest, as the guardrails
-# defender entry's `config`, because a defender consumes it rather than the agent-hardener process.
+# safety → the in-victim guardrail judge's endpoint + key (agent-hardener hands the key to the sandbox). Its
+# model is not an env knob: it travels in the manifest, as the guardrails defender entry's `config`.
 _ATTACK_MODEL_ENVVARS = ("GARAK_RED_TEAM_MODEL_NAME", "GARAK_DETECTOR_MODEL_NAME")
 _ATTACK_BASE_URL_ENVVARS = ("GARAK_RED_TEAM_MODEL_URI", "GARAK_DETECTOR_MODEL_URI")
 _ATTACK_KEY_ENVVAR = "NIM_API_KEY"  # pragma: allowlist secret
 _ANALYSIS_MODEL_ENVVAR = "AGENT_HARDENER_MODEL"
 _ANALYSIS_BASE_URL_ENVVAR = "AGENT_HARDENER_BASE_URL"
 _ANALYSIS_KEY_ENVVAR = "INFERENCE_API_KEY"  # pragma: allowlist secret
+_SAFETY_BASE_URL_ENVVAR = "AGENT_HARDENER_SAFETY_BASE_URL"
+_SAFETY_KEY_ENVVAR = "AGENT_HARDENER_SAFETY_API_KEY"  # pragma: allowlist secret
 
 
 def _resolve_secret(sdk: Any, name: str, workspace: str) -> str | None:
@@ -141,7 +143,8 @@ def build_model_env(models: WarGameModels | None, *, sdk: Any, workspace: str) -
 
     Only set knobs the user actually chose (``None`` leaves agent-hardener's built-in default in force). A
     group's ``api_key_secret`` is resolved to its plaintext value and bound to that group's key env var,
-    so a custom provider's credential reaches garak (NIM_API_KEY) / the llm factory (INFERENCE_API_KEY).
+    so a custom provider's credential reaches garak (NIM_API_KEY) / the llm factory (INFERENCE_API_KEY) /
+    the guardrail judge (AGENT_HARDENER_SAFETY_API_KEY).
     """
     if models is None:
         return {}
@@ -158,6 +161,7 @@ def build_model_env(models: WarGameModels | None, *, sdk: Any, workspace: str) -
         sdk,
         workspace,
     )
+    _apply_group(env, models.safety, (), (_SAFETY_BASE_URL_ENVVAR,), _SAFETY_KEY_ENVVAR, sdk, workspace)
     return env
 
 

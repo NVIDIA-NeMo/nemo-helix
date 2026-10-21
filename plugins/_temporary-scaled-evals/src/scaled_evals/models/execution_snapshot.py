@@ -51,14 +51,13 @@ def build_execution_snapshot(
     evaluation: Mapping[str, Any],
     task: Mapping[str, Any],
     profiles: Mapping[str, Mapping[str, Any]],
-    credentials: Mapping[str, Mapping[str, Any]],
+    credentials: Mapping[str, str],
     submission_identity: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Build the exact private input snapshot stored with an evaluation.
 
-    Profile config is intentionally exact because dispatch consumes it. Credential
-    payloads are never accepted here; only identity and the stored fingerprint are
-    retained.
+    Profile config is intentionally exact because dispatch consumes it. Credentials
+    are provider -> platform secret references; secret values are never accepted here.
     """
     return {
         "schema_version": EXECUTION_SNAPSHOT_SCHEMA_VERSION,
@@ -66,7 +65,7 @@ def build_execution_snapshot(
         "evaluation": _json_value(dict(evaluation)),
         "task": _json_value(dict(task)),
         "profiles": {role: _json_value(dict(profile)) for role, profile in sorted(profiles.items())},
-        "credentials": {role: _json_value(dict(credential)) for role, credential in sorted(credentials.items())},
+        "credentials": dict(sorted(credentials.items())),
         "submission_identity": _json_value(dict(submission_identity)),
     }
 
@@ -98,25 +97,6 @@ def snapshot_profile_config(snapshot: Mapping[str, Any], role: str) -> dict[str,
     if not isinstance(config, dict):
         raise ValueError(f"snapshotted {role} profile config must be a JSON object")
     return dict(config)
-
-
-def snapshot_credential_expectations(snapshot: Mapping[str, Any]) -> dict[str, dict[str, str]]:
-    result: dict[str, dict[str, str]] = {}
-    credentials = snapshot.get("credentials")
-    if not isinstance(credentials, Mapping):
-        return result
-    for role, raw in credentials.items():
-        if not isinstance(raw, Mapping):
-            raise ValueError(f"snapshotted credential {role!r} must be an object")
-        credential_id = raw.get("id")
-        if not credential_id:
-            raise ValueError(f"snapshotted credential {role!r} is missing id")
-        result[str(credential_id)] = {
-            "fingerprint": str(raw.get("fingerprint") or ""),
-            "provider": str(raw.get("provider") or ""),
-            "payload_kind": str(raw.get("payload_kind") or ""),
-        }
-    return result
 
 
 def public_execution_projection(snapshot: Mapping[str, Any]) -> dict[str, Any]:
@@ -151,17 +131,13 @@ def public_execution_projection(snapshot: Mapping[str, Any]) -> dict[str, Any]:
             "config_sha256": canonical_sha256(profile.get("config") or {}),
         }
 
-    public_credentials = {
-        role: {key: raw.get(key) for key in ("id", "provider", "payload_kind", "fingerprint", "updated_at")}
-        for role, raw in validated["credentials"].items()
-    }
     return {
         "schema_version": validated["schema_version"],
         "captured_at": validated.get("captured_at"),
         "evaluation": public_evaluation,
         "task": public_task,
         "profiles": public_profiles,
-        "credentials": public_credentials,
+        "credentials": dict(validated["credentials"]),
         "submission_identity": _sanitize_public(validated["submission_identity"]),
         "private_snapshot_sha256": canonical_sha256(validated),
     }

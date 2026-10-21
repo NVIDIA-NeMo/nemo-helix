@@ -8,10 +8,13 @@ Each method maps 1:1 onto the FastAPI routes in
 :mod:`nemo_insights_plugin.service`.
 """
 
-from typing import Protocol, TypedDict
+from datetime import datetime
+from enum import Enum
+from typing import Protocol, TypeAlias, TypedDict
 
 from nemo_insights_plugin.client import AsyncInsightsClient, InsightsClient
-from nemo_insights_plugin.entities import Insight, InsightStatus
+from nemo_insights_plugin.entities import Insight, InsightRating, InsightStatus
+from nemo_insights_plugin.evidence import TraceEvidence
 from nemo_insights_plugin.schema import (
     CreateInsightRequest,
     InsightPage,
@@ -22,11 +25,22 @@ from nemo_insights_plugin.sdk_resources._errors import httpx_status_errors
 from nemo_insights_plugin.types import ListInsightsQueryParams
 
 
+class _Unset(Enum):
+    VALUE = "unset"
+
+
+_UNSET = _Unset.VALUE
+_NullableRatingUpdate: TypeAlias = InsightRating | None | _Unset
+
+
 class _InsightUpdatePatch(TypedDict, total=False):
     agent: str
     description: str
     status: InsightStatus
-    trace_refs: list[str]
+    evidence: list[TraceEvidence]
+    updated_date: datetime
+    severity: InsightRating | None
+    confidence: InsightRating | None
 
 
 def _insight_from_response(data: dict[str, object]) -> Insight:
@@ -67,14 +81,20 @@ def _build_create_body(
     agent: str,
     description: str,
     status: InsightStatus | str,
-    trace_refs: list[str] | None,
+    evidence: list[TraceEvidence] | None,
+    updated_date: datetime | None,
+    severity: InsightRating | None = None,
+    confidence: InsightRating | None = None,
 ) -> CreateInsightRequest:
     body = CreateInsightRequest(
         title=title,
         agent=agent,
         description=description,
         status=InsightStatus(status) if isinstance(status, str) else status,
-        trace_refs=list(trace_refs or []),
+        evidence=list(evidence or []),
+        updated_date=updated_date,
+        severity=severity,
+        confidence=confidence,
     )
     return body
 
@@ -84,7 +104,10 @@ def _build_update_body(
     agent: str | None,
     description: str | None,
     status: InsightStatus | str | None,
-    trace_refs: list[str] | None,
+    evidence: list[TraceEvidence] | None,
+    updated_date: datetime | None,
+    severity: _NullableRatingUpdate = _UNSET,
+    confidence: _NullableRatingUpdate = _UNSET,
 ) -> UpdateInsightRequest:
     update: _InsightUpdatePatch = {}
     if agent is not None:
@@ -93,8 +116,14 @@ def _build_update_body(
         update["description"] = description
     if status is not None:
         update["status"] = InsightStatus(status) if isinstance(status, str) else status
-    if trace_refs is not None:
-        update["trace_refs"] = trace_refs
+    if evidence is not None:
+        update["evidence"] = evidence
+    if updated_date is not None:
+        update["updated_date"] = updated_date
+    if not isinstance(severity, _Unset):
+        update["severity"] = severity
+    if not isinstance(confidence, _Unset):
+        update["confidence"] = confidence
     return UpdateInsightRequest(**update)
 
 
@@ -128,14 +157,20 @@ class _InsightResource:
         agent: str,
         description: str,
         status: InsightStatus | str = InsightStatus.OPEN,
-        trace_refs: list[str] | None = None,
+        evidence: list[TraceEvidence] | None = None,
+        updated_date: datetime | None = None,
+        severity: InsightRating | None = None,
+        confidence: InsightRating | None = None,
     ) -> Insight:
         body = _build_create_body(
             title=title,
             agent=agent,
             description=description,
             status=status,
-            trace_refs=trace_refs,
+            evidence=evidence,
+            updated_date=updated_date,
+            severity=severity,
+            confidence=confidence,
         )
         with httpx_status_errors():
             response = self._client.create_insight(workspace=workspace, body=body)
@@ -178,13 +213,19 @@ class _InsightResource:
         agent: str | None = None,
         description: str | None = None,
         status: InsightStatus | str | None = None,
-        trace_refs: list[str] | None = None,
+        evidence: list[TraceEvidence] | None = None,
+        updated_date: datetime | None = None,
+        severity: _NullableRatingUpdate = _UNSET,
+        confidence: _NullableRatingUpdate = _UNSET,
     ) -> Insight:
         body = _build_update_body(
             agent=agent,
             description=description,
             status=status,
-            trace_refs=trace_refs,
+            evidence=evidence,
+            updated_date=updated_date,
+            severity=severity,
+            confidence=confidence,
         )
         with httpx_status_errors():
             response = self._client.update_insight(workspace=workspace, insight_id=insight_id, body=body)
@@ -213,14 +254,20 @@ class _AsyncInsightResource:
         agent: str,
         description: str,
         status: InsightStatus | str = InsightStatus.OPEN,
-        trace_refs: list[str] | None = None,
+        evidence: list[TraceEvidence] | None = None,
+        updated_date: datetime | None = None,
+        severity: InsightRating | None = None,
+        confidence: InsightRating | None = None,
     ) -> Insight:
         body = _build_create_body(
             title=title,
             agent=agent,
             description=description,
             status=status,
-            trace_refs=trace_refs,
+            evidence=evidence,
+            updated_date=updated_date,
+            severity=severity,
+            confidence=confidence,
         )
         with httpx_status_errors():
             response = await self._client.create_insight(workspace=workspace, body=body)
@@ -263,13 +310,19 @@ class _AsyncInsightResource:
         agent: str | None = None,
         description: str | None = None,
         status: InsightStatus | str | None = None,
-        trace_refs: list[str] | None = None,
+        evidence: list[TraceEvidence] | None = None,
+        updated_date: datetime | None = None,
+        severity: _NullableRatingUpdate = _UNSET,
+        confidence: _NullableRatingUpdate = _UNSET,
     ) -> Insight:
         body = _build_update_body(
             agent=agent,
             description=description,
             status=status,
-            trace_refs=trace_refs,
+            evidence=evidence,
+            updated_date=updated_date,
+            severity=severity,
+            confidence=confidence,
         )
         with httpx_status_errors():
             response = await self._client.update_insight(workspace=workspace, insight_id=insight_id, body=body)

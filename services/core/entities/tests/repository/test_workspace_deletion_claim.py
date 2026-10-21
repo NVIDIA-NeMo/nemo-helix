@@ -171,6 +171,7 @@ async def test_renewal_fences_stale_holder_from_failure_transition(
     stale_failure = await workspace_repo.fail_workspace_deletion_if_claimed(
         name=workspace.name,
         expected_updated_at=claimed.updated_at,
+        deletion_error="stale holder",
     )
 
     assert stale_renewal is None
@@ -178,7 +179,12 @@ async def test_renewal_fences_stale_holder_from_failure_transition(
     assert await workspace_repo.fail_workspace_deletion_if_claimed(
         name=workspace.name,
         expected_updated_at=renewed.updated_at,
+        deletion_error="current holder",
     )
+    failed = await workspace_repo.get_workspace_by_name(name=workspace.name)
+    assert failed is not None
+    assert failed._deletion_stage == WorkspaceDeletionStage.FAILED
+    assert failed._deletion_error == "current holder"
 
 
 @pytest.mark.asyncio
@@ -265,3 +271,64 @@ async def test_controller_leaves_recent_deletion_with_real_repository(
     persisted = await workspace_repo.get_workspace_by_name(name="active-cleaner")
     assert persisted is not None
     assert persisted.updated_at == recent_timestamp
+
+
+@pytest.mark.asyncio
+async def test_failed_cleanup_stores_error_and_retry_claim_keeps_it(
+    workspace_repo: SQLAlchemyWorkspaceRepository,
+) -> None:
+    workspace = await workspace_repo.create_workspace(name="blocked-fileset")
+    await workspace_repo.mark_workspace_for_deletion(
+        name=workspace.name,
+        deletion_stage=WorkspaceDeletionStage.PENDING,
+    )
+    pending = await workspace_repo.get_workspace_by_name(name=workspace.name)
+    assert pending is not None
+    claimed = await workspace_repo.claim_workspace_for_deletion(
+        name=workspace.name,
+        expected_stage=WorkspaceDeletionStage.PENDING,
+        expected_updated_at=pending.updated_at,
+    )
+    assert claimed is not None
+
+    reason = "shared-weights: HTTP 409: Cannot delete fileset because 1 model entity reference(s) still use it"
+    assert await workspace_repo.fail_workspace_deletion_if_claimed(
+        name=workspace.name,
+        expected_updated_at=claimed.updated_at,
+        deletion_error=reason + (" x" * 2000),
+    )
+    failed = await workspace_repo.get_workspace_by_name(name=workspace.name)
+    assert failed is not None
+    assert failed._deletion_stage == WorkspaceDeletionStage.FAILED
+    assert failed._deletion_error is not None
+    assert failed._deletion_error.startswith(reason)
+    assert len(failed._deletion_error) == 2000
+    assert failed._deletion_error.endswith("...")
+
+    retried = await workspace_repo.claim_workspace_for_deletion(
+        name=workspace.name,
+        expected_stage=WorkspaceDeletionStage.FAILED,
+        expected_updated_at=failed.updated_at,
+    )
+    assert retried is not None
+    assert retried._deletion_stage == WorkspaceDeletionStage.DELETING
+    assert retried._deletion_error == failed._deletion_error
+
+    assert not await workspace_repo.fail_workspace_deletion_if_claimed(
+        name=workspace.name,
+        expected_updated_at=failed.updated_at,
+        deletion_error="stale holder must not replace the reason",
+    )
+    unchanged = await workspace_repo.get_workspace_by_name(name=workspace.name)
+    assert unchanged is not None
+    assert unchanged._deletion_error == failed._deletion_error
+
+    assert await workspace_repo.fail_workspace_deletion_if_claimed(
+        name=workspace.name,
+        expected_updated_at=retried.updated_at,
+        deletion_error="shared-weights: HTTP 409: still referenced",
+    )
+    replaced = await workspace_repo.get_workspace_by_name(name=workspace.name)
+    assert replaced is not None
+    assert replaced._deletion_stage == WorkspaceDeletionStage.FAILED
+    assert replaced._deletion_error == "shared-weights: HTTP 409: still referenced"

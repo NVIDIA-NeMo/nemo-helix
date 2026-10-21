@@ -40,7 +40,8 @@ _RUN_ENV_KEYS = (
 
 
 @pytest.fixture(autouse=True)
-def restore_platform_runner_env():
+def restore_platform_runner_env(monkeypatch):
+    monkeypatch.setattr(server, "docker_listener_host", lambda host: None)
     original_env = {key: os.environ.get(key) for key in _RUN_ENV_KEYS}
     yield
     for key, value in original_env.items():
@@ -423,6 +424,7 @@ def test_run_server_can_bind_tcp_and_unix_domain_socket():
         "keep_alive_timeout_seconds": DEFAULT_UVICORN_KEEP_ALIVE_TIMEOUT_SECONDS,
         "port": 9999,
         "socket_path": "/tmp/nemo-helix.sock",
+        "docker_host": None,
     }
 
 
@@ -436,10 +438,12 @@ def test_run_server_on_bound_sockets_sets_keep_alive_timeout():
     uds_config.bind_socket.return_value = uds_socket
 
     with (
+        patch("nhx.platform_runner.server.tcp_listener_sockets") as bound_tcp,
         patch("nhx.platform_runner.server.uvicorn.Config", side_effect=[tcp_config, uds_config]) as config_cls,
         patch("nhx.platform_runner.server.uvicorn.Server") as server_cls,
         patch("nhx.platform_runner.server.asyncio.run") as asyncio_run,
     ):
+        bound_tcp.return_value.__enter__.return_value = [tcp_socket]
         server._run_server_on_bound_sockets(
             app,
             host="127.0.0.1",
@@ -453,7 +457,7 @@ def test_run_server_on_bound_sockets_sets_keep_alive_timeout():
     server_cls.assert_called_once_with(tcp_config)
     server_cls.return_value.serve.assert_called_once_with(sockets=[tcp_socket, uds_socket])
     asyncio_run.assert_called_once_with(server_cls.return_value.serve.return_value)
-    tcp_socket.close.assert_called_once_with()
+    bound_tcp.return_value.__exit__.assert_called_once()
     uds_socket.close.assert_called_once_with()
 
 
@@ -685,3 +689,19 @@ def test_non_get_root_still_requires_auth():
         response = client.post("/")
 
     assert response.status_code == 401
+
+
+def test_run_server_owns_docker_and_loopback_listener_together(monkeypatch):
+    monkeypatch.setattr(server, "docker_listener_host", lambda host: "172.17.0.1")
+    with (
+        patch.object(server, "preflight_embedded_auth_policy_wasm"),
+        patch.object(server, "create_app", return_value=FastAPI()),
+        patch.object(server, "setup_fastapi_instrumentations"),
+        patch.object(server, "_run_server_on_bound_sockets") as serve,
+        patch.object(server.uvicorn, "run") as single_listener,
+    ):
+        server.run_server(host="127.0.0.1", port=8080)
+    assert serve.call_args.kwargs["host"] == "127.0.0.1"
+    assert serve.call_args.kwargs["docker_host"] == "172.17.0.1"
+    assert serve.call_args.kwargs["port"] == 8080
+    single_listener.assert_not_called()

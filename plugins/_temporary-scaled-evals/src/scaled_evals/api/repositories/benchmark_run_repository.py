@@ -11,6 +11,7 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Json
 
+from scaled_evals.api import config_profile_store
 from scaled_evals.api.failure_diagnostics import failure_category_for_code, is_retryable_failure
 from scaled_evals.api.repositories.base_repository import (
     created_at_cursor_clause,
@@ -424,6 +425,16 @@ class BenchmarkRunRepository:
         run row.
         """
         evaluations = EvaluationRepository(self.conn)
+        profiles_by_id = config_profile_store.ConfigProfileStore().get_many(
+            profile_id
+            for profile_id in (
+                framework_profile_id,
+                harbor_profile_id,
+                intake_profile_id,
+                *(member.get("framework_profile_id") for member in members),
+            )
+            if profile_id
+        )
         with self.conn.transaction(), self.conn.cursor() as cur:
             cur.execute(
                 """
@@ -508,6 +519,7 @@ class BenchmarkRunRepository:
                     visibility=visibility,
                     benchmark_run_id=run_id,
                     owner_id=owner_id,
+                    profiles_by_id=profiles_by_id,
                 )
         return run
 

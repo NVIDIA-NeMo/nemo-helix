@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal, Self, Union
 
 from nemo_helix_plugin.deployment import DEPLOYMENT_CONFIG_DESCRIPTION, DeploymentParams
+from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH
 from nemo_helix_plugin.integrations import IntegrationsSpec
 from nhx.customization_common.schema import NamespacedModel
 from nhx.customization_common.schemas.values import OutputNameType
@@ -759,7 +760,7 @@ TrainingMethod = Annotated[Union[DPOTraining, GRPOTraining], Discriminator("type
 
 
 class _OutputBase(RlSchema):
-    name: str = Field(max_length=255, examples=["my-dpo-llama"])
+    name: str = Field(max_length=NAME_MAX_LENGTH, examples=["my-dpo-llama"])
 
 
 class OutputRequest(_OutputBase):
@@ -770,7 +771,7 @@ class OutputResponse(_OutputBase):
     """Resolved output artifact details."""
 
     type: OutputNameType = Field(default=OutputNameType.MODEL)
-    fileset: str = Field(max_length=255)
+    fileset: str = Field(max_length=NAME_MAX_LENGTH)
 
 
 def trains_lora_adapter(training: TrainingMethod) -> bool:

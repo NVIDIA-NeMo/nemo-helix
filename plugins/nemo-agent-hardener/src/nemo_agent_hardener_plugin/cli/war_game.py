@@ -84,9 +84,17 @@ def register(app: typer.Typer) -> None:
         safety_model: str | None = typer.Option(
             None,
             "--safety-model",
-            help="Model the generated guardrail uses to screen traffic. Unset reuses the agent's own model. "
+            help="Model the generated guardrail uses to screen traffic. Unset uses the analysis model. "
             "Preflighted when set: a bad name or key fails before the sandbox is built, with the list of "
             "models the credentials can reach.",
+        ),
+        safety_base_url: str | None = typer.Option(
+            None,
+            "--safety-base-url",
+            help="Custom OpenAI-compatible endpoint for the safety model. Unset uses the analysis endpoint.",
+        ),
+        safety_key_secret: str | None = typer.Option(
+            None, "--safety-key-secret", help="Secrets-store name holding the safety endpoint's API key."
         ),
     ) -> None:
         """Run the attack/defend/validate war-game against a local manifest or a saved manifest.
@@ -146,6 +154,8 @@ def register(app: typer.Typer) -> None:
                     analysis_base_url=analysis_base_url,
                     analysis_key_secret=analysis_key_secret,
                     safety_model=safety_model,
+                    safety_base_url=safety_base_url,
+                    safety_key_secret=safety_key_secret,
                 ),
             )
         except ValueError as exc:

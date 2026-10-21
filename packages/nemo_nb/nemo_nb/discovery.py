@@ -250,8 +250,8 @@ def find_processable_notebooks(path: str) -> NotebookDiscoveryResult:
             if not nb.name.endswith((".executed.ipynb", ".tmp.ipynb")) and not is_in_excluded_dir(nb)
         ]
 
-        # Find .md files, excluding build artifacts and excluded filenames
-        all_md = list(path_obj.rglob("*.md"))
+        # Find Markdown/MDX files, excluding build artifacts and excluded filenames.
+        all_md = [*path_obj.rglob("*.md"), *path_obj.rglob("*.mdx")]
         all_md = [md for md in all_md if not is_in_excluded_dir(md) and not is_excluded_file(md)]
 
         # Filter notebooks with the process marker
@@ -263,7 +263,7 @@ def find_processable_notebooks(path: str) -> NotebookDiscoveryResult:
         ipynb_basenames = {nb.with_suffix("") for nb in ipynb_files}
         conflicts = md_basenames & ipynb_basenames
 
-    elif path_obj.suffix == ".md":
+    elif path_obj.suffix in {".md", ".mdx"}:
         md_files = [path_obj]
     elif path_obj.suffix == ".ipynb":
         ipynb_files = [path_obj]
