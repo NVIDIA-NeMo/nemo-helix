@@ -1,11 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { cancelRunJob, deleteRunWithJob } from '@agent-hardener/api/runJobs';
 import {
   getAgentHardenerListRunsQueryKey,
-  useAgentHardenerCancelJob,
-  useAgentHardenerDeleteJob,
-  useAgentHardenerDeleteRun,
   useAgentHardenerListRuns,
 } from '@agent-hardener/generated/api';
 import type { AgentHardenerRun, RunFilter } from '@agent-hardener/generated/schema';
@@ -13,7 +11,7 @@ import { useNotify, useToast, useWorkspace } from '@agent-hardener/host';
 import { getAgentHardenerRunDetailsRoute } from '@agent-hardener/paths';
 import { DeleteConfirmationModal, JOB_POLLING_INTERVAL_MS, QuickActionsMenuRoot, RelativeTime, StatusBadge, StudioDataView, TableEmptyState, getSortParam, useStudioDataViewState, withOperators, type StatusConfigEntry } from '@nemo/common';
 import { Text } from '@nvidia/foundations-react-core';
-import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ComponentProps, FC, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -47,17 +45,14 @@ export const AgentHardenerRunsDataView: FC = () => {
   const invalidateRuns = () =>
     queryClient.invalidateQueries({ queryKey: getAgentHardenerListRunsQueryKey(workspace) });
 
-  const cancelJob = useAgentHardenerCancelJob({
-    mutation: {
-      onSuccess: () => {
-        toast.success('War-game cancelled.');
-        invalidateRuns();
-      },
-      onError: () => toast.error('Failed to cancel the war-game.'),
+  const cancelJob = useMutation({
+    mutationFn: cancelRunJob,
+    onSuccess: () => {
+      toast.success('Run job cancelled.');
+      invalidateRuns();
     },
+    onError: () => toast.error('Failed to cancel the run job.'),
   });
-  const deleteRun = useAgentHardenerDeleteRun();
-  const deleteJob = useAgentHardenerDeleteJob();
 
   const { data: runsResponse, isLoading } = useAgentHardenerListRuns(
     workspace,
@@ -190,12 +185,7 @@ export const AgentHardenerRunsDataView: FC = () => {
         errorText="Failed to delete the run."
         onDelete={async () => {
           if (!toDelete?.name) return false;
-          await deleteRun.mutateAsync({ workspace, name: toDelete.name });
-          // The run's job is best-effort — the record is the user-facing artifact.
-          if (toDelete.job_id)
-            await deleteJob
-              .mutateAsync({ workspace, name: toDelete.job_id })
-              .catch(() => undefined);
+          await deleteRunWithJob(workspace, { name: toDelete.name, job_id: toDelete.job_id });
           invalidateRuns();
           return true;
         }}

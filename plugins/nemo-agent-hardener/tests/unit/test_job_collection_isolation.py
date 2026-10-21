@@ -51,6 +51,7 @@ def _job(name, spec, source="agent-hardener"):
         error_details=None,
         ownership=None,
         custom_fields=None,
+        control={},
     )
 
 

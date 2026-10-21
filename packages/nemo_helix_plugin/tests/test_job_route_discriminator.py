@@ -59,6 +59,7 @@ def _job(name: str, discriminator: str | None, *, source: str = "agent-hardener"
         error_details=None,
         ownership=None,
         custom_fields=None,
+        control={},
     )
 
 
@@ -142,6 +143,14 @@ class _JobsClient:
         await self._unexpected_action("resume")
         raise AssertionError("unreachable")
 
+    async def update_job_control(self, **_kwargs: object) -> _Response:
+        await self._unexpected_action("control")
+        raise AssertionError("unreachable")
+
+    async def rerun_job(self, **_kwargs: object) -> _Response:
+        await self._unexpected_action("rerun")
+        raise AssertionError("unreachable")
+
     async def get_job_status(self, **_kwargs: object) -> _Response:
         await self._unexpected_action("status")
         raise AssertionError("unreachable")
@@ -194,6 +203,12 @@ class _WriteOnlyJobsClient(_JobsClient):
     async def resume_job(self, **kwargs: object) -> _Response:
         return self._mutation_response("resume", cast(str, kwargs["name"]), cast(str, kwargs["workspace"]))
 
+    async def update_job_control(self, **kwargs: object) -> _Response:
+        return self._mutation_response("control", cast(str, kwargs["name"]), cast(str, kwargs["workspace"]))
+
+    async def rerun_job(self, **kwargs: object) -> _Response:
+        return self._mutation_response("rerun", cast(str, kwargs["job"]), cast(str, kwargs["workspace"]))
+
     def _mutation_response(self, action: str, name: str, workspace: str) -> _Response:
         self.action_calls.append(action)
         job = _job(name, "war-game")
@@ -212,7 +227,7 @@ def _build_app(jobs_client: _JobsClient, *, authorize: Any | None = None) -> Fas
             job_type="WarGame",
             job_input=_Spec,
             platform_job_config_compiler=_compiler,
-            route_options=[JobRouteOption.CORE, JobRouteOption.PAUSE_RESUME],
+            route_options=[JobRouteOption.CORE, JobRouteOption.PAUSE_RESUME, JobRouteOption.RERUN],
             job_discriminator="war-game",
         ),
         prefix="/war/{workspace}",
@@ -223,7 +238,7 @@ def _build_app(jobs_client: _JobsClient, *, authorize: Any | None = None) -> Fas
             job_type="SynthBenign",
             job_input=_Spec,
             platform_job_config_compiler=_compiler,
-            route_options=[JobRouteOption.CORE, JobRouteOption.PAUSE_RESUME],
+            route_options=[JobRouteOption.CORE, JobRouteOption.PAUSE_RESUME, JobRouteOption.RERUN],
             job_discriminator="synth-benign",
         ),
         prefix="/synth/{workspace}",
@@ -295,6 +310,8 @@ def test_get_accepts_only_matching_collection_and_hides_marker() -> None:
 
     assert response.status_code == 200, response.text
     assert response.json()["spec"] == {"value": "war-1"}
+    # Reuse the ownership response rather than doubling Studio's named-job polls.
+    assert jobs.get_calls == ["war-1"]
 
 
 @pytest.mark.parametrize(
@@ -310,6 +327,8 @@ def test_get_accepts_only_matching_collection_and_hides_marker() -> None:
         ("get", "/war/default/jobs/synth-1/results/report/download"),
         ("post", "/war/default/jobs/synth-1/pause"),
         ("post", "/war/default/jobs/synth-1/resume"),
+        ("patch", "/war/default/jobs/synth-1/control"),
+        ("post", "/war/default/jobs/synth-1/rerun"),
     ],
 )
 def test_every_name_scoped_route_rejects_another_subtype_before_action(method: str, path: str) -> None:
@@ -321,7 +340,7 @@ def test_every_name_scoped_route_rejects_another_subtype_before_action(method: s
         "nemo_helix_plugin.jobs.api_factory.get_async_nemo_client",
         return_value=internal_client,
     ):
-        response = client.request(method, path)
+        response = client.request(method, path, json={} if method == "patch" else None)
 
     assert response.status_code == 404, response.text
     assert jobs.action_calls == []
@@ -355,6 +374,22 @@ def test_every_name_scoped_route_rejects_another_subtype_before_action(method: s
             "POST",
             "/apis/jobs/v2/workspaces/default/jobs/war-1/resume",
         ),
+        (
+            "patch",
+            "/war/default/jobs/war-1/control",
+            200,
+            "control",
+            "PATCH",
+            "/apis/jobs/v2/workspaces/default/jobs/war-1/control",
+        ),
+        (
+            "post",
+            "/war/default/jobs/war-1/rerun",
+            200,
+            "rerun",
+            "POST",
+            "/apis/jobs/v2/workspaces/default/jobs/war-1/rerun",
+        ),
     ],
 )
 def test_mutation_ownership_lookup_uses_internal_service_client_not_caller_read(
@@ -379,7 +414,7 @@ def test_mutation_ownership_lookup_uses_internal_service_client_not_caller_read(
         "nemo_helix_plugin.jobs.api_factory.get_async_nemo_client",
         return_value=internal_client,
     ) as client_factory:
-        response = client.request(method, path)
+        response = client.request(method, path, json={} if method == "patch" else None)
 
     assert response.status_code == status_code, response.text
     assert authorization_calls == [(authorized_method, authorized_path)]
@@ -393,7 +428,8 @@ def test_mutation_ownership_lookup_uses_internal_service_client_not_caller_read(
     )
 
 
-def test_mutation_authorization_denial_happens_before_internal_ownership_lookup() -> None:
+@pytest.mark.parametrize(("method", "suffix"), [("post", "cancel"), ("patch", "control"), ("post", "rerun")])
+def test_mutation_authorization_denial_happens_before_internal_ownership_lookup(method: str, suffix: str) -> None:
     async def deny(_method: str, _path: str) -> None:
         raise HTTPException(status_code=403, detail="mutation denied")
 
@@ -401,7 +437,7 @@ def test_mutation_authorization_denial_happens_before_internal_ownership_lookup(
     client = TestClient(_build_app(caller_jobs, authorize=deny))
 
     with patch("nemo_helix_plugin.jobs.api_factory.get_async_nemo_client") as client_factory:
-        response = client.post("/war/default/jobs/unknown/cancel")
+        response = client.request(method, f"/war/default/jobs/unknown/{suffix}", json={} if method == "patch" else None)
 
     assert response.status_code == 403, response.text
     assert response.json()["detail"] == "mutation denied"

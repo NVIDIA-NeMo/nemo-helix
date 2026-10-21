@@ -98,7 +98,16 @@ from nemo_helix_plugin.jobs.types import (
     HelixJobResponse as HelixJob,
 )
 from nemo_helix_plugin.schema import Page, PaginationData
-from pydantic import BaseModel, ConfigDict, Field, RootModel, TypeAdapter, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    RootModel,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1888,11 +1897,20 @@ def job_route_factory(
             workspace: str,
             body: JobControl,
             async_client: AsyncNemoClient = Depends(get_nemo_client),
+            authorize: RequestAuthorizer = Depends(mutation_authorizer_dependency),
         ) -> TypedJobResponse:
             f"""Change mutable job behavior for the {service_name} microservice."""
 
             jobs_client = AsyncJobsClient.from_client(async_client)
-            await require_own_job(jobs_client, name, workspace)
+            if job_discriminator is None:
+                await require_own_job(jobs_client, name, workspace)
+            await _require_mutation_target_in_collection(
+                name=name,
+                workspace=workspace,
+                authorize=authorize,
+                method="PATCH",
+                suffix="/control",
+            )
             job_resp = (await jobs_client.update_job_control(name=name, workspace=workspace, body=body)).data()
             return from_response(job_resp)
 
@@ -1908,11 +1926,20 @@ def job_route_factory(
             name: str,
             workspace: str,
             async_client: AsyncNemoClient = Depends(get_nemo_client),
+            authorize: RequestAuthorizer = Depends(mutation_authorizer_dependency),
         ) -> TypedJobResponse:
             f"""Rerun a failed job by name for the {service_name} microservice."""
 
             jobs_client = AsyncJobsClient.from_client(async_client)
-            await require_own_job(jobs_client, name, workspace)
+            if job_discriminator is None:
+                await require_own_job(jobs_client, name, workspace)
+            await _require_mutation_target_in_collection(
+                name=name,
+                workspace=workspace,
+                authorize=authorize,
+                method="POST",
+                suffix="/rerun",
+            )
             # Sent once: a retry after a lost response would find the new attempt and fail with 409.
             rerun_client = jobs_client.with_retry(RetryPolicy(max_retries=0))
             job_resp = (await rerun_client.rerun_job(job=name, workspace=workspace)).data()
