@@ -3,28 +3,30 @@
 # SPDX-License-Identifier: Apache-2.0
 
 title: "Secure Sandboxed GRPO"
-description: "Set up minikube, OpenSandbox, optional Kata, and the Helm values that run sandboxed GRPO with the Gym sandbox locked out of the training control plane."
+description: "Set up OpenSandbox, Kata, and the Helm values that run sandboxed GRPO with the Gym sandbox locked out of the training control plane."
 ---
 <a id="secure-sandboxed-grpo"></a>
 
 Sandboxed GRPO runs untrusted environment code in an OpenSandbox pod, separate from the training pod. The sandbox needs two endpoints on the training pod: the episode broker and the vLLM generation server. Everything else on that pod, including Ray, is the training control plane and must stay unreachable from the sandbox.
 
-This how-to walks through one supported single-node setup end to end: an enforcing CNI on minikube, OpenSandbox, optional Kata, and the Helm values. It separates the settings that make GRPO **run** from the settings that make the sandbox **secure**. A GRPO job starts and trains without the network-policy settings, but the sandbox's cluster access is not locked down.
+This how-to separates the settings that make GRPO **run** from the settings that make the sandbox **secure**. A GRPO job starts and trains without the network-policy settings and without Kata, but then the sandbox's cluster access is open and a kernel exploit in the Gym can leave the sandbox. The worked example is a single-node minikube cluster. On another Kubernetes cluster, use the same Helm overlay and follow [On a Kubernetes cluster](#on-a-kubernetes-cluster).
 
 ## What each layer does
 
 | Layer | Required to run GRPO | Required for a secure sandbox | What it provides |
 | --- | --- | --- | --- |
 | OpenSandbox server and `sandboxClusterCapable: true` | Yes | Yes | Runs the Gym in its own pod. Without it, GRPO fails at submit. |
-| Job-storage PVC (`rl.job_storage_pvc_claim`) | Yes | Yes | The sandbox reads the environment and dataset from it. The chart sets it. |
-| CNI that enforces NetworkPolicy | No | Yes | Without enforcement, NetworkPolicy objects are stored and ignored. |
+| CNI that enforces NetworkPolicy | No | Yes | Without enforcement, NetworkPolicy objects are stored and ignored. Cilium is the tested CNI. Calico and other enforcing CNIs work on Kubernetes. |
 | `networkPolicies.enabled` and `networkPolicies.jobSteps.enabled` | No | Yes | The jobs controller creates a per-step ingress policy that admits the sandbox only on the broker and vLLM ports. |
-| Kata (`kata-qemu`) | No | Optional | Gives each sandbox its own guest kernel. It does not restrict network access. |
+| Kata (`kata-qemu`) | No | Yes | Gives each sandbox its own guest kernel. A shared-kernel sandbox uses the node's kernel, so a kernel exploit in the Gym can leave the sandbox. Kata does not restrict network access. |
+
+The Helm chart sets `rl.job_storage_pvc_claim` to its job-storage PVC. The sandbox reads the environment and dataset from that claim. Leave it unset unless you are not using the chart, or job storage uses a different claim.
 
 ## Prerequisites
 
 - A source checkout of `NVIDIA-NeMo/nemo-helix`
-- `minikube`, `docker`, `kubectl`, `helm`, `jq`, and `openssl`
+- A Kubernetes cluster. The steps below use minikube; skip the minikube start when the cluster already exists.
+- `kubectl`, `helm`, `jq`, and `openssl`. The minikube path also needs `minikube` and `docker`.
 - An NVIDIA GPU host with the NVIDIA container toolkit, for GPU training
 - `NGC_API_KEY` with access to NeMo Helix chart and container images
 - Kubernetes 1.30 or later, or 1.28 or later with the ValidatingAdmissionPolicy beta API enabled. This is needed only for the secure configuration.
@@ -52,6 +54,21 @@ kubectl -n kube-system rollout status ds/cilium --timeout=5m
   The [NetworkPolicy smoke test](/documentation/kubernetes-deployment/setup/helm/network-policy-smoke-test) checks the chart's API, controller, and managed-job policies on Kind with Calico. It does not exercise the Gym sandbox policy described here.
 </Note>
 
+## On a Kubernetes cluster
+<a id="on-a-kubernetes-cluster"></a>
+
+Skip the minikube start when the cluster already exists. The sandbox settings in the Helm overlay below are the same. These parts differ:
+
+| | minikube | Kubernetes |
+| --- | --- | --- |
+| Cluster | `setup_local_minikube_gpu.sh` | The cluster you already run. Install the chart with [Install](/documentation/kubernetes-deployment/setup/helm/install). |
+| CNI | Cilium. The Docker driver does not enforce NetworkPolicy on its own, and Calico stays in `ContainerCreating` with that driver. | Any CNI that enforces NetworkPolicy. Cilium is the one this setup was tested with. Calico and other enforcing CNIs apply the same policy. |
+| OpenSandbox | `install_opensandbox_minikube.sh` | [OpenSandbox](/documentation/kubernetes-deployment/setup/helm/open-sandbox), then [Kata](/documentation/kubernetes-deployment/setup/helm/opensandbox-kata) for a secure sandbox. |
+| Chart values | `e2e/k8s/values/minikube.yaml`, then the overlay | Your cluster's values file, then the same overlay. Job storage needs a ReadWriteMany claim, as in [Install](/documentation/kubernetes-deployment/setup/helm/install). |
+| DNS | CoreDNS with the `k8s-app=kube-dns` label | The chart's managed-job DNS rule selects that label in `kube-system`. If your DNS pods use another label, set `networkPolicies.jobs.dns` to match. |
+
+The per-step policy is a standard ingress NetworkPolicy. The jobs controller writes each allowed port on its own, so a CNI that ignores port ranges still admits the broker and the vLLM span.
+
 ## 2. Install OpenSandbox
 
 Install the shared-kernel OpenSandbox controller and server, and copy its API-key Secret into the platform namespace:
@@ -62,11 +79,11 @@ Install the shared-kernel OpenSandbox controller and server, and copy its API-ke
 
 The server's `[kubernetes] namespace` must be the platform release namespace, because sandbox pods remount the job-storage PVC and resolve pull Secrets there. See [OpenSandbox](/documentation/kubernetes-deployment/setup/helm/open-sandbox) for the namespace rule, the Secret copy, and installs outside minikube.
 
-## 3. Optional: use Kata
+## 3. Install Kata
 
-To isolate sandbox pods from the host kernel, follow [OpenSandbox with Kata](/documentation/kubernetes-deployment/setup/helm/opensandbox-kata) and point the platform at the Kata server's Service instead. One OpenSandbox server cannot mix shared-kernel and Kata sandboxes.
+The server from the previous step is the shared-kernel runtime, which is enough to run GRPO. It is not enough for a secure sandbox: the Gym shares the node's kernel, and a kernel exploit in untrusted environment code can leave the pod. Follow [OpenSandbox with Kata](/documentation/kubernetes-deployment/setup/helm/opensandbox-kata) and point the platform at the Kata server's Service. One OpenSandbox server cannot mix shared-kernel and Kata sandboxes.
 
-Kata changes the kernel boundary, not the network boundary. Configure the network-policy values in the next step whether or not you use Kata.
+Kata is the kernel boundary. The network-policy values in the next step are the network boundary. A secure sandbox needs both.
 
 ## 4. Install the platform with sandboxing enabled
 
@@ -112,21 +129,47 @@ Notes on these values:
 - `networkPolicies.enabled: true` also enables the chart's API, controller, and managed-job policies. Keep them on. Turning them off is not part of this setup.
 - The per-step policy is created only when **both** `networkPolicies.enabled` and `networkPolicies.jobSteps.enabled` are true. With either one off, GRPO still runs and the sandbox can reach every port on the training pod.
 - `rl.sandboxed_gym_default` already defaults to `true`, and `rl.job_storage_pvc_claim` already names the chart PVC.
-- `rl.sandbox_allow_internet` lets a sandbox's per-server venv build reach a public package index. Cluster-private, node-local, and metadata destinations stay denied. Add hosts outside `*.com` and `*.org` with `rl.sandbox_public_dns_allow`. A complete `wheels-v1` closure needs neither.
 - With the policy flags on, the chart installs a ValidatingAdmissionPolicy and fails the install on clusters that do not serve that API.
+
+## Internet access
+<a id="internet-access"></a>
+
+`rl.sandbox_allow_internet` defaults to `false`. It is an operator setting on the platform, under `platformConfig.rl`. The overlay above turns it on so a `native-v1` environment can install its dependencies. Set it back to `false` when every environment you run already vendors a complete closure.
+
+| | `false` | `true` |
+| --- | --- | --- |
+| Public names | The sandbox cannot resolve a package index. | The sandbox may resolve `*.com` and `*.org`. |
+| When to use it | A complete `wheels-v1` closure, and converter-built `adapter-wheels-v1` packages. Those do not fetch dependencies at job start. | Every `native-v1` package, and any wheels package whose closure is incomplete. Otherwise the venv build fails when it cannot reach an index. |
+| Other public hosts | None. | A host outside `*.com` and `*.org`, such as `hub.primeintellect.ai`, must be named in `rl.sandbox_public_dns_allow`. |
+
+Turning internet on does not open a public address range, and it does not open the cluster. Private, link-local, and metadata addresses stay denied, including the platform database, the Files service, the platform API, and Ray.
 
 ## How the sandbox is isolated
 
+Two boundaries apply. OpenSandbox's egress sidecar is on every Gym sandbox the documented server creates. The per-step NetworkPolicy is ingress to the training pod, and the jobs controller creates it only when both network-policy flags are on.
+
 ```mermaid
 flowchart LR
-  gym["Gym sandbox pod"]
-  broker["Episode broker TCP 51234"]
-  vllm["vLLM TCP 3000-4998"]
-  ray["Ray and other training ports"]
+  gym["Gym sandbox"]
+  broker["Episode broker"]
+  vllm["vLLM"]
+  ray["Ray on the training pod"]
+  private["Database, Files, API, and other private addresses"]
   gym --> broker
   gym --> vllm
   gym -.->|denied| ray
+  gym -.->|denied| private
 ```
+
+### OpenSandbox egress
+
+The documented OpenSandbox server runs its egress sidecar in `dns+nft` mode. The policy is deny by default, and it denies private, shared, link-local, and metadata ranges, including `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, and `169.254.0.0/16`. The platform database, the Files service, the platform API, and the rest of the cluster sit in those ranges, so the Gym cannot open them. The job-storage claim is still mounted into the sandbox so it can read its environment and dataset. That mount is not a connection to the Files service.
+
+The addresses carved out of the deny are the job's episode broker, the policy model endpoint, and the cluster DNS resolver. Public name resolution is the [internet access](#internet-access) setting. The platform builds the allow list.
+
+The broker and the policy model are addresses on the training pod. An address carve-out has no port, so this layer alone still leaves the training pod's other ports, including Ray, reachable. The ingress policy below closes those ports.
+
+### Training pod ingress
 
 For each GRPO training step, the jobs controller creates an ingress NetworkPolicy:
 
@@ -137,21 +180,7 @@ For each GRPO training step, the jobs controller creates an ingress NetworkPolic
 
 Ray's ports stay outside the allowed set: GCS 6379, client 10001, dashboard 8265, node manager and agent ports from 53001, and workers 54001–54257. If you override Ray ports with `GCS_PORT`, `MIN_WORKER_PORT`, or the other Ray port variables, keep them out of 3000–4998 and off 51234.
 
-### What a job cannot widen
-
-- The training step's network rules are compiled by the platform. A job JSON cannot set them.
-- A job cannot set sandbox metadata under the `nhx.nvidia.com/` prefix or override `nemo-rl-job-id`.
-- The chart's ValidatingAdmissionPolicy admits only this policy shape from the jobs controller: ingress-only, same-namespace pod peers labelled with the target job's id, and TCP ports from `networkPolicies.jobSteps.allowedIngressTcpPorts` and `allowedIngressTcpPortRanges`. It rejects `ipBlock` peers, namespace selectors, egress rules, and other ports.
-
-NetworkPolicy allows are additive. Do not add another policy in the namespace that selects the training pods with a broader allow, such as an exception for the training pod's IP with no ports. That reopens every port, including Ray.
-
-### Policy lifecycle
-
-- **Create.** The controller creates the policy before the step's pods exist. If a policy with that name is left over, it deletes and recreates it.
-- **Own.** It sets the Job or Volcano workload as the policy's owner, so Kubernetes garbage-collects the policy with the workload.
-- **Delete.** It deletes the policy when the step terminates.
-
-Do not edit these policies by hand. The same settings apply to the `volcano_job` executor, so multi-node GRPO gets the same policy shape. This how-to was verified on single-node minikube.
+NetworkPolicy allows are additive. Another policy in the namespace that selects the training pods with a broader allow, such as an exception for the training pod's IP with no ports, reopens every port on that pod, including Ray.
 
 ## Verify
 
@@ -186,16 +215,9 @@ The expected connectivity from the sandbox is:
 
 - The episode broker and the vLLM generation port are reachable.
 - Ray ports on the training pod are not reachable.
-- Unrelated cluster-private services are not reachable.
+- The platform database, the Files service, the platform API, and other private addresses are not reachable.
 
 A completed GRPO job with training metrics and an output model confirms that the allowed ports are enough.
-
-After the job ends, confirm the policy is gone:
-
-```sh
-kubectl -n "$KUBE_NAMESPACE" get networkpolicy \
-  -l nhx.nvidia.com/managed_by=jobs-controller,nhx.nvidia.com/job_id="$JOB_ID"
-```
 
 ## Next Steps
 
