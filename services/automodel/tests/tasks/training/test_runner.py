@@ -25,6 +25,7 @@ from nhx.automodel.tasks.training.schemas import (  # noqa: E402
     DistillationConfig,
     ModelConfig,
     TrainingMetrics,
+    TrainingResult,
     TrainingStepConfig,
 )
 from nhx.customization_common.service.context import NHXJobContext  # noqa: E402
@@ -210,3 +211,107 @@ def test_postprocessing_reports_the_work_it_is_doing(
     runner._postprocess_phase(None, TrainingMetrics(), MagicMock())
 
     assert sent == [phase, "process"]
+
+
+def test_a_paused_run_skips_publication_and_completion(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Training wrote the pause marker, so nothing is selected, published, or reported completed."""
+    monkeypatch.setattr("nhx.automodel.tasks.training.runner.get_gpu_info", lambda: None)
+    backend = MagicMock()
+
+    def train(library: LibraryConfig) -> TrainingMetrics:
+        (tmp_path / "PAUSED").write_text("5\n")
+        return TrainingMetrics()
+
+    runner = _ScriptedRunner(tmp_path, duration=5.0, compile_config=MagicMock, train=train, backend=backend)
+    synced: list[str] = []
+    completed: list[str] = []
+    monkeypatch.setattr(runner._dist_ctx, "sync_point", synced.append)
+    monkeypatch.setattr(runner._progress, "report_completed", lambda *args, **kwargs: completed.append("completed"))
+
+    result = runner.run()
+
+    assert result.paused and not result.success
+    assert synced == []
+    assert completed == []
+    backend.find_checkpoints.assert_not_called()
+    backend.process_checkpoints.assert_not_called()
+
+
+def _paused_multi_node_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, role: DistributedRole) -> TrainingResult:
+    monkeypatch.setattr("nhx.automodel.tasks.training.runner.get_gpu_info", lambda: None)
+
+    def train(library: LibraryConfig) -> TrainingMetrics:
+        (tmp_path / "PAUSED").write_text("5\n")
+        return TrainingMetrics()
+
+    runner = _ScriptedRunner(tmp_path, duration=5.0, compile_config=MagicMock, train=train, backend=MagicMock())
+    rank = 0 if role == DistributedRole.COORDINATOR else 1
+    runner._dist_ctx = DistributedContext(role=role, rank=rank, world_size=2, barrier_dir=tmp_path / "barriers")
+    (tmp_path / "barriers" / "config_ready.rank0.ready").touch()
+    return runner.run()
+
+
+def test_a_paused_coordinator_clears_the_barriers_for_the_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A resume reuses the attempt's barriers, and a worker that starts first must not take this run's marker."""
+    result = _paused_multi_node_run(tmp_path, monkeypatch, DistributedRole.COORDINATOR)
+
+    assert result.paused
+    assert not (tmp_path / "barriers").exists()
+
+
+def test_a_paused_worker_leaves_the_barriers_to_the_coordinator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result = _paused_multi_node_run(tmp_path, monkeypatch, DistributedRole.WORKER)
+
+    assert result.paused
+    assert (tmp_path / "barriers" / "config_ready.rank0.ready").exists()
+
+
+def test_a_pause_fails_when_the_barriers_cannot_be_cleared(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The job then ends in error, and a rerun starts a new attempt with its own barriers."""
+    monkeypatch.setattr(
+        "nhx.automodel.tasks.training.distributed.shutil.rmtree", MagicMock(side_effect=PermissionError("denied"))
+    )
+
+    result = _paused_multi_node_run(tmp_path, monkeypatch, DistributedRole.COORDINATOR)
+
+    assert not result.paused and not result.success
+
+
+def test_the_coordinator_clears_an_earlier_pause_marker_before_training(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Otherwise a run that finishes after a resume would read the old marker and exit as paused."""
+    (tmp_path / "PAUSED").write_text("5\n")
+    backend = MagicMock()
+    backend.compile_config.return_value = {}
+    runner = _ScriptedRunner(tmp_path, duration=None, compile_config=MagicMock, backend=backend)
+    signals: list[str] = []
+    monkeypatch.setattr(runner._dist_ctx, "signal", signals.append)
+
+    # The real compile phase, which _ScriptedRunner replaces.
+    TrainingRunner._compile_config_phase(runner)
+
+    assert not (tmp_path / "PAUSED").exists()
+    assert signals == ["config_ready"]
+
+
+def test_a_paused_run_exits_with_the_pause_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nhx.automodel.tasks.training import __main__ as entrypoint
+    from nhx.automodel.tasks.training.schemas import TrainingResult
+
+    class _Runner:
+        def __enter__(self) -> "_Runner":
+            return self
+
+        def __exit__(self, *exc: object) -> None: ...
+
+        def run(self) -> TrainingResult:
+            return TrainingResult(success=False, paused=True)
+
+    monkeypatch.setattr(entrypoint, "TrainingRunner", _Runner)
+
+    assert entrypoint.run() == 75

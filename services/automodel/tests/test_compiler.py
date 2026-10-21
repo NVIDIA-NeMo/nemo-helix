@@ -181,6 +181,17 @@ def test_compile_training_step_sets_shm_by_finetuning_type(
     assert executor.resources.shm_size == shm_size
 
 
+def test_the_training_step_can_pause_within_the_configured_deadline() -> None:
+    """Pause is rejected for a step without a deadline, so training declares one."""
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
+    from nhx.automodel.config import config
+
+    step = compile_training_step(_make_job_output(), base_env=[], me=_make_mock_model_entity())
+
+    assert step.lifecycle is not None
+    assert step.lifecycle.pause_deadline_seconds == config.training_pause_deadline_seconds > 0
+
+
 def test_compile_training_step_carries_explicit_cross_encoder_recipe() -> None:
     from nhx.automodel.app.jobs.training.compiler import compile_training_step
 

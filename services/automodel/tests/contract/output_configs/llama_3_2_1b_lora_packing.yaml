@@ -27,6 +27,7 @@ step_scheduler:
   local_batch_size: 1
   max_steps: 13
   num_epochs: 1
+  preemption_signal: SIGUSR1
   val_every_steps: 12
   ckpt_every_steps: 12
 optimizer:
@@ -44,6 +45,7 @@ checkpoint:
   enabled: true
   model_save_format: safetensors
   checkpoint_dir: ./checkpoints
+  restore_from: LATEST
   save_consolidated: true
   dequantize_base_checkpoint: true
   v4_compatible: true
