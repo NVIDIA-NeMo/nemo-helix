@@ -59,13 +59,17 @@ class BuildImage(BaseModel):
 
 
 class TaskImageBuildEntity(EntityBase):
-    """One attempt at building every container image a task revision needs."""
+    """One attempt at building every container image a task's contents need.
+
+    A child of the task, keyed by the revision digest: revisions with the same contents need the same images, so
+    they share builds. Publishing earlier contents again republishes them as a new revision with the same digest.
+    """
 
     __entity_type__: ClassVar[str] = "task_image_build"
 
     task: str = Field(description="`<workspace>/<name>` of the task.")
     revision_digest: str = Field(min_length=DIGEST_LENGTH, max_length=DIGEST_LENGTH, pattern=DIGEST_PATTERN)
-    attempt: int = Field(ge=1, description="1-based attempt for this revision. Matches the `build.<n>` name.")
+    attempt: int = Field(ge=1, description="1-based attempt for these contents. Ends the record's name.")
     status: BuildStatus = "pending"
     job: str = Field(description="Name of the task-builder Job that runs this attempt.")
     allowed_registries: list[str] = Field(default_factory=list)
@@ -126,11 +130,12 @@ class ImageBuild(BaseModel):
         )
 
 
-def build_entity_name(attempt: int) -> str:
-    return f"{_BUILD_NAME_PREFIX}{attempt}"
+def build_entity_name(revision_digest: str, attempt: int) -> str:
+    """Name of one attempt's record under its task: the digest's first 32 characters keep it a valid entity name."""
+    return f"{_BUILD_NAME_PREFIX}{revision_digest[:32]}.{attempt}"
 
 
 def build_job_name(task: str, revision_digest: str, attempt: int) -> str:
-    """Name of the task-builder Job for one attempt, unique per task revision and attempt."""
+    """Name of the task-builder Job for one attempt, unique per task contents and attempt."""
     key = hashlib.sha256(f"{task}#{revision_digest}".encode()).hexdigest()[:16]
     return f"task-image-build-{key}-{attempt}"

@@ -70,9 +70,13 @@ async def run_task_image_build(
 ) -> TaskImageBuildEntity:
     """Plan, submit and follow every image of one build, recording progress on its record."""
     head = await entities.get(TaskEntity, name=spec.task, workspace=spec.workspace)
+    # Any revision with this digest will do: they hold the same contents.
     revision = await get_revision(entities, TaskRevisionEntity, head, spec.revision_digest)
     build = await entities.get(
-        TaskImageBuildEntity, name=build_entity_name(spec.attempt), workspace=spec.workspace, parent=revision.id
+        TaskImageBuildEntity,
+        name=build_entity_name(spec.revision_digest, spec.attempt),
+        workspace=spec.workspace,
+        parent=head.id,
     )
     if build.status in TERMINAL_BUILD_STATUSES:
         return build
@@ -90,9 +94,7 @@ async def run_task_image_build(
         )
     except Exception as exc:
         logger.exception("Image build %s of %s raised", build.name, build.task)
-        current = await entities.get(
-            TaskImageBuildEntity, name=build.name, workspace=build.workspace, parent=revision.id
-        )
+        current = await entities.get(TaskImageBuildEntity, name=build.name, workspace=build.workspace, parent=head.id)
         if current.status in TERMINAL_BUILD_STATUSES:
             return current
         return await _fail(entities, current, f"task-builder error: {exc}")
@@ -176,7 +178,10 @@ async def _submit(builder: ImageBuilder, image: BuildImage, definition: HarborTa
     else:
         assert image.context_path is not None and image.dockerfile is not None
         name = builder_name(
-            archive_digest=definition.source.files_hash, context_path=image.context_path, dockerfile=image.dockerfile
+            archive=definition.source.fileset_ref,
+            archive_digest=definition.source.files_hash,
+            context_path=image.context_path,
+            dockerfile=image.dockerfile,
         )
         source, dockerfile = archive_source(definition.source.fileset_ref, image.context_path), image.dockerfile
     try:

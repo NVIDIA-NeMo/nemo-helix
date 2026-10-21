@@ -30,7 +30,7 @@ from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
 from nemo_helix_plugin.dependencies import RequestAuthorizer
 from nemo_helix_plugin.entities import EntityClient, PaginationInfo
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
-from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperator
+from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperator, LogicalOperation
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 from nemo_helix_plugin.schema import Page, PaginationData
@@ -104,7 +104,10 @@ class JobsServiceBuildJobs:
 
 
 class ImageBuildService:
-    """Image builds of task revisions, stored as children of the revision they build."""
+    """Image builds of task revisions, stored under the task and keyed by revision digest.
+
+    Revisions with the same contents share builds: their images are the same.
+    """
 
     def __init__(self, entity_client: EntityClient, jobs: BuildJobs, authorize_builds: AuthorizeBuilds) -> None:
         self.entity_client = entity_client
@@ -137,7 +140,7 @@ class ImageBuildService:
             )
         parse_task_config(task_revision.spec.config)
 
-        newest = await self._newest(task_revision)
+        newest = await self._newest(head, task_revision.content_hash)
         if newest is not None and newest.status == "ready":
             return ImageBuild.from_entity(newest)
         if newest is not None and newest.status != "failed":
@@ -152,7 +155,7 @@ class ImageBuildService:
         attempt = 1 if newest is None else newest.attempt + 1
         task = f"{workspace}/{name}"
         build = TaskImageBuildEntity(
-            name=build_entity_name(attempt),
+            name=build_entity_name(task_revision.content_hash, attempt),
             workspace=workspace,
             project=head.project,
             task=task,
@@ -161,12 +164,12 @@ class ImageBuildService:
             job=build_job_name(task, task_revision.content_hash, attempt),
             allowed_registries=request.allowed_registries,
         )
-        build._parent = task_revision.id
+        build._parent = head.id
         try:
             build = await self.entity_client.create(build)
         except NemoEntityConflictError:
             build = await self.entity_client.get(
-                TaskImageBuildEntity, name=build.name, workspace=workspace, parent=task_revision.id
+                TaskImageBuildEntity, name=build.name, workspace=workspace, parent=head.id
             )
         await self._ensure_job(build)
         return ImageBuild.from_entity(build)
@@ -178,11 +181,11 @@ class ImageBuildService:
         found = await self._revision(workspace, name, revision)
         if found is None:
             return None
-        _, task_revision = found
+        head, task_revision = found
         result = await self.entity_client.list(
             TaskImageBuildEntity,
             workspace=workspace,
-            filter_operation=ComparisonOperation(field="parent", operator=FilterOperator.EQ, value=task_revision.id),
+            filter_operation=_builds_of(head, task_revision.content_hash),
             sort="-created_at",
             page=page,
             page_size=page_size,
@@ -195,13 +198,13 @@ class ImageBuildService:
         found = await self._revision(workspace, name, revision)
         if found is None or not build_id.isdigit():
             return None
-        _, task_revision = found
+        head, task_revision = found
         try:
             build = await self.entity_client.get(
                 TaskImageBuildEntity,
-                name=build_entity_name(int(build_id)),
+                name=build_entity_name(task_revision.content_hash, int(build_id)),
                 workspace=workspace,
-                parent=task_revision.id,
+                parent=head.id,
             )
         except NemoEntityNotFoundError:
             return None
@@ -214,11 +217,11 @@ class ImageBuildService:
             return None
         return head, await get_revision(self.entity_client, TaskRevisionEntity, head, revision)
 
-    async def _newest(self, task_revision: TaskRevisionEntity) -> TaskImageBuildEntity | None:
+    async def _newest(self, head: TaskEntity, revision_digest: str) -> TaskImageBuildEntity | None:
         result = await self.entity_client.list(
             TaskImageBuildEntity,
-            workspace=task_revision.workspace,
-            filter_operation=ComparisonOperation(field="parent", operator=FilterOperator.EQ, value=task_revision.id),
+            workspace=head.workspace,
+            filter_operation=_builds_of(head, revision_digest),
             sort="-created_at",
             page_size=1,
         )
@@ -249,6 +252,17 @@ class ImageBuildService:
                 raise ImageBuildJobConflictError(f"Job {build.job} exists and does not run this build") from None
             return
         logger.info("Started image build %s of %s as job %s", build.name, build.task, build.job)
+
+
+def _builds_of(head: TaskEntity, revision_digest: str) -> LogicalOperation:
+    """The task's builds of the contents with ``revision_digest``."""
+    return LogicalOperation(
+        operator=FilterOperator.AND,
+        operations=[
+            ComparisonOperation(field="parent", operator=FilterOperator.EQ, value=head.id),
+            ComparisonOperation(field="data.revision_digest", operator=FilterOperator.EQ, value=revision_digest),
+        ],
+    )
 
 
 def _pagination(src: PaginationInfo, current_page_size: int) -> PaginationData:
