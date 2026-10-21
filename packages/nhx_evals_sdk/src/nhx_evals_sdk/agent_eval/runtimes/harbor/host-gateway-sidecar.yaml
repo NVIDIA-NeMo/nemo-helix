@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# For tasks with restricted network access: Harbor puts their container on its egress sidecar's network,
+# where Docker refuses extra_hosts, and the container uses the sidecar's hosts file. The alias goes on the
+# sidecar instead; the task's allowlist still decides whether the host is reachable.
+services:
+  harbor-docker-egress-control-sidecar:
+    extra_hosts:
+      host.docker.internal: host-gateway
