@@ -18,7 +18,6 @@ from nhx.core.jobs.app.constants import (
     DEFAULT_PROVIDER,
     IMAGE_DIGEST,
     IMAGE_DIGEST_AT_SAVE,
-    IMAGE_DIGEST_COMPARISON_SKIPPED,
     IMAGE_DIGEST_STEP,
     IMAGE_DIGEST_WARNING,
     NON_RESUMABLE_REASON,
@@ -173,6 +172,8 @@ def with_lifecycle_timestamps(
             digest = existing.get(IMAGE_DIGEST)
         if isinstance(digest, str) and digest:
             details[IMAGE_DIGEST_AT_SAVE] = digest
+            # A warning compares against the previous save. Status details merge, so clear it.
+            details[IMAGE_DIGEST_WARNING] = None
     elif status == HelixJobStatus.RESUMING:
         details[RESUMED_AT] = stamp
     return details or None
@@ -209,8 +210,8 @@ def image_digest_updates(existing: dict[str, Any] | None, observed: str | None) 
 
     The saved digest is ``image_digest_at_save``, copied when the step enters
     ``paused`` or ``error``. Until that exists, the live digest is overwritten
-    as pods start. The comparison runs on the first reconcile that sees the
-    new pod.
+    as pods start. A digest is missing until the task container starts, so the
+    comparison waits for one, and warns at most once per saved digest.
     """
     current = existing or {}
     saved = current.get(IMAGE_DIGEST_AT_SAVE)
@@ -221,12 +222,11 @@ def image_digest_updates(existing: dict[str, Any] | None, observed: str | None) 
         return {}
 
     updates: dict[str, Any] = {}
-    if observed and current.get(IMAGE_DIGEST) != observed:
-        updates[IMAGE_DIGEST] = observed
-    if IMAGE_DIGEST_WARNING in current or IMAGE_DIGEST_COMPARISON_SKIPPED in current:
-        return updates
     if not observed:
-        updates[IMAGE_DIGEST_COMPARISON_SKIPPED] = "Image digest comparison skipped because the new digest is missing."
+        return updates
+    if current.get(IMAGE_DIGEST) != observed:
+        updates[IMAGE_DIGEST] = observed
+    if current.get(IMAGE_DIGEST_WARNING):
         return updates
     if observed != saved:
         updates[IMAGE_DIGEST_WARNING] = (

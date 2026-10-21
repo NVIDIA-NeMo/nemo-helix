@@ -61,6 +61,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     list_pods_by_labels,
     load_kubernetes_config,
     name_for_step,
+    reclaim_job_persistent_storage,
     update_all_tasks,
     update_tasks_with_pause_outcome,
 )
@@ -544,17 +545,16 @@ class VolcanoJobBackend(
             status_details={"message": "Job is being paused", **digest_details},
         )
 
-    def reclaim_persistent_storage(self, workspace: str, job: str) -> None:
+    def reclaim_persistent_storage(self, workspace: str, job: str) -> bool:
         storage = self._execution_profile_config.storage
         if storage is None:
-            return
-        cleanup_job_persistent_storage(
+            return True
+        return reclaim_job_persistent_storage(
             namespace=self.namespace,
             batch_v1=self._batch_v1,
             pvc_name=storage.pvc_name,
             workspace=workspace,
             job_id=job,
-            step_name="retention",
             permissions_image=storage.volume_permissions_image,
             execution_backend=self.BACKEND_NAME,
             execution_profile=self._profile_name,

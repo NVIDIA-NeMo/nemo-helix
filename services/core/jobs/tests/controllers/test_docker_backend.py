@@ -2776,6 +2776,35 @@ def test_cleanup_job_persistent_storage_labels_cleanup_container_owner(docker_jo
     assert cleanup_args["labels"][JOB_TYPE_LABEL] == JOB_TYPE_STORAGE_CLEANUP
 
 
+def _cleanup_container(docker_client_mock, exit_code: int = 0, wait_error: Exception | None = None) -> None:
+    container = MagicMock()
+    container.wait.return_value = {"StatusCode": exit_code}
+    container.wait.side_effect = wait_error
+    docker_client_mock.containers.create.side_effect = None
+    docker_client_mock.containers.create.return_value = container
+
+
+def test_reclaim_reports_storage_removed_by_the_cleanup_container(docker_job, docker_client_mock):
+    _cleanup_container(docker_client_mock)
+
+    assert docker_job.reclaim_persistent_storage("default", "job-1") is True
+
+
+@pytest.mark.parametrize("failure", ["exit", "create", "wait"])
+def test_reclaim_raises_when_the_cleanup_container_fails(docker_job, docker_client_mock, failure):
+    """The reconciler keeps the reclaim record on a raise, and retries on a later tick."""
+    _cleanup_container(
+        docker_client_mock,
+        exit_code=1 if failure == "exit" else 0,
+        wait_error=APIError("daemon unavailable") if failure == "wait" else None,
+    )
+    if failure == "create":
+        docker_client_mock.containers.create.side_effect = APIError("daemon unavailable")
+
+    with pytest.raises(JobStorageError):
+        docker_job.reclaim_persistent_storage("default", "job-1")
+
+
 def test_created_step_does_not_ttl_before_backend_acceptance(docker_job, docker_client_mock, test_job_step):
     """CREATED age should not fail a step before the backend accepts it."""
     ttl_seconds = docker_job._execution_profile_config.ttl_seconds_before_active

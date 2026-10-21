@@ -18,7 +18,7 @@ from nemo_helix_plugin.jobs.types import (
     ListStepsQueryParams,
 )
 from nhx.common.controller import Controller, HeartbeatMixin
-from nhx.common.entities import SYSTEM_WORKSPACE, SyncEntityClient
+from nhx.common.entities import SYSTEM_WORKSPACE, EntityConflictError, SyncEntityClient
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.common.observability import scoped_app_ctx, start_span_with_ctx
 from nhx.core.jobs.app.constants import (
@@ -218,10 +218,10 @@ class JobReconciler(HeartbeatMixin, Controller):
         self._enforce_storage_retention()
 
     def _enforce_storage_retention(self) -> None:
-        """Reclaim storage of deleted jobs every tick, and of stopped jobs on the retention interval."""
+        """Reclaim queued storage every tick, and queue stopped jobs' storage on the retention interval."""
         if self._stop_signal and self._stop_signal.is_set():
             return
-        self._reclaim_deleted_job_storage()
+        self._reclaim_queued_storage()
 
         # Listing every stopped step is the expensive part, so it runs on a slower interval.
         now = time.monotonic()
@@ -250,29 +250,33 @@ class JobReconciler(HeartbeatMixin, Controller):
             finally:
                 self.emit_heartbeat()
 
-    def _reclaim_deleted_job_storage(self) -> None:
-        """Reclaim storage that deleted jobs left behind, then clear each record.
+    def _reclaim_queued_storage(self) -> None:
+        """Reclaim the storage of deleted and stopped jobs, and clear each record once it is gone.
 
-        Runs every tick: a new job cannot reuse the deleted job's name until its record is cleared.
+        Runs every tick: a deleted job's record holds its name, and some backends remove storage
+        in the background, so a record stays until a later tick finds the removal done.
         """
         try:
             # One page per tick. Anything beyond it is picked up on the next tick.
             reclaims = list(self._system_entities.list(HelixJobStorageReclaim, workspace=SYSTEM_WORKSPACE).data)
         except Exception:
-            logger.exception("Could not list storage of deleted jobs")
+            logger.exception("Could not list job storage to reclaim")
             return
         for reclaim in reclaims:
             extra = {"job": reclaim.job_name, "workspace": reclaim.job_workspace}
             try:
-                self._reclaim_storage(reclaim.job_workspace, reclaim.job_name, reclaim.targets)
+                if not self._reclaim_storage(reclaim.job_workspace, reclaim.job_name, reclaim.targets):
+                    continue
                 self._system_entities.delete_by_id(HelixJobStorageReclaim, reclaim.id)
-                logger.info("Reclaimed storage of deleted job", extra=extra)
+                logger.info("Reclaimed job storage", extra=extra)
             except Exception:
-                logger.exception("Could not reclaim storage of deleted job", extra=extra)
+                logger.exception("Could not reclaim job storage", extra=extra)
             finally:
                 self.emit_heartbeat()
 
-    def _reclaim_storage(self, workspace: str, job: str, targets: list[JobStorageTarget]) -> None:
+    def _reclaim_storage(self, workspace: str, job: str, targets: list[JobStorageTarget]) -> bool:
+        """Return True once the storage is gone from every target."""
+        done = True
         for target in targets:
             try:
                 backend = self._backend_registry.get_backend(provider=target.provider, profile=target.profile)
@@ -283,7 +287,8 @@ class JobReconciler(HeartbeatMixin, Controller):
                     extra={"job": job, "workspace": workspace, "provider": target.provider, "profile": target.profile},
                 )
                 continue
-            backend.reclaim_persistent_storage(workspace, job)
+            done = backend.reclaim_persistent_storage(workspace, job) and done
+        return done
 
     def _retain_step_storage(self, step: HelixJobStepWithContext) -> None:
         job = self._jobs.get_job(name=step.job, workspace=step.workspace).data()
@@ -293,32 +298,72 @@ class JobReconciler(HeartbeatMixin, Controller):
             self._mark_step_swept(step)
             return
         targets = storage_targets(job.platform_spec)
-        if not targets or (job.status_details or {}).get(STORAGE_RECLAIMED_AT):
+        if not targets:
             self._mark_step_swept(step)
             return
-        if step.status == HelixJobStatus.CANCELLED:
-            pass
-        elif step.status == HelixJobStatus.PAUSED:
-            ttl_seconds = effective_pause_ttl_seconds(job.control, self._storage_config)
-            if not storage_window_expired(_storage_clock(step), ttl_seconds):
+        # A job already marked is queued again: an earlier pass may have marked it and stopped there.
+        if not (job.status_details or {}).get(STORAGE_RECLAIMED_AT):
+            if step.status == HelixJobStatus.CANCELLED:
+                pass
+            elif step.status == HelixJobStatus.PAUSED:
+                ttl_seconds = effective_pause_ttl_seconds(job.control, self._storage_config)
+                if not storage_window_expired(_storage_clock(step), ttl_seconds):
+                    return
+            elif step.status == HelixJobStatus.ERROR:
+                ttl_seconds = self._storage_config.failed_storage_ttl_seconds
+                if not storage_window_expired(_storage_clock(step), ttl_seconds):
+                    return
+            else:
                 return
-        elif step.status == HelixJobStatus.ERROR:
-            ttl_seconds = self._storage_config.failed_storage_ttl_seconds
-            if not storage_window_expired(_storage_clock(step), ttl_seconds):
+            if not self._mark_storage_reclaimed(step):
                 return
-        else:
-            return
 
-        self._reclaim_storage(step.workspace, step.job, targets)
-        reclaimed_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        self._queue_storage_reclaim(job.id, step, targets)
+        if step.status == HelixJobStatus.PAUSED:
+            self._jobs.cancel_job(name=step.job, workspace=step.workspace)
+        self._mark_step_swept(step)
+
+    def _mark_storage_reclaimed(self, step: HelixJobStepWithContext) -> bool:
+        """Mark the job's storage reclaimed before reclaiming it. Return False if a resume got there first.
+
+        Resume, rerun and control updates refuse a marked job. A resume that moved the step
+        before the mark was written keeps its storage, so the mark is taken back.
+        """
+        self._set_storage_reclaimed_at(step, datetime.datetime.now(datetime.timezone.utc).isoformat())
+        current = self._jobs.get_job_step(name=step.name, workspace=step.workspace, job=step.job).data()
+        if current.status == step.status:
+            return True
+        self._set_storage_reclaimed_at(step, None)
+        logger.info(
+            "Kept the storage of a job that left its stopped state",
+            extra={"job": step.job, "step": step.name, "workspace": step.workspace, "status": current.status},
+        )
+        return False
+
+    def _set_storage_reclaimed_at(self, step: HelixJobStepWithContext, reclaimed_at: str | None) -> None:
         self._jobs.update_job_status_details(
             name=step.job,
             workspace=step.workspace,
             body=JobStatusDetailsUpdate({STORAGE_RECLAIMED_AT: reclaimed_at}),
         )
-        self._mark_step_swept(step)
-        if step.status == HelixJobStatus.PAUSED:
-            self._jobs.cancel_job(name=step.job, workspace=step.workspace)
+
+    def _queue_storage_reclaim(
+        self, job_id: str, step: HelixJobStepWithContext, targets: list[JobStorageTarget]
+    ) -> None:
+        """Hand the job's storage to the reclaim pass, which runs every tick until the storage is gone."""
+        try:
+            self._system_entities.create(
+                HelixJobStorageReclaim(
+                    name=HelixJobStorageReclaim.name_for_job(job_id),
+                    workspace=SYSTEM_WORKSPACE,
+                    job_id=job_id,
+                    job_workspace=step.workspace,
+                    job_name=step.job,
+                    targets=targets,
+                )
+            )
+        except EntityConflictError:
+            pass  # Already queued.
 
     def _mark_step_swept(self, step: HelixJobStepWithContext) -> None:
         """Record on the step that the sweep is done with it, so later passes skip it without a lookup."""

@@ -516,17 +516,22 @@ class DockerJobBackend(JobBackend[ProviderT, DockerJobExecutionProfileConfig], G
             except DockerException:
                 logger.exception("Failed to clean up task storage volume", extra={"volume_name": volume_name})
 
-    def reclaim_persistent_storage(self, workspace: str, job: str) -> None:
-        self.cleanup_job_persistent_storage(workspace, job)
+    def reclaim_persistent_storage(self, workspace: str, job: str) -> bool:
+        if not self.cleanup_job_persistent_storage(workspace, job):
+            raise JobStorageError(f"Could not reclaim persistent storage of job {workspace}/{job}")
+        return True
 
-    def cleanup_job_persistent_storage(self, workspace: str, job: str) -> None:
-        """Remove persistent job storage from the shared volume after successful job completion."""
+    def cleanup_job_persistent_storage(self, workspace: str, job: str) -> bool:
+        """Remove persistent job storage from the shared volume. Return whether the storage is gone.
+
+        Failures are logged. Cleanup after a successful job ignores the result; a reclaim raises on it.
+        """
         storage_config = self._execution_profile_config.storage
         if storage_config is None or storage_config.volume_name == "":
             logger.debug(
                 "No persistent storage configured, skipping cleanup for job", extra={"workspace": workspace, "job": job}
             )
-            return
+            return True
 
         job_storage_subpath = self.job_storage_subpath(workspace, job)
         cleanup_script = f"""#!/bin/sh
@@ -572,7 +577,7 @@ fi
             logger.error(
                 "Error creating cleanup container for job", extra={"workspace": workspace, "job": job}, exc_info=True
             )
-            return
+            return False
 
         container.put_archive(path="/", data=fileobj)
         try:
@@ -582,7 +587,7 @@ fi
                 "Error starting cleanup container for job", extra={"workspace": workspace, "job": job}, exc_info=True
             )
             self.cleanup_container(container)
-            return
+            return False
 
         try:
             exit_status = container.wait()
@@ -591,10 +596,13 @@ fi
                     "Cleanup container for job exited with non-zero status",
                     extra={"workspace": workspace, "job": job, "exit_code": exit_status["StatusCode"]},
                 )
+                return False
+            return True
         except APIError:
             logger.error(
                 "Error waiting for cleanup container for job", extra={"workspace": workspace, "job": job}, exc_info=True
             )
+            return False
         finally:
             self.cleanup_container(container)
 

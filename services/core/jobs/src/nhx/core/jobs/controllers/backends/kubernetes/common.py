@@ -1189,9 +1189,36 @@ def cleanup_job_persistent_storage(
         pod_security_context: Same pod security context as workload jobs (runAsUser/fsGroup, etc.) so cleanup
             can remove files on NFS and similar storage where the workload user owns the data.
     """
-    job_storage_subpath = build_job_storage_subpath(workspace, job_id)
-    cleanup_job_name = f"cleanup-{workspace}-{job_id}-{uuid.uuid4().hex[:8]}"[:63].rstrip("-")
+    cleanup_job_name, cleanup_job = _storage_cleanup_job(
+        namespace=namespace,
+        pvc_name=pvc_name,
+        workspace=workspace,
+        job_id=job_id,
+        step_name=step_name,
+        permissions_image=permissions_image,
+        execution_backend=execution_backend,
+        execution_profile=execution_profile,
+        job_metadata=job_metadata,
+        pod_metadata=pod_metadata,
+        pod_security_context=pod_security_context,
+    )
+    try:
+        batch_v1.create_namespaced_job(namespace=namespace, body=cleanup_job)
+        logger.info(
+            "Created persistent storage cleanup job",
+            extra=dict(cleanup_job_name=cleanup_job_name, job=f"{workspace}/{job_id}"),
+        )
+    except ApiException as e:
+        logger.error(
+            "Failed to create persistent storage cleanup job",
+            extra=dict(job=f"{workspace}/{job_id}", error=e),
+            exc_info=True,
+        )
 
+
+def _storage_cleanup_labels(
+    workspace: str, job_id: str, step_name: str, execution_backend: str, execution_profile: str
+) -> dict[str, str]:
     # Use same common labels as regular jobs (app, managed-by, backend, profile) plus cleanup-specific labels
     cleanup_common_labels = copy.deepcopy(KUBE_JOB_SELECTOR_LABELS)
     cleanup_common_labels.update(
@@ -1204,6 +1231,26 @@ def cleanup_job_persistent_storage(
             JOB_EXECUTION_PROFILE_LABEL: execution_profile,
         }
     )
+    return cleanup_common_labels
+
+
+def _storage_cleanup_job(
+    namespace: str,
+    pvc_name: str,
+    workspace: str,
+    job_id: str,
+    step_name: str,
+    permissions_image: str,
+    execution_backend: str,
+    execution_profile: str,
+    job_metadata: KubernetesObjectMetadata,
+    pod_metadata: KubernetesObjectMetadata,
+    pod_security_context: dict[str, Any] | None,
+) -> tuple[str, client.V1Job]:
+    """Build the Job that removes a job's storage directory, and return its name and body."""
+    job_storage_subpath = build_job_storage_subpath(workspace, job_id)
+    cleanup_job_name = f"cleanup-{workspace}-{job_id}-{uuid.uuid4().hex[:8]}"[:63].rstrip("-")
+    cleanup_common_labels = _storage_cleanup_labels(workspace, job_id, step_name, execution_backend, execution_profile)
 
     job_meta = build_metadata(cleanup_common_labels, job_metadata)
     job_meta.name = cleanup_job_name  # type: ignore[assignment]
@@ -1260,19 +1307,85 @@ fi
             ),
         ),
     )
+    return cleanup_job_name, cleanup_job
 
-    try:
+
+# Step name label of the cleanup Jobs that reclaim a stopped or deleted job's storage.
+STORAGE_RECLAIM_STEP_NAME = "retention"
+
+
+def reclaim_job_persistent_storage(
+    namespace: str,
+    batch_v1: client.BatchV1Api,
+    pvc_name: str,
+    workspace: str,
+    job_id: str,
+    permissions_image: str,
+    execution_backend: str,
+    execution_profile: str,
+    job_metadata: KubernetesObjectMetadata,
+    pod_metadata: KubernetesObjectMetadata,
+    pod_security_context: dict[str, Any] | None = None,
+) -> bool:
+    """Remove a job's persistent storage with a cleanup Job. Return True once the storage is gone.
+
+    The first call creates the cleanup Job and later calls poll it, so the caller keeps its
+    reclaim record until the Job succeeds. A finished cleanup Job is deleted, so a later
+    reclaim of a job with the same name runs its own. A failed one also raises, and the next
+    call starts a new one.
+    """
+    labels = _storage_cleanup_labels(workspace, job_id, STORAGE_RECLAIM_STEP_NAME, execution_backend, execution_profile)
+    selector = ",".join(f"{key}={value}" for key, value in labels.items())
+    cleanup_jobs = batch_v1.list_namespaced_job(namespace=namespace, label_selector=selector).items
+    if not cleanup_jobs:
+        cleanup_job_name, cleanup_job = _storage_cleanup_job(
+            namespace=namespace,
+            pvc_name=pvc_name,
+            workspace=workspace,
+            job_id=job_id,
+            step_name=STORAGE_RECLAIM_STEP_NAME,
+            permissions_image=permissions_image,
+            execution_backend=execution_backend,
+            execution_profile=execution_profile,
+            job_metadata=job_metadata,
+            pod_metadata=pod_metadata,
+            pod_security_context=pod_security_context,
+        )
         batch_v1.create_namespaced_job(namespace=namespace, body=cleanup_job)
         logger.info(
-            "Created persistent storage cleanup job",
+            "Created storage reclaim job",
             extra=dict(cleanup_job_name=cleanup_job_name, job=f"{workspace}/{job_id}"),
         )
-    except ApiException as e:
-        logger.error(
-            "Failed to create persistent storage cleanup job",
-            extra=dict(job=f"{workspace}/{job_id}", error=e),
-            exc_info=True,
-        )
+        return False
+
+    outcomes = [_finished_condition(cleanup_job) for cleanup_job in cleanup_jobs]
+    for cleanup_job, outcome in zip(cleanup_jobs, outcomes, strict=True):
+        if outcome is None:
+            continue
+        try:
+            batch_v1.delete_namespaced_job(
+                name=cleanup_job.metadata.name,
+                namespace=namespace,
+                body=client.V1DeleteOptions(propagation_policy="Background"),
+            )
+        except ApiException as e:
+            if e.status != 404:
+                raise
+    # Another cleanup Job still running could remove storage a new job with the same name wrote.
+    if None in outcomes:
+        return False
+    if "Complete" in outcomes:
+        return True
+    raise JobStorageError(f"Storage reclaim job for {workspace}/{job_id} failed")
+
+
+def _finished_condition(job: client.V1Job) -> str | None:
+    """Return ``Complete`` or ``Failed`` once Kubernetes has finished the Job, else None."""
+    conditions = job.status.conditions if job.status is not None else None
+    for condition in conditions or []:
+        if condition.type in ("Complete", "Failed") and condition.status == "True":
+            return condition.type
+    return None
 
 
 def build_event_field_selector(kind: str, api_version: str, name: str = "") -> str:

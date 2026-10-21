@@ -508,7 +508,7 @@ class JobDispatcher:
                             "terminal state before deleting."
                         )
 
-            await self._queue_storage_reclaim(job_entity, attempts)
+            await self._queue_storage_reclaim(job_entity)
 
             # Get all results
             results = await self._list_all_entities(
@@ -567,18 +567,16 @@ class JobDispatcher:
             logger.exception("Error deleting job", extra=extras)
             raise e
 
-    async def _queue_storage_reclaim(self, job: HelixJob, attempts: list[HelixJobAttempt]) -> None:
+    async def _queue_storage_reclaim(self, job: HelixJob) -> None:
         """Record the job's storage for the controller to reclaim once the job is gone.
 
-        Skipped when the job never mounted storage or the storage sweep already
-        reclaimed it. Written before any entity is deleted. A failure to write it
-        is logged and does not block the delete.
+        Skipped when the job never mounted storage. Written before any entity is deleted,
+        and a failure to write it fails the delete: without the record, a new job with the
+        same name would mount this job's storage. A job the storage sweep already reclaimed
+        is recorded too, since the sweep may have stopped before queueing it.
         """
         targets = storage_targets(job.platform_spec)
         if not targets:
-            return
-        current = next((attempt for attempt in attempts if attempt.id == job.current_attempt_id), None)
-        if current is not None and (current.status_details or {}).get(STORAGE_RECLAIMED_AT):
             return
         extras = {"job": job.name, "workspace": job.workspace}
         try:
@@ -596,15 +594,16 @@ class JobDispatcher:
             # A previous delete of this job failed after queueing the reclaim.
             pass
         except Exception:
-            logger.exception("Could not queue storage reclaim for deleted job; its storage stays", extra=extras)
-            return
+            logger.exception("Could not queue storage reclaim for deleted job", extra=extras)
+            raise
         logger.info("Queued storage reclaim for deleted job", extra=extras)
 
     async def _reject_pending_storage_reclaim(self, job_name: str, workspace: str) -> None:
         """Refuse a job name whose deleted predecessor's storage is not reclaimed yet.
 
         Job storage is keyed by name, so the pending reclaim would delete the new
-        job's storage. The controller clears the record within a reconcile tick.
+        job's storage. The controller clears the record once the storage is gone. A
+        failed check refuses the name too, since a record may still exist.
         """
         try:
             pending = await self.system_store.list(
@@ -612,13 +611,16 @@ class JobDispatcher:
                 filter_obj={"job_workspace": workspace, "job_name": job_name},
                 workspace=SYSTEM_WORKSPACE,
             )
-        except Exception:
+        except Exception as exc:
             logger.warning(
                 "Could not check for a pending storage reclaim",
                 extra={"job": job_name, "workspace": workspace},
                 exc_info=True,
             )
-            return
+            raise JobStorageReclaimPendingError(
+                f"Could not confirm that storage of an earlier job named '{job_name}' in workspace '{workspace}' "
+                "was reclaimed. Retry in a few seconds."
+            ) from exc
         if pending.data:
             raise JobStorageReclaimPendingError(
                 f"Storage of a deleted job named '{job_name}' in workspace '{workspace}' is still being reclaimed. "

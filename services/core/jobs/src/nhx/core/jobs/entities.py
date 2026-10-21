@@ -214,19 +214,19 @@ class JobStorageTarget(BaseModel):
 
 
 class HelixJobStorageReclaim(EntityBase):
-    """Storage a deleted job left behind, waiting for the jobs controller to reclaim it.
+    """Job storage waiting for the jobs controller to reclaim it, from a deleted job or one stopped too long.
 
     Job storage is keyed by the job name, and deleting the job removes the entities the
     storage sweep reads. This record outlives the job, so the controller can still reach
-    the backends that hold the storage. It lives in the system workspace, so deleting the
-    job's workspace does not drop it.
+    the backends that hold the storage, and it holds the name until the storage is gone.
+    It lives in the system workspace, so deleting the job's workspace does not drop it.
     """
 
     __entity_type__: ClassVar[str] = "platform_job_storage_reclaim"
 
-    job_id: str = Field(..., description="ID of the deleted job")
-    job_workspace: str = Field(..., description="Workspace the deleted job belonged to")
-    job_name: str = Field(..., description="Name of the deleted job. Job storage is keyed by it.")
+    job_id: str = Field(..., description="ID of the job")
+    job_workspace: str = Field(..., description="Workspace the job belongs to")
+    job_name: str = Field(..., description="Name of the job. Job storage is keyed by it.")
     targets: list[JobStorageTarget] = Field(default_factory=list, description="Backends that hold the storage")
 
     @staticmethod

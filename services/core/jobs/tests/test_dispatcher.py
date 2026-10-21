@@ -3432,6 +3432,76 @@ async def test_delete_without_storage_queues_nothing(
 
 
 @pytest.mark.asyncio
+async def test_delete_queues_storage_the_sweep_already_marked(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """The sweep marks a job before it queues the storage, and can stop in between."""
+    job = await mock_dispatcher.create_job(
+        _download_and_train_request(sample_platform_job_request, "marked-delete"), DEFAULT_WORKSPACE
+    )
+    download = await mock_dispatcher.get_current_job_step_by_name(job.name, "download", DEFAULT_WORKSPACE)
+    assert download is not None
+    await mock_dispatcher.update_job_status_from_step(download, HelixJobStatus.ERROR)
+    await mock_dispatcher.update_job_status_details(
+        job.name, DEFAULT_WORKSPACE, {"storage_reclaimed_at": "2026-10-08T00:00:00+00:00"}
+    )
+
+    assert await mock_dispatcher.delete_job(job.name, DEFAULT_WORKSPACE)
+
+    reclaims = await mock_store.list(HelixJobStorageReclaim, filter_obj={}, workspace=SYSTEM_WORKSPACE)
+    assert [r.job_name for r in reclaims.data] == [job.name]
+
+
+def _failing_for_reclaims(method):
+    """Fail store calls on storage reclaim records only, as a store outage would."""
+
+    async def call(entity_or_type, *args, **kwargs):
+        if entity_or_type is HelixJobStorageReclaim or isinstance(entity_or_type, HelixJobStorageReclaim):
+            raise RuntimeError("store unavailable")
+        return await method(entity_or_type, *args, **kwargs)
+
+    return call
+
+
+@pytest.mark.asyncio
+async def test_delete_fails_when_storage_reclaim_cannot_be_queued(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """Without the record, a new job with the same name would mount this job's storage."""
+    request = _download_and_train_request(sample_platform_job_request, "unqueued-delete")
+    job = await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE)
+    download = await mock_dispatcher.get_current_job_step_by_name(job.name, "download", DEFAULT_WORKSPACE)
+    assert download is not None
+    await mock_dispatcher.update_job_status_from_step(download, HelixJobStatus.ERROR)
+
+    with (
+        patch.object(mock_store, "create", side_effect=_failing_for_reclaims(mock_store.create)),
+        pytest.raises(RuntimeError, match="store unavailable"),
+    ):
+        await mock_dispatcher.delete_job(job.name, DEFAULT_WORKSPACE)
+
+    assert await mock_store.get(HelixJob, job.name, workspace=DEFAULT_WORKSPACE) is not None
+
+
+@pytest.mark.asyncio
+async def test_create_refuses_a_name_when_pending_reclaims_cannot_be_checked(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """A record may still exist, and its reclaim would delete the new job's storage."""
+    with (
+        patch.object(mock_store, "list", side_effect=_failing_for_reclaims(mock_store.list)),
+        pytest.raises(JobStorageReclaimPendingError, match="Could not confirm"),
+    ):
+        await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+
+
+@pytest.mark.asyncio
 async def test_resume_and_rerun_reject_reclaimed_storage(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,

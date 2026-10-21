@@ -128,7 +128,12 @@ def test_stopping_snapshots_the_image_digest():
 
     details = with_lifecycle_timestamps(step, HelixJobStatus.ERROR, {}, now=now)
 
-    assert details == {"stopped_at": now.isoformat(), "image_digest_at_save": "sha256:old"}
+    # The warning belongs to the previous save, and status details merge, so it is cleared.
+    assert details == {
+        "stopped_at": now.isoformat(),
+        "image_digest_at_save": "sha256:old",
+        "image_digest_warning": None,
+    }
 
 
 def test_image_digest_comparison():
@@ -136,10 +141,30 @@ def test_image_digest_comparison():
     saved = {"image_digest_at_save": "sha256:a"}
     assert image_digest_updates(saved, "sha256:a") == {"image_digest": "sha256:a"}
     assert "image_digest_warning" in image_digest_updates(saved, "sha256:b")
-    assert "image_digest_comparison_skipped" in image_digest_updates(saved, None)
-    # The warning or skip note is written once.
+    # The warning is written once per saved digest.
     warned = {**saved, "image_digest_warning": "changed"}
     assert image_digest_updates(warned, "sha256:c") == {"image_digest": "sha256:c"}
+
+
+def test_image_digest_comparison_waits_for_the_task_container():
+    """A pending pod has no digest yet. It must not stop the comparison once the container starts."""
+    resumed = {"image_digest": "sha256:a", "image_digest_at_save": "sha256:a"}
+
+    assert image_digest_updates(resumed, None) == {}
+    assert "image_digest_warning" in image_digest_updates(resumed, "sha256:b")
+
+
+def test_each_save_compares_the_image_again():
+    """A warning from an earlier pause must not hide a change after the next one."""
+    now = datetime.datetime(2026, 10, 9, 12, 0, tzinfo=datetime.timezone.utc)
+    running = {"image_digest": "sha256:b", "image_digest_at_save": "sha256:a", "image_digest_warning": "a to b"}
+    step = SimpleNamespace(status=HelixJobStatus.ACTIVE, status_details=running)
+
+    paused = {**running, **with_lifecycle_timestamps(step, HelixJobStatus.PAUSED, {}, now=now)}
+
+    assert paused["image_digest_at_save"] == "sha256:b"
+    assert image_digest_updates(paused, "sha256:b") == {}
+    assert "was sha256:b, now sha256:c" in image_digest_updates(paused, "sha256:c")["image_digest_warning"]
 
 
 def test_storage_targets_lists_each_backend_that_mounts_storage_once():
