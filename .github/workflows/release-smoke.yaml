@@ -1,0 +1,205 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Release smoke checks
+
+on:
+  workflow_dispatch:
+    inputs:
+      release-version:
+        description: "Full published chart version (e.g. 0.8.0 or 0.8.0-nightly-20261021000000)"
+        required: true
+        type: string
+      send-notifications:
+        description: Send notifications to Slack
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      release-version:
+        required: true
+        type: string
+      send-notifications:
+        type: boolean
+        default: false
+    secrets:
+      NVIDIA_INFERENCE_URL:
+        required: true
+      NVIDIA_INFERENCE_KEY:
+        required: true
+      NGC_REGISTRY_READ_TOKEN:
+        required: false
+      SLACK_RELEASE_WEBHOOK:
+        required: false
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  UV_VERSION: "0.10.10"
+  RELEASE_VERSION: ${{ inputs.release-version }}
+  SMOKE_RESULTS: ${{ github.workspace }}/smoke-results
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      wheel_version: ${{ steps.resolve.outputs.wheel_version }}
+      wheel_index: ${{ steps.resolve.outputs.wheel_index }}
+      image_registry: ${{ steps.resolve.outputs.image_registry }}
+      image_tag: ${{ steps.resolve.outputs.image_tag }}
+      chart_repository: ${{ steps.resolve.outputs.chart_repository }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - id: resolve
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { resolveRelease } = require("./.github/scripts/release-smoke.cjs");
+            for (const [key, value] of Object.entries(resolveRelease(process.env.RELEASE_VERSION))) {
+              core.setOutput(key, value);
+            }
+
+  macos:
+    name: macOS installation
+    needs: prepare
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    outputs:
+      stage: ${{ steps.report.outputs.stage }}
+    env:
+      WHEEL_VERSION: ${{ needs.prepare.outputs.wheel_version }}
+      WHEEL_INDEX: ${{ needs.prepare.outputs.wheel_index }}
+      NVIDIA_INFERENCE_URL: ${{ secrets.NVIDIA_INFERENCE_URL }}
+      NVIDIA_INFERENCE_KEY: ${{ secrets.NVIDIA_INFERENCE_KEY }}
+      SMOKE_INFERENCE_MODEL: ${{ vars.SMOKE_INFERENCE_MODEL }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - id: uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.12"
+          enable-cache: false
+      - name: Install and smoke test published wheel
+        id: smoke
+        run: uv run --no-project --python 3.12 python .github/scripts/release_smoke.py macos
+      - name: Collect diagnostics and clean up
+        id: cleanup
+        if: always()
+        timeout-minutes: 7
+        run: uv run --no-project --python 3.12 python .github/scripts/release_smoke.py finalize macos
+      - name: Record result
+        id: report
+        if: always()
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          STEP_RESULTS: ${{ toJSON(steps) }}
+        with:
+          script: |
+            const { reportSmoke } = require("./.github/scripts/release-smoke.cjs");
+            await reportSmoke({ core, env: process.env, steps: JSON.parse(process.env.STEP_RESULTS), fs: require("node:fs") });
+      - name: Upload macOS results
+        if: always() && steps.report.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smoke-macos-${{ github.run_id }}-${{ github.run_attempt }}
+          path: smoke-results/
+          retention-days: 7
+
+  kubernetes:
+    name: Kubernetes installation
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      stage: ${{ steps.report.outputs.stage }}
+    env:
+      WHEEL_VERSION: ${{ needs.prepare.outputs.wheel_version }}
+      WHEEL_INDEX: ${{ needs.prepare.outputs.wheel_index }}
+      IMAGE_REGISTRY: ${{ needs.prepare.outputs.image_registry }}
+      IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
+      CHART_REPOSITORY: ${{ needs.prepare.outputs.chart_repository }}
+      NVIDIA_INFERENCE_URL: ${{ secrets.NVIDIA_INFERENCE_URL }}
+      NVIDIA_INFERENCE_KEY: ${{ secrets.NVIDIA_INFERENCE_KEY }}
+      SMOKE_INFERENCE_MODEL: ${{ vars.SMOKE_INFERENCE_MODEL }}
+      NGC_REGISTRY_READ_TOKEN: ${{ secrets.NGC_REGISTRY_READ_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      KIND_CLUSTER_NAME: release-smoke
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Create disposable Kind cluster
+        id: kind
+        uses: ./.github/actions/setup-kind-cluster
+        with:
+          kind-cluster-name: release-smoke
+          kube-namespace: release-smoke
+          install-nemo-helix: "false"
+          wait-for-api: "false"
+          kind-enable-gateway: "false"
+          image-registry: ${{ env.IMAGE_REGISTRY }}
+          image-tag: ${{ env.IMAGE_TAG }}
+          kind-image-pull-user: ${{ github.actor }}
+          kind-image-pull-token: ${{ github.token }}
+      - name: Install and smoke test published chart
+        id: smoke
+        run: uv run --no-project --python 3.12 python .github/scripts/release_smoke.py kubernetes
+      - name: Collect diagnostics and clean up
+        id: cleanup
+        if: always()
+        timeout-minutes: 7
+        run: uv run --no-project --python 3.12 python .github/scripts/release_smoke.py finalize kubernetes
+      - name: Record result
+        id: report
+        if: always()
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          STEP_RESULTS: ${{ toJSON(steps) }}
+        with:
+          script: |
+            const { reportSmoke } = require("./.github/scripts/release-smoke.cjs");
+            await reportSmoke({ core, env: process.env, steps: JSON.parse(process.env.STEP_RESULTS), fs: require("node:fs") });
+      - name: Upload Kubernetes results
+        if: always() && steps.report.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smoke-kubernetes-${{ github.run_id }}-${{ github.run_attempt }}
+          path: smoke-results/
+          retention-days: 7
+
+  result:
+    name: Combined smoke result
+    if: always()
+    needs: [prepare, macos, kubernetes]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        if: always()
+        with:
+          persist-credentials: false
+      - name: Report result and optionally notify Slack
+        if: always()
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PREPARE_RESULT: ${{ needs.prepare.result }}
+          MACOS_RESULT: ${{ needs.macos.result }}
+          KUBERNETES_RESULT: ${{ needs.kubernetes.result }}
+          MACOS_STAGE: ${{ needs.macos.outputs.stage }}
+          KUBERNETES_STAGE: ${{ needs.kubernetes.outputs.stage }}
+          SEND_NOTIFICATIONS: ${{ inputs.send-notifications }}
+          SLACK_RELEASE_WEBHOOK: ${{ secrets.SLACK_RELEASE_WEBHOOK }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const { finishSmoke } = require("./.github/scripts/release-smoke.cjs");
+            const { result, text } = await finishSmoke({ env: process.env, fetchImpl: fetch });
+            await core.summary.addRaw(text).write();
+            if (result !== "passed") core.setFailed(`Smoke checks ${result}`);

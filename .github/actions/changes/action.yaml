@@ -227,6 +227,9 @@ runs:
             - 'plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/references/**'
           github-scripts:
             - '.github/scripts/**/*.cjs'
+            - '.github/scripts/release_smoke*.py'
+            - '.github/scripts/tests/test_release_smoke.py'
+            - '.github/workflows/release-smoke.yaml'
             - '.github/eslint.config.mjs'
             - '.github/workflows/release.yaml'
             - '.github/workflows/ci.yaml'

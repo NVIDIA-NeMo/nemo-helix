@@ -107,6 +107,9 @@ async function sendReleaseNotification({ env, fetchImpl }) {
     );
   }
 
+  if (published && env.SMOKE_CHECKS_PENDING === "true") {
+    lines.push("", "Smoke checks pending");
+  }
   lines.push("", `:link: <${env.RUN_URL}|Release run #${env.RUN_NUMBER}>`);
   return fetchImpl(webhook, {
     method: "POST",
