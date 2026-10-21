@@ -1236,7 +1236,8 @@ class EvaluationStore:
             entity.next_retry_at = None
             _start_terminal_artifacts(entity, now)
             # The summary's own finish time wins over the moment it was written.
-            entity.finished_at = datetime.fromisoformat(summary.finished_at) if summary.finished_at else None
+            if summary.finished_at:
+                entity.finished_at = datetime.fromisoformat(summary.finished_at)
             _add_event(entity, terminal_status, detail)
             return True, True
 

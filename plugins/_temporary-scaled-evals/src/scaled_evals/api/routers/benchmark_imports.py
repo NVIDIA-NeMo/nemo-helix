@@ -409,6 +409,7 @@ def publish_benchmark_import(
                 description=row.get("description"),
                 visibility=row["visibility"],
                 tasks=refs,
+                owner_id=current.owner_id,
             )
             revision = int(created["current_revision"])
         else:

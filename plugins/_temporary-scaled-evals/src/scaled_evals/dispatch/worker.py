@@ -495,7 +495,7 @@ class Dispatcher:
         row: dict[str, Any] | None = None
         try:
             with self.connect() as conn:
-                row: dict[str, Any] | None = EvaluationStore().load_for_dispatch(evaluation_id)
+                row = EvaluationStore().load_for_dispatch(evaluation_id)
                 if row is None:
                     raise RuntimeError(f"evaluation not found: {evaluation_id}")
                 if row.get("status") not in _DB_TERMINAL_STATUSES:
@@ -1564,6 +1564,12 @@ class Dispatcher:
                 count = artifacts.sync_directory_to_prefix(artifact_root, artifact_prefix)
             else:
                 with self.connect() as conn, conn.transaction():
+                    # ponytail: check-then-publish. Postgres held the row lock
+                    # across the upload; Entity Store can't, so a retry that
+                    # advances `current_execution` mid-upload lets this stale
+                    # execution overwrite the shared prefix. The archive build
+                    # below has the same gap. Upgrade path: a prefix per
+                    # execution, with the evaluation pointing at the current one.
                     if not EvaluationStore().current_execution_is(
                         evaluation_id,
                         expected_execution_number=execution_number,

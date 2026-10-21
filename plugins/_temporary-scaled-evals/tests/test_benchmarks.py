@@ -142,6 +142,25 @@ def test_create_with_no_tasks_returns_201_revision_1() -> None:
     assert duplicate.json()["detail"]["error"]["code"] == "slug_conflict"
 
 
+def test_created_benchmarks_and_variants_belong_to_the_caller() -> None:
+    from scaled_evals.api.benchmark_store import BenchmarkStore
+
+    v1.dependency_overrides[current_principal] = lambda: CurrentPrincipal(
+        owner_type="USER", owner_id="dev", source="starfleet_jwt"
+    )
+    base = client.post("/v1/benchmarks", json={"name": "Suite"})
+    assert base.status_code == 201, base.text
+    variant = client.post(
+        f"/v1/benchmarks/{base.json()['id']}/variants",
+        json={"name": "Suite long", "operational_policy": {"agent_timeout_floor_sec": 600}},
+    )
+    assert variant.status_code == 201, variant.text
+    for benchmark_id in (base.json()["id"], variant.json()["id"]):
+        stored = BenchmarkStore().get(benchmark_id)
+        assert stored is not None
+        assert stored["owner_id"] == "dev"
+
+
 def test_concurrent_create_on_a_taken_slug_withdraws_the_later_benchmark(monkeypatch: pytest.MonkeyPatch) -> None:
     from scaled_evals.api.benchmark_store import BenchmarkStore
     from scaled_evals.api.repositories.base_repository import Conflict

@@ -433,6 +433,33 @@ def test_create_run_spawns_run_and_members() -> None:
     ]
 
 
+def test_failed_create_withdraws_its_members_even_if_the_run_delete_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_scaled_evals_plugin.entities import ScaledEvalsEvaluation
+    from scaled_evals.api import entity_store
+
+    _use_conn(_conn(members=[_member(0), _member(1)]))
+    create = EvaluationStore.create
+    calls = iter([True, False])
+
+    def flaky_create(self, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003, ANN202
+        if not next(calls):
+            raise RuntimeError("member create failed")
+        return create(self, *args, **kwargs)
+
+    def failing_run_delete(self, run_id: str) -> bool:  # noqa: ANN001
+        raise RuntimeError("run delete failed")
+
+    monkeypatch.setattr(EvaluationStore, "create", flaky_create)
+    monkeypatch.setattr(BenchmarkRunStore, "soft_delete", failing_run_delete)
+
+    with pytest.raises(RuntimeError, match="member create failed"):
+        client.post("/v1/benchmark-runs", json={"name": "suite run", "benchmark_id": "bm_suite"})
+
+    members = entity_store.list_all(entity_store.entity_client(), ScaledEvalsEvaluation)
+    assert len(members) == 1
+    assert members[0].deleted_at is not None
+
+
 def test_create_run_applies_member_framework_profile_overrides() -> None:
     overrides = {"task_0": "cfg_member"}
     for profile_id in ("cfg_default", "cfg_member"):

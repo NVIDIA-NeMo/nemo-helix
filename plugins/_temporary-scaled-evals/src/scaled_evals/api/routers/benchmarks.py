@@ -78,7 +78,7 @@ def _task_refs(tasks: list) -> list[TaskRef]:
 
 
 @router.post("", status_code=201, response_model=BenchmarkCreateResponse)
-def create_benchmark(body: BenchmarkCreate, db: Db) -> BenchmarkCreateResponse:
+def create_benchmark(body: BenchmarkCreate, db: Db, current: Principal) -> BenchmarkCreateResponse:
     """Register a benchmark and its first revision.
 
     A benchmark is a revisioned *collection of tasks*. Input: `BenchmarkCreate`
@@ -100,6 +100,7 @@ def create_benchmark(body: BenchmarkCreate, db: Db) -> BenchmarkCreateResponse:
             description=body.description,
             visibility=body.visibility,
             tasks=_task_refs(body.tasks),
+            owner_id=current.owner_id,
         )
     except Conflict as exc:
         raise _http_error(409, exc.code, exc.message) from exc
@@ -122,7 +123,9 @@ def create_benchmark(body: BenchmarkCreate, db: Db) -> BenchmarkCreateResponse:
     status_code=201,
     response_model=BenchmarkVariantCreateResponse,
 )
-def create_benchmark_variant(benchmark_id: str, body: BenchmarkVariantCreate, db: Db) -> BenchmarkVariantCreateResponse:
+def create_benchmark_variant(
+    benchmark_id: str, body: BenchmarkVariantCreate, db: Db, current: Principal
+) -> BenchmarkVariantCreateResponse:
     """Derive a metadata-only variant of an existing benchmark revision.
 
     Copies the base member task pins unchanged and stores an allowlisted
@@ -144,6 +147,7 @@ def create_benchmark_variant(benchmark_id: str, body: BenchmarkVariantCreate, db
             description=body.description,
             visibility=body.visibility,
             operational_policy=body.operational_policy.model_dump(),
+            owner_id=current.owner_id,
         )
     except Conflict as exc:
         raise _http_error(409, exc.code, exc.message) from exc

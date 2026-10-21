@@ -75,6 +75,8 @@ def test_persist_result_writes_the_summary_without_numeric_coercion() -> None:
     assert store.persist_result("ev_bool", boolean)
     stored = _stored("ev_bool")
     assert (stored["reward_value"], stored["reward"]) == (True, None)
+    # A summary without a finish time keeps the moment the result was written.
+    assert stored["finished_at"] is not None
 
 
 def test_manual_retry_resets_terminal_state_unless_artifacts_are_finalizing() -> None:

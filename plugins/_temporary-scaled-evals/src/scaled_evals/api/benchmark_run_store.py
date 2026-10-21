@@ -12,6 +12,7 @@ from __future__ import annotations
 
 # `BenchmarkRunStore.list` shadows the builtin inside the class body.
 import builtins
+import contextlib
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, TypeVar
@@ -445,9 +446,13 @@ class BenchmarkRunStore:
                 )
                 created.append(member["id"])
         except BaseException:
-            self.soft_delete(run_id)
+            # Members first, each on its own: one failed delete must not leave
+            # the rest dispatchable or replace the original error.
             for evaluation_id in created:
-                evaluations.soft_delete(evaluation_id)
+                with contextlib.suppress(Exception):
+                    evaluations.soft_delete(evaluation_id)
+            with contextlib.suppress(Exception):
+                self.soft_delete(run_id)
             raise
         return _row(run)
 
