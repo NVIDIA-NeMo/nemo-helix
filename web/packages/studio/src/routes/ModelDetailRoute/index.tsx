@@ -6,10 +6,20 @@ import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { useQueryParams } from '@nemo/common/src/hooks/useQueryParams';
 import { formatFinetuningType } from '@nemo/common/src/utils/formatters';
 import { getJobRefetchInterval } from '@nemo/common/src/utils/query';
-import { Badge, Button, Stack, TabsContent, TabsRoot } from '@nvidia/foundations-react-core';
+import {
+  Badge,
+  Button,
+  Flex,
+  PageHeader,
+  Stack,
+  TabsContent,
+  TabsList,
+  TabsRoot,
+  TabsTrigger,
+  Text,
+} from '@nvidia/foundations-react-core';
 import { CustomizationOverview } from '@studio/components/CustomizationOverview';
 import { DeploymentStatusBadge } from '@studio/components/dataViews/CustomModelsDataView/DeploymentStatusBadge';
-import { DetailPageHeader, type DetailPageHeaderTab } from '@studio/components/DetailPageHeader';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { ModelChatTab } from '@studio/components/ModelChatTab';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
@@ -57,7 +67,7 @@ export const ModelDetailRoute: FC = () => {
 
   // The job tabs stay visible but disabled while the lookup runs, and go away if there is no job.
   const hasJobTabs = job.isLoading || Boolean(job.jobName);
-  const tabs: DetailPageHeaderTab[] = [
+  const tabs: { value: ModelDetailTab; label: string; disabled?: boolean }[] = [
     { value: ModelDetailTab.Details, label: 'Details' },
     { value: ModelDetailTab.Chat, label: 'Chat' },
     ...(hasJobTabs
@@ -105,47 +115,54 @@ export const ModelDetailRoute: FC = () => {
 
   return (
     <AccessibleTitle title={`Model details for ${name}`}>
-      <Stack className="h-full min-h-0 w-full p-density-2xl">
-        <TabsRoot
-          className="flex min-h-0 flex-1 flex-col gap-density-xl"
-          value={selectedTab}
-          onValueChange={(value) => setQueryParam(QUERY_PARAMETERS.tab, value)}
-        >
-          <DetailPageHeader
-            heading={name}
-            slotStatus={
+      <Stack className="h-full min-h-0" gap="density-2xl" padding="density-2xl">
+        <PageHeader
+          className="shrink-0 p-0"
+          slotHeading={
+            <Flex align="baseline" gap="3" wrap="wrap">
+              <Text kind="title/md">{name}</Text>
               <DeploymentStatusBadge state={lineage.deployment} isAdapter={Boolean(adapter)} />
-            }
-            slotTags={
-              tags.length > 0 &&
-              tags.map((tag) => (
+              {tags.map((tag) => (
                 <Badge key={tag} kind="outline" color="gray">
                   {tag}
                 </Badge>
-              ))
-            }
-            description={(adapter ?? model).description}
-            tabs={tabs}
-            slotActions={
-              isJobTab &&
-              job.jobName && (
-                <Button color="brand" asChild>
-                  <Link to={getWorkspaceCustomizationJobDetailsRoute(job.workspace, job.jobName)}>
-                    Open Job
-                  </Link>
-                </Button>
-              )
-            }
-          />
+              ))}
+            </Flex>
+          }
+          slotDescription={(adapter ?? model).description}
+          slotActions={
+            isJobTab &&
+            job.jobName && (
+              <Button color="brand" asChild>
+                <Link to={getWorkspaceCustomizationJobDetailsRoute(job.workspace, job.jobName)}>
+                  Open Job
+                </Link>
+              </Button>
+            )
+          }
+        />
+
+        <TabsRoot
+          className="flex min-h-0 flex-1 flex-col"
+          value={selectedTab}
+          onValueChange={(value) => setQueryParam(QUERY_PARAMETERS.tab, value)}
+        >
+          <TabsList className="shrink-0">
+            {tabs.map((tab) => (
+              <TabsTrigger key={tab.value} value={tab.value} disabled={tab.disabled}>
+                {tab.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
 
           <TabsContent
             value={ModelDetailTab.Details}
-            className="min-h-0 flex-1 overflow-y-auto p-0"
+            className="min-h-0 flex-1 overflow-y-auto p-0 pt-6"
           >
             <DetailsTab model={model} adapter={adapter} lineage={lineage} jobRecord={jobDetails} />
           </TabsContent>
 
-          <TabsContent value={ModelDetailTab.Chat} className="flex min-h-0 flex-1 p-0">
+          <TabsContent value={ModelDetailTab.Chat} className="flex min-h-0 flex-1 p-0 pt-6">
             <Stack className="mx-auto h-full w-full max-w-[768px]">
               <ModelChatTab model={model} adapter={adapter} />
             </Stack>
@@ -155,7 +172,7 @@ export const ModelDetailRoute: FC = () => {
             <>
               <TabsContent
                 value={ModelDetailTab.Training}
-                className="min-h-0 flex-1 overflow-y-auto p-0 pr-density-md"
+                className="min-h-0 flex-1 overflow-y-auto p-0 pt-6 pr-density-md"
               >
                 <Stack className="w-full">
                   <CustomizationOverview
@@ -164,7 +181,7 @@ export const ModelDetailRoute: FC = () => {
                   />
                 </Stack>
               </TabsContent>
-              <TabsContent value={ModelDetailTab.Logs} className="flex min-h-0 flex-1 p-0">
+              <TabsContent value={ModelDetailTab.Logs} className="flex min-h-0 flex-1 p-0 pt-6">
                 <LogsTab
                   customizationJobName={job.jobName}
                   workspace={job.workspace}

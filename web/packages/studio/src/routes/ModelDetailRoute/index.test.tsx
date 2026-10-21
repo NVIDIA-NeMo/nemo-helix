@@ -65,7 +65,7 @@ describe('ModelDetailRoute', () => {
     mockLineage();
     renderPage('/workspaces/ws/fine-tune/models/my-model');
 
-    expect(await screen.findByRole('heading', { name: 'my-model' })).toBeInTheDocument();
+    expect(await screen.findByTestId('nv-page-header-heading')).toHaveTextContent('my-model');
     for (const name of ['Details', 'Chat', 'Training', 'Logs']) {
       expect(screen.getByRole('tab', { name })).toBeInTheDocument();
     }
@@ -104,7 +104,7 @@ describe('ModelDetailRoute', () => {
     mockLineage({ adapter });
     renderPage('/workspaces/ws/fine-tune/models/my-model/adapters/my-adapter');
 
-    expect(await screen.findByRole('heading', { name: 'my-adapter' })).toBeInTheDocument();
+    expect(await screen.findByTestId('nv-page-header-heading')).toHaveTextContent('my-adapter');
     expect(screen.getByText('Model: my-model')).toBeInTheDocument();
   });
 
