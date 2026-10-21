@@ -2684,6 +2684,37 @@ def test_cleanup_active_by_ttl(kubernetes_job, test_step_active):
     assert call_args.kwargs["namespace"] == "test-namespace"
 
 
+def test_cleanup_active_by_the_step_ttl(kubernetes_job, test_step_active):
+    """A TTL in the step's lifecycle replaces the execution profile's."""
+    assert test_step_active.step_spec is not None
+    test_step_active.step_spec.lifecycle = StepLifecycle(ttl_seconds_active=3600)
+    test_step_active.status = HelixJobStatus.ACTIVE
+    test_step_active.created_at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)
+    mock_job = MagicMock()
+    mock_job.metadata.name = "test-job-active"
+    mock_job.metadata.labels = {JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER}
+    kubernetes_job._batch_v1.read_namespaced_job.return_value = mock_job
+
+    with (
+        patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks"),
+    ):
+        result = kubernetes_job.sync(test_step_active)
+
+    assert result.status == HelixJobStatus.ERROR.value
+    assert result.error_details == {"message": "Job timed out after reaching max TTL of 3600 seconds"}
+
+
+def test_schedule_sets_the_pod_deadline_from_the_step_ttl(kubernetes_job, cpu_execution_provider, test_step_pending):
+    assert test_step_pending.step_spec is not None
+    test_step_pending.step_spec.lifecycle = StepLifecycle(ttl_seconds_active=259200)
+
+    kubernetes_job.schedule(cpu_execution_provider, test_step_pending)
+
+    job_body = kubernetes_job._batch_v1.create_namespaced_job.call_args.kwargs["body"]
+    assert job_body.spec.template.spec.active_deadline_seconds == 259200
+
+
 # =============================================================================
 # Auth Context Tests
 # =============================================================================

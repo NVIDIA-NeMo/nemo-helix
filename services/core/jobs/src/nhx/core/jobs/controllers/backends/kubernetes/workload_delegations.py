@@ -65,7 +65,7 @@ class KubernetesPodBoundWorkloadDelegationManager:
         *,
         core_v1: client.CoreV1Api,
         namespace: str,
-        ttl_seconds_active: Callable[[], int],
+        ttl_seconds_active: Callable[[HelixJobStepWithContext], int],
         workload_audience: Callable[[], str],
         register_workload_delegation: Callable[[WorkloadDelegationEntity], object | None],
         revoke_workload_delegation: Callable[[str], object | None],
@@ -235,7 +235,7 @@ class KubernetesPodBoundWorkloadDelegationManager:
             attempt_id=step.attempt_id,
             step_id=step.id,
             auth_context=auth_context,
-            ttl_seconds_active=self._ttl_seconds_active(),
+            ttl_seconds_active=self._ttl_seconds_active(step),
         )
         if delegation.name != delegation_name:
             raise JobStorageError("Kubernetes workload identity delegation name changed during build")
