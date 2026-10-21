@@ -59,6 +59,9 @@ export const isNotFoundError = (error: unknown): boolean => {
 export const isForbiddenError = (error: unknown): boolean =>
   error instanceof AxiosError && error.response?.status === 403;
 
+export const isServerError = (error: unknown): boolean =>
+  error instanceof AxiosError && (error.response?.status ?? 0) >= 500;
+
 /**
  * Extracts a user-friendly error message from an error object.
  * Handles both ValidationError arrays and simple string errors from the backend.
