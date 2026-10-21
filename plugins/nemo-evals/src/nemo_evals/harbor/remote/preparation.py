@@ -252,10 +252,12 @@ async def _current_build(builds: ImageBuildService, workspace: str, name: str, r
     attempt, recreates a lost Job, or replaces a build whose Job ended without a result. ``request_build``
     checks build permission first, so a caller without it still learns that someone else's build is running.
     """
-    page = await builds.list_builds(workspace, name, revision, page_size=1)
+    page = await builds.list_builds(workspace, name, revision, page_size=100)
     if page is None:
         return None
-    newest = page.data[0] if page.data else None
+    # A run takes images for the deployment's default platform, as ``request_build`` below asks for: another
+    # platform's build, ready or failed, is no answer.
+    newest = next((build for build in page.data if build.platform is None), None)
     if newest is not None and newest.status in ("ready", "failed"):
         return newest
     try:

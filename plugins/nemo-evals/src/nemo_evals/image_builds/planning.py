@@ -235,7 +235,9 @@ def dockerfile_pin(dockerfile: str) -> str | None:
 
     The final stage is the image. A platform given through a variable, such as ``$BUILDPLATFORM``, pins nothing.
     """
-    lines = re.sub(r"\\\r?\n", " ", dockerfile).splitlines()
+    # A comment line never continues an instruction, even ending in a backslash, and drops out of one it splits.
+    instructions = "\n".join(line for line in dockerfile.splitlines() if not line.lstrip().startswith("#"))
+    lines = re.sub(r"\\\n", " ", instructions).splitlines()
     froms = [match for line in lines if (match := _FROM.match(line))]
     if not froms:
         return None

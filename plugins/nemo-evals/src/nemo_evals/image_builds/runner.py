@@ -9,7 +9,7 @@ import asyncio
 import logging
 import tempfile
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -188,7 +188,7 @@ async def _plan(
 
 
 @asynccontextmanager
-async def _downloaded(files: AsyncFilesClient, source: HarborArchiveSource) -> AsyncIterator[Path]:
+async def _downloaded(files: AsyncFilesClient, source: HarborArchiveSource) -> AsyncGenerator[Path]:
     """A task archive downloaded to a scratch file, its digest checked, for as long as the context lasts."""
     with tempfile.TemporaryDirectory(prefix="task-image-build-") as scratch:
         path = Path(scratch) / "task_archive"
