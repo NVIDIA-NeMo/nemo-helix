@@ -12,7 +12,11 @@ import {
   type GenericSortField,
 } from '@nemo/sdk/generated/platform/schema';
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
-import { VISIBLE_PURPOSES } from '@studio/components/DatasetsTable/constants';
+import {
+  DEFAULT_PURPOSE_FILTER,
+  isDefaultPurposeFilter,
+  VISIBLE_PURPOSES,
+} from '@studio/components/DatasetsTable/constants';
 import {
   type DatasetWithId,
   type DatasetsTableProps,
@@ -51,7 +55,20 @@ export function useDatasetsTable({
     defaultSort: [{ id: 'created_at', desc: true }],
   });
 
-  const hasActiveFilters = dataViewState.debouncedColumnFilters.length > 0;
+  // Seed the default purposes as checked (generic stays off) unless the URL already has filters.
+  const seededDefaults = useRef(false);
+  useEffect(() => {
+    if (!enableFilters || seededDefaults.current) return;
+    seededDefaults.current = true;
+    if (dataViewState.columnFiltering.state.length === 0) {
+      dataViewState.columnFiltering.set([{ id: 'purpose', value: DEFAULT_PURPOSE_FILTER }]);
+    }
+  }, [enableFilters, dataViewState.columnFiltering]);
+
+  // The seeded default doesn't count as the user filtering, so empty states stay "no filesets yet".
+  const hasActiveFilters = dataViewState.debouncedColumnFilters.some(
+    (f) => !(f.id === 'purpose' && isDefaultPurposeFilter(f.value))
+  );
   const hasSearchOrFilters = !!(dataViewState.debouncedSearchBar || hasActiveFilters);
 
   const [modalDataset, setModalDataset] = useState<Dataset>();

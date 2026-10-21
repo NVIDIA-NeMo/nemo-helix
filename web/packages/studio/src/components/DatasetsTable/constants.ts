@@ -24,6 +24,19 @@ export const VISIBLE_PURPOSES = [
   FilesetPurpose.model,
 ] as const;
 
+/** The Purpose multi-select value for the default selection: `{ dataset: true, ... }`. */
+export const DEFAULT_PURPOSE_FILTER = Object.fromEntries(
+  VISIBLE_PURPOSES.map((purpose) => [purpose, true])
+);
+
+export const isDefaultPurposeFilter = (value: unknown) => {
+  const checked = Object.keys((value ?? {}) as object);
+  return (
+    checked.length === VISIBLE_PURPOSES.length &&
+    VISIBLE_PURPOSES.every((purpose) => checked.includes(purpose))
+  );
+};
+
 export const PURPOSE_TAG_COLORS: Record<FilesetPurpose, TagColor> = {
   [FilesetPurpose.dataset]: 'blue',
   [FilesetPurpose.environment]: 'green',
