@@ -296,3 +296,18 @@ def test_a_platform_that_is_not_os_and_architecture_is_rejected(client, store_ta
     response = client.post(f"{_BASE}/{digest}/image-builds", json={"platform": platform})
 
     assert response.status_code == 422
+
+
+def test_rebuild_starts_a_new_attempt_over_a_ready_build(client, store_task, entity_store) -> None:
+    """A ready build may be for a previous default platform; ``rebuild`` takes the request to Builder again."""
+    digest = _store(store_task)
+    client.post(f"{_BASE}/{digest}/image-builds")
+    _set_status(entity_store, digest, 1, "ready")
+
+    rebuilt = client.post(f"{_BASE}/{digest}/image-builds", json={"rebuild": True}).json()
+    again = client.post(f"{_BASE}/{digest}/image-builds", json={"rebuild": True}).json()
+    plain = client.post(f"{_BASE}/{digest}/image-builds").json()
+
+    assert (rebuilt["id"], rebuilt["status"]) == ("2", "pending")
+    # A rebuild that's still running is the answer: it isn't started twice.
+    assert again["id"] == "2" and plain["id"] == "2"
