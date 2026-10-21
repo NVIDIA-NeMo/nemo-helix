@@ -107,6 +107,7 @@ _TERMINAL_PHASES = frozenset({"succeeded", "failed"})
 _DB_TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
 # Rows the worker may pick up (including resume after a restart).
 _RESUMABLE_STATUSES = frozenset({"queued", "provisioning", "running"})
+_PROFILE_TYPES_BY_ROLE = {"intake": ("intake",), "harbor": ("harbor",), "framework": ("harbor", "gym")}
 ConnFactory = Callable[[], AbstractContextManager[psycopg.Connection]]
 BackendResolver = Callable[[str], RuntimeBackend]
 _DATABASE_CONNECT_RETRY_SECONDS = 300.0
@@ -1426,8 +1427,7 @@ class Dispatcher:
             if not config and snap_role not in profiles:
                 raise RuntimeError(f"{role} profile missing from execution snapshot")
             return config
-        loader = getattr(EvaluationRepository(conn), f"load_{role}_profile")
-        profile_row = loader(str(profile_id))
+        profile_row = ConfigProfileStore().get_typed(str(profile_id), _PROFILE_TYPES_BY_ROLE[role])
         if profile_row is None:
             raise RuntimeError(f"{role} profile not found: {profile_id}")
         config = profile_row.get("config") or {}

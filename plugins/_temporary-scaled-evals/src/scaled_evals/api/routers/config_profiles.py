@@ -156,9 +156,13 @@ def delete_profile(profile_id: str, db: Db, current: Principal, admin: IsAdmin) 
     profile nor is an admin; 409 if an active evaluation still references it.
     Evaluations already submitted keep the snapshot they captured.
     """
+    owner_id = _write_owner_scope(current, admin)
+    existing = db.config_profiles.get(profile_id)
+    if existing is None or (owner_id is not None and existing["owner_id"] != owner_id):
+        raise _http_error(404, "not_found", "config profile not found")
     _reject_if_in_use(db, profile_id)
     try:
-        deleted = db.config_profiles.delete(profile_id, owner_id=_write_owner_scope(current, admin))
+        deleted = db.config_profiles.delete(profile_id, owner_id=owner_id)
     except Conflict as exc:
         raise _http_error(409, exc.code, exc.message) from exc
     if not deleted:

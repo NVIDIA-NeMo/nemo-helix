@@ -95,9 +95,14 @@ def test_profile_crud_is_owner_scoped_and_searchable() -> None:
 
 
 def test_profile_referenced_by_an_active_evaluation_cannot_change(in_use: MagicMock) -> None:
+    _act_as("user-1")
     profile = _create()
     in_use.cursor.return_value.__enter__.return_value.fetchone.return_value = {"id": "ev_active"}
 
+    # A non-owner gets 404 and does not learn the profile is in use.
+    _act_as("user-2")
+    assert client.delete(f"/v1/config-profiles/{profile['id']}").status_code == 404
+    _act_as("user-1")
     for response in (
         client.patch(f"/v1/config-profiles/{profile['id']}", json={"config": {"env": {}}}),
         client.delete(f"/v1/config-profiles/{profile['id']}"),
@@ -108,6 +113,19 @@ def test_profile_referenced_by_an_active_evaluation_cannot_change(in_use: MagicM
     assert client.patch(f"/v1/config-profiles/{profile['id']}", json={"name": "renamed"}).status_code == 200
     query = in_use.cursor.return_value.__enter__.return_value.execute.call_args.args[0]
     assert "intake_profile_id" in query and "status NOT IN" in query
+
+
+def test_dispatch_loads_unsnapshotted_profiles_from_the_entity_store() -> None:
+    from scaled_evals.dispatch.worker import Dispatcher
+
+    gym = _create("gym", "gym", _VALID_GYM_CONFIG)
+    intake = _create("intake", "intake", {"workspace": "team", "app": "evals"})
+    row = {"framework": "gym", "framework_profile_id": gym["id"], "intake_profile_id": intake["id"]}
+
+    assert Dispatcher._profile_config(None, row, snapshot=None, role="framework") == _VALID_GYM_CONFIG
+    assert Dispatcher._profile_config(None, row, snapshot=None, role="intake")["app"] == "evals"
+    with pytest.raises(RuntimeError, match="harbor profile not found"):
+        Dispatcher._profile_config(None, {**row, "harbor_profile_id": gym["id"]}, snapshot=None, role="harbor")
 
 
 @pytest.mark.parametrize(
