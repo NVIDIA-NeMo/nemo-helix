@@ -88,7 +88,7 @@ def test_warns_when_it_cannot_apply(caplog: pytest.LogCaptureFixture, data: dict
 
 def test_safety_model_reaches_guardrails_without_a_workflow(caplog: pytest.LogCaptureFixture) -> None:
     """A workflow-less victim keeps the guardrails defender, so the safety model has a home."""
-    manifest = {"agent": {"name": "finance"}}
+    manifest: dict[str, Any] = {"agent": {"name": "finance"}}
 
     with caplog.at_level(logging.WARNING):
         _apply_manifest_overrides(manifest, {"defenders": ["guardrails"], "models": {"safety": {"model": "guard-1"}}})

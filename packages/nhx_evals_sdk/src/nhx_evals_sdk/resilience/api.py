@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Sequence
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from typing import ParamSpec, TypeVar, cast
+from typing import Any, ParamSpec, TypeVar, cast
 
 from nhx_evals_sdk.resilience.config import ResilienceConfig
 from nhx_evals_sdk.resilience.scheduler import ResilienceScheduler
@@ -88,7 +88,7 @@ async def run_with_resilience(
 
 async def run_indexed_tasks(
     indices: Sequence[int],
-    worker: Callable[[int], Awaitable[_T]],
+    worker: Callable[[int], Coroutine[Any, Any, _T]],
     *,
     parallelism: int,
 ) -> list[_T]:

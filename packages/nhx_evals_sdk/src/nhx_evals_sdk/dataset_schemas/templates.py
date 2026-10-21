@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -139,10 +139,11 @@ def _collect_expression_references(
     if isinstance(node, nodes.TemplateData | nodes.Const):
         return set()
     if isinstance(node, nodes.Filter):
-        references = _collect_expression_references(
-            node.node,
-            ignored_roots=ignored_roots,
-            ignored_names=ignored_names,
+        # A ``{% filter %}`` block's filter has no input expression of its own.
+        references = (
+            _collect_expression_references(node.node, ignored_roots=ignored_roots, ignored_names=ignored_names)
+            if node.node is not None
+            else set()
         )
         for arg in node.args:
             references.update(
@@ -254,7 +255,7 @@ def _collect_expression_references(
 
 def _collect_call_argument_references(
     *,
-    args: list[nodes.Node],
+    args: Sequence[nodes.Node],
     kwargs: list[nodes.Keyword],
     ignored_roots: set[str],
     ignored_names: set[str],

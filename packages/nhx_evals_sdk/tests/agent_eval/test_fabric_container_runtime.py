@@ -169,7 +169,8 @@ async def test_success_maps_evidence_contract(tmp_path: Path) -> None:
     # Same evidence keys/kinds FabricAgentRuntime + Codex produce, so metrics work unchanged.
     assert trial.evidence is not None
     ws = trial.evidence.require("workspace")
-    assert ws.kind == "filesystem" and Path(ws.ref).is_dir()  # type: ignore[arg-type]
+    assert ws.ref is not None
+    assert ws.kind == "filesystem" and Path(ws.ref).is_dir()
     trace = trial.evidence.require("trace")
     assert trace.kind == "trace" and trace.format == "atif"
     assert trial.evidence.require("result").kind == "json"
@@ -516,7 +517,9 @@ async def test_codex_skill_seeds_workspace_and_is_excluded_from_evidence(
     # ...then removed from the downloaded evidence (with its emptied .agents parents) before the workspace is
     # exposed, so the injected files don't read as agent output to workspace-reading metrics.
     assert trial.evidence is not None
-    workspace = Path(trial.evidence.require("workspace").ref)  # type: ignore[arg-type]
+    workspace_ref = trial.evidence.require("workspace").ref
+    assert workspace_ref is not None
+    workspace = Path(workspace_ref)
     assert not (workspace / ".agents").exists()
 
 
@@ -597,7 +600,9 @@ async def test_multiple_codex_skills_all_removed_from_evidence(tmp_path: Path, m
     assert _seeded_skill_paths(provider) == []
     assert [prov["name"] for prov in trial.metadata["skills"]] == ["docx", "pptx"]
     assert trial.evidence is not None
-    workspace = Path(trial.evidence.require("workspace").ref)  # type: ignore[arg-type]
+    workspace_ref = trial.evidence.require("workspace").ref
+    assert workspace_ref is not None
+    workspace = Path(workspace_ref)
     assert not (workspace / ".agents").exists()
 
 
@@ -652,7 +657,9 @@ async def test_same_skill_from_both_injection_and_task_files_fails_task(
 
     assert trial.status == AgentEvalTrialStatus.FAILED
     assert trial.evidence is not None
-    error = json.loads(Path(trial.evidence.require("error").ref).read_text())  # type: ignore[arg-type]
+    error_ref = trial.evidence.require("error").ref
+    assert error_ref is not None
+    error = json.loads(Path(error_ref).read_text())
     assert error["error_type"] == "SkillInjectionError"
     assert "also injected as the runtime skill 'code-review'" in error["error"]
 

@@ -37,6 +37,7 @@ def test_create_entity_excludes_unset_fields() -> None:
     body = EntityCreateInput(data={"colour": "blue"})
     prepared = endpoints.create_entity(workspace="default", entity_type="widget", body=body)
 
+    assert isinstance(prepared.content, bytes)
     content = json.loads(prepared.content)
     assert content == {"data": {"colour": "blue"}}
     assert "name" not in content
@@ -99,6 +100,7 @@ def test_update_entity_by_name_excludes_unset_fields() -> None:
     body = EntityUpdate(data={"colour": "red"})
     prepared = endpoints.update_entity_by_name(workspace="default", entity_type="widget", name="my-widget", body=body)
 
+    assert isinstance(prepared.content, bytes)
     content = json.loads(prepared.content)
     assert content == {"data": {"colour": "red"}}
     assert "new_name" not in content
