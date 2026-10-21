@@ -142,6 +142,26 @@ def test_create_with_no_tasks_returns_201_revision_1() -> None:
     assert duplicate.json()["detail"]["error"]["code"] == "slug_conflict"
 
 
+def test_concurrent_create_on_a_taken_slug_withdraws_the_later_benchmark(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scaled_evals.api.benchmark_store import BenchmarkStore
+    from scaled_evals.api.repositories.base_repository import Conflict
+
+    seed_benchmark("bm_first", slug="suite")
+    store = BenchmarkStore()
+    # Both creates passed the up-front check before either was written.
+    monkeypatch.setattr(store, "_ensure_slug_free", lambda slug, **_: None)
+
+    with pytest.raises(Conflict) as exc:
+        store.create_with_initial_revision(
+            "bm_second", name="Suite", slug="suite", description=None, visibility="private", tasks=[]
+        )
+
+    assert exc.value.code == "slug_conflict"
+    holder = store.get_by_slug("suite")
+    assert holder is not None and holder["id"] == "bm_first"
+    assert client.get("/v1/benchmarks/bm_second").status_code == 404
+
+
 def test_create_validates_task_members() -> None:
     seed_task_revision("task_a", 2)
     floating = client.post("/v1/benchmarks", json={"name": "Floating", "tasks": [{"task_id": "task_a"}]})

@@ -513,6 +513,29 @@ def test_preflight_run_reports_bounded_member_failure() -> None:
     assert summary["failures"][0]["code"] == "task_not_ready"
 
 
+def test_preflight_run_blocks_a_soft_deleted_member_task() -> None:
+    from scaled_evals.api.task_store import TaskStore
+
+    conn = _conn(members=[_member(0), _member(1)])
+    _use_conn(conn)
+    # Task deletion doesn't check benchmark pins, so a ready member can be deleted under the benchmark.
+    TaskStore().soft_delete("task_0")
+
+    response = client.post(
+        "/v1/benchmark-runs/preflight",
+        json={"name": "suite check", "benchmark_id": "bm_suite"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["runnable"] is False
+    summary = body["member_summary"]
+    assert (summary["total"], summary["ready"], summary["blocked"]) == (2, 1, 1)
+    failure = summary["failures"][0]
+    assert (failure["task_id"], failure["code"]) == ("task_0", "task_not_ready")
+    assert "'deleted'" in failure["message"]
+
+
 def test_preflight_run_truncates_large_member_failure_details() -> None:
     members = [_member(i, revision_status="building") for i in range(52)]
     conn = _conn(members=members)

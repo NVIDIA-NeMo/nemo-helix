@@ -195,6 +195,15 @@ def create_benchmark_import(
     )
     if row is None:
         existing_import = _owned_import(import_id, db, current)
+        if not existing_import["populated"]:
+            # ponytail: a creator killed mid-populate (not an exception, which
+            # deletes the import) leaves it in progress for good; upgrade path is
+            # a lease on updated_at that lets a later create take it over.
+            raise _http_error(
+                409,
+                "benchmark_import_in_progress",
+                "an identical benchmark import is still being created; retry shortly",
+            )
         _attach_images(import_id, body.images, db)
         response.status_code = 200
         return _detail(db, existing_import)

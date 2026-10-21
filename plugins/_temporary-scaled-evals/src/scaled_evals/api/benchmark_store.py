@@ -133,10 +133,17 @@ class BenchmarkStore:
         raise Conflict("benchmark_changed", "benchmark changed concurrently; retry")
 
     def _ensure_slug_free(self, slug: str, *, benchmark_id: str | None = None) -> None:
-        # ponytail: check-then-write, so two concurrent writes claiming the
-        # same slug can both land, as for tasks.
+        # ponytail: check-then-write, as for tasks. Concurrent creates are settled
+        # afterwards by `_slug_owner`; a concurrent rename onto a taken slug can
+        # still land. Entity Store has no secondary unique index, and naming the
+        # entity by slug would break the ids benchmark runs reference.
         if any(entity.slug == slug and entity.name != benchmark_id for entity in self._live()):
             raise Conflict("slug_conflict", f"slug already exists: {slug}")
+
+    def _slug_owner(self, slug: str) -> ScaledEvalsBenchmark | None:
+        """Return the oldest live benchmark with `slug`, so every reader agrees on one."""
+        holders = [entity for entity in self._live() if entity.slug == slug]
+        return min(holders, key=lambda entity: (entity.created_at, entity.name), default=None)
 
     def _create(
         self,
@@ -159,7 +166,13 @@ class BenchmarkStore:
             current_revision=revision.revision,
             revisions=[revision],
         )
-        return _row(self._client.create(entity))
+        created = self._client.create(entity)
+        owner = self._slug_owner(slug)
+        if owner is not None and owner.name != benchmark_id:
+            # A concurrent create took the slug first; withdraw this one.
+            self.soft_delete(benchmark_id)
+            raise Conflict("slug_conflict", f"slug already exists: {slug}")
+        return _row(created)
 
     def create_with_initial_revision(
         self,
@@ -269,7 +282,7 @@ class BenchmarkStore:
         return _row(entity) if entity is not None else None
 
     def get_by_slug(self, slug: str) -> dict[str, Any] | None:
-        entity = next((entity for entity in self._live() if entity.slug == slug), None)
+        entity = self._slug_owner(slug)
         return _row(entity) if entity is not None else None
 
     def slug(self, benchmark_id: str) -> str | None:

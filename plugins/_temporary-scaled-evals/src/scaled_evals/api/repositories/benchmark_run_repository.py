@@ -325,7 +325,8 @@ class BenchmarkRunRepository:
         """Member tasks of a benchmark revision, each resolved to a task revision.
 
         `revision_status` and the image fields are None when the resolved
-        revision does not exist; the router validates `ready`.
+        revision does not exist, and `revision_status` is ``deleted`` for a
+        soft-deleted task, which can't be run; the router validates `ready`.
         """
         rows = BenchmarkStore().members(benchmark_id, revision)
         return [
@@ -334,7 +335,7 @@ class BenchmarkRunRepository:
                 "position": member["position"],
                 "task_revision": revision["revision"] if revision else task["current_revision"],
                 "task_slug": task["slug"],
-                "revision_status": revision["status"] if revision else None,
+                "revision_status": "deleted" if task["deleted"] else revision["status"] if revision else None,
                 **{
                     field: revision[field] if revision else None
                     for field in ("image_ref", "image_digest", "tarball_object_key")

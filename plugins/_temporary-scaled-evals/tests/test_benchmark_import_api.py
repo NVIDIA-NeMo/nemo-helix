@@ -139,6 +139,7 @@ def test_resumed_import_attaches_opaque_image_metadata_idempotently() -> None:
         "manifest": manifest,
         "visibility": "public",
         "description": None,
+        "populated": True,
         "created_at": now,
         "updated_at": now,
     }
@@ -201,6 +202,47 @@ def test_failed_import_create_leaves_no_import() -> None:
     assert exc.value.status_code == 409
     import_id = import_id_for("usr_test", body.manifest_sha256, "private")
     assert BenchmarkImportStore().get(import_id, owner_id="usr_test") is None
+
+
+def test_identical_create_while_the_first_is_populating_is_a_conflict() -> None:
+    manifest = {
+        "schema_version": 1,
+        "catalog_id": "fixture",
+        "visibility": "private",
+        "source": {"type": "git", "commit": "b" * 40},
+        "tasks": [{"name": "Task", "slug": "task", "pack": "packs/task.tar.gz", "pack_sha256": "c" * 64}],
+        "benchmarks": [{"name": "Bench", "slug": "bench", "tasks": ["task"]}],
+    }
+    body = BenchmarkImportCreate.model_validate(
+        {"manifest_sha256": canonical_manifest_sha256(manifest), "manifest": manifest, "visibility": "private"}
+    )
+    import_id = import_id_for("usr_test", body.manifest_sha256, "private")
+    store = BenchmarkImportStore()
+    # The first create has made the entity but not yet written its tasks and benchmarks.
+    store.create(
+        import_id,
+        owner_id="usr_test",
+        manifest_sha256=body.manifest_sha256,
+        manifest=manifest,
+        visibility="private",
+        description=None,
+    )
+    current = CurrentPrincipal(owner_type="user", owner_id="usr_test")
+
+    with pytest.raises(HTTPException) as exc:
+        create_benchmark_import(body, Database(MagicMock()), current, Response())
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail == {
+        "error": {
+            "code": "benchmark_import_in_progress",
+            "message": "an identical benchmark import is still being created; retry shortly",
+            "details": {},
+        }
+    }
+    # The in-progress import is left alone for its creator to finish.
+    existing = store.get(import_id, owner_id="usr_test")
+    assert existing is not None and existing["populated"] is False
 
 
 def test_public_import_promotes_reused_owned_task_visibility() -> None:

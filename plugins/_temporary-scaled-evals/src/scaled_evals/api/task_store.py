@@ -550,7 +550,8 @@ class TaskStore:
                 continue
             number = member["task_revision"] if member["task_revision"] is not None else entity.current_revision
             rev = _revision(entity, number) if number is not None else None
-            resolved.append((member, _task_row(entity), self._view(entity, rev) if rev else None))
+            task = {**_task_row(entity), "deleted": entity.deleted_at is not None}
+            resolved.append((member, task, self._view(entity, rev) if rev else None))
         return resolved
 
     def tasks(self, task_ids: Iterable[str]) -> dict[str, dict[str, Any]]:

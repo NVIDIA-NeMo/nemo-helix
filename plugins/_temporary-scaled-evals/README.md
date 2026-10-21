@@ -382,20 +382,23 @@ Tasks are `scaled_evals_task` entities in the same workspace, with their
 revisions and build state embedded. The build queue claims a revision by
 rewriting its task entity, so build heartbeats also move the task's
 `updated_at`. A write that loses a concurrent update retries, then returns
-`409 task_changed`. Slug uniqueness is checked before the write, so two
-simultaneous creates with the same slug can both succeed. A task referenced by
+`409 task_changed`. Slug uniqueness is checked before the write, and of two
+simultaneous creates with the same slug the later one is withdrawn with
+`409 slug_conflict`; a simultaneous rename onto a taken slug can still land. A
+task referenced by
 a non-terminal evaluation cannot be deleted (`409 task_in_use`). Benchmark and
 benchmark-run member lists skip tasks or revisions that no longer exist.
 
 Benchmarks are `scaled_evals_benchmark` entities with their revisions and
 member pins embedded; a write that loses a concurrent update returns
-`409 benchmark_changed`, and slug uniqueness is checked before the write as for
-tasks. Benchmark imports are `scaled_evals_benchmark_import` entities whose id
-is derived from the owner, manifest digest, and visibility, so a repeated create
-resumes the existing import. A create racing an identical one can return the
-other's import while it is still being populated. A create that fails partway
-deletes its import; task revisions it already allocated remain as unused
-uploads.
+`409 benchmark_changed`, and slugs are kept unique as for tasks. A benchmark
+run's preflight blocks a member whose task was deleted. Benchmark imports are
+`scaled_evals_benchmark_import` entities whose id is derived from the owner,
+manifest digest, and visibility, so a repeated create resumes the existing
+import. A create racing an identical one returns
+`409 benchmark_import_in_progress` until the first has finished populating it.
+A create that fails partway deletes its import; task revisions it already
+allocated remain as unused uploads.
 
 Each evaluation Job may run for every sequential trial wave
 (`ceil(n_attempts / parallelism)`) times the profile's sandbox
