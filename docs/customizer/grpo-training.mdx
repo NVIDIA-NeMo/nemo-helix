@@ -550,6 +550,7 @@ GRPO fails at submit, before any GPU is claimed, unless the platform operator ha
 | `NHX_RL_JOB_STORAGE_PVC_CLAIM`                                     | The Gym sandbox mounts the job-storage claim itself to read the downloaded environment and dataset, and only learns the claim by name                                                                                              |
 | `NHX_RL_SANDBOX_ALLOW_INTERNET`                                    | Needed whenever an environment's venv build has to reach a package index — every `native-v1` package and any wheels package whose closure is incomplete. Converter-built `adapter-wheels-v1` packages do not need it at job start. |
 | `NHX_RL_SANDBOX_PUBLIC_DNS_ALLOW`                                  | Extra hosts, consulted only when the above is on. The built-in allowance covers `*.com` and `*.org`, so a host on another TLD (for example `hub.primeintellect.ai`) must be named                                                  |
+| `networkPolicies.jobSteps.enabled`                                 | Off by default. Set it `true` so the jobs controller installs a per-step ingress NetworkPolicy. Without it the sandbox can reach the training pod's Ray ports. The cluster CNI must enforce NetworkPolicy, and the admission policy needs Kubernetes 1.30+ (or 1.28+ with the ValidatingAdmissionPolicy beta API). |
 
 If a submit fails on either of the first two, that is a platform configuration gap, not a problem with your package. Neither is settable per job.
 

@@ -74,3 +74,20 @@ create_platform_secrets() {
         log_warn "HF_TOKEN not set, skipping HuggingFace token secret"
     fi
 }
+
+# Waits for Cilium when the cluster runs it. When MINIKUBE_CNI=cilium was requested
+# but the profile lacks it, warns that NetworkPolicy resources (networkPolicies.*
+# chart values) will be accepted but not enforced. minikube's default docker-driver
+# CNI ignores NetworkPolicy, and --cni only takes effect when the profile is created.
+check_minikube_network_policy_cni() {
+    local profile="$1" cni="$2"
+    local kubectl_ns=(kubectl --context "${profile}" -n kube-system)
+    if "${kubectl_ns[@]}" get daemonset cilium >/dev/null 2>&1; then
+        log_info "Waiting for Cilium (NetworkPolicy enforcement)..."
+        "${kubectl_ns[@]}" rollout status daemonset/cilium --timeout=5m
+        "${kubectl_ns[@]}" rollout status deployment/cilium-operator --timeout=5m
+    elif [ -n "${cni}" ] && [ "${cni}" != "auto" ]; then
+        log_warn "Profile ${profile} is running without an enforcing CNI, so NetworkPolicy is not enforced."
+        log_warn "Recreate it to enforce: minikube delete -p ${profile} && MINIKUBE_CNI=cilium rerun this script"
+    fi
+}

@@ -345,6 +345,8 @@ jobs:
         shm_size:
       # Pod security context for the Kubernetes job pods.
       pod_security_context: {}
+      # Create an ingress NetworkPolicy for each step that declares `network`. Requires a NetworkPolicy-enforcing CNI and controller RBAC on networking.k8s.io/networkpolicies. | default: False
+      step_network_policies_enabled: false
       # Image pull secrets for the Kubernetes job pods.
       image_pull_secrets: []
       # Metadata to add to each job object in the Kubernetes job.
@@ -427,6 +429,8 @@ jobs:
         shm_size:
       # Pod security context for the Kubernetes job pods.
       pod_security_context: {}
+      # Create an ingress NetworkPolicy for each step that declares `network`. Requires a NetworkPolicy-enforcing CNI and controller RBAC on networking.k8s.io/networkpolicies. | default: False
+      step_network_policies_enabled: false
       # Image pull secrets for the Kubernetes job pods.
       image_pull_secrets: []
       # Metadata to add to each job object in the Kubernetes job.

@@ -14,6 +14,7 @@ import httpx
 import pytest
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.deployment import DeploymentParams, ToolCallParams
+from nemo_helix_plugin.jobs.providers import DistributedGPUExecutionProvider, GPUExecutionProvider
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.models.types import ModelEntity
 from nhx.automodel.adapter import automodel_spec_to_compiler_output
@@ -173,7 +174,6 @@ def test_compile_training_step_sets_shm_by_finetuning_type(
         training=SFTTraining(peft=peft, learning_rate=1e-4, batch_size=4, micro_batch_size=1, max_seq_length=2048),
         output=_output(output_type=output_type),
     )
-    from nemo_helix_plugin.jobs.providers import DistributedGPUExecutionProvider, GPUExecutionProvider
 
     step = compile_training_step(job_output, base_env=[], me=_make_mock_model_entity())
     executor = step.executor

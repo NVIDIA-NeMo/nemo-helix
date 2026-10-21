@@ -42,6 +42,7 @@ from nhx.core.jobs.controllers.backends.base import (
 from nhx.core.jobs.controllers.backends.exceptions import SchedulingDeferred
 from nhx.core.jobs.controllers.backends.kubernetes.common import (
     BaseKubernetesExecutionProfileConfig,
+    adopt_step_network_policy,
     build_event_field_selector,
     build_metadata,
     classify_task_containers,
@@ -49,7 +50,9 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     common_labels_for_step,
     create_configmap,
     create_pod_template_spec,
+    create_step_network_policy,
     delete_configmap,
+    delete_step_network_policy,
     get_namespace_from_environment,
     image_pull_backoff_failure,
     last_task_exit_time,
@@ -117,6 +120,7 @@ class VolcanoJobBackend(
         self._core_v1 = client.CoreV1Api()
         self._custom_v1 = client.CustomObjectsApi()
         self._batch_v1 = client.BatchV1Api()
+        self._networking_v1 = client.NetworkingV1Api()
         self.namespace = self._execution_profile_config.namespace or get_namespace_from_environment()
         self._workload_delegation_store = create_authenticated_workload_delegation_store(self._nemo_client)
         self._workload_delegations = KubernetesPodBoundWorkloadDelegationManager(
@@ -131,6 +135,7 @@ class VolcanoJobBackend(
     def shutdown(self):
         self._core_v1.api_client.close()
         self._custom_v1.api_client.close()
+        self._networking_v1.api_client.close()
         return
 
     def _workload_delegation_target_for_volcano_job(
@@ -253,6 +258,11 @@ class VolcanoJobBackend(
             namespace=self.namespace,
             step=step,
         )
+        network_policy_name = (
+            create_step_network_policy(self._networking_v1, self.namespace, step)
+            if self._execution_profile_config.step_network_policies_enabled
+            else None
+        )
 
         pod_template = create_pod_template_spec(
             step,
@@ -372,15 +382,12 @@ class VolcanoJobBackend(
             volcano_job_spec["maxRetry"] = self._execution_profile_config.max_retry
 
         try:
-            self._custom_v1.create_namespaced_custom_object(
+            created = self._custom_v1.create_namespaced_custom_object(
                 group="batch.volcano.sh",
                 version="v1alpha1",
                 namespace=self.namespace,
                 plural="jobs",
                 body=volcano_job,
-            )
-            logger.info(
-                "Scheduled job step with Volcano job", extra={"job_name": job_name, "namespace": self.namespace}
             )
         except ApiException as e:
             if e.status == 404:
@@ -400,6 +407,7 @@ class VolcanoJobBackend(
                     namespace=self.namespace,
                     name=configmap_name,
                 )
+                self._delete_step_network_policy(network_policy_name)
                 return JobUpdate(
                     status=HelixJobStatus.ERROR,
                     error_details={
@@ -407,15 +415,25 @@ class VolcanoJobBackend(
                         "reason": "VolcanoNotInstalled",
                     },
                 )
-            else:
-                logger.exception(
-                    "Failed to create Volcano Job",
-                    extra={"job_name": job_name, "namespace": self.namespace, "error_message": e.reason},
-                )
-                raise
+            logger.exception(
+                "Failed to create Volcano Job",
+                extra={"job_name": job_name, "namespace": self.namespace, "error_message": e.reason},
+            )
+            self._delete_step_network_policy(network_policy_name)
+            raise
         except Exception:
             logger.exception("Failed to create Volcano Job", extra={"job_name": job_name, "namespace": self.namespace})
+            self._delete_step_network_policy(network_policy_name)
             raise
+        logger.info("Scheduled job step with Volcano job", extra={"job_name": job_name, "namespace": self.namespace})
+        uid = created.get("metadata", {}).get("uid") if isinstance(created, dict) else None
+        if network_policy_name and uid:
+            adopt_step_network_policy(
+                self._networking_v1,
+                self.namespace,
+                network_policy_name,
+                client.V1OwnerReference(api_version="batch.volcano.sh/v1alpha1", kind="Job", name=job_name, uid=uid),
+            )
         return JobUpdate(
             status=HelixJobStatus.PENDING, status_details={"message": "Job scheduled with Volcano backend"}
         )
@@ -713,6 +731,9 @@ class VolcanoJobBackend(
                     self._workload_delegations.revoke_for_target(target)
                 else:
                     self._workload_delegations.ensure_for_target(step, target)
+        phase = (job.get("status") or {}).get("state", {}).get("phase")
+        if status in HelixJobStatus.terminals() and phase in ("Completed", "Failed"):
+            self._delete_step_network_policy(job.get("metadata", {}).get("name"))
         return JobUpdate(status=status, status_details=status_details)
 
     def enforce_image_pull_ttl(self, step: HelixJobStepWithContext, volcano_job: dict) -> JobUpdate | None:
@@ -856,6 +877,12 @@ class VolcanoJobBackend(
                 namespace=self.namespace,
                 name=job_name,
             )
+            self._delete_step_network_policy(job_name)
+
+    def _delete_step_network_policy(self, name: str | None) -> None:
+        if not name or not self._execution_profile_config.step_network_policies_enabled:
+            return
+        delete_step_network_policy(self._networking_v1, self.namespace, name)
 
 
 def map_volcano_job_status_to_platform_status(status: dict) -> tuple[HelixJobStatus, dict]:
