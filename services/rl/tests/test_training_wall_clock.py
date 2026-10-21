@@ -285,3 +285,19 @@ def test_result_json_omits_duration_when_training_never_started(
 
     assert result.training_duration_seconds is None
     assert written_duration(tmp_path) is None
+
+
+def test_postprocessing_reports_that_it_is_finalizing_the_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Converting or copying a large checkpoint can run for minutes after the last step."""
+    sent: list[str] = []
+    backend = MagicMock()
+    backend.find_best_checkpoint.return_value = tmp_path / "ckpt"
+    backend.process_checkpoint.side_effect = lambda *a, **k: sent.append("process")
+    runner = ScriptedRunner(tmp_path, duration=1.0, compile_config=MagicMock, backend=backend)
+    monkeypatch.setattr(runner._progress, "report_running", lambda reported, **details: sent.append(reported))
+
+    runner._postprocess_phase(None, TrainingMetrics(), MagicMock())
+
+    assert sent == ["finalizing_checkpoint", "process"]

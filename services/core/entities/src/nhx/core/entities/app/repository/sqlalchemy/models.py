@@ -47,6 +47,7 @@ class DBWorkspace(Base):
     updated_by: Mapped[str] = mapped_column(String(255), nullable=True, default=same_as("created_by"))
 
     deletion_stage: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    deletion_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (Index("idx_workspaces_created", "created_at"),)
 
@@ -63,6 +64,7 @@ class DBWorkspace(Base):
         )
         if self.deletion_stage is not None:
             workspace._deletion_stage = WorkspaceDeletionStage(self.deletion_stage)
+        workspace._deletion_error = self.deletion_error
         return workspace
 
 

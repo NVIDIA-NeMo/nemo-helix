@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useAgentOptimizationListStrategies } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
-import { Block, Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
+import { Banner, Block, Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { StartOptionCards } from '@studio/components/StartOptions/StartOptionCards';
 import { CONTENT_WIDTH } from '@studio/components/StartOptions/tile';
-import { strategyOptions } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect/constants';
-import type {
-  OptimizationStrategyId,
-  OptimizationStrategySelectProps,
-} from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect/types';
+import {
+  strategyOptions,
+  UPLOAD_CONFIG_OPTION_ID,
+} from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect/constants';
+import type { OptimizationStrategySelectProps } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect/types';
 import { ChevronLeft } from 'lucide-react';
 import type { FC } from 'react';
 
@@ -21,16 +21,26 @@ import type { FC } from 'react';
  * There is nothing to fill in after picking, so a card goes straight to its strategy rather than
  * waiting on a Continue footer. Nothing is pre-selected, so every card fires on click.
  *
- * Strategies that come from an optional plugin are checked against the platform's installed
- * strategies, so a tile only opens when the job it would submit can actually run.
+ * The tiles are the platform's installed strategies, so a tile only opens when the job it would
+ * submit can actually run, and a newly installed strategy shows up without a Studio change.
  */
 export const OptimizationStrategySelect: FC<OptimizationStrategySelectProps> = ({
   agentName,
   onBack,
   onSelect,
+  onUploadConfig,
 }) => {
-  const { data: strategies, isError } = useAgentOptimizationListStrategies();
-  const installed = isError ? [] : strategies?.data?.map((strategy) => strategy.name);
+  const { data, isError } = useAgentOptimizationListStrategies();
+  const strategies = data?.data ?? [];
+
+  const select = (name: string) => {
+    if (name === UPLOAD_CONFIG_OPTION_ID) {
+      onUploadConfig();
+      return;
+    }
+    const strategy = strategies.find((candidate) => candidate.name === name);
+    if (strategy) onSelect(strategy);
+  };
 
   return (
     <Stack className="h-full min-h-0 w-full">
@@ -51,11 +61,19 @@ export const OptimizationStrategySelect: FC<OptimizationStrategySelectProps> = (
       <Block className="min-h-0 flex-1 overflow-auto pb-6 [scrollbar-gutter:stable]">
         <Flex justify="center" className="w-full">
           <Stack className={CONTENT_WIDTH}>
-            <StartOptionCards
-              options={strategyOptions(installed)}
-              value={null}
-              onChange={(id) => onSelect(id as OptimizationStrategyId)}
-            />
+            {isError ? (
+              <Banner status="error" kind="inline">
+                <Text kind="body/regular/sm">
+                  Could not load the optimization strategies installed on this platform.
+                </Text>
+              </Banner>
+            ) : (
+              <StartOptionCards
+                options={strategyOptions(strategies)}
+                value={null}
+                onChange={select}
+              />
+            )}
           </Stack>
         </Flex>
       </Block>

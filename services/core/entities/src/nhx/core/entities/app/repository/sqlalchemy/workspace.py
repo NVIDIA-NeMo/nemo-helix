@@ -19,6 +19,16 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 logger = logging.getLogger(__name__)
 
+_DELETION_ERROR_MAX_LENGTH = 2000
+
+
+def _stored_deletion_error(deletion_error: str) -> str:
+    """Collapse whitespace and cap the text persisted for a failed cleanup."""
+    message = " ".join(deletion_error.split())
+    if len(message) <= _DELETION_ERROR_MAX_LENGTH:
+        return message
+    return message[: _DELETION_ERROR_MAX_LENGTH - 3] + "..."
+
 
 class SQLAlchemyWorkspaceRepository(WorkspaceRepositoryInterface):
     """SQLAlchemy implementation of Workspace repository."""
@@ -242,6 +252,7 @@ class SQLAlchemyWorkspaceRepository(WorkspaceRepositoryInterface):
         *,
         name: str,
         expected_updated_at: datetime,
+        deletion_error: str,
         session: AsyncSession | None = None,
     ) -> bool:
         """Mark a deletion failed only while holding its current lease."""
@@ -255,6 +266,7 @@ class SQLAlchemyWorkspaceRepository(WorkspaceRepositoryInterface):
                 )
                 .values(
                     deletion_stage=WorkspaceDeletionStage.FAILED,
+                    deletion_error=_stored_deletion_error(deletion_error),
                     updated_at=_utcnow(),
                 )
                 .returning(DBWorkspace.id)

@@ -7,10 +7,12 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.entity_client import NemoPaginationInfo, get_entity_client
 from nemo_insights_plugin.entities import Insight
+from nemo_insights_plugin.evidence import TraceEvidence
 from nemo_insights_plugin.service import InsightsService
 from nhx.intake.entities.experiments import ExperimentGroup
 from nhx.intake.spans.api.dependencies import get_spans_service
@@ -43,6 +45,75 @@ def test_service_exposes_analysis_runs_without_legacy_job_routes() -> None:
     assert not any("/jobs/" in path for path in paths)
 
 
+def test_api_returns_converted_evidence_and_persists_span_updates() -> None:
+    entity_client = AsyncMock()
+    insight = Insight.model_validate(
+        {
+            "name": "stable-name",
+            "workspace": "default",
+            "title": "Original title",
+            "description": "Original description",
+            "agent": "test-agent",
+            "trace_refs": ["trace-a"],
+            "trace_links": {"trace-a": "https://provider/trace-a"},
+        }
+    )
+    insight._id = "insight-a"
+    entity_client.get_by_id.return_value = insight
+    entity_client.update.side_effect = lambda item: item
+    client = TestClient(_app(entity_client, AsyncMock()))
+    response = client.get("/v2/workspaces/default/insights/insight-a")
+    assert response.status_code == 200
+    assert "trace_refs" not in response.json()
+    assert response.json()["evidence"][0]["url"] == "https://provider/trace-a"
+    response = client.patch(
+        "/v2/workspaces/default/insights/insight-a",
+        json={
+            "evidence": [{"trace_id": "trace-a", "spans": [{"span_id": "child"}]}],
+            "updated_date": "2026-10-07T12:00:00Z",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["evidence"][0]["spans"][0]["span_id"] == "child"
+    assert data["updated_date"] == "2026-10-07T12:00:00Z"
+    assert (data["id"], data["name"], data["title"], data["description"]) == (
+        "insight-a",
+        "stable-name",
+        "Original title",
+        "Original description",
+    )
+
+
+@pytest.mark.parametrize("severity,confidence", [(None, None), ("high", "med")])
+def test_api_preserves_optional_ratings_through_create_and_evidence_update(severity, confidence):
+    entity_client = AsyncMock()
+    entity_client.create.side_effect = lambda item: item
+    entity_client.update.side_effect = lambda item: item
+    client = TestClient(_app(entity_client, AsyncMock()))
+    response = client.post(
+        "/v2/workspaces/default/insights",
+        json={
+            "title": "Issue",
+            "description": "Details",
+            "agent": "test-agent",
+            "severity": severity,
+            "confidence": confidence,
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["severity"] == severity
+    assert response.json()["confidence"] == confidence
+    entity_client.get_by_id.return_value = entity_client.create.await_args.args[0]
+    response = client.patch("/v2/workspaces/default/insights/insight-a", json={"evidence": [{"trace_id": "a"}]})
+    assert response.status_code == 200
+    assert response.json()["severity"] == severity
+    assert response.json()["confidence"] == confidence
+    response = client.patch("/v2/workspaces/default/insights/insight-a", json={"severity": None})
+    assert response.status_code == 200
+    assert response.json()["severity"] is None
+
+
 def test_list_insights_enriches_the_page_with_counts_and_last_seen_at() -> None:
     entity_client = AsyncMock()
     spans_service = AsyncMock()
@@ -51,8 +122,8 @@ def test_list_insights_enriches_the_page_with_counts_and_last_seen_at() -> None:
         _insight("second", "insight-b"),
         _insight("third", "insight-c"),
     ]
-    insights[0].trace_refs = ["trace-old", "trace-new"]
-    insights[1].trace_refs = ["trace-missing"]
+    insights[0].evidence = [TraceEvidence(trace_id=ref) for ref in ["trace-old", "trace-new"]]
+    insights[1].evidence = [TraceEvidence(trace_id="trace-missing")]
     entity_client.list.return_value = SimpleNamespace(
         data=insights,
         pagination=NemoPaginationInfo(
@@ -92,3 +163,28 @@ def test_list_insights_enriches_the_page_with_counts_and_last_seen_at() -> None:
             "insight-c": [],
         },
     )
+
+
+def test_normalized_openapi_preserves_nullable_insight_fields():
+    from jsonschema import Draft202012Validator
+
+    from script.generate_openapi_spec import apply_standard_schema_fixes
+
+    spec = apply_standard_schema_fixes(_app(AsyncMock(), AsyncMock()).openapi())
+    for name in ("Insight", "InsightListItem", "CreateInsightRequest", "UpdateInsightRequest"):
+        for field in ("severity", "confidence"):
+            validator = Draft202012Validator(spec["components"]["schemas"][name]["properties"][field])
+            for value in (None, "low", "med", "high"):
+                validator.validate(value)
+            assert not validator.is_valid("critical")
+        date_schema = spec["components"]["schemas"][name]["properties"]["updated_date"]
+        assert date_schema["format"] == "date-time"
+        validator = Draft202012Validator(date_schema)
+        validator.validate(None)
+        validator.validate("2026-10-14T12:00:00Z")
+        assert not validator.is_valid(123)
+    for name in ("SpanEvidence", "TraceEvidence"):
+        validator = Draft202012Validator(spec["components"]["schemas"][name]["properties"]["url"])
+        validator.validate(None)
+        validator.validate("https://provider.example/evidence")
+        assert not validator.is_valid(123)

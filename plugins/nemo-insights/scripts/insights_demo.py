@@ -327,7 +327,7 @@ class DemoAPI:
                 "description": insight.description,
                 "agent": "insights-demo-agent",
                 "status": insight.status,
-                "trace_refs": [],
+                "evidence": [],
             },
         )
         return str(response.json()["id"])
@@ -336,7 +336,7 @@ class DemoAPI:
         self._request(
             "PATCH",
             _workspace_path("insights", f"/insights/{insight_id}"),
-            json={"trace_refs": list(trace_refs)},
+            json={"evidence": [{"trace_id": ref} for ref in trace_refs]},
         )
 
     def create_group(self, group: GroupSpec, insight_id: str) -> str:

@@ -25,6 +25,7 @@ from nemo_helix_plugin.client.errors import (
 from nemo_helix_plugin.deployment import DeploymentParams, is_unbound_deployment_config
 from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH
 from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.models.types import (
     ContainerExecutorConfig,
@@ -50,12 +51,15 @@ from nemo_helix_plugin.models.types import (
     FinetuningType as ModelsFinetuningType,
 )
 from nhx.common.client_factory import get_task_nemo_client
+from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.customization_common.schemas.model_entity import (
     ModelEntityCreationError,
+    ModelEntityPhase,
     ModelEntityTaskConfig,
 )
 from nhx.customization_common.schemas.values import FinetuningType
 from nhx.customization_common.service.context import NHXJobContext
+from nhx.customization_common.tasks.file_io_progress_reporter import JobsServiceProgressReporter
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
@@ -588,6 +592,12 @@ def run(
     client_owned = client is None
     try:
         client = client or get_task_nemo_client(service_name)
+        progress_reporter = JobsServiceProgressReporter.create_progress_reporter(
+            JobsClient.from_client(client), job_ctx
+        )
+        progress_reporter.update_progress(
+            status=HelixJobStatus.ACTIVE, status_details={"phase": ModelEntityPhase.REGISTERING_MODEL}
+        )
         runner = ModelEntityRunner(
             models=ModelsClient.from_client(client),
             files=FilesClient.from_client(client),
@@ -611,6 +621,9 @@ def run(
         logger.info(f"Model entity creation complete: {result}")
 
         runner.launch_model(config, deploy_target)
+        progress_reporter.update_progress(
+            status=HelixJobStatus.COMPLETED, status_details={"phase": ModelEntityPhase.COMPLETED}
+        )
         return 0
 
     except ModelEntityCreationError as e:

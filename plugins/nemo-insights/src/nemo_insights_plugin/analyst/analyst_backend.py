@@ -48,7 +48,8 @@ from nemo_helix_plugin.intake.client import AsyncIntakeClient
 from nemo_helix_plugin.intake.types import SpanMode
 from nemo_helix_plugin.schema import PaginationData
 from nemo_insights_plugin.analyst.result import AnalystResult
-from nemo_insights_plugin.entities import Insight, InsightStatus
+from nemo_insights_plugin.entities import Insight, InsightRating, InsightStatus
+from nemo_insights_plugin.evidence import TraceEvidence, merge_evidence
 from nemo_insights_plugin.schema import InsightListItem, InsightPage
 from pydantic import BaseModel, JsonValue
 
@@ -62,17 +63,6 @@ class InsightNotFoundError(Exception):
 def _dump(item: BaseModel) -> dict[str, object]:
     """Serialize one SDK model to a plain JSON-able dict (drop null fields)."""
     return item.model_dump(mode="json", exclude_none=True)
-
-
-def _union_refs(existing: list[str] | None, new: list[str] | None) -> list[str]:
-    """Append *new* refs to *existing*, de-duplicating and preserving order."""
-    merged = list(existing or [])
-    seen = set(merged)
-    for ref in new or []:
-        if ref not in seen:
-            merged.append(ref)
-            seen.add(ref)
-    return merged
 
 
 async def _drain(paginator: AsyncIterable[BaseModel], *, limit: int) -> tuple[list[BaseModel], bool]:
@@ -381,7 +371,10 @@ def _insight_to_record(insight: Insight, *, workspace: str) -> dict:
         "agent": insight.agent,
         "description": insight.description,
         "status": insight.status.value,
-        "trace_refs": list(insight.trace_refs),
+        "evidence": [item.model_dump(mode="json", exclude_none=True) for item in insight.evidence],
+        "updated_date": insight.updated_date.isoformat() if insight.updated_date else None,
+        "severity": insight.severity,
+        "confidence": insight.confidence,
         "created_at": insight.created_at.isoformat() if insight.created_at else None,
         "updated_at": insight.updated_at.isoformat() if insight.updated_at else None,
     }
@@ -465,7 +458,7 @@ class RemoteAnalystBackend(AnalystBackend):
 
         New insights are created with their evidence; the store auto-assigns a
         unique slug name and an id. Existing insights are referenced by id —
-        only trace refs are appended. Whatever the platform stored is then
+        trace and span evidence is merged, retaining the latest evidence timestamp. Whatever the platform stored is then
         mirrored to the local file, if one is configured.
         """
         lines: list[str] = []
@@ -478,19 +471,23 @@ class RemoteAnalystBackend(AnalystBackend):
                 agent=agent,
                 description=new.description,
                 status=new.status,
-                trace_refs=new.trace_refs or None,
+                evidence=new.evidence or None,
+                updated_date=new.updated_date,
+                severity=new.severity,
+                confidence=new.confidence,
             )
             stored.append(created)
-            lines.append(f"- created: {new.title} [{created.id}] ({len(new.trace_refs)} trace refs)")
+            lines.append(f"- created: {new.title} [{created.id}] ({len(new.evidence)} trace refs)")
 
         for upd in result.updated_insights:
             try:
-                if upd.trace_refs:
-                    updated = await self._add_trace_refs(
+                if upd.evidence:
+                    updated = await self._add_evidence(
                         workspace=workspace,
                         agent=agent,
                         insight_id=upd.id,
-                        trace_refs=upd.trace_refs,
+                        evidence=upd.evidence,
+                        updated_date=upd.updated_date,
                     )
                 else:
                     updated = await self._get(workspace=workspace, insight_id=upd.id)
@@ -498,7 +495,7 @@ class RemoteAnalystBackend(AnalystBackend):
                 lines.append(f"- skipped (insight not found): {upd.id}")
                 continue
             stored.append(updated)
-            lines.append(f"- updated: {upd.id} ({len(upd.trace_refs)} trace refs)")
+            lines.append(f"- updated: {upd.id} ({len(upd.evidence)} trace refs)")
 
         if not lines:
             lines.append("- no insights created or updated")
@@ -532,7 +529,10 @@ class RemoteAnalystBackend(AnalystBackend):
         agent: str,
         description: str,
         status: InsightStatus,
-        trace_refs: list[str] | None,
+        evidence: list[TraceEvidence] | None,
+        updated_date: datetime | None = None,
+        severity: InsightRating | None = None,
+        confidence: InsightRating | None = None,
     ) -> Insight:
         return await self._insights.create(
             workspace=workspace,
@@ -540,10 +540,21 @@ class RemoteAnalystBackend(AnalystBackend):
             agent=agent,
             description=description,
             status=status,
-            trace_refs=_union_refs(None, trace_refs),
+            evidence=merge_evidence([], evidence or []),
+            updated_date=updated_date,
+            severity=severity,
+            confidence=confidence,
         )
 
-    async def _add_trace_refs(self, *, workspace: str, agent: str, insight_id: str, trace_refs: list[str]) -> Insight:
+    async def _add_evidence(
+        self,
+        *,
+        workspace: str,
+        agent: str,
+        insight_id: str,
+        evidence: list[TraceEvidence],
+        updated_date: datetime | None = None,
+    ) -> Insight:
         current = await self._get(workspace=workspace, insight_id=insight_id)
         if current.workspace != workspace or current.agent != agent:
             raise ValueError(f"Insight {insight_id!r} no longer belongs to this workspace and agent")
@@ -551,7 +562,8 @@ class RemoteAnalystBackend(AnalystBackend):
             return await self._insights.update(
                 workspace=workspace,
                 insight_id=insight_id,
-                trace_refs=_union_refs(current.trace_refs, trace_refs),
+                evidence=merge_evidence(current.evidence, evidence),
+                updated_date=max(filter(None, [current.updated_date, updated_date]), default=None),
             )
         except (httpx.HTTPStatusError, NotFoundError) as exc:
             if _is_not_found(exc):
@@ -619,13 +631,16 @@ class LocalAnalystBackend(AnalystBackend):
                 "agent": agent,
                 "description": new.description,
                 "status": new.status.value,
-                "trace_refs": list(new.trace_refs),
+                "evidence": [item.model_dump(mode="json", exclude_none=True) for item in new.evidence],
+                "updated_date": new.updated_date.isoformat() if new.updated_date else None,
+                "severity": new.severity,
+                "confidence": new.confidence,
                 "created_at": now,
                 "updated_at": now,
             }
             records.append(record)
             by_id[(workspace, insight_id)] = record
-            lines.append(f"- created: {new.title} [{insight_id}] ({len(new.trace_refs)} trace refs)")
+            lines.append(f"- created: {new.title} [{insight_id}] ({len(new.evidence)} trace refs)")
 
         for upd in result.updated_insights:
             existing = by_id.get((workspace, upd.id))
@@ -634,9 +649,18 @@ class LocalAnalystBackend(AnalystBackend):
                 continue
             if existing.get("agent") != agent:
                 raise ValueError(f"Insight {upd.id!r} no longer belongs to this agent")
-            existing["trace_refs"] = _union_refs(existing.get("trace_refs"), upd.trace_refs)
+            current = Insight.model_validate(existing)
+            existing["evidence"] = [
+                item.model_dump(mode="json", exclude_none=True)
+                for item in merge_evidence(current.evidence, upd.evidence)
+            ]
+            latest = max(filter(None, [current.updated_date, upd.updated_date]), default=None)
+            if latest is not None:
+                existing["updated_date"] = latest.isoformat()
             existing["updated_at"] = now
-            lines.append(f"- updated: {upd.id} ({len(upd.trace_refs)} trace refs)")
+            for field in ("trace_refs", "trace_links", "span_refs", "span_links"):
+                existing.pop(field, None)
+            lines.append(f"- updated: {upd.id} ({len(upd.evidence)} trace refs)")
 
         if not lines:
             lines.append("- no insights created or updated")

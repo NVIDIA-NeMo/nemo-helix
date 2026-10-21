@@ -1601,6 +1601,21 @@ def test_authentik_kubernetes_test_action_runs_host_contracts() -> None:
     assert "--auth-idp-context" in output
 
 
+def test_authentik_kubernetes_test_action_collects_pod_logs_before_deleting_the_cluster() -> None:
+    output = _run_authentik_script(
+        "test",
+        "k8s",
+        "--dry-run",
+        env={"NHX_AUTHENTIK_K8S_RUNTIME": "kind", "NHX_AUTHENTIK_K8S_KEEP_CLUSTER": "0"},
+    )
+
+    collect = output.find("logs --all-containers --prefix --timestamps")
+    delete = output.find("kind delete cluster")
+    assert collect != -1, output
+    assert delete != -1, output
+    assert collect < delete
+
+
 def test_authentik_down_cleans_reused_compose_and_kubernetes_resources(tmp_path: Path) -> None:
     output = _run_authentik_script("down", "--dry-run", env={"NEMO_AUTHENTIK_STATE_DIR": str(tmp_path)})
 

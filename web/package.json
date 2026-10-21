@@ -21,7 +21,7 @@
     "deps:studio": "pnpm tsx packages/scripts/src/deps-check.ts packages/studio",
     "deps:common": "pnpm tsx packages/scripts/src/deps-check.ts packages/common",
     "deps:scripts": "pnpm tsx packages/scripts/src/deps-check.ts packages/scripts",
-    "dev": "concurrently -n app,storybook \"pnpm dev:app\" \"pnpm dev:storybook --no-open\"",
+    "dev": "concurrently -n app,storybook \"pnpm dev:app\" \"pnpm dev:storybook --ci\"",
     "dev:app": "pnpm --filter nemo-studio-ui start",
     "dev:storybook": "pnpm --filter @nemo/storybook storybook",
     "stg": "pnpm --filter nemo-studio-ui start:stg",

@@ -37,31 +37,42 @@ navigation:
             path: ../../run-inference/tutorials/run-inference.mdx
           - page: Deploy Models
             path: ../../run-inference/tutorials/deploy-models.mdx
+          - page: Virtual Models
+            path: ../../run-inference/virtual-models.mdx
       - section: Agents
         path: ../../agents/index.mdx
         contents:
-          - page: Deploy Agents
+          - page: Register Agents
+            path: ../../agents/register-agents.mdx
+          - section: Deploy Agents
             path: ../../agents/deploy-agents.mdx
-          - page: Sandboxed Deployments
-            path: ../../agents/sandboxed-deployments.mdx
-          - page: Add Guardrails
-            path: ../../agents/add-guardrails.mdx
-            slug: add-guardrails
+            contents:
+              - page: Sandboxed Deployments
+                path: ../../agents/sandboxed-deployments.mdx
           - page: Execute Agents as Jobs
             path: ../../agents/execute-agent-jobs.mdx
-          - page: Observe Agents
-            path: ../../agents/observability.mdx
-          - page: Scan Trace Data
-            path: ../../agents/scan-trace-data.mdx
-          - section: Optimize Agents
+          - section: Traces and Insights
             contents:
-              - page: Run the Agent Optimizer
-                path: ../../agents/optimization.mdx
-              - page: Analyze Agent Telemetry with Insights
-                path: ../../agents/insights-analysis.mdx
-                slug: insights-analysis
-          - page: Plugins and Skills
-            path: ../../agents/plugins.mdx
+              - page: Collect Agent Traces
+                path: ../../agents/traces-and-insights/collect-agent-traces.mdx
+              - page: Insights from Traces
+                path: ../../agents/traces-and-insights/insights-from-traces.mdx
+          - page: Optimize Agents
+            path: ../../agents/optimize-agents.mdx
+          - section: Agent Governance
+            slug: governance
+            path: ../../agents/governance/index.mdx
+            contents:
+              - page: Run a War-Game
+                path: ../../agents/governance/run-a-war-game.mdx
+              - page: Review and Apply Mitigations
+                path: ../../agents/governance/apply-mitigations.mdx
+                slug: apply-mitigations
+              - page: Agent Hardening CLI Reference
+                path: ../../agents/governance/cli-reference.mdx
+                slug: cli-reference
+              - page: Troubleshooting
+                path: ../../agents/governance/troubleshooting.mdx
       - section: Evaluate Agents & Models
         slug: evaluate-models
         path: ../../evals/index.mdx
@@ -441,6 +452,9 @@ navigation:
                   - page: OpenSandbox
                     slug: open-sandbox
                     path: ../../set-up/helm/opensandbox.mdx
+                  - page: Secure Sandboxed GRPO
+                    slug: sandboxed-grpo
+                    path: ../../set-up/helm/sandboxed-grpo.mdx
                   - page: OpenShell
                     slug: openshell
                     path: ../../set-up/helm/openshell.mdx
@@ -581,6 +595,8 @@ navigation:
             path: ../../support-matrix.mdx
           - page: Telemetry and Privacy
             path: ../../telemetry-and-privacy.mdx
+          - page: Plugin Architecture
+            path: ../../plugin-architecture.mdx
           - api: API Reference
           - section: Python SDK
             path: ../../pysdk/index.mdx

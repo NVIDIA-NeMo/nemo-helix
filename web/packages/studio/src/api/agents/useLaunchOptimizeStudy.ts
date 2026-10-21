@@ -27,15 +27,19 @@ export type LaunchOptimizeStudyParams = BundleSource & {
   optimizeConfig: string;
   /** Name for the study; the server generates one when omitted. */
   name?: string;
+  /** Installed strategy to run the bundle with; {@link STUDIO_OPTIMIZE_STRATEGY} when omitted. */
+  strategy?: string;
 };
 
-/**
- * The optimization strategy Studio submits a staged bundle to.
- *
- * `run-strategy` is strategy-agnostic, but the bundle Studio stages here — an optimize YAML plus
- * the assets it references — is the input the `config-tuning` strategy takes, so the choice is fixed
- * rather than offered as a picker.
- */
+/** A run of a strategy whose config is optional, started without one. */
+export interface LaunchStrategyRunParams {
+  workspace: string;
+  agentName: string;
+  strategy: string;
+  /** Name for the run; the server generates one when omitted. */
+  name?: string;
+}
+
 export const STUDIO_OPTIMIZE_STRATEGY = 'config-tuning';
 
 // Marks a bundle fileset that Studio created for exactly one study, so deleting the study may delete it.
@@ -110,14 +114,14 @@ export const optimizeBundleFilesetName = (agentName: string, now = Date.now()): 
 };
 
 const createStudy = (
-  { workspace, agentName, optimizeConfig, name }: LaunchOptimizeStudyParams,
+  { workspace, agentName, optimizeConfig, name, strategy }: LaunchOptimizeStudyParams,
   filesetName: string,
   customFields?: Record<string, string>
 ): Promise<RunStrategyJob> =>
   agentOptimizationCreateRunStrategyJob(workspace, {
     ...(name ? { name } : {}),
     spec: {
-      strategy: STUDIO_OPTIMIZE_STRATEGY,
+      strategy: strategy ?? STUDIO_OPTIMIZE_STRATEGY,
       optimize_config: optimizeConfig,
       optimize_config_fileset: `${workspace}/${filesetName}`,
       agent: agentName,
@@ -149,10 +153,28 @@ export const launchOptimizeStudy = async (
   }
 };
 
+/** Nothing is staged: the strategy runs on the agent alone, with its own defaults. */
+export const launchStrategyRun = ({
+  workspace,
+  agentName,
+  strategy,
+  name,
+}: LaunchStrategyRunParams): Promise<RunStrategyJob> =>
+  agentOptimizationCreateRunStrategyJob(workspace, {
+    ...(name ? { name } : {}),
+    spec: { strategy, agent: agentName },
+  });
+
+/** A bundled study, or a strategy run without a config. */
+export type LaunchOptimizationParams = LaunchOptimizeStudyParams | LaunchStrategyRunParams;
+
+const launchOptimization = (params: LaunchOptimizationParams): Promise<RunStrategyJob> =>
+  'optimizeConfig' in params ? launchOptimizeStudy(params) : launchStrategyRun(params);
+
 export type UseLaunchOptimizeStudyOptions = Omit<
-  UseMutationOptions<RunStrategyJob, Error, LaunchOptimizeStudyParams>,
+  UseMutationOptions<RunStrategyJob, Error, LaunchOptimizationParams>,
   'mutationFn'
 >;
 
 export const useLaunchOptimizeStudy = (options?: UseLaunchOptimizeStudyOptions) =>
-  useMutation({ ...options, mutationFn: launchOptimizeStudy });
+  useMutation({ ...options, mutationFn: launchOptimization });

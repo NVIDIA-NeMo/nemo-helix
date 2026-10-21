@@ -222,6 +222,16 @@ def test_zitadel_kubernetes_test_action_uses_k3d_compatible_fresh_cluster_name()
     assert len(match.group(1)) <= 32
 
 
+def test_zitadel_kubernetes_test_action_collects_pod_logs_before_deleting_the_cluster() -> None:
+    output = _run_zitadel_script("test", "k8s", "--dry-run")
+
+    collect = output.find("logs --all-containers --prefix --timestamps")
+    delete = output.find("kind delete cluster")
+    assert collect != -1, output
+    assert delete != -1, output
+    assert collect < delete
+
+
 def test_zitadel_kubernetes_runner_builds_with_direct_buildx_bake() -> None:
     output = _run_zitadel_script(
         "test",

@@ -576,11 +576,19 @@ paths:
         \ HTTP response whose status distinguishes acceptance from replay.\n    caller:\
         \ Effective authenticated principal, supplied by the platform dependency.\n\
         \    service: Caller-delegated request-scoped acceptance service.\n\nReturns:\n\
-        \    Public run status with advisory overlap warnings; 201 for acceptance\
-        \ or 200\n    for replay. Submission creates no Jobs or member records.\n\n\
-        Raises:\n    RequestValidationError: The execution budget exceeds the operator\
-        \ maximum.\n    HTTPException: Source denial (403), conflicting key (409),\
-        \ resolution rejection\n        (422), or a sanitized unexpected failure (500)."
+        \    Public run status with advisory overlap warnings and one notice per task\
+        \ Job;\n    201 for acceptance or 200 for replay. Submission creates one task\
+        \ Job per task\n    right after acceptance; a keyed replay creates any that\
+        \ are still missing.\n\nRaises:\n    RequestValidationError: The execution\
+        \ budget exceeds the operator maximum.\n    HTTPException: Source denial (403),\
+        \ conflicting key (409), resolution rejection\n        (422), an unavailable\
+        \ image build service before acceptance (503, safe to resend), missing\n \
+        \       task Jobs after acceptance (503), an Intake Evaluation refused after\
+        \ acceptance (403, not\n        retried), or a sanitized unexpected failure\
+        \ (500).\n        When the request omits idempotency_key, submit generates\
+        \ one. A 5xx then names it in the\n        detail and the ``x-idempotency-key``\
+        \ header and says not to retry automatically: the SDK\n        would resend\
+        \ the keyless request and accept a second run. Resubmit with that key instead."
       operationId: submit_taskset_run_apis_evals_v2_workspaces__workspace__agent_evaluate_runs_post
       parameters:
       - name: workspace
@@ -611,8 +619,11 @@ paths:
         '409':
           description: The idempotency key already belongs to a different request.
         '422':
-          description: Invalid request, excessive timeout, or missing or incompatible
-            source.
+          description: Invalid request, excessive timeout, missing or incompatible
+            source, unconfigured execution, or a task without images.
+        '503':
+          description: The run was accepted but some task Jobs, or its Intake Evaluation,
+            weren't created; retry the same request.
     get:
       tags:
       - Evals Plugin Taskset Run Routes
@@ -3052,8 +3063,7 @@ components:
           type: boolean
           title: Fail Fast
           description: Fail on the first metric error instead of recording an errored
-            score. On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks
-            budget can also fail the run and cancel remaining task Jobs.
+            score. On Kubernetes runs it fails that task's Job.
           default: false
         labels:
           additionalProperties:
@@ -3308,8 +3318,7 @@ components:
           type: boolean
           title: Fail Fast
           description: Fail on the first metric error instead of recording an errored
-            score. On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks
-            budget can also fail the run and cancel remaining task Jobs.
+            score. On Kubernetes runs it fails that task's Job.
           default: false
         labels:
           additionalProperties:
@@ -3490,6 +3499,8 @@ components:
           title: Custom Fields
           additionalProperties: true
           type: object
+        control:
+          $ref: '#/components/schemas/JobControl'
       type: object
       required:
       - name
@@ -4305,6 +4316,8 @@ components:
           title: Custom Fields
           additionalProperties: true
           type: object
+        control:
+          $ref: '#/components/schemas/JobControl'
       type: object
       required:
       - name
@@ -5391,42 +5404,14 @@ components:
           description: 'Execution strategy: one Kubernetes Job per Harbor task. Future
             strategies add new kinds.'
           default: harbor-task-jobs
-        sandbox_policy:
-          type: string
-          title: Sandbox Policy
-          description: 'Name of an operator-approved sandbox policy: which sandbox
-            provider and isolation policy each task''s agent and environment run under,
-            meaning the security and isolation boundary. It does not control compute
-            resources; see dispatcher_profile. Operators define the available policies.'
-          examples:
-          - harbor-standard
         dispatcher_profile:
-          type: string
           title: Dispatcher Profile
           description: Name of a Jobs Service profile that decides where task Jobs
             run and what resources they get. Operators define the available profiles;
-            defaults to local-k8s, the profile the Helm chart ships.
-          default: local-k8s
+            omitted uses the first one they list.
           examples:
           - local-k8s
-        missing_prebuilt_image:
           type: string
-          enum:
-          - fail
-          - build
-          title: Missing Prebuilt Image
-          description: What to do when a task pins a prebuilt image (its docker_image)
-            and that image is no longer in the registry. 'fail' (default) fails that
-            task with image_unavailable. 'build' builds the image from the task's
-            Dockerfile instead and records the substitution; the result may differ
-            from the image the task author benchmarked, and a task without a Dockerfile
-            still fails. Does not apply to tasks without a pinned image, which are
-            always built from their Dockerfile, or to an image this run built that
-            disappears mid-run, which is always rebuilt.
-          default: fail
-          examples:
-          - fail
-          - build
         max_concurrent_task_jobs:
           title: Max Concurrent Task Jobs
           description: Maximum number of this run's task Jobs running at once. Omit
@@ -5435,24 +5420,25 @@ components:
           - 5
           type: integer
           minimum: 1.0
-        max_failed_tasks:
-          anyOf:
-          - type: integer
-            minimum: 0.0
-          - type: string
-            pattern: ^(100|[1-9]?\d)%$
-          title: Max Failed Tasks
-          description: Failed tasks the run tolerates, as a count or a percent of
-            the taskset's tasks. Once exceeded, the run fails and its remaining task
-            Jobs are cancelled. Submit resolves a percent into a count. Omit for no
-            limit.
+        sandbox:
+          allOf:
+          - $ref: '#/components/schemas/SandboxSelection'
+          description: 'Sandbox for every task. profile names an operator sandbox
+            profile: isolation, egress and resource ceilings; omitted uses the operator''s
+            default. cpus, memory_mb and storage_mb size each task''s agent sandbox,
+            over its task.toml [environment]; a separate verifier keeps task.toml''s
+            resources. Unset cpus and memory_mb default to 1 CPU and 2048 MB, capped
+            by the ceilings. Every sandbox''s values must stay within the profile''s
+            ceilings, or submit fails with 422. Omit the whole object for the default
+            profile and each task''s own resources.'
           examples:
-          - 3
-          - 10%
+          - cpus: 4
+            memory_mb: 8192
+            storage_mb: 20480
+          - memory_mb: 4096
+            profile: harbor-open
       additionalProperties: false
       type: object
-      required:
-      - sandbox_policy
       title: HarborTaskJobsExecutionInput
       description: 'Settings that run a Harbor taskset as many independent task Jobs
         instead of one Job.
@@ -5469,8 +5455,8 @@ components:
         It exists because these settings mean nothing on the Docker path: where task
         Jobs are
 
-        placed, which sandbox they may use, and when to give up on a run. Keeping
-        them in their
+        placed, which sandbox they may use, and how many run at once. Keeping them
+        in their
 
         own model, selected by ``kind``, lets future execution strategies add new
         models rather
@@ -5479,24 +5465,17 @@ components:
         runs.
 
 
-        Submit validates this input, resolves the percent form of ``max_failed_tasks``
-        into a
+        Submit validates this input and freezes the ``sandbox`` profile, with its
+        resource
 
-        count, and stores the M1 execution caps and missing-image policy in the run''s
-        plan.
+        overrides checked against the profile''s ceilings, the ``dispatcher_profile``,
+        the pinned
 
-        In M1, ``sandbox_policy`` and ``dispatcher_profile`` participate in request
-        identity
+        dispatcher image and the concurrency cap into the run''s plan, so operator
+        config edits
 
-        only; their names are intentionally neither resolved nor stored while execution
-        is
-
-        unavailable. M2 Story 3 validates these selections and adds the resolved sandbox
-
-        policy, dispatcher profile and pinned dispatcher image as required plan fields
-        before
-
-        execution is enabled. Earlier development runs are deleted rather than migrated.'
+        never reach a running run. Earlier development runs are deleted rather than
+        migrated.'
     HelixJobListResultResponse:
       properties:
         data:
@@ -5975,8 +5954,9 @@ components:
           minLength: 1
           title: Agent Version
           description: Agent version recorded on each published trajectory. Neither
-            a Model nor an Agent carries a version, so this defaults to 'unknown'
-            unless the submitter supplies one.
+            a Model nor an Agent carries a version, so this defaults to the version
+            the agent's own trajectory records (a Harbor agent's, such as codex's),
+            else 'unknown'.
           default: unknown
         required:
           type: boolean
@@ -6000,6 +5980,30 @@ components:
         group is a different resource and is not what goes here. The job never creates\
         \ the Evaluation: a\nmissing one is an error, because nothing in an eval spec\
         \ can supply the dataset identity\n``evaluations.create`` requires."
+    JobControl:
+      properties:
+        pause_ttl_seconds:
+          title: Pause Ttl Seconds
+          description: How long this job keeps storage after it pauses, measured from
+            stopped_at. When the job has no value, the platform paused-storage TTL
+            applies. Cannot exceed the platform maximum. 0 reclaims on the next retention
+            pass. In a control update, an omitted or null value keeps the current
+            value. Changing this value does not move the start time.
+          nullable: true
+          type: integer
+          minimum: 0.0
+      type: object
+      title: JobControl
+      description: 'Mutable job behavior, stored on the job and kept off the execution
+        spec.
+
+
+        The attempt spec stays the immutable snapshot of what a run executes. Rerun
+
+        copies the job spec into the next attempt and keeps using this object. In
+        a
+
+        control update, an omitted or null value keeps the job''s current value.'
     JsonValue:
       title: JsonValue
     LiveMetricResult:
@@ -7231,6 +7235,8 @@ components:
           title: Custom Fields
           additionalProperties: true
           type: object
+        control:
+          $ref: '#/components/schemas/JobControl'
       type: object
       required:
       - name
@@ -7448,8 +7454,9 @@ components:
           minLength: 1
           title: Agent Version
           description: Agent version recorded on each published trajectory. Neither
-            a Model nor an Agent carries a version, so this defaults to 'unknown'
-            unless the submitter supplies one.
+            a Model nor an Agent carries a version, so this defaults to the version
+            the agent's own trajectory records (a Harbor agent's, such as codex's),
+            else 'unknown'.
           default: unknown
         required:
           type: boolean
@@ -7623,6 +7630,34 @@ components:
       type: object
       title: RunConfigOnlineModel
       description: Job parameters for model online evaluation.
+    SandboxSelection:
+      properties:
+        cpus:
+          title: Cpus
+          type: integer
+          exclusiveMinimum: 0.0
+        memory_mb:
+          title: Memory Mb
+          type: integer
+          exclusiveMinimum: 0.0
+        storage_mb:
+          title: Storage Mb
+          type: integer
+          exclusiveMinimum: 0.0
+        profile:
+          title: Profile
+          description: 'Name of an operator sandbox profile: the sandbox''s isolation
+            and egress rules and its resource ceilings. Omit for the operator''s default
+            profile.'
+          examples:
+          - harbor-standard
+          type: string
+          minLength: 1
+      additionalProperties: false
+      type: object
+      title: SandboxSelection
+      description: '``execution.sandbox``: an operator sandbox profile by name, and
+        resource overrides within its ceilings.'
     SecretRef:
       type: string
       pattern: ^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)?$
@@ -8162,16 +8197,21 @@ components:
         execution:
           allOf:
           - $ref: '#/components/schemas/HarborTaskJobsExecutionInput'
-          description: 'Kubernetes task Job settings: sandbox policy, dispatcher profile,
-            run-wide task Job concurrency and failure tolerance.'
+          description: 'Kubernetes task Job settings: sandbox profile and resources,
+            dispatcher profile and run-wide task Job concurrency.'
         idempotency_key:
           title: Idempotency Key
-          description: Optional caller-supplied key, scoped to workspace and caller,
-            so retries of the same request return the accepted run. Omit for a new
-            keyless run.
+          description: Optional key, scoped to workspace and caller, so retries of
+            the same request return the accepted run. When omitted, submit generates
+            one and returns it as the run's idempotency_key.
           type: string
           maxLength: 256
           minLength: 1
+        publication:
+          allOf:
+          - $ref: '#/components/schemas/TasksetRunPublicationInput'
+          description: Publish the run's trials to an Intake Experiment. Omit to publish
+            nowhere.
         timeout_seconds:
           title: Timeout Seconds
           description: Execution budget in seconds from acceptance. Omit to use evals.runs.default_timeout_seconds.
@@ -8189,6 +8229,46 @@ components:
         \ references or doing\nservice I/O. Submit uses it to derive request identity\
         \ and acceptance budgets.\n\nRaises:\n    ValidationError: Fields are invalid\
         \ or the spec violates Kubernetes run rules."
+    TasksetRunIntakeInput:
+      properties:
+        experiment:
+          type: string
+          minLength: 1
+          title: Experiment
+          description: Name of an existing Intake Experiment. Submit creates one Evaluation
+            in it per run, named after the run; each task Job publishes its trials
+            there when it finishes.
+          examples:
+          - swe-agent-tuning
+        agent_name:
+          title: Agent Name
+          description: Agent name recorded on each published trajectory. Defaults
+            to the Harbor agent.
+          type: string
+          minLength: 1
+        dataset_name:
+          title: Dataset Name
+          description: The Evaluation's dataset, such as the Harbor Hub dataset the
+            tasks came from. Defaults to the taskset (workspace/name).
+          examples:
+          - datacurve/deep-swe
+          type: string
+          minLength: 1
+        dataset_version:
+          title: Dataset Version
+          description: The dataset's version, such as a Harbor Hub dataset digest.
+            Defaults to the pinned taskset's content digest.
+          examples:
+          - sha256:aaa82ceb8404dccc17689c9383f93dbcbc8f029a7601d2e3856a416f2cb89269
+          type: string
+          minLength: 1
+      additionalProperties: false
+      type: object
+      required:
+      - experiment
+      title: TasksetRunIntakeInput
+      description: Publish the run's trials to an existing Intake Experiment, as one
+        Evaluation named after the run.
     TasksetRunPhase:
       type: string
       enum:
@@ -8208,6 +8288,19 @@ components:
         finalization is tracked separately by ``ResultState`` so execution completion
 
         does not imply that combined results are already available.'
+    TasksetRunPublicationInput:
+      properties:
+        intake:
+          allOf:
+          - $ref: '#/components/schemas/TasksetRunIntakeInput'
+          description: Publish trials and scores to an Intake Experiment.
+      additionalProperties: false
+      type: object
+      required:
+      - intake
+      title: TasksetRunPublicationInput
+      description: Where the run publishes its results, beyond its result bundle and
+        record.
     TasksetRunStatus:
       properties:
         run_id:
@@ -8266,7 +8359,8 @@ components:
           type: string
         idempotency_key:
           title: Idempotency Key
-          description: Caller-supplied submit key; None for a keyless run.
+          description: 'Submit key: the caller''s, or the one submit generated when
+            the request omitted it.'
           type: string
       additionalProperties: false
       type: object
@@ -8368,7 +8462,8 @@ components:
           type: string
         idempotency_key:
           title: Idempotency Key
-          description: Caller-supplied submit key; None for a keyless run.
+          description: 'Submit key: the caller''s, or the one submit generated when
+            the request omitted it.'
           type: string
         warnings:
           items:

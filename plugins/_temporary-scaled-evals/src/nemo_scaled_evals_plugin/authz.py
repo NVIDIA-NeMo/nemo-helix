@@ -10,6 +10,10 @@ from fastapi.routing import APIRoute
 from nemo_helix_plugin.authz import AuthzScope, CallerKind, path_rule
 
 scope = AuthzScope("scaled-evals")
+# No platform role grants this, so only HelixAdmin (which bypasses permission
+# checks) holds it unless an operator binds a custom role that does.
+ADMIN = scope.permission("admin", description="Operate scaled-evals: analytics, qualification, promotion")
+admin_only = path_rule(callers=[CallerKind.PRINCIPAL], permissions=[ADMIN])
 
 _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -17,10 +21,9 @@ _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 def stamp_router_authz(router: APIRouter) -> APIRouter:
     """Stamp platform ``@path_rule`` + scope onto every route on *router*.
 
-    The rules are authenticated-but-permissionless so the vendored scaled-evals
-    routers mount without rewriting every handler. Any valid principal therefore
-    reaches every route, including the admin router; per-route permissions have
-    to be declared on the handlers themselves to narrow that.
+    Routes without their own rule are authenticated-but-permissionless, so any
+    valid principal reaches them. Admin routes declare ``@admin_only`` on the
+    handler, which this leaves in place.
     """
     for route in router.routes:
         if not isinstance(route, APIRoute):

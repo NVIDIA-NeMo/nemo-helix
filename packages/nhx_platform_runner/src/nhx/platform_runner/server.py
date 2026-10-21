@@ -40,6 +40,7 @@ from nhx.platform_runner.loader import (
     load_service,
     order_services_by_dependencies,
 )
+from nhx.platform_runner.local_network import docker_listener_host, tcp_listener_sockets
 from nhx.platform_runner.registry import (
     AVAILABLE_SIDECARS,
     check_no_controller_sidecar_collision,
@@ -391,12 +392,14 @@ def run_server(
     preflight_embedded_auth_policy_wasm(get_auth_config())
     app = create_app(services or [])
     setup_fastapi_instrumentations(app)
-    if socket_path:
+    docker_host = docker_listener_host(host)
+    if socket_path or docker_host:
         _run_server_on_bound_sockets(
             app,
             host=host,
             port=port,
             socket_path=socket_path,
+            docker_host=docker_host,
             keep_alive_timeout_seconds=keep_alive_timeout_seconds,
         )
     else:
@@ -414,28 +417,30 @@ def _run_server_on_bound_sockets(
     *,
     host: str,
     port: int,
-    socket_path: str,
+    socket_path: str | None = None,
+    docker_host: str | None = None,
     keep_alive_timeout_seconds: int = DEFAULT_UVICORN_KEEP_ALIVE_TIMEOUT_SECONDS,
 ) -> None:
-    tcp_config = uvicorn.Config(
+    config = uvicorn.Config(
         app,
         host=host,
         port=port,
         log_config=None,
         timeout_keep_alive=keep_alive_timeout_seconds,
     )
-    uds_config = uvicorn.Config(
-        app,
-        uds=socket_path,
-        log_config=None,
-        timeout_keep_alive=keep_alive_timeout_seconds,
-    )
-    sockets = [tcp_config.bind_socket(), uds_config.bind_socket()]
-    try:
-        asyncio.run(uvicorn.Server(tcp_config).serve(sockets=sockets))
-    finally:
-        for sock in sockets:
-            sock.close()
+    with tcp_listener_sockets(host, port, docker_host=docker_host) as sockets:
+        uds_socket = None
+        try:
+            if socket_path:
+                uds_socket = uvicorn.Config(
+                    app, uds=socket_path, log_config=None, timeout_keep_alive=keep_alive_timeout_seconds
+                ).bind_socket()
+                sockets.append(uds_socket)
+            logger.info("Platform HTTP listeners: %s", [sock.getsockname() for sock in sockets])
+            asyncio.run(uvicorn.Server(config).serve(sockets=sockets))
+        finally:
+            if uds_socket is not None:
+                uds_socket.close()
 
 
 def run_server_with_reload(
@@ -453,18 +458,37 @@ def run_server_with_reload(
         "packages/nhx_platform_runner/src",
     ]
     logger.warning("Hot reload is enabled. Controllers will restart with each reload.")
-    uvicorn.run(
-        app_factory,
-        host=host,
-        port=port,
-        reload=True,
-        reload_dirs=reload_dirs,
-        log_config=None,
-        access_log=False,
-        log_level="warning",
-        factory=True,
-        timeout_keep_alive=keep_alive_timeout_seconds,
-    )
+    docker_host = docker_listener_host(host)
+    if docker_host:
+        from uvicorn.supervisors import ChangeReload
+
+        config = uvicorn.Config(
+            app_factory,
+            host=host,
+            port=port,
+            reload=True,
+            reload_dirs=reload_dirs,
+            log_config=None,
+            access_log=False,
+            log_level="warning",
+            factory=True,
+            timeout_keep_alive=keep_alive_timeout_seconds,
+        )
+        with tcp_listener_sockets(host, port, docker_host=docker_host) as sockets:
+            ChangeReload(config, target=uvicorn.Server(config).run, sockets=sockets).run()
+    else:
+        uvicorn.run(
+            app_factory,
+            host=host,
+            port=port,
+            reload=True,
+            reload_dirs=reload_dirs,
+            log_config=None,
+            access_log=False,
+            log_level="warning",
+            factory=True,
+            timeout_keep_alive=keep_alive_timeout_seconds,
+        )
 
 
 _obs_initialized = False

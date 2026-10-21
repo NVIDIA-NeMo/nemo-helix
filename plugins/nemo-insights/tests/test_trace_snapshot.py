@@ -4,10 +4,15 @@
 """Authenticated Intake pagination and canonical trace conversion."""
 
 import json
+import sys
 from datetime import datetime, timezone
 
 import httpx
 import pytest
+
+if sys.version_info >= (3, 14):
+    pytest.skip("nemo-compass requires Python 3.12 or 3.13", allow_module_level=True)
+
 from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
 from nemo_insights_plugin.analyst.trace_snapshot import load_trace_snapshot

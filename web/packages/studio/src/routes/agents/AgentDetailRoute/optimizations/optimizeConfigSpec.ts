@@ -24,3 +24,15 @@ export const optimizeConfigSpec = (agentName: string): BundleFileSpec<OptimizeCo
   validate: (config, bundlePaths) =>
     optimizeBundleProblems({ config, bundlePaths, agent: agentName }),
 });
+
+/**
+ * Any other strategy's config: a YAML mapping. Studio does not know what an installed strategy
+ * expects in it, so checking the contents is left to the strategy when the run is submitted.
+ */
+export const STRATEGY_CONFIG_SPEC: BundleFileSpec<OptimizeConfig> = {
+  label: 'config',
+  description: 'a YAML file with a mapping at the top level',
+  candidateNoun: 'YAML files',
+  isCandidate: isYamlPath,
+  parse: parseOptimizeConfig,
+};

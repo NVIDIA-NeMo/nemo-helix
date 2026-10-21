@@ -18,6 +18,7 @@ import pytest
 pytest.importorskip("scaled_evals")
 
 from api_test_fixture import client, v1
+from scaled_evals.api.config_profile_store import ConfigProfileStore
 from scaled_evals.api.db import get_conn
 from scaled_evals.api.repositories.benchmark_run_repository import derive_run_view
 from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
@@ -47,7 +48,7 @@ def _use_conn(conn: MagicMock) -> None:
 @pytest.fixture(autouse=True)
 def _clear_overrides() -> Iterator[None]:
     yield
-    v1.dependency_overrides.clear()
+    v1.dependency_overrides.pop(get_conn, None)
 
 
 @pytest.fixture(autouse=True)
@@ -354,6 +355,28 @@ def test_benchmark_request_supports_full_member_execution_contract() -> None:
     assert request.initial_user_turns == ["Initialize", "/review"]
 
 
+@pytest.mark.parametrize(
+    ("runtime", "accepted"), [("sandbox_k8s", True), ("harbor_opensandbox", True), ("docker", False)]
+)
+def test_benchmark_request_agent_bundle_runtimes(runtime: str, accepted: bool) -> None:
+    from scaled_evals.api.schemas.benchmark_runs import CreateBenchmarkRunRequest
+
+    def build() -> CreateBenchmarkRunRequest:
+        return CreateBenchmarkRunRequest(
+            name="bundle",
+            benchmark_id="bm_test",
+            framework_profile_id="cfg_h",
+            agent_bundle_id="ab_claude",
+            runtime=runtime,
+        )
+
+    if accepted:
+        assert build().agent_bundle_id == "ab_claude"
+    else:
+        with pytest.raises(ValueError, match="agent_bundle currently requires"):
+            build()
+
+
 # ---- POST /benchmark-runs: spawn run + member evaluations -----------------
 
 
@@ -383,10 +406,10 @@ def test_create_run_spawns_run_and_members() -> None:
 
 def test_create_run_applies_member_framework_profile_overrides() -> None:
     overrides = {"task_0": "cfg_member"}
+    for profile_id in ("cfg_default", "cfg_member"):
+        ConfigProfileStore().create(profile_id, name=profile_id, type="harbor", config={})
     conn = _conn(
         fetchone=[
-            {"config": {}},
-            {"config": {}},
             {"current_revision": 1},
             _run_row(
                 framework_profile_id="cfg_default",
@@ -397,10 +420,6 @@ def test_create_run_applies_member_framework_profile_overrides() -> None:
             _member_eval(1),
         ],
         fetchall=[
-            [
-                {"id": "cfg_default", "type": "harbor"},
-                {"id": "cfg_member", "type": "harbor"},
-            ],
             [_member(0), _member(1)],
             [_member_eval(0, status="queued", reward=None)],
         ],
@@ -761,7 +780,7 @@ def test_reproduce_run_returns_complete_frozen_request_and_command() -> None:
         },
         framework_profile_id="cfg_h",
         harbor_profile_id="cfg_h",
-        credentials={"openai": "cred_openai"},
+        credentials={"openai": "team-a/openai-key"},
         parallelism=2,
         max_concurrent_members=4,
     )

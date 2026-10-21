@@ -70,7 +70,7 @@ server:
           - {key: sitecustomize.py, path: sitecustomize.py}
           - {key: nemo_ext_server.py, path: nemo_ext_server.py}
           - {key: nemo_ext_pod.py, path: nemo_ext_pod.py}
-          - {key: harbor_opensandbox_services.py, path: scaled_evals/harbor_opensandbox_services.py}
+          - {key: harbor_opensandbox_services.py, path: nhx_sandbox/harbor_opensandbox_services.py}
 
   gateway:
     enabled: false

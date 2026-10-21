@@ -85,7 +85,8 @@ async def test_controller_submits_deterministic_reference_only_jobs(monkeypatch:
     assert evaluation_request.name == "scaled-evals-evaluation-eval_1-e3"
     assert evaluation_request.spec["evaluation_id"] == "eval_1"
     assert evaluation_request.spec["execution_number"] == 3
-    assert "credentials" not in evaluation_request.spec
+    # References only; the Job resolves values from platform Secrets.
+    assert evaluation_request.spec["credentials"] == {}
     # The launch inputs are stored before the Job that reads them exists.
     write_inputs.assert_called_once_with("eval_1", 3, evaluation_request.name)
     assert evaluation_request.spec["inputs_workspace"] == settings.entity_store_private_workspace
@@ -486,13 +487,14 @@ def test_submitter_stores_immutable_launch_inputs_once(monkeypatch: pytest.Monke
 
 
 def test_private_workspace_is_created_by_the_service_or_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    import nemo_scaled_evals_plugin.submitter as submitter_module
+    import scaled_evals.api.entity_store as entity_store
 
+    monkeypatch.undo()  # the conftest fake replaces private_workspace
     workspaces = MagicMock()
-    monkeypatch.setattr(submitter_module, "get_nemo_client", lambda **_: object())
-    monkeypatch.setattr(submitter_module.WorkspacesClient, "from_client", lambda _client: workspaces)
-    submitter_module.private_workspace.cache_clear()
-    assert submitter_module.private_workspace() == settings.entity_store_private_workspace
+    monkeypatch.setattr(entity_store, "get_nemo_client", lambda **_: object())
+    monkeypatch.setattr(entity_store.WorkspacesClient, "from_client", lambda _client: workspaces)
+    entity_store.private_workspace.cache_clear()
+    assert entity_store.private_workspace() == settings.entity_store_private_workspace
     assert workspaces.create_workspace.call_args.kwargs["body"].name == settings.entity_store_private_workspace
 
     # An existing workspace is reused only when this service created it.
@@ -500,10 +502,10 @@ def test_private_workspace_is_created_by_the_service_or_refused(monkeypatch: pyt
         httpx.Response(409, request=httpx.Request("POST", "http://entities"))
     )
     workspaces.get_workspace.return_value.data.return_value.created_by = "service:scaled-evals"
-    submitter_module.private_workspace.cache_clear()
-    assert submitter_module.private_workspace() == settings.entity_store_private_workspace
+    entity_store.private_workspace.cache_clear()
+    assert entity_store.private_workspace() == settings.entity_store_private_workspace
     workspaces.get_workspace.return_value.data.return_value.created_by = "mallory@example.com"
-    submitter_module.private_workspace.cache_clear()
+    entity_store.private_workspace.cache_clear()
     with pytest.raises(RuntimeError, match="mallory"):
-        submitter_module.private_workspace()
-    submitter_module.private_workspace.cache_clear()
+        entity_store.private_workspace()
+    entity_store.private_workspace.cache_clear()

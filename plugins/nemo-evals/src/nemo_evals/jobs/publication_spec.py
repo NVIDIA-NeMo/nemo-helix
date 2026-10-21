@@ -45,7 +45,8 @@ class IntakePublicationSpec(BaseModel):
         default=DEFAULT_AGENT_VERSION,
         min_length=1,
         description="Agent version recorded on each published trajectory. Neither a Model nor an "
-        "Agent carries a version, so this defaults to 'unknown' unless the submitter supplies one.",
+        "Agent carries a version, so this defaults to the version the agent's own trajectory records "
+        "(a Harbor agent's, such as codex's), else 'unknown'.",
     )
     required: bool = Field(
         default=True,

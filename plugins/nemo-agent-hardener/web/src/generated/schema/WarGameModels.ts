@@ -16,6 +16,6 @@ export interface WarGameModels {
   attack?: ModelChoice;
   /** Defenders + benign validator (synth suite-generation + judge) model. */
   analysis?: ModelChoice;
-  /** Guardrail middleware LLM (agent-hardener's `safety_llm`); unset copies the victim's own LLM. Only `model` applies — agent-hardener pins this LLM's endpoint and key when it writes the guardrail. */
+  /** Guardrail judge LLM that runs inside the victim (agent-hardener's `safety_llm`); an unset field falls back to the analysis group's. */
   safety?: ModelChoice;
 }

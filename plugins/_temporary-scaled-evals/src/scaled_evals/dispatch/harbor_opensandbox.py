@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import string
 import subprocess
 from collections.abc import Callable, Mapping, MutableMapping, Sequence
@@ -32,10 +33,30 @@ from typing import Any
 
 import tomlkit
 import yaml
+from nhx_sandbox.harbor_opensandbox_cleanup import (
+    APPLIED_EGRESS_GLOB,
+    BENCHMARK_RUN_METADATA_KEY,
+    DEPLOYMENT_METADATA_KEY,
+    EVALUATION_METADATA_KEY,
+    ownership_selector,
+    validate_selector,
+)
+from nhx_sandbox.harbor_opensandbox_cleanup import connection_env as _sdk_connection_env
+from nhx_sandbox.harbor_opensandbox_services import (
+    COMPOSE_FILENAMES,
+    MAIN_SERVICE,
+    ComposeServices,
+    SandboxAgentBundle,
+    parse_compose_services,
+)
 from nhx_sandbox.opensandbox_policy import canonical_egress_target
 from tomlkit.items import InlineTable, Table
 
-from scaled_evals.api.build.task_image_identity import TaskImageIdentityError, validate_task_image_request
+from scaled_evals.api.build.task_image_identity import (
+    TaskImageIdentityError,
+    validate_task_image_request,
+    verify_stored_task_image,
+)
 from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_HARBOR_VERSIONS, HARBOR_OPENSANDBOX_RUNTIME
 from scaled_evals.api.settings import settings
 from scaled_evals.dispatch.credentials import merged_env_file
@@ -70,33 +91,24 @@ from scaled_evals.dispatch.sandbox_k8s import (
     make_sandbox_k8s_status_reader,
     summarize_harbor_result,
 )
-from scaled_evals.harbor_opensandbox_cleanup import (
-    APPLIED_EGRESS_GLOB,
-    BENCHMARK_RUN_METADATA_KEY,
-    DEPLOYMENT_METADATA_KEY,
-    EVALUATION_METADATA_KEY,
-    ownership_selector,
-    validate_selector,
-)
-from scaled_evals.harbor_opensandbox_cleanup import connection_env as _sdk_connection_env
-from scaled_evals.harbor_opensandbox_services import (
-    COMPOSE_FILENAMES,
-    MAIN_SERVICE,
-    ComposeServices,
-    parse_compose_services,
-)
 from scaled_evals.models.runtime import LaunchHandle, LaunchSpec, RuntimeStatus
 
 LOG = logging.getLogger(__name__)
 
 # Harbor environment class the rendered config loads for every trial.
-NEMO_OPENSANDBOX_IMPORT_PATH = "scaled_evals.harbor_opensandbox_environment:NemoOpenSandboxEnvironment"
+NEMO_OPENSANDBOX_IMPORT_PATH = "nhx_sandbox.harbor_opensandbox_environment:NemoOpenSandboxEnvironment"
 # Run-level artifact of per-sandbox egress records, read back by the evidence builder for provenance.
 APPLIED_EGRESS_SUMMARY_FILENAME = "scaled-evals-applied-egress.json"
 # Evaluation network policies this runtime accepts.
 SUPPORTED_NETWORK_POLICIES = ("default_deny",)
+# Agents whose bundles are verified to be used. A bundle only takes effect when the agent's Harbor
+# install finds the agent on PATH and skips itself; most installed agents always install, which
+# would ignore the bundle while provenance recorded it.
+AGENT_BUNDLE_SUPPORTED_AGENTS = ("claude-code",)
+# A registered bundle's immutable identity, as the API stores it.
+_DIGEST_REF = re.compile(r"[^\s@]+@sha256:[0-9a-f]{64}")
 # Module the terminator runs, with the Harbor runner's interpreter, to kill an evaluation's sandboxes.
-CLEANUP_MODULE = "scaled_evals.harbor_opensandbox_cleanup"
+CLEANUP_MODULE = "nhx_sandbox.harbor_opensandbox_cleanup"
 
 # Template kwargs that tune NemoOpenSandboxEnvironment without touching isolation. Everything else in the
 # environment block is set by this backend or rejected.
@@ -180,9 +192,9 @@ def preflight(spec: LaunchSpec) -> None:
             "omit network_policy_config"
         )
 
-    # sandbox_k8s features this runtime hasn't implemented.
+    # A bundle the environment can't install fails here, not in every trial.
     if spec.agent_bundle:
-        raise ValueError(f"{HARBOR_OPENSANDBOX_RUNTIME} does not support agent bundles yet")
+        environment_agent_bundle(spec.agent_bundle)
 
     # The task must be an uploaded pack with a prebuilt image: submit stages the pack, and
     # OpenSandbox can only run existing images.
@@ -441,6 +453,80 @@ def profile_compose_services(profile_config: Mapping[str, Any]) -> ComposeServic
     return _profile_overrides(profile_config)[1]
 
 
+def environment_agent_bundle(bundle: Mapping[str, Any]) -> SandboxAgentBundle:
+    """The environment's ``agent_bundle`` kwarg for a registered bundle; ``ValueError`` if it can't be used.
+
+    The API validated the record at registration. ``SandboxAgentBundle`` checks again what the sandbox
+    relies on: a registry-qualified image, and an entrypoint inside ``/installed-agent``. Like the
+    task image, the image is the registered digest, or in tag mode (which hosted admission requires)
+    the signed tag, which ``verify_agent_bundle_image`` checks at launch.
+    """
+    agent_name = bundle.get("agent_name")
+    if agent_name not in AGENT_BUNDLE_SUPPORTED_AGENTS:
+        raise ValueError(
+            f"agent bundles support only {', '.join(AGENT_BUNDLE_SUPPORTED_AGENTS)}, not {agent_name!r}: "
+            "Harbor's install for that agent doesn't skip itself for an installed copy, so the bundle would be unused"
+        )
+
+    image_ref, image_digest = str(bundle.get("image_ref") or ""), str(bundle.get("image_digest") or "")
+    if not _DIGEST_REF.fullmatch(image_digest):
+        raise ValueError("agent bundle image: the bundle has no immutable digest")
+
+    # The bundle runs in the task's pod, so like service images it gets the task image registry policy.
+    try:
+        image = _image_ref_for_sandbox(image_ref, image_digest)
+        validate_task_image_request(image, image_digest)
+    except ValueError as exc:
+        raise ValueError(f"agent bundle image: {exc}") from exc
+
+    return SandboxAgentBundle(
+        image=image,
+        # The installer path belongs to the bundle image's layout, so it comes from configuration.
+        installer=settings.agent_bundle_installer_path,
+        entrypoint=str(bundle.get("entrypoint") or ""),
+    )
+
+
+def verify_agent_bundle_image(bundle: Mapping[str, Any]) -> None:
+    """Fail the launch if a bundle delivered by tag no longer resolves to its registered digest.
+
+    Registry I/O, so it runs at launch, not in preflight. Tag mode only: elsewhere the sandbox
+    pulls the digest itself.
+    """
+    if settings.sandbox_k8s_task_image_reference_mode != "tag":
+        return
+    try:
+        verify_stored_task_image(str(bundle.get("image_ref") or ""), str(bundle.get("image_digest") or ""))
+    except TaskImageIdentityError as exc:
+        raise ValueError(f"agent bundle image: {exc}") from exc
+
+
+def _check_bundle_agent(config: Mapping[str, Any], bundle: Mapping[str, Any]) -> None:
+    """Reject a config that doesn't run the bundle's agent, or pins it to a version other than the bundle's.
+
+    Without the agent, the bundle would be installed and recorded but never used. Harbor's installed
+    agents skip their install only when the agent they find has the version they were given, so a
+    different pin would ignore the bundle and attempt the root install.
+    """
+    agent_name, agent_version = bundle.get("agent_name"), str(bundle.get("agent_version") or "")
+    agents = [agent for agent in config.get("agents") or [] if isinstance(agent, Mapping)]
+
+    # Matched by name; an agent loaded by import_path isn't the bundle's agent.
+    bundle_agents = [agent for agent in agents if agent.get("name") == agent_name]
+    if not bundle_agents:
+        raise ValueError(f"the agent bundle provides {agent_name!r}, but the evaluation doesn't run that agent")
+
+    # An unpinned agent accepts whatever version it finds.
+    for agent in bundle_agents:
+        kwargs = agent.get("kwargs") if isinstance(agent.get("kwargs"), Mapping) else {}
+        pinned = kwargs.get("version")
+        if pinned is not None and str(pinned) != agent_version:
+            raise ValueError(
+                f"agent {agent_name!r} is pinned to version {pinned!r}, but the agent bundle "
+                f"provides {agent_version!r}; remove the pin or choose a matching bundle"
+            )
+
+
 def ownership_metadata(spec: LaunchSpec) -> dict[str, str]:
     """Labels every sandbox of this evaluation carries: the cleanup selector, plus the benchmark run if any."""
     metadata = ownership_selector(
@@ -509,6 +595,12 @@ def render_harbor_config(
         config["environment"]["kwargs"]["compose_services"] = compose_services.model_dump(
             mode="json", by_alias=True, exclude_defaults=True
         )
+    # The environment installs the bundle into the agent's sandbox; Harbor then finds the agent and skips its install.
+    if spec.agent_bundle:
+        _check_bundle_agent(config, spec.agent_bundle)
+        config["environment"]["kwargs"]["agent_bundle"] = environment_agent_bundle(spec.agent_bundle).model_dump(
+            mode="json", exclude_defaults=True
+        )
     return config
 
 
@@ -576,6 +668,8 @@ def make_harbor_opensandbox_submitter(
         # Reject unsupported evaluations, and missing OpenSandbox connection settings, before
         # anything is downloaded or written.
         preflight(spec)
+        if spec.agent_bundle:
+            verify_agent_bundle_image(spec.agent_bundle)
         harbor_env = connection_env(os.environ if environ is None else environ, env_file)
 
         # The evaluation may pin its own Harbor runner venv; otherwise use the deployment default.
@@ -668,6 +762,9 @@ def make_harbor_opensandbox_submitter(
             "compose_services": (
                 {s.name: s.image for s in compose_services.services} if compose_services is not None else None
             ),
+            # The bundle's identity is recorded from the evaluation; this is how it reached the sandbox.
+            "agent_bundle_image": config["environment"]["kwargs"].get("agent_bundle", {}).get("image"),
+            "agent_bundle_delivery": "init_container" if spec.agent_bundle else None,
             "network_policy": spec.network_policy,
             "trusted_allowed_hosts": trusted_hosts,
             "egress_verification": settings.harbor_opensandbox_egress_verification,

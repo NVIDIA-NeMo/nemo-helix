@@ -121,8 +121,53 @@ def test_default_install_is_a_plain_pypi_install(tmp_path: Path, monkeypatch: py
         "allow",
         "--python",
         str(cfg.venv_path / "bin" / "python"),
-        "nvidia-agent-hardener>=0.0.16",
+        "nvidia-agent-hardener>=0.0.17",
     ]
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_existing_venv_rechecks_configured_requirement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, force: bool
+) -> None:
+    cfg = AgentHardenerConfig(
+        venv_path=tmp_path / "venv",
+        spec="nvidia-agent-hardener>=0.0.17",
+        index_url="private=https://registry.example/simple",
+        index_strategy="unsafe-best-match",
+    )
+    cfg.agent_hardener_bin.parent.mkdir(parents=True)
+    cfg.agent_hardener_bin.touch()
+    sentinel = cfg.venv_path / "keep-existing-environment"
+    sentinel.touch()
+    commands = _capture_provision(monkeypatch, cfg)
+
+    provisioning.provision_venv(cfg, force=force)
+
+    creates = [c for c in commands if c[1] == "venv"]
+    assert creates == ([["uv", "venv", "--python", "3.12", str(cfg.venv_path)]] if force else [])
+    install = next(c for c in commands if "install" in c)
+    assert install[-1] == cfg.spec
+    assert install[install.index("--python") + 1] == str(cfg.venv_path / "bin" / "python")
+    assert install[install.index("--index") + 1] == cfg.index_url
+    assert install[install.index("--index-strategy") + 1] == cfg.index_strategy
+    assert "--upgrade" not in install
+    assert sentinel.exists()
+
+
+def test_existing_venv_does_not_hide_install_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = _config(tmp_path)
+    cfg.agent_hardener_bin.parent.mkdir(parents=True)
+    cfg.agent_hardener_bin.touch()
+    monkeypatch.setattr(provisioning.shutil, "which", lambda _n: "/usr/bin/uv")
+
+    def fail_install(cmd: list[str], action: str) -> None:
+        assert "install" in cmd
+        raise typer.Exit(code=1)
+
+    monkeypatch.setattr(provisioning, "run_subprocess", fail_install)
+    with pytest.raises(typer.Exit) as excinfo:
+        provisioning.provision_venv(cfg, force=False)
+    assert excinfo.value.exit_code == 1
 
 
 def test_provision_venv_passes_configured_index(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

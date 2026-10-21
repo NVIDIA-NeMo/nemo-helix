@@ -4128,6 +4128,8 @@ nemo jobs [OPTIONS] COMMAND [ARGS]...
 * `list-execution-profiles`: Get all currently configured execution profiles.
 * `pause`: Pause a platform job by name or ID.
 * `resume`: Resume a paused platform job by name or ID.
+* `rerun`: Rerun a failed platform job from surviving storage.
+* `control`: Change mutable job behavior, such as how long a pause...
 * `get`: Get a platform job by name or ID.
 * `update-status-details`: Update the status details of a platform job.
 * `watch`: Watch a platform job until it reaches a terminal status.
@@ -4414,6 +4416,59 @@ nemo jobs resume [OPTIONS] NAME
 
 **Options:**
 
+* `--workspace`
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+#### nemo jobs rerun
+
+Rerun a failed platform job from surviving storage.
+
+**Usage:**
+
+```shell
+nemo jobs rerun [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Job name or ID (both are accepted).
+
+**Options:**
+
+* `--workspace`
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+#### nemo jobs control
+
+Change mutable job behavior, such as how long a pause keeps storage.
+
+**Usage:**
+
+```shell
+nemo jobs control [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Job name or ID (both are accepted).
+
+**Options:**
+
+* `--pause-ttl-seconds <INTEGER>`: How long to keep storage after a pause, measured from the pause. Cannot exceed the platform maximum.
 * `--workspace`
 
 **Help:**
@@ -5612,6 +5667,7 @@ nemo workspaces [OPTIONS] COMMAND [ARGS]...
 
 * `create`: Create a new workspace.
 * `delete`: Delete a workspace.
+* `deletion-status`: Show why a workspace name is still reserved.
 * `list`: List all workspaces with pagination.
 * `get`: Get a specific workspace by ID.
 * `update`: Update a workspace's description.
@@ -5703,6 +5759,40 @@ nemo workspaces delete [OPTIONS] NAME
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+#### nemo workspaces deletion-status
+
+Show why a workspace name is still reserved.
+
+Returns the cleanup stage and the last error for a workspace that is
+pending, deleting, or failed. The original creator, a platform admin, or a
+service principal can read it. A missing workspace, a live workspace, and a
+deletion the caller may not see all return not found.
+
+**Examples:**
+
+
+```
+GET /apis/entities/v2/workspace-deletions/ml-team
+```
+
+**Usage:**
+
+```shell
+nemo workspaces deletion-status [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Workspace name
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 #### nemo workspaces list
 
@@ -8957,6 +9047,7 @@ nemo evals [OPTIONS] COMMAND [ARGS]...
 
 * `info`: Print the current plugin status.
 * `metric-types`: Print available evaluator metric names or a metric JSON...
+* `runs`: Kubernetes taskset runs: one Job per Harbor task.
 
 *Jobs:*
 
@@ -8996,6 +9087,156 @@ nemo evals metric-types [OPTIONS] [<metric-name>]
 
 * `--help, -h`: Show this message and exit.
 
+#### nemo evals runs
+
+Kubernetes taskset runs: one Job per Harbor task.
+
+**Usage:**
+
+```shell
+nemo evals runs [OPTIONS] COMMAND [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+* `list`: List a workspace's runs, newest first.
+* `status`: Show each task Job of a run and its status.
+* `download`: Download a run's merged result bundle (report.html,...
+* `results`: Show each completed task's scores (every Harbor reward)...
+* `submit`: Publish the selected tasks as a taskset, build their...
+
+##### nemo evals runs list
+
+List a workspace's runs, newest first.
+
+**Usage:**
+
+```shell
+nemo evals runs list [OPTIONS]
+```
+
+**Options:**
+
+* `--active`: Only accepted and running runs.
+* `--mine`: Only runs you created.
+* `--page <INTEGER RANGE>`: One-based page number. [default: 1]
+* `--page-size <INTEGER RANGE>`: Runs per page. [default: 20]
+* `--workspace`: Workspace of the runs; default: configured.
+* `--json`: Print the API page as JSON.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+##### nemo evals runs status
+
+Show each task Job of a run and its status.
+
+**Usage:**
+
+```shell
+nemo evals runs status [OPTIONS] RUN_ID
+```
+
+**Arguments:**
+
+* `<RUN_ID>`: Run name, e.g. run-7f3a…
+
+**Options:**
+
+* `--workspace`: Workspace of the run; default: configured.
+* `--watch`: Refresh until every task Job is done.
+* `--poll-seconds <FLOAT>`: Refresh interval with --watch. [default: 15.0]
+* `--json`: Print JSON.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+##### nemo evals runs download
+
+Download a run's merged result bundle (report.html, summary.json, every trial and score).
+
+**Usage:**
+
+```shell
+nemo evals runs download [OPTIONS] RUN_ID
+```
+
+**Arguments:**
+
+* `<RUN_ID>`: Run name, e.g. run-7f3a…
+
+**Options:**
+
+* `--output-dir, -o <PATH>`: Directory to unpack agent-eval-results/ into; default ./\<run_id>.
+* `--workspace`: Workspace of the run; default: configured.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+##### nemo evals runs results
+
+Show each completed task's scores (every Harbor reward) and a run rollup.
+
+**Usage:**
+
+```shell
+nemo evals runs results [OPTIONS] RUN_ID
+```
+
+**Arguments:**
+
+* `<RUN_ID>`: Run name, e.g. run-7f3a…
+
+**Options:**
+
+* `--workspace`: Workspace of the run; default: configured.
+* `--json`: Print every score of every task as JSON.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+##### nemo evals runs submit
+
+Publish the selected tasks as a taskset, build their images, and submit one task Job per task.
+
+**Usage:**
+
+```shell
+nemo evals runs submit [OPTIONS]
+```
+
+**Options:**
+
+* `--harbor-dir <PATH>`: Local Harbor dataset directory.
+* `--harbor-hub`: Harbor Hub dataset, org/name@ref.
+* `--harbor-git`: Public git repo of Harbor tasks, pinned to a tag or commit: \<url>@\<ref> reads tasks/ at that ref. For another directory, use a GitHub tree URL: https://github.com/\<org>/\<repo>/tree/\<ref>/\<dir>.
+* `--spec-file <PATH>`: TasksetRunInput JSON: its target and execution, and its taskset unless --harbor-dir, --harbor-hub or --harbor-git supplies the tasks.
+* `--tasks`: Indexes or names, comma-separated; default all.
+* `--agent`: Harbor built-in agent (without --spec-file). [default: oracle]
+* `--sandbox-profile`: Operator sandbox profile; default: the operator's (without --spec-file).
+* `--dispatcher-profile`: Jobs profile for task Jobs.
+* `--cpus <INTEGER RANGE>`: CPUs for every task's agent sandbox, over task.toml (without --spec-file).
+* `--memory-mb <INTEGER RANGE>`: Memory in MB for every task's agent sandbox (without --spec-file).
+* `--storage-mb <INTEGER RANGE>`: Disk in MB for every task's agent sandbox (without --spec-file).
+* `--no-build-images`: Don't request or wait for image builds here; submit starts a first build for a task that has none.
+* `--idempotency-key`: Key that makes a resubmit return the same run; default: a new one. A failed submit prints its key.
+* `--list-tasks`: Print the selectable tasks and exit.
+* `--workspace`: Workspace for tasks, taskset and run; default: the configured workspace.
+* `--poll-seconds <FLOAT>`: Image-build polling interval. [default: 10.0]
+* `--experiment`: Intake Experiment (name) to publish the run to: one Evaluation per run, trials as each task ends.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
 #### nemo evals agent-evaluate
 
 Run agent evaluation over tasks against a model, agent, or runner.
@@ -9013,10 +9254,10 @@ nemo evals agent-evaluate [OPTIONS] [COMMAND] [ARGS]...
 **Job Spec:**
 
 * `--max-concurrent-tasks <INTEGER>`: Concurrency for this evaluation's SDK work. Harbor and Gym: concurrent scoring calls only (trials are bounded by the runner). Other runners: concurrent trials and scoring calls. For model and agent targets, target.params.parallelism bounds concurrent inference requests during trial generation. On Kubernetes runs it applies per task Job; the task-Job cap is execution.max_concurrent_task_jobs.
-* `--fail-fast`: Fail on the first metric error instead of recording an errored score. On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks budget can also fail the run and cancel remaining task Jobs.
+* `--fail-fast`: Fail on the first metric error instead of recording an errored score. On Kubernetes runs it fails that task's Job.
 * `--publication.intake.evaluation-id`: Name of the existing Evaluation to publish under. Must already exist; the job does not create it.
 * `--publication.intake.agent-name`: Agent name recorded on each published trajectory. Derived from the target when it names one; required otherwise.
-* `--publication.intake.agent-version`: Agent version recorded on each published trajectory. Neither a Model nor an Agent carries a version, so this defaults to 'unknown' unless the submitter supplies one.
+* `--publication.intake.agent-version`: Agent version recorded on each published trajectory. Neither a Model nor an Agent carries a version, so this defaults to the version the agent's own trajectory records (a Harbor agent's, such as codex's), else 'unknown'.
 * `--publication.intake.required`: Fail the job when publication fails. Defaults to True so a run that asked to publish does not report success with nothing in Experiments. The result bundle is saved before publication runs, so a failed job still leaves the results intact to re-publish. Set False to keep the job successful and report the failure in its output instead.
 
 **Spec Source:**
@@ -9077,7 +9318,7 @@ nemo evals evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `--prompt-template`: Optional prompt template for online target generation. This flag accepts the string form only; use --spec or --spec-file for the other union form(s).
 * `--publication.intake.evaluation-id`: Name of the existing Evaluation to publish under. Must already exist; the job does not create it.
 * `--publication.intake.agent-name`: Agent name recorded on each published trajectory. Derived from the target when it names one; required otherwise.
-* `--publication.intake.agent-version`: Agent version recorded on each published trajectory. Neither a Model nor an Agent carries a version, so this defaults to 'unknown' unless the submitter supplies one.
+* `--publication.intake.agent-version`: Agent version recorded on each published trajectory. Neither a Model nor an Agent carries a version, so this defaults to the version the agent's own trajectory records (a Harbor agent's, such as codex's), else 'unknown'.
 * `--publication.intake.required`: Fail the job when publication fails. Defaults to True so a run that asked to publish does not report success with nothing in Experiments. The result bundle is saved before publication runs, so a failed job still leaves the results intact to re-publish. Set False to keep the job successful and report the failure in its output instead.
 * `--publication.intake.test-case-id-field`: Dataset column identifying each row, recorded as the published test case id. Defaults to a hash of the row's content, which keeps a row's id stable across dataset reorderings and revisions so the same test case can be compared run over run; editing a row makes it a new test case. Name a column here when the dataset has a real identifier — it reads better and survives content edits. Values must be unique per row; the run is rejected if they are not.
 

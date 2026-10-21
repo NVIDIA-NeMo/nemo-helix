@@ -3,6 +3,7 @@
 
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
 import { JOB_POLLING_INTERVAL_LONG } from '@nemo/common/src/constants';
+import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import { getListTracesQueryKey } from '@nemo/sdk/generated/platform/traces';
 import { IntakeTracesTable } from '@studio/components/IntakeLists/IntakeTracesTable';
 import { ROUTES } from '@studio/constants/routes';
@@ -13,6 +14,7 @@ import { getAgentDetailRoute, getIntakeTracesRoute } from '@studio/routes/utils'
 import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
 import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
 import { act, renderRoute, screen, waitFor } from '@studio/tests/util/render';
+import { within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
@@ -154,6 +156,54 @@ describe('IntakeTracesTable', () => {
 
     await user.click(screen.getByTestId('clear-filters'));
     await waitFor(() => expect(startedAtParams.at(-1)).toBeNull());
+  });
+
+  it('does not update the trace URL or refetch a seeded Started At range before Apply', async () => {
+    vi.stubEnv('TZ', 'America/Los_Angeles');
+    vi.setSystemTime(new Date('2026-05-15T12:00:00Z'));
+    try {
+      const user = userEvent.setup();
+      const requests: string[] = [];
+      server.use(
+        http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), ({ request }) => {
+          requests.push(request.url);
+          return HttpResponse.json(mockTracesPage);
+        })
+      );
+      renderRoute(
+        <>
+          <IntakeTracesTable workspace={DEFAULT_WORKSPACE} />
+          <LocationDisplay />
+        </>,
+        { history: getIntakeTracesRoute(DEFAULT_WORKSPACE) }
+      );
+      await screen.findByText('Answer customer policy question');
+      // Restore the clock after seeding; use-debounce relies on Date.now advancing.
+      vi.useRealTimers();
+      await user.click(screen.getByTestId('open-filters-button'));
+      const originalUrl = screen.getByTestId(LOCATION_DISPLAY_TEST_ID).textContent;
+      const originalRequests = [...requests];
+      const input = within(screen.getByTestId('column-filter-started_at')).getAllByRole(
+        'textbox'
+      )[0];
+      await user.click(input);
+      await user.click(await screen.findByRole('button', { name: /April 20th, 2026/ }));
+      expect(screen.getByTestId(LOCATION_DISPLAY_TEST_ID).textContent).toBe(originalUrl);
+      expect(requests).toEqual(originalRequests);
+      await user.click(screen.getByRole('button', { name: 'Cancel' }));
+      expect(screen.getByTestId(LOCATION_DISPLAY_TEST_ID).textContent).toBe(originalUrl);
+      expect(requests).toEqual(originalRequests);
+      await user.click(screen.getByRole('button', { name: /April 20th, 2026/ }));
+      await user.click(screen.getByRole('button', { name: 'Apply' }));
+      await waitFor(() => expect(requests.length).toBeGreaterThan(originalRequests.length));
+      expect(screen.getByTestId(LOCATION_DISPLAY_TEST_ID).textContent).not.toBe(originalUrl);
+      expect(new URL(requests.at(-1)!).searchParams.get('filter[started_at][$lte]')).toBe(
+        '2026-04-20T23:59:59.999Z'
+      );
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
   });
 
   it('shows explicit trace filter facets', async () => {

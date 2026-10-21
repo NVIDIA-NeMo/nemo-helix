@@ -15,7 +15,7 @@ from scaled_evals.api.schemas.config_profiles import (
     ConfigProfileType,
     ConfigProfileUpdate,
 )
-from scaled_evals.api.tenancy import is_admin, record_principal
+from scaled_evals.api.tenancy import IsAdmin
 from scaled_evals.api.utils import make_id
 from scaled_evals.intake.config import validate_intake_profile_config
 from scaled_evals.models.gym_profile import validate_gym_profile_config
@@ -27,13 +27,11 @@ Db = Annotated[Database, Depends(get_db)]
 Principal = Annotated[CurrentPrincipal, Depends(current_principal)]
 
 
-def _write_owner_scope(current: CurrentPrincipal) -> str | None:
-    # None disables owner filtering: local auth-disabled development and
-    # configured admins keep unrestricted writes, including pre-ownership
-    # rows whose owner_id is NULL.
-    if current.source == "disabled" or is_admin(current):
-        return None
-    return current.owner_id
+def _write_owner_scope(current: CurrentPrincipal, admin: bool) -> str | None:
+    # None disables owner filtering: admins (including every caller when
+    # platform auth is disabled) keep unrestricted writes, including
+    # pre-ownership rows whose owner_id is NULL.
+    return None if admin else current.owner_id
 
 
 def _http_error(status: int, code: str, message: str) -> HTTPException:
@@ -55,6 +53,14 @@ def _validate_profile_config(profile_type: ConfigProfileType, config: dict[str, 
         raise _http_error(422, "invalid_config", str(exc)) from exc
 
 
+def _reject_if_in_use(db: Database, profile_id: str) -> None:
+    # ponytail: checked before the write rather than under a lock, so a run
+    # submitted in between still starts; it runs from its own snapshot, so the
+    # edit cannot change it.
+    if db.evaluations.profile_in_active_use(profile_id):
+        raise _http_error(409, "profile_in_use", "config profile is referenced by an active evaluation")
+
+
 @router.post("", status_code=201, response_model=ConfigProfile)
 def create_profile(body: ConfigProfileCreate, db: Db, current: Principal) -> ConfigProfile:
     """Create a reusable config profile owned by the caller.
@@ -66,7 +72,6 @@ def create_profile(body: ConfigProfileCreate, db: Db, current: Principal) -> Con
     Errors: 422 on schema validation (bad `name` or unknown `type`).
     """
     _validate_profile_config(body.type, body.config)
-    record_principal(db, current)
     row = db.config_profiles.create(
         make_id("cfg"),
         name=body.name,
@@ -118,25 +123,24 @@ def get_profile(profile_id: str, db: Db) -> ConfigProfile:
 
 
 @router.patch("/{profile_id}", response_model=ConfigProfile)
-def patch_profile(profile_id: str, body: ConfigProfileUpdate, db: Db, current: Principal) -> ConfigProfile:
+def patch_profile(
+    profile_id: str, body: ConfigProfileUpdate, db: Db, current: Principal, admin: IsAdmin
+) -> ConfigProfile:
     """Update a config profile's `name` and/or `config`. Type is immutable;
     Gym config is validated before persistence.
 
     Writes are owner-scoped: 404 if not found, or if the caller neither owns
     the profile nor is an admin.
     """
+    owner_id = _write_owner_scope(current, admin)
     existing = db.config_profiles.get(profile_id)
-    if existing is None:
+    if existing is None or (owner_id is not None and existing["owner_id"] != owner_id):
         raise _http_error(404, "not_found", "config profile not found")
     if body.config is not None:
         _validate_profile_config(existing["type"], body.config)
+        _reject_if_in_use(db, profile_id)
     try:
-        row = db.config_profiles.update(
-            profile_id,
-            name=body.name,
-            config=body.config,
-            owner_id=_write_owner_scope(current),
-        )
+        row = db.config_profiles.update(profile_id, name=body.name, config=body.config, owner_id=owner_id)
     except Conflict as exc:
         raise _http_error(409, exc.code, exc.message) from exc
     if row is None:
@@ -145,15 +149,20 @@ def patch_profile(profile_id: str, body: ConfigProfileUpdate, db: Db, current: P
 
 
 @router.delete("/{profile_id}", status_code=200, response_model=DeleteResponse)
-def delete_profile(profile_id: str, db: Db, current: Principal) -> DeleteResponse:
-    """Soft-delete a config profile (sets `deleted_at`).
+def delete_profile(profile_id: str, db: Db, current: Principal, admin: IsAdmin) -> DeleteResponse:
+    """Delete a config profile.
 
-    Writes are owner-scoped: 404 if not found, already deleted, or the caller
-    neither owns the profile nor is an admin; 409 if an active evaluation
-    still references it.
+    Writes are owner-scoped: 404 if not found or the caller neither owns the
+    profile nor is an admin; 409 if an active evaluation still references it.
+    Evaluations already submitted keep the snapshot they captured.
     """
+    owner_id = _write_owner_scope(current, admin)
+    existing = db.config_profiles.get(profile_id)
+    if existing is None or (owner_id is not None and existing["owner_id"] != owner_id):
+        raise _http_error(404, "not_found", "config profile not found")
+    _reject_if_in_use(db, profile_id)
     try:
-        deleted = db.config_profiles.soft_delete(profile_id, owner_id=_write_owner_scope(current))
+        deleted = db.config_profiles.delete(profile_id, owner_id=owner_id)
     except Conflict as exc:
         raise _http_error(409, exc.code, exc.message) from exc
     if not deleted:

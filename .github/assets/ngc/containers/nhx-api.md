@@ -12,6 +12,8 @@ This container image provides the NeMo Helix REST API for inference, models, fil
 
 [Documentation](https://docs.nvidia.com/nemo-helix)
 
+[NeMo Helix on GitHub](https://github.com/NVIDIA-NeMo/nemo-helix)
+
 ### License
 
 This container is licensed under the [Apache License 2.0](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/LICENSE).

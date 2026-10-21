@@ -1327,6 +1327,7 @@ def test_execute_job_create_route_stores_canonical_step_config() -> None:
             error_details=None,
             ownership=None,
             custom_fields=None,
+            control=None,
         )
         return response
 
