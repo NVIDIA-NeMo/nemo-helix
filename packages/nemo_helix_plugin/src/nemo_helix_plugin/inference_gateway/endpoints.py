@@ -4,8 +4,7 @@
 """Typed endpoint definitions for the Inference Gateway proxy routes.
 
 Three proxy surfaces share the ``/-/{trailing_uri:path}`` convention, where
-``trailing_uri`` is the provider-relative path such as ``v1/chat/completions``,
-sent with literal slashes (the gateway declares the same ``:path`` converter):
+``trailing_uri`` is the provider-relative path such as ``v1/chat/completions``:
 
 - ``provider``: route straight to a registered ModelProvider by name.
 - ``model``: route through a model entity (``workspace/name``).

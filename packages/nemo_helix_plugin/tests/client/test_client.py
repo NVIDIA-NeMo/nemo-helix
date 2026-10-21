@@ -139,12 +139,7 @@ def test_send_url_encodes_path_params() -> None:
 
 
 def test_send_keeps_slashes_literal_in_path_placeholders() -> None:
-    """``{path:path}`` spans segments: ``/`` stays literal, everything else is encoded.
-
-    An encoded slash (``%2F``) in the request-target is rejected by proxies that
-    refuse encoded slashes (the OpenShell sandbox supervisor drops the connection),
-    while the server route's ``{path:path}`` converter accepts the literal form.
-    """
+    """``{path:path}`` spans segments: ``/`` stays literal, everything else is encoded."""
     mock_http = MagicMock(spec=httpx.Client)
     mock_http.request.return_value = httpx.Response(
         200,
@@ -173,10 +168,7 @@ def test_send_normalizes_leading_and_trailing_slash_in_path_placeholders(path: s
 
 @pytest.mark.parametrize("path", ["../x", "a/../b", "./x", "a//b", "//x", "x//", "/"])
 def test_send_rejects_dot_and_empty_segments_in_path_placeholders(path: str) -> None:
-    """A ``{path:path}`` value is sent with literal ``/``, so ``..`` would walk into a
-    sibling route (``delete_file(name="a", path="../../victim")`` would hit
-    ``/filesets/victim``). Reject before any request is built or sent.
-    """
+    """With literal ``/``, ``path="../../victim"`` would hit a sibling route, so reject before sending."""
     client = NemoClient(
         base_url=BASE, http_client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200)))
     )

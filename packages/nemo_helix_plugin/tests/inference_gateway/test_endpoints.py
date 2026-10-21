@@ -153,13 +153,7 @@ def _client(recorder: _Recorder) -> InferenceGatewayClient:
 
 
 def test_trailing_uri_slashes_are_literal_on_the_wire() -> None:
-    """``trailing_uri`` is a ``{trailing_uri:path}`` placeholder, matching the gateway route.
-
-    Its slashes travel literally: an encoded ``/`` (``%2F``) is rejected by proxies
-    that refuse encoded slashes (the OpenShell sandbox supervisor drops the
-    connection). ``raw_path`` pins the wire form; ``url.path`` would decode and pass
-    vacuously.
-    """
+    """``raw_path`` pins the wire form; ``url.path`` would decode ``%2F`` and pass vacuously."""
     recorder = _Recorder()
 
     _client(recorder).openai_post(trailing_uri="v1/chat/completions", body=JsonBody({"model": "m"}))

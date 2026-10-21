@@ -44,8 +44,6 @@ SETUP_MOD = "nemo_helix_ext.cli.commands.setup"
 
 SECRETS_BASE = "/apis/secrets/v2/workspaces/default/secrets"
 PROVIDERS_BASE = "/apis/models/v2/workspaces/default/providers"
-# The gateway's ``{trailing_uri:path}`` segment is sent with literal slashes by the
-# typed client (its own endpoint tests pin that form).
 PROBE_PATH = "/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions"
 
 SECRET = {

@@ -294,15 +294,12 @@ def _retry_after(response: httpx.Response) -> float | None:
     return delay if 0 < delay <= 60 else None
 
 
-# A ``{name:path}`` value keeps ``/`` literal because a percent-encoded ``/``
-# (``%2F``) in a request-target is rejected by HTTP proxies that refuse encoded
-# slashes, such as the OpenShell sandbox supervisor. Its segments therefore become
-# real URL segments, so ``.``, ``..`` and empty segments are rejected: they would
-# resolve into a different route, e.g. a sibling fileset. A leading ``/`` is
-# dropped (the template already ends its literal part with one) and one trailing
-# ``/`` is allowed (``v1/models/`` is a distinct, valid target).
 def _format_path(template: str, params: Mapping[str, str]) -> str:
-    """Fill a path template, percent-encoding each value per its placeholder kind."""
+    """Fill a path template, percent-encoding each value per its placeholder kind.
+
+    A ``{name:path}`` value keeps ``/`` literal, drops one leading ``/``, and must not
+    contain empty, ``.`` or ``..`` segments, which would resolve to a different route.
+    """
     parts: list[str] = []
     for literal, field_name, format_spec, _conversion in string.Formatter().parse(template):
         parts.append(literal)
