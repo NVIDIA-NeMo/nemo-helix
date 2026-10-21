@@ -47,6 +47,8 @@ def _job(name: str, discriminator: str | None, *, source: str = "agent-hardener"
         spec[_DISCRIMINATOR_KEY] = discriminator
     return SimpleNamespace(
         id=f"id-{name}",
+        attempt_id=f"attempt-{name}",
+        project=None,
         name=name,
         description=None,
         source=source,
@@ -98,6 +100,8 @@ class _JobsClient:
         self.jobs = jobs or {}
         self.list_items = list_items or []
         self.created_body: object | None = None
+        self.updated_body: object | None = None
+        self.updated_name: str | None = None
         self.list_query: dict[str, object] | None = None
         self.get_calls: list[str] = []
         self.action_calls: list[str] = []
@@ -127,6 +131,19 @@ class _JobsClient:
     async def _unexpected_action(self, action: str) -> None:
         self.action_calls.append(action)
         raise AssertionError(f"{action} must not run before collection ownership is verified")
+
+    async def update_job(self, *, name: str, workspace: str, body: object) -> _Response:
+        del name, workspace, body
+        await self._unexpected_action("update")
+        raise AssertionError("unreachable")
+
+    async def list_job_attempts(self, **_kwargs: object) -> _PageResponse:
+        await self._unexpected_action("list-attempts")
+        raise AssertionError("unreachable")
+
+    async def get_job_attempt(self, **_kwargs: object) -> _Response:
+        await self._unexpected_action("get-attempt")
+        raise AssertionError("unreachable")
 
     async def delete_job(self, **_kwargs: object) -> None:
         await self._unexpected_action("delete")
@@ -208,6 +225,15 @@ class _WriteOnlyJobsClient(_JobsClient):
 
     async def rerun_job(self, **kwargs: object) -> _Response:
         return self._mutation_response("rerun", cast(str, kwargs["job"]), cast(str, kwargs["workspace"]))
+
+    async def update_job(self, *, name: str, workspace: str, body: object) -> _Response:
+        self.updated_body = body
+        self.updated_name = name
+        response = self._mutation_response("update", "war-1", workspace)
+        spec = getattr(body, "spec", None)
+        if spec is not None:
+            cast(SimpleNamespace, response.data()).spec = spec
+        return response
 
     def _mutation_response(self, action: str, name: str, workspace: str) -> _Response:
         self.action_calls.append(action)
@@ -319,6 +345,8 @@ def test_get_accepts_only_matching_collection_and_hides_marker() -> None:
     [
         ("get", "/war/default/jobs/synth-1"),
         ("get", "/war/default/jobs/synth-1/status"),
+        ("get", "/war/default/jobs/synth-1/attempts"),
+        ("get", "/war/default/jobs/synth-1/attempts/attempt-1"),
         ("delete", "/war/default/jobs/synth-1"),
         ("post", "/war/default/jobs/synth-1/cancel"),
         ("get", "/war/default/jobs/synth-1/logs"),
@@ -428,7 +456,9 @@ def test_mutation_ownership_lookup_uses_internal_service_client_not_caller_read(
     )
 
 
-@pytest.mark.parametrize(("method", "suffix"), [("post", "cancel"), ("patch", "control"), ("post", "rerun")])
+@pytest.mark.parametrize(
+    ("method", "suffix"), [("post", "/cancel"), ("patch", "/control"), ("post", "/rerun"), ("patch", "")]
+)
 def test_mutation_authorization_denial_happens_before_internal_ownership_lookup(method: str, suffix: str) -> None:
     async def deny(_method: str, _path: str) -> None:
         raise HTTPException(status_code=403, detail="mutation denied")
@@ -437,7 +467,8 @@ def test_mutation_authorization_denial_happens_before_internal_ownership_lookup(
     client = TestClient(_build_app(caller_jobs, authorize=deny))
 
     with patch("nemo_helix_plugin.jobs.api_factory.get_async_nemo_client") as client_factory:
-        response = client.request(method, f"/war/default/jobs/unknown/{suffix}", json={} if method == "patch" else None)
+        body = ({} if suffix else {"description": "updated"}) if method == "patch" else None
+        response = client.request(method, f"/war/default/jobs/unknown{suffix}", json=body)
 
     assert response.status_code == 403, response.text
     assert response.json()["detail"] == "mutation denied"
@@ -452,6 +483,79 @@ def test_unmarked_legacy_job_is_not_guessed_into_a_discriminated_collection() ->
     response = client.get("/war/default/jobs/legacy")
 
     assert response.status_code == 404, response.text
+
+
+@pytest.mark.parametrize("body", [{"description": "updated"}, {"spec": {"value": "updated"}}])
+@pytest.mark.parametrize(("prefix", "marker"), [("war", "synth-benign"), ("synth", "war-game")])
+def test_definition_update_rejects_sibling_before_compilation_or_mutation(body: dict, prefix: str, marker: str) -> None:
+    jobs = _JobsClient({"other": _job("other", marker)})
+    client = TestClient(_build_app(jobs))
+    with patch("nemo_helix_plugin.jobs.api_factory.get_async_nemo_client", return_value=_InternalNemoClient(jobs)):
+        response = client.patch(f"/{prefix}/default/jobs/other", json=body)
+    assert response.status_code == 404, response.text
+    assert jobs.action_calls == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"description": "updated"},
+        {"spec": {"value": "updated", _DISCRIMINATOR_KEY: "synth-benign"}},
+    ],
+)
+def test_definition_update_preserves_marker_and_write_only_permissions(body: dict) -> None:
+    authorized: list[tuple[str, str]] = []
+
+    async def authorize(method: str, path: str) -> None:
+        authorized.append((method, path))
+
+    caller = _WriteOnlyJobsClient()
+    ownership = _JobsClient({"war-1": _job("war-1", "war-game")})
+    client = TestClient(_build_app(caller, authorize=authorize))
+    with patch("nemo_helix_plugin.jobs.api_factory.get_async_nemo_client", return_value=_InternalNemoClient(ownership)):
+        response = client.patch("/war/default/jobs/war-1", json=body)
+    assert response.status_code == 200, response.text
+    assert authorized == [("PATCH", "/apis/jobs/v2/workspaces/default/jobs/war-1")]
+    assert ownership.get_calls == ["war-1"]  # reuse the canonical metadata for compilation, no caller read
+    assert caller.action_calls == ["update"]
+    if "spec" in body:
+        assert caller.updated_name == "id-war-1"
+        assert getattr(caller.updated_body, "spec") == {"value": "updated", _DISCRIMINATOR_KEY: "war-game"}
+        assert response.json()["spec"] == {"value": "updated"}
+
+
+class _AttemptJobsClient(_JobsClient):
+    def _attempt(self) -> SimpleNamespace:
+        return SimpleNamespace(
+            id="attempt-1",
+            name="attempt-1",
+            job="war-1",
+            workspace="default",
+            seq=1,
+            spec={"value": "historical", _DISCRIMINATOR_KEY: "war-game"},
+            status="completed",
+            status_details={},
+            error_details=None,
+            created_at="2026-01-01T00:00:00Z",
+            updated_at="2026-01-01T00:00:00Z",
+            is_current=True,
+        )
+
+    async def list_job_attempts(self, **_kwargs: object) -> _PageResponse:
+        return _PageResponse([self._attempt()])
+
+    async def get_job_attempt(self, **_kwargs: object) -> _Response:
+        return _Response(self._attempt())
+
+
+@pytest.mark.parametrize("suffix", ["/attempts", "/attempts/attempt-1"])
+def test_owned_attempts_hide_internal_marker(suffix: str) -> None:
+    jobs = _AttemptJobsClient({"war-1": _job("war-1", "war-game")})
+    response = TestClient(_build_app(jobs)).get(f"/war/default/jobs/war-1{suffix}")
+    assert response.status_code == 200, response.text
+    payload = response.json()["data"][0] if suffix == "/attempts" else response.json()
+    assert payload["spec"] == {"value": "historical"}
+    assert jobs.get_calls == ["war-1"]
 
 
 @pytest.mark.parametrize("value", ["", "   ", 3])

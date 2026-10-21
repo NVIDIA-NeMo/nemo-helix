@@ -39,6 +39,8 @@ class _StoredJob(_Base):
 def _job(name, spec, source="agent-hardener"):
     return SimpleNamespace(
         id=f"id-{name}",
+        attempt_id=f"attempt-{name}",
+        project=None,
         name=name,
         workspace="default",
         source=source,
@@ -193,6 +195,9 @@ def test_named_access_preserves_legacy_and_rejects_siblings(mixed_jobs, collecti
     "method,suffix",
     [
         ("GET", "/status"),
+        ("GET", "/attempts"),
+        ("GET", "/attempts/attempt-1"),
+        ("GET", "/logs?attempt_id=other"),
         ("GET", "/logs"),
         ("GET", "/results"),
         ("GET", "/results/report"),
@@ -324,3 +329,54 @@ def test_caller_cannot_select_sibling_marker(mixed_jobs, collection, sibling):
     assert response.status_code == 200, response.text
     assert response.json()["pagination"]["total_results"] == 0
     assert response.json()["data"] == []
+
+
+@pytest.mark.parametrize("collection,name", [("", "old-war"), ("/synth-benign", "old-synth")])
+def test_legacy_definition_description_update_and_attempt_access(mixed_jobs, collection, name):
+    client, jobs, records = mixed_jobs
+    records[name].description = "updated"
+    jobs.update_job.return_value = _response(records[name])
+    prefix = f"/v2/default{collection}/jobs/{name}"
+    response = client.patch(prefix, json={"description": "updated"})
+    assert response.status_code == 200, response.text
+    assert response.json()["description"] == "updated"
+    assert jobs.get_job.await_count == 1
+    assert jobs.update_job.await_args.kwargs["name"] == name
+    attempt = SimpleNamespace(
+        id="old-attempt",
+        name="old-attempt",
+        job=name,
+        workspace="default",
+        seq=1,
+        spec=records[name].spec,
+        status="completed",
+        status_details={},
+        error_details=None,
+        created_at="2026-01-01T00:00:00Z",
+        updated_at="2026-01-01T00:00:00Z",
+        is_current=True,
+    )
+    jobs.get_job_attempt.return_value = _response(attempt)
+    response = client.get(f"{prefix}/attempts/old-attempt")
+    assert response.status_code == 200, response.text
+    assert response.json()["spec"] == records[name].spec
+
+
+@pytest.mark.parametrize("collection,name", [("", "old-war"), ("/synth-benign", "old-synth")])
+def test_owned_attempt_query_parameters_are_forwarded(mixed_jobs, collection, name):
+    client, jobs, _ = mixed_jobs
+    prefix = f"/v2/default{collection}/jobs/{name}"
+    jobs.list_job_logs.return_value = SimpleNamespace(
+        page=lambda: SimpleNamespace(
+            items=[],
+            metadata={"total": 0, "next_page": None, "prev_page": None},
+        )
+    )
+    filters = {"attempt_id": "old-attempt", "step_id": "old-step", "task_id": "old-task"}
+    response = client.get(f"{prefix}/logs", params=filters)
+    assert response.status_code == 200, response.text
+    assert jobs.list_job_logs.await_args.kwargs["query_params"] == filters
+    jobs.list_job_results.return_value = _response(SimpleNamespace(data=[]))
+    response = client.get(f"{prefix}/results", params={"attempt_id": "old-attempt"})
+    assert response.status_code == 200, response.text
+    assert jobs.list_job_results.await_args.kwargs["query_params"] == {"attempt_id": "old-attempt"}

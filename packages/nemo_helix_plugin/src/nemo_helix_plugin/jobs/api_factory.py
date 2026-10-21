@@ -148,7 +148,8 @@ _JOB_PERMISSION_DESCRIPTIONS: dict[str, str] = {
 # A plugin service can expose more than one logical job collection while keeping a
 # single Jobs ``source`` for service-level discovery and telemetry.  The Jobs service
 # has no first-class job-kind column, so discriminated routers persist their kind in
-# the plugin-defined spec (an immutable, server-filterable namespace).  The factory
+# the plugin-defined spec (a server-filterable namespace). The factory restamps it
+# on typed definition updates; direct core Jobs updates remain a generic surface. The factory
 # strips this reserved field before validating or returning the plugin's public spec.
 _JOB_ROUTE_DISCRIMINATOR_SPEC_KEY = "_nemo_job_route"
 
@@ -903,7 +904,7 @@ def job_route_factory(
             job_name is None when no name was provided and no generator exists.
         route_options: Which routes to enable (defaults to CORE).
         job_result_routes: Custom result download routes.
-        job_discriminator: Server-owned collection marker in the immutable stored spec.
+        job_discriminator: Server-owned collection marker in the stored job/attempt specs.
             Removed from public specs and task configuration. Scopes every route.
         legacy_job_filter: Optional server-defined predicate identifying unmarked historical
             records. Applied before pagination and during named ownership checks using
@@ -1095,13 +1096,24 @@ def job_route_factory(
             extra.pop(_JOB_ROUTE_DISCRIMINATOR_SPEC_KEY, None)
         return clean
 
-    def _public_job_spec(job_resp: HelixJob) -> object:
-        """Remove the factory-owned discriminator before public schema validation."""
-        if job_discriminator is None or not isinstance(job_resp.spec, Mapping):
-            return job_resp.spec
-        public_spec = dict(job_resp.spec)
+    def _public_job_spec(spec: object) -> object:
+        """Remove the factory-owned discriminator from jobs and historical attempt specs."""
+        if job_discriminator is None or not isinstance(spec, Mapping):
+            return spec
+        public_spec = dict(spec)
         public_spec.pop(_JOB_ROUTE_DISCRIMINATOR_SPEC_KEY, None)
         return public_spec
+
+    def _stored_job_spec(spec: Any) -> Any:
+        """Stamp server-owned metadata on both creates and definition updates."""
+        if job_discriminator is None:
+            return spec
+        if not isinstance(spec, Mapping):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to serialize {service_name} job spec as an object.",
+            )
+        return {**spec, _JOB_ROUTE_DISCRIMINATOR_SPEC_KEY: job_discriminator}
 
     async def _require_job_in_collection(
         jobs_client: AsyncJobsClient,
@@ -1129,7 +1141,7 @@ def job_route_factory(
         authorize: RequestAuthorizer,
         method: str,
         suffix: str = "",
-    ) -> None:
+    ) -> HelixJob | None:
         """Verify subtype ownership without adding ``jobs.read`` to the caller's contract.
 
         The actual mutation still uses the request-scoped client below, so core Jobs
@@ -1137,6 +1149,9 @@ def job_route_factory(
         the actor.  Only this metadata-only ownership lookup uses the plugin's internal
         service principal.  Keeping the two clients separate avoids turning a subtype
         guard into an undocumented read-permission requirement for write-only roles.
+
+        This lookup is not atomic with the mutation; core Jobs has no subtype
+        precondition, and direct core definition updates remain generic.
 
         Authorize the core mutation before the privileged lookup. Otherwise a caller
         holding only the plugin permission could distinguish a matching job (later 403)
@@ -1152,7 +1167,7 @@ def job_route_factory(
             internal=True,
             workspace=workspace,
         ) as ownership_client:
-            await _require_job_in_collection(
+            return await _require_job_in_collection(
                 AsyncJobsClient.from_client(ownership_client),
                 workspace=workspace,
                 name=name,
@@ -1191,7 +1206,7 @@ def job_route_factory(
             workspace=job_resp.workspace,
             created_at=job_resp.created_at,
             updated_at=job_resp.updated_at,
-            spec=handle_job_spec_mismatch(job_output, _public_job_spec(job_resp)),
+            spec=handle_job_spec_mismatch(job_output, _public_job_spec(job_resp.spec)),
             status=job_resp.status,
             status_details=job_resp.status_details,
             error_details=job_resp.error_details,
@@ -1228,7 +1243,7 @@ def job_route_factory(
             job=attempt.job,
             workspace=attempt.workspace,
             seq=attempt.seq,
-            spec=handle_job_spec_mismatch(job_output, attempt.spec),
+            spec=handle_job_spec_mismatch(job_output, _public_job_spec(attempt.spec)),
             status=attempt.status,
             status_details=attempt.status_details,
             error_details=attempt.error_details,
@@ -1293,17 +1308,8 @@ def job_route_factory(
             # JSON-encode on the wire (invalid utf-8 on the pickle marker). ``mode="json"`` runs each
             # nested model's own JSON serializer, so bytes base64-encode and round-trip on read.
             spec_dict = job_spec.model_dump(mode="json") if isinstance(job_spec, BaseModel) else job_spec
-            if job_discriminator is not None:
-                # The request spec was schema-validated before this point.  Stamp the
-                # reserved value afterwards so a caller cannot spoof another route,
-                # and so the marker never enters plugin compile/task configuration.
-                if not isinstance(spec_dict, Mapping):
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=f"Failed to serialize {service_name} job spec as an object.",
-                    )
-                spec_dict = dict(spec_dict)
-                spec_dict[_JOB_ROUTE_DISCRIMINATOR_SPEC_KEY] = job_discriminator
+            # Stamp only after transform/compile; metadata must not enter task configuration.
+            spec_dict = _stored_job_spec(spec_dict)
 
             # Only include optional fields when they have values — passing None
             # explicitly serializes differently than omitting (exclude_unset).
@@ -1442,21 +1448,30 @@ def job_route_factory(
             request: TypedJobUpdate,
             async_client: AsyncNemoClient = Depends(get_nemo_client),
             entity_client: EntityClient = Depends(get_entity_client),
+            authorize: RequestAuthorizer = Depends(mutation_authorizer_dependency),
         ) -> TypedJobResponse:
             f"""Update a job for the {service_name} microservice."""
 
             jobs = AsyncJobsClient.from_client(async_client)
+            existing_job = await _require_mutation_target_in_collection(
+                name=name,
+                workspace=workspace,
+                authorize=authorize,
+                method="PATCH",
+            )
             update_fields: dict[str, Any] = {}
             update_identifier = name
             if "description" in request.model_fields_set:
                 update_fields["description"] = request.description
             if "spec" in request.model_fields_set:
                 assert request.spec is not None
-                existing_job = (await jobs.get_job(name=name, workspace=workspace)).data()
+                if existing_job is None:
+                    existing_job = (await jobs.get_job(name=name, workspace=workspace)).data()
                 update_identifier = existing_job.id
+                input_spec = _without_job_discriminator(cast(JobInputT, request.spec))
                 job_spec = await _transform_input_to_output(
                     input_to_output,
-                    request.spec,
+                    input_spec,
                     workspace,
                     entity_client,
                     existing_job.name,
@@ -1466,14 +1481,14 @@ def job_route_factory(
                 platform_spec = await _compile_platform_spec(
                     platform_job_config_compiler,
                     workspace,
-                    request.spec,
+                    input_spec,
                     job_spec,
                     entity_client,
                     existing_job.name,
                     service_name,
                     async_client,
                 )
-                update_fields["spec"] = (
+                update_fields["spec"] = _stored_job_spec(
                     job_spec.model_dump(mode="json") if isinstance(job_spec, BaseModel) else job_spec
                 )
                 update_fields["platform_spec"] = platform_spec
@@ -1497,11 +1512,13 @@ def job_route_factory(
             filter: str | None = Query(default=None),
         ) -> Page[TypedJobAttempt]:
             f"""List attempts for a {service_name} job."""
+            jobs = AsyncJobsClient.from_client(async_client)
+            await _require_job_in_collection(jobs, name=name, workspace=workspace)
             query: ListAttemptsQueryParams = {"page": page, "page_size": page_size, "sort": sort}
             if filter is not None:
                 query["filter"] = filter
             attempt_page = (
-                await AsyncJobsClient.from_client(async_client).list_job_attempts(
+                await jobs.list_job_attempts(
                     workspace=workspace,
                     job=name,
                     query_params=query,
@@ -1532,8 +1549,10 @@ def job_route_factory(
             async_client: AsyncNemoClient = Depends(get_nemo_client),
         ) -> TypedJobAttempt:
             f"""Get one attempt for a {service_name} job."""
+            jobs = AsyncJobsClient.from_client(async_client)
+            await _require_job_in_collection(jobs, name=name, workspace=workspace)
             response = (
-                await AsyncJobsClient.from_client(async_client).get_job_attempt(
+                await jobs.get_job_attempt(
                     workspace=workspace,
                     job=name,
                     attempt=attempt,
