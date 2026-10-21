@@ -35,6 +35,7 @@ ROOTS = (
     "/usr/local",
     "/usr/lib/python3/dist-packages",
     "/root/.local/share/uv/python",
+    "/app/.garak_venv",
 )
 SOURCE_OUTPUT = Path("/usr/share/nemo-helix/source-distributions/rebuilt-wandb")
 CACHE_ROOTS = (Path("/opt/uv_cache"), Path("/home/ubuntu/.cache/uv"))
