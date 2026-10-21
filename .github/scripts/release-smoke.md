@@ -14,7 +14,8 @@ checks; they do not validate GPU workloads or replace the QA suite.
   and `NVIDIA_INFERENCE_KEY`. The endpoint must be reachable from GitHub-hosted
   runners and return the configured model from its OpenAI-compatible models API.
 - Set repository variable `SMOKE_INFERENCE_MODEL` to a tool-calling chat model ID
-  served by that endpoint. Initial selection: `aws-anthropic-bedrock-claude-haiku-5-5`.
+  served by that endpoint. Initial selection: `aws/anthropic/bedrock-claude-haiku-5-5`.
+  Use the provider's model ID, not the normalized model entity name shown in Studio.
 - Existing `NGC_REGISTRY_READ_TOKEN` and the workflow's `GITHUB_TOKEN` authenticate
   published image/chart pulls. `SLACK_RELEASE_WEBHOOK` is used only when requested.
 
@@ -41,6 +42,13 @@ This enables the call after `notify-end` for full, successfully published stable
 and nightly releases. A skipped or failed Slack announcement does not block it.
 While disabled, releases do not announce pending smoke checks. Partial releases,
 dry runs and `act` runs do not schedule them.
+
+**Initial rollout blocker:** validation of `0.8.0` and
+`0.8.1-nightly-20261020230741` found that their `nemo-fabric-runtime==0.4.0`
+dependency has no Intel macOS wheel. Both exact `[all]` installs fail on
+`macos-15-intel`; Colima itself starts. Keep automatic runs disabled until the
+runner/dependency compatibility is resolved and both installation checks pass.
+This workflow does not bypass that installation failure or change packaging.
 
 With notifications enabled, a scheduled release announcement says **Smoke checks
 pending**, and one final message reports both jobs as passed, failed, or
