@@ -96,6 +96,10 @@ class TrainingRunner:
             if self._pause_sentinel_path().exists():
                 # Every pod stops here and exits 75; there is nothing to synchronize or publish.
                 logger.info("Training stopped for a pause after saving its checkpoint; skipping publication")
+                # A resume reuses this attempt's barriers. A worker that starts before the resumed
+                # coordinator would take this run's config-ready marker and load the old config.
+                # If they cannot be removed, the pause fails, and a rerun starts a new attempt.
+                self._dist_ctx.clear_barriers()
                 result = TrainingResult(
                     success=False,
                     paused=True,

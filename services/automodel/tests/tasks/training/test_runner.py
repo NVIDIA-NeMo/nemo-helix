@@ -25,6 +25,7 @@ from nhx.automodel.tasks.training.schemas import (  # noqa: E402
     DistillationConfig,
     ModelConfig,
     TrainingMetrics,
+    TrainingResult,
     TrainingStepConfig,
 )
 from nhx.customization_common.service.context import NHXJobContext  # noqa: E402
@@ -234,6 +235,50 @@ def test_a_paused_run_skips_publication_and_completion(tmp_path: Path, monkeypat
     assert completed == []
     backend.find_checkpoints.assert_not_called()
     backend.process_checkpoints.assert_not_called()
+
+
+def _paused_multi_node_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, role: DistributedRole) -> TrainingResult:
+    monkeypatch.setattr("nhx.automodel.tasks.training.runner.get_gpu_info", lambda: None)
+
+    def train(library: LibraryConfig) -> TrainingMetrics:
+        (tmp_path / "PAUSED").write_text("5\n")
+        return TrainingMetrics()
+
+    runner = _ScriptedRunner(tmp_path, duration=5.0, compile_config=MagicMock, train=train, backend=MagicMock())
+    rank = 0 if role == DistributedRole.COORDINATOR else 1
+    runner._dist_ctx = DistributedContext(role=role, rank=rank, world_size=2, barrier_dir=tmp_path / "barriers")
+    (tmp_path / "barriers" / "config_ready.rank0.ready").touch()
+    return runner.run()
+
+
+def test_a_paused_coordinator_clears_the_barriers_for_the_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A resume reuses the attempt's barriers, and a worker that starts first must not take this run's marker."""
+    result = _paused_multi_node_run(tmp_path, monkeypatch, DistributedRole.COORDINATOR)
+
+    assert result.paused
+    assert not (tmp_path / "barriers").exists()
+
+
+def test_a_paused_worker_leaves_the_barriers_to_the_coordinator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result = _paused_multi_node_run(tmp_path, monkeypatch, DistributedRole.WORKER)
+
+    assert result.paused
+    assert (tmp_path / "barriers" / "config_ready.rank0.ready").exists()
+
+
+def test_a_pause_fails_when_the_barriers_cannot_be_cleared(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The job then ends in error, and a rerun starts a new attempt with its own barriers."""
+    monkeypatch.setattr(
+        "nhx.automodel.tasks.training.distributed.shutil.rmtree", MagicMock(side_effect=PermissionError("denied"))
+    )
+
+    result = _paused_multi_node_run(tmp_path, monkeypatch, DistributedRole.COORDINATOR)
+
+    assert not result.paused and not result.success
 
 
 def test_the_coordinator_clears_an_earlier_pause_marker_before_training(

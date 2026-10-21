@@ -403,6 +403,7 @@ class _Scheduler:
     def __init__(self, max_steps: int = 40, num_epochs: int = 2) -> None:
         self.max_steps, self.num_epochs = max_steps, num_epochs
         self.step, self.epoch, self.is_last_batch = 0, 0, False
+        self.sigterm_flag = False
 
 
 class _Sample:
@@ -413,6 +414,7 @@ class _Sample:
 class _CheckpointerConfig:
     def __init__(self, checkpoint_dir: str) -> None:
         self.checkpoint_dir = checkpoint_dir
+        self.save_consolidated: object = False
 
 
 class _Checkpointer:
