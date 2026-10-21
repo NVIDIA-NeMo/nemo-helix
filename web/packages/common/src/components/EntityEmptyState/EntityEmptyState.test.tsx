@@ -4,7 +4,7 @@
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
 import { ToastProvider } from '@nemo/common/src/providers/toast/ToastProvider';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { FC, ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
@@ -48,7 +48,7 @@ describe('EntityEmptyState', () => {
       expect(help).not.toHaveTextContent(descriptor.cliCommand as string);
 
       await user.click(screen.getByRole('radio', { name: 'CLI' }));
-      expect(help).toHaveTextContent(descriptor.cliCommand as string);
+      await waitFor(() => expect(help).toHaveTextContent(descriptor.cliCommand as string));
       expect(help).not.toHaveTextContent(descriptor.skillPrompt as string);
     });
 
