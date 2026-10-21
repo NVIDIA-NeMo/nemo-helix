@@ -404,8 +404,13 @@ class KubernetesJobExecutionProfile(BaseExecutionProfile):
     )
     allowed_services: list[str] = Field(
         default_factory=list,
-        description="Platform services whose Jobs may use this profile, by service name (`builder` for "
-        "`service:builder`). Empty lets any caller use it.",
+        description=(
+            "Platform services whose Jobs may use this profile, by service name (`builder` for "
+            "`service:builder`); Jobs refuses any other creator with 403. Empty lets any caller use it. "
+            "This keeps users, job workloads, and services passing on a user's choice of profile off it. "
+            "It relies on workload token exchange to make identities unforgeable, and it trusts platform "
+            "services: one could still claim another's name."
+        ),
     )
 
     @property
