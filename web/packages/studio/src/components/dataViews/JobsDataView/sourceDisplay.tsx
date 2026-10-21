@@ -32,10 +32,10 @@ const SOURCE_DISPLAY: Record<string, SourceDisplay> = {
 
 const FALLBACK_ICON = <Cog className={iconColorClass} size={14} />;
 
-/** Unknown sources fall back to their raw name and a generic icon. */
 export const getSourceDisplay = (source: string): SourceDisplay =>
-  SOURCE_DISPLAY[source] ?? { label: source, icon: FALLBACK_ICON };
+  Object.hasOwn(SOURCE_DISPLAY, source)
+    ? SOURCE_DISPLAY[source]
+    : { label: source, icon: FALLBACK_ICON };
 
-/** Tooltip for a source cell: the label it shows, not the raw value the API reports. */
 export const getSourceTitle = (value: unknown): string | undefined =>
   typeof value === 'string' && value ? getSourceDisplay(value).label : undefined;

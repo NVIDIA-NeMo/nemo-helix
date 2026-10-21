@@ -1,7 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { formatDurationMs, formatTimeInSeconds, getElapsedSeconds, utcToLocalDate } from './date';
+import {
+  formatDurationMs,
+  formatTimeInSeconds,
+  getElapsedSeconds,
+  utcToLocalDate,
+} from '@nemo/common/src/utils/date';
 
 describe('formatTimeInSeconds', () => {
   it('Returns empty string when seconds is undefined', () => {

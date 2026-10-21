@@ -8,8 +8,8 @@ import {
   type HelixJobResponsesPage,
   HelixJobStatus,
 } from '@nemo/sdk/generated/platform/schema';
+import { DEFAULT_QUERY_RETRY_COUNT } from '@studio/api/queryClient';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
-import { IN_PROGRESS_JOB_STATUSES } from '@studio/constants/platformJobs';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
@@ -18,11 +18,11 @@ import { RecentJobsTable } from '@studio/routes/WorkspaceDashboardHomeRoute/Rece
 import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
 import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
 import { act, renderRoute, screen, within } from '@studio/tests/util/render';
-import { focusManager } from '@tanstack/react-query';
+import { focusManager, onlineManager } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { useState } from 'react';
-import { generatePath } from 'react-router';
+import { generatePath, Link } from 'react-router';
 
 const mockEnvironment = vi.hoisted(() => ({ customizerEnabled: true }));
 
@@ -35,8 +35,8 @@ vi.mock('@studio/constants/environment', async (importOriginal) => ({
 
 const JOBS_URL = `${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs`;
 const WORKSPACE = workspace1.workspace;
-// "Recent" uses the real clock; fixtures count back from one instant for exact gaps.
 const NOW = Date.now();
+const CUTOFF_BUCKET_MS = 5 * 60 * 1000;
 const hoursAgo = (hours: number) => new Date(NOW - hours * 60 * 60 * 1000).toISOString();
 
 const makeJob = (overrides: Partial<HelixJobResponse> = {}): HelixJobResponse => ({
@@ -53,16 +53,41 @@ const makeJob = (overrides: Partial<HelixJobResponse> = {}): HelixJobResponse =>
   ...overrides,
 });
 
-const makeJobsPage = (jobs: HelixJobResponse[]): HelixJobResponsesPage => ({
+const makeJobsPage = (
+  jobs: HelixJobResponse[],
+  { page = 1, pageSize = 10, totalResults = jobs.length } = {}
+): HelixJobResponsesPage => ({
   data: jobs,
   pagination: {
-    page: 1,
-    page_size: 10,
+    page,
+    page_size: pageSize,
     current_page_size: jobs.length,
-    total_pages: 1,
-    total_results: jobs.length,
+    total_pages: Math.ceil(totalResults / pageSize),
+    total_results: totalResults,
   },
 });
+
+const pageJobs = (request: Request, jobs: HelixJobResponse[]) => {
+  const params = new URL(request.url).searchParams;
+  const page = Number(params.get('page'));
+  const pageSize = Number(params.get('page_size'));
+  return makeJobsPage(jobs.slice((page - 1) * pageSize, page * pageSize), {
+    page,
+    pageSize,
+    totalResults: jobs.length,
+  });
+};
+
+const makeRuns = (count: number) =>
+  Array.from({ length: count }, (_, i) =>
+    makeJob({ id: `job-${i + 1}`, name: `run-${i + 1}`, status: HelixJobStatus.completed })
+  );
+
+const refetchOnFocus = () =>
+  act(() => {
+    focusManager.setFocused(false);
+    focusManager.setFocused(true);
+  });
 
 const renderComponent = (search = '') =>
   renderRoute(<RecentJobsTable />, {
@@ -80,6 +105,8 @@ describe('RecentJobsTable', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    focusManager.setFocused(undefined);
+    onlineManager.setOnline(true);
   });
 
   it('renders the Name, Source, Status, and Elapsed time columns with job rows', async () => {
@@ -157,16 +184,12 @@ describe('RecentJobsTable', () => {
     await screen.findByText('first-name');
     const [nameCell] = screen.getAllByTestId('line-clamp');
 
-    act(() => {
-      focusManager.setFocused(false);
-      focusManager.setFocused(true);
-    });
+    await refetchOnFocus();
 
     expect(await screen.findByText('second-name')).toBeInTheDocument();
     expect(requestCount).toBe(2);
     expect(screen.getAllByTestId('line-clamp')[0]).toBe(nameCell);
     expect(nameCell).toHaveTextContent('second-name');
-    focusManager.setFocused(undefined);
   });
 
   it('requests in-progress jobs and jobs that finished in the last 48 hours', async () => {
@@ -193,13 +216,46 @@ describe('RecentJobsTable', () => {
     expect(sourceClause.source.$nin).toContain('models-system');
     expect(sourceClause.source.$nin).not.toContain('customization');
 
-    const [inProgress, recentlyFinished] = statusClause.$or;
-    expect(inProgress).toEqual({ status: { $in: IN_PROGRESS_JOB_STATUSES } });
-    expect(recentlyFinished.$and[0]).toEqual({ status: { $in: HelixJobTerminalStatuses } });
+    expect(statusClause.$or).toEqual([
+      { status: { $nin: HelixJobTerminalStatuses } },
+      { updated_at: { $gte: '2026-01-01T12:30:00.000Z' } },
+    ]);
+  });
 
-    expect(recentlyFinished.$and[1]).toEqual({
-      updated_at: { $gte: '2026-01-01T12:00:00.000Z' },
-    });
+  it('moves the 48-hour cutoff forward as polls pass without reloading the page in view', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-01-03T12:04:40.000Z'));
+    const cutoffs: string[] = [];
+    let releaseRefetch = () => {};
+    server.use(
+      http.get(JOBS_URL, async ({ request }) => {
+        const filter = JSON.parse(new URL(request.url).searchParams.get('filter') ?? '');
+        const cutoff: string = filter.$and[1].$or[1].updated_at.$gte;
+        cutoffs.push(cutoff);
+        if (cutoffs.length > 1 && cutoff !== cutoffs[0]) {
+          await new Promise<void>((resolve) => {
+            releaseRefetch = resolve;
+          });
+          return HttpResponse.json(makeJobsPage([makeJob({ name: 'fresh-run' })]));
+        }
+        return HttpResponse.json(
+          makeJobsPage([makeJob({ name: 'done-run', status: HelixJobStatus.completed })])
+        );
+      })
+    );
+
+    renderComponent();
+    await screen.findByText('done-run');
+    expect(cutoffs).toEqual(['2026-01-01T12:00:00.000Z']);
+
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    await vi.waitFor(() => expect(cutoffs.at(-1)).toBe('2026-01-01T12:05:00.000Z'));
+
+    expect(screen.getByText('done-run')).toBeInTheDocument();
+    expect(screen.getByText('1-1 of 1 items')).toBeInTheDocument();
+
+    releaseRefetch();
+    expect(await screen.findByText('fresh-run')).toBeInTheDocument();
   });
 
   it('leaves fine-tuning jobs out of the request when fine-tuning is disabled', async () => {
@@ -221,7 +277,7 @@ describe('RecentJobsTable', () => {
     );
   });
 
-  it('shows cached rows right away when the table remounts within the hour', async () => {
+  it('shows cached rows right away when the table remounts within the cutoff bucket', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date('2026-01-03T12:10:00.000Z'));
     const filters: (string | null)[] = [];
@@ -257,7 +313,7 @@ describe('RecentJobsTable', () => {
 
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     await user.click(screen.getByRole('button', { name: 'toggle' }));
-    vi.setSystemTime(new Date('2026-01-03T12:40:00.000Z'));
+    vi.setSystemTime(new Date('2026-01-03T12:14:00.000Z'));
     await user.click(screen.getByRole('button', { name: 'toggle' }));
 
     expect(screen.getByText('cached-run')).toBeInTheDocument();
@@ -286,7 +342,7 @@ describe('RecentJobsTable', () => {
     }
   );
 
-  it('fetches recent jobs in one large page and pages them in the table', async () => {
+  it('requests the page in view and counts every matching job from the API total', async () => {
     const requests: URLSearchParams[] = [];
     const jobs = Array.from({ length: 12 }, (_, i) =>
       makeJob({ id: `job-${i + 1}`, name: `run-${i + 1}`, status: HelixJobStatus.completed })
@@ -294,12 +350,7 @@ describe('RecentJobsTable', () => {
     server.use(
       http.get(JOBS_URL, ({ request }) => {
         requests.push(new URL(request.url).searchParams);
-        const page = makeJobsPage(jobs);
-        // The API's total counts every job, not just those passing the status filter.
-        return HttpResponse.json({
-          ...page,
-          pagination: { ...page.pagination, total_results: 500 },
-        });
+        return HttpResponse.json(pageJobs(request, jobs));
       })
     );
 
@@ -309,61 +360,131 @@ describe('RecentJobsTable', () => {
     expect(screen.getByText('run-12')).toBeInTheDocument();
     expect(screen.queryByText('run-10')).not.toBeInTheDocument();
     expect(screen.getByText('11-12 of 12 items')).toBeInTheDocument();
-    expect(requests[0].get('page')).toBe('1');
-    expect(requests[0].get('page_size')).toBe('100');
-    expect(requests.every((params) => params.get('page') === '1')).toBe(true);
+    expect(requests.map((params) => [params.get('page'), params.get('page_size')])).toEqual([
+      ['2', '10'],
+    ]);
   });
 
-  it('drops finished jobs once they age out of the 48-hour window', async () => {
-    server.use(
-      http.get(JOBS_URL, () =>
-        HttpResponse.json(
-          makeJobsPage([
-            makeJob({ id: 'job-recent', name: 'recent-run', status: HelixJobStatus.error }),
-            makeJob({
-              id: 'job-old',
-              name: 'old-run',
-              status: HelixJobStatus.completed,
-              created_at: hoursAgo(50),
-              updated_at: hoursAgo(49),
-            }),
-            makeJob({
-              id: 'job-long',
-              name: 'long-run',
-              created_at: hoursAgo(100),
-              updated_at: hoursAgo(60),
-            }),
-          ])
-        )
-      )
+  it('requests the next page when the user pages forward', async () => {
+    const user = userEvent.setup();
+    const jobs = Array.from({ length: 12 }, (_, i) =>
+      makeJob({ id: `job-${i + 1}`, name: `run-${i + 1}`, status: HelixJobStatus.completed })
     );
+    server.use(http.get(JOBS_URL, ({ request }) => HttpResponse.json(pageJobs(request, jobs))));
 
     renderComponent();
+    expect(await screen.findByText('1-10 of 12 items')).toBeInTheDocument();
 
-    expect(await screen.findByText('recent-run')).toBeInTheDocument();
-    expect(screen.getByText('long-run')).toBeInTheDocument();
-    expect(screen.queryByText('old-run')).not.toBeInTheDocument();
-    expect(screen.getByText('1-2 of 2 items')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /next page/i }));
+
+    expect(await screen.findByText('run-11')).toBeInTheDocument();
+    expect(screen.queryByText('run-1')).not.toBeInTheDocument();
+    expect(screen.getByText('11-12 of 12 items')).toBeInTheDocument();
   });
 
   it('steps back to the last page when jobs age out from under the page in view', async () => {
+    const requestedPages: (string | null)[] = [];
     const recent = Array.from({ length: 10 }, (_, i) =>
       makeJob({ id: `job-${i + 1}`, name: `run-${i + 1}`, status: HelixJobStatus.completed })
     );
-    const agedOut = makeJob({
-      id: 'job-old',
-      name: 'old-run',
-      status: HelixJobStatus.completed,
-      created_at: hoursAgo(50),
-      updated_at: hoursAgo(49),
-    });
-    server.use(http.get(JOBS_URL, () => HttpResponse.json(makeJobsPage([...recent, agedOut]))));
+    server.use(
+      http.get(JOBS_URL, ({ request }) => {
+        requestedPages.push(new URL(request.url).searchParams.get('page'));
+        return HttpResponse.json(pageJobs(request, recent));
+      })
+    );
 
     renderComponent('?page=2');
 
     expect(await screen.findByText('1-10 of 10 items')).toBeInTheDocument();
     expect(screen.getByText('run-1')).toBeInTheDocument();
     expect(screen.queryByText(ENTITY_EMPTY_STATES.recentJobs.heading)).not.toBeInTheDocument();
+    expect(requestedPages).toEqual(['2', '1']);
+  });
+
+  it('refetches a cached page that ran past the end before stepping back from it', async () => {
+    const user = userEvent.setup();
+    let jobs = makeRuns(11);
+    server.use(http.get(JOBS_URL, ({ request }) => HttpResponse.json(pageJobs(request, jobs))));
+
+    renderComponent('?page=2');
+    expect(await screen.findByText('run-11')).toBeInTheDocument();
+
+    jobs = makeRuns(10);
+    await refetchOnFocus();
+    expect(await screen.findByText('1-10 of 10 items')).toBeInTheDocument();
+
+    jobs = makeRuns(11);
+    await refetchOnFocus();
+    expect(await screen.findByText('1-10 of 11 items')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /next page/i }));
+
+    expect(await screen.findByText('run-11')).toBeInTheDocument();
+    expect(screen.getByText('11-11 of 11 items')).toBeInTheDocument();
+  });
+
+  it('keeps the pager when a page fails to load so the user can page back', async () => {
+    const user = userEvent.setup();
+    const jobs = makeRuns(12);
+    server.use(
+      http.get(JOBS_URL, ({ request }) =>
+        new URL(request.url).searchParams.get('page') === '2'
+          ? HttpResponse.json({ detail: 'boom' }, { status: 403 })
+          : HttpResponse.json(pageJobs(request, jobs))
+      )
+    );
+
+    renderComponent();
+    expect(await screen.findByText('1-10 of 12 items')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /next page/i }));
+    expect(await screen.findByText(/boom/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /previous page/i }));
+    expect(await screen.findByText('run-1')).toBeInTheDocument();
+    expect(screen.queryByText(/boom/)).not.toBeInTheDocument();
+  });
+
+  it("doesn't show the previous workspace's jobs while another workspace loads", async () => {
+    const user = userEvent.setup();
+    const otherWorkspace = 'other-workspace';
+    let isOtherRequested = false;
+    let releaseOther = () => {};
+    server.use(
+      http.get(JOBS_URL, async ({ params }) => {
+        if (params.workspace !== otherWorkspace) {
+          return HttpResponse.json(makeJobsPage([makeJob({ name: 'my-run' })]));
+        }
+        isOtherRequested = true;
+        await new Promise<void>((resolve) => {
+          releaseOther = resolve;
+        });
+        return HttpResponse.json(
+          makeJobsPage([makeJob({ name: 'other-run', workspace: otherWorkspace })])
+        );
+      })
+    );
+    const DashboardWithSwitcher = () => (
+      <>
+        <Link to={generatePath(ROUTES.workspace.dashboard, { workspace: otherWorkspace })}>
+          switch
+        </Link>
+        <RecentJobsTable />
+      </>
+    );
+    renderRoute(<DashboardWithSwitcher />, {
+      history: generatePath(ROUTES.workspace.dashboard, { workspace: WORKSPACE }),
+      routes: [{ path: ROUTES.workspace.dashboard, element: <DashboardWithSwitcher /> }],
+    });
+    await screen.findByText('my-run');
+
+    await user.click(screen.getByRole('link', { name: 'switch' }));
+    await vi.waitFor(() => expect(isOtherRequested).toBe(true));
+
+    expect(screen.queryByText('my-run')).not.toBeInTheDocument();
+    releaseOther();
+    expect(await screen.findByText('other-run')).toBeInTheDocument();
   });
 
   it('points the empty state at the fine-tuning entry point when there are no recent jobs', async () => {
@@ -390,24 +511,60 @@ describe('RecentJobsTable', () => {
     expect(screen.queryByRole('button', { name: 'Fine-tune a Model' })).not.toBeInTheDocument();
   });
 
-  it('shows an error panel when the request fails', async () => {
-    server.use(http.get(JOBS_URL, () => HttpResponse.json({ detail: 'boom' }, { status: 500 })));
+  it('shows the error at once without retrying when the request fails with a client error', async () => {
+    let requestCount = 0;
+    server.use(
+      http.get(JOBS_URL, () => {
+        requestCount += 1;
+        return HttpResponse.json({ detail: 'boom' }, { status: 403 });
+      })
+    );
 
     renderComponent();
 
     expect(await screen.findByText(/boom/)).toBeInTheDocument();
+    expect(requestCount).toBe(1);
+  });
+
+  it('retries a server error before showing it', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let requestCount = 0;
+    server.use(
+      http.get(JOBS_URL, () => {
+        requestCount += 1;
+        return HttpResponse.json({ detail: 'boom' }, { status: 500 });
+      })
+    );
+
+    renderComponent();
+    await act(() => vi.advanceTimersByTimeAsync(10_000));
+
+    expect(await screen.findByText(/boom/)).toBeInTheDocument();
+    expect(requestCount).toBe(DEFAULT_QUERY_RETRY_COUNT + 1);
+  });
+
+  it('shows the loading state, not the empty state, while offline before the first load', async () => {
+    server.use(http.get(JOBS_URL, () => HttpResponse.json(makeJobsPage([makeJob()]))));
+    onlineManager.setOnline(false);
+
+    renderComponent();
+
+    // A header row plus a loading row per item on the page.
+    await vi.waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(11));
+    expect(screen.queryByText(ENTITY_EMPTY_STATES.recentJobs.heading)).not.toBeInTheDocument();
+
+    act(() => onlineManager.setOnline(true));
+    expect(await screen.findByText('my-job')).toBeInTheDocument();
   });
 
   describe('polling', () => {
     beforeEach(() => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
+      // Just past a cutoff boundary, so no poll moves the cutoff.
+      vi.setSystemTime(Math.floor(NOW / CUTOFF_BUCKET_MS) * CUTOFF_BUCKET_MS + 1000);
     });
 
-    afterEach(() => {
-      vi.useRealTimers();
-    });
-
-    it('polls every 5s while a job is running', async () => {
+    it('polls every 15s while a job is running', async () => {
       let requestCount = 0;
       server.use(
         http.get(JOBS_URL, () => {
@@ -420,8 +577,10 @@ describe('RecentJobsTable', () => {
       await screen.findByText('running-run');
       expect(requestCount).toBe(1);
 
-      await act(() => vi.advanceTimersByTimeAsync(5000));
+      await act(() => vi.advanceTimersByTimeAsync(14_000));
+      expect(requestCount).toBe(1);
 
+      await act(() => vi.advanceTimersByTimeAsync(1000));
       expect(requestCount).toBe(2);
     });
 
@@ -446,7 +605,7 @@ describe('RecentJobsTable', () => {
       expect(requestCount).toBe(2);
     });
 
-    it('keeps the last rows when a poll fails and recovers on a later poll', async () => {
+    it('keeps the last rows while a poll that failed with a server error is retried', async () => {
       let requestCount = 0;
       server.use(
         http.get(JOBS_URL, () => {
@@ -463,16 +622,73 @@ describe('RecentJobsTable', () => {
       renderComponent();
       await screen.findByText('first-run');
 
-      await act(() => vi.advanceTimersByTimeAsync(5000));
+      await act(() => vi.advanceTimersByTimeAsync(15_000));
 
       expect(requestCount).toBe(2);
       expect(screen.getByText('first-run')).toBeInTheDocument();
       expect(screen.queryByText(/boom/)).not.toBeInTheDocument();
 
-      await act(() => vi.advanceTimersByTimeAsync(30_000));
+      await act(() => vi.advanceTimersByTimeAsync(1000));
 
       expect(await screen.findByText('second-run')).toBeInTheDocument();
       expect(requestCount).toBe(3);
+    });
+
+    it('keeps the last rows without retrying a poll that failed with a client error', async () => {
+      let requestCount = 0;
+      server.use(
+        http.get(JOBS_URL, () => {
+          requestCount += 1;
+          if (requestCount === 2) {
+            return HttpResponse.json({ detail: 'boom' }, { status: 403 });
+          }
+          return HttpResponse.json(
+            makeJobsPage([makeJob({ name: requestCount === 1 ? 'first-run' : 'second-run' })])
+          );
+        })
+      );
+
+      renderComponent();
+      await screen.findByText('first-run');
+
+      await act(() => vi.advanceTimersByTimeAsync(25_000));
+
+      expect(requestCount).toBe(2);
+      expect(screen.getByText('first-run')).toBeInTheDocument();
+      expect(screen.queryByText(/boom/)).not.toBeInTheDocument();
+
+      await act(() => vi.advanceTimersByTimeAsync(20_000));
+
+      expect(await screen.findByText('second-run')).toBeInTheDocument();
+      expect(requestCount).toBe(3);
+    });
+
+    it('keeps showing the error while a failed first load polls again', async () => {
+      let requestCount = 0;
+      let releaseRetry = () => {};
+      server.use(
+        http.get(JOBS_URL, async () => {
+          requestCount += 1;
+          if (requestCount === 1) {
+            return HttpResponse.json({ detail: 'boom' }, { status: 403 });
+          }
+          await new Promise<void>((resolve) => {
+            releaseRetry = resolve;
+          });
+          return HttpResponse.json(makeJobsPage([makeJob({ name: 'recovered-run' })]));
+        })
+      );
+
+      renderComponent();
+      expect(await screen.findByText(/boom/)).toBeInTheDocument();
+
+      await act(() => vi.advanceTimersByTimeAsync(30_000));
+
+      expect(requestCount).toBe(2);
+      expect(screen.getByText(/boom/)).toBeInTheDocument();
+
+      releaseRetry();
+      expect(await screen.findByText('recovered-run')).toBeInTheDocument();
     });
   });
 });

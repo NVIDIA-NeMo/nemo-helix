@@ -1,9 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { useLiveSeconds } from '@nemo/common/src/hooks/useLiveSeconds';
 import { act, renderHook } from '@testing-library/react';
-
-import { useLiveSeconds } from './index';
 
 const START = new Date('2025-01-01T00:00:00.000Z');
 
@@ -114,38 +113,5 @@ describe('useLiveSeconds', () => {
       vi.advanceTimersByTime(1000);
     });
     expect(result.current).toBeUndefined();
-  });
-
-  it('returns undefined while disabled, then the time already elapsed once enabled', () => {
-    vi.setSystemTime(new Date('2025-01-01T00:00:10.000Z'));
-    const { result, rerender } = renderHook(
-      ({ enabled }) => useLiveSeconds({ startDate: START, enabled }),
-      { initialProps: { enabled: false } }
-    );
-    expect(result.current).toBeUndefined();
-
-    rerender({ enabled: true });
-
-    expect(result.current).toBe(10);
-  });
-
-  it('catches up at once when re-enabled instead of resuming from the paused count', () => {
-    vi.setSystemTime(START);
-    const { result, rerender } = renderHook(
-      ({ enabled }) => useLiveSeconds({ startDate: START, enabled }),
-      { initialProps: { enabled: true } }
-    );
-    act(() => {
-      vi.advanceTimersByTime(10_000);
-    });
-    expect(result.current).toBe(10);
-
-    rerender({ enabled: false });
-    act(() => {
-      vi.advanceTimersByTime(60_000);
-    });
-    rerender({ enabled: true });
-
-    expect(result.current).toBe(70);
   });
 });

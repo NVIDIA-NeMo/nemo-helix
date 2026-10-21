@@ -11,11 +11,8 @@ import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import type { HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
-import { Flex, Tag } from '@nvidia/foundations-react-core';
-import {
-  getSourceDisplay,
-  getSourceTitle,
-} from '@studio/components/dataViews/JobsDataView/sourceDisplay';
+import { getSourceTitle } from '@studio/components/dataViews/JobsDataView/sourceDisplay';
+import { SourceTag } from '@studio/components/dataViews/JobsDataView/SourceTag';
 import { getJobDetailRoute } from '@studio/components/dataViews/JobsDataView/utils';
 import { CUSTOMIZER_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -25,7 +22,7 @@ import { useRecentJobs } from '@studio/routes/WorkspaceDashboardHomeRoute/useRec
 import { type ComponentProps, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 
-// Module-level, with a stable onRowClick, so cells don't remount on every poll.
+// Module-level so cells don't remount on every poll.
 const makeColumns: ComponentProps<typeof StudioDataView<HelixJobResponse>>['makeColumns'] = ({
   accessor,
 }) => [
@@ -44,15 +41,7 @@ const makeColumns: ComponentProps<typeof StudioDataView<HelixJobResponse>>['make
       if (!sourceValue) {
         return '-';
       }
-      const { icon, label } = getSourceDisplay(sourceValue);
-      return (
-        <Tag kind="outline" color="gray" density="compact" readOnly>
-          <Flex align="center" gap="density-sm">
-            {icon}
-            {label}
-          </Flex>
-        </Tag>
-      );
+      return <SourceTag source={sourceValue} readOnly />;
     },
   }),
   accessor((original) => original?.status || '', {
@@ -89,10 +78,6 @@ export const RecentJobsTable = () => {
     [openRow, workspace]
   );
 
-  if (error) {
-    return <ErrorPanel errorMessage={getErrorMessage(error)} />;
-  }
-
   return (
     <StudioDataView<HelixJobResponse>
       dataViewState={dataViewState}
@@ -102,9 +87,13 @@ export const RecentJobsTable = () => {
         DataViewRoot: {
           data: pageRows,
           totalCount,
-          requestStatus: isLoading ? 'loading' : undefined,
+          requestStatus: error ? 'error' : isLoading ? 'loading' : undefined,
         },
+        DataViewPagination: { showWhileError: totalCount > 0 },
         DataViewTableContent: {
+          renderErrorState: () => (
+            <ErrorPanel errorMessage={error ? getErrorMessage(error) : undefined} />
+          ),
           renderEmptyState: () => (
             <EntityEmptyState
               entity="recentJobs"

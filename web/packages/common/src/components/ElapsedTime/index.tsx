@@ -22,7 +22,7 @@ interface ElapsedTimeProps {
 /** Live count from `start` while `running`, else `durationMs`, else `start` → `end`. */
 export const ElapsedTime: FC<ElapsedTimeProps> = ({ start, end, durationMs, running }) => {
   const startDate = utcToLocalDate(start);
-  const liveSeconds = useLiveSeconds({ startDate, enabled: running });
+  const liveSeconds = useLiveSeconds({ startDate: running ? startDate : undefined });
 
   if (!running && durationMs != null) {
     return (

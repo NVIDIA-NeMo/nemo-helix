@@ -20,7 +20,7 @@ import type {
   HelixJobResponse,
   HelixJobsListFilter,
 } from '@nemo/sdk/generated/platform/schema';
-import { Flex, Tag } from '@nvidia/foundations-react-core';
+import { Flex } from '@nvidia/foundations-react-core';
 import {
   getHiddenJobSources,
   JOB_SOURCE,
@@ -30,12 +30,13 @@ import {
   getSourceDisplay,
   getSourceTitle,
 } from '@studio/components/dataViews/JobsDataView/sourceDisplay';
+import { SourceTag } from '@studio/components/dataViews/JobsDataView/SourceTag';
 import { getJobDetailRoute } from '@studio/components/dataViews/JobsDataView/utils';
 import { CUSTOMIZER_ENABLED } from '@studio/constants/environment';
 import { STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { keepPreviousData } from '@tanstack/react-query';
-import { ComponentProps, useRef } from 'react';
+import { type ComponentProps, useRef } from 'react';
 
 const STATUS_OPTIONS_WITH_ALL = [{ value: '', label: 'All' }, ...STATUS_FILTER_OPTIONS];
 
@@ -135,20 +136,12 @@ export const JobsDataView = () => {
       cell: ({ row, column: col }) => {
         const sourceValue = row.original.source;
         if (!sourceValue) return '-';
-        const { icon, label } = getSourceDisplay(sourceValue);
         return (
-          <Tag
-            kind="outline"
-            color="gray"
-            density="compact"
+          <SourceTag
+            source={sourceValue}
             data-no-row-click
             onClick={() => col.setFilterValue(sourceValue)}
-          >
-            <Flex align="center" gap="density-sm">
-              {icon}
-              {label}
-            </Flex>
-          </Tag>
+          />
         );
       },
     }),

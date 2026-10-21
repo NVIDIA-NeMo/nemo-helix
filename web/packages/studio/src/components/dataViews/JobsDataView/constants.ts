@@ -19,7 +19,7 @@ export const SOURCE_OPTIONS = [
   { label: 'Evaluator', value: JOB_SOURCE.EVALUATOR_METRICS },
 ];
 
-export const HIDDEN_JOB_SOURCES: readonly string[] = [JOB_SOURCE.MODELS_SYSTEM];
+const HIDDEN_JOB_SOURCES: readonly string[] = [JOB_SOURCE.MODELS_SYSTEM];
 
 export const getHiddenJobSources = (): readonly string[] =>
   CUSTOMIZER_ENABLED ? HIDDEN_JOB_SOURCES : [...HIDDEN_JOB_SOURCES, JOB_SOURCE.CUSTOMIZATION];
