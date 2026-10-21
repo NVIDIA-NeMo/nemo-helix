@@ -19,7 +19,7 @@ from harbor.models.trial.config import EnvironmentConfig as TrialEnvironmentConf
 from harbor.models.trial.config import ResourceMode
 from harbor.models.trial.paths import TrialPaths
 from nemo_evals.filesets import FilesetRef
-from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT
+from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT, SETUP_HOSTS_KWARG
 from nemo_evals.harbor.remote.profile import ResourceOverrides, resource_defaults
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evals.jobs.agent_spec import AgentEvalSpec, RegisteredAgentSource
@@ -286,7 +286,11 @@ def test_setup_hosts_reach_the_environment_and_wrap_a_builtin_agent(task_spec, t
     assert configured.environment is not None
     assert configured.environment.kwargs["agent_setup_hosts"] == ["registry.npmjs.org"]
     assert configured.agent_import_path == SETUP_EGRESS_AGENT
-    assert configured.agent_kwargs == {"version": "2.1.0", INNER_AGENT_KWARG: "claude-code"}
+    assert configured.agent_kwargs == {
+        "version": "2.1.0",
+        INNER_AGENT_KWARG: "claude-code",
+        SETUP_HOSTS_KWARG: ["registry.npmjs.org"],
+    }
 
 
 def test_setup_hosts_wrap_an_importable_custom_agent(task_spec, tmp_path):
