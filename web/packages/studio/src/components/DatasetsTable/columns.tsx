@@ -114,19 +114,19 @@ export function makeDatasetsTableColumns({
         meta: {
           filter: {
             label: 'Purpose',
-            type: 'single-select',
+            type: 'multi-select',
             options: [
-              { value: '', label: 'All' },
               { value: FilesetPurpose.dataset, label: 'Dataset' },
               { value: FilesetPurpose.environment, label: 'Environment' },
               { value: FilesetPurpose.model, label: 'Model' },
+              { value: FilesetPurpose.generic, label: 'Generic' },
             ],
           },
         },
         cell({ row }) {
           const purpose = row.original?.purpose;
           if (!purpose) return null;
-          const color = PURPOSE_TAG_COLORS[purpose as keyof typeof PURPOSE_TAG_COLORS] ?? 'gray';
+          const color = PURPOSE_TAG_COLORS[purpose];
           return (
             <Tag
               color={color}

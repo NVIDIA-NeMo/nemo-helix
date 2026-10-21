@@ -317,15 +317,14 @@ describe('FilesetListRoute', () => {
       const classes = purposes.map((p) => screen.getAllByTestId(`purpose-pill-${p}`)[0].className);
       expect(new Set(classes).size).toBe(purposes.length);
 
-      // dropdown: every filter defaults to "All"; Purpose offers no "Generic" option
+      // Purpose is a checkbox filter: nothing is checked by default (generic stays off)
       await user.click(screen.getByRole('button', { name: /filter/i }));
-      const options = screen.getAllByRole('option');
-      const names = options.map((o) => o.textContent);
-      expect(names).toEqual(expect.arrayContaining(['Dataset', 'Environment', 'Model']));
-      expect(names).not.toContain('Generic');
-      options
-        .filter((o) => o.textContent === 'All')
-        .forEach((o) => expect(o).toHaveAttribute('aria-selected', 'true'));
+      const names = ['Dataset', 'Environment', 'Model', 'Generic'];
+      names.forEach((name) => expect(screen.getByRole('checkbox', { name })).not.toBeChecked());
+
+      // checking Generic opts those filesets in
+      await user.click(screen.getByRole('checkbox', { name: 'Generic' }));
+      await screen.findByText('d-generic', undefined, { timeout: LG_SELECTOR_TIMEOUT });
     });
   });
 });

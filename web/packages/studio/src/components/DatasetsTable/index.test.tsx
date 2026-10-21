@@ -342,10 +342,10 @@ describe('DatasetsTable', () => {
   });
 
   describe('Filtering', () => {
-    it('sends filter[purpose] when the purpose column filter is active', async () => {
+    it('sends the checked purposes as a $in filter, including generic when checked', async () => {
       const state = installListHandler();
       const filtersParam = encodeURIComponent(
-        JSON.stringify([{ id: 'purpose', value: 'dataset' }])
+        JSON.stringify([{ id: 'purpose', value: { dataset: true, generic: true } }])
       );
 
       render(
@@ -358,7 +358,10 @@ describe('DatasetsTable', () => {
 
       await waitFor(
         () => {
-          expect(state.lastUrl?.searchParams.get('filter[purpose]')).toBe('dataset');
+          expect(state.lastUrl?.searchParams.getAll('filter[purpose][$in]').sort()).toEqual([
+            'dataset',
+            'generic',
+          ]);
         },
         { timeout: LG_SELECTOR_TIMEOUT }
       );

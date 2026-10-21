@@ -7,6 +7,7 @@ import { getSortParam } from '@nemo/common/src/utils/query';
 import { useFilesDeleteFileset, useFilesListFilesets } from '@nemo/sdk/generated/platform/files';
 import {
   type FilesetFilter,
+  type FilesetPurpose,
   type FilesetOutput as Dataset,
   type GenericSortField,
 } from '@nemo/sdk/generated/platform/schema';
@@ -69,6 +70,11 @@ export function useDatasetsTable({
     dataViewState.resetFilters();
   }, [dataViewState, onDatasetsSelected]);
 
+  // The Purpose column is a multi-select, so its filter value is `{ [purpose]: true }`.
+  const selectedPurposes = Object.keys(
+    (enableFilters ? dataViewState.apiFilter.filter?.purpose : undefined) ?? {}
+  ) as FilesetPurpose[];
+
   const {
     data: datasetsResponse,
     refetch,
@@ -84,14 +90,16 @@ export function useDatasetsTable({
         ? (getSortParam(dataViewState.sorting.state) as GenericSortField)
         : undefined,
       filter: {
-        // "All" means every visible purpose; generic filesets are never listed.
-        ...withOperators<FilesetFilter>({ purpose: { $in: VISIBLE_PURPOSES } }),
         ...(enableFilters ? dataViewState.apiFilter.filter : undefined),
         ...(enableFilters && dataViewState.apiFilter.searchText
           ? withOperators<FilesetFilter>({
               name: { $like: `%${dataViewState.apiFilter.searchText}%` },
             })
           : {}),
+        // Nothing checked is the default view: every purpose except "generic".
+        ...withOperators<FilesetFilter>({
+          purpose: { $in: selectedPurposes.length > 0 ? selectedPurposes : VISIBLE_PURPOSES },
+        }),
         ...(purposeFilter !== undefined ? { purpose: purposeFilter } : {}),
       },
     },
