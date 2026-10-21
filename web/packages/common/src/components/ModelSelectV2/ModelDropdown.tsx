@@ -178,7 +178,7 @@ export const ModelDropdown: FC<ModelDropdownProps> = ({
         align="start"
         side={dropdownSide}
         data-testid="model-select-v2-content"
-        className="min-w-[360px]"
+        className="min-w-[360px] min-h-[200px]"
         style={{ width: 360 }} // eslint-disable-line no-restricted-syntax -- KUI DropdownContent needs explicit width
       >
         {open && (

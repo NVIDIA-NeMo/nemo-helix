@@ -9,13 +9,17 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { BudgetSection } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/BudgetSection';
 import { EvaluationSection } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/EvaluationSection';
 import {
+  DEFAULT_PROMPT_OPTIONS,
   optimizationFormSchema,
   type OptimizationFormOutput,
   type OptimizationFormValues,
+  promptIssues,
+  sweepableVersions,
 } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/formValues';
 import { IntentSection } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/IntentSection';
 import { buildOptimizationName } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/optimizationName';
 import { optimizationTargets } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/optimizationTargets';
+import { PromptSection } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/PromptSection';
 import { RunSummaryPanel } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/RunSummaryPanel';
 import { useStudyRowCount } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/useStudyRowCount';
 import {
@@ -49,8 +53,9 @@ export interface NewOptimizationFormProps {
  * beside it, which does not survive a dialog's width, and its own back button is what returns to
  * the strategy picker it was chosen from.
  *
- * The user answers three questions — what to tune for, what to score against, how many trials.
- * Nothing here asks for a config path or a fileset; those are derived on submit.
+ * The user answers three questions — what to tune for, what to score against, how many trials —
+ * and may opt into a fourth: whether to tune the system prompt, by model or from their own
+ * versions. Nothing here asks for a config path or a fileset; those are derived on submit.
  */
 export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
   agentName,
@@ -71,6 +76,7 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
       budget: 'standard',
       experimentId: '',
       searchSpace: intentById(DEFAULT_INTENT).parameters,
+      prompt: DEFAULT_PROMPT_OPTIONS,
     },
   });
 
@@ -95,6 +101,7 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
   const budget = budgetById(watch('budget'));
   const searchSpace = watch('searchSpace');
   const experimentId = watch('experimentId');
+  const prompt = watch('prompt');
 
   // Regenerate when the intent changes, since the intent is part of the name — and when the agent
   // finally resolves, which is what leaves the initial name empty.
@@ -119,17 +126,20 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
 
   const nameError = touchedFields.name ? errors.name?.message : undefined;
 
-  const blockingReason = !agentName
-    ? 'No agent selected.'
-    : !experimentId
-      ? 'Pick an evaluation to score trials against.'
-      : nameError
-        ? 'Fix the name before running.'
-        : errors.searchSpace
-          ? 'Fix the search space before running.'
-          : !onSubmit
-            ? 'Running a study from here is not available yet.'
-            : undefined;
+  // First failing check wins, in the order the user meets them on the page.
+  const blockingChecks: [boolean, string][] = [
+    [!agentName, 'No agent selected.'],
+    [!experimentId, 'Pick an evaluation to score trials against.'],
+    [!!nameError, 'Fix the name before running.'],
+    [!!errors.searchSpace, 'Fix the search space before running.'],
+    ...promptIssues(prompt).map(({ message }): [boolean, string] => [true, message]),
+    [!onSubmit, 'Running a study from here is not available yet.'],
+  ];
+  const blockingReason = blockingChecks.find(([blocked]) => blocked)?.[1];
+
+  // The prompt step only becomes the one in progress once the user opts into it.
+  let activeStep = 1;
+  if (experimentId) activeStep = prompt.enabled ? 4 : 3;
 
   const [submitError, setSubmitError] = useState<string | undefined>();
 
@@ -193,7 +203,7 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
             <Stepper
               layout="vertical"
               aria-label="Optimization setup"
-              activeStep={experimentId ? 3 : 1}
+              activeStep={activeStep}
               items={[
                 {
                   slotHeading: 'What are you tuning for?',
@@ -219,6 +229,12 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
                   slotSuccessIndicator: 3,
                   slotContent: <BudgetSection />,
                 },
+                {
+                  slotHeading: 'Tune the prompt too?',
+                  slotDescription: 'Optional — let a model rewrite it, or try your own versions',
+                  slotSuccessIndicator: 4,
+                  slotContent: <PromptSection workspace={workspace} agentName={agentName} />,
+                },
               ]}
             />
           </Stack>
@@ -227,6 +243,8 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
             intent={intent}
             budget={budget}
             searchSpace={searchSpace}
+            promptMode={prompt.enabled ? prompt.mode : undefined}
+            promptVersions={sweepableVersions(prompt.versions).length}
             rows={rowCount}
             blockingReason={blockingReason}
             submitError={
