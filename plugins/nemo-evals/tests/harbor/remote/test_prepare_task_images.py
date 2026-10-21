@@ -22,6 +22,7 @@ from nemo_evals.harbor.remote.preparation import (
 from nemo_evals.image_builds.models import (
     BuildImage,
     BuildImageSource,
+    ImageBuildRequest,
     TaskImageBuildEntity,
     build_entity_name,
     build_job_name,
@@ -180,6 +181,25 @@ async def test_a_failed_build_fails_the_task_without_a_new_attempt(
     code, detail = failure(await prepare(task(digest), clients, sandbox_policy))
     assert code == "build_failed" and detail.endswith("Dockerfile step 3 failed")
     assert len(jobs.created) == 1  # a broken task doesn't start attempt after attempt
+
+
+async def test_a_failed_build_for_another_platform_does_not_hide_the_ready_default_one(
+    clients, store_task, sandbox_policy, entity_store
+):
+    """Runs use the deployment's default platform, so another platform's newer build is no answer."""
+    digest = await store_task(config=SEPARATE)
+    await prepare(task(digest), clients, sandbox_policy)
+    images = [image("main", digest_ref("d")), image("verifier", digest_ref("e"))]
+    await settle(entity_store, digest, 1, "ready", images=images)
+    await clients.image_builds("default").request_build(
+        "default", "sort-task", digest, ImageBuildRequest(platform="linux/arm64")
+    )
+    await settle(entity_store, digest, 2, "failed", error="no arm64 base image")
+
+    result = await prepare(task(digest), clients, sandbox_policy)
+
+    assert result.status == "ready" and result.environment is not None
+    assert result.environment.agent.image_ref == digest_ref("d")
 
 
 async def test_a_running_build_is_reported_and_left_alone(clients, store_task, sandbox_policy, jobs):

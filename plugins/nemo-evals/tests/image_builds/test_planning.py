@@ -301,6 +301,9 @@ def test_task_archive_with_two_task_directories_is_rejected(tmp_path: Path) -> N
         ("FROM --platform=$TARGETPLATFORM alpine\n", None),
         ("FROM \\\n  --platform=linux/amd64 \\\n  ubuntu\n", "linux/amd64"),
         ("# FROM --platform=linux/amd64 ubuntu\nFROM ubuntu\n", None),
+        # A comment line never continues, even ending in a backslash, and is dropped from an instruction it splits.
+        ("# a note \\\nFROM --platform=linux/arm64 alpine\n", "linux/arm64"),
+        ("FROM \\\n# a note\n  --platform=linux/amd64 ubuntu\n", "linux/amd64"),
     ],
 )
 def test_a_dockerfile_pins_the_platform_its_final_stage_names_plainly(dockerfile: str, pin: str | None) -> None:
