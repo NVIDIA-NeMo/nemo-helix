@@ -54,6 +54,9 @@ class ModelProviderInfo:
     secret_refresh_failed_at: datetime | None = None
     """Timestamp of the last failed secret fetch, or ``None`` if the last attempt succeeded"""
 
+    secret_refresh_failed_name: str | None = None
+    """Secret name the last failed fetch was for; a different name is not held back by the backoff"""
+
 
 @dataclass
 class ModelEntityInfo:
@@ -370,19 +373,28 @@ async def refresh_model_provider_info(
     if (
         api_key_secret_name
         and (secret_value_diff.total_seconds() > model_cache.secret_value_ttl)
-        and not _in_secret_failure_backoff(model_info, now)
+        and not _in_secret_failure_backoff(model_info, api_key_secret_name, now)
     ):
-        refreshed = await _refresh_secret_value(model_info, client, api_key_secret_name)
-        model_info.secret_refresh_failed_at = None if refreshed else now
-        model_info.secret_value_updated_at = now
+        if await _refresh_secret_value(model_info, client, api_key_secret_name):
+            model_info.secret_value_updated_at = now
+            model_info.secret_refresh_failed_at = None
+            model_info.secret_refresh_failed_name = None
+        else:
+            # Only the backoff gates retries after a failure; the TTL applies to successful fetches.
+            model_info.secret_refresh_failed_at = now
+            model_info.secret_refresh_failed_name = api_key_secret_name
 
     model_cache.update_model_info(model_info)
 
 
-def _in_secret_failure_backoff(model_info: ModelProviderInfo, now: datetime) -> bool:
-    """Whether the last secret fetch for this provider failed recently enough to skip retrying it."""
+def _in_secret_failure_backoff(model_info: ModelProviderInfo, api_key_secret_name: str, now: datetime) -> bool:
+    """Whether fetching this secret failed recently enough to skip retrying it."""
     failed_at = model_info.secret_refresh_failed_at
-    return failed_at is not None and (now - failed_at).total_seconds() < SECRET_REFRESH_FAILURE_BACKOFF_SEC
+    return (
+        failed_at is not None
+        and model_info.secret_refresh_failed_name == api_key_secret_name
+        and (now - failed_at).total_seconds() < SECRET_REFRESH_FAILURE_BACKOFF_SEC
+    )
 
 
 async def _refresh_secret_value(
