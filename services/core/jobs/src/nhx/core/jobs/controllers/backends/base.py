@@ -45,7 +45,9 @@ from nhx.common.jobs.constants import (
     TASK_CONFIG_ENVVAR,
 )
 from nhx.common.platform_endpoint import parse_platform_endpoint
-from nhx.core.jobs.app.lifecycle import active_ttl_anchor, ensure_aware
+from nhx.core.jobs.app.constants import DEFAULT_PROFILE as DEFAULT_PROFILE
+from nhx.core.jobs.app.constants import DEFAULT_PROVIDER as DEFAULT_PROVIDER
+from nhx.core.jobs.app.lifecycle import active_ttl_anchor, ensure_aware, step_provider_profile
 from nhx.core.jobs.app.providers import ComputeResources
 from nhx.core.jobs.entities import get_step_spec_name, is_final_platform_step
 from pydantic import BaseModel, model_validator
@@ -61,8 +63,6 @@ is_workload_identity_token_exchange_enabled = _workload_identity.is_workload_ide
 ExecutionProviderConfigT = TypeVar("ExecutionProviderConfigT")
 ExecutionProfileConfigT = TypeVar("ExecutionProfileConfigT")
 
-DEFAULT_PROFILE = "default"
-DEFAULT_PROVIDER = "cpu"
 
 # The base ``JobExecutionProfileConfig`` lives in the shared plugin leaf node
 # (imported above) so that both the server and the typed HTTP client agree on
@@ -359,6 +359,14 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
     @abstractmethod
     def shutdown(self): ...
 
+    def reclaim_persistent_storage(self, workspace: str, job: str) -> bool:
+        """Delete a job's persistent storage. Backends with durable storage override this.
+
+        Return True once the storage is gone, and False while its removal is still running, so the
+        caller calls again later. Raise if the removal failed.
+        """
+        return True
+
     def __str__(self) -> str:
         return self.BACKEND_NAME
 
@@ -408,17 +416,6 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
         except Exception as e:
             raise RuntimeError(f"Could not fetch job step '{job}/{step_name}' to check if terminal") from e
 
-    def check_job_is_terminal(self, job: str, workspace: str) -> bool:
-        """Check if a job is in a terminal state."""
-        try:
-            job_response = self._jobs.get_job(name=job, workspace=workspace).data()
-            return job_response.status in ("cancelled", "error", "completed")
-        except ClientNotFoundError:
-            # If the job entity is not found, we treat it as terminal so cleanup can proceed.
-            return True
-        except Exception as e:
-            raise RuntimeError(f"Failed to fetch job '{workspace}/{job}' to check if terminal") from e
-
     def check_job_persistent_storage_cleanup_allowed(self, job: str, step_name: str, workspace: str) -> bool:
         """Return whether a completed step may delete persistent job storage.
 
@@ -434,7 +431,8 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
             raise RuntimeError(f"Failed to fetch job '{workspace}/{job}' to check storage cleanup eligibility") from e
 
         job_status = getattr(job_response.status, "value", job_response.status)
-        if job_status not in ("cancelled", "error", "completed"):
+        # Failed jobs keep storage until the retention pass. Completed and cancelled jobs reclaim here.
+        if job_status not in ("cancelled", "completed"):
             return False
 
         try:
@@ -596,15 +594,7 @@ def extract_provider_profile(step: HelixJobStepWithContext) -> tuple[str, str]:
     step_spec = step.step_spec
     if step_spec is None:
         raise ValueError("Job step requires a step_spec")
-
-    profile = DEFAULT_PROFILE
-    if isinstance(step_spec.executor, str):
-        provider = step_spec.executor
-    else:
-        provider = step_spec.executor.provider or DEFAULT_PROVIDER
-        profile = step_spec.executor.profile or profile
-
-    return provider, profile
+    return step_provider_profile(step_spec)
 
 
 def get_logs_endpoint_from_fileset(

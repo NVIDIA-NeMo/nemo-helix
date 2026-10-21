@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 #: Key under which the outcome is merged into the job's ``status_details``.
 STATUS_DETAILS_KEY = "evaluation"
+PUBLICATION_STATUS_KEY = "publication"
+"""Where an agent evaluation that publishes to Intake records the publish outcome in its status details."""
 
 
 class RunOutcome(BaseModel):
@@ -102,25 +104,30 @@ def _has_usable_value(outputs: Iterable[MetricOutput]) -> bool:
 
 def report_run_outcome(outcome: RunOutcome, *, ctx: JobContext, async_client: AsyncNemoClient | None) -> None:
     """Merge the outcome into the platform job's status details. Best-effort; local runs skip it."""
+    report_status_details(outcome.status_details(), ctx=ctx, async_client=async_client)
+
+
+def report_status_details(details: dict[str, object], *, ctx: JobContext, async_client: AsyncNemoClient | None) -> None:
+    """Merge ``details`` into the platform job's status details. Best-effort; local runs skip it."""
     if ctx.job_id is None or async_client is None:
         return
     job_id = ctx.job_id
 
     async def _update(client: AsyncNemoClient) -> None:
-        await AsyncJobsClient.from_client(client).update_status_details(
-            job_id, workspace=ctx.workspace, body=outcome.status_details()
-        )
+        await AsyncJobsClient.from_client(client).update_status_details(job_id, workspace=ctx.workspace, body=details)
 
     try:
         run_with_isolated_async_client(async_client, _update)
     except Exception:
-        logger.warning("Failed to report the evaluation outcome for job %r", job_id, exc_info=True)
+        logger.warning("Failed to report status details %s for job %r", sorted(details), job_id, exc_info=True)
 
 
 __all__ = [
+    "PUBLICATION_STATUS_KEY",
     "STATUS_DETAILS_KEY",
     "RunOutcome",
     "agent_eval_outcome",
     "report_run_outcome",
+    "report_status_details",
     "row_eval_outcome",
 ]

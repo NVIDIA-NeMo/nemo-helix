@@ -4128,6 +4128,7 @@ nemo jobs [OPTIONS] COMMAND [ARGS]...
 * `list-execution-profiles`: Get all currently configured execution profiles.
 * `pause`: Pause a platform job by name or ID.
 * `resume`: Resume a paused platform job by name or ID.
+* `rerun`: Rerun a failed platform job from surviving storage.
 * `control`: Change mutable job behavior, such as how long a pause...
 * `get`: Get a platform job by name or ID.
 * `update-status-details`: Update the status details of a platform job.
@@ -4407,6 +4408,32 @@ Resume a paused platform job by name or ID.
 
 ```shell
 nemo jobs resume [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Job name or ID (both are accepted).
+
+**Options:**
+
+* `--workspace`
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+#### nemo jobs rerun
+
+Rerun a failed platform job from surviving storage.
+
+**Usage:**
+
+```shell
+nemo jobs rerun [OPTIONS] NAME
 ```
 
 **Arguments:**
@@ -9190,16 +9217,21 @@ nemo evals runs submit [OPTIONS]
 
 * `--harbor-dir <PATH>`: Local Harbor dataset directory.
 * `--harbor-hub`: Harbor Hub dataset, org/name@ref.
-* `--spec-file <PATH>`: TasksetRunInput JSON naming a taskset.
+* `--harbor-git`: Public git repo of Harbor tasks, pinned to a tag or commit: \<url>@\<ref> reads tasks/ at that ref. For another directory, use a GitHub tree URL: https://github.com/\<org>/\<repo>/tree/\<ref>/\<dir>.
+* `--spec-file <PATH>`: TasksetRunInput JSON: its target and execution, and its taskset unless --harbor-dir, --harbor-hub or --harbor-git supplies the tasks.
 * `--tasks`: Indexes or names, comma-separated; default all.
 * `--agent`: Harbor built-in agent (without --spec-file). [default: oracle]
-* `--sandbox-policy`: Operator sandbox profile. [default: harbor-standard]
+* `--sandbox-profile`: Operator sandbox profile; default: the operator's (without --spec-file).
 * `--dispatcher-profile`: Jobs profile for task Jobs.
+* `--cpus <INTEGER RANGE>`: CPUs for every task's agent sandbox, over task.toml (without --spec-file).
+* `--memory-mb <INTEGER RANGE>`: Memory in MB for every task's agent sandbox (without --spec-file).
+* `--storage-mb <INTEGER RANGE>`: Disk in MB for every task's agent sandbox (without --spec-file).
 * `--no-build-images`: Don't request or wait for image builds here; submit starts a first build for a task that has none.
 * `--idempotency-key`: Key that makes a resubmit return the same run; default: a new one. A failed submit prints its key.
 * `--list-tasks`: Print the selectable tasks and exit.
 * `--workspace`: Workspace for tasks, taskset and run; default: the configured workspace.
 * `--poll-seconds <FLOAT>`: Image-build polling interval. [default: 10.0]
+* `--experiment`: Intake Experiment (name) to publish the run to: one Evaluation per run, trials as each task ends.
 
 **Help:**
 
@@ -9225,7 +9257,7 @@ nemo evals agent-evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `--fail-fast`: Fail on the first metric error instead of recording an errored score. On Kubernetes runs it fails that task's Job.
 * `--publication.intake.evaluation-id`: Name of the existing Evaluation to publish under. Must already exist; the job does not create it.
 * `--publication.intake.agent-name`: Agent name recorded on each published trajectory. Derived from the target when it names one; required otherwise.
-* `--publication.intake.agent-version`: Agent version recorded on each published trajectory. Neither a Model nor an Agent carries a version, so this defaults to 'unknown' unless the submitter supplies one.
+* `--publication.intake.agent-version`: Agent version recorded on each published trajectory. Neither a Model nor an Agent carries a version, so this defaults to the version the agent's own trajectory records (a Harbor agent's, such as codex's), else 'unknown'.
 * `--publication.intake.required`: Fail the job when publication fails. Defaults to True so a run that asked to publish does not report success with nothing in Experiments. The result bundle is saved before publication runs, so a failed job still leaves the results intact to re-publish. Set False to keep the job successful and report the failure in its output instead.
 
 **Spec Source:**
@@ -9286,7 +9318,7 @@ nemo evals evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `--prompt-template`: Optional prompt template for online target generation. This flag accepts the string form only; use --spec or --spec-file for the other union form(s).
 * `--publication.intake.evaluation-id`: Name of the existing Evaluation to publish under. Must already exist; the job does not create it.
 * `--publication.intake.agent-name`: Agent name recorded on each published trajectory. Derived from the target when it names one; required otherwise.
-* `--publication.intake.agent-version`: Agent version recorded on each published trajectory. Neither a Model nor an Agent carries a version, so this defaults to 'unknown' unless the submitter supplies one.
+* `--publication.intake.agent-version`: Agent version recorded on each published trajectory. Neither a Model nor an Agent carries a version, so this defaults to the version the agent's own trajectory records (a Harbor agent's, such as codex's), else 'unknown'.
 * `--publication.intake.required`: Fail the job when publication fails. Defaults to True so a run that asked to publish does not report success with nothing in Experiments. The result bundle is saved before publication runs, so a failed job still leaves the results intact to re-publish. Set False to keep the job successful and report the failure in its output instead.
 * `--publication.intake.test-case-id-field`: Dataset column identifying each row, recorded as the published test case id. Defaults to a hash of the row's content, which keeps a row's id stable across dataset reorderings and revisions so the same test case can be compared run over run; editing a row makes it a new test case. Name a column here when the dataset has a real identifier — it reads better and survives content edits. Values must be unique per row; the run is rejected if they are not.
 

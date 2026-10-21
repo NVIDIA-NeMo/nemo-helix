@@ -37,16 +37,13 @@ service_entrypoint = next(iter(entry_points(group="nemo.services", name="scaled-
 print("DISCOVERED:", service_entrypoint.name == "scaled-evals")
 service_entrypoint.load()()
 
-from cryptography.fernet import Fernet
-os.environ["CREDENTIALS_ENCRYPTION_KEY"] = Fernet.generate_key().decode()
-
 from scaled_evals.api.settings import settings
 print("DBURL:", settings.resolved_database_url())
 """
 
 
 def test_plugin_loads_without_test_env_and_keeps_off_the_platform_database() -> None:
-    env = {k: v for k, v in os.environ.items() if k != "CREDENTIALS_ENCRYPTION_KEY"}
+    env = dict(os.environ)
     # Both are visible in the real platform process, so the DSN below has to be the
     # one that wins.
     env["DATABASE_URL"] = PLATFORM_DB_URL
@@ -61,8 +58,8 @@ def test_plugin_loads_without_test_env_and_keeps_off_the_platform_database() -> 
     )
     assert result.returncode == 0, result.stderr
 
-    # Loads even though CREDENTIALS_ENCRYPTION_KEY is absent; the entry-point
-    # loader swallows import errors, so a crash here would silently drop the plugin.
+    # The entry-point loader swallows import errors, so a crash here would
+    # silently drop the plugin.
     assert "DISCOVERED: True" in result.stdout, result.stdout
 
     db_line = next(ln for ln in result.stdout.splitlines() if ln.startswith("DBURL:"))

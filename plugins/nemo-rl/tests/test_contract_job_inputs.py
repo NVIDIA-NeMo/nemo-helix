@@ -112,7 +112,17 @@ def test_grpo_fixtures_satisfy_training_divisibility(fixture_name: str) -> None:
         assert total_gpus % t.vllm_tensor_parallel_size == 0
 
 
-def test_output_name_cannot_exceed_response_limit() -> None:
-    assert len(OutputRequest(name="x" * 255).name or "") == 255
+def test_output_name_cannot_exceed_fileset_limit() -> None:
+    assert len(OutputRequest(name="x" * 63).name or "") == 63
     with pytest.raises(ValueError):
-        OutputRequest(name="x" * 256)
+        OutputRequest(name="x" * 64)
+
+
+def test_generated_output_name_collapses_repeated_hyphens() -> None:
+    from nemo_rl_plugin.transform import _resolved_output_name
+
+    generated = _resolved_output_name(None, "default/foo-.bar", "default/escape-env-dataset", "default")
+    assert "--" not in generated
+
+    with pytest.raises(ValueError, match="not a valid fileset name"):
+        _resolved_output_name("foo--bar", "default/foo-.bar", "default/escape-env-dataset", "default")

@@ -4,14 +4,14 @@
 """Frozen OpenSandbox policy a taskset run carries in its plan.
 
 Contract module (M1 story 5). The operator config that produces the policy lives in
-``nemo_evals.config``; ``resolve_sandbox_policy`` picks a profile by name.
-
-TODO(M2 story 3): request resource overrides and the profile's ceilings.
+``nemo_evals.config``; ``resolve_sandbox_policy`` is M2 story 0's slice of M2 story 3's
+resolver: it picks a profile by name (the operator's default when the request names none) and
+applies the request's resource overrides within the profile's ceilings.
 """
 
-from typing import Literal, Self
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 ResourceClass = Literal["cpu", "gpu"]
 
@@ -50,29 +50,30 @@ class OpenSandboxConnection(OpenSandboxClientSettings):
 
 
 class ResourceOverrides(BaseModel):
-    """Request-level resource overrides; beat task.toml ``[environment]``. Field names match task.toml (M2 story 3)."""
+    """Request-level resource overrides; beat task.toml ``[environment]`` in the agent sandbox only.
+
+    A separate verifier keeps task.toml's resources. Field names match task.toml (M2 story 3).
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     cpus: int | None = Field(default=None, gt=0)
     memory_mb: int | None = Field(default=None, gt=0)
     storage_mb: int | None = Field(default=None, gt=0)
-    gpus: int | None = Field(default=None, ge=0)
-
-    def harbor_kwargs(self) -> dict[str, int]:
-        """Harbor's environment kwargs: ``cpus`` → ``override_cpus``, unset fields omitted."""
-        return {f"override_{k}": v for k, v in self.model_dump(exclude_none=True).items()}
 
 
-class ResourceClassPolicy(BaseModel):
-    """Sandbox template and task-Job profile for one resource class."""
+class SandboxSelection(ResourceOverrides):
+    """``execution.sandbox``: an operator sandbox profile by name, and resource overrides within its ceilings."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    template: str = Field(min_length=1, description="OpenSandbox BatchSandbox template.")
-    dispatcher_profile: str = Field(min_length=1, description="Jobs execution profile for this class's task Jobs.")
-    gpu_type_labels: dict[str, list[str]] = Field(default_factory=dict)
-    max_gpus_per_task: int = Field(default=0, ge=0)
+    profile: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Name of an operator sandbox profile: the sandbox's isolation and egress rules and its resource "
+            "ceilings. Omit for the operator's default profile."
+        ),
+        examples=["harbor-standard"],
+    )
 
 
 class ResolvedHarborSandboxPolicy(BaseModel):
@@ -82,8 +83,6 @@ class ResolvedHarborSandboxPolicy(BaseModel):
 
     profile: str = Field(min_length=1, description="Profile name, for display and provenance.")
     connection: OpenSandboxConnection
-    resource_classes: dict[ResourceClass, ResourceClassPolicy]
-    root_template: str | None
     egress_allow: tuple[str, ...] = Field(description="Operator (Helm) hosts: always applied.")
     request_egress_allow: tuple[str, ...] = Field(
         default=(), description="execution.sandbox.egress_allow, kept apart for provenance."
@@ -97,6 +96,8 @@ class ResolvedHarborSandboxPolicy(BaseModel):
     max_cpus: int | None = None
     max_memory_mb: int | None = None
     max_storage_mb: int | None = None
+    enforce_disk_limit: bool = Field(description="Cap each sandbox's ephemeral storage at its storage_mb.")
+    max_disk_mb: int | None = Field(description="Clamp on that disk limit; None applies storage_mb as given.")
     egress_verification: Literal["default_action", "strict"]
     max_sandbox_lifetime_s: int = Field(ge=1)
     scoring_reserve_s: int = Field(ge=0)
@@ -104,8 +105,19 @@ class ResolvedHarborSandboxPolicy(BaseModel):
     stale_attempt_cleanup_timeout_s: int = Field(ge=1)
     image_reference_mode: Literal["digest", "tag"] = "digest"
 
-    @model_validator(mode="after")
-    def _cpu_class_required(self) -> Self:
-        if "cpu" not in self.resource_classes:
-            raise ValueError("resource_classes must include 'cpu'")
-        return self
+
+DEFAULT_SANDBOX_CPUS = 1
+DEFAULT_SANDBOX_MEMORY_MB = 2048
+"""What a sandbox gets when neither task.toml nor the request sets cpus or memory_mb: the OpenSandbox SDK's
+own fallback for a create with no resources. Filled in explicitly, because the SDK applies it only when
+no resource at all is set, and a disk limit alone would leave the sandbox without CPU or memory limits."""
+
+
+def resource_defaults(policy: ResolvedHarborSandboxPolicy) -> dict[str, int]:
+    """The ``cpus`` and ``memory_mb`` a sandbox gets when nothing sets them, capped by the profile's ceilings."""
+    cpus, memory_mb = DEFAULT_SANDBOX_CPUS, DEFAULT_SANDBOX_MEMORY_MB
+    if policy.max_cpus is not None:
+        cpus = min(cpus, policy.max_cpus)
+    if policy.max_memory_mb is not None:
+        memory_mb = min(memory_mb, policy.max_memory_mb)
+    return {"cpus": cpus, "memory_mb": memory_mb}

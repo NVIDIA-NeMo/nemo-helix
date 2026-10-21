@@ -9,7 +9,13 @@ import secrets
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.exceptions import RequestValidationError
 from nemo_evals.api.dependencies import get_taskset_run_service
-from nemo_evals.api.service.taskset_run_service import TasksetRunResolutionError, TasksetRunService
+from nemo_evals.api.service.taskset_run_service import (
+    IntakeUnavailableError,
+    RunEvaluationDeniedError,
+    RunEvaluationError,
+    TasksetRunResolutionError,
+    TasksetRunService,
+)
 from nemo_evals.api.taskset_run_schemas import (
     TasksetRunInput,
     TasksetRunStatus,
@@ -55,7 +61,10 @@ router = APIRouter()
             "description": "Invalid request, excessive timeout, missing or incompatible source, "
             "unconfigured execution, or a task without images."
         },
-        503: {"description": "The run was accepted but some task Jobs weren't created; retry the same request."},
+        503: {
+            "description": "The run was accepted but some task Jobs, or its Intake Evaluation, weren't created; "
+            "retry the same request."
+        },
     },
 )
 @scope.write
@@ -90,7 +99,8 @@ async def submit_taskset_run(
         RequestValidationError: The execution budget exceeds the operator maximum.
         HTTPException: Source denial (403), conflicting key (409), resolution rejection
             (422), an unavailable image build service before acceptance (503, safe to resend), missing
-            task Jobs after acceptance (503), or a sanitized unexpected failure (500).
+            task Jobs after acceptance (503), an Intake Evaluation refused after acceptance (403, not
+            retried), or a sanitized unexpected failure (500).
             When the request omits idempotency_key, submit generates one. A 5xx then names it in the
             detail and the ``x-idempotency-key`` header and says not to retry automatically: the SDK
             would resend the keyless request and accept a second run. Resubmit with that key instead.
@@ -120,10 +130,18 @@ async def submit_taskset_run(
         ) from exc
     except TasksetRunResolutionError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except IntakeUnavailableError as exc:
+        # Raised before acceptance: nothing exists yet, so a retry is safe with or without an idempotency_key.
+        raise HTTPException(status_code=503, detail=str(exc), headers={"x-should-retry": "true"}) from exc
     except ImagePreparationUnavailableError as exc:
         # Raised before acceptance, so no run exists yet: resending the same request is safe, keyed or not.
         raise HTTPException(status_code=503, detail=str(exc), headers={"x-should-retry": "true"}) from exc
-    except TaskJobsIncompleteError as exc:
+    except RunEvaluationDeniedError as exc:
+        # Accepted but refused its Evaluation, so no Job started; an automatic retry would be refused the same way.
+        headers = {"x-should-retry": "false"} | ({"x-idempotency-key": key} if generated else {})
+        detail = f"{exc}; once you may create Intake Evaluations, resubmit with idempotency_key={key}"
+        raise HTTPException(status_code=403, detail=detail, headers=headers) from exc
+    except (TaskJobsIncompleteError, RunEvaluationError) as exc:
         # The run is already accepted here. Its ID is derived from (workspace, caller, idempotency_key),
         # so a retry with the same key finds this run and creates only its missing Jobs.
         raise _server_error(503, str(exc), key, generated=generated) from exc

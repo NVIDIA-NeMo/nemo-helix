@@ -19,10 +19,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
 
+from nemo_evals.harbor.remote.profile import resource_defaults
 from nemo_evals.jobs.agent_compiler import _environment_stage_step, _secret_refs, _staged_fileset
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evals.jobs.harbor_task_spec import HarborTaskJobSpec
 from nemo_evals.jobs.secret_env import build_task_environment
+from nemo_evals.taskset_runs.identifiers import task_job_name
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
@@ -96,9 +98,13 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
     - Fails before any sandbox if the platform's OpenSandbox server isn't the one the run was accepted for.
     - Binds the materialized task to its prepared image digests.
     - Never deletes the agent-files snapshot: sibling task Jobs and Jobs retries still stage it.
+    - Runs under its own name as the SDK run id, so trials it publishes to the run's Intake Evaluation
+      have stable sessions (``<run_id>-task-<i>:<trial>``) and a re-publish replaces them.
+    - Never writes the shared Evaluation's metadata: the run controller stamps the run's duration once.
     """
 
     discard_agent_files: ClassVar[bool] = False
+    record_publication_durations: ClassVar[bool] = False
     _task_spec: HarborTaskJobSpec
 
     def run(self, config: dict, *, ctx: JobContext, async_client: AsyncNemoClient) -> dict:
@@ -110,6 +116,9 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
         return self._run_with_client(
             spec.spec.model_dump(mode="json"), ctx=ctx, platform_client=async_client, async_client=async_client
         )
+
+    def _run_id(self) -> str | None:
+        return task_job_name(self._task_spec.run_id, self._task_spec.task_index)
 
     def _prepared_tasks(self, tasks: list[AgentEvalTask]) -> None:
         environment = self._task_spec.environment
@@ -151,7 +160,12 @@ def check_sandbox_server(spec: HarborTaskJobSpec) -> None:
 
 
 def configure_runtime(config: HarborRuntimeConfig, ctx: JobContext, spec: HarborTaskJobSpec) -> HarborRuntimeConfig:
-    """Select ``NemoOpenSandboxEnvironment`` with the run's frozen policy, labels and one trial at a time."""
+    """Select ``NemoOpenSandboxEnvironment`` with the run's frozen policy, labels and one trial at a time.
+
+    The request's resource overrides size the agent sandbox only; a separate verifier keeps task.toml's
+    resources. Every sandbox gets ``resource_defaults(policy)`` for unset cpus and memory_mb, the values
+    submit checked against the profile's ceilings. No Harbor resource mode is set, so every value is a limit.
+    """
     policy = spec.sandbox_policy
     connection = policy.connection
     environment = HarborEnvironmentConfig(
@@ -166,6 +180,10 @@ def configure_runtime(config: HarborRuntimeConfig, ctx: JobContext, spec: Harbor
             "trusted_allowed_hosts": [*policy.egress_allow, *policy.request_egress_allow],
             "agent_channel_hosts": list(policy.agent_channel),
             "egress_verification": policy.egress_verification,
+            "enforce_disk_limit": policy.enforce_disk_limit,
+            "max_disk_mb": policy.max_disk_mb,
+            "agent_resource_overrides": policy.resource_overrides.model_dump(exclude_none=True),
+            "sandbox_resource_defaults": resource_defaults(policy),
             "metadata": {
                 "nemo-run": spec.run_id,
                 "nemo-task-index": str(spec.task_index),

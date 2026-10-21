@@ -15,11 +15,12 @@ import hashlib
 import json
 import re
 import shutil
+import subprocess
 import tarfile
 import tempfile
 import time
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,10 +29,12 @@ import httpx
 import typer
 from nemo_evals.api.fields import TaskRef, TasksetRef
 from nemo_evals.api.schemas import AgentEvalResult, TasksetInput
-from nemo_evals.api.taskset_run_schemas import HarborTaskJobsExecutionInput, TasksetRunInput
+from nemo_evals.api.taskset_run_schemas import TasksetRunInput
+from nemo_evals.harbor.remote.profile import SandboxSelection
 from nemo_evals.image_builds.models import TERMINAL_BUILD_STATUSES, ImageBuild
 from nemo_evals.jobs.agent_evaluate import DEFAULT_RESULT_NAME, SUMMARY_FILE_NAME
 from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, HarborBuiltinAgentSource, HarborRunnerTarget
+from nemo_evals.jobs.run_outcome import PUBLICATION_STATUS_KEY
 from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.taskset_runs.controller import MAX_BUNDLE_ATTEMPTS
 from nemo_evals.taskset_runs.identifiers import bundle_job_name, task_job_name
@@ -111,10 +114,11 @@ def is_compose_task(task_dir: Path) -> bool:
     return any((task_dir / "environment" / name).is_file() for name in COMPOSE_FILENAMES)
 
 
-def download_hub_tasks(dataset: str, names: str | None, output_dir: Path) -> tuple[str, list[Path]]:
+def download_hub_tasks(dataset: str, names: str | None, output_dir: Path) -> tuple[str, str | None, list[Path]]:
     """Download the selected tasks of Harbor Hub dataset ``org/name@ref`` into ``output_dir``.
 
-    Returns the dataset's name and the task directories, in the dataset's order.
+    Returns the dataset's name, its resolved version (``sha256:…``, also without ``@ref``) and the task
+    directories, in the dataset's order.
     """
     from harbor.registry.client.package import PackageDatasetClient
 
@@ -124,7 +128,7 @@ def download_hub_tasks(dataset: str, names: str | None, output_dir: Path) -> tup
     candidates = [Candidate(i, entity_name(t.get_name().rpartition("/")[2]), t.get_name()) for i, t in enumerate(ids)]
     chosen = [ids[c.index] for c in select_tasks(candidates, names)]
     result = asyncio.run(client._task_client.download_tasks(task_ids=chosen, output_dir=output_dir, export=True))
-    return metadata.name, list(result.paths)
+    return metadata.name, metadata.version, list(result.paths)
 
 
 def list_hub_tasks(dataset: str) -> list[str]:
@@ -132,6 +136,71 @@ def list_hub_tasks(dataset: str) -> list[str]:
 
     metadata = asyncio.run(PackageDatasetClient().get_dataset_metadata(dataset))
     return sorted(task_id.get_name() for task_id in metadata.task_ids)
+
+
+def check_git_source(source: str) -> None:
+    """Reject a ``--harbor-git`` source that Harbor can't parse or that names no tag or commit.
+
+    Raises:
+        ValueError: The source isn't a git URL, or has no ``@<ref>``.
+    """
+    from harbor.registry.client.git_repo import resolve_repo_source
+
+    if resolve_repo_source(source).ref is None:
+        raise ValueError(f"{source!r} names no tag or commit; pass <url>@<ref> so the run is reproducible")
+
+
+def download_git_tasks(source: str, names: str | None, output_dir: Path) -> tuple[str, str, list[Path], int]:
+    """Download the selected tasks of git repo ``<url>@<ref>`` (its ``tasks/`` directory, or the ``<dir>`` of a
+    ``…/tree/<ref>/<dir>`` URL) into ``output_dir``.
+
+    Returns the repo's ``org/name``, the commit the download checked out, the task directories in name order,
+    and how many tasks the repo has.
+
+    Raises:
+        RuntimeError: The selected tasks didn't come from one commit.
+    """
+    from harbor.registry.client.git_repo import GitRepoRegistryClient, resolve_repo_source
+
+    check_git_source(source)
+    repo = resolve_repo_source(source)
+    client = GitRepoRegistryClient(repo)
+    metadata = _run_git(client.get_dataset_metadata(""))  # no dataset name: every task under tasks/
+    ids = sorted(metadata.task_ids, key=lambda task_id: task_id.get_name())
+    candidates = [Candidate(i, entity_name(t.get_name()), t.get_name()) for i, t in enumerate(ids)]
+    chosen = [ids[c.index] for c in select_tasks(candidates, names)]
+    result = _run_git(client._task_client.download_tasks(task_ids=chosen, output_dir=output_dir, export=True))
+    # Not the ids' git_commit_id: for an annotated tag that's the tag object's SHA, not its commit.
+    commits = {r.resolved_git_commit_id for r in result.results}
+    commit = next(iter(commits)) if len(commits) == 1 else None
+    if commit is None:
+        raise RuntimeError(f"Harbor resolved {source} to {sorted(map(str, commits))}, not one commit")
+    return f"{repo.org}/{repo.name}", commit, list(result.paths), len(ids)
+
+
+def list_git_tasks(source: str) -> list[str]:
+    from harbor.registry.client.git_repo import GitRepoRegistryClient, resolve_repo_source
+
+    check_git_source(source)
+    metadata = _run_git(GitRepoRegistryClient(resolve_repo_source(source)).get_dataset_metadata(""))
+    return sorted(task_id.get_name() for task_id in metadata.task_ids)
+
+
+def _run_git[T](operation: Coroutine[Any, Any, T]) -> T:
+    """Run a Harbor git operation; a failed git command becomes a RuntimeError carrying git's own message.
+
+    Raises:
+        RuntimeError: A git command Harbor ran failed (unreachable repo, unknown ref, …), or git isn't installed.
+    """
+    try:
+        return asyncio.run(operation)
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else str(exc.stderr or "")
+        raise RuntimeError(f"{' '.join(exc.cmd[:2])} failed: {stderr.strip() or exc}") from exc
+    except FileNotFoundError as exc:
+        if exc.filename != "git":
+            raise
+        raise RuntimeError("--harbor-git needs git on PATH; install git and retry") from exc
 
 
 def publish_tasks(
@@ -246,29 +315,50 @@ def run_request(
     *,
     spec_file: Path | None,
     agent: str,
-    sandbox_policy: str,
     dispatcher_profile: str | None,
+    sandbox: SandboxSelection | None = None,
+    experiment: str | None = None,
+    dataset: tuple[str, str | None] | None = None,
     idempotency_key: str | None = None,
 ) -> TasksetRunInput:
     """The run request: ``--spec-file``'s with its tasks replaced, or ``--agent`` with default execution.
 
-    The idempotency key is ``idempotency_key``, else the spec file's, else a new one.
+    ``--experiment`` sets ``publication.intake``, replacing the spec file's.
+    ``dataset`` is the Harbor Hub dataset or git repo the tasks came from, as ``(name, version or commit)``:
+    the Evaluation's dataset instead of the taskset. ``dispatcher_profile`` and ``sandbox`` apply
+    to ``--agent`` only; a spec file carries its own ``execution``. The idempotency key is
+    ``idempotency_key``, else the spec file's, else a new one.
     """
+    publication: dict[str, Any] | None = None
+    if experiment is not None:
+        publication = {"intake": {"experiment": experiment}}
+        if dataset is not None:
+            name, version = dataset
+            publication["intake"] |= {"dataset_name": name} | ({"dataset_version": version} if version else {})
     if spec_file is not None:
-        request = TasksetRunInput.model_validate(json.loads(spec_file.read_text()))
-        spec = request.spec.model_copy(update={"tasks": TasksetRef(taskset_ref)})
-        data = request.model_dump(mode="json", exclude={"spec"}) | {"spec": spec.model_dump(mode="json")}
-        data["idempotency_key"] = idempotency_key or data.get("idempotency_key") or str(uuid.uuid4())
-        return TasksetRunInput.model_validate(data)
-    execution: dict[str, Any] = {"sandbox_policy": sandbox_policy}
+        # The selected taskset replaces spec.tasks before validation: with a dataset the file may leave it out.
+        raw = json.loads(spec_file.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict) or not isinstance(raw.get("spec") or {}, dict):
+            raise ValueError(f"{spec_file}: expected a TasksetRunInput JSON object with an object 'spec'")
+        raw["spec"] = {**(raw.get("spec") or {}), "tasks": taskset_ref}
+        if publication is not None:
+            raw["publication"] = publication  # --experiment replaces the file's, before it's validated
+        raw["idempotency_key"] = idempotency_key or raw.get("idempotency_key") or str(uuid.uuid4())
+        return TasksetRunInput.model_validate(raw)
+    execution: dict[str, Any] = {}
     if dispatcher_profile is not None:
         execution["dispatcher_profile"] = dispatcher_profile
-    return TasksetRunInput(
-        spec=AgentEvalInputSpec(
-            tasks=TasksetRef(taskset_ref), target=HarborRunnerTarget(source=HarborBuiltinAgentSource(name=agent))
-        ),
-        execution=HarborTaskJobsExecutionInput.model_validate(execution),
-        idempotency_key=idempotency_key or str(uuid.uuid4()),
+    if sandbox is not None:
+        execution["sandbox"] = sandbox.model_dump(exclude_none=True)
+    return TasksetRunInput.model_validate(
+        {
+            "spec": AgentEvalInputSpec(
+                tasks=TasksetRef(taskset_ref), target=HarborRunnerTarget(source=HarborBuiltinAgentSource(name=agent))
+            ).model_dump(mode="json", exclude_none=True),
+            "execution": execution,
+            "publication": publication,
+            "idempotency_key": idempotency_key or str(uuid.uuid4()),
+        }
     )
 
 
@@ -282,11 +372,33 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
     def submit(
         harbor_dir: Path | None = typer.Option(None, "--harbor-dir", help="Local Harbor dataset directory."),
         harbor_hub: str | None = typer.Option(None, "--harbor-hub", help="Harbor Hub dataset, org/name@ref."),
-        spec_file: Path | None = typer.Option(None, "--spec-file", help="TasksetRunInput JSON naming a taskset."),
+        harbor_git: str | None = typer.Option(
+            None,
+            "--harbor-git",
+            help="Public git repo of Harbor tasks, pinned to a tag or commit: <url>@<ref> reads tasks/ at that ref. "
+            "For another directory, use a GitHub tree URL: https://github.com/<org>/<repo>/tree/<ref>/<dir>.",
+        ),
+        spec_file: Path | None = typer.Option(
+            None,
+            "--spec-file",
+            help="TasksetRunInput JSON: its target and execution, and its taskset unless --harbor-dir, --harbor-hub "
+            "or --harbor-git supplies the tasks.",
+        ),
         tasks: str | None = typer.Option(None, "--tasks", help="Indexes or names, comma-separated; default all."),
         agent: str = typer.Option("oracle", "--agent", help="Harbor built-in agent (without --spec-file)."),
-        sandbox_policy: str = typer.Option("harbor-standard", "--sandbox-policy", help="Operator sandbox profile."),
+        sandbox_profile: str | None = typer.Option(
+            None, "--sandbox-profile", help="Operator sandbox profile; default: the operator's (without --spec-file)."
+        ),
         dispatcher_profile: str | None = typer.Option(None, "--dispatcher-profile", help="Jobs profile for task Jobs."),
+        cpus: int | None = typer.Option(
+            None, "--cpus", min=1, help="CPUs for every task's agent sandbox, over task.toml (without --spec-file)."
+        ),
+        memory_mb: int | None = typer.Option(
+            None, "--memory-mb", min=1, help="Memory in MB for every task's agent sandbox (without --spec-file)."
+        ),
+        storage_mb: int | None = typer.Option(
+            None, "--storage-mb", min=1, help="Disk in MB for every task's agent sandbox (without --spec-file)."
+        ),
         no_build_images: bool = typer.Option(
             False,
             "--no-build-images",
@@ -302,26 +414,65 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
             None, "--workspace", help="Workspace for tasks, taskset and run; default: the configured workspace."
         ),
         poll_seconds: float = typer.Option(10.0, "--poll-seconds", help="Image-build polling interval."),
+        experiment: str | None = typer.Option(
+            None,
+            "--experiment",
+            help="Intake Experiment (name) to publish the run to: one Evaluation per run, trials as each task ends.",
+        ),
     ) -> None:
         """Publish the selected tasks as a taskset, build their images, and submit one task Job per task."""
-        if sum(source is not None for source in (harbor_dir, harbor_hub, spec_file)) != 1:
-            raise typer.BadParameter("pass exactly one of --harbor-dir, --harbor-hub or --spec-file")
+        sources = [
+            flag
+            for flag, value in (
+                ("--harbor-dir", harbor_dir),
+                ("--harbor-hub", harbor_hub),
+                ("--harbor-git", harbor_git),
+            )
+            if value is not None
+        ]
+        if len(sources) > 1:
+            raise typer.BadParameter(
+                f"pass one of --harbor-dir, --harbor-hub or --harbor-git, not {' and '.join(sources)}"
+            )
+        if not sources and spec_file is None:
+            raise typer.BadParameter("pass --harbor-dir, --harbor-hub, --harbor-git or --spec-file")
+        if harbor_git is not None:
+            try:
+                check_git_source(harbor_git)
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc), param_hint="--harbor-git") from exc
+        # A spec file alone selects from its own taskset; with a dataset it supplies only the target and settings.
+        from_spec = not sources
+        if spec_file is not None and any(value is not None for value in (sandbox_profile, cpus, memory_mb, storage_mb)):
+            raise typer.BadParameter(
+                "--sandbox-profile, --cpus, --memory-mb and --storage-mb don't apply with --spec-file; "
+                "set execution.sandbox in it"
+            )
         echo = typer.echo
         client = client_factory()
         workspace = client.resolve_workspace(workspace)
         try:
             if list_tasks:
-                _print_tasks(client_factory, harbor_dir, harbor_hub, spec_file, workspace)
+                _print_tasks(
+                    client_factory, harbor_dir, harbor_hub, harbor_git, spec_file if from_spec else None, workspace
+                )
                 return
             evaluator = Evaluator.from_client(client)
+            dataset: tuple[str, str | None] | None = None
             with tempfile.TemporaryDirectory(prefix="nemo-runs-") as scratch:
-                if spec_file is not None:
+                if from_spec:
+                    assert spec_file is not None
                     refs, total, prefix = _select_from_spec(evaluator, spec_file, tasks, workspace)
                 else:
                     if harbor_hub is not None:
-                        prefix, task_dirs = download_hub_tasks(harbor_hub, tasks, Path(scratch))
-                        prefix = prefix.rpartition("/")[2]
+                        hub_name, hub_version, task_dirs = download_hub_tasks(harbor_hub, tasks, Path(scratch))
+                        dataset = (hub_name, hub_version)
+                        prefix = hub_name.rpartition("/")[2]
                         total = len(list_hub_tasks(harbor_hub))
+                    elif harbor_git is not None:
+                        repo_name, sha, task_dirs, total = download_git_tasks(harbor_git, tasks, Path(scratch))
+                        dataset = (repo_name, sha)
+                        prefix = repo_name.rpartition("/")[2]
                     else:
                         assert harbor_dir is not None
                         all_dirs = _task_dirs(harbor_dir)
@@ -330,7 +481,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                         prefix, total = harbor_dir.resolve().name, len(all_dirs)
                     refs = publish_tasks(evaluator, task_dirs, prefix=prefix, workspace=workspace, echo=echo)
                 taskset = entity_name(
-                    f"{prefix}-sel-{selection_suffix(refs)}" if spec_file else f"{prefix}-{selection_suffix(refs)}"
+                    f"{prefix}-sel-{selection_suffix(refs)}" if from_spec else f"{prefix}-{selection_suffix(refs)}"
                 )
                 evaluator.tasksets.replace(
                     taskset, taskset=TasksetInput(tasks=[TaskRef(ref) for ref in refs]), workspace=workspace
@@ -344,8 +495,10 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 taskset_ref,
                 spec_file=spec_file,
                 agent=agent,
-                sandbox_policy=sandbox_policy,
                 dispatcher_profile=dispatcher_profile,
+                sandbox=_sandbox_selection(sandbox_profile, cpus, memory_mb, storage_mb),
+                experiment=experiment,
+                dataset=dataset,
                 idempotency_key=idempotency_key,
             )
             status = submit_run(
@@ -360,6 +513,15 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         echo("")
         flag = _workspace_flag(workspace, client.resolve_workspace())
         echo(f"View evaluation run: nemo evals runs status {status['run_id']}{flag} --watch")
+
+
+def _sandbox_selection(
+    profile: str | None, cpus: int | None, memory_mb: int | None, storage_mb: int | None
+) -> SandboxSelection | None:
+    """``execution.sandbox`` from the sandbox flags, or None when none is given."""
+    if profile is None and cpus is None and memory_mb is None and storage_mb is None:
+        return None
+    return SandboxSelection(profile=profile, cpus=cpus, memory_mb=memory_mb, storage_mb=storage_mb)
 
 
 def _task_dirs(dataset: Path) -> list[Path]:
@@ -383,9 +545,14 @@ def _select_from_spec(
     evaluator: Evaluator, spec_file: Path, tokens: str | None, workspace: str
 ) -> tuple[list[str], int, str]:
     """The pinned refs of ``--spec-file``'s taskset, narrowed by ``--tasks``; tasks are not re-uploaded."""
-    request = TasksetRunInput.model_validate(json.loads(spec_file.read_text()))
-    assert isinstance(request.spec.tasks, TasksetRef)
-    ref = request.spec.tasks.root
+    # Only spec.tasks matters here: run_request applies --experiment before the whole file is validated.
+    raw = json.loads(spec_file.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or not isinstance(raw.get("spec"), dict):
+        raise ValueError(f"{spec_file}: expected a TasksetRunInput JSON object with an object 'spec'")
+    spec = AgentEvalInputSpec.model_validate(raw["spec"])
+    if not isinstance(spec.tasks, TasksetRef):
+        raise ValueError(f"{spec_file}: spec.tasks must name a taskset (workspace/name#revision)")
+    ref = spec.tasks.root
     head, _, fragment = ref.partition("#")
     taskset_workspace, _, name = head.rpartition("/")
     taskset = evaluator.tasksets.retrieve(name, revision=fragment or None, workspace=taskset_workspace or workspace)
@@ -404,11 +571,14 @@ def _print_tasks(
     client_factory: Callable[[], NemoClient],
     harbor_dir: Path | None,
     harbor_hub: str | None,
+    harbor_git: str | None,
     spec_file: Path | None,
     workspace: str,
 ) -> None:
     if harbor_hub is not None:
         rows = list_hub_tasks(harbor_hub)
+    elif harbor_git is not None:
+        rows = list_git_tasks(harbor_git)
     elif harbor_dir is not None:
         rows = [_native_id(d) for d in _task_dirs(harbor_dir)]
     else:
@@ -433,6 +603,16 @@ class TaskJobView:
     status: str  # Jobs status, or "missing" when submit hasn't created the Job yet
     job_id: str | None = None
     result: AgentEvalResult | None = None
+    publication: dict[str, Any] | None = None  # the task's Intake publish outcome, once it published
+
+
+def _published(view: TaskJobView) -> str:
+    """The ``published`` cell: what the task's Job published to Intake."""
+    if view.publication is None:
+        return "-"
+    if view.publication.get("status") == "completed":
+        return f"✓ {view.publication.get('trial_count', 0)} trials"
+    return f"✗ {view.publication.get('error') or 'failed'}"
 
 
 def get_run(client: NemoClient, workspace: str, run_id: str) -> dict[str, Any]:
@@ -528,7 +708,8 @@ def run_task_jobs(
             # Result records carry the Job's name as job_id (NEMO_JOB_ID), not its platform id.
             found = evaluator.agent_eval_results.list(workspace=workspace, job_id=job_name, page_size=1).data
             result = found[0] if found else None
-        views.append(TaskJobView(index, job_name, tasks[0].get("id"), status, job.id, result))
+        publication = (job.status_details or {}).get(PUBLICATION_STATUS_KEY)
+        views.append(TaskJobView(index, job_name, tasks[0].get("id"), status, job.id, result, publication))
     return views
 
 
@@ -648,8 +829,17 @@ def _status_table(
         lines.append(f"  completed tasks' scores: nemo evals runs results {run['run_id']}{workspace_flag}")
     lines.append("")
     width = max([4, *(len(v.task or "") for v in views)])
-    lines.append(f"{'#':>3}  {'task':<{width}}  {'Job':<{len(views[0].job) if views else 3}}  status")
-    lines += [f"{v.index:>3}  {(v.task or '-'):<{width}}  {v.job}  {v.status}" for v in views]
+    job_width = len(views[0].job) if views else 3
+    if any(v.publication is not None for v in views):
+        status_width = max(6, *(len(v.status) for v in views))
+        lines.append(f"{'#':>3}  {'task':<{width}}  {'Job':<{job_width}}  {'status':<{status_width}}  published")
+        lines += [
+            f"{v.index:>3}  {(v.task or '-'):<{width}}  {v.job}  {v.status:<{status_width}}  {_published(v)}"
+            for v in views
+        ]
+    else:
+        lines.append(f"{'#':>3}  {'task':<{width}}  {'Job':<{job_width}}  status")
+        lines += [f"{v.index:>3}  {(v.task or '-'):<{width}}  {v.job}  {v.status}" for v in views]
     done = [v for v in views if v.status in _TERMINAL]
     failed = [v for v in done if v.status != "completed"]
     lines.append(f"{len(done)}/{len(views)} done ({len(done) - len(failed)} completed, {len(failed)} failed)")
@@ -851,6 +1041,8 @@ def add_progress_commands(runs: typer.Typer, client_factory: Callable[[], NemoCl
 
 def _view_json(view: TaskJobView) -> dict[str, Any]:
     data: dict[str, Any] = {"index": view.index, "job": view.job, "task": view.task, "status": view.status}
+    if view.publication is not None:
+        data["publication"] = view.publication
     if view.result is not None:
         data["result"] = view.result.model_dump(mode="json", include={"name", "scores", "summary", "bundle_ref"})
     return data

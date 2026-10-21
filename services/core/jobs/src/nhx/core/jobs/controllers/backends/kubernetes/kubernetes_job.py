@@ -23,7 +23,7 @@ from nhx.core.jobs.app.constants import (
     JOB_WORKSPACE_ID_LABEL,
     KUBE_JOB_SELECTOR_LABELS,
 )
-from nhx.core.jobs.app.lifecycle import describe_paused_exit, pause_deadline_exceeded
+from nhx.core.jobs.app.lifecycle import describe_paused_exit, image_digest_updates, pause_deadline_exceeded
 from nhx.core.jobs.app.providers import (
     ComputeResources,
     ContainerSpec,
@@ -41,6 +41,7 @@ from nhx.core.jobs.controllers.backends.base import (
 from nhx.core.jobs.controllers.backends.exceptions import SchedulingDeferred
 from nhx.core.jobs.controllers.backends.kubernetes.common import (
     BaseKubernetesExecutionProfileConfig,
+    adopt_step_network_policy,
     aggregate_pod_statuses_for_job_step,
     build_event_field_selector,
     build_metadata,
@@ -49,7 +50,10 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     common_labels_for_step,
     create_configmap,
     create_pod_template_spec,
+    create_step_network_policy,
     delete_configmap,
+    delete_step_network_policy,
+    first_task_image_id,
     get_namespace_from_environment,
     image_pull_backoff_failure,
     last_task_exit_time,
@@ -57,7 +61,9 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     list_pods_by_labels,
     load_kubernetes_config,
     name_for_step,
+    reclaim_job_persistent_storage,
     update_all_tasks,
+    update_tasks_with_pause_outcome,
 )
 from nhx.core.jobs.controllers.backends.kubernetes.workload_delegations import (
     KubernetesPodBoundWorkloadDelegationManager,
@@ -107,6 +113,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         load_kubernetes_config()
         self._batch_v1 = client.BatchV1Api()
         self._core_v1 = client.CoreV1Api()
+        self._networking_v1 = client.NetworkingV1Api()
         self.namespace = self._execution_profile_config.namespace or get_namespace_from_environment()
         self._workload_delegation_store = create_authenticated_workload_delegation_store(self._nemo_client)
         self._workload_delegations = KubernetesPodBoundWorkloadDelegationManager(
@@ -121,6 +128,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
     def shutdown(self):
         self._batch_v1.api_client.close()
         self._core_v1.api_client.close()
+        self._networking_v1.api_client.close()
         return
 
     def _workload_delegation_target_for_job(self, job: V1Job) -> KubernetesPodBoundWorkloadDelegationTarget | None:
@@ -241,6 +249,11 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             namespace=self.namespace,
             step=step,
         )
+        network_policy_name = (
+            create_step_network_policy(self._networking_v1, self.namespace, step)
+            if self._execution_profile_config.step_network_policies_enabled
+            else None
+        )
 
         # Otherwise, create a new job
         common_labels = common_labels_for_step(step)
@@ -282,17 +295,28 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         )
 
         try:
-            # Create the job in Kubernetes
-            self._batch_v1.create_namespaced_job(namespace=self.namespace, body=k8s_job)
-            logger.info(
-                "Scheduled job step with Kubernetes job", extra={"job_name": job_name, "namespace": self.namespace}
-            )
-            self._ensure_initial_workload_delegation(step, k8s_job)
+            created = self._batch_v1.create_namespaced_job(namespace=self.namespace, body=k8s_job)
         except ApiException:
             logger.exception(
                 "Failed to create Kubernetes job", extra={"job_name": job_name, "namespace": self.namespace}
             )
+            try:
+                self._delete_step_network_policy(network_policy_name)
+            except Exception:
+                logger.exception(
+                    "Failed to delete step NetworkPolicy after Kubernetes job creation failed",
+                    extra={"network_policy": network_policy_name, "namespace": self.namespace},
+                )
             raise
+        logger.info("Scheduled job step with Kubernetes job", extra={"job_name": job_name, "namespace": self.namespace})
+        if network_policy_name and created.metadata and created.metadata.uid:
+            adopt_step_network_policy(
+                self._networking_v1,
+                self.namespace,
+                network_policy_name,
+                client.V1OwnerReference(api_version="batch/v1", kind="Job", name=job_name, uid=created.metadata.uid),
+            )
+        self._ensure_initial_workload_delegation(step, k8s_job)
 
         return JobUpdate(
             status=HelixJobStatus.PENDING,
@@ -386,6 +410,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         if status == HelixJobStatus.ERROR:
             error_message = _status_details_message(status_details, "Job encountered an error")
         status_details["events"] = self.get_kube_job_events(job)
+        status_details.update(image_digest_updates(step.status_details, _task_image_id(self._core_v1, job, step)))
         task_has_error = update_all_tasks(self._nemo_client, self._core_v1, self.namespace, step)
         teardown_lifecycle_statuses = {
             HelixJobStatus.PAUSING,
@@ -421,6 +446,8 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
                 else:
                     self._workload_delegations.ensure_for_target(step, target)
         error_details = {"message": error_message} if error_message is not None else {}
+        if _kubernetes_job_workload_is_finished(job, status):
+            self._delete_step_network_policy(job.metadata.name)
         return JobUpdate(status=status, status_details=status_details, error_details=error_details)
 
     def enforce_image_pull_ttl(self, step: HelixJobStepWithContext, k8s_job: V1Job) -> JobUpdate | None:
@@ -523,20 +550,27 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             return JobUpdate(status=HelixJobStatus.PAUSED, status_details={"message": "Job is paused"})
 
         pods = _pods_for_job(self._core_v1, job, step)
+        digest_details = image_digest_updates(step.status_details, first_task_image_id(pods))
         running, exit_code = classify_task_containers(pods)
         if not running and exit_code is None:
             exit_code = _job_object_pause_exit_code(job)
         if not running and exit_code is not None and not pause_deadline_exceeded(step, now=last_task_exit_time(pods)):
-            return _pause_exit_update(self, job, exit_code)
+            return _pause_exit_update(self, step, job, pods, exit_code, digest_details)
         if pause_deadline_exceeded(step):
-            self.terminate_job(job)
             message = "Pause deadline exceeded"
+            update_tasks_with_pause_outcome(
+                self._nemo_client, self._core_v1, self.namespace, step, pods, HelixJobStatus.ERROR, {"message": message}
+            )
+            self.terminate_job(job)
             return JobUpdate(
                 status=HelixJobStatus.ERROR,
                 status_details={"message": message},
                 error_details={"message": message},
             )
-        return JobUpdate(status=HelixJobStatus.PAUSING, status_details={"message": "Job is being paused"})
+        return JobUpdate(
+            status=HelixJobStatus.PAUSING,
+            status_details={"message": "Job is being paused", **digest_details},
+        )
 
     def sync_suspend_job(self, step: HelixJobStepWithContext, job: V1Job | None) -> JobUpdate:
         if job is None:
@@ -605,6 +639,30 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             core_v1=self._core_v1,
             namespace=self.namespace,
             name=job_name,
+        )
+        self._delete_step_network_policy(job_name)
+
+    def _delete_step_network_policy(self, name: str | None) -> None:
+        if not name or not self._execution_profile_config.step_network_policies_enabled:
+            return
+        delete_step_network_policy(self._networking_v1, self.namespace, name)
+
+    def reclaim_persistent_storage(self, workspace: str, job: str) -> bool:
+        storage = self._execution_profile_config.storage
+        if storage is None:
+            return True
+        return reclaim_job_persistent_storage(
+            namespace=self.namespace,
+            batch_v1=self._batch_v1,
+            pvc_name=storage.pvc_name,
+            workspace=workspace,
+            job_id=job,
+            permissions_image=storage.volume_permissions_image,
+            execution_backend=self.BACKEND_NAME,
+            execution_profile=self._profile_name,
+            job_metadata=self._execution_profile_config.job_metadata,
+            pod_metadata=self._execution_profile_config.pod_metadata,
+            pod_security_context=self._execution_profile_config.pod_security_context,
         )
 
     def cleanup_steps(self):
@@ -767,6 +825,22 @@ def _job_namespace(job: V1Job) -> str | None:
     return metadata.namespace
 
 
+def _kubernetes_job_workload_is_finished(job: V1Job, status: HelixJobStatus) -> bool:
+    """Whether Kubernetes has stopped this Job, so its NetworkPolicy can be removed.
+
+    The platform status can be ERROR while pods are still running. The policy stays until the
+    Job has completed, Kubernetes has recorded a Failed condition, or cancellation has drained
+    every pod.
+    """
+    job_status = job.status
+    if job_status is not None and job_status.completion_time is not None:
+        return True
+    if status == HelixJobStatus.CANCELLED:
+        return True
+    conditions = job_status.conditions if job_status is not None else None
+    return any(condition.type == "Failed" and condition.status == "True" for condition in conditions or [])
+
+
 def map_kubernetes_job_status_to_step_status(
     job: V1Job, core_v1: client.CoreV1Api, step: HelixJobStepWithContext
 ) -> tuple[HelixJobStatus, KubernetesStatusDetails]:
@@ -881,6 +955,10 @@ def _pods_for_job(core_v1: client.CoreV1Api, job: V1Job, step: HelixJobStepWithC
     return list_pods_by_labels(core_v1, namespace, common_labels_for_step(step))
 
 
+def _task_image_id(core_v1: client.CoreV1Api, job: V1Job, step: HelixJobStepWithContext) -> str | None:
+    return first_task_image_id(_pods_for_job(core_v1, job, step))
+
+
 def _positive_count(value: object) -> bool:
     return isinstance(value, int) and value > 0
 
@@ -897,12 +975,22 @@ def _job_object_pause_exit_code(job: V1Job) -> int | None:
     return None
 
 
-def _pause_exit_update(backend: KubernetesJobBackend, job: V1Job, exit_code: int) -> JobUpdate:
+def _pause_exit_update(
+    backend: KubernetesJobBackend,
+    step: HelixJobStepWithContext,
+    job: V1Job,
+    pods: list,
+    exit_code: int,
+    digest_details: dict,
+) -> JobUpdate:
     status, message, error_details = describe_paused_exit(exit_code)
+    update_tasks_with_pause_outcome(
+        backend._nemo_client, backend._core_v1, backend.namespace, step, pods, status, error_details
+    )
     if status == HelixJobStatus.PAUSED:
         backend.terminate_job(job)
     return JobUpdate(
         status=status,
-        status_details={"message": message},
+        status_details={"message": message, **digest_details},
         error_details=error_details or None,
     )

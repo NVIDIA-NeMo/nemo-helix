@@ -5,7 +5,9 @@
 
 import io
 import json
+import subprocess
 import tarfile
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
@@ -14,6 +16,7 @@ import pytest
 import typer
 from nemo_evals.api.fields import TasksetRef
 from nemo_evals.api.schemas import AgentEvalResult
+from nemo_evals.harbor.remote.profile import SandboxSelection
 from nemo_evals.runs_cli import (
     BundleJobView,
     Candidate,
@@ -21,10 +24,14 @@ from nemo_evals.runs_cli import (
     SelectionError,
     TaskJobView,
     _results_table,
+    _select_from_spec,
     _status_table,
+    _view_json,
     _workspace_flag,
     add_runs_commands,
     build_images,
+    check_git_source,
+    download_git_tasks,
     job_error,
     newest_bundle_job,
     rollup_scores,
@@ -133,7 +140,7 @@ def test_spec_file_keeps_its_settings_and_takes_the_selected_taskset(tmp_path):
         json.dumps(
             {
                 "spec": {"tasks": "default/full", "target": {"kind": "harbor", "source": {"name": "oracle"}}},
-                "execution": {"sandbox_policy": "harbor-open", "max_concurrent_task_jobs": 3},
+                "execution": {"sandbox": {"profile": "harbor-open"}, "max_concurrent_task_jobs": 3},
             }
         )
     )
@@ -141,13 +148,255 @@ def test_spec_file_keeps_its_settings_and_takes_the_selected_taskset(tmp_path):
         "default/full-sel-1234abcd#" + "a" * 64,
         spec_file=spec,
         agent="ignored",
-        sandbox_policy="ignored",
         dispatcher_profile=None,
+        sandbox=SandboxSelection(profile="ignored", cpus=64),
     )
     assert isinstance(request.spec.tasks, TasksetRef)
     assert request.spec.tasks.root.startswith("default/full-sel-1234abcd#")
-    assert request.execution.sandbox_policy == "harbor-open" and request.execution.max_concurrent_task_jobs == 3
+    assert request.execution.sandbox == SandboxSelection(profile="harbor-open")
+    assert request.execution.max_concurrent_task_jobs == 3
     assert request.idempotency_key
+
+
+def test_experiment_publishes_the_run_to_intake(tmp_path):
+    plain = run_request("default/t#" + "a" * 64, spec_file=None, agent="codex", dispatcher_profile=None)
+    assert plain.publication is None
+    request = run_request(
+        "default/t#" + "a" * 64,
+        spec_file=None,
+        agent="codex",
+        dispatcher_profile=None,
+        experiment="swe-agent-tuning",
+    )
+    assert request.publication is not None and request.publication.intake.experiment == "swe-agent-tuning"
+    spec = tmp_path / "run.json"
+    spec.write_text(json.dumps({"spec": {"tasks": "default/t", "target": {"kind": "harbor"}}, "execution": {}}))
+    # With --harbor-hub/--harbor-dir the dataset supplies the tasks, so the file may leave spec.tasks out.
+    no_tasks = tmp_path / "no-tasks.json"
+    no_tasks.write_text(json.dumps({"spec": {"target": {"kind": "harbor"}}, "execution": {}}))
+    selected = run_request("default/t#" + "a" * 64, spec_file=no_tasks, agent="", dispatcher_profile=None)
+    assert isinstance(selected.spec.tasks, TasksetRef) and selected.spec.tasks.root == "default/t#" + "a" * 64
+    # --experiment replaces the file's publication before validation, so an invalid one doesn't block it.
+    no_tasks.write_text(
+        json.dumps(
+            {
+                "spec": {"target": {"kind": "harbor"}},
+                "execution": {},
+                "publication": {"intake": {"experiment": ""}},
+            }
+        )
+    )
+    overridden = run_request(
+        "default/t#" + "a" * 64,
+        spec_file=no_tasks,
+        agent="",
+        dispatcher_profile=None,
+        experiment="x",
+    )
+    assert overridden.publication is not None and overridden.publication.intake.experiment == "x"
+    for bad in ([], {"spec": ["not", "an", "object"]}):
+        no_tasks.write_text(json.dumps(bad))
+        with pytest.raises(ValueError, match="expected a TasksetRunInput JSON object"):
+            run_request("default/t#" + "a" * 64, spec_file=no_tasks, agent="", dispatcher_profile=None)
+    from_file = run_request("default/t#" + "a" * 64, spec_file=spec, agent="", dispatcher_profile=None, experiment="x")
+    assert from_file.publication is not None and from_file.publication.intake.experiment == "x"
+    assert from_file.publication.intake.dataset_name is None  # no Hub dataset: the server uses the taskset
+    hub = run_request(
+        "default/t#" + "a" * 64,
+        spec_file=spec,
+        agent="",
+        dispatcher_profile=None,
+        experiment="x",
+        dataset=("datacurve/deep-swe", "sha256:" + "b" * 64),
+    )
+    assert hub.publication is not None
+    assert (hub.publication.intake.dataset_name, hub.publication.intake.dataset_version) == (
+        "datacurve/deep-swe",
+        "sha256:" + "b" * 64,
+    )
+
+
+@pytest.mark.parametrize(
+    ("sandbox", "expected"),
+    [
+        (SandboxSelection(cpus=4, storage_mb=20_480), {"cpus": 4, "storage_mb": 20_480}),
+        (SandboxSelection(profile="harbor-open"), {"profile": "harbor-open"}),
+        (None, None),
+    ],
+)
+def test_agent_request_carries_the_sandbox_selection(sandbox, expected):
+    request = run_request(
+        "default/full#" + "a" * 64,
+        spec_file=None,
+        agent="oracle",
+        dispatcher_profile=None,
+        sandbox=sandbox,
+    )
+    assert request.model_dump(mode="json", exclude_none=True)["execution"].get("sandbox") == expected
+
+
+@pytest.mark.parametrize(
+    ("flag", "value"),
+    [("--sandbox-profile", "harbor-open"), ("--cpus", "4"), ("--memory-mb", "4"), ("--storage-mb", "4")],
+)
+def test_sandbox_flags_are_rejected_with_a_spec_file(tmp_path, flag, value):
+    spec = tmp_path / "run.json"
+    spec.write_text("{}")
+    app = typer.Typer()
+
+    def no_client() -> NemoClient:
+        raise AssertionError("no request is made")
+
+    add_runs_commands(app, no_client)
+    result = CliRunner().invoke(app, ["runs", "submit", "--spec-file", str(spec), flag, value])
+    assert result.exit_code == 2
+    assert "don't apply with --spec-file" in " ".join(result.output.replace("│", " ").split())
+
+
+TB = "https://github.com/harbor-framework/terminal-bench.git"
+SHA = "2b0442c3" + "0" * 32  # what Harbor's ls-remote gives an annotated tag: the tag object
+COMMIT = "9f1e7a55" + "0" * 32  # the commit the download checks out
+
+
+class FakeGitRegistry:
+    """Harbor's ``GitRepoRegistryClient``: three tasks under ``tasks/`` at ``SHA``; records what it downloads."""
+
+    downloads: list[list[str]] = []
+    commits: list[str | None] | None = None  # per selected task; default COMMIT for each
+
+    repos: list = []
+
+    def __init__(self, repo):
+        self.repo = repo
+        self._task_client = self
+        FakeGitRegistry.repos.append(repo)
+
+    async def get_dataset_metadata(self, name):
+        from harbor.models.task.id import GitTaskId
+
+        names = ["sum-three", "bun-sourcemap-leak", "greet-universe"]
+        return SimpleNamespace(
+            task_ids=[GitTaskId(git_url=self.repo.git_url, git_commit_id=SHA, path=Path("tasks") / n) for n in names]
+        )
+
+    async def download_tasks(self, task_ids, output_dir, export):
+        FakeGitRegistry.downloads.append([t.get_name() for t in task_ids])
+        paths = [output_dir / t.get_name() for t in task_ids]
+        commits = FakeGitRegistry.commits or [COMMIT] * len(paths)
+        results = [SimpleNamespace(path=p, resolved_git_commit_id=c) for p, c in zip(paths, commits, strict=True)]
+        return SimpleNamespace(paths=paths, results=results)
+
+
+@pytest.fixture
+def git_registry(monkeypatch):
+    from harbor.registry.client import git_repo
+
+    FakeGitRegistry.downloads = []
+    FakeGitRegistry.repos = []
+    FakeGitRegistry.commits = None
+    monkeypatch.setattr(git_repo, "GitRepoRegistryClient", FakeGitRegistry)
+    return FakeGitRegistry
+
+
+def test_git_source_downloads_only_the_selected_tasks(git_registry, tmp_path):
+    name, sha, dirs, total = download_git_tasks(f"{TB}@v3.0.0", "sum-three,0", tmp_path)
+    # The checked-out commit, not the tag object an annotated tag's ls-remote gives.
+    assert (name, sha, total) == ("harbor-framework/terminal-bench", COMMIT, 3)
+    assert dirs == [tmp_path / "sum-three", tmp_path / "bun-sourcemap-leak"]  # name order: index 0 is bun-…
+    assert git_registry.downloads == [["sum-three", "bun-sourcemap-leak"]]
+
+
+@pytest.mark.parametrize("second", ["a" * 40, None], ids=["another-commit", "unresolved"])
+def test_git_source_needs_one_commit_for_every_task(git_registry, tmp_path, second):
+    git_registry.commits = [COMMIT, second]
+    with pytest.raises(RuntimeError, match="not one commit"):
+        download_git_tasks(f"{TB}@v3.0.0", "sum-three,0", tmp_path)
+
+
+def test_git_source_needs_a_ref():
+    check_git_source(f"{TB}@v3.0.0")
+    check_git_source("https://github.com/harbor-framework/terminal-bench/tree/2b0442c3/tasks")
+    with pytest.raises(ValueError, match="names no tag or commit"):
+        check_git_source(TB)
+    result = CliRunner().invoke(_runs_app(), ["runs", "submit", "--harbor-git", TB])
+    assert result.exit_code == 2
+    assert "names no tag or commit" in " ".join(result.output.replace("│", " ").split())
+
+
+@pytest.mark.parametrize(
+    ("other", "flags"),
+    [
+        (["--harbor-dir", "."], "--harbor-dir and --harbor-git"),
+        (["--harbor-hub", "a/b@1"], "--harbor-hub and --harbor-git"),
+    ],
+)
+def test_git_source_excludes_the_other_sources(other, flags):
+    result = CliRunner().invoke(_runs_app(), ["runs", "submit", *other, "--harbor-git", f"{TB}@v3.0.0"])
+    assert result.exit_code == 2
+    assert f"not {flags}" in " ".join(result.output.replace("│", " ").split())
+
+
+def test_list_tasks_reads_the_git_repo(git_registry):
+    client = NemoClient(base_url="http://platform.test", workspace="default")
+    app = typer.Typer()
+    add_runs_commands(app, lambda: client)
+    result = CliRunner().invoke(app, ["runs", "submit", "--harbor-git", f"{TB}@v3.0.0", "--list-tasks"])
+    assert result.exit_code == 0, result.output
+    assert result.output.split("\n")[1:4] == ["  0  bun-sourcemap-leak", "  1  greet-universe", "  2  sum-three"]
+    assert git_registry.downloads == []
+
+
+def test_a_tree_url_reads_tasks_from_its_directory(git_registry):
+    result = CliRunner().invoke(
+        _listing_app(),
+        ["runs", "submit", "--harbor-git", "https://github.com/acme/evals/tree/v2/suites/smoke", "--list-tasks"],
+    )
+    assert result.exit_code == 0, result.output
+    (repo,) = git_registry.repos
+    assert (repo.git_url, repo.ref, repo.subdir) == ("https://github.com/acme/evals", "v2", "suites/smoke")
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (
+            subprocess.CalledProcessError(128, ["git", "ls-remote", TB, "v9"], b"", b"fatal: repository not found\n"),
+            "Error: git ls-remote failed: fatal: repository not found",
+        ),
+        (FileNotFoundError(2, "No such file or directory", "git"), "Error: --harbor-git needs git on PATH"),
+    ],
+)
+def test_a_failed_git_command_is_an_error_not_a_traceback(monkeypatch, error, message):
+    from harbor.registry.client import git_repo
+
+    class UnreachableRepo(FakeGitRegistry):
+        async def get_dataset_metadata(self, name):
+            raise error
+
+    monkeypatch.setattr(git_repo, "GitRepoRegistryClient", UnreachableRepo)
+    client = NemoClient(base_url="http://platform.test", workspace="default")
+    app = typer.Typer()
+    add_runs_commands(app, lambda: client)
+    result = CliRunner().invoke(app, ["runs", "submit", "--harbor-git", f"{TB}@v9", "--list-tasks"])
+    assert result.exit_code == 1
+    assert message in result.output
+    assert isinstance(result.exception, SystemExit)  # typer.Exit, not the git error
+
+
+def _listing_app() -> typer.Typer:
+    client = NemoClient(base_url="http://platform.test", workspace="default")
+    app = typer.Typer()
+    add_runs_commands(app, lambda: client)
+    return app
+
+
+def _runs_app() -> typer.Typer:
+    def no_client() -> NemoClient:
+        raise AssertionError("no request is made")
+
+    app = typer.Typer()
+    add_runs_commands(app, no_client)
+    return app
 
 
 def test_submit_retries_a_503_with_the_same_body():
@@ -184,23 +433,47 @@ def test_an_explicit_idempotency_key_wins(tmp_path, spec_key):
     ref = "default/t#" + "a" * 64
     assert (
         run_request(
-            ref, spec_file=None, agent="oracle", sandbox_policy="p", dispatcher_profile=None, idempotency_key="k-123"
+            ref, spec_file=None, agent="oracle", dispatcher_profile=None, idempotency_key="k-123"
         ).idempotency_key
         == "k-123"
     )
     spec = tmp_path / "run.json"
     body = {
         "spec": {"tasks": "default/full", "target": {"kind": "harbor"}},
-        "execution": {"sandbox_policy": "p"},
+        "execution": {},
         "idempotency_key": spec_key,
     }
     spec.write_text(json.dumps(body))
-    explicit = run_request(
-        ref, spec_file=spec, agent="", sandbox_policy="", dispatcher_profile=None, idempotency_key="k-123"
-    )
+    explicit = run_request(ref, spec_file=spec, agent="", dispatcher_profile=None, idempotency_key="k-123")
     assert explicit.idempotency_key == "k-123"
-    default = run_request(ref, spec_file=spec, agent="", sandbox_policy="", dispatcher_profile=None)
+    default = run_request(ref, spec_file=spec, agent="", dispatcher_profile=None)
     assert default.idempotency_key == (spec_key or default.idempotency_key) and default.idempotency_key
+
+
+def test_spec_selection_ignores_a_publication_that_experiment_replaces(tmp_path):
+    spec = tmp_path / "run.json"
+    body = {
+        "spec": {"tasks": "default/suite#" + "e" * 64, "target": {"kind": "harbor"}},
+        "execution": {"sandbox_policy": "p"},
+        "publication": {"intake": {"experiment": ""}},  # invalid on its own; --experiment replaces it
+    }
+    spec.write_text(json.dumps(body))
+    member = "default/a#" + "1" * 64
+    tasks = SimpleNamespace(
+        retrieve=lambda name, revision, workspace: SimpleNamespace(revision=1, spec=SimpleNamespace())
+    )
+    tasksets = SimpleNamespace(retrieve=lambda name, revision, workspace: SimpleNamespace(tasks=[member]))
+    evaluator = cast(Evaluator, SimpleNamespace(tasks=tasks, tasksets=tasksets))
+    assert _select_from_spec(evaluator, spec, None, "default") == ([member], 1, "suite")
+
+
+def test_spec_selection_needs_a_taskset(tmp_path):
+    spec = tmp_path / "run.json"
+    spec.write_text(
+        json.dumps({"spec": {"tasks": ["default/a#" + "1" * 64], "target": {"kind": "harbor"}}, "execution": {}})
+    )
+    with pytest.raises(ValueError, match="must name a taskset"):
+        _select_from_spec(cast(Evaluator, SimpleNamespace()), spec, None, "default")
 
 
 # --- runs status / runs results ----------------------------------------------------------------------------
@@ -258,7 +531,8 @@ def page(items):
 @pytest.fixture
 def platform():
     jobs = {
-        "run-0123456789abcdef-task-0": job("run-0123456789abcdef-task-0", "completed", "hello/greet-universe"),
+        "run-0123456789abcdef-task-0": job("run-0123456789abcdef-task-0", "completed", "hello/greet-universe")
+        | {"status_details": {"publication": {"status": "completed", "evaluation_id": "e", "trial_count": 2}}},
         "run-0123456789abcdef-task-1": job("run-0123456789abcdef-task-1", "active", "hello/sum-three"),
     }
     results = {  # keyed and filtered by the Job's name, as the platform stores them
@@ -322,6 +596,16 @@ def test_rollup_weights_task_means_by_count():
     rollup = {s.name: s for s in rollup_scores([first, second])}
     assert rollup["harbor_reward.reward"] == ScoreRollup("harbor_reward.reward", 0.75, 4, 1, 2)
     assert rollup["harbor_reward.extra"].tasks == 1
+
+
+def test_status_shows_what_each_task_published(platform):
+    views = run_task_jobs(platform, RUN, workspace="default")
+    assert views[0].publication == {"status": "completed", "evaluation_id": "e", "trial_count": 2}
+    failed = TaskJobView(1, "j1", "b", "completed", publication={"status": "error", "error": "intake 503"})
+    lines = _status_table(RUN, [views[0], failed, views[2]])
+    assert lines[-5].endswith("published")
+    assert lines[-4].endswith("✓ 2 trials") and lines[-3].endswith("✗ intake 503") and lines[-2].endswith("  -")
+    assert _view_json(failed)["publication"] == {"status": "error", "error": "intake 503"}
 
 
 def test_status_counts_done_and_failed():

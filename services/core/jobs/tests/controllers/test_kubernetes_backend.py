@@ -10,6 +10,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from kubernetes import client
 from kubernetes.client.rest import ApiException
+from nemo_helix_plugin.jobs.spec import StepIngressRule, StepNetwork, TcpPortRange
 from nhx.common.auth import (
     KUBERNETES_POD_UID_REFERENCE_NAME,
     NHX_PRINCIPAL_ENVVAR,
@@ -33,6 +34,8 @@ from nhx.core.jobs.app.constants import (
     JOB_MANAGED_BY_LABEL,
     JOB_STEP_ID_LABEL,
     JOB_STEP_NAME_LABEL,
+    JOB_TYPE_LABEL,
+    JOB_TYPE_STORAGE_CLEANUP,
     JOB_USES_PERSISTENT_STORAGE_LABEL,
     JOB_WORKSPACE_ID_LABEL,
     KUBE_JOB_SELECTOR_LABELS,
@@ -52,7 +55,7 @@ from nhx.core.jobs.controllers.backends.base import (
     WORKLOAD_IDENTITY_VOLUME_PATH,
     JobUpdate,
 )
-from nhx.core.jobs.controllers.backends.exceptions import SchedulingDeferred
+from nhx.core.jobs.controllers.backends.exceptions import FailedToScheduleError, JobStorageError, SchedulingDeferred
 from nhx.core.jobs.controllers.backends.kubernetes import (
     CPUKubernetesJobBackend,
     GPUKubernetesJobBackend,
@@ -75,14 +78,19 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     build_image_pull_secrets,
     build_metadata,
     build_pod_security_context,
+    build_step_network_policy,
     build_tolerations,
     classify_task_containers,
     cleanup_job_persistent_storage,
     common_labels_for_step,
     create_configmap,
+    create_step_network_policy,
     delete_configmap,
+    delete_step_network_policy,
+    first_task_image_id,
     last_task_exit_time,
     name_for_step,
+    reclaim_job_persistent_storage,
 )
 from nhx.core.jobs.controllers.backends.workload_tokens import WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS
 from pydantic import ValidationError
@@ -636,6 +644,100 @@ def test_cleanup_job_persistent_storage_omits_security_context_when_unconfigured
     )
     body = batch_v1.create_namespaced_job.call_args.kwargs["body"]
     assert body.spec.template.spec.security_context is None
+
+
+def _reclaim_storage(batch_v1: MagicMock) -> bool:
+    return reclaim_job_persistent_storage(
+        namespace="ns",
+        batch_v1=batch_v1,
+        pvc_name="pvc",
+        workspace="ws",
+        job_id="jid",
+        permissions_image="perm:img",
+        execution_backend="kubernetes_job",
+        execution_profile="default",
+        job_metadata=KubernetesObjectMetadata(),
+        pod_metadata=KubernetesObjectMetadata(),
+    )
+
+
+def _cleanup_job(name: str, finished: str | None = None) -> client.V1Job:
+    conditions = [client.V1JobCondition(type=finished, status="True")] if finished else None
+    return client.V1Job(metadata=client.V1ObjectMeta(name=name), status=client.V1JobStatus(conditions=conditions))
+
+
+def _cleanup_jobs(batch_v1: MagicMock, *jobs: client.V1Job) -> None:
+    batch_v1.list_namespaced_job.return_value = SimpleNamespace(items=list(jobs))
+
+
+def test_reclaim_starts_a_cleanup_job_and_reports_it_pending():
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1)
+
+    assert _reclaim_storage(batch_v1) is False
+
+    selector = batch_v1.list_namespaced_job.call_args.kwargs["label_selector"].split(",")
+    for label in (
+        f"{JOB_TYPE_LABEL}={JOB_TYPE_STORAGE_CLEANUP}",
+        f"{JOB_WORKSPACE_ID_LABEL}=ws",
+        f"{JOB_ID_LABEL}=jid",
+        f"{JOB_STEP_NAME_LABEL}=retention",
+        f"{JOB_EXECUTION_BACKEND_LABEL}=kubernetes_job",
+        f"{JOB_EXECUTION_PROFILE_LABEL}=default",
+    ):
+        assert label in selector
+    labels = batch_v1.create_namespaced_job.call_args.kwargs["body"].metadata.labels
+    assert all(labels[key] == value for key, value in (item.split("=") for item in selector))
+
+
+def test_reclaim_waits_for_a_running_cleanup_job():
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1, _cleanup_job("cleanup-1"))
+
+    assert _reclaim_storage(batch_v1) is False
+
+    batch_v1.create_namespaced_job.assert_not_called()
+    batch_v1.delete_namespaced_job.assert_not_called()
+
+
+def test_reclaim_reports_done_and_deletes_the_succeeded_cleanup_job():
+    """A later reclaim of a job with the same name must run its own cleanup, not read this result."""
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1, _cleanup_job("cleanup-1", "Complete"))
+
+    assert _reclaim_storage(batch_v1) is True
+
+    assert batch_v1.delete_namespaced_job.call_args.kwargs["name"] == "cleanup-1"
+
+
+def test_reclaim_waits_while_another_cleanup_job_runs():
+    """The running one could still delete storage that a new job with the same name wrote."""
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1, _cleanup_job("cleanup-1", "Complete"), _cleanup_job("cleanup-2"))
+
+    assert _reclaim_storage(batch_v1) is False
+
+    assert [c.kwargs["name"] for c in batch_v1.delete_namespaced_job.call_args_list] == ["cleanup-1"]
+
+
+def test_reclaim_raises_and_deletes_a_failed_cleanup_job():
+    """The next call starts a new cleanup Job."""
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1, _cleanup_job("cleanup-1", "Failed"))
+
+    with pytest.raises(JobStorageError):
+        _reclaim_storage(batch_v1)
+
+    assert batch_v1.delete_namespaced_job.call_args.kwargs["name"] == "cleanup-1"
+
+
+def test_reclaim_raises_when_the_cleanup_job_cannot_be_created():
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1)
+    batch_v1.create_namespaced_job.side_effect = ApiException(status=403)
+
+    with pytest.raises(ApiException):
+        _reclaim_storage(batch_v1)
 
 
 def test_build_affinity_without_affinity():
@@ -1575,11 +1677,12 @@ def test_sync_pausing_deadline_deletes_job_and_returns_error(kubernetes_job, tes
     terminate.assert_called_once_with(job)
 
 
-def _terminated_task_pod(exit_code: int, finished_at: datetime.datetime | None = None):
-    terminated = SimpleNamespace(exit_code=exit_code, finished_at=finished_at)
-    state = SimpleNamespace(terminated=terminated)
-    container = SimpleNamespace(name="nemo-job-task", state=state)
-    return SimpleNamespace(status=SimpleNamespace(container_statuses=[container], phase="Succeeded"))
+def _terminated_task_pod(exit_code: int, finished_at: datetime.datetime | None = None) -> client.V1Pod:
+    pod = _task_pod("uid-1", exit_code)
+    task = pod.status.container_statuses[0]
+    task.state.terminated.finished_at = finished_at
+    task.image_id = "sha256:training"
+    return pod
 
 
 @pytest.mark.parametrize(
@@ -1607,6 +1710,69 @@ def test_sync_pausing_exit_uses_exit_code(kubernetes_job, test_step_pausing, exi
         terminate.assert_called_once_with(job)
     else:
         terminate.assert_not_called()
+
+
+def _task_pod(uid: str, exit_code: int | None) -> client.V1Pod:
+    """A pod whose task container is running (exit_code None) or exited with exit_code."""
+    state = (
+        client.V1ContainerState(running=client.V1ContainerStateRunning())
+        if exit_code is None
+        else client.V1ContainerState(terminated=client.V1ContainerStateTerminated(exit_code=exit_code))
+    )
+    phase = "Running" if exit_code is None else "Succeeded" if exit_code == 0 else "Failed"
+    container = client.V1ContainerStatus(
+        image="test-image", image_id="test-image-id", name="nemo-job-task", ready=False, restart_count=0, state=state
+    )
+    return client.V1Pod(
+        metadata=client.V1ObjectMeta(name=f"pod-{uid}", namespace="test-namespace", uid=uid),
+        status=client.V1PodStatus(phase=phase, container_statuses=[container]),
+    )
+
+
+@pytest.mark.parametrize(
+    "exit_code,expected",
+    [(75, HelixJobStatus.PAUSED), (0, HelixJobStatus.COMPLETED), (1, HelixJobStatus.ERROR)],
+)
+def test_sync_pausing_exit_gives_the_task_the_pause_outcome(
+    kubernetes_job, mock_jobs_client, test_step_pausing, exit_code, expected
+):
+    """A pod that exits 75 ends Failed, but its task records the pause, not an error."""
+    step = _cooperative_pausing_step(test_step_pausing)
+    kubernetes_job._batch_v1.read_namespaced_job.return_value = _running_pause_job()
+    pod = _task_pod("uid-1", exit_code)
+    kubernetes_job._core_v1.read_namespaced_pod.return_value = pod
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pods_by_labels", return_value=[pod]),
+        patch.object(kubernetes_job, "terminate_job"),
+    ):
+        update = kubernetes_job.sync(step)
+
+    task_update = mock_jobs_client.update_job_step_task.call_args.kwargs
+    assert task_update["name"] == "task-uid-1"
+    assert task_update["body"].status == update.status == expected
+    assert task_update["body"].error_details == (update.error_details or {})
+    assert bool(task_update["body"].error_stack) == (expected == HelixJobStatus.ERROR)
+
+
+def test_sync_pausing_deadline_fails_the_task(kubernetes_job, mock_jobs_client, test_step_pausing):
+    """The deadline fails a still-running pod's task as well as the step."""
+    step = _cooperative_pausing_step(test_step_pausing, requested_ago_seconds=120, deadline_seconds=30)
+    kubernetes_job._batch_v1.read_namespaced_job.return_value = _running_pause_job()
+    pod = _task_pod("uid-1", None)
+    kubernetes_job._core_v1.read_namespaced_pod.return_value = pod
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pods_by_labels", return_value=[pod]),
+        patch.object(kubernetes_job, "terminate_job"),
+    ):
+        update = kubernetes_job.sync(step)
+
+    assert update.status == HelixJobStatus.ERROR
+    task_update = mock_jobs_client.update_job_step_task.call_args.kwargs
+    assert task_update["name"] == "task-uid-1"
+    assert task_update["body"].status == HelixJobStatus.ERROR
+    assert task_update["body"].error_details == {"message": "Pause deadline exceeded"}
 
 
 @pytest.mark.parametrize(
@@ -3413,3 +3579,310 @@ def test_last_task_exit_time_is_the_latest_task_exit():
 )
 def test_last_task_exit_time_is_unknown_unless_every_task_has_one(pods):
     assert last_task_exit_time(pods) is None
+
+
+def _step_with_network(step: HelixJobStepWithContext) -> HelixJobStepWithContext:
+    step = step.model_copy(deep=True)
+    assert step.step_spec is not None
+    step.step_spec.network = StepNetwork(
+        ingress=[StepIngressRule(job_id_label="nemo-rl-job-id", tcp_ports=[8000, 51234])]
+    )
+    return step
+
+
+def test_build_step_network_policy_requires_declared_network(test_step_pending):
+    assert build_step_network_policy(test_step_pending) is None
+
+
+def test_build_step_network_policy_limits_peers_to_declared_ports(test_step_pending):
+    policy = build_step_network_policy(_step_with_network(test_step_pending))
+
+    assert policy is not None
+    assert policy.metadata.name == name_for_step(test_step_pending)
+    assert policy.metadata.labels[JOB_MANAGED_BY_LABEL] == JOB_MANAGED_BY_JOBS_CONTROLLER
+    assert policy.spec.policy_types == ["Ingress"]
+    assert policy.spec.pod_selector.match_labels == {
+        JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER,
+        JOB_ID_LABEL: "test-job-id",
+        JOB_STEP_ID_LABEL: "test-step-id",
+    }
+    same_job, sandboxes = policy.spec.ingress
+    assert same_job.ports is None
+    assert same_job._from[0].pod_selector.match_labels == {
+        JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER,
+        JOB_ID_LABEL: "test-job-id",
+    }
+    assert sandboxes._from[0].pod_selector.match_labels == {"nemo-rl-job-id": "test-job-id"}
+    assert sandboxes._from[0].namespace_selector is None
+    ranged = _step_with_network(test_step_pending)
+    ranged.step_spec.network.ingress[0].tcp_port_ranges = [TcpPortRange(low=3000, high=4998)]
+    ranged_policy = build_step_network_policy(ranged)
+    ranged_ports = [(p.protocol, p.port, p.end_port) for p in ranged_policy.spec.ingress[1].ports]
+    assert ranged_ports[:2] == [("TCP", 8000, None), ("TCP", 51234, None)]
+    enumerated = ranged_ports[2:]
+    assert enumerated[0] == ("TCP", 3000, None)
+    assert enumerated[-1] == ("TCP", 4998, None)
+    assert len(enumerated) == 4998 - 3000 + 1
+    assert all(protocol == "TCP" and end_port is None for protocol, _, end_port in enumerated)
+    assert [(p.protocol, p.port, p.end_port) for p in sandboxes.ports] == [
+        ("TCP", 8000, None),
+        ("TCP", 51234, None),
+    ]
+
+
+def test_schedule_creates_network_policy_before_job_and_hands_it_to_the_job(
+    kubernetes_job, cpu_execution_provider, test_step_pending
+):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = True
+    calls = MagicMock()
+    kubernetes_job._networking_v1 = calls.networking
+    kubernetes_job._batch_v1 = calls.batch
+    calls.batch.create_namespaced_job.return_value = client.V1Job(metadata=client.V1ObjectMeta(uid="job-uid"))
+
+    kubernetes_job.schedule(cpu_execution_provider, _step_with_network(test_step_pending))
+
+    order = [
+        c[0]
+        for c in calls.mock_calls
+        if c[0] in ("networking.create_namespaced_network_policy", "batch.create_namespaced_job")
+    ]
+    assert order == ["networking.create_namespaced_network_policy", "batch.create_namespaced_job"]
+    patch_kwargs = calls.networking.patch_namespaced_network_policy.call_args.kwargs
+    assert patch_kwargs["name"] == name_for_step(test_step_pending)
+    (owner,) = patch_kwargs["body"]["metadata"]["ownerReferences"]
+    assert (owner["apiVersion"], owner["kind"], owner["uid"]) == ("batch/v1", "Job", "job-uid")
+    assert owner["controller"] is True
+    assert owner["blockOwnerDeletion"] is True
+    calls.networking.delete_namespaced_network_policy.assert_not_called()
+
+
+def test_schedule_removes_network_policy_when_kubernetes_job_creation_fails(
+    kubernetes_job, cpu_execution_provider, test_step_pending
+):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = True
+    kubernetes_job._networking_v1 = MagicMock()
+    kubernetes_job._batch_v1.create_namespaced_job.side_effect = ApiException(status=500)
+
+    with pytest.raises(ApiException):
+        kubernetes_job.schedule(cpu_execution_provider, _step_with_network(test_step_pending))
+
+    kubernetes_job._networking_v1.delete_namespaced_network_policy.assert_called_once_with(
+        name=name_for_step(test_step_pending), namespace="test-namespace"
+    )
+
+
+def test_schedule_keeps_the_job_creation_error_when_policy_cleanup_fails(
+    kubernetes_job, cpu_execution_provider, test_step_pending
+):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = True
+    kubernetes_job._networking_v1 = MagicMock()
+    kubernetes_job._batch_v1.create_namespaced_job.side_effect = ApiException(status=422)
+    kubernetes_job._networking_v1.delete_namespaced_network_policy.side_effect = ApiException(status=500)
+
+    with pytest.raises(ApiException) as raised:
+        kubernetes_job.schedule(cpu_execution_provider, _step_with_network(test_step_pending))
+
+    assert raised.value.status == 422
+
+
+def test_schedule_fails_closed_when_network_policy_cannot_be_created(
+    kubernetes_job, cpu_execution_provider, test_step_pending
+):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = True
+    kubernetes_job._networking_v1 = MagicMock()
+    kubernetes_job._networking_v1.create_namespaced_network_policy.side_effect = ApiException(status=403)
+
+    with pytest.raises(FailedToScheduleError):
+        kubernetes_job.schedule(cpu_execution_provider, _step_with_network(test_step_pending))
+
+    kubernetes_job._batch_v1.create_namespaced_job.assert_not_called()
+
+
+def test_create_step_network_policy_recreates_a_leftover_policy(test_step_pending):
+    networking_v1 = MagicMock()
+    networking_v1.create_namespaced_network_policy.side_effect = [ApiException(status=409), None]
+
+    name = create_step_network_policy(networking_v1, "test-namespace", _step_with_network(test_step_pending))
+
+    networking_v1.delete_namespaced_network_policy.assert_called_once_with(name=name, namespace="test-namespace")
+    assert networking_v1.create_namespaced_network_policy.call_count == 2
+    networking_v1.replace_namespaced_network_policy.assert_not_called()
+
+
+def test_create_step_network_policy_fails_closed_when_leftover_cannot_be_removed(test_step_pending):
+    networking_v1 = MagicMock()
+    networking_v1.create_namespaced_network_policy.side_effect = ApiException(status=409)
+    networking_v1.delete_namespaced_network_policy.side_effect = ApiException(status=403)
+
+    with pytest.raises(FailedToScheduleError):
+        create_step_network_policy(networking_v1, "test-namespace", _step_with_network(test_step_pending))
+
+
+def test_schedule_ignores_declared_network_when_profile_disables_policies(
+    kubernetes_job, cpu_execution_provider, test_step_pending
+):
+    kubernetes_job._networking_v1 = MagicMock()
+
+    kubernetes_job.schedule(cpu_execution_provider, _step_with_network(test_step_pending))
+
+    kubernetes_job._networking_v1.create_namespaced_network_policy.assert_not_called()
+    kubernetes_job._batch_v1.create_namespaced_job.assert_called_once()
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_terminate_job_deletes_network_policy_only_when_enabled(kubernetes_job, test_step_pending, enabled):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = enabled
+    kubernetes_job._networking_v1 = MagicMock()
+
+    kubernetes_job.terminate_job(_kubernetes_job_for_step(test_step_pending))
+
+    delete = kubernetes_job._networking_v1.delete_namespaced_network_policy
+    if enabled:
+        delete.assert_called_once_with(name=name_for_step(test_step_pending), namespace="test-namespace")
+    else:
+        delete.assert_not_called()
+
+
+def test_finished_step_deletes_its_network_policy(kubernetes_job, test_step_pending):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = True
+    kubernetes_job._networking_v1 = MagicMock()
+    finished = _kubernetes_job_for_step(
+        test_step_pending,
+        status=client.V1JobStatus(
+            succeeded=1,
+            completion_time=datetime.datetime.now(datetime.timezone.utc),
+        ),
+    )
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
+        patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
+    ):
+        update = kubernetes_job.create_step_update(test_step_pending, finished)
+
+    assert update.status == HelixJobStatus.COMPLETED
+    kubernetes_job._networking_v1.delete_namespaced_network_policy.assert_called_once_with(
+        name=name_for_step(test_step_pending), namespace="test-namespace"
+    )
+
+
+def test_running_step_keeps_its_network_policy(kubernetes_job, test_step_pending):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = True
+    kubernetes_job._networking_v1 = MagicMock()
+    kubernetes_job._core_v1.list_namespaced_pod.return_value = SimpleNamespace(
+        items=[_kubernetes_pod("pod-1", phase="Running")]
+    )
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
+        patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
+    ):
+        update = kubernetes_job.create_step_update(test_step_pending, _kubernetes_job_for_step(test_step_pending))
+
+    assert update.status == HelixJobStatus.ACTIVE
+    kubernetes_job._networking_v1.delete_namespaced_network_policy.assert_not_called()
+
+
+def test_errored_step_keeps_its_network_policy_while_a_pod_is_running(kubernetes_job, test_step_pending):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = True
+    kubernetes_job._networking_v1 = MagicMock()
+    failed = _kubernetes_pod("failed", phase="Failed")
+    failed.status.container_statuses[0].state.terminated = client.V1ContainerStateTerminated(
+        exit_code=1, reason="Error"
+    )
+    kubernetes_job._core_v1.list_namespaced_pod.return_value = SimpleNamespace(
+        items=[failed, _kubernetes_pod("running", phase="Running")]
+    )
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
+        patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
+    ):
+        update = kubernetes_job.create_step_update(test_step_pending, _kubernetes_job_for_step(test_step_pending))
+
+    assert update.status == HelixJobStatus.ERROR
+    kubernetes_job._networking_v1.delete_namespaced_network_policy.assert_not_called()
+
+
+def test_task_error_keeps_the_network_policy_while_the_job_is_active(kubernetes_job, test_step_pending):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = True
+    kubernetes_job._networking_v1 = MagicMock()
+    kubernetes_job._core_v1.list_namespaced_pod.return_value = SimpleNamespace(
+        items=[_kubernetes_pod("running", phase="Running")]
+    )
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=True),
+        patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
+    ):
+        update = kubernetes_job.create_step_update(test_step_pending, _kubernetes_job_for_step(test_step_pending))
+
+    assert update.status == HelixJobStatus.ERROR
+    kubernetes_job._networking_v1.delete_namespaced_network_policy.assert_not_called()
+
+
+def test_failed_kubernetes_job_deletes_its_network_policy(kubernetes_job, test_step_pending):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = True
+    kubernetes_job._networking_v1 = MagicMock()
+    failed = _kubernetes_job_for_step(
+        test_step_pending,
+        status=client.V1JobStatus(
+            failed=1,
+            conditions=[client.V1JobCondition(type="Failed", status="True", message="BackoffLimitExceeded")],
+        ),
+    )
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
+        patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
+    ):
+        update = kubernetes_job.create_step_update(test_step_pending, failed)
+
+    assert update.status == HelixJobStatus.ERROR
+    kubernetes_job._networking_v1.delete_namespaced_network_policy.assert_called_once_with(
+        name=name_for_step(test_step_pending), namespace="test-namespace"
+    )
+
+
+def test_cancelled_step_deletes_its_network_policy(kubernetes_job, test_step_pending):
+    kubernetes_job._execution_profile_config.step_network_policies_enabled = True
+    kubernetes_job._networking_v1 = MagicMock()
+    kubernetes_job._core_v1.list_namespaced_pod.return_value = SimpleNamespace(items=[])
+    cancelling = test_step_pending.model_copy(update={"status": HelixJobStatus.CANCELLING})
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
+        patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
+    ):
+        update = kubernetes_job.create_step_update(cancelling, _kubernetes_job_for_step(cancelling))
+
+    assert update.status == HelixJobStatus.CANCELLED
+    kubernetes_job._networking_v1.delete_namespaced_network_policy.assert_called_once_with(
+        name=name_for_step(cancelling), namespace="test-namespace"
+    )
+
+
+@pytest.mark.parametrize("status", [403, 404])
+def test_delete_step_network_policy_tolerates_denied_and_missing_policies(status):
+    networking_v1 = MagicMock()
+    networking_v1.delete_namespaced_network_policy.side_effect = ApiException(status=status)
+
+    delete_step_network_policy(networking_v1, "test-namespace", "step")
+
+    networking_v1.read_namespaced_network_policy.assert_not_called()
+
+
+def test_delete_step_network_policy_raises_other_errors():
+    networking_v1 = MagicMock()
+    networking_v1.delete_namespaced_network_policy.side_effect = ApiException(status=500)
+
+    with pytest.raises(ApiException):
+        delete_step_network_policy(networking_v1, "test-namespace", "step")
+
+
+def test_image_digest_comes_from_the_task_container():
+    sidecar = SimpleNamespace(name="istio-proxy", image_id="sha256:proxy")
+    task = SimpleNamespace(name="nemo-job-task", image_id="sha256:training")
+    pod = SimpleNamespace(status=SimpleNamespace(container_statuses=[sidecar, task]))
+
+    assert first_task_image_id([pod]) == "sha256:training"

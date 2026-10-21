@@ -34,6 +34,8 @@ class EvaluationExecutionSpec(BaseModel):
     # named after the Job. None for Jobs submitted before inputs were written
     # there; those still load the run from Postgres.
     inputs_workspace: str | None = None
+    # provider -> platform secret reference "workspace/name"; injected into the Job environment.
+    credentials: dict[str, str] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

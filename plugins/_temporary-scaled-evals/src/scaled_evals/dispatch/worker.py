@@ -49,6 +49,8 @@ from psycopg.rows import dict_row
 
 from scaled_evals.api import artifacts
 from scaled_evals.api.build.task_image_identity import verify_stored_task_image
+from scaled_evals.api.config_profile_store import ConfigProfileStore
+from scaled_evals.api.execution_analytics import emit_execution_span
 from scaled_evals.api.failure_diagnostics import failure_category_for_code, is_retryable_failure
 from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_RUNTIME
 from scaled_evals.api.redaction import redact_secret_text
@@ -65,7 +67,7 @@ from scaled_evals.api.repositories.resource_usage_repository import ResourceUsag
 from scaled_evals.api.settings import settings
 from scaled_evals.benchmark_archive import build_benchmark_archive
 from scaled_evals.benchmark_archive_cleanup import cleanup_benchmark_archives as cleanup_archive_objects
-from scaled_evals.dispatch.credentials import materialize_credential_env
+from scaled_evals.dispatch.credentials import injected_credential_env
 from scaled_evals.dispatch.harbor_dataset_images import (
     dataset_configs,
     effective_image_mode,
@@ -90,7 +92,6 @@ from scaled_evals.intake.experiments import ExperimentRequest, build_experiment_
 from scaled_evals.intake.upload import upload_job_atif_warn
 from scaled_evals.models.evaluations import EvaluationResultWrite
 from scaled_evals.models.execution_snapshot import (
-    snapshot_credential_expectations,
     snapshot_profile_config,
     validate_execution_snapshot,
 )
@@ -106,6 +107,7 @@ _TERMINAL_PHASES = frozenset({"succeeded", "failed"})
 _DB_TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
 # Rows the worker may pick up (including resume after a restart).
 _RESUMABLE_STATUSES = frozenset({"queued", "provisioning", "running"})
+_PROFILE_TYPES_BY_ROLE = {"intake": ("intake",), "harbor": ("harbor",), "framework": ("harbor", "gym")}
 ConnFactory = Callable[[], AbstractContextManager[psycopg.Connection]]
 BackendResolver = Callable[[str], RuntimeBackend]
 _DATABASE_CONNECT_RETRY_SECONDS = 300.0
@@ -502,9 +504,10 @@ class Dispatcher:
     def build_evidence(self, evaluation_id: str) -> None:
         """Generate terminal evidence and upload it before the archive is built."""
         execution_number: int | None = None
+        row: dict[str, Any] | None = None
         try:
             with self.connect() as conn:
-                row: dict[str, Any] | None = EvaluationRepository(conn).load_for_dispatch(evaluation_id)
+                row = EvaluationRepository(conn).load_for_dispatch(evaluation_id)
                 if row is None:
                     raise RuntimeError(f"evaluation not found: {evaluation_id}")
                 if row.get("status") not in _DB_TERMINAL_STATUSES:
@@ -572,6 +575,21 @@ class Dispatcher:
                     str(exc),
                     expected_execution_number=execution_number,
                 )
+        finally:
+            # Evidence can fail permanently; the outcome still belongs in analytics.
+            # Each attempt re-emits the same span id and reads keep one per evaluation.
+            if row is not None and row.get("status") in _DB_TERMINAL_STATUSES:
+                self._record_analytics(row)
+
+    def _record_analytics(self, row: dict[str, Any]) -> None:
+        """Record the terminal evaluation in Intake; analytics never block evidence."""
+        try:
+            with self.connect() as conn:
+                usage = ResourceUsageRepository(conn).totals_for_evaluation(str(row["id"]))
+        except Exception:  # noqa: BLE001 — analytics are best-effort
+            LOG.warning("could not read resource usage for %s", row["id"], exc_info=True)
+            usage = {}
+        emit_execution_span(row, usage, workspace=settings.platform_jobs_workspace)
 
     def build_archive(self, evaluation_id: str) -> None:
         """Build ``results.tar.gz`` for an evaluation from synced artifacts."""
@@ -753,7 +771,6 @@ class Dispatcher:
 
             try:
                 snapshot = validate_execution_snapshot(row.get("execution_snapshot"))
-                expected_credentials = {} if snapshot is None else snapshot_credential_expectations(snapshot)
             except Exception as exc:  # noqa: BLE001 — record invalid execution snapshot
                 self._write_provenance_warn(row, status="failed", artifact_root=artifact_root)
                 self._sync_artifacts_warn(
@@ -788,11 +805,7 @@ class Dispatcher:
                 if row.get("framework") == "harbor" and not framework_config:
                     framework_config = harbor_config
                 intake_config = self._load_intake_config(conn, row)
-                credential_env = materialize_credential_env(
-                    conn,
-                    row["credentials"] or {},
-                    expected=expected_credentials,
-                )
+                credential_env = injected_credential_env(row["credentials"] or {})
             except Exception as exc:  # noqa: BLE001 — record profile load/validation failure
                 self._write_provenance_warn(row, status="failed", artifact_root=artifact_root)
                 self._sync_artifacts_warn(
@@ -1414,8 +1427,7 @@ class Dispatcher:
             if not config and snap_role not in profiles:
                 raise RuntimeError(f"{role} profile missing from execution snapshot")
             return config
-        loader = getattr(EvaluationRepository(conn), f"load_{role}_profile")
-        profile_row = loader(str(profile_id))
+        profile_row = ConfigProfileStore().get_typed(str(profile_id), _PROFILE_TYPES_BY_ROLE[role])
         if profile_row is None:
             raise RuntimeError(f"{role} profile not found: {profile_id}")
         config = profile_row.get("config") or {}
@@ -1471,7 +1483,7 @@ class Dispatcher:
 
         config = row.get("intake_config")
         if not isinstance(config, dict):
-            profile_row = EvaluationRepository(conn).load_intake_profile(profile_id)
+            profile_row = ConfigProfileStore().get_typed(profile_id, ("intake",))
             if profile_row is None:
                 LOG.warning("intake profile %s not found for %s", profile_id, row["id"])
                 return f"intake profile not found: {profile_id}"

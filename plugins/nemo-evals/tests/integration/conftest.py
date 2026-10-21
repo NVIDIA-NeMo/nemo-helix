@@ -111,8 +111,8 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 
 
 #: Controllers these tests need. Not ``--controller-group all``: that also starts
-#: ``scaled-evals-jobs``, which wants a Fernet ``CREDENTIALS_ENCRYPTION_KEY`` and its own Postgres
-#: on 5432, and without them ``/health/ready`` never returns 200 and every fixture below times out.
+#: ``scaled-evals-jobs``, which wants its own Postgres on 5432, and without it
+#: ``/health/ready`` never returns 200 and every fixture below times out.
 REQUIRED_CONTROLLERS = ("jobs", "entities", "models")
 
 

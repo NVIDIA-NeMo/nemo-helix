@@ -1248,6 +1248,13 @@ authz:
         scopes:
         - jobs:write
         - platform:write
+    /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/rerun:
+      post:
+        permissions:
+        - jobs.update
+        scopes:
+        - jobs:write
+        - platform:write
     /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/results/{name}:
       get:
         permissions:

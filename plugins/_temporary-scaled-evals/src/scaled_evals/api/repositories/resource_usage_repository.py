@@ -178,3 +178,29 @@ class ResourceUsageRepository:
                 (evaluation_id,),
             )
             return cur.fetchall()
+
+    def totals_for_evaluation(self, evaluation_id: str) -> dict:
+        """Return one evaluation's usage summed over executions and components."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    COALESCE(SUM(cpu_sample_count), 0) AS cpu_samples,
+                    COALESCE(SUM(cpu_usage_cores_sum), 0) AS cpu_sum,
+                    MAX(cpu_usage_cores_max) FILTER (WHERE cpu_sample_count > 0) AS peak_cpu_cores,
+                    MAX(cpu_request_cores) AS cpu_request_cores,
+                    MAX(cpu_limit_cores) AS cpu_limit_cores,
+                    COALESCE(SUM(memory_sample_count), 0) AS memory_samples,
+                    COALESCE(SUM(memory_usage_bytes_sum), 0) AS memory_sum,
+                    MAX(memory_usage_bytes_max) FILTER (WHERE memory_sample_count > 0) AS peak_memory_bytes,
+                    MAX(memory_request_bytes) AS memory_request_bytes,
+                    MAX(memory_limit_bytes) AS memory_limit_bytes,
+                    MAX(gpu_request) AS gpu_request,
+                    COALESCE(SUM(gpu_sample_count), 0) AS gpu_samples
+                FROM evaluation_resource_usage
+                WHERE evaluation_id = %s
+                """,
+                (evaluation_id,),
+            )
+            row = cur.fetchone()
+        return {key: float(value) if value is not None else None for key, value in row.items()}

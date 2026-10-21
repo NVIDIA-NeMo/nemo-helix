@@ -27,10 +27,10 @@ from __future__ import annotations
 
 import copy
 import logging
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Protocol
 
 from fastapi import APIRouter
 from fastapi.routing import APIRoute
@@ -44,7 +44,6 @@ from nemo_helix_plugin.authz import (
     get_path_scope,
 )
 from nemo_helix_plugin.authz_format import is_valid_permission_id
-from nemo_helix_plugin.service import NemoService
 from starlette.routing import BaseRoute
 
 logger = logging.getLogger(__name__)
@@ -57,6 +56,36 @@ logger = logging.getLogger(__name__)
 LEGACY_PERMISSION_NAMESPACES: Mapping[str, str] = MappingProxyType(
     {"garak": "auditor", "evals": "evaluator", "compass": "insights"}
 )
+
+
+class _MountedRouter(Protocol):
+    """A router a service mounts under ``/apis/<name><prefix>`` (``RouterSpec`` or ``RouterConfig``)."""
+
+    @property
+    def router(self) -> APIRouter: ...
+
+    @property
+    def prefix(self) -> str: ...
+
+
+class _AuthzRouteSurface(Protocol):
+    """The parts of a service that authz derivation reads.
+
+    ``NemoService`` plugins provide them; a core service such as Studio can too, so its route rules
+    are checked by the same derivation.
+    """
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def permission_namespace(self) -> str | None: ...
+
+    def get_routers(self) -> Sequence[_MountedRouter]: ...
+
+    def extra_permissions(self) -> list[Permission]: ...
+
+    def extra_role_permissions(self) -> dict[str, list[Permission]]: ...
 
 
 def _method_from_dict(spec: dict[str, Any]) -> AuthzEndpointMethod:
@@ -172,7 +201,7 @@ def _register_permission(catalog: dict[str, Permission], perm: Permission, warni
     catalog.setdefault(perm.id, perm)
 
 
-def _iter_composed_routes(service: NemoService) -> Iterator[BaseRoute]:
+def _iter_composed_routes(service: _AuthzRouteSurface) -> Iterator[BaseRoute]:
     """Yield the fully-composed leaf routes of *service*, one ``BaseRoute`` per mounted route.
 
     This re-creates the runtime mount (``/apis/<name>`` + ``RouterSpec.prefix`` + route path)
@@ -220,7 +249,7 @@ def _iter_composed_routes(service: NemoService) -> Iterator[BaseRoute]:
                 yield ctx.starlette_route or original
 
 
-def _derive_service_contribution(service: NemoService) -> tuple[AuthzContribution, list[str], list[str]]:
+def _derive_service_contribution(service: _AuthzRouteSurface) -> tuple[AuthzContribution, list[str], list[str]]:
     """Derive one plugin's wire contribution, split into deny-worthy errors and warnings.
 
     Every mounted route must carry a valid ``@path_rule``. A route that doesn't — unruled,

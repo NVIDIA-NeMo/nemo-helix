@@ -495,6 +495,26 @@ async def test_atif_trace_evidence_supplies_the_real_steps(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
+async def test_the_trajectorys_own_agent_version_is_published_unless_one_is_given(tmp_path: Path) -> None:
+    recorded = await atif_steps_from_trial(
+        _trial_with_trace(tmp_path, document=_atif_document()), started_at=STARTED_AT
+    )
+    assert recorded is not None and recorded.agent_version == "1.0"
+    trial = _trial()
+
+    def published_version(**kwargs: Any) -> str:
+        body = trial_to_atif_ingest(
+            trial, run_id="r", evaluation_name="e", agent_name="codex", started_at=STARTED_AT, **kwargs
+        )
+        return body["agent"]["version"]
+
+    # Harbor records codex's release in the trajectory; the default would overwrite it with "unknown".
+    assert published_version(steps=recorded) == "1.0"
+    assert published_version(steps=recorded, agent_version="2.0") == "2.0"  # an explicit version still wins
+    assert published_version() == DEFAULT_AGENT_VERSION  # no trajectory, nothing to take it from
+
+
+@pytest.mark.asyncio
 async def test_steps_without_a_timestamp_fall_back_to_the_run_start(tmp_path: Path) -> None:
     document = _atif_document()
     del document["steps"][1]["timestamp"]
