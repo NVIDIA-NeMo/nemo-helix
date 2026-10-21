@@ -285,11 +285,15 @@ class RayClusterBootstrap:
         The marker is attempt-scoped so a normal retry already gets a new path;
         this additionally covers attempt-id reuse (e.g. local runs / resume) where
         a marker from the prior run could otherwise linger on shared storage.
+
+        The head starts Ray only after this, and a worker connects only to a running
+        head, so a connected worker never sees the earlier run's marker. If the marker
+        cannot be removed, the head fails instead of starting Ray.
         """
         try:
             self.ended_file.unlink(missing_ok=True)
         except OSError as e:
-            logger.warning(f"Failed to clear stale ENDED marker {self.ended_file}: {e}")
+            raise RuntimeError(f"Could not clear the ENDED marker an earlier run left: {self.ended_file}") from e
 
     @property
     def expected_worker_units(self) -> int:
@@ -435,8 +439,11 @@ class RayClusterBootstrap:
         Returns:
             True if worker started successfully, False otherwise
         """
+        # The ENDED marker is not read before the worker connects. A resume keeps the attempt id,
+        # so a worker that starts before the head would read the paused run's marker. The head
+        # clears it before it starts Ray, so once connected, any marker is this run's.
         for attempt in range(self.num_retries):
-            if self._stop_event.is_set() or self.ended_file.exists():
+            if self._stop_event.is_set():
                 logger.info("Worker node stopping due to termination signal")
                 return False
 
@@ -454,7 +461,7 @@ class RayClusterBootstrap:
                 logger.exception(f"Worker node error: {e}")
                 print(f"[ray_bootstrap] Worker node error: {e}", flush=True)
 
-            if not self._stop_event.is_set() and not self.ended_file.exists():
+            if not self._stop_event.is_set():
                 _pause(self.retry_sleep)
 
         logger.error("Worker Node failed to start after all retries")

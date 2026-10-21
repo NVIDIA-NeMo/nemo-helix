@@ -4,30 +4,39 @@
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
 from nhx.rl.app.constants import DEFAULT_TRAINING_RESULT_FILE_NAME
-from nhx.rl.app.jobs.training.schemas import TrainingResult
+from nhx.rl.app.jobs.training.schemas import TrainingResult, TrainingStepConfig
+from nhx.rl.tasks.training.distributed import DistributedContext
+from nhx.rl.tasks.training.progress import JobsServiceProgressReporter
 from nhx.rl.tasks.training.protocol import TrainingPaused
 from nhx.rl.tasks.training.runner import TrainingRunner
 
 
 def _runner(tmp_path: Path, synced: list[str], completed: list[str]) -> TrainingRunner:
     runner = TrainingRunner.__new__(TrainingRunner)
-    runner._config = SimpleNamespace(seed=1)
-    runner._progress = SimpleNamespace(
-        training_duration_seconds=3.0,
-        report_running=lambda *args, **kwargs: None,
-        report_completed=completed.append,
-        report_error=lambda *args, **kwargs: None,
+    runner._config = cast(TrainingStepConfig, SimpleNamespace(seed=1))
+    runner._progress = cast(
+        JobsServiceProgressReporter,
+        SimpleNamespace(
+            training_duration_seconds=3.0,
+            report_running=lambda *args, **kwargs: None,
+            report_completed=completed.append,
+            report_error=lambda *args, **kwargs: None,
+        ),
     )
-    runner._dist_ctx = SimpleNamespace(is_coordinator=True, sync_point=synced.append, signal_failure=lambda: None)
+    runner._dist_ctx = cast(
+        DistributedContext,
+        SimpleNamespace(is_coordinator=True, sync_point=synced.append, signal_failure=lambda: None),
+    )
     runner._workspace_path = tmp_path
     runner._output_path = tmp_path / "output"
     runner._backend = MagicMock()
-    runner._preprocessing_phase = lambda: None  # type: ignore[method-assign]
-    runner._compile_config_phase = lambda: MagicMock()  # type: ignore[method-assign]
+    setattr(runner, "_preprocessing_phase", lambda: None)
+    setattr(runner, "_compile_config_phase", lambda: MagicMock())
     return runner
 
 
@@ -44,8 +53,9 @@ def test_a_paused_run_releases_workers_and_skips_publication(tmp_path: Path, mon
     # Workers wait at this barrier for the coordinator, so a pause must still reach it.
     assert synced == ["training_complete"]
     assert completed == []
-    runner._backend.find_best_checkpoint.assert_not_called()
-    runner._backend.process_checkpoint.assert_not_called()
+    backend = cast(MagicMock, runner._backend)
+    backend.find_best_checkpoint.assert_not_called()
+    backend.process_checkpoint.assert_not_called()
     written = json.loads((tmp_path / DEFAULT_TRAINING_RESULT_FILE_NAME).read_text())
     assert written["paused"] is True
     assert written["training_duration_seconds"] == 3.0

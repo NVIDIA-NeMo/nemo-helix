@@ -31,7 +31,7 @@ class _TimeoutChecker:
 @pytest.fixture
 def algorithm() -> types.ModuleType:
     module = types.ModuleType("fake_algorithm")
-    module.TimeoutChecker = _TimeoutChecker  # type: ignore[attr-defined]
+    setattr(module, "TimeoutChecker", _TimeoutChecker)
     return module
 
 
