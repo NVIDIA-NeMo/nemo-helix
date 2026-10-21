@@ -102,6 +102,7 @@ describe('fetchStudyResults', () => {
     const [best] = results?.trials ?? [];
     expect(best).toEqual({
       number: 6,
+      phase: 'numeric',
       state: 'COMPLETE',
       durationSeconds: 12.5,
       paretoOptimal: true,
@@ -184,6 +185,75 @@ describe('fetchStudyResults', () => {
     );
     expect(results?.summary).not.toBeNull();
     expect(results?.trials).toHaveLength(3);
+  });
+
+  it('appends the prompt phase candidates and reports its winner as the study best', async () => {
+    const promptSummary = JSON.stringify({
+      best_global_trial_number: 8,
+      best_metrics: { avg_score: 4.5, avg_tokens: 700 },
+    });
+    const promptHistory = JSON.stringify([
+      {
+        global_trial_number: 7,
+        status: 'completed',
+        'metric.avg_score': 4.0,
+        'metric.avg_tokens': 720,
+        'prompt.prompt': 'Seed prompt.\nBe careful.',
+      },
+      {
+        global_trial_number: 8,
+        status: 'completed',
+        'metric.avg_score': 4.5,
+        'metric.avg_tokens': 700,
+        'prompt.prompt': 'Rewritten prompt.',
+      },
+      { global_trial_number: 9, status: 'failed', 'prompt.prompt': 'Broken.' },
+    ]);
+    mockResults(`fileset://${workspace}/study-artifacts#${resultDir}`);
+    mockFiles([
+      `${resultDir}/study_summary.json`,
+      `${resultDir}/trials_dataframe_params.csv`,
+      `${resultDir}/prompt_phase_summary.json`,
+      `${resultDir}/ga_history_prompts.json`,
+    ]);
+    mockDownloads({
+      [`${resultDir}/study_summary.json`]: SUMMARY,
+      [`${resultDir}/trials_dataframe_params.csv`]: TRIALS_CSV,
+      [`${resultDir}/prompt_phase_summary.json`]: promptSummary,
+      [`${resultDir}/ga_history_prompts.json`]: promptHistory,
+    });
+
+    const results = await fetchStudyResults(workspace, jobName);
+
+    expect(results?.summary).toEqual({
+      nTrials: 6,
+      bestTrial: 8,
+      metricNames: ['avg_score', 'avg_tokens'],
+      bestValues: [4.5, 700],
+    });
+    expect(results?.trials.map((trial) => trial.number)).toEqual([6, 3, 4, 7, 8, 9]);
+    expect(results?.trials.filter((trial) => trial.paretoOptimal).map((t) => t.number)).toEqual([
+      8,
+    ]);
+    // Each candidate ran on the sweep's best params, with its own prompt replacing the swept one.
+    expect(results?.trials.find((trial) => trial.number === 8)).toEqual({
+      number: 8,
+      phase: 'prompt',
+      state: 'COMPLETE',
+      durationSeconds: null,
+      paretoOptimal: true,
+      metrics: [
+        { name: 'avg_score', value: 4.5 },
+        { name: 'avg_tokens', value: 700 },
+      ],
+      params: [
+        { name: 'temperature', value: '0.2' },
+        { name: 'prompt', value: 'Rewritten prompt.' },
+      ],
+    });
+    const failed = results?.trials.find((trial) => trial.number === 9);
+    expect(failed?.state).toBe('FAIL');
+    expect(failed?.metrics.map((metric) => metric.value)).toEqual([null, null]);
   });
 
   it('reads trials even when the summary is missing, falling back to CSV metric order', async () => {

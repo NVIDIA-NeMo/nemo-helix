@@ -18,3 +18,10 @@ export const formatParamValue = (value: string): string => {
 
 export const paramValue = (trial: Trial, name: string): string | undefined =>
   trial.params.find((param) => param.name === name)?.value;
+
+/** Longer than a table cell shows whole. */
+const TEXT_PREVIEW_LENGTH = 60;
+
+/** A value too long or multi-line to read in a cell, such as a prompt. */
+export const isTextValue = (value: string): boolean =>
+  value.includes('\n') || value.length > TEXT_PREVIEW_LENGTH;
