@@ -232,7 +232,7 @@ class Smoke:
             self.command(["brew", "install", "colima", "docker", "qemu"], timeout=600)
             self.stage("colima-start")
             self.command(
-                ["colima", "start", "--vm-type", "qemu", "--cpu", "2", "--memory", "6", "--disk", "30"], timeout=300
+                ["colima", "start", "--vm-type", "qemu", "--cpu", "2", "--memory", "6", "--disk", "30"], timeout=600
             )
             self.env["DOCKER_HOST"] = f"unix://{self.root}/config/colima/default/docker.sock"
             self.command(["docker", "info"])
@@ -340,9 +340,20 @@ class Smoke:
                 log="diagnostics.log",
             )
         if Path(self.nemo).exists():
-            commands = [
-                [self.nemo, "agents", "deployments", "delete", "smoke-agent", "--workspace", "release-smoke", "--yes"]
-            ]
+            commands = []
+            if self.state["stage"] in ("agent-deploy", "agent-invoke", "complete"):
+                commands.append(
+                    [
+                        self.nemo,
+                        "agents",
+                        "deployments",
+                        "delete",
+                        "smoke-agent",
+                        "--workspace",
+                        "release-smoke",
+                        "--yes",
+                    ]
+                )
             commands += [[self.python, str(SCRIPTS / "release_smoke_api.py"), "cleanup"]]
             if target == "macos":
                 self.env["DOCKER_HOST"] = f"unix://{self.root}/config/colima/default/docker.sock"
