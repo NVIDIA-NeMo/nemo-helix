@@ -7,12 +7,12 @@ import { getSortParam } from '@nemo/common/src/utils/query';
 import { useFilesDeleteFileset, useFilesListFilesets } from '@nemo/sdk/generated/platform/files';
 import {
   type FilesetFilter,
-  type FilesetPurpose,
   type FilesetOutput as Dataset,
   type GenericSortField,
 } from '@nemo/sdk/generated/platform/schema';
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
 import {
+  checkedPurposes,
   DEFAULT_PURPOSE_FILTER,
   isDefaultPurposeFilter,
   VISIBLE_PURPOSES,
@@ -55,13 +55,18 @@ export function useDatasetsTable({
     defaultSort: [{ id: 'created_at', desc: true }],
   });
 
-  // Seed the default purposes as checked (generic stays off) unless the URL already has filters.
+  // Seed the default purposes as checked (generic stays off) once on load, alongside any
+  // filters already in the URL. A later deliberate "uncheck all" is not re-seeded.
   const seededDefaults = useRef(false);
   useEffect(() => {
     if (!enableFilters || seededDefaults.current) return;
     seededDefaults.current = true;
-    if (dataViewState.columnFiltering.state.length === 0) {
-      dataViewState.columnFiltering.set([{ id: 'purpose', value: DEFAULT_PURPOSE_FILTER }]);
+    const current = dataViewState.columnFiltering.state;
+    if (!current.some((f) => f.id === 'purpose')) {
+      dataViewState.columnFiltering.set([
+        ...current,
+        { id: 'purpose', value: DEFAULT_PURPOSE_FILTER },
+      ]);
     }
   }, [enableFilters, dataViewState.columnFiltering]);
 
@@ -81,16 +86,19 @@ export function useDatasetsTable({
     },
   });
 
-  // Reset filters and selections
+  // Reset filters and selections; the default purposes come back checked.
   const resetFilters = useCallback(() => {
     onDatasetsSelected?.([]);
     dataViewState.resetFilters();
-  }, [dataViewState, onDatasetsSelected]);
+    if (enableFilters) {
+      dataViewState.columnFiltering.set([{ id: 'purpose', value: DEFAULT_PURPOSE_FILTER }]);
+    }
+  }, [dataViewState, enableFilters, onDatasetsSelected]);
 
   // The Purpose column is a multi-select, so its filter value is `{ [purpose]: true }`.
-  const selectedPurposes = Object.keys(
-    (enableFilters ? dataViewState.apiFilter.filter?.purpose : undefined) ?? {}
-  ) as FilesetPurpose[];
+  const selectedPurposes = checkedPurposes(
+    enableFilters ? dataViewState.apiFilter.filter?.purpose : undefined
+  );
 
   const {
     data: datasetsResponse,
@@ -113,10 +121,13 @@ export function useDatasetsTable({
               name: { $like: `%${dataViewState.apiFilter.searchText}%` },
             })
           : {}),
-        // Nothing checked is the default view: every purpose except "generic".
-        ...withOperators<FilesetFilter>({
-          purpose: { $in: selectedPurposes.length > 0 ? selectedPurposes : VISIBLE_PURPOSES },
-        }),
+        // Management view only: nothing checked means every purpose except "generic". Pickers
+        // (filters off) list everything unless `purposeFilter` narrows them.
+        ...(enableFilters
+          ? withOperators<FilesetFilter>({
+              purpose: { $in: selectedPurposes.length > 0 ? selectedPurposes : VISIBLE_PURPOSES },
+            })
+          : {}),
         ...(purposeFilter !== undefined ? { purpose: purposeFilter } : {}),
       },
     },
