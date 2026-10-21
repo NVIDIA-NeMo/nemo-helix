@@ -679,7 +679,7 @@ class TestPolicy:
             "  read_only: [/usr]\n"
             "  read_write: [/tmp]\n"
             "process:\n"
-            "  run_as_user: sandbox\n"
+            "  run_as_user: worker\n"
             "  run_as_group: sandbox\n"
             "network_policies:\n"
             "  custom:\n"
@@ -693,3 +693,33 @@ class TestPolicy:
         # The hand-written rule is kept and the mandatory platform egress is injected.
         assert "custom" in policy.network_policies
         assert "nemo_helix" in policy.network_policies
+        # Lists the file declares replace the defaults; sections it omits keep them.
+        assert list(policy.filesystem.read_only) == ["/usr"]
+        assert list(policy.filesystem.read_write) == ["/tmp"]
+        assert policy.filesystem.include_workdir
+        assert policy.landlock.compatibility == "best_effort"
+        # A scalar the file sets overrides the generated value.
+        assert policy.process.run_as_user == "worker"
+
+    def test_network_only_policy_path_keeps_generated_contract(
+        self, mock_nemo_client, mock_platform_config, tmp_path
+    ) -> None:
+        policy_file = tmp_path / "policy.yaml"
+        policy_file.write_text(
+            "landlock: null\n"
+            "network_policies:\n"
+            "  custom:\n"
+            "    endpoints:\n"
+            "      - host: example.com\n"
+            "        port: 443\n"
+        )
+        backend = _backend(mock_nemo_client, mock_platform_config, policy_path=str(policy_file))
+        policy = backend._build_executor_policy()
+
+        # The launcher's filesystem/process contract survives a file that only adds egress.
+        assert "/tools" in policy.filesystem.read_only
+        assert "/var/run/scratch" in policy.filesystem.read_write
+        assert policy.process.run_as_user == "sandbox"
+        # null keeps the generated section rather than dropping confinement.
+        assert policy.landlock.compatibility == "best_effort"
+        assert set(policy.network_policies) == {"custom", "nemo_helix"}

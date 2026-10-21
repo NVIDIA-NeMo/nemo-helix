@@ -554,8 +554,9 @@ class OpenShellJobExecutionProfileConfig(JobExecutionProfileConfig):
     policy_path: str | None = Field(
         default=None,
         description=(
-            "Path to a hand-written OpenShell SandboxPolicy YAML applied to created sandboxes. When unset, "
-            "a default-deny policy is generated from platform_egress plus the sandbox filesystem defaults."
+            "Path to a hand-written OpenShell SandboxPolicy YAML layered over the generated default-deny "
+            "policy. Mappings merge recursively, lists and scalars replace, and null keeps the generated "
+            "value."
         ),
     )
     image: str | None = Field(
