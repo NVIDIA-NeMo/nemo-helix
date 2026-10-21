@@ -2180,7 +2180,30 @@ def test_finished_volcano_step_deletes_its_network_policy(
     )
 
 
+# A pod failure or eviction ends the job Terminated, through Terminating while its pods stop.
+@pytest.mark.parametrize("phase", ["Failed", "Terminated"])
 def test_failed_volcano_step_deletes_its_network_policy(
+    volcano_job: VolcanoJobBackend, test_step_pending: HelixJobStepWithContext, phase: str
+):
+    volcano_job._execution_profile_config.step_network_policies_enabled = True
+    volcano_job._networking_v1 = MagicMock()
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks", return_value=False),
+        patch.object(volcano_job, "get_volcano_job_events", return_value=[]),
+        patch.object(volcano_job, "get_volcano_pod_group_events", return_value=[]),
+    ):
+        update = volcano_job.create_step_update(
+            test_step_pending, _volcano_job_for_step(test_step_pending, phase=phase)
+        )
+
+    assert update.status == HelixJobStatus.ERROR
+    volcano_job._networking_v1.delete_namespaced_network_policy.assert_called_once_with(
+        name=name_for_step(test_step_pending), namespace="test-namespace"
+    )
+
+
+def test_terminating_volcano_step_keeps_its_network_policy(
     volcano_job: VolcanoJobBackend, test_step_pending: HelixJobStepWithContext
 ):
     volcano_job._execution_profile_config.step_network_policies_enabled = True
@@ -2192,13 +2215,11 @@ def test_failed_volcano_step_deletes_its_network_policy(
         patch.object(volcano_job, "get_volcano_pod_group_events", return_value=[]),
     ):
         update = volcano_job.create_step_update(
-            test_step_pending, _volcano_job_for_step(test_step_pending, phase="Failed")
+            test_step_pending, _volcano_job_for_step(test_step_pending, phase="Terminating")
         )
 
     assert update.status == HelixJobStatus.ERROR
-    volcano_job._networking_v1.delete_namespaced_network_policy.assert_called_once_with(
-        name=name_for_step(test_step_pending), namespace="test-namespace"
-    )
+    volcano_job._networking_v1.delete_namespaced_network_policy.assert_not_called()
 
 
 def test_running_volcano_step_keeps_its_network_policy_when_a_task_errors(
