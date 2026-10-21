@@ -536,10 +536,10 @@ class EvaluationSessionResponse(BaseModel):
         ),
     )
 
-    input_tokens: int | None = Field(default=None, description="Sum of input tokens across this session's spans.")
-    output_tokens: int | None = Field(default=None, description="Sum of output tokens across this session's spans.")
-    cached_tokens: int | None = Field(default=None, description="Sum of cached tokens across this session's spans.")
-    cost_total_usd: float | None = Field(default=None, description="Sum of cost across this session's spans.")
+    input_tokens: int | None = Field(default=None, description="Session input tokens, counting each model call once.")
+    output_tokens: int | None = Field(default=None, description="Session output tokens, counting each model call once.")
+    cached_tokens: int | None = Field(default=None, description="Session cached tokens, counting each model call once.")
+    cost_total_usd: float | None = Field(default=None, description="Session cost, counting each model call once.")
 
     evaluator_scores: dict[str, float] = Field(
         default_factory=dict,

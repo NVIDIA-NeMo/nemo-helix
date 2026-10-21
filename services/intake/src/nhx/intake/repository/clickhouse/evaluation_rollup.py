@@ -11,6 +11,7 @@ from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickH
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable
 from nhx.intake.repository.evaluation_rollup import EvaluationRollup, EvaluationRollupRepository, ScoreRollup
 from nhx.intake.spans.span_attribute_catalog import COST_SCALE, SpanAttributeField, spec_for_field
+from nhx.intake.spans.span_rollups import USAGE_TIER_EXPRESSION, usage_sql
 from nhx.intake.spans.storage import float_or_none
 
 
@@ -316,6 +317,10 @@ def _test_case_scores_cte() -> str:
                 test_cases.evaluation_name, test_cases.test_case_key, evaluators.evaluator_name, test_cases.session_count"""
 
 
+# Cost stays in stored micro-dollars here; session_costs divides by COST_SCALE once, after traces are summed.
+_ROLLUP_USAGE = usage_sql(("input_tokens", "output_tokens", "cost_usd"), scaled=False)
+
+
 def _current_session_span_metrics_sql(spans_table: str) -> str:
     """Latest-version spans for the scoped sessions, projected to *only* the metric inputs.
 
@@ -323,15 +328,20 @@ def _current_session_span_metrics_sql(spans_table: str) -> str:
     The metric rollup then joins that to the sessions, so the join hash table would hold every deduped
     span with its maps — gigabytes on real agent workloads (long trajectories × many spans), which is
     what trips ClickHouse's memory limit. Here we ``argMax`` just the cost and token values (plus a
-    present-flag each, to keep an absent metric distinct from a real 0) and the model/agent strings, so
-    the join carries a handful of scalars per span instead. Deduping by span identity picks each span's
-    latest version.
+    present-flag each, to keep an absent metric distinct from a real 0), the kind and parent id the
+    usage tier needs, and the model/agent strings. The rollup groups those scalars per trace before
+    joining, so the join still carries a handful of scalars per trace rather than the attribute maps.
+    Deduping by span identity picks each span's latest version.
     """
     return f"""
         (
             SELECT
                 workspace,
+                source_format,
+                trace_id,
                 argMax(session_id, (event_ts, is_deleted)) AS dedup_session_id,
+                argMax(kind, (event_ts, is_deleted)) AS kind,
+                argMax(external_parent_span_id, (event_ts, is_deleted)) AS external_parent_span_id,
                 argMax(attributes_number[%(cost_key)s], (event_ts, is_deleted)) AS cost_value,
                 argMax(has(mapKeys(attributes_number), %(cost_key)s), (event_ts, is_deleted)) AS cost_present,
                 argMax(attributes_number[%(input_tokens_key)s], (event_ts, is_deleted)) AS input_tokens_value,
@@ -361,30 +371,58 @@ def _metric_rollups_sql(*, trace_index_table: str, spans_table: str, evaluation_
             {_scoped_sessions_sql(trace_index_table, evaluation_names_sql)}
         ),
         current_session_spans AS {_current_session_span_metrics_sql(spans_table)},
+        span_tiers AS (
+            SELECT
+                workspace,
+                dedup_session_id,
+                source_format,
+                trace_id,
+                model_name,
+                agent_name,
+                agent_version,
+                {USAGE_TIER_EXPRESSION} AS usage_tier,
+                input_tokens_present AS reports_input_tokens,
+                input_tokens_value,
+                output_tokens_present AS reports_output_tokens,
+                output_tokens_value,
+                cost_present AS reports_cost_usd,
+                cost_value AS cost_usd_value
+            FROM current_session_spans
+            WHERE del_flag = 0
+        ),
+        trace_usage AS (
+            SELECT
+                workspace,
+                dedup_session_id,
+                {_ROLLUP_USAGE.trace_columns},
+                groupUniqArrayIf(model_name, model_name != '') AS model_names,
+                groupUniqArrayIf(agent_name, agent_name != '') AS agent_names,
+                groupUniqArrayIf(agent_version, agent_version != '') AS agent_versions
+            FROM span_tiers
+            GROUP BY workspace, dedup_session_id, source_format, trace_id
+        ),
         session_costs AS (
             SELECT
                 sessions.evaluation_name AS evaluation_name,
                 sessions.test_case_name AS test_case_key,
                 sessions.latency_ms AS latency_ms,
                 if(
-                    countIf(spans.cost_present) = 0,
+                    countIf(isNotNull(spans.cost_usd)) = 0,
                     NULL,
-                    sumIf(spans.cost_value, spans.cost_present) / {COST_SCALE}
+                    sum(spans.cost_usd) / {COST_SCALE}
                 ) AS cost_usd,
                 if(
-                    countIf(spans.input_tokens_present) = 0 AND countIf(spans.output_tokens_present) = 0,
+                    countIf(isNotNull(spans.input_tokens)) = 0 AND countIf(isNotNull(spans.output_tokens)) = 0,
                     NULL,
-                    sumIf(spans.input_tokens_value, spans.input_tokens_present)
-                        + sumIf(spans.output_tokens_value, spans.output_tokens_present)
+                    coalesce(sum(spans.input_tokens), 0) + coalesce(sum(spans.output_tokens), 0)
                 ) AS tokens,
-                groupUniqArrayIf(spans.model_name, spans.model_name != '') AS model_names,
-                groupUniqArrayIf(spans.agent_name, spans.agent_name != '') AS agent_names,
-                groupUniqArrayIf(spans.agent_version, spans.agent_version != '') AS agent_versions
+                arrayDistinct(arrayFlatten(groupArray(spans.model_names))) AS model_names,
+                arrayDistinct(arrayFlatten(groupArray(spans.agent_names))) AS agent_names,
+                arrayDistinct(arrayFlatten(groupArray(spans.agent_versions))) AS agent_versions
             FROM scoped_sessions AS sessions
-            LEFT JOIN current_session_spans AS spans
+            LEFT JOIN trace_usage AS spans
                 ON sessions.workspace = spans.workspace
                 AND sessions.session_id = spans.dedup_session_id
-                AND spans.del_flag = 0
             WHERE sessions.test_case_name != ''
             GROUP BY sessions.evaluation_name, sessions.session_id, sessions.test_case_name, sessions.latency_ms
         ),
