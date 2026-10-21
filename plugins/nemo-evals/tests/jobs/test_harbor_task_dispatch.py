@@ -4,6 +4,7 @@
 """A task Job's input, its compiled Job, and what the dispatcher changes inside it."""
 
 import json
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -18,6 +19,7 @@ from harbor.models.trial.config import EnvironmentConfig as TrialEnvironmentConf
 from harbor.models.trial.config import ResourceMode
 from harbor.models.trial.paths import TrialPaths
 from nemo_evals.filesets import FilesetRef
+from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT
 from nemo_evals.harbor.remote.profile import ResourceOverrides, resource_defaults
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evals.jobs.agent_spec import AgentEvalSpec, RegisteredAgentSource
@@ -267,6 +269,63 @@ def test_a_storage_only_task_still_gets_cpu_and_memory_limits(task_spec, tmp_pat
     config = EnvironmentConfig(docker_image=AGENT.image_ref, storage_mb=4096)
     resource = _sandbox(configured, tmp_path, "trial-x", config)._resource()
     assert resource == {"cpu": "1", "memory": "2048Mi", "ephemeral-storage": "4096Mi"}
+
+
+def _configured_with_setup_hosts(task_spec, tmp_path, hosts: tuple[str, ...], **runtime: Any) -> HarborRuntimeConfig:
+    policy = task_spec.sandbox_policy.model_copy(update={"agent_setup_egress": hosts})
+    spec = task_spec.model_copy(update={"sandbox_policy": policy})
+    ctx = MagicMock(spec=JobContext)
+    ctx.job_id = "run-0123456789abcdef-task-1"
+    return configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path, **runtime), ctx, spec)
+
+
+def test_setup_hosts_reach_the_environment_and_wrap_a_builtin_agent(task_spec, tmp_path):
+    configured = _configured_with_setup_hosts(
+        task_spec, tmp_path, ("registry.npmjs.org",), agent_name="claude-code", agent_kwargs={"version": "2.1.0"}
+    )
+    assert configured.environment is not None
+    assert configured.environment.kwargs["agent_setup_hosts"] == ["registry.npmjs.org"]
+    assert configured.agent_import_path == SETUP_EGRESS_AGENT
+    assert configured.agent_kwargs == {"version": "2.1.0", INNER_AGENT_KWARG: "claude-code"}
+
+
+def test_setup_hosts_wrap_an_importable_custom_agent(task_spec, tmp_path):
+    configured = _configured_with_setup_hosts(
+        task_spec, tmp_path, ("registry.npmjs.org",), agent_import_path="nemo_evals.harbor.agents:SandboxedCodex"
+    )
+    assert configured.agent_import_path == SETUP_EGRESS_AGENT
+    assert configured.agent_kwargs[INNER_AGENT_KWARG] == "nemo_evals.harbor.agents:SandboxedCodex"
+
+
+@pytest.mark.parametrize("agent", ["oracle", "nop"])
+def test_agents_that_install_nothing_are_not_wrapped(task_spec, tmp_path, agent, caplog):
+    """Harbor constructs and scores oracle and nop by name, so wrapping them would break them."""
+    with caplog.at_level(logging.INFO, logger="nemo_evals.jobs.harbor_task_dispatch"):
+        configured = _configured_with_setup_hosts(task_spec, tmp_path, ("registry.npmjs.org",), agent_name=agent)
+    assert configured.agent_import_path is None and configured.agent_name == agent
+    assert f"Agent {agent} runs setup without the agent setup egress window: it installs nothing" in caplog.text
+
+
+def test_without_setup_hosts_the_agent_is_not_wrapped(task_spec, tmp_path, caplog):
+    with caplog.at_level(logging.INFO, logger="nemo_evals.jobs.harbor_task_dispatch"):
+        configured = _configured_with_setup_hosts(task_spec, tmp_path, (), agent_name="claude-code")
+    assert "agent setup egress window" not in caplog.text
+    assert configured.agent_import_path is None and configured.agent_name == "claude-code"
+    assert INNER_AGENT_KWARG not in configured.agent_kwargs
+
+
+def test_a_loose_agent_file_runs_unwrapped(task_spec, tmp_path, caplog):
+    """The runtime picks a loose file's import path at run time, so it can't be named for the wrapper.
+
+    Its install then fails on the task's own policy, so the log says why, for whoever debugs it.
+    """
+    with caplog.at_level(logging.INFO, logger="nemo_evals.jobs.harbor_task_dispatch"):
+        configured = _configured_with_setup_hosts(
+            task_spec, tmp_path, ("registry.npmjs.org",), agent_import_path="wrapper:Agent", agent_dir=tmp_path
+        )
+    assert "Agent wrapper:Agent runs setup without the agent setup egress window: a loose agent file" in caplog.text
+    assert configured.agent_import_path == "wrapper:Agent"
+    assert INNER_AGENT_KWARG not in configured.agent_kwargs
 
 
 def write_task(root: Path, toml: str, *, compose: bool = False) -> Path:
