@@ -1,3 +1,4 @@
+# WARNING: This file is maintained by the garak project. Do not modify it directly in Helix.
 # SPDX-FileCopyrightText: Portions Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
