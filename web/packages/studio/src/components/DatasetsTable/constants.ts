@@ -15,8 +15,8 @@ export const PURPOSE_LABELS: Record<FilesetPurpose, string> = {
 type TagColor = NonNullable<ComponentProps<typeof Tag>['color']>;
 
 /**
- * Purposes shown in the filesets table. "generic" filesets are machine-generated
- * (e.g. job logs) and surface on their jobs instead.
+ * Purposes shown by default. "generic" filesets are machine-generated (e.g. job logs), so the
+ * Purpose filter leaves them off until asked for.
  */
 export const VISIBLE_PURPOSES = [
   FilesetPurpose.dataset,
@@ -24,8 +24,9 @@ export const VISIBLE_PURPOSES = [
   FilesetPurpose.model,
 ] as const;
 
-export const PURPOSE_TAG_COLORS: Record<(typeof VISIBLE_PURPOSES)[number], TagColor> = {
+export const PURPOSE_TAG_COLORS: Record<FilesetPurpose, TagColor> = {
   [FilesetPurpose.dataset]: 'blue',
   [FilesetPurpose.environment]: 'green',
   [FilesetPurpose.model]: 'purple',
+  [FilesetPurpose.generic]: 'gray',
 };
