@@ -20,7 +20,7 @@ nemo jobs list --workspace default --filter.source customization --filter.status
 
 ## Pause a Job
 
-Pausing stops a job without losing its progress. A job can be paused while its current step supports pausing, which depends on the training backend. Otherwise, for example while the model is still downloading, or when the backend's training step does not support pausing, the request returns `409` and names the step. Training on the `automodel` backend supports pausing.
+Pausing stops a job without losing its progress. A job can be paused while its current step supports pausing, which depends on the training backend. Otherwise, for example while the model is still downloading, or when the backend's training step does not support pausing, the request returns `409` and names the step. Training on every backend supports pausing: `automodel`, `unsloth`, and `rl` for both DPO and GRPO.
 
 ```bash
 nemo jobs pause automodel-a1b2c3d4e5f6 --workspace default
@@ -28,7 +28,7 @@ nemo jobs pause automodel-a1b2c3d4e5f6 --workspace default
 
 The training step finishes the step it is on, saves a checkpoint, and exits, which frees its GPUs. The job's status moves from `pausing` to `paused`. Its storage, including the checkpoint, is kept so that the job can resume later.
 
-If training doesn't save its checkpoint and exit within 30 minutes, the pause fails and the job ends in `error`. You can then rerun it from its newest checkpoint. Operators can change this limit with the `automodel.training_pause_deadline_seconds` platform setting.
+If training doesn't save its checkpoint and exit in time, the pause fails and the job ends in `error`. The limit is 30 minutes on `automodel` and `unsloth`, and one hour on `rl`, where one step includes generating rollouts. You can then rerun the job from its newest checkpoint. Operators can change each limit with the backend's `training_pause_deadline_seconds` platform setting, for example `unsloth.training_pause_deadline_seconds`.
 
 If training finishes before it acts on the pause, the job completes as usual.
 
@@ -39,6 +39,8 @@ nemo jobs resume automodel-a1b2c3d4e5f6 --workspace default
 ```
 
 Resume restarts the paused step in the same job. Training continues from the checkpoint it saved when it paused, and the job's metrics continue from where they stopped. If the job logs to W&B or MLflow, it continues the same run.
+
+If the training image changed while the job was paused, for example because its tag now points to a newer build, the training step's status details include an `image_digest_warning` that names both images. Training continues, but it may behave differently or fail to load its checkpoint. A rerun compares the image the same way.
 
 By default, a paused job keeps its storage for 7 days. To keep it for a different period, up to the platform maximum of 30 days, set the job's pause window in seconds:
 

@@ -33,3 +33,10 @@ class TrainingStepConfig(BaseModel):
         ),
     )
     output_path: str = Field(description="Local filesystem path the training driver should save the checkpoint to.")
+    checkpoint_path: str | None = Field(
+        default=None,
+        description=(
+            "Local filesystem path the trainer writes its checkpoints to, and resumes from. "
+            "Kept apart from ``output_path`` so checkpoints are not published with the model."
+        ),
+    )

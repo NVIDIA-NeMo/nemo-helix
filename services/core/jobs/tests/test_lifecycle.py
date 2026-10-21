@@ -12,6 +12,7 @@ from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.app.lifecycle import (
     active_ttl_anchor,
     attempt_can_transition,
+    clear_image_comparison,
     describe_paused_exit,
     effective_pause_ttl_seconds,
     image_digest_updates,
@@ -128,12 +129,7 @@ def test_stopping_snapshots_the_image_digest():
 
     details = with_lifecycle_timestamps(step, HelixJobStatus.ERROR, {}, now=now)
 
-    # The warning belongs to the previous save, and status details merge, so it is cleared.
-    assert details == {
-        "stopped_at": now.isoformat(),
-        "image_digest_at_save": "sha256:old",
-        "image_digest_warning": None,
-    }
+    assert details == {"stopped_at": now.isoformat(), "image_digest_at_save": "sha256:old"}
 
 
 def test_image_digest_comparison():
@@ -141,30 +137,36 @@ def test_image_digest_comparison():
     saved = {"image_digest_at_save": "sha256:a"}
     assert image_digest_updates(saved, "sha256:a") == {"image_digest": "sha256:a"}
     assert "image_digest_warning" in image_digest_updates(saved, "sha256:b")
-    # The warning is written once per saved digest.
+    # The warning is written once.
     warned = {**saved, "image_digest_warning": "changed"}
     assert image_digest_updates(warned, "sha256:c") == {"image_digest": "sha256:c"}
 
 
-def test_image_digest_comparison_waits_for_the_task_container():
-    """A pending pod has no digest yet. It must not stop the comparison once the container starts."""
-    resumed = {"image_digest": "sha256:a", "image_digest_at_save": "sha256:a"}
+def test_a_pod_that_has_not_started_its_container_decides_nothing():
+    """While the new pod pulls its image there is no digest yet, and a later reconcile compares."""
+    saved = {"image_digest_at_save": "sha256:a", "resumed_at": "2026-10-14T00:00:00+00:00"}
 
-    assert image_digest_updates(resumed, None) == {}
-    assert "image_digest_warning" in image_digest_updates(resumed, "sha256:b")
+    assert image_digest_updates(saved, None) == {}
+    assert "image_digest_warning" in image_digest_updates(saved, "sha256:b")
 
 
-def test_each_save_compares_the_image_again():
-    """A warning from an earlier pause must not hide a change after the next one."""
-    now = datetime.datetime(2026, 10, 9, 12, 0, tzinfo=datetime.timezone.utc)
-    running = {"image_digest": "sha256:b", "image_digest_at_save": "sha256:a", "image_digest_warning": "a to b"}
-    step = SimpleNamespace(status=HelixJobStatus.ACTIVE, status_details=running)
+def test_a_resume_without_a_saved_digest_gets_one_note():
+    resumed = {"resumed_at": "2026-10-14T00:00:00+00:00"}
 
-    paused = {**running, **with_lifecycle_timestamps(step, HelixJobStatus.PAUSED, {}, now=now)}
+    note = image_digest_updates(resumed, "sha256:a")
 
-    assert paused["image_digest_at_save"] == "sha256:b"
-    assert image_digest_updates(paused, "sha256:b") == {}
-    assert "was sha256:b, now sha256:c" in image_digest_updates(paused, "sha256:c")["image_digest_warning"]
+    assert set(note) == {"image_digest", "image_digest_comparison_skipped"}
+    assert image_digest_updates({**resumed, **note}, "sha256:a") == {}
+
+
+def test_a_resume_compares_again():
+    """A second pause saves a newer digest, and the warning from the first resume must not block that comparison."""
+    details = {"image_digest": "sha256:b", "image_digest_at_save": "sha256:b", "image_digest_warning": "was a, now b"}
+
+    clear_image_comparison(details)
+
+    assert "image_digest_warning" not in details
+    assert "image_digest_warning" in image_digest_updates(details, "sha256:c")
 
 
 def test_storage_targets_lists_each_backend_that_mounts_storage_once():

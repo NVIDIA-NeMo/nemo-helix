@@ -322,6 +322,10 @@ class TrainingResult(BaseModel):
     """Result written by the training task to ``{workspace_path}/training_result.json``."""
 
     success: bool
+    paused: bool = Field(
+        default=False,
+        description="Training stopped for a pause after saving its checkpoint, so nothing was published.",
+    )
     error_message: str | None = None
     checkpoint: CheckpointInfo | None = None
     gpu_info: GPUInfo | None = None
