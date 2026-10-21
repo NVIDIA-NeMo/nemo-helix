@@ -6668,6 +6668,26 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: expected_step_id
+        in: query
+        required: false
+        schema:
+          description: Update only while this step belongs to the job's current attempt.
+            The details are written on that attempt.
+          title: Expected Step Id
+          type: string
+        description: Update only while this step belongs to the job's current attempt.
+          The details are written on that attempt.
+      - name: expected_step_status
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: With expected_step_id, update only while the step has this
+            status.
+          title: Expected Step Status
+        description: With expected_step_id, update only while the step has this status.
       requestBody:
         required: true
         content:
@@ -6684,6 +6704,8 @@ paths:
               schema: {}
         '404':
           description: Job not Found
+        '409':
+          description: The expected step is no longer current or in the expected status
         '422':
           description: Validation Error
           content:

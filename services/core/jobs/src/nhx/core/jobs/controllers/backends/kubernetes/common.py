@@ -1352,6 +1352,9 @@ def reclaim_job_persistent_storage(
             pod_metadata=pod_metadata,
             pod_security_context=pod_security_context,
         )
+        # Finished reclaim Jobs are deleted here. A TTL could delete one before it is seen to
+        # succeed, and the next call would start another.
+        cleanup_job.spec.ttl_seconds_after_finished = None
         batch_v1.create_namespaced_job(namespace=namespace, body=cleanup_job)
         logger.info(
             "Created storage reclaim job",

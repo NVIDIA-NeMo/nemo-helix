@@ -620,6 +620,7 @@ def test_cleanup_job_persistent_storage_applies_pod_security_context():
     )
     batch_v1.create_namespaced_job.assert_called_once()
     body = batch_v1.create_namespaced_job.call_args.kwargs["body"]
+    assert body.spec.ttl_seconds_after_finished == 300
     sc = body.spec.template.spec.security_context
     assert sc is not None
     assert sc.run_as_user == 2000
@@ -686,8 +687,10 @@ def test_reclaim_starts_a_cleanup_job_and_reports_it_pending():
         f"{JOB_EXECUTION_PROFILE_LABEL}=default",
     ):
         assert label in selector
-    labels = batch_v1.create_namespaced_job.call_args.kwargs["body"].metadata.labels
-    assert all(labels[key] == value for key, value in (item.split("=") for item in selector))
+    body = batch_v1.create_namespaced_job.call_args.kwargs["body"]
+    assert all(body.metadata.labels[key] == value for key, value in (item.split("=") for item in selector))
+    # Reclaim deletes the Job once it has seen it finish. A TTL could delete it before that.
+    assert body.spec.ttl_seconds_after_finished is None
 
 
 def test_reclaim_waits_for_a_running_cleanup_job():

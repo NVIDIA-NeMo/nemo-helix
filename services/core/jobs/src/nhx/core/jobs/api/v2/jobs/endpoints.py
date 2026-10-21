@@ -612,6 +612,7 @@ async def get_job_status(
     responses={
         status.HTTP_200_OK: {"description": "Successful Response"},
         status.HTTP_404_NOT_FOUND: {"description": "Job not Found"},
+        status.HTTP_409_CONFLICT: {"description": "The expected step is no longer current or in the expected status"},
     },
 )
 async def update_job_status_details(
@@ -619,10 +620,25 @@ async def update_job_status_details(
     request: HelixJobStatusDetailsUpdateRequest,
     workspace: str,
     dispatcher: JobDispatcher = Depends(dep_dispatcher),
+    expected_step_id: str | None = Query(
+        default=None,
+        description="Update only while this step belongs to the job's current attempt. "
+        "The details are written on that attempt.",
+    ),
+    expected_step_status: HelixJobStatus | None = Query(
+        default=None,
+        description="With expected_step_id, update only while the step has this status.",
+    ),
 ) -> None:
     """Update the status details of a platform job."""
-    with scoped_app_ctx(JobContext(id=name)):
-        result = await dispatcher.update_job_status_details(name, workspace, request)
+    with scoped_app_ctx(JobContext(id=name)), job_operation_errors("update the status details of", name, workspace):
+        result = await dispatcher.update_job_status_details(
+            name,
+            workspace,
+            request,
+            expected_step_id=expected_step_id,
+            expected_step_status=expected_step_status,
+        )
         if not result:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

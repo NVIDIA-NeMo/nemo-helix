@@ -464,6 +464,11 @@ class ListJobResultsQueryParams(TypedDict, total=False):
     sort: NotRequired[str]
 
 
+class JobStatusDetailsQueryParams(TypedDict, total=False):
+    expected_step_id: NotRequired[str]
+    expected_step_status: NotRequired[str]
+
+
 class JobLogsQueryParams(TypedDict, total=False):
     limit: NotRequired[int]
     page_cursor: NotRequired[str]

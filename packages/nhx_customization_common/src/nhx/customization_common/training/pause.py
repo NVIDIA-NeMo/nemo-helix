@@ -25,7 +25,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_POLL_INTERVAL_SECONDS = 15.0
 # A slow read only delays noticing the pause by one interval, so fail fast.
-_POLL_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
+_POLL_READ_TIMEOUT_SECONDS = 10.0
+_POLL_TIMEOUT = httpx.Timeout(_POLL_READ_TIMEOUT_SECONDS, connect=5.0)
 
 
 def exit_paused() -> NoReturn:
@@ -88,7 +89,7 @@ class PausePoller:
         self._stopped.set()
         thread = self._thread
         if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout=self._interval_seconds + _POLL_TIMEOUT.read)
+            thread.join(timeout=self._interval_seconds + _POLL_READ_TIMEOUT_SECONDS)
         if self._owned_client is not None:
             self._owned_client.close()
             self._owned_client = None

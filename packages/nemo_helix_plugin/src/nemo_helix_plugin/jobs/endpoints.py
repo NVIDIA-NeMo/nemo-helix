@@ -39,6 +39,7 @@ from nemo_helix_plugin.jobs.types import (
     HelixJobTaskUpdate,
     JobControl,
     JobLogsQueryParams,
+    JobStatusDetailsQueryParams,
     JobStatusDetailsUpdate,
     ListJobResultsQueryParams,
     ListJobsQueryParams,
@@ -129,7 +130,13 @@ def get_job_status(*, workspace: str | None = None, name: str) -> HelixJobStatus
 
 @patch("/apis/jobs/v2/workspaces/{workspace}/jobs/{name}/status-details")
 @abstractmethod
-def update_job_status_details(*, workspace: str | None = None, name: str, body: JobStatusDetailsUpdate) -> None: ...
+def update_job_status_details(
+    *,
+    workspace: str | None = None,
+    name: str,
+    body: JobStatusDetailsUpdate,
+    query_params: JobStatusDetailsQueryParams | None = None,
+) -> None: ...
 
 
 # ---------------------------------------------------------------------------

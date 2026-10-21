@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
+import datetime
 import json
 import logging
 import re
@@ -508,7 +509,7 @@ class JobDispatcher:
                             "terminal state before deleting."
                         )
 
-            await self._queue_storage_reclaim(job_entity)
+            await self._queue_storage_reclaim(job_entity, attempts)
 
             # Get all results
             results = await self._list_all_entities(
@@ -567,18 +568,28 @@ class JobDispatcher:
             logger.exception("Error deleting job", extra=extras)
             raise e
 
-    async def _queue_storage_reclaim(self, job: HelixJob) -> None:
+    async def _queue_storage_reclaim(self, job: HelixJob, attempts: list[HelixJobAttempt]) -> None:
         """Record the job's storage for the controller to reclaim once the job is gone.
 
         Skipped when the job never mounted storage. Written before any entity is deleted,
         and a failure to write it fails the delete: without the record, a new job with the
         same name would mount this job's storage. A job the storage sweep already reclaimed
         is recorded too, since the sweep may have stopped before queueing it.
+
+        The current attempt is marked reclaimed first. A delete that fails after queueing
+        leaves the job in place while the controller deletes its storage, and the mark makes
+        resume, rerun and control updates refuse it.
         """
         targets = storage_targets(job.platform_spec)
         if not targets:
             return
         extras = {"job": job.name, "workspace": job.workspace}
+        current = next((attempt for attempt in attempts if attempt.id == job.current_attempt_id), None)
+        if current is not None and not (current.status_details or {}).get(STORAGE_RECLAIMED_AT):
+            current.status_details = self._update_status_details_object(
+                current.status_details, {STORAGE_RECLAIMED_AT: datetime.datetime.now(datetime.timezone.utc).isoformat()}
+            )
+            await self.store.update(current)
         try:
             await self.system_store.create(
                 HelixJobStorageReclaim(
@@ -1013,6 +1024,13 @@ class JobDispatcher:
             raise JobStatusUpdateSkippedError(f"Job does not exist: {attempt.job}") from exc
 
         async with _get_job_mutation_lock(job.name, job.workspace):
+            if status == HelixJobStatus.RESUMING:
+                # Checked again under the lock the storage sweep holds while it marks storage reclaimed.
+                current = await self.get_attempt(step.attempt_id)
+                if current is not None and (current.status_details or {}).get(STORAGE_RECLAIMED_AT):
+                    raise JobOperationConflictError(
+                        f"Cannot resume job '{job.name}': storage has been reclaimed. Create a new job."
+                    )
             return await self._update_job_status_from_step_locked(step, status, status_details, error_details)
 
     async def _update_job_status_from_step_locked(
@@ -1292,20 +1310,55 @@ class JobDispatcher:
                     raise
 
     async def update_job_status_details(
-        self, job_name: str, workspace: str, status_details: Dict[str, Any]
+        self,
+        job_name: str,
+        workspace: str,
+        status_details: Dict[str, Any],
+        expected_step_id: str | None = None,
+        expected_step_status: HelixJobStatus | None = None,
     ) -> HelixJobResponse | None:
-        """Update the status details of a job attempt."""
-        job = await self.store.get(HelixJob, job_name, workspace=workspace)
-        if job is None:
-            return None
+        """Update the status details of a job attempt.
 
-        attempt = await self.get_current_attempt(job.name, workspace=workspace)
-        if attempt is None:
-            raise Exception(f"Job attempt with Job ID {job.id} does not exist.")
+        With ``expected_step_id``, the details go to that step's attempt, and only while it is
+        the job's current attempt and the step has ``expected_step_status``. Otherwise this
+        raises ``JobOperationConflictError``. The check and the write hold the job's lock, as
+        resume and rerun do, so the storage sweep cannot mark a job that one of them took over.
+        """
+        if expected_step_id is None:
+            job = await self.store.get(HelixJob, job_name, workspace=workspace)
+            if job is None:
+                return None
+            attempt = await self.get_current_attempt(job.name, workspace=workspace)
+            if attempt is None:
+                raise Exception(f"Job attempt with Job ID {job.id} does not exist.")
+            attempt.status_details = self._update_status_details_object(attempt.status_details, status_details)
+            attempt = await self.store.update(attempt)
+            operations_counter.add(1, attributes={"operation": "update_job_status_details"})
+            return create_platform_job_response(job, attempt)
 
-        attempt.status_details = self._update_status_details_object(attempt.status_details, status_details)
-        attempt = await self.store.update(attempt)
-
+        async with _get_job_mutation_lock(job_name, workspace):
+            try:
+                job = await self.store.get(HelixJob, job_name, workspace=workspace)
+            except EntityNotFoundError:
+                return None
+            if job is None:
+                return None
+            try:
+                step = await self.store.get_by_id(HelixJobStep, expected_step_id)
+            except EntityNotFoundError:
+                step = None
+            if (
+                step is None
+                or step.attempt_id != job.current_attempt_id
+                or (expected_step_status is not None and step.status != expected_step_status)
+            ):
+                expected = f" and {expected_step_status.value}" if expected_step_status is not None else ""
+                raise JobOperationConflictError(
+                    f"Job '{job_name}' changed: step '{expected_step_id}' is no longer in its current attempt{expected}."
+                )
+            attempt = await self.store.get_by_id(HelixJobAttempt, step.attempt_id)
+            attempt.status_details = self._update_status_details_object(attempt.status_details, status_details)
+            attempt = await self.store.update(attempt)
         operations_counter.add(1, attributes={"operation": "update_job_status_details"})
         return create_platform_job_response(job, attempt)
 
