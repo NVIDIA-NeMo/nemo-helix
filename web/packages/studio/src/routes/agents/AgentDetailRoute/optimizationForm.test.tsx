@@ -239,6 +239,46 @@ describe('AgentDetailRoute optimization form', () => {
     expect(await screen.findByText(/temperature 0\.3–1\.5/)).toBeInTheDocument();
   });
 
+  it('reveals the prompt options only once the user opts in, and counts their runs', async () => {
+    const user = userEvent.setup();
+    renderDetail('?tab=optimizations&view=form');
+
+    await screen.findByText('Tune the prompt too?');
+    expect(screen.queryByText('Rewrite with')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('switch', { name: 'Optimize the system prompt' }));
+
+    expect(await screen.findByText('What should the prompt achieve?')).toBeInTheDocument();
+    expect(screen.getByText('Rewrite with')).toBeInTheDocument();
+    expect(screen.getByText(/a model writes new versions/)).toBeInTheDocument();
+    expect(screen.getByText('system prompt')).toBeInTheDocument();
+    expect(screen.getByText('prompts')).toBeInTheDocument();
+  });
+
+  it('swaps to the user’s own versions, which add no runs of their own', async () => {
+    const user = userEvent.setup();
+    renderDetail('?tab=optimizations&view=form');
+
+    await user.click(await screen.findByRole('switch', { name: 'Optimize the system prompt' }));
+    await user.click(await screen.findByRole('radio', { name: 'Try my own versions' }));
+
+    expect(
+      await screen.findByText(/Each sweep trial runs one of your versions/)
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Rewrite with')).not.toBeInTheDocument();
+    expect(screen.queryByText('prompts')).not.toBeInTheDocument();
+
+    await user.type(screen.getByRole('textbox', { name: 'Version 1' }), 'Be brief.');
+    await user.type(screen.getByRole('textbox', { name: 'Version 2' }), 'Be thorough.');
+    await user.click(screen.getByRole('button', { name: 'Add a version' }));
+
+    expect(screen.getByRole('textbox', { name: 'Version 3' })).toBeInTheDocument();
+    expect(screen.getByText('system prompt · 2 versions')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Remove version 3' }));
+    expect(screen.queryByRole('textbox', { name: 'Version 3' })).not.toBeInTheDocument();
+  });
+
   it('holds the run closed while the form is unanswered', async () => {
     renderDetail('?tab=optimizations&view=form');
 
