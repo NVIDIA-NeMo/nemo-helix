@@ -207,11 +207,17 @@ class TaskStore:
         raise Conflict("task_changed", "task changed concurrently; retry")
 
     def _ensure_slug_free(self, slug: str, *, task_id: str | None = None) -> None:
-        # ponytail: check-then-write, so two concurrent writes claiming the
-        # same slug can both land. Naming the entity by slug would close it,
-        # but slugs are mutable and task ids are what everything references.
+        # ponytail: check-then-write. Concurrent creates are settled afterwards
+        # by `_slug_owner`; a concurrent rename onto a taken slug can still
+        # land. Naming the entity by slug would close it, but slugs are mutable
+        # and task ids are what everything references.
         if any(entity.slug == slug and entity.name != task_id for entity in self._live()):
             raise Conflict("slug_conflict", f"slug already exists: {slug}")
+
+    def _slug_owner(self, slug: str) -> ScaledEvalsTask | None:
+        """Return the oldest live task with `slug`, so every reader agrees on one."""
+        holders = [entity for entity in self._live() if entity.slug == slug]
+        return min(holders, key=lambda entity: (entity.created_at, entity.name), default=None)
 
     def _owner_storage_bytes(self, entity: ScaledEvalsTask, revision: int) -> int:
         """Sum the owner's stored pack bytes, excluding this revision."""
@@ -259,7 +265,13 @@ class TaskStore:
             visibility=visibility,
             revisions=[ScaledEvalsTaskRevision(revision=1, tarball_object_key=object_key, created_at=_now())],
         )
-        return _task_row(self._client.create(entity))
+        created = self._client.create(entity)
+        owner = self._slug_owner(slug)
+        if owner is not None and owner.name != task_id:
+            # A concurrent create took the slug first; withdraw this one.
+            self.soft_delete(task_id)
+            raise Conflict("slug_conflict", f"slug already exists: {slug}")
+        return _task_row(created)
 
     def mark_latest_revision_building(
         self,
@@ -458,7 +470,7 @@ class TaskStore:
         return _task_row(entity) if entity is not None else None
 
     def get_by_slug(self, slug: str) -> dict[str, Any] | None:
-        entity = next((entity for entity in self._live() if entity.slug == slug), None)
+        entity = self._slug_owner(slug)
         return _task_row(entity) if entity is not None else None
 
     def get_detail(self, task_id: str) -> dict[str, Any] | None:

@@ -108,3 +108,20 @@ def test_views_soft_delete_and_slug_conflict() -> None:
     assert stored_revision("task_1", 1)["task_deleted"] is True
     assert store.resolve_members(members, include_deleted=False) == []
     assert set(store.revisions([("task_1", 1), ("task_1", 9)])) == {("task_1", 1)}
+
+
+def test_concurrent_creates_with_one_slug_leave_the_first(monkeypatch) -> None:
+    store = TaskStore()
+    # Both creates pass the pre-check, as two racing requests would.
+    monkeypatch.setattr(store, "_ensure_slug_free", lambda slug, task_id=None: None)
+    store.create_with_initial_revision(
+        "task_a", name="a", slug="same", description=None, visibility="private", object_key="a"
+    )
+    with pytest.raises(Conflict) as exc:
+        store.create_with_initial_revision(
+            "task_b", name="b", slug="same", description=None, visibility="private", object_key="b"
+        )
+
+    assert exc.value.code == "slug_conflict"
+    assert store.get_by_slug("same")["id"] == "task_a"
+    assert store.get("task_b") is None and store.count() == 1
