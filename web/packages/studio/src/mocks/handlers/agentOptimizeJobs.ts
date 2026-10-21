@@ -135,7 +135,8 @@ export const mockOptimizationStrategies: OptimizationStrategyList = {
     {
       name: 'config-tuning',
       title: 'Hyper-parameter and prompt optimization',
-      description: 'Run an optimize config against the agent.',
+      description:
+        'Tunes model settings and the prompt with hyperparameter search and genetic algorithms, scored against your eval set.',
       requires_config: true,
     },
     {
