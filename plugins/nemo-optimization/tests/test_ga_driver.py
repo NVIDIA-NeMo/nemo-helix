@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import random
 from pathlib import Path
 from typing import Any
 
@@ -614,8 +615,11 @@ class FeedbackRecordingTransformer:
         return f"{parent_a} + {parent_b}"
 
 
-class FixedRandom:
+class FixedRandom(random.Random):
+    """A Random whose ``random()`` draws come from a fixed script."""
+
     def __init__(self, values: list[float]) -> None:
+        super().__init__()
         self._values = iter(values)
 
     def random(self) -> float:

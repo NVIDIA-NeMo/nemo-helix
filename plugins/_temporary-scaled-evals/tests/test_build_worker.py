@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from unittest.mock import MagicMock
 
 import pytest
@@ -11,6 +10,8 @@ import pytest
 pytest.importorskip("scaled_evals")
 
 from scaled_evals.api.build import worker
+from scaled_evals.api.task_store import TaskStore
+from task_fixtures import stored_revision
 
 
 def test_finalize_build_persists_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -78,27 +79,18 @@ def test_finalize_uploaded_persists_terminal_result(monkeypatch: pytest.MonkeyPa
         failure.assert_not_called()
 
 
-def test_terminal_persistence_helpers_use_repository(monkeypatch: pytest.MonkeyPatch) -> None:
-    connection = MagicMock()
-    repository = MagicMock()
+def test_terminal_persistence_helpers_record_outcome() -> None:
+    store = TaskStore()
+    for task_id in ("task_1", "task_2"):
+        store.create_with_initial_revision(
+            task_id, name=task_id, slug=task_id, description=None, visibility="private", object_key="k"
+        )
+        store.mark_latest_revision_building(task_id, build_backend="buildkit")
 
-    @contextmanager
-    def connect():
-        yield connection
+    worker._record_success("task_1", 1, "registry.example/task:rev1", "sha256:abc")
+    worker._record_failure("task_2", 1, "terminal failure")
 
-    monkeypatch.setattr(worker, "_connect", connect)
-    repository_factory = MagicMock(return_value=repository)
-    monkeypatch.setattr(worker, "TaskBuildRepository", repository_factory)
-
-    worker._record_success("task_1", 2, "registry.example/task:rev2", "sha256:abc")
-    worker._record_failure("task_1", 3, "terminal failure")
-
-    assert repository_factory.call_count == 2
-    repository_factory.assert_any_call(connection)
-    repository.record_success.assert_called_once_with(
-        "task_1",
-        2,
-        image_ref="registry.example/task:rev2",
-        image_digest="sha256:abc",
-    )
-    repository.record_failure.assert_called_once_with("task_1", 3, "terminal failure")
+    ready = stored_revision("task_1", 1)
+    failed = stored_revision("task_2", 1)
+    assert (ready["status"], ready["image_digest"]) == ("ready", "sha256:abc")
+    assert (failed["status"], failed["build_error"]) == ("failed", "terminal failure")

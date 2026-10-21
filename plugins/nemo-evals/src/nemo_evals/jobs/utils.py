@@ -13,6 +13,7 @@ from typing import TypeVar, cast
 import httpx
 from nemo_evals.jobs.secret_env import JobSecretResolver
 from nemo_helix_plugin.client.adapter import AsyncHelixClient
+from nemo_helix_plugin.client.auth import AsyncClientTokenProvider, AsyncFromSyncTokenProvider
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nhx_evals_sdk import Evaluator
 from nhx_evals_sdk.execution.backends.local.backend import LocalBackend
@@ -103,7 +104,12 @@ def async_client_from_sync_client(client: NemoClient) -> Generator[AsyncNemoClie
     async_client = AsyncNemoClient(
         base_url=client.base_url,
         workspace=client.workspace,
-        auth=client._auth,
+        # Built-in providers serve async clients directly; a sync-only one is run on a thread.
+        auth=(
+            client._auth
+            if client._auth is None or isinstance(client._auth, AsyncClientTokenProvider)
+            else AsyncFromSyncTokenProvider(client._auth)
+        ),
         default_headers=client.default_headers or None,
         timeout=client._timeout,
         retry=client._retry,

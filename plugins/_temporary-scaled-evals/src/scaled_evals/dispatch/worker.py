@@ -928,7 +928,6 @@ class Dispatcher:
                         and effective_image_mode(spec.harbor_config) == "managed"
                     ):
                         imports = prepare_dataset_images(
-                            conn,
                             datasets=dataset_configs(spec.harbor_config),
                             harbor_dir=str(spec.harbor_dir or settings.harbor_dir),
                         )

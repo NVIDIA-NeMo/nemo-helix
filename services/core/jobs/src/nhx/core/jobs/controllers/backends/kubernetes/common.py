@@ -92,6 +92,7 @@ from nhx.core.jobs.controllers.backends.base import (
     is_workload_identity_token_exchange_enabled,
     resolve_gpu_job_shm_size,
     resolve_task_image,
+    step_ttl_seconds_active,
     validate_no_reserved_managed_job_environment_variable_names,
 )
 from nhx.core.jobs.controllers.backends.exceptions import FailedToScheduleError, JobStorageError
@@ -1696,7 +1697,7 @@ def create_pod_template_spec(
         "containers": [job_container],
         "volumes": volumes,
         "restart_policy": "Never",
-        "active_deadline_seconds": config.ttl_seconds_active,
+        "active_deadline_seconds": step_ttl_seconds_active(step, config.ttl_seconds_active),
         "tolerations": build_tolerations(config.tolerations, num_gpus=num_gpus),
         "node_selector": config.node_selector or {},
         "affinity": build_affinity(config.affinity),

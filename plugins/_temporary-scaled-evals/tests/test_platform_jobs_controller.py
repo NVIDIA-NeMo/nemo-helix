@@ -22,8 +22,8 @@ pytest.importorskip("scaled_evals")
 
 import nemo_scaled_evals_plugin.controller as controller_module
 from nemo_scaled_evals_plugin.controller import ScaledEvalsJobsController
-from scaled_evals.api.repositories.build_repository import TaskBuildJob
 from scaled_evals.api.settings import settings
+from scaled_evals.api.task_store import TaskBuildJob
 
 _CREATED = datetime(2026, 9, 29, tzinfo=UTC)
 

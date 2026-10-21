@@ -31,7 +31,7 @@ def spec(**overrides) -> GymHostSpec:
         ),
     }
     fields.update(overrides)
-    return GymHostSpec(**fields)
+    return GymHostSpec.model_validate(fields)
 
 
 def test_one_claim_with_two_sub_paths_stays_two_directories(tmp_path: Path) -> None:

@@ -24,6 +24,7 @@ from scaled_evals.api.repositories.base_repository import (
     substring_search_pattern,
 )
 from scaled_evals.api.schemas.common import decode_cursor
+from scaled_evals.api.task_store import TaskStore
 from scaled_evals.models.evaluations import EvaluationResultWrite
 from scaled_evals.models.execution_snapshot import (
     build_execution_snapshot,
@@ -70,8 +71,7 @@ EVALUATION_DETAIL_COLUMNS = (
     "e.reward, e.reward_value, e.n_trials, e.n_completed, e.n_errored, "
     "e.n_failed_solve, e.exception_counts, e.finished_at, e.created_at, "
     "e.updated_at, e.result, e.evidence_status, e.evidence_error, "
-    "e.archive_status, e.archive_error, "
-    "r.image_ref AS image_ref, r.image_digest AS image_digest"
+    "e.archive_status, e.archive_error"
 )
 _CANCELLABLE_SQL = "('blocked', 'queued', 'provisioning', 'running')"
 RetryBlockReason = Literal["terminal_artifacts_finalizing", "benchmark_unavailable"]
@@ -237,17 +237,6 @@ _LOAD_FOR_DISPATCH_SQL = """
         e.next_retry_at,
         e.last_failure_code,
         e.last_failure_category,
-        b.slug AS task_slug,
-        r.image_ref,
-        r.image_digest,
-        r.verifier_image_ref,
-        r.verifier_image_digest,
-        r.tarball_sha256,
-        r.tarball_object_key,
-        r.tarball_size_bytes,
-        r.build_backend,
-        r.build_payload,
-        r.build_completed_at,
         e.extra_skill_object_keys,
         e.instruction_prefix,
         e.instruction_postfix,
@@ -265,13 +254,31 @@ _LOAD_FOR_DISPATCH_SQL = """
         e.updated_at,
         e.finished_at
     FROM evaluations e
-    JOIN task_revisions r
-        ON r.task_id = e.task_id
-       AND r.revision = e.task_revision
-    JOIN tasks b ON b.id = e.task_id
-    LEFT JOIN benchmark_runs br ON br.id = e.benchmark_run_id
     WHERE e.id = %s AND e.deleted_at IS NULL
 """
+_DISPATCH_REVISION_FIELDS = (
+    "image_ref",
+    "image_digest",
+    "verifier_image_ref",
+    "verifier_image_digest",
+    "tarball_sha256",
+    "tarball_object_key",
+    "tarball_size_bytes",
+    "build_backend",
+    "build_payload",
+    "build_completed_at",
+)
+
+
+def _with_task_images(rows: builtins.list[dict]) -> builtins.list[dict]:
+    """Add each evaluation's task revision `image_ref` and `image_digest`, None when the revision is gone."""
+    revisions = TaskStore().revisions((row["task_id"], row["task_revision"]) for row in rows)
+    for row in rows:
+        revision = revisions.get((row["task_id"], row["task_revision"]), {})
+        row["image_ref"] = revision.get("image_ref")
+        row["image_digest"] = revision.get("image_digest")
+    return rows
+
 
 _ARCHIVE_CLAIM_SQL = """
     WITH candidate AS (
@@ -344,17 +351,21 @@ class EvaluationRepository:
     def __init__(self, conn: psycopg.Connection) -> None:
         self.conn = conn
 
-    def task_revision_for_evaluation(self, task_id: str, revision: int) -> dict | None:
+    def task_in_active_use(self, task_id: str) -> bool:
+        """Return whether an unfinished evaluation runs the task."""
         with self.conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT status, image_ref, image_digest, tarball_object_key
-                FROM task_revisions
-                WHERE task_id = %s AND revision = %s
+                SELECT id
+                FROM evaluations
+                WHERE deleted_at IS NULL
+                  AND status NOT IN ('succeeded', 'failed', 'cancelled')
+                  AND task_id = %s
+                LIMIT 1
                 """,
-                (task_id, revision),
+                (task_id,),
             )
-            return cur.fetchone()
+            return cur.fetchone() is not None
 
     def profile_in_active_use(self, profile_id: str) -> bool:
         """Return whether an unfinished evaluation references the config profile."""
@@ -424,27 +435,34 @@ class EvaluationRepository:
     ) -> dict[str, Any]:
         """Capture mutable execution inputs in the insert transaction.
 
-        Task rows are read under row locks. Config profiles live in Entity
-        Store, so they are copied as read; `profiles_by_id` lets a caller
-        inserting many evaluations read them once.
+        Tasks and config profiles live in Entity Store, so they are copied as
+        read; `profiles_by_id` lets a caller inserting many evaluations read
+        the profiles once.
         """
-        cur.execute(
-            """
-            SELECT
-                t.id, t.name, t.slug, r.revision, r.status,
-                r.image_ref, r.image_digest, r.tarball_object_key,
-                r.tarball_size_bytes, r.tarball_sha256, r.build_backend,
-                r.build_payload, r.build_completed_at, r.created_at
-            FROM tasks t
-            JOIN task_revisions r ON r.task_id = t.id
-            WHERE t.id = %s AND r.revision = %s AND t.deleted_at IS NULL
-            FOR KEY SHARE OF t, r
-            """,
-            (task_id, task_revision),
-        )
-        task = cur.fetchone()
-        if task is None:
+        revision = TaskStore().revision(task_id, task_revision, include_deleted=False)
+        if revision is None:
             raise InvalidReference(f"task revision not found: {task_id} rev {task_revision}")
+        task = {
+            "id": task_id,
+            "name": revision["task_name"],
+            "slug": revision["task_slug"],
+            **{
+                field: revision[field]
+                for field in (
+                    "revision",
+                    "status",
+                    "image_ref",
+                    "image_digest",
+                    "tarball_object_key",
+                    "tarball_size_bytes",
+                    "tarball_sha256",
+                    "build_backend",
+                    "build_payload",
+                    "build_completed_at",
+                    "created_at",
+                )
+            },
+        }
 
         wanted_profiles = {role: value for role, value in profile_ids.items() if value}
         if profiles_by_id is None:
@@ -765,16 +783,13 @@ class EvaluationRepository:
                 f"""
                 SELECT {EVALUATION_DETAIL_COLUMNS}, e.deleted_at
                 FROM evaluations e
-                LEFT JOIN task_revisions r
-                  ON r.task_id = e.task_id
-                 AND r.revision = e.task_revision
                 {where}
                 ORDER BY e.updated_at ASC, e.id ASC
                 LIMIT %s
                 """,
                 params,
             )
-            return cur.fetchall()
+            return _with_task_images(cur.fetchall())
 
     def get(self, evaluation_id: str) -> dict | None:
         with self.conn.cursor() as cur:
@@ -782,14 +797,12 @@ class EvaluationRepository:
                 f"""
                 SELECT {EVALUATION_DETAIL_COLUMNS}
                 FROM evaluations e
-                LEFT JOIN task_revisions r
-                  ON r.task_id = e.task_id
-                 AND r.revision = e.task_revision
                 WHERE e.id = %s AND e.deleted_at IS NULL
                 """,
                 (evaluation_id,),
             )
-            return cur.fetchone()
+            row = cur.fetchone()
+        return _with_task_images([row])[0] if row is not None else None
 
     def exists(self, evaluation_id: str) -> bool:
         with self.conn.cursor() as cur:
@@ -1830,7 +1843,15 @@ class EvaluationRepository:
     def load_for_dispatch(self, evaluation_id: str) -> dict | None:
         with self.conn.cursor() as cur:
             cur.execute(_LOAD_FOR_DISPATCH_SQL, (evaluation_id,))
-            return cur.fetchone()
+            row = cur.fetchone()
+        revision = row and TaskStore().revision(row["task_id"], row["task_revision"])
+        if not revision:
+            return None
+        return {
+            **row,
+            "task_slug": revision["task_slug"],
+            **{field: revision[field] for field in _DISPATCH_REVISION_FIELDS},
+        }
 
     def load_dispatch_state(self, evaluation_id: str) -> dict | None:
         """Return only the columns of the dispatch row that change during a run."""

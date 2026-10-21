@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
+from nemo_agents_plugin.fabric.runtime import FabricRuntimeResult, FabricRuntimeStream
 from nemo_agents_plugin.fabric.streaming import (
     FabricStreamResultError,
     extract_assistant_text_delta,
@@ -16,29 +17,20 @@ from nemo_agents_plugin.fabric.streaming import (
 )
 
 
-class _FakeFabricRuntimeResult:
-    def __init__(self, *, status: str = "succeeded", response: str | None = "done", error: object = None) -> None:
-        self.status = status
-        self.response = response
-        self.error = error
+class _FakeFabricRuntimeStream(FabricRuntimeStream):
+    """A Fabric runtime stream that replays scripted ATOF records and a terminal result."""
 
-
-class _FakeFabricRuntimeStream:
-    def __init__(
-        self,
-        records: list[dict[str, Any]],
-        *,
-        result: _FakeFabricRuntimeResult | None = None,
-    ) -> None:
+    def __init__(self, records: list[dict[str, Any]], *, result: FabricRuntimeResult | None = None) -> None:
+        super().__init__(stream=None)
         self._records = records
-        self._result = result or _FakeFabricRuntimeResult()
+        self._result = result or FabricRuntimeResult(status="succeeded", response="done")
         self.result_awaited = False
 
     async def records(self) -> AsyncIterator[dict[str, Any]]:
         for record in self._records:
             yield record
 
-    async def result(self) -> _FakeFabricRuntimeResult:
+    async def result(self) -> FabricRuntimeResult:
         self.result_awaited = True
         return self._result
 
@@ -221,7 +213,7 @@ async def test_iter_fabric_assistant_text_deltas_skips_duplicate_turn_summary() 
 async def test_iter_fabric_assistant_text_deltas_falls_back_to_terminal_response() -> None:
     stream = _FakeFabricRuntimeStream(
         [{"kind": "scope", "scope_category": "start", "name": "request"}],
-        result=_FakeFabricRuntimeResult(response="terminal response"),
+        result=FabricRuntimeResult(status="succeeded", response="terminal response"),
     )
 
     assert [text async for text in iter_fabric_assistant_text_deltas(stream)] == ["terminal response"]
@@ -231,7 +223,7 @@ async def test_iter_fabric_assistant_text_deltas_falls_back_to_terminal_response
 async def test_iter_fabric_assistant_text_deltas_raises_failed_terminal_result() -> None:
     stream = _FakeFabricRuntimeStream(
         [{"data": {"choices": [{"delta": {"content": "partial"}}]}}],
-        result=_FakeFabricRuntimeResult(status="failed", error={"message": "terminal failure"}),
+        result=FabricRuntimeResult(status="failed", response="done", error={"message": "terminal failure"}),
     )
 
     with pytest.raises(FabricStreamResultError, match="terminal failure"):

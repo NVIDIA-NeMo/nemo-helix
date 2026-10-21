@@ -8,6 +8,7 @@ import io
 import pytest
 from nemo_helix_plugin.cli_progress import _MinutesSecondsElapsedColumn, request_progress
 from rich.console import Console
+from rich.progress import Task, TaskID
 
 
 def _tty_console() -> Console:
@@ -87,11 +88,16 @@ def test_handle_update_is_safe_when_disabled() -> None:
     ],
 )
 def test_elapsed_column_renders_minutes_seconds(elapsed: float | None, expected: str) -> None:
-    class _StubTask:
-        def __init__(self, elapsed: float | None) -> None:
-            self.elapsed = elapsed
-            self.finished = False
-            self.finished_time = None
+    # A running task whose clock reads ``elapsed`` seconds after it started (or not started yet).
+    task = Task(
+        id=TaskID(0),
+        description="",
+        total=None,
+        completed=0,
+        _get_time=lambda: float(elapsed or 0),
+    )
+    if elapsed is not None:
+        task.start_time = 0.0
 
-    rendered = _MinutesSecondsElapsedColumn().render(_StubTask(elapsed))  # type: ignore[arg-type]
+    rendered = _MinutesSecondsElapsedColumn().render(task)
     assert rendered.plain == expected

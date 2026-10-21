@@ -9,7 +9,7 @@ fine on a CPU box without ``unsloth``/``torch`` installed.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from nhx.unsloth.schemas import (
     DatasetSpec,
@@ -24,7 +24,7 @@ from nhx.unsloth.tasks.training.backends.unsloth_sft import build_model_load_kwa
 
 def _spec(
     *,
-    finetuning_type: str = "lora",
+    finetuning_type: Literal["lora", "all_weights"] = "lora",
     load_in_4bit: bool = True,
     model_extra: dict[str, Any] | None = None,
     lora: LoRAParams | None = None,

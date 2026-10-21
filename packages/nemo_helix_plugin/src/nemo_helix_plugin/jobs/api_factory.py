@@ -42,6 +42,7 @@ from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.docker import validate_gpu_available_for_docker
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError, HelixJobDependencyUnavailableError
+from nemo_helix_plugin.jobs.list_filter import BaseJobsListFilter
 from nemo_helix_plugin.jobs.openapi_utils import generate_openapi_extra_params
 from nemo_helix_plugin.jobs.providers import (
     ComputeResources,
@@ -86,7 +87,7 @@ from nemo_helix_plugin.jobs.types import (
 from nemo_helix_plugin.jobs.types import (
     HelixJobResponse as HelixJob,
 )
-from nemo_helix_plugin.schema import DatetimeFilter, Filter, Page, PaginationData, StringFilter
+from nemo_helix_plugin.schema import Page, PaginationData
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
@@ -165,27 +166,6 @@ class BaseJob(BaseModel, Generic[JobConfigT]):
     ownership: dict[str, object] | None = None
     custom_fields: dict[str, object] | None = None
     control: JobControl | None = None
-
-
-class BaseJobsListFilter(Filter):
-    created_at: DatetimeFilter | None = Field(
-        default=None, description="Jobs created at 'gte' datetime or 'lte' datetime."
-    )
-    name: StringFilter | str | None = Field(default=None, description="Name of the job.")
-    workspace: str | None = Field(default=None, description="Workspace of the job.")
-    project: str | None = Field(default=None, description="Project containing the job.")
-    status: HelixJobStatus | None = Field(default=None, description="The current status.")
-    spec: dict[str, Any] | None = Field(
-        default=None, description="Filter on a path within the job's spec, e.g. `spec.target.format`."
-    )
-    updated_at: DatetimeFilter | None = Field(
-        default=None, description="Jobs updated at 'gte' datetime or 'lte' datetime."
-    )
-
-    @classmethod
-    def _get_entity_namespace_map(cls) -> dict[str, str]:
-        """Declare ``spec`` as a namespace so ``spec.<path>`` passes field validation."""
-        return {"spec": "data.spec"}
 
 
 class BaseJobsSortField(StrEnum):

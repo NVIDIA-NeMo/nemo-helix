@@ -95,8 +95,8 @@ def test_harbor_submission_converts_target_before_creating_job(monkeypatch, tmp_
     jobs_dir = tmp_path / "harbor-jobs"
     options = {} if directory == "omitted" else {"jobs_dir": None if directory == "none" else jobs_dir}
     runner = HarborAgentTaskRunner(
-        config=HarborRuntimeConfig(
-            **options, agent_name="oracle", reward_key="score", n_attempts=2, n_concurrent_trials=3
+        config=HarborRuntimeConfig.model_validate(
+            {**options, "agent_name": "oracle", "reward_key": "score", "n_attempts": 2, "n_concurrent_trials": 3}
         )
     )
     tasks = TasksetRef("default/suite")

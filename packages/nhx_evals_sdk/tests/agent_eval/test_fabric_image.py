@@ -113,8 +113,9 @@ def test_image_exists_false_when_image_absent(monkeypatch: pytest.MonkeyPatch) -
 
 def test_image_exists_raises_on_daemon_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     # An unresponsive daemon must fail fast (bounded), not hang the runtime indefinitely.
-    def _hang(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
+    def _hang(argv: list[str], *, timeout: float | None = None, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        assert timeout is not None, "the docker call must be bounded"
+        raise subprocess.TimeoutExpired(argv, timeout)
 
     monkeypatch.setattr(image_mod.subprocess, "run", _hang)
     with pytest.raises(FabricImageError, match="timed out"):

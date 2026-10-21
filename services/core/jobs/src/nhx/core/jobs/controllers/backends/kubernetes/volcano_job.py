@@ -39,6 +39,7 @@ from nhx.core.jobs.controllers.backends.base import (
     JobUpdate,
     require_staleness_timeout_seconds,
     staleness_error_message,
+    step_ttl_seconds_active,
 )
 from nhx.core.jobs.controllers.backends.exceptions import SchedulingDeferred
 from nhx.core.jobs.controllers.backends.kubernetes.common import (
@@ -130,7 +131,9 @@ class VolcanoJobBackend(
         self._workload_delegations = KubernetesPodBoundWorkloadDelegationManager(
             core_v1=self._core_v1,
             namespace=self.namespace,
-            ttl_seconds_active=lambda: self._execution_profile_config.ttl_seconds_active,
+            ttl_seconds_active=lambda step: step_ttl_seconds_active(
+                step, self._execution_profile_config.ttl_seconds_active
+            ),
             workload_audience=get_workload_delegation_audience,
             register_workload_delegation=self._workload_delegation_store.register,
             revoke_workload_delegation=self._workload_delegation_store.revoke,
@@ -457,7 +460,10 @@ class VolcanoJobBackend(
         if step.status == HelixJobStatus.ACTIVE:
             if volcano_job is not None and (
                 result := self.enforce_sync_ttl(
-                    step, self._execution_profile_config.ttl_seconds_active, volcano_job, before_active=False
+                    step,
+                    step_ttl_seconds_active(step, self._execution_profile_config.ttl_seconds_active),
+                    volcano_job,
+                    before_active=False,
                 )
             ):
                 return result

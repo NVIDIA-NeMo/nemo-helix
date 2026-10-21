@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from nemo_agents_plugin.api.v2 import sample_agent as sample
 from nemo_helix_plugin.agents.types import Agent, AgentDeployment, CreateSampleAgentRequest, SampleAgentStreamEvent
 from nemo_helix_plugin.files.types import FilesetPurpose
@@ -26,6 +27,15 @@ class _Page:
     async def items(self):
         for item in self._items:
             yield item
+
+
+async def _frames(response: StreamingResponse) -> list[SampleAgentStreamEvent]:
+    """Parse the streamed events; the endpoint writes each one as a text frame."""
+    frames: list[SampleAgentStreamEvent] = []
+    async for chunk in response.body_iterator:
+        assert isinstance(chunk, str)
+        frames.append(SampleAgentStreamEvent.model_validate_json(chunk))
+    return frames
 
 
 def _wire(value):
@@ -175,7 +185,7 @@ async def test_incomplete_workspace_resumes_without_creating_another(monkeypatch
         principal_id="alice",
         authorize=authorize,
     )
-    frames = [SampleAgentStreamEvent.model_validate_json(chunk) async for chunk in response.body_iterator]
+    frames = await _frames(response)
 
     assert [(frame.kind, frame.component) for frame in frames] == [
         ("progress", "workspace"),
@@ -226,7 +236,7 @@ async def test_failure_preserves_workspace_for_retry(monkeypatch: pytest.MonkeyP
         principal_id="alice",
         authorize=AsyncMock(),
     )
-    frames = [SampleAgentStreamEvent.model_validate_json(chunk) async for chunk in response.body_iterator]
+    frames = await _frames(response)
 
     assert response.status_code == 200
     assert frames[-2].component == "dataset"
@@ -260,7 +270,7 @@ async def test_model_conflict_ends_stream_without_uploading_files(monkeypatch: p
         principal_id="alice",
         authorize=AsyncMock(),
     )
-    frames = [SampleAgentStreamEvent.model_validate_json(chunk) async for chunk in response.body_iterator]
+    frames = await _frames(response)
 
     assert frames[-1].kind == "error"
     assert frames[-1].status_code == 409

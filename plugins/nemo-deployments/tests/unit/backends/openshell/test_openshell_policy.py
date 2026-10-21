@@ -160,11 +160,11 @@ def test_inject_platform_egress_overwrites_user_rule_and_keeps_others() -> None:
             "pypi": {"name": "pypi", "endpoints": [{"host": "pypi.org", "port": 443}]},
         }
     }
-    inject_platform_egress(policy, _egress())
+    injected = inject_platform_egress(policy, _egress())
 
-    rule = policy["network_policies"][PLATFORM_EGRESS_KEY]
+    rule = injected["network_policies"][PLATFORM_EGRESS_KEY]
     assert rule["endpoints"][0]["host"] == "host.docker.internal"  # ours, not the user's
-    assert "pypi" in policy["network_policies"]  # unrelated rule preserved
+    assert "pypi" in injected["network_policies"]  # unrelated rule preserved
 
 
 def test_inject_platform_egress_adds_rule_when_absent() -> None:
@@ -269,7 +269,7 @@ def test_executor_config_landlock_default_and_validation() -> None:
         OpenShellExecutorConfig(landlock_compatibility="hard_requirement").landlock_compatibility == "hard_requirement"
     )
     with pytest.raises(ValueError):
-        OpenShellExecutorConfig(landlock_compatibility="bogus")
+        OpenShellExecutorConfig.model_validate({"landlock_compatibility": "bogus"})
 
 
 # --- policy overrides are validated strictly ---

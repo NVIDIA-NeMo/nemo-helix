@@ -3,7 +3,7 @@
 
 """Entity Store entities for scaled-evals metadata.
 
-Config profiles and agent bundles live only here. `ScaledEvaluation` is a derived
+Tasks, config profiles and agent bundles live only here. `ScaledEvaluation` is a derived
 read model with exactly one writer (the controller's projection phase), which is
 what makes it safe on a store that offers per-entity optimistic locking but no
 multi-entity transaction and no atomic dequeue.
@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Any
 
 from nemo_helix_plugin.entity import NemoEntity
-from pydantic import Field
+from pydantic import BaseModel, Field
 from scaled_evals.api.schemas.evaluations import Evaluation
 
 # Columns the SQL `q` filter matches with ILIKE. Projected into one lowercased
@@ -116,6 +116,50 @@ class ScaledEvalsAgentBundle(NemoEntity, entity_type="scaled_evals_agent_bundle"
     qualification_evidence: dict[str, Any] = Field(default_factory=dict)
     qualified_at: datetime | None = None
     qualified_by: str | None = None
+
+
+class ScaledEvalsTaskRevision(BaseModel):
+    """One immutable task-pack revision and its image build state."""
+
+    revision: int
+    status: str = "uploading"
+    tarball_object_key: str
+    tarball_size_bytes: int | None = None
+    tarball_sha256: str | None = None
+    image_ref: str | None = None
+    image_digest: str | None = None
+    verifier_image_ref: str | None = None
+    verifier_image_digest: str | None = None
+    build_backend: str | None = None
+    build_payload: dict[str, Any] = Field(default_factory=dict)
+    build_credentials: dict[str, str] = Field(default_factory=dict)
+    build_error: str | None = None
+    build_attempts: int = 0
+    build_claimed_by: str | None = None
+    build_claimed_at: datetime | None = None
+    build_first_claimed_at: datetime | None = None
+    build_next_attempt_at: datetime | None = None
+    build_started_at: datetime | None = None
+    build_completed_at: datetime | None = None
+    created_at: datetime
+
+
+class ScaledEvalsTask(NemoEntity, entity_type="scaled_evals_task"):
+    """A task, named by its task id, with every revision embedded.
+
+    Embedding keeps revision numbering, finalize, and build-state transitions
+    to a single versioned write on one entity. Soft-deleted tasks are kept so
+    evaluations that ran them still resolve their revision.
+    """
+
+    owner_id: str | None = None
+    display_name: str
+    slug: str
+    description: str | None = None
+    visibility: str = "private"
+    current_revision: int | None = None
+    deleted_at: datetime | None = None
+    revisions: list[ScaledEvalsTaskRevision] = Field(default_factory=list)
 
 
 def searchable_blob(row: dict[str, Any]) -> str:

@@ -37,6 +37,8 @@ export type DeploymentIndicatorState =
       status?: ModelDeploymentStatus;
       statusMessage?: string;
       providerRef?: string;
+      /** `<workspace>/<name>` of the backing deployment, when `hasDeployment`. */
+      deploymentRef?: string;
     }
   /** Adapter only: the base model is served, but this adapter is not loaded. */
   | { kind: 'adapter-not-loaded' }
@@ -216,6 +218,7 @@ export function useModelDeploymentStatuses(
           status: deployment?.status,
           statusMessage: deployment?.statusMessage,
           providerRef: `${servesTarget.workspace}/${servesTarget.name}`,
+          deploymentRef,
         });
         continue;
       }

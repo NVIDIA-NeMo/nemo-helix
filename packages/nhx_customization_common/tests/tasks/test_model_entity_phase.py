@@ -4,12 +4,14 @@
 """The model_entity task reports its own phase, so the job does not keep showing the upload's."""
 
 import importlib
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 from nhx.common.jobs.schemas import HelixJobStatus
+from nhx.customization_common.service.context import NHXJobContext
 
 # The package re-exports the ``run`` function under the module's own name.
 model_entity_run = importlib.import_module("nhx.customization_common.tasks.model_entity.run")
@@ -43,8 +45,18 @@ def reporter(monkeypatch: pytest.MonkeyPatch) -> _RecordingReporter:
 
 def _run(runner: MagicMock, monkeypatch: pytest.MonkeyPatch) -> int:
     monkeypatch.setattr(model_entity_run, "ModelEntityRunner", lambda **kwargs: runner)
-    job_ctx = SimpleNamespace(job_id="job-1", workspace="default", config_path="/config.json")
-    return model_entity_run.run(MagicMock(), job_ctx, service_name="customizer")  # type: ignore[arg-type]
+    job_ctx = NHXJobContext(
+        workspace="default",
+        job_id="job-1",
+        attempt_id="attempt-1",
+        step="step",
+        task="task",
+        jobs_url=None,
+        files_url=None,
+        storage_path=Path("/storage"),
+        config_path=Path("/config.json"),
+    )
+    return model_entity_run.run(MagicMock(), job_ctx, service_name="customizer")
 
 
 def test_reports_registering_then_completed(reporter: _RecordingReporter, monkeypatch: pytest.MonkeyPatch) -> None:
