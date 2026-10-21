@@ -9,7 +9,7 @@ description: "Set up OpenSandbox, Kata, and the Helm values that run sandboxed G
 
 Sandboxed GRPO runs untrusted environment code in an OpenSandbox pod, separate from the training pod. The sandbox needs two endpoints on the training pod: the episode broker and the vLLM generation server. Everything else on that pod, including Ray, is the training control plane and must stay unreachable from the sandbox.
 
-This how-to separates the settings that make GRPO **run** from the settings that make the sandbox **secure**. A GRPO job starts and trains without the network-policy settings and without Kata, but then the sandbox's cluster access is open and a kernel exploit in the Gym can leave the sandbox. The worked example is a single-node minikube cluster. On another Kubernetes cluster, use the same Helm overlay and follow [On a Kubernetes cluster](#on-a-kubernetes-cluster).
+This how-to separates the settings that make GRPO **run** from the settings that make the sandbox **secure**. A GRPO job starts and trains without the network-policy settings and without Kata. The OpenSandbox sidecar still denies other private addresses, but its exceptions are addresses with no port: the sandbox can reach every port on the training pod, including Ray, and every port on the cluster DNS resolver. Without Kata, a kernel exploit in the Gym can leave the sandbox. The worked example is a single-node minikube cluster. On another Kubernetes cluster, use the same Helm overlay and follow [On a Kubernetes cluster](#on-a-kubernetes-cluster).
 
 ## What each layer does
 
