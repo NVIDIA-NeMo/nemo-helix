@@ -3661,12 +3661,10 @@ async def test_split_job_task_filters_select_folder_names_literally(
     jobs = await _created_jobs(tmp_path, monkeypatch, dataset)
 
     selected = {
-        name: sorted(
-            entry.path.name for entry in await DatasetConfig(path=dataset, task_names=task_names).get_task_configs()
-        )
+        name: {entry.path for entry in await DatasetConfig(path=dataset, task_names=task_names).get_task_configs()}
         for name, _, task_names, _ in jobs
     }
-    assert selected == {HOST_ALIAS_JOB: ["probe1"], NETWORK_RESTRICTED_JOB: ["probe[1]"]}
+    assert selected == {HOST_ALIAS_JOB: {dataset / "probe1"}, NETWORK_RESTRICTED_JOB: {dataset / "probe[1]"}}
 
 
 def test_a_split_job_dir_yields_the_trials_of_both_harbor_jobs(tmp_path: Path) -> None:
