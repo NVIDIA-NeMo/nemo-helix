@@ -11,11 +11,13 @@ import threading
 import types
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from nemo_helix_plugin.job_context import JobContext
 from nhx.unsloth.schemas import DatasetSpec, ModelLoadSpec, OutputResponse, TrainingSpec, UnslothJobOutput
 from nhx.unsloth.tasks.training.backends import unsloth_sft
+from nhx.unsloth.tasks.training.backends.callbacks import TrainingProgressCallback
 from nhx.unsloth.tasks.training.backends.pause import create_pause_callback, newest_complete_checkpoint
 
 
@@ -53,16 +55,21 @@ class _Flow:
     def __init__(self, *, save_strategy: str = "epoch", max_steps: int = 30) -> None:
         pytest.importorskip("transformers")
         from transformers.trainer_callback import CallbackHandler, DefaultFlowCallback, TrainerControl, TrainerState
+        from transformers.training_args import TrainingArguments
 
         self.requested = threading.Event()
         self.pause = create_pause_callback(self.requested)
         self.handler = CallbackHandler([DefaultFlowCallback, self.pause], None, None, None, None)
-        self.args = SimpleNamespace(
-            logging_first_step=False,
-            logging_strategy="steps",
-            eval_strategy="epoch",
-            eval_delay=0,
-            save_strategy=save_strategy,
+        # Only the fields DefaultFlowCallback reads.
+        self.args = cast(
+            TrainingArguments,
+            SimpleNamespace(
+                logging_first_step=False,
+                logging_strategy="steps",
+                eval_strategy="epoch",
+                eval_delay=0,
+                save_strategy=save_strategy,
+            ),
         )
         self.state = TrainerState(max_steps=max_steps, logging_steps=10, eval_steps=10, save_steps=10)
         self.control = TrainerControl()
@@ -169,13 +176,11 @@ def run_training(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     seen: dict[str, Any] = {"saved": False}
 
     unsloth_mod = types.ModuleType("unsloth")
-    unsloth_mod.FastLanguageModel = SimpleNamespace(  # type: ignore[attr-defined]
-        from_pretrained=lambda **kwargs: (object(), object())
-    )
+    setattr(unsloth_mod, "FastLanguageModel", SimpleNamespace(from_pretrained=lambda **kwargs: (object(), object())))
     monkeypatch.setitem(sys.modules, "unsloth", unsloth_mod)
     datasets_mod = types.ModuleType("datasets")
-    datasets_mod.Dataset = object  # type: ignore[attr-defined]
-    datasets_mod.load_dataset = lambda *args, **kwargs: None  # type: ignore[attr-defined]
+    setattr(datasets_mod, "Dataset", object)
+    setattr(datasets_mod, "load_dataset", lambda *args, **kwargs: None)
     monkeypatch.setitem(sys.modules, "datasets", datasets_mod)
 
     class SFTConfig:
@@ -196,8 +201,8 @@ def run_training(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
             return SimpleNamespace(training_loss=0.5)
 
     trl_mod = types.ModuleType("trl")
-    trl_mod.SFTConfig = SFTConfig  # type: ignore[attr-defined]
-    trl_mod.SFTTrainer = SFTTrainer  # type: ignore[attr-defined]
+    setattr(trl_mod, "SFTConfig", SFTConfig)
+    setattr(trl_mod, "SFTTrainer", SFTTrainer)
     monkeypatch.setitem(sys.modules, "trl", trl_mod)
 
     monkeypatch.setattr(unsloth_sft.NHXJobContext, "from_env", staticmethod(lambda: SimpleNamespace()))
@@ -226,15 +231,15 @@ def run_training(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
         progress = _Progress()
         result = unsloth_sft.train_sft(
             spec,
-            SimpleNamespace(job_id="", workspace="default"),  # type: ignore[arg-type]
+            cast(JobContext, SimpleNamespace(job_id="", workspace="default")),
             output_path=str(output),
             checkpoint_path=str(checkpoints),
-            progress_callback=progress,  # type: ignore[arg-type]
+            progress_callback=cast(TrainingProgressCallback, progress),
         )
         return result, seen, progress
 
-    run.checkpoints = checkpoints  # type: ignore[attr-defined]
-    run.output = output  # type: ignore[attr-defined]
+    setattr(run, "checkpoints", checkpoints)
+    setattr(run, "output", output)
     return run
 
 
