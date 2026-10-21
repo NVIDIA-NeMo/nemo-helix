@@ -592,6 +592,13 @@ def require_staleness_timeout_seconds(step: HelixJobStepWithContext) -> int:
     return staleness_timeout
 
 
+def step_ttl_seconds_active(step: HelixJobStepWithContext, profile_ttl_seconds_active: int) -> int:
+    """The step's own active TTL when its lifecycle sets one, else the execution profile's."""
+    if step.step_spec is None or step.step_spec.lifecycle is None:
+        return profile_ttl_seconds_active
+    return step.step_spec.lifecycle.ttl_seconds_active or profile_ttl_seconds_active
+
+
 def extract_provider_profile(step: HelixJobStepWithContext) -> tuple[str, str]:
     step_spec = step.step_spec
     if step_spec is None:

@@ -60,6 +60,7 @@ from nhx.core.jobs.app.schemas import (
     HelixJobEnvironmentVariable,
     HelixJobSecretEnvironmentVariableRef,
     HelixJobStepSpec,
+    StepLifecycle,
 )
 from nhx.core.jobs.controllers.backends.base import (
     NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR,
@@ -995,6 +996,24 @@ def test_docker_workload_delegation_expiry_covers_active_ttl(docker_job, test_jo
     expected_max = after + datetime.timedelta(seconds=900 + WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS)
     assert expected_min <= delegation.expires_at <= expected_max
     assert delegation.revoked_at is None
+
+
+def test_docker_workload_delegation_expiry_covers_the_step_ttl(docker_job, test_job_step_with_auth_context):
+    """A step that may outlive the profile's TTL keeps its credentials for as long as it may run."""
+    docker_job._execution_profile_config.ttl_seconds_active = 900
+    test_job_step_with_auth_context.step_spec.lifecycle = StepLifecycle(ttl_seconds_active=7200)
+    before = datetime.datetime.now(datetime.timezone.utc)
+    workload_delegation_store = workload_delegation_store_mock()
+    docker_job._workload_delegation_store = workload_delegation_store
+
+    with patch.object(docker_job, "_write_workload_identity_subject_token"):
+        docker_job._prepare_workload_identity_for_step(
+            step=test_job_step_with_auth_context,
+            workload_identity_volume_name="workload-token-volume",
+        )
+
+    delegation = workload_delegation_store.register.call_args.args[0]
+    assert delegation.expires_at >= before + datetime.timedelta(seconds=7200 + WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS)
 
 
 def test_docker_schedule_cleans_task_volumes_when_workload_identity_proof_token_fails(

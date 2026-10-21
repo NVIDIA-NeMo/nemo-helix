@@ -20463,6 +20463,14 @@ components:
           description: How long a pause may stay in progress before the workload is
             deleted and the step fails. A value of 0 means this step cannot be paused.
           default: 0
+        ttl_seconds_active:
+          type: integer
+          minimum: 0.0
+          title: Ttl Seconds Active
+          description: How long the step may stay active before it is terminated,
+            in place of the execution profile's `ttl_seconds_active`. A value of 0
+            uses the profile's value.
+          default: 0
       type: object
       title: StepLifecycle
       description: 'Controller-level lifecycle configuration for a job step.

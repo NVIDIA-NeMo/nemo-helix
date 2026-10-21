@@ -115,6 +115,7 @@ from nhx.core.jobs.controllers.backends.base import (
     resolve_gpu_job_shm_size,
     resolve_task_image,
     staleness_error_message,
+    step_ttl_seconds_active,
     validate_no_reserved_managed_job_environment_variable_names,
 )
 from nhx.core.jobs.controllers.backends.exceptions import (
@@ -313,7 +314,7 @@ class DockerJobBackend(JobBackend[ProviderT, DockerJobExecutionProfileConfig], G
             attempt_id=step.attempt_id,
             step_id=step.id,
             auth_context=auth_context,
-            ttl_seconds_active=self._execution_profile_config.ttl_seconds_active,
+            ttl_seconds_active=step_ttl_seconds_active(step, self._execution_profile_config.ttl_seconds_active),
         )
         self._workload_delegation_store.register(
             delegation,
@@ -1616,7 +1617,10 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 if task_fallback is not None:
                     return task_fallback
             if result := self.enforce_sync_ttl(
-                step, self._execution_profile_config.ttl_seconds_active, container, before_active=False
+                step,
+                step_ttl_seconds_active(step, self._execution_profile_config.ttl_seconds_active),
+                container,
+                before_active=False,
             ):
                 return result
             if container is not None and self.check_step_is_stale(step):

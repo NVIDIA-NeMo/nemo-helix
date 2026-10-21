@@ -80,6 +80,12 @@ class StepLifecycle(JobSpecModel):
         description="How long a pause may stay in progress before the workload is deleted and the step fails. "
         "A value of 0 means this step cannot be paused.",
     )
+    ttl_seconds_active: int = Field(
+        default=0,
+        ge=0,
+        description="How long the step may stay active before it is terminated, in place of the execution "
+        "profile's `ttl_seconds_active`. A value of 0 uses the profile's value.",
+    )
 
 
 _K8S_LABEL_KEY_PATTERN = r"^([a-z0-9]([-a-z0-9.]*[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$"

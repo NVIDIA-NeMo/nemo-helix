@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Optional, Self
 
+from nemo_helix_plugin.jobs.api_factory import StepLifecycle
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 FILESET_PROTOCOL = "fileset://"
@@ -169,6 +170,15 @@ class FileIOTaskConfig(BaseModel):
 
     download: list[DownloadItem] = Field(default_factory=list, description="List of FileSets to download.")
     upload: list[UploadItem] = Field(default_factory=list, description="List of files to upload to FileSets.")
+
+
+def model_upload_lifecycle() -> StepLifecycle:
+    """Lifecycle for the step that uploads the trained model.
+
+    The upload reports progress while each file is in flight, so an hour without a report means it
+    stalled. Merged weights can take far longer to upload than the training profile's TTL allows.
+    """
+    return StepLifecycle(staleness_timeout_seconds=60 * 60, ttl_seconds_active=72 * 60 * 60)
 
 
 class TaskCompilationError(Exception):
