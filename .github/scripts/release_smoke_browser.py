@@ -18,9 +18,7 @@ with sync_playwright() as playwright:
         response = page.goto(f"{os.environ['NHX_BASE_URL']}/studio/workspaces/release-smoke/dashboard", timeout=60000)
         assert response and response.ok, "Studio document did not load"
         # Fresh browsers show onboarding over the rendered dashboard.
-        expect(page.get_by_role("heading", name="Quickstart", exact=True, include_hidden=True)).to_be_visible(
-            timeout=60000
-        )
+        expect(page.get_by_text("Quickstart", exact=True)).to_be_visible(timeout=60000)
         expect(page.get_by_role("link", name="Agents", exact=True, include_hidden=True)).to_be_visible()
         assert not errors, f"Studio JavaScript errors: {errors}"
     finally:
