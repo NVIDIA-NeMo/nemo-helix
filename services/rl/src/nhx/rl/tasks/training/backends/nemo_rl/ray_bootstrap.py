@@ -189,6 +189,14 @@ class RayClusterBootstrap:
     Example: "/opt/venv/lib/python3.12/site-packages:/other/path"
     """
 
+    node_env: dict[str, str] = field(default_factory=dict)
+    """Environment for this node's ``ray start`` only, such as the RDMA devices this pod can use.
+
+    Ray workers inherit it from the node's raylet. It is kept out of the driver, because NeMo-RL
+    copies the driver's environment to every worker on every node, which would replace each
+    node's own value with the head's.
+    """
+
     # Internal state
     # Driver wall clock. None when the cluster is started without a driver.
     progress: JobsServiceProgressReporter | None = field(default=None, repr=False)
@@ -219,6 +227,10 @@ class RayClusterBootstrap:
 
         # Disable proxy environment variables for local pod communication
         self._unset_proxy_env()
+
+    def _ray_start_env(self) -> dict[str, str] | None:
+        """The environment for ``ray start``: this process's plus ``node_env``, or None to inherit it unchanged."""
+        return {**os.environ, **self.node_env} if self.node_env else None
 
     def _unset_proxy_env(self) -> None:
         """Unset proxy environment variables for local pod communication."""
@@ -273,11 +285,15 @@ class RayClusterBootstrap:
         The marker is attempt-scoped so a normal retry already gets a new path;
         this additionally covers attempt-id reuse (e.g. local runs / resume) where
         a marker from the prior run could otherwise linger on shared storage.
+
+        The head starts Ray only after this, and a worker connects only to a running
+        head, so a connected worker never sees the earlier run's marker. If the marker
+        cannot be removed, the head fails instead of starting Ray.
         """
         try:
             self.ended_file.unlink(missing_ok=True)
         except OSError as e:
-            logger.warning(f"Failed to clear stale ENDED marker {self.ended_file}: {e}")
+            raise RuntimeError(f"Could not clear the ENDED marker an earlier run left: {self.ended_file}") from e
 
     @property
     def expected_worker_units(self) -> int:
@@ -423,8 +439,11 @@ class RayClusterBootstrap:
         Returns:
             True if worker started successfully, False otherwise
         """
+        # The ENDED marker is not read before the worker connects. A resume keeps the attempt id,
+        # so a worker that starts before the head would read the paused run's marker. The head
+        # clears it before it starts Ray, so once connected, any marker is this run's.
         for attempt in range(self.num_retries):
-            if self._stop_event.is_set() or self.ended_file.exists():
+            if self._stop_event.is_set():
                 logger.info("Worker node stopping due to termination signal")
                 return False
 
@@ -442,7 +461,7 @@ class RayClusterBootstrap:
                 logger.exception(f"Worker node error: {e}")
                 print(f"[ray_bootstrap] Worker node error: {e}", flush=True)
 
-            if not self._stop_event.is_set() and not self.ended_file.exists():
+            if not self._stop_event.is_set():
                 _pause(self.retry_sleep)
 
         logger.error("Worker Node failed to start after all retries")
@@ -482,7 +501,7 @@ class RayClusterBootstrap:
         logger.info(f"Starting head: {' '.join(cmd)}")
         print(f"[ray_bootstrap] Starting head: {' '.join(cmd)}", flush=True)
         try:
-            result = subprocess.run(cmd, check=False, timeout=RAY_START_TIMEOUT_SECONDS)
+            result = subprocess.run(cmd, check=False, timeout=RAY_START_TIMEOUT_SECONDS, env=self._ray_start_env())
         except subprocess.TimeoutExpired:
             logger.warning(f"Ray head start timed out after {RAY_START_TIMEOUT_SECONDS}s")
             print(f"[ray_bootstrap] Ray head start timed out after {RAY_START_TIMEOUT_SECONDS}s", flush=True)
@@ -522,7 +541,7 @@ class RayClusterBootstrap:
         logger.info(f"Starting worker: {' '.join(cmd)}")
         print(f"[ray_bootstrap] Starting worker: {' '.join(cmd)}", flush=True)
         try:
-            result = subprocess.run(cmd, check=False, timeout=RAY_START_TIMEOUT_SECONDS)
+            result = subprocess.run(cmd, check=False, timeout=RAY_START_TIMEOUT_SECONDS, env=self._ray_start_env())
         except subprocess.TimeoutExpired:
             logger.warning(f"Ray worker start timed out after {RAY_START_TIMEOUT_SECONDS}s")
             print(f"[ray_bootstrap] Ray worker start timed out after {RAY_START_TIMEOUT_SECONDS}s", flush=True)

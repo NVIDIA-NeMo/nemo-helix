@@ -57,7 +57,7 @@ def test_detector_discriminates(source: str, expected: bool) -> None:
     assert _closes_logger_in_finally(source) is expected
 
 
-@pytest.mark.parametrize("driver", ["dpo_driver.py"])
+@pytest.mark.parametrize("driver", ["grpo_driver.py", "dpo_driver.py"])
 def test_driver_closes_the_progress_logger_in_a_finally(driver: str) -> None:
     """`finally`, not the happy path: an aborted run is when the flush matters."""
     source = (DRIVERS / driver).read_text()
@@ -278,3 +278,50 @@ def test_driver_states_which_algorithm_it_is(driver: str) -> None:
     Per-algorithm, and only the driver has the compiled config to read it from.
     """
     assert "run_facts" in _for_schedule_keywords((DRIVERS / driver).read_text())
+
+
+def _trains_inside_stop_for_pause(source: str, train_fn: str) -> bool:
+    """Whether a `with stop_for_pause(...)` block calls `train_fn`."""
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.With):
+            continue
+        if not any(
+            isinstance(item.context_expr, ast.Call)
+            and isinstance(item.context_expr.func, ast.Name)
+            and item.context_expr.func.id == "stop_for_pause"
+            for item in node.items
+        ):
+            continue
+        for stmt in node.body:
+            for inner in ast.walk(stmt):
+                if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name) and inner.func.id == train_fn:
+                    return True
+    return False
+
+
+def test_stop_for_pause_detector_discriminates() -> None:
+    """The tripwire is only worth having if it can actually trip."""
+    assert _trains_inside_stop_for_pause("with stop_for_pause(m, c) as p:\n    dpo_train()\n", "dpo_train")
+    assert not _trains_inside_stop_for_pause("with stop_for_pause(m, c) as p:\n    pass\ndpo_train()\n", "dpo_train")
+    assert not _trains_inside_stop_for_pause("with other(m) as p:\n    dpo_train()\n", "dpo_train")
+
+
+@pytest.mark.parametrize("driver,train_fn", [("grpo_driver.py", "grpo_train"), ("dpo_driver.py", "dpo_train")])
+def test_driver_trains_with_the_pause_check_installed(driver: str, train_fn: str) -> None:
+    """Without it a pause is never noticed, and the step fails at its pause deadline."""
+    source = (DRIVERS / driver).read_text()
+
+    assert _trains_inside_stop_for_pause(source, train_fn)
+    assert "exit_paused()" in source
+    assert ".rewind_to(" in source
+
+
+def test_grpo_driver_exits_for_a_pause_before_the_checkpoint_check() -> None:
+    """A paused run is unfinished. The no-checkpoint check after it must not run, or its error replaces the pause."""
+    calls = {
+        node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", None): node.lineno
+        for node in ast.walk(ast.parse((DRIVERS / "grpo_driver.py").read_text()))
+        if isinstance(node, ast.Call)
+    }
+
+    assert calls["exit_paused"] < calls["get_best_checkpoint_path"]
