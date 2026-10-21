@@ -79,8 +79,8 @@ from nhx.core.jobs.controllers.backends.openshell.policy import (
     build_sandbox_policy,
     generate_policy_dict,
     inject_platform_egress,
+    layer_policy_dict,
     load_policy_dict,
-    normalize_loaded_policy,
 )
 
 if TYPE_CHECKING:
@@ -245,11 +245,12 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
     def _build_executor_policy(self) -> Any:
         """The SandboxPolicy applied to created sandboxes.
 
-        A hand-written YAML (``policy_path``) if given, else a generated default-deny
-        policy. The platform egress rule is always injected as mandatory so a job can
-        never lose its path back to the platform. When ``platform_egress`` is null the
-        sandbox gets no direct egress at all, which breaks the launcher's config and
-        secrets fetch and OTLP log export; the profile default sets it.
+        A generated default-deny policy, with the hand-written YAML (``policy_path``)
+        layered over it when given (see ``layer_policy_dict``). The platform egress rule
+        is always injected as mandatory so a job can never lose its path back to the
+        platform. When ``platform_egress`` is null the sandbox gets no direct egress at
+        all, which breaks the launcher's config and secrets fetch and OTLP log export;
+        the profile default sets it.
         """
         cfg = self._executor_config.platform_egress
         egress = (
@@ -264,14 +265,10 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
             if cfg is not None
             else None
         )
+        policy_dict = generate_policy_dict(filesystem=SandboxFilesystem(), egress=egress)
         path = self._executor_config.policy_path
         if path:
-            policy_dict = normalize_loaded_policy(load_policy_dict(path))
-        else:
-            policy_dict = generate_policy_dict(
-                filesystem=SandboxFilesystem(),
-                egress=egress,
-            )
+            policy_dict = layer_policy_dict(policy_dict, load_policy_dict(path))
         if egress is not None:
             inject_platform_egress(policy_dict, egress)
         return build_sandbox_policy(policy_dict)
