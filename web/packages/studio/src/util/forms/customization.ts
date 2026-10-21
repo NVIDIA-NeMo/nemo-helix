@@ -616,18 +616,63 @@ const keepKnownKeys = (value: unknown, known: unknown): unknown => {
   );
 };
 
+const unwrapSchema = (schema: z.ZodTypeAny): z.ZodTypeAny => {
+  if (schema instanceof z.ZodOptional || schema instanceof z.ZodNullable) {
+    return unwrapSchema(schema.unwrap());
+  }
+  if (schema instanceof z.ZodDefault) return unwrapSchema(schema.removeDefault());
+  return schema;
+};
+
+/** The union arm whose literal fields (e.g. RL's `training.type`) all match `value`. */
+const matchingUnionOption = (
+  union: z.ZodUnion<z.ZodUnionOptions>,
+  value: Record<string, unknown>
+): z.AnyZodObject | undefined =>
+  union.options
+    .map(unwrapSchema)
+    .filter((option): option is z.AnyZodObject => option instanceof z.ZodObject)
+    .find((option) =>
+      Object.entries(option.shape as z.ZodRawShape).every(([key, field]) => {
+        const inner = unwrapSchema(field);
+        return !(inner instanceof z.ZodLiteral) || !(key in value) || value[key] === inner.value;
+      })
+    );
+
+/**
+ * `keepKnownKeys` against the schema itself, for a spec that fails to parse. A union with no
+ * arm that matches is left as it is rather than guessed at.
+ */
+const keepSchemaKeys = (value: unknown, schema: z.ZodTypeAny): unknown => {
+  const inner = unwrapSchema(schema);
+  if (Array.isArray(value)) {
+    return inner instanceof z.ZodArray
+      ? value.map((item) => keepSchemaKeys(item, inner.element))
+      : value;
+  }
+  if (!isPlainRecord(value)) return value;
+  const object = inner instanceof z.ZodUnion ? matchingUnionOption(inner, value) : inner;
+  if (!(object instanceof z.ZodObject)) return value;
+  const shape = object.shape as z.ZodRawShape;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => key in shape)
+      .map(([key, v]) => [key, keepSchemaKeys(v, shape[key])])
+  );
+};
+
 /**
  * A stored spec is the backend's output shape, which has fields its submit forbids (e.g.
  * `backend`). The generated schemas aren't strict, so parsing drops them at every level, but
  * it also fills defaults, and the backend treats an unset field differently from one at its
- * default. So the parse only says which keys to keep. A spec that fails to parse still loses
- * its unknown top-level keys, and the form reports the rest.
+ * default. So the parse only says which keys to keep. A spec that fails to parse is walked
+ * against the schema instead, and the form reports what made it fail.
  */
 const toSubmittableSpec = <T>(schema: z.AnyZodObject, spec: unknown): T => {
   const cleaned = stripNulls(spec) as Record<string, unknown>;
   const parsed = schema.safeParse(cleaned);
   if (parsed.success) return keepKnownKeys(cleaned, parsed.data) as T;
-  return Object.fromEntries(Object.entries(cleaned).filter(([key]) => key in schema.shape)) as T;
+  return keepSchemaKeys(cleaned, schema) as T;
 };
 
 export const jobToFormFields = (job: ReplayableJob): CustomizationFormFields => {

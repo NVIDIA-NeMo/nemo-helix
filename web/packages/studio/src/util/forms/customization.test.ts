@@ -532,14 +532,29 @@ describe('jobToFormFields', () => {
     expect(arm.training).not.toHaveProperty('not_a_field');
   });
 
-  it('still drops unknown top-level fields from a spec that fails to parse', () => {
-    const job = {
-      ...customizationJob1,
-      spec: { ...customizationJob1.spec, backend: 'automodel', parallelism: 'invalid' },
-    } as unknown as typeof customizationJob1;
-    const body = formToAutomodelCreate(jobToFormFields(job));
-    expect(body.spec).not.toHaveProperty('backend');
-  });
+  it.each([
+    ['automodel', customizationJob1],
+    ['unsloth', customizationJob3],
+    ['rl', grpoCustomizationJob],
+  ] as const)(
+    'drops the same fields from a %s spec that fails to parse, without adding defaults',
+    (backend, source) => {
+      const job = {
+        ...source,
+        spec: {
+          ...source.spec,
+          name: 42,
+          backend,
+          training: { ...source.spec.training, not_a_field: 1 },
+        },
+      } as unknown as typeof source;
+      const arm = jobToFormFields(job)[backend];
+      expect(arm).not.toHaveProperty('backend');
+      expect(Object.keys(arm.training ?? {}).sort()).toEqual(
+        Object.keys(source.spec.training ?? {}).sort()
+      );
+    }
+  );
 });
 
 describe('getInitialFormValuesFromState', () => {
