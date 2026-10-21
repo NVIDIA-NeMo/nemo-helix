@@ -19,27 +19,23 @@ from __future__ import annotations
 
 import asyncio
 
-import psycopg
-from psycopg.rows import dict_row
-
 from scaled_evals.api.build.buildkit import build_revision_image
 from scaled_evals.api.build.image_builder_service import resolve_uploaded_revision_image
-from scaled_evals.api.repositories.build_repository import TaskBuildRepository
 from scaled_evals.api.settings import settings
+from scaled_evals.api.task_store import TaskStore
 
 
 def run_finalize_build(task_id: str, revision: int, tarball_object_key: str) -> None:
     """Run a revision build and persist its outcome. Background-job entrypoint.
 
-    Opens its OWN database connection — the request-scoped connection is long
-    closed by the time this runs (after the HTTP response). On success the
+    Runs after the HTTP response, so it writes the outcome itself. On success the
     revision flips to `ready` with image_ref/image_digest and becomes the
     task's current revision; on failure it flips to `failed` with the
     captured build log in build_error.
 
     New finalize requests are handled by the durable leased worker in
     `queue_worker` instead. It is synchronous so a FastAPI BackgroundTask can run it in the
-    threadpool — the blocking S3 download and Postgres writes stay off the event
+    threadpool — the blocking download and Entity Store writes stay off the event
     loop, while the build itself drives an async subprocess via `asyncio.run`.
     """
     try:
@@ -73,20 +69,9 @@ def run_finalize_uploaded(
     _record_success(task_id, revision, image_ref, image_digest)
 
 
-def _connect() -> psycopg.Connection:
-    return psycopg.connect(settings.resolved_database_url(), row_factory=dict_row)
-
-
 def _record_success(task_id: str, revision: int, image_ref: str, image_digest: str) -> None:
-    with _connect() as conn:
-        TaskBuildRepository(conn).record_success(
-            task_id,
-            revision,
-            image_ref=image_ref,
-            image_digest=image_digest,
-        )
+    TaskStore().record_success(task_id, revision, image_ref=image_ref, image_digest=image_digest)
 
 
 def _record_failure(task_id: str, revision: int, build_error: str) -> None:
-    with _connect() as conn:
-        TaskBuildRepository(conn).record_failure(task_id, revision, build_error)
+    TaskStore().record_failure(task_id, revision, build_error)

@@ -39,6 +39,7 @@ from scaled_evals.dispatch import (
 from scaled_evals.dispatch.worker import (
     Dispatcher,
 )
+from task_fixtures import seed_task_revision
 
 NOW = datetime(2026, 6, 6, tzinfo=UTC)
 
@@ -134,6 +135,14 @@ def _conn_with_fetchone(*results) -> MagicMock:
     cur.fetchone.side_effect = list(results)
     cur.fetchall.return_value = []
     return conn
+
+
+def _create_conn(revision: dict | None, *results) -> MagicMock:
+    """Seed `task_abc` revisions 1 and 2 with `revision`'s fields (absent when None); mock the rest."""
+    if revision is not None:
+        for number in (1, 2):
+            seed_task_revision("task_abc", number, **revision)
+    return _conn_with_fetchone(*results)
 
 
 def _conn(fetchone=(), fetchall=()) -> MagicMock:  # noqa: ANN001
@@ -248,7 +257,7 @@ def test_create_commits_before_returning() -> None:
     runs in a SAVEPOINT (the validation SELECTs already opened a txn), so
     without an explicit commit the worker can't see the queued row promptly.
     """
-    conn = _conn_with_fetchone({"status": "ready"}, _eval_row())
+    conn = _create_conn({"status": "ready"}, _eval_row())
     _override_conn(conn)
 
     response = client.post(
@@ -261,7 +270,7 @@ def test_create_commits_before_returning() -> None:
 
 
 def test_preflight_reports_runnable_without_creating_evaluation() -> None:
-    conn = _conn_with_fetchone({"status": "ready"})
+    conn = _create_conn({"status": "ready"})
     _override_conn(conn)
 
     response = client.post(
@@ -280,7 +289,7 @@ def test_preflight_reports_runnable_without_creating_evaluation() -> None:
 
 
 def test_preflight_reports_create_blocker_with_http_200() -> None:
-    conn = _conn_with_fetchone({"status": "building"})
+    conn = _create_conn({"status": "building"})
     _override_conn(conn)
 
     response = client.post(
@@ -347,7 +356,7 @@ def test_create_rejects_agent_bundle_elsewhere(framework: Framework, runtime: st
 
 
 def test_create_409_when_revision_not_ready() -> None:
-    conn = _conn_with_fetchone({"status": "building"})
+    conn = _create_conn({"status": "building"})
     _override_conn(conn)
 
     response = client.post(
@@ -369,7 +378,7 @@ def test_create_allows_ready_gcs_revision_when_pack_exists(
         "scaled_evals.api.routers.evaluations.artifacts.object_exists",
         lambda key: checked.append(key) or True,
     )
-    conn = _conn_with_fetchone(
+    conn = _create_conn(
         {
             "status": "ready",
             "image_ref": "us-central1-docker.pkg.dev/project/repo/task:rev1",
@@ -394,7 +403,7 @@ def test_create_409_when_ready_revision_pack_missing_local_rustfs(
 ) -> None:
     monkeypatch.setattr(settings, "object_store_backend", "artifacts")
     monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.object_exists", lambda _key: False)
-    conn = _conn_with_fetchone(
+    conn = _create_conn(
         {
             "status": "ready",
             "image_ref": "registry.example/task_abc:rev1",
@@ -435,7 +444,7 @@ def test_create_rejects_task_image_from_unapproved_registry(
 ) -> None:
     monkeypatch.setattr(settings, "task_image_validation_mode", "resolve")
     monkeypatch.setattr(settings, "task_image_allowed_registries", "us-central1-docker.pkg.dev")
-    conn = _conn_with_fetchone(
+    conn = _create_conn(
         {
             "status": "ready",
             "image_ref": "artifactory.nvidia.com/team/task:rev2",
@@ -479,9 +488,9 @@ def test_create_422_on_malformed_profile_id() -> None:
 
 
 def test_create_records_default_deny() -> None:
+    _create_conn({"status": "ready"})
     conn = _conn(
         fetchone=[
-            {"status": "ready"},
             _eval_row(network_policy="default_deny"),
         ],
         fetchall=[[]],
@@ -507,9 +516,9 @@ def test_create_records_default_deny() -> None:
 
 
 def test_create_resolves_harbor_version_before_queueing() -> None:
+    _create_conn({"status": "ready"})
     conn = _conn(
         fetchone=[
-            {"status": "ready"},
             _eval_row(
                 requested_framework_version="stable",
                 framework_version="0.13.2",
@@ -557,9 +566,9 @@ def test_create_gym_runtime_persists_runtime_runner_identity(monkeypatch) -> Non
     monkeypatch.setattr(settings, "gym_runner_image_digest", digest)
     monkeypatch.setattr(settings, "gym_source_revision", source_revision)
     monkeypatch.setattr(settings, "gym_package_version", "0.4.0")
+    _create_conn({"status": "ready"})
     conn = _conn(
         fetchone=[
-            {"status": "ready"},
             _eval_row(
                 runtime="gym_daytona",
                 runner_image_ref="registry.example/gym:0.4.0",
@@ -598,7 +607,7 @@ def test_create_gym_runtime_persists_runtime_runner_identity(monkeypatch) -> Non
 )
 def test_create_resolves_and_persists_agent_bundle(monkeypatch, runtime: str, network_policy: str) -> None:
     _profile("cfg_h", "harbor")
-    conn = _conn_with_fetchone({"status": "ready"}, _eval_row(framework_profile_id="cfg_h", harbor_profile_id="cfg_h"))
+    conn = _create_conn({"status": "ready"}, _eval_row(framework_profile_id="cfg_h", harbor_profile_id="cfg_h"))
     _override_conn(conn)
     resolved = {
         "bundle_id": "ab_claude",
@@ -682,7 +691,7 @@ def test_create_rejects_zero_parallelism() -> None:
 
 def test_create_202_with_valid_profile_and_credential() -> None:
     _profile("cfg_h", "harbor")
-    conn = _conn_with_fetchone({"status": "ready"}, _eval_row())
+    conn = _create_conn({"status": "ready"}, _eval_row())
     _override_conn(conn)
 
     response = client.post(
@@ -701,7 +710,7 @@ def test_create_202_with_valid_profile_and_credential() -> None:
 
 def test_create_202_with_nemo_gym_framework_profile() -> None:
     _profile("cfg_g", "gym")
-    conn = _conn_with_fetchone({"status": "ready"}, _eval_row(framework="nemo_gym", framework_profile_id="cfg_g"))
+    conn = _create_conn({"status": "ready"}, _eval_row(framework="nemo_gym", framework_profile_id="cfg_g"))
     _override_conn(conn)
 
     response = client.post(
@@ -720,7 +729,7 @@ def test_create_202_with_nemo_gym_framework_profile() -> None:
 
 def test_create_202_treats_framework_profile_as_harbor_alias() -> None:
     _profile("cfg_h", "harbor")
-    conn = _conn_with_fetchone({"status": "ready"}, _eval_row(framework_profile_id="cfg_h", harbor_profile_id="cfg_h"))
+    conn = _create_conn({"status": "ready"}, _eval_row(framework_profile_id="cfg_h", harbor_profile_id="cfg_h"))
     _override_conn(conn)
 
     response = client.post(
@@ -737,7 +746,7 @@ def test_create_202_treats_framework_profile_as_harbor_alias() -> None:
 
 
 def test_create_422_when_profile_missing() -> None:
-    conn = _conn_with_fetchone({"status": "ready"})
+    conn = _create_conn({"status": "ready"})
     _override_conn(conn)
 
     response = client.post(
@@ -757,7 +766,7 @@ def test_create_422_when_profile_missing() -> None:
 def test_create_422_when_profile_wrong_type() -> None:
     # harbor_profile_id points at an intake-typed profile.
     _profile("cfg_sw", "intake")
-    conn = _conn_with_fetchone({"status": "ready"})
+    conn = _create_conn({"status": "ready"})
     _override_conn(conn)
 
     response = client.post(
@@ -776,7 +785,7 @@ def test_create_422_when_profile_wrong_type() -> None:
 
 def test_create_422_when_nemo_gym_profile_wrong_type() -> None:
     _profile("cfg_h", "harbor")
-    conn = _conn_with_fetchone({"status": "ready"})
+    conn = _create_conn({"status": "ready"})
     _override_conn(conn)
 
     response = client.post(
@@ -829,7 +838,7 @@ def test_create_422_when_harbor_alias_used_for_nemo_gym() -> None:
 
 
 def test_create_422_when_credential_secret_unusable() -> None:
-    _override_conn(_conn(fetchone=[{"status": "ready"}] * 2))
+    _override_conn(_create_conn({"status": "ready"}))
     body = {"name": "x", "task_id": "task_abc", "task_revision": 1}
 
     unqualified = client.post("/v1/evaluations", json={**body, "credentials": {"anthropic": "cred_ghost"}})
@@ -2055,6 +2064,14 @@ class _FakeBackend:
 
 def _worker_conn(row: dict | None) -> tuple[MagicMock, list]:
     """Connection whose load returns `row`; returns (conn, executed-calls)."""
+    if row is not None:
+        seed_task_revision(
+            row["task_id"],
+            row["task_revision"],
+            image_ref=row.get("image_ref"),
+            image_digest=row.get("image_digest"),
+            tarball_object_key=row.get("tarball_object_key"),
+        )
     conn = MagicMock()
     cur = conn.cursor.return_value.__enter__.return_value
     cur.fetchone.return_value = row

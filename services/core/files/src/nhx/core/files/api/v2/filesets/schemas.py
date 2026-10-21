@@ -47,7 +47,9 @@ def fileset_output_from_entity(entity: Fileset) -> FilesetOutput:
         custom_fields=entity.custom_fields,
         project=entity.project or "",
         created_at=entity.created_at.isoformat() if entity.created_at else "",
+        created_by=entity.created_by or None,
         updated_at=entity.updated_at.isoformat() if entity.updated_at else "",
+        updated_by=entity.updated_by or None,
     )
 
 
@@ -104,6 +106,12 @@ class FilesetFilter(Filter):
     storage_type: Annotated[Optional[StorageConfigType], map_entity_field("data.storage.type")] = Field(
         default=None,
         description="Filter by the storage backend type (e.g., 'local', 'ngc').",
+    )
+    created_by: StringFilter | str | None = Field(
+        default=None, description="Filter by the principal id that created the fileset."
+    )
+    updated_by: StringFilter | str | None = Field(
+        default=None, description="Filter by the principal id that last updated the fileset."
     )
     created_at: Optional[DatetimeFilter] = Field(
         default=None,

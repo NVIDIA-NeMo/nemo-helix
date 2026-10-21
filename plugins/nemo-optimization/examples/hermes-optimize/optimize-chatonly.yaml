@@ -5,7 +5,7 @@
 # Stage this bundle with:
 #   nemo agents optimize prepare-fileset --source examples/hermes-optimize --optimize-config optimize-chatonly.yaml --fileset hermes-optimize-chatonly --workspace default
 # Then launch it with:
-#   nemo agents optimize --optimize-config-fileset default/hermes-optimize-chatonly --optimize-config optimize-chatonly.yaml --workspace default
+#   nemo agents optimize run-strategy --strategy config-tuning --optimize-config-fileset default/hermes-optimize-chatonly --optimize-config optimize-chatonly.yaml --workspace default
 #
 # Models route through the platform inference gateway (README setup step 5).
 # See README.md in this directory for install + run steps.
