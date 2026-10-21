@@ -75,7 +75,7 @@ The package name is the `name` field in the plugin's `pyproject.toml`, not the d
 | `nemo-evals/` | `nemo-evals-plugin` |
 | `nemo-scaled-evals/` | `nemo-scaled-evals-plugin` (Phase 1 ephemeral; install `-e`) |
 | `nemo-guardrails/` | `nemo-guardrails-plugin` |
-| `nemo-insights/` | `nemo-insights-plugin` |
+| `nemo-compass/` | `nemo-compass-plugin` |
 | `nemo-switchyard/` | `nemo-switchyard-plugin` |
 
 Example:

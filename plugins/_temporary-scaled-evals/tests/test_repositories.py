@@ -10,6 +10,7 @@ import pytest
 
 try:
     from nemo_scaled_evals_plugin import migrations
+    from scaled_evals.api.benchmark_store import BenchmarkStore
     from scaled_evals.api.config_profile_store import ConfigProfileStore
     from scaled_evals.api.repositories.base_repository import (
         InvalidReference,
@@ -17,7 +18,6 @@ try:
         patch_set_clause,
         substring_search_pattern,
     )
-    from scaled_evals.api.repositories.benchmark_repository import BenchmarkRepository
     from scaled_evals.api.repositories.benchmark_run_repository import BenchmarkRunRepository
     from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
     from scaled_evals.api.repositories.execution_cleanup_repository import (
@@ -31,7 +31,7 @@ try:
     from scaled_evals.api.schemas.common import encode_cursor
     from scaled_evals.api.task_store import TaskStore
     from scaled_evals.models.evaluations import EvaluationResultSummary, EvaluationResultWrite
-    from task_fixtures import seed_task_revision, stored_revision
+    from task_fixtures import seed_benchmark, seed_task_revision, stored_revision
 except ImportError as exc:
     pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
 
@@ -52,26 +52,26 @@ def _executed_sql_and_params(cur: MagicMock, index: int = 0) -> tuple[str, tuple
 
 
 def test_benchmark_run_revision_returns_qualification_metadata() -> None:
-    conn, cur = _conn()
     qualified_at = datetime(2026, 8, 6, tzinfo=UTC)
-    cur.fetchone.return_value = {
-        "current_revision": 3,
+    seed_benchmark(
+        "bm_safe",
+        qualification_status="qualified",
+        qualification_evidence={"receipt": "qe_1"},
+        qualified_at=qualified_at,
+    )
+    store = BenchmarkStore()
+
+    assert store.revision_for_run("bm_safe") == {
+        "revision": 1,
         "qualification_status": "qualified",
         "qualification_evidence": {"receipt": "qe_1"},
         "qualified_at": qualified_at,
     }
-
-    resolved = BenchmarkRunRepository(conn).benchmark_revision_for_run("bm_safe")
-
-    assert resolved == {
-        "revision": 3,
-        "qualification_status": "qualified",
-        "qualification_evidence": {"receipt": "qe_1"},
-        "qualified_at": qualified_at,
-    }
-    sql, params = _executed_sql_and_params(cur)
-    assert "qualification_status" in sql
-    assert params == ("bm_safe",)
+    assert store.revision_for_run("bm_safe", 1) == store.revision_for_run("bm_safe")
+    assert store.revision_for_run("bm_safe", 2) is None
+    assert store.revision_for_run("bm_missing") is None
+    store.soft_delete("bm_safe")
+    assert store.revision_for_run("bm_safe") is None
 
 
 def test_task_prebuilt_finalize_marks_ready_with_verifier_image() -> None:
@@ -140,7 +140,6 @@ def test_evaluation_list_parameterizes_filters_and_cursor() -> None:
 @pytest.mark.parametrize(
     ("repository", "kwargs", "expected_sql"),
     [
-        (BenchmarkRepository, {}, "slug ILIKE %s"),
         (
             BenchmarkRunRepository,
             {"benchmark_id": None, "shared": False},
@@ -608,7 +607,9 @@ def test_repository_order_rejects_unallowed_sort_direction() -> None:
     conn, _cur = _conn()
 
     with pytest.raises(ValueError, match="order"):
-        BenchmarkRepository(conn).list(limit=20, cursor=None, order="desc; DROP TABLE tasks")
+        BenchmarkRunRepository(conn).list(
+            limit=20, cursor=None, order="desc; DROP TABLE tasks", benchmark_id=None, shared=False
+        )
 
 
 def test_order_by_clause_rejects_unallowed_columns() -> None:

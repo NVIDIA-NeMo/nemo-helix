@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  insightsDisableAnalysisConfig,
-  insightsEnableAnalysisConfig,
-} from '@nemo/sdk/generated/insights/insights-analysis-configs';
-import type { AnalysisConfig } from '@nemo/sdk/generated/insights/schema';
+  compassDisableAnalysisConfig,
+  compassEnableAnalysisConfig,
+} from '@nemo/sdk/generated/compass/compass-analysis-configs';
+import type { AnalysisConfig } from '@nemo/sdk/generated/compass/schema';
 
 /**
  * Raised when the `enable` half of an enable-then-disable save landed but the `disable` half did
@@ -49,14 +49,14 @@ export const saveAnalysisConfig = async (
   if (!mustWriteModels) {
     if (draft.enabled === stored.enabled) return stored;
     return draft.enabled
-      ? insightsEnableAnalysisConfig(workspace, agent, {
+      ? compassEnableAnalysisConfig(workspace, agent, {
           default_model: draft.defaultModel,
           fast_model: draft.fastModel,
         })
-      : insightsDisableAnalysisConfig(workspace, agent);
+      : compassDisableAnalysisConfig(workspace, agent);
   }
 
-  const enabled = await insightsEnableAnalysisConfig(workspace, agent, {
+  const enabled = await compassEnableAnalysisConfig(workspace, agent, {
     default_model: draft.defaultModel,
     fast_model: draft.fastModel,
   });
@@ -64,7 +64,7 @@ export const saveAnalysisConfig = async (
   if (draft.enabled) return enabled;
 
   try {
-    return await insightsDisableAnalysisConfig(workspace, agent);
+    return await compassDisableAnalysisConfig(workspace, agent);
   } catch (disableError) {
     throw new AnalysisConfigPartialSaveError(disableError);
   }

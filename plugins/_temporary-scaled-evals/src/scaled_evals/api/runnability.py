@@ -612,7 +612,7 @@ def preflight_benchmark_run(
     if blocker:
         return BlockedPreflight(_report("benchmark_run", checks), blocker)
 
-    benchmark_revision = db.benchmark_runs.benchmark_revision_for_run(body.benchmark_id, body.benchmark_revision)
+    benchmark_revision = db.benchmarks.revision_for_run(body.benchmark_id, body.benchmark_revision)
     if benchmark_revision is None:
         target = (
             f"{body.benchmark_id} rev {body.benchmark_revision}"

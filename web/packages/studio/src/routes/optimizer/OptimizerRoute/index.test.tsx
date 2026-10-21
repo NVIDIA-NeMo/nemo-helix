@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
-import { getInsightsListInsightsQueryKey } from '@nemo/sdk/generated/insights/insights-insights';
-import type { InsightListItem } from '@nemo/sdk/generated/insights/schema';
+import { getCompassListInsightsQueryKey } from '@nemo/sdk/generated/compass/compass-insights';
+import type { InsightListItem } from '@nemo/sdk/generated/compass/schema';
 import { ROUTES } from '@studio/constants/routes';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
@@ -12,7 +12,7 @@ import { getOptimizerRoute } from '@studio/routes/utils';
 import { renderRoute, screen, within } from '@studio/tests/util/render';
 import { http, HttpResponse } from 'msw';
 
-const INSIGHTS_URL = mockApiUrl(getInsightsListInsightsQueryKey, ':workspace');
+const INSIGHTS_URL = mockApiUrl(getCompassListInsightsQueryKey, ':workspace');
 const EXPERIMENTS_URL = '*/apis/intake/v2/workspaces/:workspace/experiments';
 
 const makeInsight = (id: string, title: string): InsightListItem => ({

@@ -10,14 +10,14 @@ and configure its default/fast model pair before importing. Trace import itself 
 require an analysis config.
 
 ```bash
-uv run nemo insights analysis enable --agent email-security-triage
+uv run nemo compass analysis enable --agent email-security-triage
 ```
 
 Without a model pair from `nemo setup`, name one explicitly (any Model Entity refs the
 platform can serve), or set it from the agent's **Details** tab in Studio:
 
 ```bash
-uv run nemo insights analysis enable --agent email-security-triage \
+uv run nemo compass analysis enable --agent email-security-triage \
   --default-model default/<model> --fast-model default/<model>
 ```
 
@@ -30,7 +30,7 @@ unset, the default model does both.
 Eighteen hand-written ATIF trajectories for the `email-security-triage` agent, one file per
 trace. They exercise all three of the agent's capabilities and carry three deliberate failure
 clusters, so an evaluation run has something to pass _and_ something to fail on — and so the
-Insights analyst has enough repeated evidence to file a recommendation.
+Compass has enough repeated evidence to file a recommendation.
 
 The two maintenance scripts that read this directory live in `web/packages/studio/scripts/`
 (`bump-trace-timestamps.ts`, `convert-trace-formats.ts`) and run as `pnpm traces:bump` and
@@ -46,7 +46,7 @@ The two maintenance scripts that read this directory live in `web/packages/studi
 | `trace-06`, `trace-15`, `trace-16`             | **Timeouts (3 sessions)**        | Terminal `AgentTimeoutError` on long bodies or large selections. Root span errored, no agent step.                                                                                                                                  |
 
 The three bolded clusters are deliberate: each spans at least three sessions with one shared
-trigger condition, which is the shape the Insights analyst files on.
+trigger condition, which is the shape the Compass files on.
 
 Each carries `extra.verifier_result.rewards` with `correctness`, `format`, and `routing`, which
 Intake turns into a `harbor.verifier` evaluator span plus one evaluator result per criterion —
@@ -112,7 +112,7 @@ are derived.
 
 ## Insights
 
-The set is built to earn an Insight rather than just to import cleanly. The analyst's bar is
+The set is built to earn an Insight rather than just to import cleanly. Compass's bar is
 "at least three representative traces per Insight", it ranks error-status spans and evaluator
 regressions above one-off outliers, and it weighs patterns that recur across many sessions over
 those confined to one. Each cluster above clears that bar on its own.
