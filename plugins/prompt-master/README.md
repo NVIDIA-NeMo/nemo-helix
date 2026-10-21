@@ -77,7 +77,7 @@ agent has to be registered on the platform.
 
 ```bash
 # 1. Register the agent whose system prompt you want to optimize (skip if it exists).
-uv run nemo agents create \
+uv run nemo agents register \
   --name calculator-agent \
   --agent-config plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml
 ```
@@ -104,7 +104,7 @@ uv run nemo agents optimize run-strategy \
 #    A directory result downloads as a tarball holding agent.yaml and prompt-master-result.json.
 uv run nemo jobs results download prompt_master --job <job-name> -o prompt_master.tar.gz
 mkdir -p prompt-master-results && tar -xzf prompt_master.tar.gz -C prompt-master-results --strip-components=1
-uv run nemo agents create \
+uv run nemo agents register \
   --name calculator-agent-optimized \
   --agent-config ./prompt-master-results/agent.yaml
 ```
@@ -120,7 +120,7 @@ own fileset on the platform:
 
 | File | Contents |
 | --- | --- |
-| `agent.yaml` | The source agent's full `nemo-agents-spec-v1` config with the optimized `instructions.system.content`. Registers as-is with `nemo agents create --agent-config`. |
+| `agent.yaml` | The source agent's full `nemo-agents-spec-v1` config with the optimized `instructions.system.content`. Registers as-is with `nemo agents register --agent-config`. |
 | `prompt-master-result.json` | Source agent, optimizer model, original and optimized prompts, and Prompt Master's full reply. |
 
 The job result also carries `optimized_prompt` directly, so the new prompt can

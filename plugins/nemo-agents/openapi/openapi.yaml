@@ -39,9 +39,9 @@ paths:
     post:
       tags:
       - Agents
-      summary: Create Agent
-      description: Create a new agent from an agent config.
-      operationId: create_agent_apis_agents_v2_workspaces__workspace__agents_post
+      summary: Register Agent
+      description: Register an agent.
+      operationId: register_agent_apis_agents_v2_workspaces__workspace__agents_post
       parameters:
       - name: workspace
         in: path
@@ -54,7 +54,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateAgentRequest'
+              $ref: '#/components/schemas/RegisterAgentRequest'
       responses:
         '201':
           description: Successful Response
@@ -3606,33 +3606,6 @@ components:
       type: object
       title: ComputeSpecInline
       description: Inline compute spec - the resources an invocation runs with.
-    CreateAgentRequest:
-      properties:
-        name:
-          type: string
-          title: Name
-          description: Unique agent name within the workspace.
-        description:
-          type: string
-          title: Description
-          description: Human-readable description.
-          default: ''
-        config:
-          additionalProperties: true
-          type: object
-          title: Config
-          description: Agent config dict interpreted according to config_format.
-        config_format:
-          type: string
-          title: Config Format
-          description: Config format identifier.
-          default: nat-workflow-v1
-      type: object
-      required:
-      - name
-      - config
-      title: CreateAgentRequest
-      description: Request body for ``POST /v2/workspaces/{workspace}/agents``.
     CreateComputeSpecRequest:
       properties:
         description:
@@ -5668,6 +5641,33 @@ components:
       - total_pages
       - total_results
       title: PaginationData
+    RegisterAgentRequest:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Unique agent name within the workspace.
+        description:
+          type: string
+          title: Description
+          description: Human-readable description.
+          default: ''
+        config:
+          additionalProperties: true
+          type: object
+          title: Config
+          description: Agent config dict interpreted according to config_format.
+        config_format:
+          type: string
+          title: Config Format
+          description: Config format identifier. Uses config.config_format when present;
+            otherwise defaults to nemo-agents-spec-v1 for an empty config or nat-workflow-v1
+            for a nonempty config. An explicit value must match config.config_format.
+      type: object
+      required:
+      - name
+      title: RegisterAgentRequest
+      description: Request body for ``POST /v2/workspaces/{workspace}/agents``.
     ResolvedAgentConfig:
       properties:
         name:

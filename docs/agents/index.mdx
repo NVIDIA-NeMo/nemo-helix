@@ -27,8 +27,9 @@ flowchart LR
  D -. traces .-> Intake
 ```
 
-1. **Register.** `nemo agents create` stores the agent's `agent.yaml` and uploads the
-   files beside it to the agent's `<name>-ethos` fileset.
+1. **Register.** `nemo agents register` creates an agent identity. With `--agent-config`,
+   it also stores the agent's config and uploads the files beside a Fabric config to
+   the agent's `<name>-ethos` fileset.
 1. **Deploy.** `nemo agents deploy` runs the agent as a local subprocess, a Docker
    container, or a Kubernetes Deployment.
 1. **Invoke.** The Agents gateway routes each request to the agent's active deployment
@@ -45,7 +46,7 @@ flowchart LR
 
 | Stage | Command |
 |---|---|
-| Register | `nemo agents create --name <name> --agent-config <path>` |
+| Register | `nemo agents register --name <name> [--agent-config <path>]` |
 | Deploy | `nemo agents deploy --agent <name>` |
 | Invoke | `nemo agents invoke --agent <name> --input "..."` |
 | Chat | `nemo agents chat --agent-deployment <deployment>` |

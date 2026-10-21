@@ -196,16 +196,23 @@ async def test_to_spec_rejects_non_fabric_agent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_to_spec_rejects_malformed_fabric_agent_config() -> None:
+@pytest.mark.parametrize(
+    ("config", "error"),
+    [
+        ({}, "Agent 'default/calc' has no configuration"),
+        ({"config_format": "nemo-agents-spec-v1", "name": "calc"}, "default_harness"),
+    ],
+)
+async def test_to_spec_rejects_malformed_fabric_agent_config(config: dict, error: str) -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = Agent(
         name="calc",
         workspace="default",
-        config={"config_format": "nemo-agents-spec-v1", "name": "calc"},
+        config=config,
         config_format="nemo-agents-spec-v1",
     )
 
-    with pytest.raises(ValueError, match="default_harness"):
+    with pytest.raises(ValueError, match=error):
         await ExecuteAgentJob.to_spec(
             ExecuteAgentJobConfig(agent="calc", input="hello"),
             workspace="default",

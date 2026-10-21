@@ -165,7 +165,7 @@ target is a `ModelTarget`, `AgentTarget`, `FabricRunnerTarget`,
 `trials`. Provide exactly one of `target` or `trials`.
 
 A `FabricRunnerTarget`'s `source` is an inline config (`{"kind": "fabric",
-"source": {"config": {...}}}`) or a registered agent (`nemo agents create`):
+"source": {"config": {...}}}`) or a registered agent (`nemo agents register`):
 `{"kind": "fabric", "source": {"agent": "<name>"}}`. A `HarborRunnerTarget`'s `source`
 takes the same registered-agent shape (`{"kind": "harbor", "source": {"agent":
 "<name>"}}`) to run it inside each task container, next to a built-in agent

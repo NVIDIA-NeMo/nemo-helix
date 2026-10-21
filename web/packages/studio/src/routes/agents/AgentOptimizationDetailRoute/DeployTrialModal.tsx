@@ -8,7 +8,7 @@ import { FormModal } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema/RunStrategyJob';
 import { getAgentsListAgentsQueryKey, useAgentsGetAgent } from '@nemo/sdk/generated/agents/agents';
-import type { CreateAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/CreateAgentRequestConfig';
+import type { RegisterAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/RegisterAgentRequestConfig';
 import { Banner, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { AgentSpecFilesetOrphanError } from '@studio/api/agents/agentSpecFileset';
 import { useCreateAgentFromTrial } from '@studio/api/agents/useCreateAgentFromTrial';
@@ -187,7 +187,7 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
           description: sourceAgent.description,
           config_format: sourceAgent.config_format,
         },
-        config: withAgentName(appliedConfig.config, name) as CreateAgentRequestConfig,
+        config: withAgentName(appliedConfig.config, name) as RegisterAgentRequestConfig,
         replaceOrphanedFileset: replaceOrphan,
       });
     } catch (error) {

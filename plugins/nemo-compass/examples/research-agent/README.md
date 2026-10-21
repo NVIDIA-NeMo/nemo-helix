@@ -83,7 +83,7 @@ uv run nemo setup
 `workflow.yml` is a valid NAT config and is accepted by the platform as-is. The model name must be the platform-registered entity ID (lowercase, hyphenated) — list available IDs with `uv run nemo models list`.
 
 ```bash
-uv run nemo agents create --name research-agent \
+uv run nemo agents register --name research-agent \
   --agent-config workflow.yml \
   --description "Tavily-powered research agent"
 uv run nemo agents deploy --agent research-agent
@@ -115,4 +115,4 @@ echo y | uv run nemo agents delete   research-agent
 
 - **Model name format.** NAT YAML accepts the `meta/llama-3.3-70b-instruct` style for direct NIM calls, but when the agent runs under the platform, NIM calls are routed through the inference gateway, which validates names as lowercase letters/digits/hyphens (2–63 chars). Use the hyphenated entity ID from `nemo models list` (e.g. `meta-llama-3-3-70b-instruct`).
 - **Undeploy / delete prompt.** No `--yes` flag on this build — pipe `echo y |` for non-interactive use.
-- **Editing `workflow.yml`.** The platform stores the YAML at create time. After edits, `undeploy` + `delete` + `create` + `deploy` to pick them up.
+- **Editing `workflow.yml`.** The platform stores the YAML at registration time. After edits, `undeploy` + `delete` + `register` + `deploy` to pick them up.

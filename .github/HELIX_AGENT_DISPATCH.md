@@ -118,7 +118,7 @@ typed envelope above) — NOT to post directly.
 **2. Create the `agent` entity** in the workspace (type `agent`, looked up by
 `{workspace, name}`). The dispatcher no-ops gracefully until this exists:
 ```bash
-nemo agents create --agent agent.yaml --workspace <workspace>
+nemo agents register --agent agent.yaml --workspace <workspace>
 ```
 
 **3. Add a registry row** in the WORKER repo's `.github/dispatch-registry.yaml`

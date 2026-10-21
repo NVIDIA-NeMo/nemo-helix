@@ -97,7 +97,7 @@ curl -fsS --connect-timeout 2 --max-time 5 \
 # If setup does not create a usable NVIDIA inference provider, follow
 # Step 2 in plugins/nemo-agents/README.md before deploying.
 
-nemo agents create \
+nemo agents register \
   --name platform-agent \
   --agent-config plugins/nemo-agents/examples/nemo-agent-config/agent-codex.yaml
 

@@ -100,7 +100,8 @@ def get_agent_config_format_handler(config_format: str) -> AgentConfigFormatHand
 
 def validate_agent_config(config_format: str, config: dict[str, Any]) -> dict[str, Any]:
     """Validate and normalize an agent config before persistence."""
-    return get_agent_config_format_handler(config_format).validate(config)
+    handler = get_agent_config_format_handler(config_format)
+    return handler.validate(config) if config else config
 
 
 def resolve_agent_config_for_deployment(
@@ -111,7 +112,13 @@ def resolve_agent_config_for_deployment(
     agent_name: str,
 ) -> dict[str, Any]:
     """Resolve a persisted agent config for deployment."""
-    return get_agent_config_format_handler(config_format).resolve_for_deployment(
+    handler = get_agent_config_format_handler(config_format)
+    if not config:
+        raise InvalidAgentConfigError(
+            f"Agent '{workspace}/{agent_name}' has no configuration. "
+            "This operation requires an agent registered with a non-empty config."
+        )
+    return handler.resolve_for_deployment(
         config,
         workspace=workspace,
         agent_name=agent_name,

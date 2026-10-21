@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { agentsCreateAgent, agentsGetAgent } from '@nemo/sdk/generated/agents/agents';
+import { agentsRegisterAgent, agentsGetAgent } from '@nemo/sdk/generated/agents/agents';
 import {
   filesCreateFileset,
   filesDeleteFileset,
@@ -17,7 +17,7 @@ import type { UploadAgentEntry } from '@studio/routes/agents/AgentsListRoute/New
 
 vi.mock('@nemo/sdk/generated/agents/agents', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@nemo/sdk/generated/agents/agents')>()),
-  agentsCreateAgent: vi.fn(),
+  agentsRegisterAgent: vi.fn(),
   agentsGetAgent: vi.fn(),
 }));
 
@@ -58,7 +58,7 @@ beforeEach(() => {
   vi.mocked(filesCreateFileset).mockResolvedValue({ name: 'calc-ethos' } as never);
   vi.mocked(filesUploadFile).mockResolvedValue({ path: 'agent.yaml' } as never);
   vi.mocked(filesDeleteFileset).mockResolvedValue(undefined as never);
-  vi.mocked(agentsCreateAgent).mockResolvedValue({ name: 'calc' } as never);
+  vi.mocked(agentsRegisterAgent).mockResolvedValue({ name: 'calc' } as never);
 });
 
 afterEach(() => {
@@ -72,7 +72,7 @@ describe('createAgentFromUpload', () => {
       order.push(`upload:${path}`);
       return { path } as never;
     });
-    vi.mocked(agentsCreateAgent).mockImplementation(async () => {
+    vi.mocked(agentsRegisterAgent).mockImplementation(async () => {
       order.push('createAgent');
       return { name: 'calc' } as never;
     });
@@ -82,7 +82,7 @@ describe('createAgentFromUpload', () => {
     // Uploads run concurrently, so only their completion before the create is guaranteed.
     expect(order.at(-1)).toBe('createAgent');
     expect(order.slice(0, -1).sort()).toEqual(['upload:agent.yaml', 'upload:mcps/calculator.py']);
-    expect(agentsCreateAgent).toHaveBeenCalledWith('ws', {
+    expect(agentsRegisterAgent).toHaveBeenCalledWith('ws', {
       name: 'calc',
       description: 'Adds numbers',
       config: expect.objectContaining({ config_format: 'nemo-agents-spec-v1' }),
@@ -104,7 +104,7 @@ describe('createAgentFromUpload', () => {
 
     await expect(createAgentFromUpload(params())).rejects.toThrow(AgentSpecFilesetOrphanError);
     expect(filesDeleteFileset).not.toHaveBeenCalled();
-    expect(agentsCreateAgent).not.toHaveBeenCalled();
+    expect(agentsRegisterAgent).not.toHaveBeenCalled();
   });
 
   it('replaces an orphaned fileset once confirmed', async () => {
@@ -117,7 +117,7 @@ describe('createAgentFromUpload', () => {
       'ws',
       expect.objectContaining({ name: 'calc-ethos' })
     );
-    expect(agentsCreateAgent).toHaveBeenCalled();
+    expect(agentsRegisterAgent).toHaveBeenCalled();
   });
 
   it('does not replace an owned fileset even when confirmed', async () => {
@@ -140,7 +140,7 @@ describe('createAgentFromUpload', () => {
   });
 
   it('deletes the fileset when creating the agent fails', async () => {
-    vi.mocked(agentsCreateAgent).mockRejectedValue(new Error('409 conflict'));
+    vi.mocked(agentsRegisterAgent).mockRejectedValue(new Error('409 conflict'));
 
     await expect(createAgentFromUpload(params())).rejects.toThrow('409 conflict');
     expect(filesDeleteFileset).toHaveBeenCalledWith('ws', 'calc-ethos');
@@ -169,7 +169,7 @@ describe('createAgentFromUpload', () => {
       createAgentFromUpload({ ...params(), replaceOrphanedFileset: true })
     ).rejects.toThrow('HTTP 503');
     expect(filesDeleteFileset).not.toHaveBeenCalled();
-    expect(agentsCreateAgent).not.toHaveBeenCalled();
+    expect(agentsRegisterAgent).not.toHaveBeenCalled();
   });
 
   it('rejects a non-Fabric config before touching anything', async () => {
@@ -180,6 +180,6 @@ describe('createAgentFromUpload', () => {
     ).rejects.toThrow(/config_format/);
     expect(filesRetrieveFileset).not.toHaveBeenCalled();
     expect(filesCreateFileset).not.toHaveBeenCalled();
-    expect(agentsCreateAgent).not.toHaveBeenCalled();
+    expect(agentsRegisterAgent).not.toHaveBeenCalled();
   });
 });

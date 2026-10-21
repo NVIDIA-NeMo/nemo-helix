@@ -101,7 +101,7 @@ async def test_model_change_allowed_before_deployment() -> None:
     agents.list_deployments = AsyncMock(return_value=_Page([]))
     agents.get_agent = AsyncMock(return_value=_wire(Agent(name=sample._AGENT_NAME, config=_config(old_model))))
     agents.delete_agent = AsyncMock()
-    agents.create_agent = AsyncMock()
+    agents.register_agent = AsyncMock()
     agents.create_deployment = AsyncMock(return_value=_wire(AgentDeployment(name="dep-new", agent=sample._AGENT_NAME)))
 
     deployment, agent_created, deployment_submitted = await sample._agent_and_deployment(
@@ -110,7 +110,7 @@ async def test_model_change_allowed_before_deployment() -> None:
 
     assert agent_created and deployment_submitted and deployment.name == "dep-new"
     agents.delete_agent.assert_awaited_once()
-    agents.create_agent.assert_awaited_once()
+    agents.register_agent.assert_awaited_once()
 
 
 @pytest.mark.asyncio

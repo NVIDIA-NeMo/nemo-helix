@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { CreateAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/CreateAgentRequestConfig';
+import type { RegisterAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/RegisterAgentRequestConfig';
 import {
   AGENT_CONFIG_FILENAME,
   AGENT_SPEC_FILENAME,
@@ -178,7 +178,7 @@ export const findNonUtf8Path = async (entries: UploadAgentEntry[]): Promise<stri
 
 export class AgentConfigParseError extends Error {}
 
-export const parseAgentConfig = (text: string): CreateAgentRequestConfig => {
+export const parseAgentConfig = (text: string): RegisterAgentRequestConfig => {
   let parsed: unknown;
   try {
     parsed = YAML.parse(text);
@@ -192,7 +192,7 @@ export const parseAgentConfig = (text: string): CreateAgentRequestConfig => {
     throw new AgentConfigParseError(`${AGENT_CONFIG_FILENAME} must contain a YAML mapping.`);
   }
 
-  const config = parsed as CreateAgentRequestConfig;
+  const config = parsed as RegisterAgentRequestConfig;
   const configFormat = config.config_format;
   if (configFormat !== FABRIC_CONFIG_FORMAT) {
     throw new AgentConfigParseError(

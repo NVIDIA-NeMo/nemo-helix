@@ -22,7 +22,7 @@ from nemo_agents_plugin.entities import Agent, AgentDeployment
 from nemo_agents_plugin.schema import (
     AgentFilter,
     AgentPage,
-    CreateAgentRequest,
+    RegisterAgentRequest,
 )
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
@@ -52,13 +52,13 @@ _agent_filter_dep = make_filter_obj_dep(AgentFilter)
     callers=[CallerKind.PRINCIPAL],
     permissions=[AgentPerms.CREATE],
 )
-async def create_agent(
+async def register_agent(
     workspace: str,
-    body: CreateAgentRequest,
+    body: RegisterAgentRequest,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> Agent:
-    """Create a new agent from an agent config."""
-    config = _validate_agent_config_for_create(body)
+    """Register an agent."""
+    config = _validate_agent_config_for_register(body)
 
     agent = Agent(
         name=body.name,
@@ -77,8 +77,8 @@ async def create_agent(
     except NemoEntityValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        logger.exception("Failed to create agent '%s'", body.name)
-        raise HTTPException(status_code=500, detail="Failed to create agent.") from exc
+        logger.exception("Failed to register agent '%s'", body.name)
+        raise HTTPException(status_code=500, detail="Failed to register agent.") from exc
     return saved
 
 
@@ -200,7 +200,7 @@ async def delete_agent(
         raise HTTPException(status_code=500, detail="Failed to delete agent.") from exc
 
 
-def _validate_agent_config_for_create(body: CreateAgentRequest) -> dict[str, Any]:
+def _validate_agent_config_for_register(body: RegisterAgentRequest) -> dict[str, Any]:
     try:
         return validate_agent_config(body.config_format, body.config)
     except AgentConfigFormatError as exc:
