@@ -42,6 +42,10 @@ CACHE_ROOTS = (Path("/opt/uv_cache"), Path("/home/ubuntu/.cache/uv"))
 FIXED_PACKAGES = {"certifi": "2026.10.19", "pip": "26.2.2", "uv": "0.13.4"}
 
 
+def source_collection_enabled() -> bool:
+    return os.environ.get("NHX_COLLECT_SOURCES", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
 @functools.cache
 def fixed_pip_wheel() -> bytes:
     with urllib.request.urlopen("https://pypi.org/pypi/pip/26.2.2/json", timeout=120) as response:
@@ -145,7 +149,7 @@ def download_source(version: str, destination: Path) -> Path:
         raise ValueError(f"wandb {version} source checksum mismatch")
     archive = destination / source["filename"]
     archive.write_bytes(data)
-    if os.environ.get("NHX_COLLECT_SOURCES") == "1":
+    if source_collection_enabled():
         shutil.copy2(archive, SOURCE_OUTPUT / archive.name)
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
         tar.extractall(destination, filter="data")
@@ -176,7 +180,7 @@ def rebuild_wandb(version: str, work: Path) -> Path:
     version_info = subprocess.check_output(["/usr/local/go/bin/go", "version", "-m", str(output)], text=True)
     if version_info.splitlines()[0].split()[-1] != "go1.27.3":
         raise ValueError(f"Unexpected wandb-core toolchain: {version_info}")
-    if os.environ.get("NHX_COLLECT_SOURCES") == "1":
+    if source_collection_enabled():
         subprocess.run(
             [
                 sys.executable,
@@ -258,6 +262,9 @@ def main() -> None:
             archive = metadata.parent.parent
             if any(link.resolve().is_relative_to(archive) for link in links):
                 raise RuntimeError(f"An environment still references obsolete {name}: {archive}")
+            for link in (cache / "wheels-v6").rglob("*"):
+                if link.is_symlink() and link.resolve().is_relative_to(archive):
+                    link.unlink()
             shutil.rmtree(archive)
 
 

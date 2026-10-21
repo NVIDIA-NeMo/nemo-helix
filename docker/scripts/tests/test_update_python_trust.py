@@ -5,8 +5,11 @@ import base64
 import csv
 import hashlib
 import importlib.util
+import io
+import json
 import os
 import sys
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -17,6 +20,51 @@ SPEC = importlib.util.spec_from_file_location(
 assert SPEC is not None and SPEC.loader is not None
 trust = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(trust)
+
+
+@pytest.mark.parametrize(
+    ("value", "enabled"),
+    [("1", True), (" TRUE ", True), ("Yes", True), (" oN ", True), (None, False), ("0", False), ("false", False)],
+)
+def test_source_collection_covers_archive_and_go_sources(tmp_path: Path, monkeypatch, value, enabled: bool) -> None:
+    if value is None:
+        monkeypatch.delenv("NHX_COLLECT_SOURCES", raising=False)
+    else:
+        monkeypatch.setenv("NHX_COLLECT_SOURCES", value)
+    output = tmp_path / "sources"
+    output.mkdir()
+    monkeypatch.setattr(trust, "SOURCE_OUTPUT", output)
+    buffer = io.BytesIO()
+    hook = b'def build_wandb_core(*, output_path, **kwargs):\n    output_path.write_bytes(b"rebuilt")\n'
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        member = tarfile.TarInfo("wandb-0.31.0/core/hatch.py")
+        member.size = len(hook)
+        archive.addfile(member, io.BytesIO(hook))
+    data = buffer.getvalue()
+    metadata = {
+        "urls": [
+            {
+                "packagetype": "sdist",
+                "filename": "wandb.tar.gz",
+                "url": "https://example.invalid/source",
+                "digests": {"sha256": hashlib.sha256(data).hexdigest()},
+            }
+        ]
+    }
+    responses = iter([json.dumps(metadata).encode(), data])
+    monkeypatch.setattr(trust.urllib.request, "urlopen", lambda *args, **kwargs: io.BytesIO(next(responses)))
+    monkeypatch.setattr(trust.platform, "machine", lambda: "aarch64")
+    monkeypatch.setattr(trust.subprocess, "check_output", lambda *args, **kwargs: "wandb-core: go1.27.3\n")
+    collected = []
+    monkeypatch.setattr(trust.subprocess, "run", lambda command, **kwargs: collected.append(command))
+
+    binary = trust.rebuild_wandb("0.31.0", tmp_path)
+
+    assert binary.read_bytes() == b"rebuilt"
+    assert (output / "wandb.tar.gz").exists() is enabled
+    assert bool(collected) is enabled
+    if enabled:
+        assert collected[0][1] == "/tmp/collect-go-module-sources.py"
 
 
 def test_update_bundles_skips_unnamed_distributions(tmp_path: Path, monkeypatch) -> None:
@@ -99,3 +147,48 @@ def test_updates_bootstrap_wheel_as_well_as_ensurepip_version(tmp_path: Path, mo
     assert module.read_text() == '_PIP_VERSION = "26.2.2"\n'
     assert not old.exists()
     assert (bundled / "pip-26.2.2-py3-none-any.whl").read_bytes() == b"verified fixed wheel"
+
+
+@pytest.mark.parametrize("referenced", [False, True])
+def test_archive_cleanup_removes_only_obsolete_index_links(tmp_path: Path, monkeypatch, referenced: bool) -> None:
+    cache = tmp_path / "cache"
+    index = cache / "wheels-v6/pypi/certifi"
+    index.mkdir(parents=True)
+    archives = {}
+    for key, version in (("old", "2026.7.22"), ("fixed", "2026.10.19")):
+        archive = cache / "archive-v0" / key
+        metadata = archive / f"certifi-{version}.dist-info/METADATA"
+        metadata.parent.mkdir(parents=True)
+        metadata.write_text(f"Name: certifi\nVersion: {version}\n")
+        (index / key).symlink_to(archive)
+        archives[key] = archive
+    # Index links can also point inside an archive, rather than at its root.
+    nested = index / "old-metadata"
+    nested.symlink_to(archives["old"] / "certifi-2026.7.22.dist-info/METADATA")
+    unrelated = cache / "archive-v0/unrelated"
+    unrelated.mkdir()
+    (index / "unrelated").symlink_to(unrelated)
+    environment = tmp_path / "environment"
+    environment.mkdir()
+    if referenced:
+        (environment / "certifi").symlink_to(archives["old"])
+    monkeypatch.setattr(sys, "argv", ["update-python-trust.py", "--root", str(environment)])
+    monkeypatch.setattr(trust, "CACHE_ROOTS", (cache,))
+    monkeypatch.setattr(trust, "SOURCE_OUTPUT", tmp_path / "sources")
+    monkeypatch.setattr(trust, "python_environments", lambda _: [])
+
+    if referenced:
+        with pytest.raises(RuntimeError, match="An environment still references obsolete certifi"):
+            trust.main()
+        assert archives["old"].exists()
+        assert (index / "old").exists()
+        assert nested.exists()
+    else:
+        trust.main()
+        assert not archives["old"].exists()
+        assert not (index / "old").is_symlink()
+        assert not nested.is_symlink()
+    assert archives["fixed"].exists()
+    assert (index / "fixed").exists()
+    assert unrelated.exists()
+    assert (index / "unrelated").exists()

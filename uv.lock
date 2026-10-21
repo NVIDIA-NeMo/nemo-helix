@@ -4480,6 +4480,7 @@ data-designer-nemo = [
 ]
 nemo-helix-plugin = [
     { name = "anthropic" },
+    { name = "certifi" },
     { name = "fastapi" },
     { name = "jsonschema" },
     { name = "lark" },
@@ -4505,6 +4506,7 @@ test = [
 requires-dist = [
     { name = "anthropic", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.88.0" },
     { name = "anyio", marker = "extra == 'data-designer-nemo'", specifier = ">=4.0" },
+    { name = "certifi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2026.10.19" },
     { name = "data-designer", specifier = "==0.9.5" },
     { name = "data-designer", marker = "extra == 'data-designer-nemo'", specifier = "==0.9.5" },
     { name = "data-designer-nemo", editable = "packages/data_designer_nemo" },
@@ -5556,6 +5558,7 @@ nemo-helix-ext = [
 ]
 nemo-helix-plugin = [
     { name = "anthropic" },
+    { name = "certifi" },
     { name = "fastapi" },
     { name = "filesets" },
     { name = "jsonschema" },
@@ -5966,6 +5969,7 @@ requires-dist = [
     { name = "botocore", marker = "extra == 'plugins'", specifier = ">=1.40.46,<1.40.62" },
     { name = "botocore", marker = "extra == 'services'", specifier = ">=1.40.46,<1.40.62" },
     { name = "certifi", specifier = ">=2026.10.19" },
+    { name = "certifi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2026.10.19" },
     { name = "clickhouse-connect", extras = ["async"], marker = "extra == 'all'", specifier = ">=1.10.0,<2" },
     { name = "clickhouse-connect", extras = ["async"], marker = "extra == 'intake-service'", specifier = ">=1.10.0,<2" },
     { name = "clickhouse-connect", extras = ["async"], marker = "extra == 'services'", specifier = ">=1.10.0,<2" },
@@ -6912,6 +6916,7 @@ name = "nemo-helix-plugin"
 source = { editable = "packages/nemo_helix_plugin" }
 dependencies = [
     { name = "anthropic" },
+    { name = "certifi" },
     { name = "fastapi" },
     { name = "filesets" },
     { name = "jsonschema" },
@@ -6965,6 +6970,7 @@ nhx-evals-sdk = [
 requires-dist = [
     { name = "anthropic", specifier = ">=0.88.0" },
     { name = "anyio", marker = "extra == 'filesets'", specifier = ">=4.0.0" },
+    { name = "certifi", specifier = ">=2026.10.19" },
     { name = "docker", marker = "extra == 'nemo-helix-ext'", specifier = ">=7.0.0" },
     { name = "fastapi", specifier = ">=0.115.4" },
     { name = "filesets", editable = "packages/filesets" },
@@ -7235,6 +7241,7 @@ dependencies = [
 [package.optional-dependencies]
 nemo-helix-plugin = [
     { name = "anthropic" },
+    { name = "certifi" },
     { name = "fastapi" },
     { name = "jsonschema" },
     { name = "lark" },
@@ -7254,6 +7261,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.88.0" },
+    { name = "certifi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2026.10.19" },
     { name = "datasets", specifier = ">=5.1.0,<6" },
     { name = "fastapi", specifier = ">=0.115.8" },
     { name = "fastapi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.115.4" },
