@@ -1153,6 +1153,16 @@ CLASSIFIED_ERROR = {
     "cause": "gpu_out_of_memory",
 }
 
+# A failure no rule matched. The task still reported it, with the traceback the controller never sees.
+UNMATCHED_ERROR = {
+    "message": "An internal error occurred during training. (ValueError: something new)",
+    "type": "InternalError",
+    "detail": "ValueError: something new",
+    "cause": None,
+}
+
+TASK_ERRORS = pytest.mark.parametrize("reported", [CLASSIFIED_ERROR, UNMATCHED_ERROR], ids=["matched", "unmatched"])
+
 
 async def _set_running(store: EntityClient, attempt_id: str, step_id: str, task_id: str) -> None:
     for entity_type, entity_id in ((HelixJobAttempt, attempt_id), (HelixJobStep, step_id), (HelixJobTask, task_id)):
@@ -1161,9 +1171,10 @@ async def _set_running(store: EntityClient, attempt_id: str, step_id: str, task_
         await store.update(entity)
 
 
+@TASK_ERRORS
 @pytest.mark.asyncio
-async def test_a_task_keeps_the_cause_it_reported_when_the_controller_reports_the_failure(
-    mock_dispatcher: JobDispatcher, mock_store: EntityClient
+async def test_a_task_keeps_the_error_it_reported_when_the_controller_reports_the_failure(
+    mock_dispatcher: JobDispatcher, mock_store: EntityClient, reported: dict
 ):
     """The controller only sees the process exit, so its error adds to the task's own instead of replacing it."""
     _, job_name, attempt_id, step_id, task_id, _ = await create_test_job_data(mock_store, "classified-task-job")
@@ -1171,7 +1182,7 @@ async def test_a_task_keeps_the_cause_it_reported_when_the_controller_reports_th
     step = await mock_store.get_by_id(HelixJobStep, step_id)
     task = await mock_store.get_by_id(HelixJobTask, task_id)
 
-    for error_details in (CLASSIFIED_ERROR, {"message": "Pod pod-1 is in error state", "failed": "Back-off"}):
+    for error_details in (reported, {"message": "Pod pod-1 is in error state", "failed": "Back-off"}):
         await mock_dispatcher.create_or_update_task(
             job_name,
             task.name,
@@ -1181,18 +1192,19 @@ async def test_a_task_keeps_the_cause_it_reported_when_the_controller_reports_th
         )
 
     stored_task = await mock_store.get_by_id(HelixJobTask, task_id)
-    assert stored_task.error_details == {**CLASSIFIED_ERROR, "failed": "Back-off"}
+    assert stored_task.error_details == {**reported, "failed": "Back-off"}
 
 
+@TASK_ERRORS
 @pytest.mark.asyncio
-async def test_a_failed_step_reports_the_cause_its_task_classified(
-    mock_dispatcher: JobDispatcher, mock_store: EntityClient
+async def test_a_failed_step_reports_the_error_its_task_classified(
+    mock_dispatcher: JobDispatcher, mock_store: EntityClient, reported: dict
 ):
     _, _, attempt_id, step_id, task_id, _ = await create_test_job_data(mock_store, "classified-step-job")
     await _set_running(mock_store, attempt_id, step_id, task_id)
     task = await mock_store.get_by_id(HelixJobTask, task_id)
     task.status = HelixJobStatus.ERROR
-    task.error_details = dict(CLASSIFIED_ERROR)
+    task.error_details = dict(reported)
     await mock_store.update(task)
     step = await mock_store.get_by_id(HelixJobStep, step_id)
 
@@ -1200,8 +1212,8 @@ async def test_a_failed_step_reports_the_cause_its_task_classified(
         step, HelixJobStatus.ERROR, error_details={"message": "Job failed; One or more tasks are in error state"}
     )
 
-    assert saved_step.error_details == CLASSIFIED_ERROR
-    assert attempt.error_details == CLASSIFIED_ERROR
+    assert saved_step.error_details == reported
+    assert attempt.error_details == reported
 
 
 @pytest.mark.asyncio

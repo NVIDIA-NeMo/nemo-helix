@@ -15,6 +15,10 @@ from nhx.customization_common.training.errors.parser import ParsedError, fallbac
         ),
         ("subprocess.TimeoutExpired: Command timed out", ParsedError("TimeoutExpired", "Command timed out")),
         (
+            "pyarrow.lib.ArrowInvalid: JSON parse error: Invalid encoding in string. in row 20",
+            ParsedError("ArrowInvalid", "JSON parse error: Invalid encoding in string. in row 20"),
+        ),
+        (
             "(DTensorPolicyWorkerV2 pid=4751, ip=10.244.5.110) RuntimeError: NCCL error",
             ParsedError("RuntimeError", "NCCL error"),
         ),

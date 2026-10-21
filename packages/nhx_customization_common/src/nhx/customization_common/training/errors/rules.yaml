@@ -115,7 +115,19 @@ rules:
       - contains: "tool_call_id must be a non-empty string"
       - starts_with: "assistant message `"
       - regex: "^`tools` (is a string but not valid JSON|must be a list)"
-      - type_name: DatasetGenerationError
+    exception: DatasetFormatError
+
+  # A dataset file that is not valid JSON or JSONL, as pyarrow reports it. The message names the row.
+  - id: invalid_json_dataset
+    rerunnable: false
+    contains: "JSON parse error"
+    exception: DatasetFormatError
+
+  # Hugging Face datasets wraps the error that stopped it, such as a JSON parse error or a full disk.
+  - id: dataset_generation_failed
+    rerunnable: false
+    symptom: true
+    type_name: DatasetGenerationError
     exception: DatasetFormatError
 
   - id: invalid_column_dataset
@@ -465,6 +477,7 @@ rules:
 
   - id: generation_refit_failed
     rerunnable: true
+    symptom: true  # NeMo-RL raises it after the vLLM worker's own error, such as running out of memory.
     or:
       - contains: "Updating weights for the generation policy failed during refit"
       - type_name: RefitAborted
@@ -542,13 +555,9 @@ rules:
 
   - id: ray_node_failed
     rerunnable: true
-    or:
-      - contains: "its node has died"
-      - type_name: WorkerCrashedError
-      - type_name: ActorUnavailableError
-      - type_name: RaySystemError
+    contains: "its node has died"
     exception: DistributedError
-    error_details: "A training node or worker process failed. This is usually transient (a node was lost or restarted); rerun the job, which continues from the newest checkpoint."
+    error_details: "A training node failed. This is usually transient (a node was lost or restarted); rerun the job, which continues from the newest checkpoint."
 
   - id: ray_actor_died
     rerunnable: true
@@ -556,8 +565,11 @@ rules:
     or:
       - type_name: ActorDiedError
       - type_name: GetTimeoutError
+      - type_name: WorkerCrashedError
+      - type_name: ActorUnavailableError
+      - type_name: RaySystemError
     exception: DistributedError
-    error_details: "A training worker process died. Check the job logs for the cause printed before this error."
+    error_details: "A training worker process died or became unreachable. Check the job logs for the cause printed before this error; if there is none, rerun the job, which continues from the newest checkpoint."
 
   - id: nccl_error
     rerunnable: true

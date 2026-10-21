@@ -10,6 +10,7 @@ a symptom only when nothing else did.
 """
 
 import logging
+from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -105,8 +106,8 @@ class FailureClassifier:
     """Match failures against rules, in file order; the first matching rule wins."""
 
     def __init__(self, rules: Sequence[Rule]) -> None:
-        ids = [rule.id for rule in rules]
-        duplicates = sorted({rule_id for rule_id in ids if ids.count(rule_id) > 1})
+        counts = Counter(rule.id for rule in rules)
+        duplicates = sorted(rule_id for rule_id, count in counts.items() if count > 1)
         if duplicates:
             raise ValueError(f"Duplicate rule ids: {duplicates}")
         self.rules = tuple(rules)
@@ -127,11 +128,18 @@ class FailureClassifier:
 
         ``candidates`` run from the earliest failure to the latest.
         """
-        matched = [(exc, self.match(exc)) for exc in candidates]
-        for wanted_symptom in (False, True):
-            for exc, rule in reversed(matched):
-                if rule is not None and rule.symptom == wanted_symptom:
-                    return rule.build(exc)
+        symptom: tuple[Exception, Rule] | None = None
+        for candidate in reversed(candidates):
+            rule = self.match(candidate)
+            if rule is None:
+                continue
+            if not rule.symptom:
+                return rule.build(candidate)
+            if symptom is None:
+                symptom = (candidate, rule)
+        if symptom is not None:
+            candidate, rule = symptom
+            return rule.build(candidate)
         latest = candidates[-1]
         return InternalError(
             message=f"{InternalError.user_message} ({format_exception_string(latest)})",

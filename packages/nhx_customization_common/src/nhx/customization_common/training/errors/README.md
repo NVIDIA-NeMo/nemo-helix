@@ -7,7 +7,8 @@ Automodel, NeMo-RL, and Unsloth training tasks classify a failure with the rules
 to the Jobs service:
 
 - `error_details`: a user-facing `message`, the error `type`, the original error as `detail`, and the `cause`,
-  which is the id of the rule that matched.
+  which is the id of the rule that matched, or `null` when none did. The Jobs service keeps these details when
+  the controller later reports the same failure.
 - `status_details.resumable`: whether a rerun of the same job could succeed. When it is `false`,
   `status_details.non_resumable_reason` says why, and a rerun of the job returns that reason as `rerun_warning`.
   A task killed before it could report sets neither, so its rerun has no warning.
@@ -30,7 +31,8 @@ such as a peer's NCCL error after a rank ran out of memory, so the cause wins ev
    may be counted.
 2. Set `rerunnable: false` only when a rerun of the same job with the same configuration would fail the same way.
    A rerun continues from the newest checkpoint, so a transient failure partway through training costs little.
-3. Set `symptom: true` when the failure usually follows another one.
+3. Set `symptom: true` when the failure usually follows another one. That includes wrappers that report another
+   error, such as `DatasetGenerationError`, and notices that a worker died, such as `WorkerCrashedError`.
 4. Put the rule before any broader rule that would also match.
 5. Add lines the rule must match to `EXAMPLES` in
    `packages/nhx_customization_common/tests/training/test_error_rules.py`. The test fails for a rule without

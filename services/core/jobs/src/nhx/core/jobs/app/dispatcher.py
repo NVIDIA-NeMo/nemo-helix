@@ -197,11 +197,12 @@ def _reject_pause_ttl_over_maximum(pause_ttl_seconds: int | None) -> None:
 def _keep_reported_cause(reported: dict[str, Any] | None, update: dict[str, Any]) -> dict[str, Any]:
     """Return the error details after ``update`` arrives for an error already ``reported``.
 
-    A task that classified its own failure reports a ``cause``. A later error for the same failure, such as
-    the controller's when the process exits, only sees the exit, so it adds keys without replacing the cause.
+    A task that classified its own failure reports a ``cause`` key, None when no rule matched. A later error
+    for the same failure, such as the controller's when the process exits, only sees the exit, so it adds
+    keys without replacing what the task reported.
     """
-    if (reported or {}).get(ERROR_CAUSE):
-        return {**update, **(reported or {})}
+    if reported and ERROR_CAUSE in reported:
+        return {**update, **reported}
     return update
 
 
@@ -1448,9 +1449,9 @@ class JobDispatcher:
         return saved_step, attempt
 
     async def _with_task_cause(self, step: HelixJobStep, error_details: dict[str, Any] | None) -> dict[str, Any] | None:
-        """Return the step's error details, led by the cause a failed task reported for itself, if any."""
+        """Return the step's error details, led by the error a failed task classified for itself, if any."""
         for task in await self.list_tasks(step.id, step.workspace):
-            if task.status == HelixJobStatus.ERROR and (task.error_details or {}).get(ERROR_CAUSE):
+            if task.status == HelixJobStatus.ERROR and ERROR_CAUSE in (task.error_details or {}):
                 return _keep_reported_cause(task.error_details, error_details or step.error_details or {})
         return error_details
 

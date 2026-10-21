@@ -38,11 +38,11 @@ ERROR_INDICATORS = [
 ]
 
 # A Python exception line: "TypeName: message". The type may be module qualified
-# ("torch.OutOfMemoryError") and need not end in Error ("TimeoutExpired"). It must not follow a ``::``
-# or be followed by one, which leaves out C++ names in native backtraces, such as
-# "c10::DistNetworkError::DistNetworkError(c10::SourceLocation, ...)".
+# ("torch.OutOfMemoryError") and need not end in Error ("TimeoutExpired", pyarrow's "ArrowInvalid").
+# It must not follow a ``::`` or be followed by one, which leaves out C++ names in native backtraces,
+# such as "c10::DistNetworkError::DistNetworkError(c10::SourceLocation, ...)".
 _EXCEPTION_RE = re.compile(
-    r"(?<![\w:.])((?:[A-Za-z_]\w*\.)*[A-Z]\w*(?:Error|Exception|Expired|Interrupt|Exit|Failed|Aborted|Rejected)):(?!:)\s*(.*)",
+    r"(?<![\w:.])((?:[A-Za-z_]\w*\.)*[A-Z]\w*(?:Error|Exception|Expired|Interrupt|Exit|Failed|Aborted|Rejected|Invalid)):(?!:)\s*(.*)",
 )
 
 # Wrapper exceptions that only report that another process failed.

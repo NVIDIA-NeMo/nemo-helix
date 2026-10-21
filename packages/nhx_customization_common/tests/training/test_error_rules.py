@@ -48,7 +48,10 @@ EXAMPLES: dict[str, list[str]] = {
         "ValueError: System role appeared in multiple messages. Only a single system message is supported.",
         "ValueError: assistant message `tool_calls[0].function.name` must be a non-empty string",
         "ValueError: `tools` must be a list or JSON-encoded list, got int",
-        "datasets.exceptions.DatasetGenerationError: An error occurred while generating the dataset",
+    ],
+    "invalid_json_dataset": ["pyarrow.lib.ArrowInvalid: JSON parse error: Invalid encoding in string. in row 20"],
+    "dataset_generation_failed": [
+        "datasets.exceptions.DatasetGenerationError: An error occurred while generating the dataset"
     ],
     "invalid_column_dataset": ["AssertionError: Expected at least two columns, got 1"],
     "answer_tokens_truncated": [
@@ -187,11 +190,13 @@ EXAMPLES: dict[str, list[str]] = {
         "TimeoutError: Timed out waiting for all workers to connect after 600s.",
         "RuntimeError: Failed to start Ray head node",
     ],
-    "ray_node_failed": [
-        "ray.exceptions.ActorDiedError: The actor is dead because its node has died.",
+    "ray_node_failed": ["ray.exceptions.ActorDiedError: The actor is dead because its node has died."],
+    "ray_actor_died": [
+        "ray.exceptions.ActorDiedError: The actor died unexpectedly before finishing this task.",
         "ray.exceptions.WorkerCrashedError: The worker died unexpectedly while executing this task.",
+        "ray.exceptions.ActorUnavailableError: The actor is temporarily unavailable: RpcError: connection lost",
+        "ray.exceptions.RaySystemError: System error: Failed to unpickle serialized exception",
     ],
-    "ray_actor_died": ["ray.exceptions.ActorDiedError: The actor died unexpectedly before finishing this task."],
     "nccl_error": [
         "torch.distributed.DistBackendError: NCCL error in: ProcessGroupNCCL.cpp:3866, unhandled system error, NCCL version 2.27.5"
     ],
@@ -299,6 +304,64 @@ def test_a_storage_error_wins_over_the_checkpoint_wrapper_after_it(classifier):
     ]
 
     assert classifier.classify_output(lines, 1).cause == "disk_full"
+
+
+def test_a_gpu_oom_wins_over_the_worker_crash_after_it(classifier):
+    lines = [
+        "(DTensorPolicyWorker pid=412) torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.00 GiB.",
+        "ray.exceptions.WorkerCrashedError: The worker died unexpectedly while executing this task.",
+    ]
+
+    error = classifier.classify_output(lines, 1)
+
+    assert error.cause == "gpu_out_of_memory"
+    assert error.rerunnable is False
+
+
+def test_a_gpu_oom_wins_over_the_refit_failure_after_it(classifier):
+    lines = [
+        "(VllmGenerationWorker pid=97) torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 1.00 GiB.",
+        "RuntimeError: ❌ Error: Updating weights for the generation policy failed during refit.",
+    ]
+
+    assert classifier.classify_output(lines, 1).cause == "gpu_out_of_memory"
+
+
+def test_a_full_disk_wins_over_the_dataset_wrapper_after_it(classifier):
+    lines = [
+        "OSError: [Errno 28] No space left on device: '/root/.cache/huggingface/datasets/json/default'",
+        "datasets.exceptions.DatasetGenerationError: An error occurred while generating the dataset",
+    ]
+
+    assert classifier.classify_output(lines, 1).cause == "disk_full"
+
+
+def test_a_json_parse_error_is_reported_with_its_row_not_the_dataset_wrapper(classifier):
+    lines = [
+        "pyarrow.lib.ArrowInvalid: JSON parse error: Invalid encoding in string. in row 20",
+        "datasets.exceptions.DatasetGenerationError: An error occurred while generating the dataset",
+    ]
+
+    error = classifier.classify_output(lines, 1)
+
+    assert error.cause == "invalid_json_dataset"
+    assert "in row 20" in error.message
+    assert error.rerunnable is False
+
+
+def test_an_in_process_dataset_wrapper_is_classified_by_the_error_it_wraps(classifier):
+    class DatasetGenerationError(Exception):
+        pass
+
+    try:
+        try:
+            raise OSError(28, "No space left on device")
+        except OSError as disk_error:
+            raise DatasetGenerationError("An error occurred while generating the dataset") from disk_error
+    except DatasetGenerationError as e:
+        error = classifier.classify(e)
+
+    assert error.cause == "disk_full"
 
 
 def test_a_killed_torchrun_worker_is_not_reported_as_nccl(classifier):
