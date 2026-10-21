@@ -27,10 +27,9 @@ unset, the default model does both.
 
 ## Sample traces
 
-Eighteen hand-written ATIF trajectories for the `email-security-triage` agent, one file per
-trace. They exercise all three of the agent's capabilities and carry three deliberate failure
-clusters, so an evaluation run has something to pass _and_ something to fail on — and so the
-Compass has enough repeated evidence to file a recommendation.
+Eighteen hand-written ATIF trajectories for the `email-security-triage` agent, one
+file per trace. They cover all three agent capabilities, with successful runs and
+three recurring failure patterns for evaluation and Compass analysis.
 
 The two maintenance scripts that read this directory live in `web/packages/studio/scripts/`
 (`bump-trace-timestamps.ts`, `convert-trace-formats.ts`) and run as `pnpm traces:bump` and
@@ -44,9 +43,6 @@ The two maintenance scripts that read this directory live in `web/packages/studi
 | `trace-07` … `trace-11`                        | **Routing failure (5 sessions)** | A direct triage question arriving with a _multi-message_ selection falls back to `review_messages`, so the analyst gets an ANALYSIS block where the contract promises one word. Verdicts are right; `routing` and `format` are 0.0. |
 | `trace-05`, `trace-12` … `trace-14`            | **Missed phishing (4 sessions)** | Every lure keeps its portal link on the sender's own lookalike domain, so there is no sender/link mismatch to catch. `correctness` 0.0.                                                                                             |
 | `trace-06`, `trace-15`, `trace-16`             | **Timeouts (3 sessions)**        | Terminal `AgentTimeoutError` on long bodies or large selections. Root span errored, no agent step.                                                                                                                                  |
-
-The three bolded clusters are deliberate: each spans at least three sessions with one shared
-trigger condition, which is the shape the Compass files on.
 
 Each carries `extra.verifier_result.rewards` with `correctness`, `format`, and `routing`, which
 Intake turns into a `harbor.verifier` evaluator span plus one evaluator result per criterion —
@@ -112,13 +108,9 @@ are derived.
 
 ## Insights
 
-The set is built to earn an Insight rather than just to import cleanly. Compass's bar is
-"at least three representative traces per Insight", it ranks error-status spans and evaluator
-regressions above one-off outliers, and it weighs patterns that recur across many sessions over
-those confined to one. Each cluster above clears that bar on its own.
-
-The periodic controller also skips a scheduled run for an agent with fewer than 10 new traces
-since its last cursor, which 18 clears comfortably.
+Each failure pattern spans at least three sessions, meeting Compass's minimum
+evidence threshold. The full set also exceeds the periodic controller's minimum
+of 10 new traces per scheduled run.
 
 See [Prerequisites](#prerequisites) to configure automatic analysis after import.
 

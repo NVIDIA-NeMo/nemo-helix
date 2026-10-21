@@ -23,7 +23,7 @@ not-for:
   - nemo-experiments-upload (use to upload traces and evaluation results into Intake; this skill reads them back out)
   - nemo-evals (use to author evaluations and metrics; this skill analyzes production behavior)
 compatibility: >-
-  nemo-helix >= 0.1.0; requires Compass plugin, a reachable platform
+  nemo-helix >= 0.1.0; requires the Compass plugin, a reachable platform
   with Intake telemetry for the target agent, and a model the platform can call
   on Compass's behalf. Requires Jobs and a configured agents.execute runtime.
 maturity: beta
@@ -89,7 +89,7 @@ they are missing, or pass `--default-model` and `--fast-model` explicitly.
 
 ## Where Insights are stored
 
-Compass plugin creates and updates insights in NeMo Helix after analysis.
+Compass creates and updates insights in NeMo Helix after analysis.
 Stored insights appear in Studio's optimizer view for the workspace.
 
 ## Verify

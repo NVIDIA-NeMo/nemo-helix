@@ -19,7 +19,7 @@ REPORT_FILE_NAME = "analysis-report.txt"
 
 
 class CompassAnalysisExtensionConfig(BaseModel):
-    """Configuration for persisting an ``CompassResult`` emitted by Fabric."""
+    """Configuration for persisting a ``CompassResult`` emitted by Fabric."""
 
     model_config = ConfigDict(extra="forbid")
 

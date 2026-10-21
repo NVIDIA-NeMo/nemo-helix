@@ -38,7 +38,7 @@ from nhx.testing import MockProviderResponse, add_mock_provider, wait_for_model_
 
 from e2e.agents_deploy_helpers import unique_name
 
-# Subprocess jobs, so the run needs no Docker: the Compass executes in-process
+# Subprocess jobs, so the run needs no Docker: Compass executes in-process
 # inside a Fabric local environment, and the mock provider stands in for the
 # model, so nothing here needs a container or a real inference provider.
 pytestmark = [
@@ -133,9 +133,9 @@ def _plain_response(model: str, content: str) -> dict[str, Any]:
 
 
 def _mock_compass_models(client: NemoClient, workspace: str) -> tuple[str, str]:
-    """Register the Compass's default/fast Model Entity pair against a mock provider.
+    """Register Compass's default/fast Model Entity pair against a mock provider.
 
-    The pair must be workspace-qualified Model Entity refs — the Compass
+    The pair must be workspace-qualified Model Entity refs — Compass
     resolves them through the platform, not as raw provider model ids.
     """
     default_model = unique_name("compass-default")
@@ -167,7 +167,7 @@ def _mock_compass_models(client: NemoClient, workspace: str) -> tuple[str, str]:
     # Create the Model Entities rather than waiting on provider autodiscovery.
     # The models controller reconciles a provider's served_models into entities
     # asynchronously, so relying on it races the run we are about to submit --
-    # and the Compass resolves Model Entities, not served-model ids. This is the
+    # and Compass resolves Model Entities, not served-model ids. This is the
     # same create-then-wait the evaluator e2e does for the same reason.
     models = ModelsClient.from_client(client)
     for name in (default_model, fast_model):
@@ -204,7 +204,7 @@ def _job_diagnostics(client: NemoClient, workspace: str, job_name: str, prefix: 
     """Explain a failed run with the backing job's own error details and logs."""
     parts = [prefix]
     # Fabric reports an adapter failure as a failed *result*, not an exception,
-    # so the task exits non-zero with nothing in its stdout and the Compass's
+    # so the task exits non-zero with nothing in its stdout and Compass's
     # own error lives only in these results.
     for result_name in (FABRIC_ERROR_RESULT_NAME, FABRIC_RUN_RESULT_NAME):
         try:
@@ -350,11 +350,11 @@ def test_analysis_run_persists_insights_and_saves_its_report(
     # The extension persisted the change-set as a real Insight. The report's
     # change log is what says which one: it is written from what the Insights
     # API returned, so its id only exists if the write landed.
-    # Relay carries the Compass's own trajectory to Intake. Nothing in this
+    # Relay carries Compass's own trajectory to Intake. Nothing in this
     # test configures telemetry: the agents plugin wires the export, Fabric
     # resolves it, and the adapter activates it.
     spans = _wait_for_spans(intake, workspace=workspace, agent_name="compass")
-    assert spans, "the Compass ran but its trajectory never reached Intake"
+    assert spans, "Compass ran but its trajectory never reached Intake"
 
     insight_id = _created_insight_id(report)
     filed = compass.insights.get(workspace=workspace, insight_id=insight_id)
