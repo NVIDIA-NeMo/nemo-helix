@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ThreadAssistantMessagePart } from '@assistant-ui/react';
-import { logger } from '@nemo/common/src/utils/logger';
 import {
   createAssistantThinkingPart,
   createAssistantToolCallPart,
   groupConsecutiveAssistantSubtleToolCalls,
-} from '@studio/routes/agents/AssistantChatRoute/toolParts';
+} from '@nemo/common/src/components/AssistantChat/toolParts';
+import { logger } from '@nemo/common/src/utils/logger';
 
 interface ServerSentEvent {
   event?: string;

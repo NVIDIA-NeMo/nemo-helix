@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { CODE_BLOCK_SURFACE_CLASS } from '@nemo/common/src/components/AssistantChat/toolCall/constants';
+import { summarizeRepeatedSubtleToolActions } from '@nemo/common/src/components/AssistantChat/toolCall/helpers';
+import type { SubtleToolAction } from '@nemo/common/src/components/AssistantChat/toolCall/types';
 import { Stack, Text } from '@nvidia/foundations-react-core';
-import { CODE_BLOCK_SURFACE_CLASS } from '@studio/routes/agents/AssistantChatRoute/toolCall/constants';
-import { summarizeRepeatedSubtleToolActions } from '@studio/routes/agents/AssistantChatRoute/toolCall/helpers';
-import type { SubtleToolAction } from '@studio/routes/agents/AssistantChatRoute/toolCall/types';
 import { ChevronRight, Copy } from 'lucide-react';
 
 interface SubtleToolCallRowProps {
