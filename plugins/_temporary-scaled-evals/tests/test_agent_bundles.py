@@ -1,7 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from collections.abc import Iterator
 from unittest.mock import MagicMock
 
 import pytest
@@ -11,58 +10,24 @@ pytest.importorskip("scaled_evals")
 from api_test_fixture import client, v1
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
 from scaled_evals.api.db import get_conn
-
-
-def _row(**overrides) -> dict:
-    row = {
-        "id": "ab_test",
-        "owner_id": "dev",
-        "bundle_name": "my-custom-agent",
-        "agent_name": "custom-agent",
-        "agent_version": "1.2.3",
-        "image_ref": "artifactory.example/team/agent:1.2.3",
-        "image_digest": "artifactory.example/team/agent@sha256:" + "a" * 64,
-        "entrypoint": "bin/custom-agent",
-        "platform": "linux/amd64",
-        "runtime_abi": "glibc",
-        "bundle_layout_version": 1,
-        "builder_profile": "node22-npm-v1",
-        "source_lock_digest": "sha256:" + "b" * 64,
-        "fingerprint": "sha256:" + "c" * 64,
-        "metadata": {},
-        "visibility": "private",
-        "qualification_status": "registered",
-        "qualification_evidence": {},
-        "qualified_at": None,
-        "qualified_by": None,
-        "created_at": "2026-07-08T00:00:00Z",
-        "updated_at": "2026-07-08T00:00:00Z",
-    }
-    row.update(overrides)
-    return row
-
-
-def _connection(*, fetchone=None, fetchall=None) -> MagicMock:
-    conn = MagicMock()
-    cur = conn.cursor.return_value.__enter__.return_value
-    cur.fetchone.return_value = fetchone
-    cur.fetchall.return_value = [] if fetchall is None else fetchall
-    return conn
-
-
-def _override(conn: MagicMock) -> None:
-    def _gen() -> Iterator[MagicMock]:
-        yield conn
-
-    v1.dependency_overrides[get_conn] = _gen
+from scaled_evals.api.tenancy import caller_is_admin
 
 
 @pytest.fixture(autouse=True)
-def _clean_override():
-    _override(_connection())
+def _restore_overrides():
+    # Bundles live in the conftest's fake Entity Store; nothing reads Postgres.
+    v1.dependency_overrides[get_conn] = lambda: MagicMock()
     yield
     v1.dependency_overrides.pop(get_conn, None)
     v1.dependency_overrides.pop(current_principal, None)
+    v1.dependency_overrides[caller_is_admin] = lambda: True
+
+
+def _act_as(owner_id: str, *, admin: bool) -> None:
+    v1.dependency_overrides[current_principal] = lambda: CurrentPrincipal(
+        owner_type="USER", owner_id=owner_id, source="platform"
+    )
+    v1.dependency_overrides[caller_is_admin] = lambda: admin
 
 
 def _create_body() -> dict:
@@ -78,74 +43,76 @@ def _create_body() -> dict:
     }
 
 
-def test_list_returns_accessible_envelope() -> None:
-    response = client.get("/v1/agent-bundles")
-    assert response.status_code == 200
-    assert response.json() == {"data": [], "next_cursor": None}
-
-
-def test_create_registers_private_owned_bundle() -> None:
-    conn = _connection(fetchone=_row())
-    _override(conn)
-    response = client.post("/v1/agent-bundles", json=_create_body())
-    assert response.status_code == 201, response.text
-    assert response.json()["owner_id"] == "dev"
-    assert response.json()["visibility"] == "private"
-    assert response.json()["qualification_status"] == "registered"
-
-
-def test_create_rejects_mutable_image_tag() -> None:
-    body = _create_body()
-    body["image_digest"] = "artifactory.example/team/agent:latest"
-    response = client.post("/v1/agent-bundles", json=body)
-    assert response.status_code == 422
-
-
-def test_create_rejects_mismatched_runtime_tag_repository() -> None:
-    body = _create_body()
-    body["image_ref"] = "artifactory.example/other/agent:1.2.3"
-    response = client.post("/v1/agent-bundles", json=body)
-    assert response.status_code == 422
-
-
-def test_create_rejects_parent_entrypoint() -> None:
-    body = _create_body()
-    body["entrypoint"] = "../bin/agent"
-    response = client.post("/v1/agent-bundles", json=body)
-    assert response.status_code == 422
-
-
-def test_get_inaccessible_bundle_is_hidden() -> None:
-    response = client.get("/v1/agent-bundles/ab_other")
-    assert response.status_code == 404
-
-
-def test_admin_can_qualify_and_promote() -> None:
-    v1.dependency_overrides[current_principal] = lambda: CurrentPrincipal(
-        owner_type="USER", owner_id="dev", source="starfleet_jwt"
+def test_bundle_lifecycle_is_owner_scoped_until_promoted() -> None:
+    _act_as("alice", admin=False)
+    created = client.post("/v1/agent-bundles", json=_create_body())
+    assert created.status_code == 201, created.text
+    bundle = created.json()
+    assert (bundle["owner_id"], bundle["visibility"], bundle["qualification_status"]) == (
+        "alice",
+        "private",
+        "registered",
     )
-    conn = _connection(
-        fetchone=_row(
-            visibility="public",
-            qualification_status="qualified",
-            qualification_evidence={"rhacs": "admitted"},
-            qualified_by="dev",
-            qualified_at="2026-07-08T00:01:00Z",
-        )
-    )
-    _override(conn)
-    qualify = client.post(
-        "/v1/agent-bundles/ab_test/qualification",
+    duplicate = client.post("/v1/agent-bundles", json=_create_body())
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"]["error"]["code"] == "agent_bundle_exists"
+
+    _act_as("bob", admin=False)
+    assert client.get(f"/v1/agent-bundles/{bundle['id']}").status_code == 404
+    assert client.get("/v1/agent-bundles").json() == {"data": [], "next_cursor": None}
+    assert client.delete(f"/v1/agent-bundles/{bundle['id']}").status_code == 404
+
+    _act_as("admin", admin=True)
+    not_qualified = client.post(f"/v1/agent-bundles/{bundle['id']}/promote")
+    assert not_qualified.status_code == 409
+    assert not_qualified.json()["detail"]["error"]["code"] == "agent_bundle_not_qualified"
+    qualified = client.post(
+        f"/v1/agent-bundles/{bundle['id']}/qualification",
         json={"status": "qualified", "evidence": {"rhacs": "admitted"}},
     )
-    assert qualify.status_code == 200, qualify.text
-    promote = client.post("/v1/agent-bundles/ab_test/promote")
-    assert promote.status_code == 200, promote.text
-    assert promote.json()["visibility"] == "public"
+    assert qualified.status_code == 200, qualified.text
+    assert qualified.json()["qualified_by"] == "admin"
+    assert qualified.json()["qualified_at"] is not None
+    promoted = client.post(f"/v1/agent-bundles/{bundle['id']}/promote")
+    assert promoted.status_code == 200, promoted.text
+    assert promoted.json()["visibility"] == "public"
+
+    _act_as("bob", admin=False)
+    assert [item["id"] for item in client.get("/v1/agent-bundles").json()["data"]] == [bundle["id"]]
+    assert client.get("/v1/agent-bundles", params={"mine": True}).json()["data"] == []
+    # Public bundles can only be deleted by an admin, even by their owner.
+    _act_as("alice", admin=False)
+    assert client.delete(f"/v1/agent-bundles/{bundle['id']}").status_code == 404
+
+    _act_as("admin", admin=True)
+    rejected = client.post(f"/v1/agent-bundles/{bundle['id']}/qualification", json={"status": "rejected"})
+    assert rejected.json()["visibility"] == "private"
+    _act_as("alice", admin=False)
+    assert client.delete(f"/v1/agent-bundles/{bundle['id']}").json() == {"id": bundle["id"], "deleted": True}
+    assert client.get(f"/v1/agent-bundles/{bundle['id']}").status_code == 404
+    assert client.post("/v1/agent-bundles", json=_create_body()).status_code == 201
 
 
-def test_owner_can_delete_private_bundle() -> None:
-    _override(_connection(fetchone={"id": "ab_test"}))
-    response = client.delete("/v1/agent-bundles/ab_test")
-    assert response.status_code == 200
-    assert response.json() == {"id": "ab_test", "deleted": True}
+def test_bundle_list_pages_newest_first() -> None:
+    ids = []
+    for index in range(3):
+        body = {**_create_body(), "bundle_name": f"agent-{index}"}
+        ids.append(client.post("/v1/agent-bundles", json=body).json()["id"])
+    first = client.get("/v1/agent-bundles", params={"limit": 2}).json()
+    assert [item["id"] for item in first["data"]] == [ids[2], ids[1]]
+    second = client.get("/v1/agent-bundles", params={"limit": 2, "cursor": first["next_cursor"]}).json()
+    assert [item["id"] for item in second["data"]] == [ids[0]]
+    assert second["next_cursor"] is None
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"image_digest": "artifactory.example/team/agent:latest"},
+        {"image_ref": "artifactory.example/other/agent:1.2.3"},
+        {"entrypoint": "../bin/agent"},
+    ],
+)
+def test_create_rejects_invalid_images_and_entrypoints(overrides: dict) -> None:
+    response = client.post("/v1/agent-bundles", json={**_create_body(), **overrides})
+    assert response.status_code == 422

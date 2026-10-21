@@ -18,6 +18,7 @@ import pytest
 pytest.importorskip("scaled_evals")
 
 from api_test_fixture import client, v1
+from scaled_evals.api.config_profile_store import ConfigProfileStore
 from scaled_evals.api.db import get_conn
 from scaled_evals.api.repositories.benchmark_run_repository import derive_run_view
 from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
@@ -405,10 +406,10 @@ def test_create_run_spawns_run_and_members() -> None:
 
 def test_create_run_applies_member_framework_profile_overrides() -> None:
     overrides = {"task_0": "cfg_member"}
+    for profile_id in ("cfg_default", "cfg_member"):
+        ConfigProfileStore().create(profile_id, name=profile_id, type="harbor", config={})
     conn = _conn(
         fetchone=[
-            {"config": {}},
-            {"config": {}},
             {"current_revision": 1},
             _run_row(
                 framework_profile_id="cfg_default",
@@ -419,10 +420,6 @@ def test_create_run_applies_member_framework_profile_overrides() -> None:
             _member_eval(1),
         ],
         fetchall=[
-            [
-                {"id": "cfg_default", "type": "harbor"},
-                {"id": "cfg_member", "type": "harbor"},
-            ],
             [_member(0), _member(1)],
             [_member_eval(0, status="queued", reward=None)],
         ],
