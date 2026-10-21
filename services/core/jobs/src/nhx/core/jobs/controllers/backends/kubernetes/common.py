@@ -1796,10 +1796,11 @@ def update_tasks_with_pause_outcome(
     for pod in pods:
         pod_status = map_pod_to_pod_status(pod)
         pod_details, _, error_stack = get_pod_details(core_v1, namespace, pod_status.name)
-        JobsClient.from_client(nemo_client).update_job_step_task(
+        JobsClient.from_client(nemo_client).update_attempt_step_task(
             name=pod_status.task_id,
             workspace=step.workspace,
             job=step.job,
+            attempt=step.attempt_id,
             step=step.name,
             body=HelixJobTaskUpdate(
                 status=status,
