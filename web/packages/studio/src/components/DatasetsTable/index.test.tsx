@@ -366,6 +366,38 @@ describe('DatasetsTable', () => {
         { timeout: LG_SELECTOR_TIMEOUT }
       );
     });
+
+    it('keeps other URL filters and still seeds the default purposes', async () => {
+      const state = installListHandler();
+      const filtersParam = encodeURIComponent(
+        JSON.stringify([{ id: 'storage_type', value: 'local' }])
+      );
+      render(
+        <TestProviders>
+          <MemoryRouter initialEntries={[`/?filters=${filtersParam}`]}>
+            <DatasetsTable enableFilters />
+          </MemoryRouter>
+        </TestProviders>
+      );
+      await waitFor(
+        () => {
+          expect(state.lastUrl?.searchParams.get('filter[storage_type]')).toBe('local');
+          expect(state.lastUrl?.searchParams.getAll('filter[purpose][$in]').sort()).toEqual([
+            'dataset',
+            'environment',
+            'model',
+          ]);
+        },
+        { timeout: LG_SELECTOR_TIMEOUT }
+      );
+    });
+
+    it('does not narrow purposes when filters are off (pickers list every purpose)', async () => {
+      const state = installListHandler();
+      renderTable();
+      await screen.findByText('dataset-1', undefined, { timeout: LG_SELECTOR_TIMEOUT });
+      expect(state.lastUrl?.searchParams.has('filter[purpose][$in]')).toBe(false);
+    });
   });
 
   describe('Sorting', () => {
