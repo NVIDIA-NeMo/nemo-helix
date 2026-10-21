@@ -90,7 +90,7 @@ index needs the operator to open it:
 
 | Setting | Env var | Notes |
 |---|---|---|
-| `rl.sandbox_allow_internet` | `NHX_RL_SANDBOX_ALLOW_INTERNET` | Default `false`. Required for every `native-v1` and every `adapter-wheels-v1` job |
+| `rl.sandbox_allow_internet` | `NHX_RL_SANDBOX_ALLOW_INTERNET` | Default `false`. Required for every `native-v1` package and any wheels package whose closure is incomplete. Converter-built `adapter-wheels-v1` packages do not need it at job start. |
 | `rl.sandbox_public_dns_allow` | `NHX_RL_SANDBOX_PUBLIC_DNS_ALLOW` | Extra suffixes/FQDNs, consulted only when the above is true. NeMo-RL's built-in list covers `*.com` and `*.org`, so e.g. `hub.primeintellect.ai` must be named here |
 
 Cluster-private, node-local and metadata destinations stay denied either way. A

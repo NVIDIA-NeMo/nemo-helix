@@ -113,8 +113,10 @@ networkPolicies:
 
 platformConfig:
   rl:
-    # Needed for native-v1 packages and wheel closures that are incomplete.
-    sandbox_allow_internet: true
+    # A complete wheels-v1 closure lets the sandbox stay off the public internet.
+    # Set this true for native-v1, an incomplete wheels closure, or an environment
+    # that calls a public service while it runs.
+    sandbox_allow_internet: false
 ```
 
 ```sh
@@ -134,12 +136,12 @@ Notes on these values:
 ## Internet access
 <a id="internet-access"></a>
 
-`rl.sandbox_allow_internet` defaults to `false`. It is an operator setting on the platform, under `platformConfig.rl`. The overlay above turns it on so a `native-v1` environment can install its dependencies. Set it back to `false` when every environment you run already vendors a complete closure.
+`rl.sandbox_allow_internet` defaults to `false`. It is an operator setting on the platform, under `platformConfig.rl`. The overlay above leaves it off, which is the setting for a complete `wheels-v1` closure.
 
 | | `false` | `true` |
 | --- | --- | --- |
-| Public names | The sandbox cannot resolve a package index. | The sandbox may resolve `*.com` and `*.org`. |
-| When to use it | A complete `wheels-v1` closure, and converter-built `adapter-wheels-v1` packages. Those do not fetch dependencies at job start. | Every `native-v1` package, and any wheels package whose closure is incomplete. Otherwise the venv build fails when it cannot reach an index. |
+| Public names | The sandbox cannot resolve public hosts. | The sandbox may resolve `*.com` and `*.org`. |
+| When to use it | A complete `wheels-v1` closure, and converter-built `adapter-wheels-v1` packages, when the environment calls no public service while it runs. | Every `native-v1` package and any wheels package whose closure is incomplete, or the venv build fails when it cannot reach an index. Also any environment whose task calls a public service, such as an external API, while it runs. |
 | Other public hosts | None. | A host outside `*.com` and `*.org`, such as `hub.primeintellect.ai`, must be named in `rl.sandbox_public_dns_allow`. |
 
 Turning internet on does not open a public address range, and it does not open the cluster. Private, link-local, and metadata addresses stay denied, including the platform database, the Files service, the platform API, and Ray.
