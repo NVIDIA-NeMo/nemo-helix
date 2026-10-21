@@ -136,6 +136,10 @@ def build_entity_name(revision_digest: str, attempt: int) -> str:
 
 
 def build_job_name(task: str, revision_digest: str, attempt: int) -> str:
-    """Name of the task-builder Job for one attempt, unique per task contents and attempt."""
-    key = hashlib.sha256(f"{task}#{revision_digest}".encode()).hexdigest()[:16]
+    """Name of the task-builder Job for one attempt, unique per task contents and attempt.
+
+    ``by-contents`` keeps these names apart from the Jobs of builds kept under a revision, before builds were keyed
+    by contents: such a Job would never write a build kept by contents.
+    """
+    key = hashlib.sha256(f"by-contents:{task}#{revision_digest}".encode()).hexdigest()[:16]
     return f"task-image-build-{key}-{attempt}"
