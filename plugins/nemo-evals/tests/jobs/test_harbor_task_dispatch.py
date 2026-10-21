@@ -20,6 +20,7 @@ from harbor.models.trial.config import ResourceMode
 from harbor.models.trial.paths import TrialPaths
 from nemo_evals.filesets import FilesetRef
 from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT, SETUP_HOSTS_KWARG
+from nemo_evals.harbor.compose import ComposeError
 from nemo_evals.harbor.remote.profile import ResourceOverrides, resource_defaults
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evals.jobs.agent_spec import AgentEvalSpec, RegisteredAgentSource
@@ -34,6 +35,7 @@ from nemo_evals.jobs.harbor_task_dispatch import (
     check_execution_deadline,
     check_sandbox_server,
     configure_runtime,
+    prepared_compose_services,
 )
 from nemo_evals.jobs.harbor_task_spec import (
     HarborTaskJobSpec,
@@ -362,7 +364,88 @@ def test_bind_leaves_a_shared_verifier_alone(tmp_path):
     assert "verifier" not in tomllib.loads((task / "task.toml").read_text())
 
 
-def test_bind_rejects_compose_tasks(tmp_path):
+def test_bind_leaves_a_compose_tasks_files_alone(tmp_path):
+    import tomllib
+
     task = write_task(tmp_path / "t", "[environment]\n", compose=True)
-    with pytest.raises(ValueError, match="compose tasks"):
-        bind_task_image(task, AGENT.image_ref)
+    bind_task_image(task, AGENT.image_ref)
+    assert tomllib.loads((task / "task.toml").read_text())["environment"]["docker_image"] == AGENT.image_ref
+    assert (task / "environment" / "docker-compose.yaml").read_text() == "services: {}\n"
+
+
+SERVICE_DB = PreparedImage(image_ref="registry.invalid/db@sha256:" + "c" * 64, preparation_key="kc")
+SERVICE_API = PreparedImage(image_ref="registry.invalid/api@sha256:" + "d" * 64, preparation_key="kd")
+COMPOSE_ENVIRONMENT = ENVIRONMENT.model_copy(update={"compose_images": {"db": SERVICE_DB, "api": SERVICE_API}})
+
+
+def write_compose_task(root: Path) -> Path:
+    """A task with a built main (its Dockerfile has an ENTRYPOINT), a published ``db`` and a built ``api``."""
+    task = write_task(root, "[environment]\n", compose=True)
+    (task / "environment" / "Dockerfile").write_text('FROM python:3.12-slim\nENTRYPOINT ["/start.sh"]\n')
+    (task / "environment" / "api").mkdir()
+    (task / "environment" / "api" / "Dockerfile").write_text("FROM python:3.12-slim\n")
+    (task / "environment" / "docker-compose.yaml").write_text(
+        "services:\n  db:\n    image: postgres:16\n  api:\n    build: ./api\n"
+    )
+    return task
+
+
+def test_compose_services_run_the_images_the_run_prepared(tmp_path):
+    task = write_compose_task(tmp_path / "t")
+    spec = prepared_compose_services(task, COMPOSE_ENVIRONMENT)
+    assert spec is not None
+    assert {service["name"]: service["image"] for service in spec["services"]} == {
+        "db": SERVICE_DB.image_ref,
+        "api": SERVICE_API.image_ref,
+    }
+    assert spec["main"]["entrypoint"] == ["/start.sh"]
+
+
+def test_compose_services_are_derived_before_the_image_is_bound(tmp_path):
+    """Binding sets docker_image, and the parser then ignores main's Dockerfile: its ENTRYPOINT would be lost."""
+    task = write_compose_task(tmp_path / "t")
+    bind_task_image(task, AGENT.image_ref)
+    spec = prepared_compose_services(task, COMPOSE_ENVIRONMENT)
+    assert spec is not None and "main" not in spec
+
+
+def test_a_single_container_task_has_no_compose_services(tmp_path):
+    task = write_task(tmp_path / "t", "[environment]\n")
+    assert prepared_compose_services(task, ENVIRONMENT) is None
+
+
+def test_a_built_service_without_a_prepared_image_is_refused(tmp_path):
+    task = write_compose_task(tmp_path / "t")
+    only_db = ENVIRONMENT.model_copy(update={"compose_images": {"db": SERVICE_DB}})
+    with pytest.raises(ComposeError, match="compose_build_not_prepared"):
+        prepared_compose_services(task, only_db)
+
+
+def test_prepared_images_must_be_for_the_tasks_services(tmp_path):
+    task = write_compose_task(tmp_path / "t")
+    extra = COMPOSE_ENVIRONMENT.model_copy(
+        update={"compose_images": {**COMPOSE_ENVIRONMENT.compose_images, "ghost": SERVICE_DB}}
+    )
+    with pytest.raises(ValueError, match="not the services the run prepared images for"):
+        prepared_compose_services(task, extra)
+
+
+def test_a_compose_file_the_pod_cannot_run_fails_the_job_with_the_parsers_message(tmp_path):
+    task = write_task(tmp_path / "t", "[environment]\n")
+    (task / "environment" / "Dockerfile").write_text("FROM python:3.12-slim\n")
+    (task / "environment" / "docker-compose.yaml").write_text(
+        "services:\n  odoo:\n    image: odoo:17\n    expose: ['18080']\n"
+    )
+    with pytest.raises(ComposeError, match="compose_reserved_port"):
+        prepared_compose_services(task, COMPOSE_ENVIRONMENT)
+
+
+def test_runtime_passes_compose_services_to_the_environment(task_spec, tmp_path):
+    ctx = MagicMock(spec=JobContext)
+    ctx.job_id = "run-0123456789abcdef-task-1"
+    services = {"services": [{"name": "db", "image": SERVICE_DB.image_ref}]}
+    with_services = configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path), ctx, task_spec, services)
+    without = configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path), ctx, task_spec)
+    assert with_services.environment is not None and without.environment is not None
+    assert with_services.environment.kwargs["compose_services"] == services
+    assert "compose_services" not in without.environment.kwargs
