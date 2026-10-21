@@ -13,9 +13,16 @@ import { Banner, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { AgentSpecFilesetOrphanError } from '@studio/api/agents/agentSpecFileset';
 import { useCreateAgentFromTrial } from '@studio/api/agents/useCreateAgentFromTrial';
 import {
+  DEPLOY_ON_CREATE_FORM_DEFAULTS,
+  type DeployOnCreatePlan,
+  deployOnCreateFormSchema,
+  useDeployOnCreate,
+} from '@studio/api/agents/useDeployOnCreate';
+import {
   routeSettingText,
   routingStrategyTitle,
 } from '@studio/components/dataViews/SwitchyardRoutesDataView/useRouteColumns';
+import { DeployOnCreateFields } from '@studio/components/DeployOnCreateFields';
 import {
   fetchRouteAgentConfig,
   type SwitchyardResults,
@@ -23,16 +30,19 @@ import {
 } from '@studio/routes/agents/AgentOptimizationDetailRoute/switchyard/switchyardResults';
 import { withAgentName } from '@studio/routes/agents/AgentOptimizationDetailRoute/trialAgentConfig';
 import { agentNameSchema } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
-import { getAgentDetailRoute } from '@studio/routes/utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { type FC, useEffect, useState } from 'react';
+import { type FC, useEffect, useRef, useState } from 'react';
 import { type SubmitHandler, useForm, useWatch } from 'react-hook-form';
-import { useNavigate } from 'react-router';
 import { z } from 'zod';
 
-const deployRouteFormSchema = z.object({ name: agentNameSchema });
+const deployRouteFormSchema = z.object({ name: agentNameSchema }).merge(deployOnCreateFormSchema);
 
 type DeployRouteFormData = z.infer<typeof deployRouteFormSchema>;
+
+const DEPLOY_ROUTE_FORM_DEFAULTS: DeployRouteFormData = {
+  name: '',
+  ...DEPLOY_ON_CREATE_FORM_DEFAULTS,
+};
 
 /** `ws/name`, or a bare name resolved against the run's workspace, as the strategy does. */
 const resolveAgentRef = (
@@ -61,10 +71,12 @@ export const DeployRouteModal: FC<DeployRouteModalProps> = ({
 }) => {
   const open = route !== null;
   const toast = useToast();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const sourceRef = resolveAgentRef(results.agent || job.spec.agent, results.workspace);
   const [replaceArmedFor, setReplaceArmedFor] = useState<string | null>(null);
+  // Set on submit, so the choice made for this agent is the one that runs once it exists.
+  const deployAfterCreate = useRef<DeployOnCreatePlan | null>(null);
+  const deployOnCreate = useDeployOnCreate(workspace, { enabled: open });
 
   const {
     data: sourceAgent,
@@ -100,9 +112,16 @@ export const DeployRouteModal: FC<DeployRouteModalProps> = ({
       void queryClient.invalidateQueries({
         queryKey: getAgentsListAgentsQueryKey(targetWorkspace),
       });
-      if (agent.name) navigate(getAgentDetailRoute(targetWorkspace, agent.name));
+      if (agent.name) {
+        void deployOnCreate.openCreatedAgent(
+          targetWorkspace,
+          agent.name,
+          deployAfterCreate.current
+        );
+      }
     },
   });
+  const busy = isPending || deployOnCreate.isDeploying;
 
   const {
     control,
@@ -111,16 +130,17 @@ export const DeployRouteModal: FC<DeployRouteModalProps> = ({
     formState: { errors },
   } = useForm<DeployRouteFormData>({
     resolver: zodResolver(deployRouteFormSchema),
-    defaultValues: { name: '' },
-    disabled: isPending,
+    defaultValues: DEPLOY_ROUTE_FORM_DEFAULTS,
+    disabled: busy,
     mode: 'onChange',
   });
   const watchedName = useWatch({ control, name: 'name' });
+  const watchedDeploy = useWatch({ control, name: 'deploy' });
   const replaceOrphan = replaceArmedFor !== null && replaceArmedFor === watchedName?.trim();
 
   // The VirtualModel is already named `<agent>-<digest>`, unique per routing setup.
   useEffect(() => {
-    resetForm({ name: route?.virtualModel ?? '' });
+    resetForm({ ...DEPLOY_ROUTE_FORM_DEFAULTS, name: route?.virtualModel ?? '' });
     setReplaceArmedFor(null);
   }, [route, resetForm]);
 
@@ -135,8 +155,10 @@ export const DeployRouteModal: FC<DeployRouteModalProps> = ({
     onClose();
   };
 
-  const onSubmit: SubmitHandler<DeployRouteFormData> = async ({ name }) => {
+  const onSubmit: SubmitHandler<DeployRouteFormData> = async (formData) => {
+    const { name } = formData;
     if (!sourceAgent || !sourceRef || !routeConfig) return;
+    deployAfterCreate.current = deployOnCreate.plan(formData);
     try {
       await createAgent({
         workspace,
@@ -166,6 +188,7 @@ export const DeployRouteModal: FC<DeployRouteModalProps> = ({
     return undefined;
   };
   const loadError = getLoadError();
+  const awaitingDeployModes = deployOnCreate.blocksSubmit(Boolean(watchedDeploy));
   const errorText =
     loadError ?? (createError ? getErrorMessage(createError, 'Failed to create agent') : undefined);
 
@@ -191,9 +214,9 @@ export const DeployRouteModal: FC<DeployRouteModalProps> = ({
       }
       submitButtonText={replaceOrphan ? 'Replace and deploy' : 'Deploy'}
       onSubmit={handleSubmit(onSubmit)}
-      disabled={isPending}
-      loading={isPending || isLoadingAgent || isLoadingConfig}
-      submitDisabled={!!loadError || !routeConfig}
+      disabled={busy}
+      loading={busy || isLoadingAgent || isLoadingConfig}
+      submitDisabled={!!loadError || !routeConfig || awaitingDeployModes}
       errorText={errorText}
     >
       {routeConfig && agentChangedSinceRun && (
@@ -224,6 +247,11 @@ export const DeployRouteModal: FC<DeployRouteModalProps> = ({
           </Stack>
         </Stack>
       )}
+      <DeployOnCreateFields
+        deployOnCreate={deployOnCreate}
+        deployControllerProps={{ control, name: 'deploy' }}
+        modeControllerProps={{ control, name: 'deploymentMode' }}
+      />
     </FormModal>
   );
 };
