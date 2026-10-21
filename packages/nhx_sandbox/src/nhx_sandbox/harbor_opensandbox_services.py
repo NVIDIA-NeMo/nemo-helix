@@ -129,7 +129,7 @@ _QUANTITY_SUFFIXES = {
 }
 
 
-def _quantity_value(quantity: str) -> Decimal:
+def quantity_value(quantity: str) -> Decimal:
     """The numeric value of a ``Quantity`` string, so ``500m`` and ``1Gi`` can be compared."""
     number = quantity.rstrip("mkKMGTi")
     return Decimal(number) * _QUANTITY_SUFFIXES[quantity[len(number) :]]
@@ -146,7 +146,7 @@ class Resources(_Strict):
         """Reject a request above its limit, which Kubernetes refuses when it creates the container."""
         for resource, request in (self.requests or {}).items():
             limit = (self.limits or {}).get(resource)
-            if limit is not None and _quantity_value(request) > _quantity_value(limit):
+            if limit is not None and quantity_value(request) > quantity_value(limit):
                 raise ValueError(f"{resource} request {request!r} exceeds its limit {limit!r}")
         return self
 
@@ -205,6 +205,9 @@ class ComposeServices(_Strict):
     volumes: list[Name] = Field(default_factory=list, max_length=16)
     services: list[Service] = Field(min_length=1, max_length=16)
     main: Main = Field(default_factory=Main)
+    # How long ``start`` waits for the services when ``main`` has no readiness check to carry its own
+    # ``timeout_sec``.
+    services_timeout_sec: int | None = Field(default=None, ge=1, le=3600)
 
     @model_validator(mode="after")
     def _check(self) -> ComposeServices:

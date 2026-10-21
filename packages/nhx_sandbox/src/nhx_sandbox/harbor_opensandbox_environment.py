@@ -123,7 +123,8 @@ DEFAULT_READY_TIMEOUT_SEC = 60 * 60 * 24
 DEFAULT_HEALTH_CHECK_POLL_INTERVAL_SEC = 2.0
 # How long the one-time ``id -u`` probe of the image's user may take. 30 seconds.
 _IMAGE_UID_PROBE_TIMEOUT_SEC = 30
-# How long start() waits for main's readiness check and the services, when main has no timeout_sec.
+# How long start() waits for main's readiness check and the services, when neither main's
+# readiness timeout_sec nor the spec's services_timeout_sec sets it.
 COMPOSE_READY_TIMEOUT_SEC = 300
 COMPOSE_READY_POLL_SEC = 2.0
 # The server's exec route accepts at most this timeout.
@@ -517,9 +518,16 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
 
         if self._services is None:
             return
+
         # One deadline covers both waits, like a Compose healthcheck's overall start period.
         readiness = self._services.main.readiness
-        deadline = time.monotonic() + (readiness.timeout_sec if readiness else COMPOSE_READY_TIMEOUT_SEC)
+        if readiness is not None:
+            timeout_sec = readiness.timeout_sec
+        else:
+            timeout_sec = self._services.services_timeout_sec or COMPOSE_READY_TIMEOUT_SEC
+
+        # Wait for main to be ready, then for all services to be ready.
+        deadline = time.monotonic() + timeout_sec
         if readiness is not None:
             await self._wait_for_main(readiness.exec_, deadline)
         # after_main services start with main, so they may still be coming up.
