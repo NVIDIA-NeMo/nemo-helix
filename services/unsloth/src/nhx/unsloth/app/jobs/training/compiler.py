@@ -18,17 +18,20 @@ from nemo_helix_plugin.jobs.api_factory import (
     GPUExecutionProviderSpec,
     HelixJobStep,
     ResourcesSpec,
+    StepLifecycle,
 )
 from nhx.customization_common.integrations import (
     collect_integration_secret_envs,
     warn_incomplete_integrations,
 )
 from nhx.unsloth.app.constants import (
+    DEFAULT_CHECKPOINT_PATH,
     DEFAULT_DATASET_PATH,
     DEFAULT_MODEL_PATH,
     DEFAULT_OUTPUT_MODEL_PATH,
 )
 from nhx.unsloth.app.jobs.training.schemas import TrainingStepConfig
+from nhx.unsloth.config import config
 from nhx.unsloth.images import UNSLOTH_PYTHON_ENTRYPOINT, get_training_image
 from nhx.unsloth.schemas import UnslothJobOutput
 
@@ -64,9 +67,12 @@ def compile_training_step(
         dataset_path=DEFAULT_DATASET_PATH,
         validation_path=validation_dataset_path,
         output_path=DEFAULT_OUTPUT_MODEL_PATH,
+        checkpoint_path=DEFAULT_CHECKPOINT_PATH,
     )
 
     executor = GPUExecutionProviderSpec(
+        # Set explicitly: the request omits unset fields, and the Jobs API needs this tag.
+        provider="gpu",
         container=ContainerSpec(
             image=get_training_image(),
             entrypoint=UNSLOTH_PYTHON_ENTRYPOINT,
@@ -85,4 +91,5 @@ def compile_training_step(
         executor=executor,
         environment=[*base_env, *collect_integration_secret_envs(job_spec.integrations)],
         config=step_config.model_dump(mode="json"),
+        lifecycle=StepLifecycle(pause_deadline_seconds=config.training_pause_deadline_seconds),
     )

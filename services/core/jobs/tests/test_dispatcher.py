@@ -45,6 +45,7 @@ from nhx.core.jobs.app.constants import (
     IMAGE_DIGEST,
     IMAGE_DIGEST_AT_SAVE,
     IMAGE_DIGEST_STEP,
+    IMAGE_DIGEST_WARNING,
     JOB_TASK_CLEANUP_PENDING_KEY,
 )
 from nhx.core.jobs.app.dispatcher import (
@@ -1810,6 +1811,37 @@ async def test_resume_job_success(
     updated_step = await mock_store.get_by_id(HelixJobStep, current_step.id)
     assert updated_step is not None
     assert updated_step.status == HelixJobStatus.RESUMING
+
+
+@pytest.mark.asyncio
+async def test_resume_clears_the_previous_image_comparison(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """The resumed pod is compared with this pause's digest, not left behind by an earlier resume's result."""
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
+    assert step is not None
+    step.status = HelixJobStatus.PAUSED
+    step.status_details = {
+        IMAGE_DIGEST: "sha256:b",
+        IMAGE_DIGEST_AT_SAVE: "sha256:b",
+        IMAGE_DIGEST_WARNING: "The training image changed since this state was saved (was sha256:a, now sha256:b).",
+    }
+    await mock_store.update(step)
+    attempt = await mock_store.get_by_id(HelixJobAttempt, job.attempt_id)
+    assert attempt is not None
+    attempt.status = HelixJobStatus.PAUSED
+    await mock_store.update(attempt)
+
+    await mock_dispatcher.resume_job(job.name, DEFAULT_WORKSPACE)
+
+    resumed = await mock_store.get_by_id(HelixJobStep, step.id)
+    assert resumed is not None
+    assert resumed.status == HelixJobStatus.RESUMING
+    assert IMAGE_DIGEST_WARNING not in resumed.status_details
+    assert resumed.status_details[IMAGE_DIGEST_AT_SAVE] == "sha256:b"
 
 
 @pytest.mark.asyncio

@@ -27,10 +27,13 @@ from typing import Any, Literal
 from nemo_helix_plugin.job_context import JobContext
 from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.service.context import NHXJobContext
+from nhx.customization_common.training.pause import PausePoller
 from nhx.customization_common.training.reporting import DIAGNOSTIC_TIME_SERIES, ProgressReportingConfig
+from nhx.unsloth.app.constants import SERVICE_NAME
 from nhx.unsloth.integrations.hf_bridge import apply_integrations_to_sft_config
 from nhx.unsloth.schemas import UnslothJobOutput
 from nhx.unsloth.tasks.training.backends.callbacks import TrainingProgressCallback
+from nhx.unsloth.tasks.training.backends.pause import create_pause_callback, newest_complete_checkpoint
 from nhx.unsloth.tasks.training.progress import JobsServiceProgressReporter
 
 logger = logging.getLogger(__name__)
@@ -127,6 +130,7 @@ def train_sft(
     dataset_path: str | None = None,
     validation_path: str | None = None,
     output_path: str | None = None,
+    checkpoint_path: str | None = None,
     progress_callback: TrainingProgressCallback | None = None,
 ) -> dict[str, Any]:
     """Run SFT with Unsloth's FastLanguageModel + LoRA.
@@ -149,6 +153,10 @@ def train_sft(
             step's expected location. When ``None`` falls back to
             ``ctx.storage.persistent / spec.output.name`` (matches the
             historical local-run layout — kept for tests).
+        checkpoint_path: Resolved local path the trainer saves checkpoints
+            to and resumes from. Kept apart from ``output_path``, which is
+            published as the model. When ``None`` falls back to
+            ``ctx.storage.persistent / "training" / "checkpoints"``.
         progress_callback: Optional Jobs-service progress reporter.
             When ``None``, a callback is created from platform job
             environment variables (no-op when Jobs context is absent).
@@ -157,6 +165,8 @@ def train_sft(
         A result dict with final training loss, step count, output
         name/type, the resolved local checkpoint path, and the
         ``CUDA_VISIBLE_DEVICES`` value the training process observed.
+        When training stopped for a pause, ``paused`` is true and nothing
+        was saved to ``output_path``.
 
     Raises:
         RuntimeError: if the configured ``training.training_type`` is not
@@ -183,6 +193,8 @@ def train_sft(
 
     output_dir = Path(output_path) if output_path else ctx.storage.persistent / spec.output.name
     output_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint_dir = Path(checkpoint_path) if checkpoint_path else ctx.storage.persistent / "training" / "checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     lora_rank = spec.training.lora.rank if spec.training.lora else None
     lora_alpha = spec.training.lora.alpha if spec.training.lora else None
@@ -281,7 +293,10 @@ def train_sft(
                 os.environ[key] = value
 
             args_kwargs: dict[str, Any] = {
-                "output_dir": str(output_dir),
+                "output_dir": str(checkpoint_dir),
+                # A resume needs only the newest checkpoint. The trainer deletes older ones after a save
+                # completes, so a save interrupted mid-write still leaves the previous one.
+                "save_total_limit": 1,
                 "per_device_train_batch_size": spec.batch.per_device_train_batch_size,
                 "gradient_accumulation_steps": spec.batch.gradient_accumulation_steps,
                 "learning_rate": spec.optimizer.learning_rate,
@@ -344,15 +359,35 @@ def train_sft(
                 create_hf_trainer_progress_callback,
             )
 
-            trainer = SFTTrainer(
-                model=model,
-                processing_class=tokenizer,
-                train_dataset=train_ds,
-                eval_dataset=eval_ds,
-                args=args,
-                callbacks=[create_hf_trainer_progress_callback(progress)],
-            )
-            train_result = trainer.train()
+            # Resume, or a rerun after a crash, continues from the newest complete checkpoint.
+            resume = newest_complete_checkpoint(checkpoint_dir)
+            resume_step = 0
+            if resume is not None:
+                resume_step = resume[1]
+                logger.info(f"Resuming training from {resume[0]} at step {resume_step}")
+            # A rerun can restore an earlier step than the last one reported.
+            progress.rewind_to(resume_step)
+
+            with PausePoller(job_ctx, SERVICE_NAME) as poller:
+                pause = create_pause_callback(poller.requested)
+                trainer = SFTTrainer(
+                    model=model,
+                    processing_class=tokenizer,
+                    train_dataset=train_ds,
+                    eval_dataset=eval_ds,
+                    args=args,
+                    callbacks=[create_hf_trainer_progress_callback(progress), pause],
+                )
+                train_result = trainer.train(resume_from_checkpoint=str(resume[0]) if resume is not None else None)
+
+        if pause.stopped:
+            logger.info(f"Training paused at step {trainer.state.global_step}; checkpoint saved, nothing published")
+            return {
+                "paused": True,
+                "global_step": trainer.state.global_step,
+                "checkpoint_dir": str(checkpoint_dir),
+                "backend": "unsloth",
+            }
 
         # ── Save ──────────────────────────────────────────────────────
         progress.report_phase(
@@ -364,6 +399,7 @@ def train_sft(
         progress.close()
 
     return {
+        "paused": False,
         "loss": float(train_result.training_loss),
         "model": spec.model.name,
         "model_path_used": resolved_model,

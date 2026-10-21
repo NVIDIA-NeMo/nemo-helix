@@ -208,3 +208,29 @@ class TestEntrypointWithoutStepConfig:
         )
         assert result.returncode == 2
         assert "nemo customization unsloth --job-json" in result.stderr
+
+
+def test_a_paused_run_exits_with_the_pause_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The checkpoint path reaches training under the job's storage, and a pause exits 75."""
+    from nhx.common.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+    from nhx.unsloth.app.constants import DEFAULT_CHECKPOINT_PATH
+    from nhx.unsloth.tasks.training.backends import unsloth_sft
+
+    config = _step_config().model_copy(update={"checkpoint_path": DEFAULT_CHECKPOINT_PATH})
+    config_file = tmp_path / "step.json"
+    config_file.write_text(json.dumps(config.model_dump(mode="json")))
+    storage = tmp_path / "job"
+    monkeypatch.setenv("NEMO_JOB_STEP_CONFIG_FILE_PATH", str(config_file))
+    monkeypatch.setenv(PERSISTENT_JOB_STORAGE_PATH_ENVVAR, str(storage))
+    monkeypatch.delenv("UNSLOTH_COMPILE_LOCATION", raising=False)
+    monkeypatch.delenv("HF_HOME", raising=False)
+    captured: dict[str, object] = {}
+
+    def _stub_train_sft(*_args: object, **kwargs: object) -> dict[str, object]:
+        captured["checkpoint_path"] = kwargs["checkpoint_path"]
+        return {"paused": True, "global_step": 7}
+
+    monkeypatch.setattr(unsloth_sft, "train_sft", _stub_train_sft)
+
+    assert main() == 75
+    assert captured["checkpoint_path"] == str(storage / "training" / "checkpoints")
