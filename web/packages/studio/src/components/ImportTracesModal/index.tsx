@@ -3,8 +3,8 @@
 
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import { useInsightsGetAnalysisConfig } from '@nemo/sdk/generated/insights/insights-analysis-configs';
-import { getInsightsListAnalysisRunsQueryKey } from '@nemo/sdk/generated/insights/insights-analysis-runs';
+import { useCompassGetAnalysisConfig } from '@nemo/sdk/generated/compass/compass-analysis-configs';
+import { getCompassListAnalysisRunsQueryKey } from '@nemo/sdk/generated/compass/compass-analysis-runs';
 import { getListSpansQueryKey } from '@nemo/sdk/generated/platform/spans';
 import { getListTracesQueryKey } from '@nemo/sdk/generated/platform/traces';
 import {
@@ -95,7 +95,7 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
   const insightsAvailable = !!agent;
   const willRunInsights = insightsAvailable && runInsights;
 
-  const { data: analysisConfig, isError: configFailed } = useInsightsGetAnalysisConfig(
+  const { data: analysisConfig, isError: configFailed } = useCompassGetAnalysisConfig(
     workspace,
     agent ?? '',
     { query: { enabled: willRunInsights, retry: false } }
@@ -179,7 +179,7 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
       const started = triggered.filter(({ status }) => status === 'started').length;
       if (started > 0) {
         void queryClient.invalidateQueries({
-          queryKey: getInsightsListAnalysisRunsQueryKey(workspace),
+          queryKey: getCompassListAnalysisRunsQueryKey(workspace),
         });
         toast.success(`Queued ${started} insights analysis run${started === 1 ? '' : 's'}.`);
       }
@@ -353,8 +353,8 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
                           slotLabel="Run insights analysis after import"
                         />
                         <Text className="text-secondary" kind="body/regular/xs">
-                          Queues an analyst run for <strong>{agent}</strong>, which must already be
-                          enabled with <code>nemo insights analysis enable</code>.
+                          Queues a Compass run for <strong>{agent}</strong>, which must already be
+                          enabled with <code>nemo compass analysis enable</code>.
                         </Text>
 
                         {runInsights && (

@@ -7,9 +7,9 @@ import { WorkspaceModelSelect } from '@nemo/common/src/components/ModelSelectV2'
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import {
-  getInsightsGetAnalysisConfigQueryKey,
-  useInsightsGetAnalysisConfig,
-} from '@nemo/sdk/generated/insights/insights-analysis-configs';
+  getCompassGetAnalysisConfigQueryKey,
+  useCompassGetAnalysisConfig,
+} from '@nemo/sdk/generated/compass/compass-analysis-configs';
 import {
   Badge,
   Button,
@@ -58,7 +58,7 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
     isLoading,
     isError,
     error,
-  } = useInsightsGetAnalysisConfig(workspace, agent ?? '', {
+  } = useCompassGetAnalysisConfig(workspace, agent ?? '', {
     query: { enabled: !!agent, retry: false },
   });
 
@@ -100,7 +100,7 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
       );
     } finally {
       await queryClient.invalidateQueries({
-        queryKey: getInsightsGetAnalysisConfigQueryKey(workspace, agent),
+        queryKey: getCompassGetAnalysisConfigQueryKey(workspace, agent),
       });
       setSaving(false);
     }
@@ -242,7 +242,7 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
       ) : notFound ? (
         <Text className="text-secondary" kind="body/regular/sm">
           Analysis is not enabled for this agent. Choose Edit to enable it, or run{' '}
-          <code>nemo insights analysis enable --agent {agent}</code>.
+          <code>nemo compass analysis enable --agent {agent}</code>.
         </Text>
       ) : (
         <Grid cols={{ base: 1, md: 2 }} gap="4">

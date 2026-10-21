@@ -75,11 +75,11 @@ def test_an_unregistered_kind_is_an_error(monkeypatch: pytest.MonkeyPatch) -> No
         resolve_execute_agent_extension("missing.extension")
 
 
-def test_the_installed_insights_extension_resolves() -> None:
+def test_the_installed_compass_extension_resolves() -> None:
     """Guards the real environment: insights.analysis is declared twice on disk."""
     resolved = resolve_execute_agent_extension("insights.analysis")
 
-    assert resolved.__name__ == "InsightsAnalysisExtension"
+    assert resolved.__name__ == "CompassAnalysisExtension"
 
 
 def test_a_valid_extension_config_is_accepted() -> None:

@@ -154,7 +154,7 @@ tool, token, cost, input/output, and session fields needed for useful Intake tel
    Preserve parent-child IDs and set a stable `session.id` for related traces. Always set
    `gen_ai.agent.name` (or `llm.agent.name` / `agent.name` for instrumentation that emits those
    conventions) on every span to a stable name for the agent. This ensures the spans can be analyzed
-   by NeMo Insights in the future.
+   by NeMo Compass in the future.
 6. Run one representative interaction, then verify it through the spans query below.
 
 Intake maps OpenInference and OTel GenAI semantic attributes into queryable model, provider, tool,

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { InsightListItem } from '@nemo/sdk/generated/insights/schema';
+import type { InsightListItem } from '@nemo/sdk/generated/compass/schema';
 import { Button, Flex, Skeleton, Stack, Text } from '@nvidia/foundations-react-core';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
 import { OpenInsightRow } from '@studio/routes/agents/AgentDetailRoute/overview/OpenInsightRow';
@@ -20,9 +20,9 @@ interface OpenInsightsPanelProps {
 }
 
 /**
- * Open insights the analyst has filed against this agent — the agent's outstanding work list.
+ * Open insights Compass has filed against this agent — the agent's outstanding work list.
  *
- * Insights are produced by the NeMo Insights analyst, which reads Intake spans, annotations
+ * Insights are produced by the NeMo Compass, which reads Intake spans, annotations
  * (user feedback), and evaluator scores on a schedule. This panel only reads them.
  */
 export const OpenInsightsPanel: FC<OpenInsightsPanelProps> = ({
@@ -72,7 +72,7 @@ export const OpenInsightsPanel: FC<OpenInsightsPanelProps> = ({
           <Text kind="body/regular/md" className="max-w-72 text-center text-secondary">
             {awaitingTelemetry
               ? 'Generating insights requires importing traces or integrating your agent with NeMo Helix.'
-              : "Insights are filed by the analyst from this agent's traces, feedback, and evaluation scores. Once analysis has run, recurring problems show up here with the traces that prove them."}
+              : "Insights are filed by Compass from this agent's traces, feedback, and evaluation scores. Once analysis has run, recurring problems show up here with the traces that prove them."}
           </Text>
         </Flex>
       ) : (

@@ -8,12 +8,12 @@ import { KVPair } from '@nemo/common/src/components/KVPair';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import {
-  getInsightsGetInsightQueryKey,
-  getInsightsListInsightsQueryKey,
-  useInsightsGetInsight,
-  useInsightsUpdateInsight,
-} from '@nemo/sdk/generated/insights/insights-insights';
-import type { InsightStatus } from '@nemo/sdk/generated/insights/schema';
+  getCompassGetInsightQueryKey,
+  getCompassListInsightsQueryKey,
+  useCompassGetInsight,
+  useCompassUpdateInsight,
+} from '@nemo/sdk/generated/compass/compass-insights';
+import type { InsightStatus } from '@nemo/sdk/generated/compass/schema';
 import {
   Anchor,
   Button,
@@ -44,21 +44,16 @@ export const OptimizerInsightRoute: FC = () => {
   const queryClient = useQueryClient();
   const toast = useToast();
 
-  const {
-    data: insight,
-    isLoading,
-    isError,
-    refetch,
-  } = useInsightsGetInsight(workspace, insightId);
+  const { data: insight, isLoading, isError, refetch } = useCompassGetInsight(workspace, insightId);
 
-  const { mutate: updateInsight, isPending: isUpdating } = useInsightsUpdateInsight({
+  const { mutate: updateInsight, isPending: isUpdating } = useCompassUpdateInsight({
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({
-          queryKey: getInsightsGetInsightQueryKey(workspace, insightId),
+          queryKey: getCompassGetInsightQueryKey(workspace, insightId),
         });
         queryClient.invalidateQueries({
-          queryKey: getInsightsListInsightsQueryKey(workspace),
+          queryKey: getCompassListInsightsQueryKey(workspace),
         });
       },
       onError: () => toast.error('Failed to update insight.'),
@@ -119,7 +114,7 @@ export const OptimizerInsightRoute: FC = () => {
           }
           slotDescription={
             <>
-              Insight generated from observed sessions by the analyst agent.{' '}
+              Insight generated from observed sessions by Compass.{' '}
               <Anchor href={LINK_DOCS_STUDIO_EVALUATION} target="_blank">
                 Learn more
               </Anchor>
