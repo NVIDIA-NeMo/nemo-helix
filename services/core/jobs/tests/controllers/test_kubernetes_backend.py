@@ -1579,11 +1579,10 @@ def test_sync_pausing_deadline_deletes_job_and_returns_error(kubernetes_job, tes
     terminate.assert_called_once_with(job)
 
 
-def _terminated_task_pod(exit_code: int, finished_at: datetime.datetime | None = None):
-    terminated = SimpleNamespace(exit_code=exit_code, finished_at=finished_at)
-    state = SimpleNamespace(terminated=terminated)
-    container = SimpleNamespace(name="nemo-job-task", state=state)
-    return SimpleNamespace(status=SimpleNamespace(container_statuses=[container], phase="Succeeded"))
+def _terminated_task_pod(exit_code: int, finished_at: datetime.datetime | None = None) -> client.V1Pod:
+    pod = _task_pod("uid-1", exit_code)
+    pod.status.container_statuses[0].state.terminated.finished_at = finished_at
+    return pod
 
 
 @pytest.mark.parametrize(
@@ -1611,6 +1610,69 @@ def test_sync_pausing_exit_uses_exit_code(kubernetes_job, test_step_pausing, exi
         terminate.assert_called_once_with(job)
     else:
         terminate.assert_not_called()
+
+
+def _task_pod(uid: str, exit_code: int | None) -> client.V1Pod:
+    """A pod whose task container is running (exit_code None) or exited with exit_code."""
+    state = (
+        client.V1ContainerState(running=client.V1ContainerStateRunning())
+        if exit_code is None
+        else client.V1ContainerState(terminated=client.V1ContainerStateTerminated(exit_code=exit_code))
+    )
+    phase = "Running" if exit_code is None else "Succeeded" if exit_code == 0 else "Failed"
+    container = client.V1ContainerStatus(
+        image="test-image", image_id="test-image-id", name="nemo-job-task", ready=False, restart_count=0, state=state
+    )
+    return client.V1Pod(
+        metadata=client.V1ObjectMeta(name=f"pod-{uid}", namespace="test-namespace", uid=uid),
+        status=client.V1PodStatus(phase=phase, container_statuses=[container]),
+    )
+
+
+@pytest.mark.parametrize(
+    "exit_code,expected",
+    [(75, HelixJobStatus.PAUSED), (0, HelixJobStatus.COMPLETED), (1, HelixJobStatus.ERROR)],
+)
+def test_sync_pausing_exit_gives_the_task_the_pause_outcome(
+    kubernetes_job, mock_jobs_client, test_step_pausing, exit_code, expected
+):
+    """A pod that exits 75 ends Failed, but its task records the pause, not an error."""
+    step = _cooperative_pausing_step(test_step_pausing)
+    kubernetes_job._batch_v1.read_namespaced_job.return_value = _running_pause_job()
+    pod = _task_pod("uid-1", exit_code)
+    kubernetes_job._core_v1.read_namespaced_pod.return_value = pod
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pods_by_labels", return_value=[pod]),
+        patch.object(kubernetes_job, "terminate_job"),
+    ):
+        update = kubernetes_job.sync(step)
+
+    task_update = mock_jobs_client.update_job_step_task.call_args.kwargs
+    assert task_update["name"] == "task-uid-1"
+    assert task_update["body"].status == update.status == expected
+    assert task_update["body"].error_details == (update.error_details or {})
+    assert bool(task_update["body"].error_stack) == (expected == HelixJobStatus.ERROR)
+
+
+def test_sync_pausing_deadline_fails_the_task(kubernetes_job, mock_jobs_client, test_step_pausing):
+    """The deadline fails a still-running pod's task as well as the step."""
+    step = _cooperative_pausing_step(test_step_pausing, requested_ago_seconds=120, deadline_seconds=30)
+    kubernetes_job._batch_v1.read_namespaced_job.return_value = _running_pause_job()
+    pod = _task_pod("uid-1", None)
+    kubernetes_job._core_v1.read_namespaced_pod.return_value = pod
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pods_by_labels", return_value=[pod]),
+        patch.object(kubernetes_job, "terminate_job"),
+    ):
+        update = kubernetes_job.sync(step)
+
+    assert update.status == HelixJobStatus.ERROR
+    task_update = mock_jobs_client.update_job_step_task.call_args.kwargs
+    assert task_update["name"] == "task-uid-1"
+    assert task_update["body"].status == HelixJobStatus.ERROR
+    assert task_update["body"].error_details == {"message": "Pause deadline exceeded"}
 
 
 @pytest.mark.parametrize(

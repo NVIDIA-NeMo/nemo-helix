@@ -61,6 +61,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     load_kubernetes_config,
     name_for_step,
     update_all_tasks,
+    update_tasks_with_pause_outcome,
 )
 from nhx.core.jobs.controllers.backends.kubernetes.workload_delegations import (
     KubernetesPodBoundWorkloadDelegationManager,
@@ -550,10 +551,13 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         if not running and exit_code is None:
             exit_code = _job_object_pause_exit_code(job)
         if not running and exit_code is not None and not pause_deadline_exceeded(step, now=last_task_exit_time(pods)):
-            return _pause_exit_update(self, job, exit_code)
+            return _pause_exit_update(self, step, job, pods, exit_code)
         if pause_deadline_exceeded(step):
-            self.terminate_job(job)
             message = "Pause deadline exceeded"
+            update_tasks_with_pause_outcome(
+                self._nemo_client, self._core_v1, self.namespace, step, pods, HelixJobStatus.ERROR, {"message": message}
+            )
+            self.terminate_job(job)
             return JobUpdate(
                 status=HelixJobStatus.ERROR,
                 status_details={"message": message},
@@ -942,8 +946,13 @@ def _job_object_pause_exit_code(job: V1Job) -> int | None:
     return None
 
 
-def _pause_exit_update(backend: KubernetesJobBackend, job: V1Job, exit_code: int) -> JobUpdate:
+def _pause_exit_update(
+    backend: KubernetesJobBackend, step: HelixJobStepWithContext, job: V1Job, pods: list, exit_code: int
+) -> JobUpdate:
     status, message, error_details = describe_paused_exit(exit_code)
+    update_tasks_with_pause_outcome(
+        backend._nemo_client, backend._core_v1, backend.namespace, step, pods, status, error_details
+    )
     if status == HelixJobStatus.PAUSED:
         backend.terminate_job(job)
     return JobUpdate(

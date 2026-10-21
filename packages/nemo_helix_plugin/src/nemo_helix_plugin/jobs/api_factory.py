@@ -120,6 +120,7 @@ _JOB_PERMISSION_DESCRIPTIONS: dict[str, str] = {
     "cancel": "Cancel {ns} jobs",
     "pause": "Pause {ns} jobs",
     "resume": "Resume {ns} jobs",
+    "rerun": "Rerun {ns} jobs",
     "control": "Update {ns} job control settings",
 }
 
@@ -497,6 +498,7 @@ class JobRouteOption(StrEnum):
 
     CORE = auto()
     PAUSE_RESUME = auto()
+    RERUN = auto()
 
 
 class HelixJobResultRoute(BaseModel):
@@ -1463,5 +1465,23 @@ def job_route_factory(
         _stamp(pause_job, perm="pause", write=True)
         _stamp(resume_job, perm="resume", write=True)
         _stamp(update_job_control, perm="control", write=True)
+
+    # Some jobs can be rerun from what survives on job storage after they fail.
+    if JobRouteOption.RERUN in route_options:
+
+        @router.post("/jobs/{name}/rerun")
+        async def rerun_job(
+            name: str,
+            workspace: str,
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
+        ) -> TypedJobResponse:
+            f"""Rerun a failed job by name for the {service_name} microservice."""
+
+            # Sent once: a retry after a lost response would find the new attempt and fail with 409.
+            jobs_client = AsyncJobsClient.from_client(async_client).with_retry(RetryPolicy(max_retries=0))
+            job_resp = (await jobs_client.rerun_job(job=name, workspace=workspace)).data()
+            return from_response(job_resp)
+
+        _stamp(rerun_job, perm="rerun", write=True)
 
     return router

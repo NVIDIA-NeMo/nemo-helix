@@ -60,6 +60,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     load_kubernetes_config,
     name_for_step,
     update_all_tasks,
+    update_tasks_with_pause_outcome,
 )
 from nhx.core.jobs.controllers.backends.kubernetes.workload_delegations import (
     KubernetesPodBoundWorkloadDelegationManager,
@@ -283,13 +284,18 @@ class VolcanoJobBackend(
         )
         job_metadata.name = job_name
 
-        # Volcano job policies
-        job_policies = [
-            {
-                "event": "PodFailed",
-                "action": "RestartJob",
-            }
-        ]
+        # Volcano job policies. Unless the profile sets max_retry, a failed or deleted pod ends the
+        # job, as a Kubernetes Job with no retries does: TerminateJob stops the other pods and keeps
+        # the failed one. Volcano reads a maxRetry of 0 as unset and would restart the job three
+        # times, training on after the step is marked error and writing checkpoints into the
+        # storage a rerun resumes from.
+        if self._execution_profile_config.max_retry:
+            job_policies = [{"event": "PodFailed", "action": "RestartJob"}]
+        else:
+            job_policies = [
+                {"event": "PodFailed", "action": "TerminateJob"},
+                {"event": "PodEvicted", "action": "TerminateJob"},
+            ]
         leader_policies = [
             {
                 "event": "TaskCompleted",
@@ -299,7 +305,7 @@ class VolcanoJobBackend(
         worker_policies: list[dict[str, Any]] = []
         if configured_pause_deadline_seconds(step) > 0:
             # A pod that exits 75 has written its pause checkpoint. Without this rule, the
-            # PodFailed policy above restarts the whole job. Task rules are checked before
+            # PodFailed policy above stops the pods still saving. Task rules are checked before
             # job rules, and ResumeJob does nothing to a running job, so the other pods keep
             # running until they exit too. The job then ends Failed with every pod kept,
             # and sync_pausing reads the exit codes.
@@ -307,7 +313,7 @@ class VolcanoJobBackend(
             # Volcano reads a failed pod's exit code from its first container status, and
             # the kubelet sorts those by container name. A classic sidecar named before the
             # task container (istio-proxy, for example) hides the 75, so this rule cannot
-            # match and the job restarts. sync_pausing does not rely on this rule: it deletes
+            # match and the job is terminated. sync_pausing does not rely on this rule: it deletes
             # the job as soon as every task container has exited, which usually happens before
             # such a sidecar exits. Native sidecars are init containers and are not affected.
             pause_policy = {"exitCode": PAUSE_EXIT_CODE, "action": "ResumeJob"}
@@ -489,7 +495,7 @@ class VolcanoJobBackend(
         The task containers are read on every tick, whatever the job's phase: a classic
         sidecar keeps the pod running after the task exits, so the job may never reach
         Completed or Failed on its own. Only when no task container is readable does
-        the job's phase decide, with Completed as exit 0 and Failed as exit 1.
+        the job's phase decide, with Completed as exit 0 and Failed or Terminated as exit 1.
 
         An exit counts when the task exited before the deadline, even if it is seen
         later. When the exit time is unreadable, the deadline is checked against now.
@@ -501,10 +507,13 @@ class VolcanoJobBackend(
         phase = (volcano_job.get("status") or {}).get("state", {}).get("phase")
         pods = list_pods_by_labels(self._core_v1, self.namespace, common_labels_for_step(step))
         running, exit_code = classify_task_containers(pods)
-        if not running and exit_code is None and phase in ("Completed", "Failed"):
+        if not running and exit_code is None and phase in ("Completed", "Failed", "Terminated"):
             exit_code = 0 if phase == "Completed" else 1
         if not running and exit_code is not None and not pause_deadline_exceeded(step, now=last_task_exit_time(pods)):
             status, message, error_details = describe_paused_exit(exit_code)
+            update_tasks_with_pause_outcome(
+                self._nemo_client, self._core_v1, self.namespace, step, pods, status, error_details
+            )
             if status == HelixJobStatus.PAUSED:
                 self.terminate_job(volcano_job)
             return JobUpdate(
@@ -513,12 +522,18 @@ class VolcanoJobBackend(
                 error_details=error_details or None,
             )
         if pause_deadline_exceeded(step):
+            # Not sync_remove_job_with_status: it records each task by its pod's phase, so a
+            # task still running would stay active.
             message = "Pause deadline exceeded"
-            return self.sync_remove_job_with_status(
-                step,
-                HelixJobStatus.ERROR,
-                volcano_job,
-                status_details={"message": message},
+            update_tasks_with_pause_outcome(
+                self._nemo_client, self._core_v1, self.namespace, step, pods, HelixJobStatus.ERROR, {"message": message}
+            )
+            events = self.get_volcano_job_events(volcano_job)
+            events.extend(self.get_volcano_pod_group_events(volcano_job))
+            self.terminate_job(volcano_job)
+            return JobUpdate(
+                status=HelixJobStatus.ERROR,
+                status_details={"message": message, "events": events},
                 error_details={"message": message},
             )
         return JobUpdate(status=HelixJobStatus.PAUSING, status_details={"message": "Job is being paused"})
@@ -732,9 +747,11 @@ class VolcanoJobBackend(
                 else:
                     self._workload_delegations.ensure_for_target(step, target)
         phase = (job.get("status") or {}).get("state", {}).get("phase")
-        if status in HelixJobStatus.terminals() and phase in ("Completed", "Failed"):
+        # A failed job ends Terminated: a pod failure or eviction terminates it rather than failing it.
+        if status in HelixJobStatus.terminals() and phase in ("Completed", "Failed", "Terminated"):
             self._delete_step_network_policy(job.get("metadata", {}).get("name"))
-        return JobUpdate(status=status, status_details=status_details)
+        error_details = {"message": status_details["message"]} if status == HelixJobStatus.ERROR else {}
+        return JobUpdate(status=status, status_details=status_details, error_details=error_details)
 
     def enforce_image_pull_ttl(self, step: HelixJobStepWithContext, volcano_job: dict) -> JobUpdate | None:
         """Fail a step whose image the kubelet has been retrying for too long.
@@ -889,7 +906,8 @@ def map_volcano_job_status_to_platform_status(status: dict) -> tuple[HelixJobSta
     """Map Kubernetes job status to HelixJobStatus."""
     if status["state"]["phase"] == "Completed":
         return HelixJobStatus.COMPLETED, {"message": "Job completed successfully"}
-    elif status["state"]["phase"] == "Failed":
+    elif status["state"]["phase"] in ("Failed", "Terminating", "Terminated"):
+        # The job-level policies terminate the job when a pod fails or is deleted.
         return HelixJobStatus.ERROR, {"message": "Job failed"}
     elif status["state"]["phase"] == "Running":
         return HelixJobStatus.ACTIVE, {"message": "Job is currently running"}

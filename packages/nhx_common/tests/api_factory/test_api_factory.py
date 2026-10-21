@@ -20,6 +20,7 @@ from nemo_helix_plugin.client.errors import (
 from nemo_helix_plugin.client.errors import (
     NotFoundError as ClientNotFoundError,
 )
+from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
@@ -94,7 +95,7 @@ def test_api_factory_routes():
         service_name="foo",
         job_type="Foo",
         job_input=FooJobConfig,
-        route_options=[JobRouteOption.CORE, JobRouteOption.PAUSE_RESUME],
+        route_options=[JobRouteOption.CORE, JobRouteOption.PAUSE_RESUME, JobRouteOption.RERUN],
         platform_job_config_compiler=foo_job_config_compiler,
     )
 
@@ -110,6 +111,7 @@ def test_api_factory_routes():
         ("post", "/jobs/{name}/cancel"),
         ("post", "/jobs/{name}/pause"),
         ("post", "/jobs/{name}/resume"),
+        ("post", "/jobs/{name}/rerun"),
         ("patch", "/jobs/{name}/control"),
         ("get", "/jobs/{name}/logs"),
         ("get", "/jobs/{name}/results"),
@@ -364,7 +366,7 @@ def _job_routes_app():
         job_type="TestJob",
         job_input=FooJobConfig,
         platform_job_config_compiler=foo_job_config_compiler,
-        route_options=[JobRouteOption.CORE, JobRouteOption.PAUSE_RESUME],
+        route_options=[JobRouteOption.CORE, JobRouteOption.PAUSE_RESUME, JobRouteOption.RERUN],
     )
     app = FastAPI()
     register_sdk_exception_handlers(app)
@@ -1935,6 +1937,36 @@ class TestSDKExceptionHandling:
 
         assert response.status_code == 409
         assert response.json()["detail"] == error_detail
+
+    @pytest.mark.parametrize(
+        "operation,error_detail",
+        [
+            ("resume", "Cannot resume job 'my-job': this job failed rather than paused, use rerun."),
+            ("rerun", "Cannot rerun job 'my-job': this job is paused, use resume."),
+        ],
+    )
+    def test_resume_and_rerun_return_the_jobs_api_reason(self, mock_service_with_job_routes, operation, error_detail):
+        app, mock_jobs = mock_service_with_job_routes
+        client = TestClient(app, raise_server_exceptions=False)
+        setattr(
+            mock_jobs, f"{operation}_job", AsyncMock(side_effect=_client_error(ClientConflictError, 409, error_detail))
+        )
+
+        response = client.post(f"/v2/workspaces/default/test/jobs/my-job/{operation}")
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == error_detail
+
+    def test_rerun_is_sent_once(self, mock_service_with_job_routes):
+        """A retried rerun would find the attempt the first one created, and fail with 409."""
+        app, mock_jobs = mock_service_with_job_routes
+        client = TestClient(app, raise_server_exceptions=False)
+        mock_jobs.rerun_job = AsyncMock(side_effect=_client_error(ClientConflictError, 409, "conflict"))
+
+        client.post("/v2/workspaces/default/test/jobs/my-job/rerun")
+
+        mock_jobs.with_retry.assert_called_once_with(RetryPolicy(max_retries=0))
+        mock_jobs.rerun_job.assert_awaited_once()
 
     def test_resume_job_returns_clean_error(self, mock_service_with_job_routes):
         app, mock_jobs = mock_service_with_job_routes
