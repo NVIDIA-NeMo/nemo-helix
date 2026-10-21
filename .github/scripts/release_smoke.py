@@ -234,7 +234,7 @@ class Smoke:
             self.command(
                 ["colima", "start", "--vm-type", "qemu", "--cpu", "2", "--memory", "6", "--disk", "30"], timeout=300
             )
-            self.env["DOCKER_HOST"] = f"unix://{Path.home()}/.colima/default/docker.sock"
+            self.env["DOCKER_HOST"] = f"unix://{self.root}/config/colima/default/docker.sock"
             self.command(["docker", "info"])
         self.stage("wheel-install")
         self.install("all" if target == "macos" else "all,nemo-agents-plugin-deepagents")
@@ -345,7 +345,7 @@ class Smoke:
             ]
             commands += [[self.python, str(SCRIPTS / "release_smoke_api.py"), "cleanup"]]
             if target == "macos":
-                self.env["DOCKER_HOST"] = f"unix://{Path.home()}/.colima/default/docker.sock"
+                self.env["DOCKER_HOST"] = f"unix://{self.root}/config/colima/default/docker.sock"
                 commands += [[self.nemo, "services", "stop", "--instance", "release-smoke"]]
             for command in commands:
                 attempt(command)
