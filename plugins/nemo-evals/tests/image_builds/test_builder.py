@@ -93,12 +93,23 @@ async def test_ensure_build_resubmits_the_newest_revision_unless_it_failed(
 
 
 def test_builder_name_depends_on_every_build_input() -> None:
-    base = {"archive_digest": "a" * 64, "context_path": "sort/environment", "dockerfile": "Dockerfile"}
+    base = {
+        "archive": "default/harbor-tasks#sort/abc/task_archive",
+        "archive_digest": "a" * 64,
+        "context_path": "sort/environment",
+        "dockerfile": "Dockerfile",
+    }
     name = builder_name(**base)
 
     assert name == builder_name(**base)
     assert name.startswith("harbor-env-") and len(name) == len("harbor-env-") + 12
-    for field, other in [("archive_digest", "b" * 64), ("context_path", "sort/tests"), ("dockerfile", "D2")]:
+    for field, other in [
+        # Builder fingerprints the source location too: one name for two locations would conflict there.
+        ("archive", "team/harbor-tasks#sort/abc/task_archive"),
+        ("archive_digest", "b" * 64),
+        ("context_path", "sort/tests"),
+        ("dockerfile", "D2"),
+    ]:
         assert builder_name(**{**base, field: other}) != name
 
 

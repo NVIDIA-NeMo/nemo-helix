@@ -13,11 +13,11 @@ import pytest
 from nemo_builder_plugin.entities import ContainerImage, Provenance
 from nemo_builder_plugin.schema import FileSetSource, ImageSource, SubmitBuildResponse
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
-from nemo_evals.image_builds.models import ImageBuildRequest, TaskImageBuildEntity
+from nemo_evals.image_builds.models import ImageBuildRequest, TaskImageBuildEntity, build_entity_name
 from nemo_evals.image_builds.planning import TaskArchive
 from nemo_evals.image_builds.runner import TaskImageBuildSpec, run_task_image_build
 from nemo_evals.image_builds.service import BuildJob, ImageBuildService
-from nemo_evals.revisions import get_revision
+from nemo_evals.revisions import apply_tag, publish_revision
 from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
@@ -117,8 +117,8 @@ async def _start(entity_store, store_task, *, config: dict, allowed: list[str] |
 
 async def _stored_build(entity_store, spec: TaskImageBuildSpec) -> TaskImageBuildEntity:
     head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
-    revision = await get_revision(entity_store, TaskRevisionEntity, head, spec.revision_digest)
-    return await entity_store.get(TaskImageBuildEntity, name="build.1", workspace="default", parent=revision.id)
+    name = build_entity_name(spec.revision_digest, 1)
+    return await entity_store.get(TaskImageBuildEntity, name=name, workspace="default", parent=head.id)
 
 
 async def _run(entity_store, spec: TaskImageBuildSpec, builder: _Builder, **kwargs) -> TaskImageBuildEntity:
@@ -249,6 +249,57 @@ async def test_a_finished_build_is_left_alone(entity_store, store_task, archive)
 
     assert again == first
     assert builder.submits == []
+
+
+class _RecordingJobs(_Jobs):
+    def __init__(self) -> None:
+        self.created: list[CreateHelixJobRequest] = []
+
+    async def create(self, request: CreateHelixJobRequest) -> None:
+        self.created.append(request)
+
+    async def get(self, name: str) -> BuildJob | None:
+        return next(
+            (BuildJob(status="active", custom_fields=job.custom_fields) for job in self.created if job.name == name),
+            None,
+        )
+
+
+async def _republish(entity_store, harbor_digest: str) -> None:
+    """Publish the task again with different contents, as Harbor hashes them."""
+    head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
+    harbor_hash = head.spec.harbor_hash.model_copy(update={"digest": harbor_digest})
+    head.spec = head.spec.model_copy(update={"harbor_hash": harbor_hash})
+    await publish_revision(entity_store, entity_store, head, TaskRevisionEntity)
+
+
+async def test_revisions_with_the_same_contents_share_one_build(entity_store, store_task, archive) -> None:
+    """Publishing A, B, then A again makes revisions 1, 2 and 3; 1 and 3 hold the same contents, so the same images."""
+    digest = await store_task(config={})
+    head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
+    await apply_tag(entity_store, entity_store, TaskRevisionEntity, head, "v1", digest)
+    await _republish(entity_store, "c" * 64)
+    await _republish(entity_store, "b" * 64)
+    jobs = _RecordingJobs()
+    service = ImageBuildService(entity_store, jobs, _allow)
+
+    first = await service.request_build("default", "sort-task", "v1", ImageBuildRequest())
+    again = await service.request_build("default", "sort-task", "latest", ImageBuildRequest())
+    assert first is not None and again == first
+    # The service creates the Job each time and relies on Jobs refusing a name it already holds.
+    assert len({job.name for job in jobs.created}) == 1
+    job = jobs.created[0]
+
+    build = await _run(
+        entity_store, TaskImageBuildSpec.model_validate(job.spec), _Builder({"sort-task/environment": "ready"})
+    )
+
+    assert build.status == "ready"
+    for fragment in ("v1", "latest", digest):
+        page = await service.list_builds("default", "sort-task", fragment)
+        assert page is not None
+        [listed] = page.data
+        assert listed.status == "ready"
 
 
 @pytest.mark.parametrize(("status", "job_status"), [("ready", "completed"), ("failed", "failed")])
