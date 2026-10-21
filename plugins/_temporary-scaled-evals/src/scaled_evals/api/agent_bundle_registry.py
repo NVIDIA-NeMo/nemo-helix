@@ -5,15 +5,12 @@ from typing import Any
 
 from scaled_evals.api.auth import CurrentPrincipal
 from scaled_evals.api.db import Database
-from scaled_evals.api.tenancy import is_admin
 
 
-def accessible_bundle_for_run(db: Database, principal: CurrentPrincipal, bundle_id: str) -> dict[str, Any] | None:
-    row = db.agent_bundles.get_accessible(
-        bundle_id,
-        owner_id=principal.owner_id,
-        include_all=principal.source == "disabled" or is_admin(principal),
-    )
+def accessible_bundle_for_run(
+    db: Database, principal: CurrentPrincipal, bundle_id: str, *, include_all: bool
+) -> dict[str, Any] | None:
+    row = db.agent_bundles.get_accessible(bundle_id, owner_id=principal.owner_id, include_all=include_all)
     if row is None:
         return None
     return {

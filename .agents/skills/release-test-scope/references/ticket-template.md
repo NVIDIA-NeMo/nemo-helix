@@ -151,7 +151,7 @@ Include only proposed or approved capabilities with sufficient evidence and reso
 
 **Description:** <What changed, who benefits, and any essential boundary.>
 
-**Documentation:** [<Task or concept title>](<canonical published documentation URL, absolute with a real host>)
+**Documentation:** [<Task or concept title>](https://docs.nvidia.com/nemo-helix/documentation/<page-path>)
 
 **Use it:**
 

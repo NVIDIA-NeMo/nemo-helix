@@ -6,7 +6,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
+
+from fastapi import Depends
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
+from nemo_helix_plugin.dependencies import get_sync_nemo_client
+from nemo_helix_plugin.refs import parse_entity_ref
+from nemo_helix_plugin.secrets.client import SecretsClient
 
 from scaled_evals.api.auth import CurrentPrincipal
 from scaled_evals.api.build.task_image_identity import (
@@ -28,13 +35,32 @@ from scaled_evals.api.schemas.runnability import (
     RunnabilityReport,
 )
 from scaled_evals.api.settings import settings
-from scaled_evals.api.tenancy import is_admin
 from scaled_evals.dispatch.harbor_dataset_images import effective_image_mode
 from scaled_evals.dispatch.registry import get_backend_capabilities
 
 ObjectExists = Callable[[str], bool]
 BundleResolver = Callable[[Database, CurrentPrincipal, str], dict[str, Any] | None]
+# Takes a qualified "workspace/name" secret reference.
+SecretReadable = Callable[[str], bool]
 _MAX_MEMBER_FAILURES = 50
+
+
+def caller_secret_readable(client: Annotated[NemoClient, Depends(get_sync_nemo_client)]) -> SecretReadable:
+    """Check secret references as the caller, so a run only uses secrets its submitter can read.
+
+    The evaluation Job later reads the value as the scaled-evals service, which may read any secret.
+    """
+    secrets = SecretsClient.from_client(client)
+
+    def readable(ref: str) -> bool:
+        parsed = parse_entity_ref(ref)
+        try:
+            secrets.get_secret(workspace=parsed.workspace, name=parsed.name)
+        except (NotFoundError, PermissionDeniedError):
+            return False
+        return True
+
+    return readable
 
 
 @dataclass(frozen=True)
@@ -137,17 +163,14 @@ def _reference_shape_error(body: CreateEvaluationRequest | CreateBenchmarkRunReq
                 return f"member_framework_profile_ids key must be a task_ id: {task_id}"
             if not profile_id.startswith("cfg_"):
                 return f"member_framework_profile_ids[{task_id}] must be a cfg_ id"
-    for role, credential_id in body.credentials.items():
-        if not credential_id.startswith("cred_"):
-            return f"credentials[{role}] must be a cred_ id"
     return None
 
 
 def _append_reference_checks(
     db: Database,
     body: CreateEvaluationRequest | CreateBenchmarkRunRequest,
-    current: CurrentPrincipal,
     checks: list[RunnabilityCheck],
+    secret_readable: SecretReadable,
 ) -> PreflightBlocker | None:
     profile_slots = [
         (body.framework_profile_id, _framework_profile_type(body.framework)),
@@ -160,7 +183,7 @@ def _append_reference_checks(
         )
     profile_slots = [(profile_id, kind) for profile_id, kind in profile_slots if profile_id]
     try:
-        db.evaluations.validate_profile_references(profile_slots)
+        db.config_profiles.validate_references(profile_slots)
     except InvalidReference as exc:
         checks.append(
             _check(
@@ -184,7 +207,7 @@ def _append_reference_checks(
     if isinstance(body, CreateBenchmarkRunRequest):
         framework_profile_ids.update(body.member_framework_profile_ids.values())
     for framework_profile_id in sorted(framework_profile_ids) if body.framework == "harbor" else ():
-        profile_row = db.evaluations.load_framework_profile(framework_profile_id)
+        profile_row = db.config_profiles.get_typed(framework_profile_id, ("harbor", "gym"))
         profile = profile_row.get("config") if profile_row else None
         if isinstance(profile, dict) and profile.get("dataset_only") is True:
             try:
@@ -225,39 +248,27 @@ def _append_reference_checks(
                 )
             )
 
-    credential_ids = sorted(set(body.credentials.values()))
-    try:
-        db.evaluations.validate_credential_references(
-            credential_ids,
-            owner_id=current.owner_id,
-            include_unowned=current.source == "disabled" or is_admin(current),
-        )
-    except InvalidReference as exc:
-        checks.append(
-            _check(
-                "credentials",
-                "unavailable",
-                exc.message,
-                blocking=True,
-                code="invalid_reference",
-            )
-        )
-        return PreflightBlocker(422, "invalid_reference", exc.message)
+    providers = sorted(body.credentials)
+    for provider in providers:
+        if not secret_readable(body.credentials[provider]):
+            message = f"credential secret for {provider} not found or not readable: {body.credentials[provider]}"
+            checks.append(_check("credentials", "unavailable", message, blocking=True, code="invalid_reference"))
+            return PreflightBlocker(422, "invalid_reference", message)
     checks.append(
         _check(
             "credentials",
-            "ready" if credential_ids else "not_applicable",
-            "referenced credentials are accessible" if credential_ids else "no credentials were requested",
-            details={"roles": sorted(body.credentials)},
+            "ready" if providers else "not_applicable",
+            "referenced credential secrets are readable" if providers else "no credentials were requested",
+            details={"providers": providers},
         )
     )
-    if credential_ids:
+    if providers:
         checks.append(
             _check(
                 "credential_verification",
                 "unverified",
-                "credential usability is not persisted and was not probed by this preflight",
-                details={"roles": sorted(body.credentials)},
+                "credential usability was not probed by this preflight",
+                details={"providers": providers},
             )
         )
     return None
@@ -494,6 +505,7 @@ def preflight_evaluation(
     *,
     object_exists: ObjectExists,
     resolve_bundle: BundleResolver,
+    secret_readable: SecretReadable,
 ) -> EvaluationPreflight:
     checks: list[RunnabilityCheck] = []
     shape_error = _reference_shape_error(body)
@@ -554,7 +566,7 @@ def preflight_evaluation(
     blocker = _append_task_image_check(task_revision, checks)
     if blocker:
         return BlockedPreflight(_report("evaluation", checks), blocker)
-    blocker = _append_reference_checks(db, body, current, checks)
+    blocker = _append_reference_checks(db, body, checks, secret_readable)
     if blocker:
         return BlockedPreflight(_report("evaluation", checks), blocker)
 
@@ -573,6 +585,7 @@ def preflight_benchmark_run(
     *,
     object_exists: ObjectExists,
     resolve_bundle: BundleResolver,
+    secret_readable: SecretReadable,
 ) -> BenchmarkRunPreflight:
     checks: list[RunnabilityCheck] = []
     shape_error = _reference_shape_error(body)
@@ -592,7 +605,7 @@ def preflight_benchmark_run(
         )
     checks.append(_check("reference_shape", "ready", "reference ids are well formed"))
 
-    blocker = _append_reference_checks(db, body, current, checks)
+    blocker = _append_reference_checks(db, body, checks, secret_readable)
     if blocker:
         return BlockedPreflight(_report("benchmark_run", checks), blocker)
     runner, blocker = _append_runtime_checks(body, checks)

@@ -914,6 +914,55 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/entities/v2/workspace-deletions/{name}:
+    get:
+      tags:
+      - Entity Store
+      summary: Get workspace deletion status
+      description: 'Read the cleanup stage for a workspace whose name is still reserved.
+
+
+        The workspace itself is hidden from get and list while deletion is in
+
+        progress. This route is system-scoped because delete already removed the
+
+        workspace role bindings. With authentication enabled, the original
+
+        creator, a platform admin, and service principals can read it. A missing
+
+        workspace, a live workspace, and a deletion the caller may not see all
+
+        return not found.
+
+
+        Example:
+
+        ```
+
+        GET /apis/entities/v2/workspace-deletions/ml-team
+
+        ```'
+      operationId: get_workspace_deletion_apis_entities_v2_workspace_deletions__name__get
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceDeletionStatus'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/entities/v2/workspaces:
     post:
       tags:
@@ -5814,6 +5863,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/rerun:
+    post:
+      tags:
+      - Jobs
+      summary: Rerun Job
+      description: Rerun a failed job from its surviving storage as a new attempt.
+      operationId: rerun_job_apis_jobs_v2_workspaces__workspace__jobs__job__rerun_post
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobResponse'
+        '404':
+          description: Job not Found
+        '409':
+          description: The job cannot be rerun, or its status changed during the request
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/results/{name}:
     post:
       tags:
@@ -6314,7 +6400,7 @@ paths:
         '404':
           description: Job not Found
         '409':
-          description: The job changed during the request
+          description: Storage has been reclaimed, or the job changed during the request
         '422':
           description: The pause window exceeds the platform maximum
   /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/logs:
@@ -10738,8 +10824,9 @@ components:
         shm_size:
           title: Shm Size
           description: Shared memory (/dev/shm) size as a Kubernetes quantity (e.g.
-            '1Gi', '4Gi'). Used for GPU and distributed-GPU job executors. When unset,
-            defaults to 1Gi per allocated GPU.
+            '1Gi', '4Gi'). Used for GPU and distributed-GPU job executors. When both
+            the step and the execution profile set shm_size, the larger value is used.
+            When neither is set, the size is 8Gi per allocated GPU.
           type: string
       type: object
       title: ComputeResources
@@ -15131,6 +15218,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/StepLifecycle'
           description: Lifecycle configuration settings for the step
+        network:
+          allOf:
+          - $ref: '#/components/schemas/StepNetwork'
+          description: Network isolation for the step's pods. Unset leaves ingress
+            unrestricted.
       type: object
       required:
       - name
@@ -16158,6 +16250,13 @@ components:
           type: object
           title: Pod Security Context
           description: Pod security context for the Kubernetes job pods.
+        step_network_policies_enabled:
+          type: boolean
+          title: Step Network Policies Enabled
+          description: Create an ingress NetworkPolicy for each step that declares
+            `network`. Requires a NetworkPolicy-enforcing CNI and controller RBAC
+            on networking.k8s.io/networkpolicies.
+          default: false
         image_pull_secrets:
           items:
             $ref: '#/components/schemas/ImagePullSecret'
@@ -20362,6 +20461,30 @@ components:
       - success
       - unknown
       title: StatusEnum
+    StepIngressRule:
+      properties:
+        job_id_label:
+          type: string
+          pattern: ^([a-z0-9]([-a-z0-9.]*[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$
+          title: Job Id Label
+          description: Label key on peer pods whose value must equal the job ID, e.g.
+            'nemo-rl-job-id'.
+        tcp_ports:
+          items:
+            type: integer
+            maximum: 65535.0
+            minimum: 1.0
+          type: array
+          minItems: 1
+          title: Tcp Ports
+          description: TCP ports on the step's pods that matching peers may reach.
+      type: object
+      required:
+      - job_id_label
+      - tcp_ports
+      title: StepIngressRule
+      description: Ingress into the step's pods from peer pods that carry this job's
+        ID under ``job_id_label``.
     StepLifecycle:
       properties:
         staleness_timeout_seconds:
@@ -20387,6 +20510,24 @@ components:
         as opposed to ``config`` which is the task payload forwarded to
 
         the container.'
+    StepNetwork:
+      properties:
+        ingress:
+          items:
+            $ref: '#/components/schemas/StepIngressRule'
+          type: array
+          title: Ingress
+          description: Additional ingress allowed into the step's pods.
+      type: object
+      title: StepNetwork
+      description: 'Network isolation for a step''s pods.
+
+
+        Enforced only when the execution profile enables step network policies. The
+        step''s pods then
+
+        accept ingress from other pods of the same job plus the listed rules, and
+        nothing else.'
     StorageConfigType:
       enum:
       - local
@@ -21853,6 +21994,13 @@ components:
           type: object
           title: Pod Security Context
           description: Pod security context for the Kubernetes job pods.
+        step_network_policies_enabled:
+          type: boolean
+          title: Step Network Policies Enabled
+          description: Create an ingress NetworkPolicy for each step that declares
+            `network`. Requires a NetworkPolicy-enforcing CNI and controller RBAC
+            on networking.k8s.io/networkpolicies.
+          default: false
         image_pull_secrets:
           items:
             $ref: '#/components/schemas/ImagePullSecret'
@@ -22037,6 +22185,33 @@ components:
       - updated_at
       title: Workspace
       description: Workspace schema for API responses.
+    WorkspaceDeletionStatus:
+      properties:
+        name:
+          type: string
+          title: Name
+        deletion_stage:
+          type: string
+          title: Deletion Stage
+        deletion_error:
+          title: Deletion Error
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - name
+      - deletion_stage
+      - updated_at
+      title: WorkspaceDeletionStatus
+      description: 'Cleanup status for a workspace whose name is still reserved.
+
+
+        Returned by the system-scoped deletion-status route. The public workspace
+
+        schema stays free of deletion fields.'
     WorkspaceInput:
       properties:
         name:

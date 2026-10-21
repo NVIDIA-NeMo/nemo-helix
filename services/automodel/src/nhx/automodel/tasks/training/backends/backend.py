@@ -24,6 +24,7 @@ from nhx.automodel.tasks.training.schemas import (
     TrainingStepConfig,
 )
 from nhx.automodel.tasks.training.utils import generate_torchrun_flags_from_env
+from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.service.context import NHXJobContext
 from nhx.customization_common.training.nccl import get_nccl_ib_env
 
@@ -79,7 +80,7 @@ class AutomodelBackend:
         TrainingProgressCallback, which reads job context from environment
         variables.
         """
-        progress.report_running("training", backend="automodel")
+        progress.report_running(TrainingPhase.TRAINING, backend="automodel")
 
         # Run training with our custom recipe
         # Note: The progress parameter is not passed to run_training_with_customizer_recipe

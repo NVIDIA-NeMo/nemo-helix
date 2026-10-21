@@ -12,7 +12,6 @@ from unittest import mock
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import pytest
-from cryptography.fernet import Fernet
 
 # This plugin is absent from `enabled-plugins`, so a default sync leaves it and its database
 # driver uninstalled and the repo-wide test run still sweeps this directory. Skip rather than
@@ -61,8 +60,7 @@ def test_sql_is_discoverable_and_ordered() -> None:
     assert migrations[0].startswith("001_")
 
 
-@pytest.mark.parametrize("key", [None, "not-a-fernet-key"], ids=["missing", "invalid"])
-def test_startup_survives_unusable_settings(key: str | None, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_startup_survives_unusable_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     """A broken plugin config must degrade the plugin, not abort platform startup.
 
     Drives the real `on_startup`, not just `_apply_migrations`: an earlier version
@@ -71,10 +69,7 @@ def test_startup_survives_unusable_settings(key: str | None, monkeypatch: pytest
     """
     # Drop the memoized Settings so the config below is what gets validated.
     monkeypatch.setattr(settings, "_instance", None)
-    if key is None:
-        monkeypatch.delenv("CREDENTIALS_ENCRYPTION_KEY", raising=False)
-    else:
-        monkeypatch.setenv("CREDENTIALS_ENCRYPTION_KEY", key)
+    monkeypatch.setenv("TASK_IMAGE_HOSTED_MODE", "true")
 
     asyncio.run(ScaledEvalsService().on_startup())
 
@@ -140,10 +135,9 @@ def _dsn_for(base_dsn: str, schema: str) -> str:
         "SCALED_EVALS_DATABASE_URL": base_dsn,
         "SCALED_EVALS_DATABASE_SCHEMA": schema,
         "DATABASE_SSL_MODE": "disable",
-        "CREDENTIALS_ENCRYPTION_KEY": Fernet.generate_key().decode(),
     }
     with mock.patch.dict(os.environ, env):
-        return Settings().resolved_database_url()  # ty: ignore[missing-argument]
+        return Settings().resolved_database_url()
 
 
 def test_database_url_never_adopts_the_platform_database(
@@ -155,7 +149,6 @@ def test_database_url_never_adopts_the_platform_database(
     would happen silently — running these migrations and the claim queues inside
     the platform's database.
     """
-    monkeypatch.setenv("CREDENTIALS_ENCRYPTION_KEY", Fernet.generate_key().decode())
     monkeypatch.delenv("SCALED_EVALS_DATABASE_URL", raising=False)
     # A platform database that is perfectly usable, so the only thing keeping us
     # off it is that we do not look.
@@ -165,12 +158,12 @@ def test_database_url_never_adopts_the_platform_database(
     )
     monkeypatch.setenv("DATABASE_HOST", "platform-db")
 
-    unset = Settings().resolved_database_url()  # ty: ignore[missing-argument]
+    unset = Settings().resolved_database_url()
     assert "platform-db" not in unset, unset
     assert unset.startswith(_fixture_dsn("scaled_evals", "localhost", "scaled_evals")), unset
 
     monkeypatch.setenv("SCALED_EVALS_DATABASE_URL", _fixture_dsn("me", "own-db", "scaled_evals", "pw"))
-    assert "own-db:5432/scaled_evals" in Settings().resolved_database_url()  # ty: ignore[missing-argument]
+    assert "own-db:5432/scaled_evals" in Settings().resolved_database_url()
 
 
 def test_dsn_carries_search_path_and_applier_refuses_a_public_fallback() -> None:

@@ -20,6 +20,7 @@ from nhx.intake.spans.ingest.atif_domain import (
 )
 from nhx.intake.spans.ingest.atif_mapping import AtifTrajectoryDepthError, _step_observation, trajectory_to_spans
 from nhx.intake.spans.ingest.evaluation_context import EvaluationContext
+from nhx.intake.spans.storage import stable_id
 from pydantic import ValidationError
 
 EVALUATION_CONTEXT: dict[str, Any] = {
@@ -238,7 +239,7 @@ def test_atif_v17_embedded_subagents_expand_recursively_in_the_parent_trace() ->
 
     assert len(spans) == 12
     assert len({span.external_span_id for span in spans}) == len(spans)
-    assert {span.trace_id for span in spans} == {"run-123"}
+    assert {span.trace_id for span in spans} == {stable_id("run-123", "root-trajectory", prefix="trace")}
     assert {span.session_id for span in spans} == {"run-123"}
     assert root.external_parent_span_id == ""
     assert research.external_parent_span_id == root_delegation.external_span_id
@@ -1387,3 +1388,37 @@ def test_atif_mapping_stamps_agent_name_on_every_span() -> None:
     assert spans
     for span in spans:
         assert span.attributes_string["gen_ai.agent.name"] == "sample-agent"
+
+
+def _turn(trajectory_id: str | None, message: str) -> AtifTrajectory:
+    payload: dict[str, Any] = {
+        "schema_version": "ATIF-v1.7",
+        "session_id": "conversation-1",
+        "agent": {"name": "chat-agent", "version": "1.0"},
+        "steps": [{"step_id": 1, "source": "user", "message": message}],
+    }
+    if trajectory_id is not None:
+        payload["trajectory_id"] = trajectory_id
+    return AtifTrajectory.model_validate(payload)
+
+
+def test_atif_mapping_keeps_turns_of_one_session_in_separate_traces() -> None:
+    ingested_at = datetime(2026, 5, 18, 10, 0, tzinfo=timezone.utc)
+    first = trajectory_to_spans(workspace="default", trajectory=_turn("turn-1", "hi"), ingested_at=ingested_at)
+    second = trajectory_to_spans(workspace="default", trajectory=_turn("turn-2", "hi"), ingested_at=ingested_at)
+
+    assert {span.session_id for span in [*first, *second]} == {"conversation-1"}
+    assert len({span.trace_id for span in first}) == 1
+    assert len({span.trace_id for span in second}) == 1
+    assert first[0].trace_id != second[0].trace_id
+    assert not {span.external_span_id for span in first} & {span.external_span_id for span in second}
+
+
+def test_atif_mapping_uses_session_id_as_trace_id_without_trajectory_id() -> None:
+    spans = trajectory_to_spans(
+        workspace="default",
+        trajectory=_turn(None, "hi"),
+        ingested_at=datetime(2026, 5, 18, 10, 0, tzinfo=timezone.utc),
+    )
+
+    assert {span.trace_id for span in spans} == {"conversation-1"}

@@ -279,6 +279,14 @@ def test_broker_owned_metadata_keys_are_refused(client):
     assert response.json()["code"] == "field_not_allowed"
 
 
+@pytest.mark.parametrize("key", ["nhx.nvidia.com/job_id", "nhx.nvidia.com/managed_by"])
+def test_platform_job_labels_are_refused(client, key):
+    response = client.post("/episodes", json={"image": APPROVED_IMAGE, "metadata": {key: "job-1"}})
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "field_not_allowed"
+
+
 def test_job_id_is_stamped_into_backend_metadata(client, backend):
     create_episode(client, metadata={"suite": "swe"})
 

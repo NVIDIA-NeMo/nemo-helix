@@ -3,7 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: inference
-description: NeMo Helix inference provider registration lifecycle through the platform SDK (secret -> create temp provider -> verify -> delete -> create final provider).
+description: NeMo Helix inference provider registration lifecycle through the platform SDK (secret, then create temp provider, verify, delete, create final provider).
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 # Inference provider tasks
 

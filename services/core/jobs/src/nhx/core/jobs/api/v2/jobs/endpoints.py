@@ -59,6 +59,7 @@ from nhx.core.jobs.app.dispatcher import (
     JobOutputLocationError,
     JobSecretValidationError,
     JobStatusUpdateSkippedError,
+    JobStorageReclaimPendingError,
     PauseTTLLimitError,
     StateTransitionConflictError,
 )
@@ -220,6 +221,8 @@ def _format_create_job_conflict(exc: ValueError, *, job_name: str | None, worksp
             f"Job '{job_name}' already exists in workspace '{workspace}'. Choose a different job name or delete the "
             "existing job before creating a new one."
         )
+    if isinstance(exc, JobStorageReclaimPendingError):
+        return str(exc)
     if isinstance(exc, JobSecretValidationError):
         return (
             "Unable to create job because one or more referenced secrets were not found or are not accessible. "
@@ -517,7 +520,7 @@ async def resume_job(
     responses={
         status.HTTP_200_OK: {"description": "Successful Response"},
         status.HTTP_404_NOT_FOUND: {"description": "Job not Found"},
-        status.HTTP_409_CONFLICT: {"description": "The job changed during the request"},
+        status.HTTP_409_CONFLICT: {"description": "Storage has been reclaimed, or the job changed during the request"},
         status.HTTP_422_UNPROCESSABLE_CONTENT: {"description": "The pause window exceeds the platform maximum"},
     },
 )
@@ -525,19 +528,13 @@ async def update_job_control(
     name: str,
     workspace: str,
     request: JobControl,
-    auth_client: AuthClient = Depends(get_auth_client),
     dispatcher: JobDispatcher = Depends(dep_dispatcher),
 ) -> HelixJobResponse:
     """Change mutable job behavior, such as how long a pause keeps storage."""
     with scoped_app_ctx(JobContext(id=name)):
         try:
             with job_operation_errors("update control for", name, workspace):
-                job = await dispatcher.update_job_control(
-                    name,
-                    workspace,
-                    request,
-                    auth_context=AuthContext.from_principal(auth_client.principal),
-                )
+                job = await dispatcher.update_job_control(name, workspace, request)
         except PauseTTLLimitError as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.detail) from exc
         if not job:

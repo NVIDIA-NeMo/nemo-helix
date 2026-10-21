@@ -68,16 +68,11 @@ dependencies = [
 version = "0.0.0"
 
 [dependency-groups]
-# Keep Git-only analyst dependencies out of published wheel metadata.
-insights = [
-  "nemo-insights-plugin",
-  "insight-agent @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137",
-  "trace-ingest @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137#subdirectory=packages/trace-ingest",
-]
+insights = ["nemo-insights-plugin"]
 typecheck = ["transformers>=5.5.0,<5.9.0"]
 # The scaled-evals plugin is opt-in: it is a path dependency rather than a workspace
 # member, so neither `enabled-plugins` nor `uv sync --all-packages` installs it. It needs
-# external config (e.g. `credentials_encryption_key`) and would otherwise fail readiness.
+# external config (e.g. its own Postgres) and would otherwise fail readiness.
 # CI still has to see it, so the lint and pytest entry points ask for this group by name;
 # without it neither the plugin nor psycopg is importable there.
 scaled-evals = [
@@ -272,6 +267,8 @@ cpu-tasks = [
   # Insights Analyst Fabric adapter and insights.analysis execute extension.
   { include-group = "insights" },
   "nemo-evals-plugin",
+  # nemo-evals' bind_task_image rewrites task.toml with it; scaled-evals pins the same version.
+  "tomlkit>=0.15.0,<0.15.1",
   "nemo-sandboxed-gym[server,opensandbox]",
   "nemo-anonymizer-plugin",
   "nemo-data-designer-plugin[retrieval-sdg]",

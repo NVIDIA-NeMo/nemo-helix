@@ -15,7 +15,7 @@ sys.modules["nemo_automodel"] = MagicMock()
 sys.modules["nemo_automodel._transformers"] = MagicMock()
 sys.modules["nemo_automodel._transformers.registry"] = MagicMock()
 
-from nhx.automodel.entities.values import TrainingType  # noqa: E402
+from nhx.automodel.entities.values import FinetuningType, TrainingType  # noqa: E402
 from nhx.automodel.tasks.training.backends.backend import AutomodelBackend  # noqa: E402
 from nhx.automodel.tasks.training.distributed import DistributedContext, DistributedRole  # noqa: E402
 from nhx.automodel.tasks.training.progress import JobsServiceProgressReporter  # noqa: E402
@@ -146,6 +146,7 @@ def test_result_json_copies_the_recorded_training_duration(tmp_path: Path, monke
 
     result = runner.run()
 
+    assert result.success is True
     assert result.training_duration_seconds == 17.5
     assert written_duration(tmp_path) == 17.5
 
@@ -184,3 +185,28 @@ def test_result_json_omits_duration_when_training_never_started(
 
     assert result.training_duration_seconds is None
     assert written_duration(tmp_path) is None
+
+
+@pytest.mark.parametrize(
+    ("finetuning_type", "phase"),
+    [
+        (FinetuningType.LORA_MERGED, "merging_adapter"),
+        (FinetuningType.LORA, "finalizing_checkpoint"),
+        (FinetuningType.ALL_WEIGHTS, "finalizing_checkpoint"),
+    ],
+)
+def test_postprocessing_reports_the_work_it_is_doing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, finetuning_type: FinetuningType, phase: str
+) -> None:
+    """A LoRA merge loads the whole base model and can take as long as training did."""
+    sent: list[str] = []
+    backend = MagicMock()
+    backend.find_checkpoints.return_value = {}
+    backend.process_checkpoints.side_effect = lambda *a, **k: sent.append("process")
+    runner = _ScriptedRunner(tmp_path, duration=1.0, compile_config=MagicMock, backend=backend)
+    runner._config.training.finetuning_type = finetuning_type
+    monkeypatch.setattr(runner._progress, "report_running", lambda reported, **details: sent.append(reported))
+
+    runner._postprocess_phase(None, TrainingMetrics(), MagicMock())
+
+    assert sent == [phase, "process"]

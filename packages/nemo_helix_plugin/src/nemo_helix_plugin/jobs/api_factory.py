@@ -87,7 +87,7 @@ from nemo_helix_plugin.jobs.types import (
     HelixJobResponse as HelixJob,
 )
 from nemo_helix_plugin.schema import DatetimeFilter, Filter, Page, PaginationData, StringFilter
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +120,7 @@ _JOB_PERMISSION_DESCRIPTIONS: dict[str, str] = {
     "cancel": "Cancel {ns} jobs",
     "pause": "Pause {ns} jobs",
     "resume": "Resume {ns} jobs",
+    "rerun": "Rerun {ns} jobs",
     "control": "Update {ns} job control settings",
 }
 
@@ -163,6 +164,7 @@ class BaseJob(BaseModel, Generic[JobConfigT]):
     error_details: dict[str, object] | None = None
     ownership: dict[str, object] | None = None
     custom_fields: dict[str, object] | None = None
+    control: JobControl | None = None
 
 
 class BaseJobsListFilter(Filter):
@@ -496,6 +498,7 @@ class JobRouteOption(StrEnum):
 
     CORE = auto()
     PAUSE_RESUME = auto()
+    RERUN = auto()
 
 
 class HelixJobResultRoute(BaseModel):
@@ -968,6 +971,28 @@ def job_route_factory(
             error_details=job_resp.error_details,
             ownership=job_resp.ownership,
             custom_fields=job_resp.custom_fields,
+            control=job_resp.control,
+        )
+
+    job_output_adapter = TypeAdapter(job_output)
+
+    async def require_own_job(jobs_client: AsyncJobsClient, name: str, workspace: str) -> None:
+        """Refuse a job these routes do not serve, before acting on it.
+
+        Services can share a job source, as the customization trainers do, so the stored spec
+        must also fit this route's schema. Otherwise the action would land on another service's
+        job, and its response could not be rendered.
+        """
+        job = (await jobs_client.get_job(name=name, workspace=workspace)).data()
+        if job.source == service_name:
+            try:
+                job_output_adapter.validate_python(job.spec)
+                return
+            except ValidationError:
+                pass
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job '{name}' was not found among {job_type} jobs in workspace '{workspace}'.",
         )
 
     # Core job routes
@@ -1422,9 +1447,9 @@ def job_route_factory(
         ) -> TypedJobResponse:
             f"""Pause a job by name for the {service_name} microservice."""
 
-            job_resp = (
-                await AsyncJobsClient.from_client(async_client).pause_job(name=name, workspace=workspace)
-            ).data()
+            jobs_client = AsyncJobsClient.from_client(async_client)
+            await require_own_job(jobs_client, name, workspace)
+            job_resp = (await jobs_client.pause_job(name=name, workspace=workspace)).data()
             return from_response(job_resp)
 
         @router.post(
@@ -1437,9 +1462,9 @@ def job_route_factory(
         ) -> TypedJobResponse:
             f"""Resume a job by name for the {service_name} microservice."""
 
-            job_resp = (
-                await AsyncJobsClient.from_client(async_client).resume_job(name=name, workspace=workspace)
-            ).data()
+            jobs_client = AsyncJobsClient.from_client(async_client)
+            await require_own_job(jobs_client, name, workspace)
+            job_resp = (await jobs_client.resume_job(name=name, workspace=workspace)).data()
             return from_response(job_resp)
 
         @router.patch("/jobs/{name}/control")
@@ -1451,15 +1476,33 @@ def job_route_factory(
         ) -> TypedJobResponse:
             f"""Change mutable job behavior for the {service_name} microservice."""
 
-            job_resp = (
-                await AsyncJobsClient.from_client(async_client).update_job_control(
-                    name=name, workspace=workspace, body=body
-                )
-            ).data()
+            jobs_client = AsyncJobsClient.from_client(async_client)
+            await require_own_job(jobs_client, name, workspace)
+            job_resp = (await jobs_client.update_job_control(name=name, workspace=workspace, body=body)).data()
             return from_response(job_resp)
 
         _stamp(pause_job, perm="pause", write=True)
         _stamp(resume_job, perm="resume", write=True)
         _stamp(update_job_control, perm="control", write=True)
+
+    # Some jobs can be rerun from what survives on job storage after they fail.
+    if JobRouteOption.RERUN in route_options:
+
+        @router.post("/jobs/{name}/rerun")
+        async def rerun_job(
+            name: str,
+            workspace: str,
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
+        ) -> TypedJobResponse:
+            f"""Rerun a failed job by name for the {service_name} microservice."""
+
+            jobs_client = AsyncJobsClient.from_client(async_client)
+            await require_own_job(jobs_client, name, workspace)
+            # Sent once: a retry after a lost response would find the new attempt and fail with 409.
+            rerun_client = jobs_client.with_retry(RetryPolicy(max_retries=0))
+            job_resp = (await rerun_client.rerun_job(job=name, workspace=workspace)).data()
+            return from_response(job_resp)
+
+        _stamp(rerun_job, perm="rerun", write=True)
 
     return router

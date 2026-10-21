@@ -89,7 +89,7 @@ Rows are operations; columns are human-facing roles. Read the hierarchy above fi
 
 <Note>
 
-Workspace creation is controlled by the `WorkspaceCreator` permission in the `system` workspace rather than by the workspace roles in the table above. By default, platform seed grants `WorkspaceCreator` to the wildcard principal `*`, so all authenticated users can still create workspaces until operators change that binding. The creator automatically becomes Admin.
+Workspace creation is controlled by the `WorkspaceCreator` role in the `system` workspace rather than by the workspace roles in the table above. By default, platform seed grants `WorkspaceCreator` to the wildcard principal `*`, so all authenticated users can still create workspaces until operators change that binding. The creator automatically becomes Admin. The same role includes `workspaces.deletion.read`, so the original creator can read deletion status for a name that is still reserved after delete. A platform admin can read any deletion status.
 
 </Note>
 ### Resource Operations (Models, Datasets, Projects)

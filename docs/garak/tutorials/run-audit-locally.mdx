@@ -28,7 +28,7 @@ This tutorial takes approximately **10 minutes** to complete, plus however long 
 
 - Install and start NeMo Helix using the [Setup guide](/documentation/get-started).
 - Install garak in a Python virtual environment so the plugin can shell out to it. By default the plugin invokes `~/.garak/.venv/bin/python -m garak`. Override the interpreter path with `NEMO_GARAK_PYTHON` if your install lives elsewhere.
-- Configure at least one Inference Gateway provider — this tutorial uses the `nvidia-inference-api` provider that is included in a default local setup, but any chat-completion-compatible provider works. Step 3 shows how to list the providers registered in your deployment. See [Inference Gateway](/documentation/vulnerability-scanning/targets/inference-gateway) for details on the `nhx_uri_spec` block used below.
+- Configure at least one Inference Gateway provider — this tutorial uses the `system/nvidia-build` provider for NVIDIA Build (`https://integrate.api.nvidia.com/v1`), with a Build API key authorized to call the selected model. Any chat-completion-compatible provider works, but its model identifiers and credentials must match that provider. Step 3 lists registered providers and checks completion access before running garak. See [Inference Gateway](/documentation/vulnerability-scanning/targets/inference-gateway) for details on the `nhx_uri_spec` block used below.
 
 ---
 
@@ -41,6 +41,13 @@ This tutorial takes approximately **10 minutes** to complete, plus however long 
 ---
 
 ## 1. Initialize the SDK
+
+Install the local audit interpreter (the same garak version used by the task image). This runs on the notebook host, not inside the platform containers:
+
+```bash
+python3 -m venv "$HOME/.garak/.venv"
+"$HOME/.garak/.venv/bin/python" -m pip install "garak==0.17.0"
+```
 
 Connect to the running platform and reach the garak sub-resource:
 
@@ -94,28 +101,52 @@ For the full set of options on each sub-block, see [Configuration Schema](/docum
 First, list the providers registered in your deployment so you can pick one that exists:
 
 ```python
-providers = client.models.list_providers(workspace="default")
+providers = client.models.list_providers(workspace="system")
 for provider in providers.items():
     print(provider.name, provider.host_url)
 ```
 
-Use a `provider` name from this output in the target below. The model identifier format depends on the provider — check the provider's API documentation or served-model list if unsure.
+Use a `provider` name from this output in the target below. This example pairs `nvidia-build` with the Build model ID `nvidia/nemotron-3.5-lightning-30b-a3b`. Do not add a second `nvidia/` prefix or reuse this ID with `nvidia-inference-api`: that provider has a different catalog and requires its own credentials.
 
-Define the model under test. This example uses garak's `nim.NVOpenAIChat` generator pointed at the `nvidia-inference-api` provider registered in a default local setup:
+Before creating the target, send one chat completion through the same provider route that garak will use. A READY provider or a model listed in its catalog does not guarantee that your API key has completion access:
+
+```python
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
+
+completion = InferenceGatewayClient.from_client(client).provider_post(
+    workspace="system",
+    name="nvidia-build",
+    trailing_uri="v1/chat/completions",
+    body=JsonBody({
+        "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+        "messages": [{"role": "user", "content": "Reply with hello."}],
+        "max_tokens": 1024,
+    }),
+).data()
+content = completion["choices"][0]["message"].get("content")
+if not content:
+    raise RuntimeError("Completion returned no content; inspect the response before auditing.")
+print(content)
+```
+
+If this request fails, resolve the provider/model or credential issue before starting the audit; see Troubleshooting below.
+
+Define the model under test. This example uses garak's `nim.NVOpenAIChat` generator pointed at the `system/nvidia-build` provider:
 
 ```python
 target = garak.targets.create(
     workspace="default",
     name="nemotron-3.5-lightning-30b",
     type="nim.NVOpenAIChat",
-    model="nvidia/nvidia/nemotron-3.5-lightning-30b-a3b",
+    model="nvidia/nemotron-3.5-lightning-30b-a3b",
     options={
         "nim": {
             "max_tokens": 1024,
             "nhx_uri_spec": {
                 "inference_gateway": {
-                    "workspace": "default",
-                    "provider": "nvidia-inference-api",
+                    "workspace": "system",
+                    "provider": "nvidia-build",
                 },
             },
         },
@@ -219,6 +250,12 @@ Report artifacts are left in place under the scheduler's temporary directory; th
 
 **`RuntimeError: Failed to resolve inference gateway provider '<workspace>/<provider>'`**
 : The `nhx_uri_spec` block in your target's options references an Inference Gateway provider that doesn't exist. List your providers with `client.models.list_providers(workspace="default")` and update the target to reference an existing one.
+
+**HTTP 403, 404, or 424 during the completion preflight**
+: Check the provider, its API base URL, the exact model ID in its served-model catalog, and the provider's configured API key. An upstream 403 (`Authorization failed` or `key_model_access_denied`) indicates an authorization/access failure; confirm both the model ID and the key's access with that provider. An upstream 404 can indicate an incorrect model ID, such as a duplicated `nvidia/` prefix on NVIDIA Build. The platform may wrap an upstream failure as HTTP 424; inspect the response body for the upstream status and error. Do not retry the audit until the completion preflight succeeds.
+
+**HTTP 504 during the completion preflight**
+: The upstream completion timed out. Provider readiness and model discovery are not successful completion tests. Retry the preflight or choose another model available to your provider and credential before running garak.
 
 **`status == "failed"` with empty `results`**
 : The audit could not complete any probe. Inspect `result.get("error")` for the failure reason, and verify the model is reachable through the provider you configured.

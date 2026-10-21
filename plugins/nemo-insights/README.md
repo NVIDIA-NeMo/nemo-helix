@@ -5,7 +5,7 @@
 
 NeMo Helix plugin for analyzing agent telemetry and persisting actionable insights.
 
-Analysis uses [NeMo Compass](https://github.com/NVIDIA-NeMo/labs-nemo-compass).
+Analysis uses [NeMo Compass](https://github.com/NVIDIA-NeMo/nemo-compass).
 NeMo Helix supplies authenticated trace and model access and stores the resulting insights.
 
 ## Prerequisites
@@ -23,30 +23,15 @@ uv sync
 
 The plugin is installed by default through the root workspace's `enabled-plugins` group.
 
-## Install analyst dependencies for PyPI installations
-
-PyPI does not accept Git dependencies in wheel metadata, so `nemo-helix[all]`
-does not install `insight-agent` and `trace-ingest`. For a `uv tool install`
-installation, include both when installing Helix before running Insights analysis:
+## Install from a package index
 
 ```bash
-uv tool install --force \
-  --with "insight-agent @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137" \
-  --with "trace-ingest @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137#subdirectory=packages/trace-ingest" \
-  "nemo-helix[all]"
+uv tool install --python 3.13 "nemo-helix[all]"
 ```
 
-For a virtual environment, install both pinned requirements in the environment
-that runs the analyst:
-
-```bash
-uv pip install \
-  "insight-agent @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137" \
-  "trace-ingest @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137#subdirectory=packages/trace-ingest"
-```
-
-Source checkouts and the platform images install these pinned dependencies through
-the workspace's `insights` group.
+The Insights extra includes `nemo-compass==0.1.0`, which bundles Compass's
+analysis code and `trace_ingest` loaders. Analyst execution requires Python
+3.12 or 3.13; Compass does not yet support Python 3.14.
 
 ## CLI
 
@@ -87,7 +72,7 @@ least 3 traces. Runs over a few sessions, such as runs scoped by `--since` or
 
 When that happens, the run summary says some observations did not meet the
 thresholds. The `analysis-report` result lists the closest ones (up to 5) and
-any evidence streams that were skipped, with their reason:
+any Compass Signals that were skipped, with their reason:
 
 ```text
 - below threshold: tool-issues knowledge_search explicit_tool_failure (2 of 3 independent cases)

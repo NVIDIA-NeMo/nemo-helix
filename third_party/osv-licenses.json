@@ -4771,6 +4771,16 @@
         },
         {
           "package": {
+            "name": "nemo-compass",
+            "version": "0.1.0",
+            "ecosystem": "PyPI"
+          },
+          "licenses": [
+            "Apache-2.0"
+          ]
+        },
+        {
+          "package": {
             "name": "nemo-fabric",
             "version": "0.4.0",
             "ecosystem": "PyPI"
@@ -30875,7 +30885,7 @@
     },
     {
       "name": "Apache-2.0",
-      "count": 158
+      "count": 159
     },
     {
       "name": "BSD-3-Clause",

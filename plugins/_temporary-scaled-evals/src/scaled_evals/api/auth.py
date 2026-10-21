@@ -3,30 +3,18 @@
 
 """The ownership identity every ``/v1`` route resolves a caller through.
 
-This is deliberately only a seam. The standalone service authenticated callers
-itself: OIDC discovery against a fixed internal issuer, JWKS fetching and JWT
-signature validation, an OAuth client-credentials exchange, API-key
-introspection, and a proxy-header trust path — all populating
-``request.state.principal`` from a middleware.
-
-None of that belongs in a platform plugin. The platform authenticates the request
-before a plugin route runs, so a second identity provider inside the plugin would
-be both redundant and a competing source of truth. The verification stack is
-gone; what remains is the ownership model the repositories filter on
-(``owner_id``) plus one function that produces it.
-
-Until platform identity is bridged into that model, every caller resolves to a
-single development principal. That is why ``/v1`` data is not multi-tenant yet:
-callers share one owner, so they share one view of tasks and evaluations.
+The platform authenticates the request before a plugin route runs and installs
+the caller in its auth context. This module maps that principal onto the
+ownership model the repositories filter on (``owner_id``); it never verifies
+credentials itself.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fastapi import HTTPException, Request
-
-from scaled_evals.api.settings import settings
+from fastapi import HTTPException
+from nemo_helix_plugin.auth import current_auth_context, is_service_principal_id, platform_auth_enabled
 
 
 @dataclass(frozen=True)
@@ -34,12 +22,12 @@ class CurrentPrincipal:
     """Who a request acts as, for ownership and attribution.
 
     ``owner_id`` is the only field the repositories filter on. The rest is
-    attribution that ``GET /users/me`` echoes and ``record_principal`` stores.
+    attribution that ``GET /users/me`` echoes.
     """
 
     owner_type: str
     owner_id: str
-    # Load-bearing, not descriptive: seven call sites treat "disabled" as
+    # Load-bearing, not descriptive: several call sites treat "disabled" as
     # "skip owner filtering" so single-owner development can still reach rows
     # written before ownership existed (owner_id IS NULL). Renaming this string
     # silently hides those rows.
@@ -51,33 +39,37 @@ class CurrentPrincipal:
     roles: tuple[str, ...] = ()
 
 
-def current_principal(request: Request) -> CurrentPrincipal:
-    """Resolve the caller's ownership identity.
+def current_principal() -> CurrentPrincipal:
+    """Resolve the caller's ownership identity from platform auth.
 
-    Nothing populates ``request.state.principal`` today. This reads it anyway so
-    that bridging platform identity becomes a matter of setting it upstream
-    rather than editing every route.
+    With platform auth disabled every caller is the shared development owner.
+    With it enabled the owner is the effective principal: the user a service
+    acts on behalf of, otherwise the authenticated caller.
 
     Raises:
-        HTTPException: 401 when ``CONTROL_PLANE_AUTH_ENABLED`` is set. Failing is
-            the honest answer: there is no identity provider left to consult, so
-            attributing the request to the shared development owner would hand
-            one caller another caller's data.
+        HTTPException: 401 when platform auth is enabled but the request carries
+            no authenticated principal.
     """
-    principal = getattr(request.state, "principal", None)
-    if isinstance(principal, CurrentPrincipal):
-        return principal
-    if settings.control_plane_auth_enabled:
+    if not platform_auth_enabled():
+        return CurrentPrincipal(owner_type="DEV", owner_id="dev", source="disabled")
+    context = current_auth_context()
+    if context is None:
         raise HTTPException(
             status_code=401,
-            detail={
-                "error": {
-                    "code": "principal_unavailable",
-                    "message": (
-                        "control-plane auth is enabled but no identity provider is wired; "
-                        "platform identity is not yet bridged into scaled-evals ownership"
-                    ),
-                }
-            },
+            detail={"error": {"code": "principal_unavailable", "message": "request has no platform principal"}},
         )
-    return CurrentPrincipal(owner_type="DEV", owner_id="dev", source="disabled")
+    if context.principal_on_behalf_of:
+        owner_id = context.principal_on_behalf_of
+        email = context.principal_on_behalf_of_email
+        groups = context.principal_on_behalf_of_groups or []
+    else:
+        owner_id = context.principal_id
+        email = context.principal_email
+        groups = context.principal_groups
+    return CurrentPrincipal(
+        owner_type="SERVICE" if is_service_principal_id(owner_id) else "USER",
+        owner_id=owner_id,
+        source="platform",
+        email=email,
+        groups=tuple(groups),
+    )

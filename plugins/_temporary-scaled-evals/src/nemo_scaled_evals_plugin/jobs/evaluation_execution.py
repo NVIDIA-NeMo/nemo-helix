@@ -69,7 +69,7 @@ class EvaluationExecutionJob(NemoJob):
                             limits=ResourcesLimitsSpec(cpu="1", memory="1Gi"),
                         ),
                     ),
-                    environment=resolve_evaluation_secret_environment(canonical.runtime),
+                    environment=resolve_evaluation_secret_environment(canonical.runtime, canonical.credentials),
                     config=canonical.model_dump(mode="json"),
                     # Without this the platform cannot reap a hung dispatcher:
                     # the step stays active forever and the reconciler keeps

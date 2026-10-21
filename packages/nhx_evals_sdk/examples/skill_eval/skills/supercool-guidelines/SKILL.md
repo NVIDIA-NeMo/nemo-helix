@@ -4,6 +4,8 @@
 
 name: supercool-guidelines
 description: The Supercool Coding Guidelines — mandatory naming conventions for every function you write. Use this whenever you are asked to write or edit a Python function.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Supercool Coding Guidelines

@@ -341,10 +341,12 @@ jobs:
         num_nodes: 1
         # Step requesting number of GPUs.
         num_gpus:
-        # Shared memory (/dev/shm) size as a Kubernetes quantity (e.g. '1Gi', '4Gi'). Used for GPU and distributed-GPU job executors. When unset, defaults to 1Gi per allocated GPU.
+        # Shared memory (/dev/shm) size as a Kubernetes quantity (e.g. '1Gi', '4Gi'). Used for GPU and distributed-GPU job executors. When both the step and the execution profile set shm_size, the larger value is used. When neither is set, the size is 8Gi per allocated GPU.
         shm_size:
       # Pod security context for the Kubernetes job pods.
       pod_security_context: {}
+      # Create an ingress NetworkPolicy for each step that declares `network`. Requires a NetworkPolicy-enforcing CNI and controller RBAC on networking.k8s.io/networkpolicies. | default: False
+      step_network_policies_enabled: false
       # Image pull secrets for the Kubernetes job pods.
       image_pull_secrets: []
       # Metadata to add to each job object in the Kubernetes job.
@@ -423,10 +425,12 @@ jobs:
         num_nodes: 1
         # Step requesting number of GPUs.
         num_gpus:
-        # Shared memory (/dev/shm) size as a Kubernetes quantity (e.g. '1Gi', '4Gi'). Used for GPU and distributed-GPU job executors. When unset, defaults to 1Gi per allocated GPU.
+        # Shared memory (/dev/shm) size as a Kubernetes quantity (e.g. '1Gi', '4Gi'). Used for GPU and distributed-GPU job executors. When both the step and the execution profile set shm_size, the larger value is used. When neither is set, the size is 8Gi per allocated GPU.
         shm_size:
       # Pod security context for the Kubernetes job pods.
       pod_security_context: {}
+      # Create an ingress NetworkPolicy for each step that declares `network`. Requires a NetworkPolicy-enforcing CNI and controller RBAC on networking.k8s.io/networkpolicies. | default: False
+      step_network_policies_enabled: false
       # Image pull secrets for the Kubernetes job pods.
       image_pull_secrets: []
       # Metadata to add to each job object in the Kubernetes job.
@@ -501,6 +505,8 @@ jobs:
     maximum_pause_ttl_seconds: 2592000
     # How long storage is kept after a job fails, measured from the failed step's stopped_at. 0 reclaims on the next retention pass. | default: 14400
     failed_storage_ttl_seconds: 14400
+    # How often the jobs controller checks paused, failed and cancelled jobs for storage to reclaim. Storage of deleted jobs is reclaimed on every reconcile tick instead. | default: 300
+    retention_interval_seconds: 300
   # Include raw job log lines in controller diagnostics snapshots. Disabled by default because job logs may contain secrets or PII. Enable only for local debugging or test environments. | default: False
   include_job_logs_in_diagnostics: false
 ```

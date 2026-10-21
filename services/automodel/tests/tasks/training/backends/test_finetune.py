@@ -544,6 +544,7 @@ def test_a_reporting_failure_does_not_stop_training(finetune: ModuleType, monkey
 
     monkeypatch.setattr(wrapper.callback, "report_train_step", boom)
     monkeypatch.setattr(wrapper.callback, "report_validation", boom)
+    monkeypatch.setattr(wrapper.callback, "report_checkpoint_saving", boom)
     monkeypatch.setattr(wrapper.callback, "report_checkpoint_saved", boom)
     monkeypatch.setattr(wrapper.callback, "report_epoch_end", boom)
 
@@ -590,6 +591,25 @@ def test_the_wrapper_reports_a_checkpoint_one_based_with_its_path(
     assert saved[-1]["step"] == 20
     assert saved[-1]["epoch"] == 2
     assert saved[-1]["checkpoint_path"] == "/ckpt"
+
+
+def test_the_wrapper_reports_a_checkpoint_save_before_it_starts(
+    finetune: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The final save also writes the consolidated model and can outlast the run's training steps."""
+    recipe = _FakeRecipe()
+    wrapper, reports = _wrapper(finetune, monkeypatch, recipe)
+    phases_when_saving: list[str] = []
+    monkeypatch.setattr(
+        wrapper, "_original_save_checkpoint", lambda *a, **k: phases_when_saving.extend(p for p, _ in reports)
+    )
+
+    recipe.save_checkpoint(epoch=1, step=19, train_loss=0.5)
+
+    assert phases_when_saving[-1] == "saving_checkpoint"
+    saving = [d for phase, d in reports if phase == "saving_checkpoint"]
+    assert saving[-1] == {"step": 20, "epoch": 2}
+    assert [phase for phase, _ in reports][-2:] == ["saving_checkpoint", "checkpoint_saved"]
 
 
 def test_the_wrapper_writes_validation_stats_for_each_checkpoint(

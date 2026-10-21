@@ -35,6 +35,19 @@ class Workspace(BaseModel):
 WorkspacePage = Page[Workspace]
 
 
+class WorkspaceDeletionStatus(BaseModel):
+    """Cleanup status for a workspace whose name is still reserved.
+
+    Returned by the system-scoped deletion-status route. The public workspace
+    schema stays free of deletion fields.
+    """
+
+    name: str
+    deletion_stage: str
+    deletion_error: str | None = None
+    updated_at: datetime
+
+
 class WorkspaceMember(BaseModel):
     """Workspace member response model."""
 

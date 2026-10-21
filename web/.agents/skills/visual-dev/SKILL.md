@@ -4,6 +4,8 @@
 
 name: visual-dev
 description: Screenshot-driven visual development workflow using Playwright MCP. Use when implementing designs from mockups or Figma, building new UI components, or fixing visual bugs.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Visual Development Workflow

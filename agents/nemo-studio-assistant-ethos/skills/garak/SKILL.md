@@ -4,6 +4,8 @@
 
 name: garak
 description: NeMo Helix garak playbook for audit target and config CRUD through the platform SDK. Use when the task involves audit targets, audit configs, or probes.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 # garak tasks
 

@@ -23,7 +23,7 @@ const makeTraceColumns = makeIntakeTraceColumns();
 
 export interface InsightTracesTableProps {
   workspace: string;
-  /** Intake trace ids (the insight's `trace_refs`). */
+  /** Intake trace ids referenced by the insight's evidence. */
   traceIds: string[];
 }
 

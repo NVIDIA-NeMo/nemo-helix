@@ -312,6 +312,12 @@ class BaseKubernetesExecutionProfileConfig(JobExecutionProfileConfig):
         default_factory=dict, description="Pod security context for the Kubernetes job pods."
     )
 
+    step_network_policies_enabled: bool = Field(
+        default=False,
+        description="Create an ingress NetworkPolicy for each step that declares `network`. Requires a "
+        "NetworkPolicy-enforcing CNI and controller RBAC on networking.k8s.io/networkpolicies.",
+    )
+
     # Image pull secrets
     image_pull_secrets: list[ImagePullSecret] = Field(
         default_factory=list, description="Image pull secrets for the Kubernetes job pods."

@@ -68,7 +68,8 @@ class ComputeResources(JobSpecModel):
     shm_size: str | None = Field(
         default=None,
         description="Shared memory (/dev/shm) size as a Kubernetes quantity (e.g. '1Gi', '4Gi'). "
-        "Used for GPU and distributed-GPU job executors. When unset, defaults to 1Gi per allocated GPU.",
+        "Used for GPU and distributed-GPU job executors. When both the step and the execution "
+        "profile set shm_size, the larger value is used. When neither is set, the size is 8Gi per allocated GPU.",
     )
 
     @field_validator("shm_size")

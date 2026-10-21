@@ -13,6 +13,7 @@ dependencies = [
     "nemo-builder-plugin",
     "nhx-evals-sdk[harbor]",
     "nemo-helix-plugin",
+    "nhx-sandbox",
     "pydantic>=2.12.0",
     "typer>=0.20.0",
 ]
@@ -31,6 +32,9 @@ evals = "nemo_evals.sdk.resources:evaluator_sdk_resources"
 "evals.evaluate" = "nemo_evals.jobs.evaluate:EvaluateJob"
 "evals.agent-evaluate" = "nemo_evals.jobs.agent_evaluate:AgentEvalJob"
 "evals.retrieve-eval" = "nemo_evals.jobs.retrieve_eval:RetrieveEvalJob"
+
+[project.entry-points."nemo.controllers"]
+evals-taskset-runs = "nemo_evals.taskset_runs.controller:EvaluatorRunController"
 
 [project.entry-points."nemo.skills"]
 evals = "nemo_evals.skills:get_skills_path"
@@ -54,6 +58,7 @@ nemo-agents-plugin = { workspace = true }
 nemo-builder-plugin = { workspace = true }
 nhx-evals-sdk = { workspace = true }
 nemo-helix-plugin = { workspace = true }
+nhx-sandbox = { workspace = true }
 nhx-testing = { workspace = true }
 
 

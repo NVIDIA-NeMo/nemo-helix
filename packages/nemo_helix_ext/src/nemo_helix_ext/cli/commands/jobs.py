@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal, cast
 
 import typer
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobResultCreateRequest
 from nemo_helix_plugin.jobs.telemetry import merge_job_telemetry_custom_fields
@@ -267,6 +268,11 @@ def _render_source_jobs_call(resource_path: list[str], method: str) -> list[str]
     if operation == (("jobs",), "resume"):
         return [
             "response = jobs_client.resume_job(name=args['name'], workspace=args.get('workspace'))",
+            "print(response.data())",
+        ]
+    if operation == (("jobs",), "rerun"):
+        return [
+            "response = jobs_client.rerun_job(job=args['name'], workspace=args.get('workspace'))",
             "print(response.data())",
         ]
     if operation == (("jobs",), "control"):
@@ -967,6 +973,36 @@ def resume_jobs(
 
     _, jobs_client = _jobs_client_from_state(state)
     result = jobs_client.resume_job(name=name, workspace=workspace).data()
+
+    format_output(
+        result,
+        is_list=False,
+        output_format=resolved_output_format,
+        no_truncate=state.get_no_truncate(),
+        timestamp_format=state.get_timestamp_format(),
+    )
+
+
+@app.command("rerun")
+@collect_warnings
+@handle_errors
+def rerun_jobs(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Job name or ID (both are accepted).")],
+    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    output_format: EntityOutputFormatOption = None,
+) -> None:
+    """Rerun a failed platform job from surviving storage."""
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+
+    kwargs = {"name": name, **build_kwargs(workspace=workspace)}
+    if handle_code_generation(["jobs"], "rerun", kwargs, resolved_output_format, state):
+        return
+
+    _, jobs_client = _jobs_client_from_state(state)
+    # Sent once: a retry after a lost response would find the new attempt and fail with 409.
+    result = jobs_client.with_retry(RetryPolicy(max_retries=0)).rerun_job(job=name, workspace=workspace).data()
 
     format_output(
         result,

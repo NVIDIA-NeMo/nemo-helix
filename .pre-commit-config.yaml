@@ -54,11 +54,6 @@ repos:
 
   - repo: local
     hooks:
-      - id: verify-nemo-helix-rename
-        name: Verify NeMo Helix rename consistency
-        entry: tools/rename/verify-nemo-helix-rename.sh
-        language: system
-        exclude: ^web/
       - id: config-reference-docs
         name: Check config reference doc is up to date
         entry: bash -c 'uv run generate-config-docs && git diff --exit-code docs/set-up/config-reference.mdx'
