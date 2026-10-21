@@ -17,6 +17,15 @@ between ``agent.setup()`` and ``agent.run()``. Each switch removes and adds egre
 sandbox, kills every process started since the sandbox came up (an install can leave a daemon
 holding a connection, and the sidecar keeps established connections across a policy change), and
 reads the policy back.
+
+Harbor references:
+
+- Network policy phases (``[environment]``, ``[agent]``, ``[verifier]``) and the capabilities that gate them:
+  https://www.harborframework.com/docs/tasks/network-policy
+- Where the trial validates phase switching and calls ``set_network_policy``:
+  https://github.com/harbor-framework/harbor/blob/main/src/harbor/trial/trial.py
+- ``BaseEnvironment`` (``set_network_policy``, ``_apply_network_policy``, ``validate_network_policy_support``):
+  https://github.com/harbor-framework/harbor/blob/main/src/harbor/environments/base.py
 """
 
 from __future__ import annotations
@@ -134,7 +143,16 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
     @property
     @override
     def capabilities(self) -> EnvironmentCapabilities:
-        """The parent's, plus runtime policy switching when there is a setup allowlist to switch away from."""
+        """The parent's, plus runtime policy switching when there is a setup allowlist to switch away from.
+
+        ``dynamic_network_policy`` is Harbor's flag for "the environment can change network policy after
+        start"; Harbor rejects tasks with ``[agent]``/``[verifier]`` network phases without it, and a provider
+        that sets it must implement ``_apply_network_policy``. See the ``dynamic_network_policy`` row of the
+        capabilities table:
+        https://www.harborframework.com/docs/tasks/network-policy#capabilities
+        and its definition:
+        https://github.com/harbor-framework/harbor/blob/main/src/harbor/environments/capabilities.py
+        """
         capabilities = super().capabilities
         if not self._agent_setup_hosts:
             return capabilities
@@ -150,7 +168,12 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
 
     @override
     def validate_network_policy_support(self, network_policy: NetworkPolicy | None = None) -> None:
-        """Accept the setup allowlist, which is operator config rather than a task's request."""
+        """Accept the setup allowlist, which is operator config rather than a task's request.
+
+        Overrides Harbor's ``BaseEnvironment.validate_network_policy_support``, which Harbor calls at
+        construction and again from ``set_network_policy``:
+        https://github.com/harbor-framework/harbor/blob/main/src/harbor/environments/base.py
+        """
         network_policy = network_policy or self._network_policy
         if self._is_setup_policy(network_policy):
             # Harbor's own capability checks still apply; the trusted-allowlist check does not.
@@ -205,6 +228,12 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
     @override
     async def _apply_network_policy(self, network_policy: NetworkPolicy) -> None:
         """Move the live sandbox from the current egress policy to ``network_policy``'s.
+
+        The hook behind Harbor's ``BaseEnvironment.set_network_policy``, which validates the policy and the
+        ``dynamic_network_policy`` capability before calling this, then records the new policy. Trials switch
+        policy between phases (``agent.setup()`` -> ``agent.run()``):
+        https://github.com/harbor-framework/harbor/blob/main/src/harbor/environments/base.py
+        https://github.com/harbor-framework/harbor/blob/main/src/harbor/trial/trial.py
 
         Rules leave before leftover processes are killed, so nothing can reconnect in between; rules
         arrive after, so nothing the previous phase started can use them.
