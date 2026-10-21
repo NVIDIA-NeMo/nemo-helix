@@ -148,7 +148,8 @@ class BuilderConfig(NemoConfig):
         pattern=PLATFORM_PATTERN,
         description=(
             "The platform a build or copy is for when its request names none, as `os/architecture`. Set it to your "
-            "nodes' architecture: `linux/arm64` for a cluster on Apple silicon, such as Docker Desktop on a Mac."
+            "nodes' architecture: `linux/arm64` for a cluster on Apple silicon, such as Docker Desktop on a Mac. "
+            "Changing it doesn't rebuild task images evals already has: request their builds with `rebuild` set."
         ),
     )
 

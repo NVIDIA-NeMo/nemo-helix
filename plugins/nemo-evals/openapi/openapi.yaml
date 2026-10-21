@@ -6527,6 +6527,14 @@ components:
             deployment''s default. An image pinned to another platform fails the build.'
           type: string
           pattern: ^[a-z0-9]+/[a-z0-9]+(/[a-z0-9]+)?$
+        rebuild:
+          type: boolean
+          title: Rebuild
+          description: 'Start a new attempt even when the newest build is ready, so
+            the request reaches Builder again: after the deployment''s default platform
+            changes, this builds for the new one. A build still running is returned
+            as it is. Builder reuses any image it already has for an unchanged request.'
+          default: false
       additionalProperties: false
       type: object
       title: ImageBuildRequest

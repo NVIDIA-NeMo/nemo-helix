@@ -144,9 +144,9 @@ class ImageBuildService:
         latest = builds[0] if builds else None
         # Another platform's build is no answer to this request, so only builds for this one are reused.
         newest = next((build for build in builds if build.platform == request.platform), None)
-        if newest is not None and newest.status == "ready":
+        if newest is not None and newest.status == "ready" and not request.rebuild:
             return ImageBuild.from_entity(newest)
-        if newest is not None and newest.status != "failed":
+        if newest is not None and newest.status not in ("ready", "failed"):
             job = await self.jobs.get(newest.job)
             if job is None or job.status not in _ENDED_JOB_STATUSES:
                 await self._ensure_job(newest)

@@ -110,6 +110,15 @@ class ImageBuildRequest(BaseModel):
         ),
     )
 
+    rebuild: bool = Field(
+        default=False,
+        description=(
+            "Start a new attempt even when the newest build is ready, so the request reaches Builder again: after "
+            "the deployment's default platform changes, this builds for the new one. A build still running is "
+            "returned as it is. Builder reuses any image it already has for an unchanged request."
+        ),
+    )
+
     @field_validator("allowed_registries")
     @classmethod
     def _registries_are_hosts(cls, value: list[str]) -> list[str]:

@@ -40,12 +40,14 @@ from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 
 
 def _image_build_request(
-    allowed_registries: builtins.list[str] | None, platform: str | None
+    allowed_registries: builtins.list[str] | None, platform: str | None, rebuild: bool
 ) -> CreateTaskImageBuildRequest:
-    # `platform` only when given: a server from before it existed refuses the field, even as null.
+    # `platform` and `rebuild` only when given: a server from before they existed refuses the fields, even unset.
     body: dict[str, object] = {"allowed_registries": allowed_registries or []}
     if platform is not None:
         body["platform"] = platform
+    if rebuild:
+        body["rebuild"] = True
     return CreateTaskImageBuildRequest.model_validate(body)
 
 
@@ -281,19 +283,20 @@ class EvaluatorTasksResource:
         revision: str = "latest",
         allowed_registries: builtins.list[str] | None = None,
         platform: str | None = None,
+        rebuild: bool = False,
         workspace: str | None = None,
     ) -> ImageBuild:
         """Build the container images of a task revision, or return the build already running or done.
 
         ``revision`` is a digest or a tag. ``platform``, such as ``linux/arm64``, builds every image for it;
         omitted, each image follows the task's own pin or the deployment's default. After a failed build, this
-        starts the next attempt.
+        starts the next attempt; ``rebuild`` starts one over a ready build too, as after the default changes.
         """
         response = self._client.create_task_image_build(
             name=name,
             revision=revision,
             workspace=workspace,
-            body=_image_build_request(allowed_registries, platform),
+            body=_image_build_request(allowed_registries, platform, rebuild),
         )
         return ImageBuild.model_validate(response.data().model_dump(mode="json"))
 
@@ -631,19 +634,20 @@ class AsyncEvaluatorTasksResource:
         revision: str = "latest",
         allowed_registries: builtins.list[str] | None = None,
         platform: str | None = None,
+        rebuild: bool = False,
         workspace: str | None = None,
     ) -> ImageBuild:
         """Build the container images of a task revision, or return the build already running or done.
 
         ``revision`` is a digest or a tag. ``platform``, such as ``linux/arm64``, builds every image for it;
         omitted, each image follows the task's own pin or the deployment's default. After a failed build, this
-        starts the next attempt.
+        starts the next attempt; ``rebuild`` starts one over a ready build too, as after the default changes.
         """
         response = await self._client.create_task_image_build(
             name=name,
             revision=revision,
             workspace=workspace,
-            body=_image_build_request(allowed_registries, platform),
+            body=_image_build_request(allowed_registries, platform, rebuild),
         )
         return ImageBuild.model_validate(response.data().model_dump(mode="json"))
 

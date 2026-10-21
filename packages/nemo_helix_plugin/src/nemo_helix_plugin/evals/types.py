@@ -328,6 +328,7 @@ class CreateTaskImageBuildRequest(BaseModel):
 
     allowed_registries: list[str] = Field(default_factory=list)
     platform: str | None = None
+    rebuild: bool = False
 
 
 # ---------------------------------------------------------------------------
