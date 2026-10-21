@@ -26,6 +26,8 @@ from nhx_evals_sdk.agent_eval.evaluator import AgentEvaluator
 from nhx_evals_sdk.agent_eval.metrics import AgentPhaseSuccessMetric
 from nhx_evals_sdk.agent_eval.results import AgentEvalSummary
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import (
+    HOST_ALIAS_JOB,
+    NETWORK_RESTRICTED_JOB,
     HarborAgentTaskRunner,
     HarborEnvironmentConfig,
     HarborRewardMetric,
@@ -37,6 +39,7 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import (
     scoped_harbor_agent_import,
 )
 from nhx_evals_sdk.agent_eval.runtimes.harbor.trial_adapter import (
+    HARBOR_SPLIT_MARKER,
     _rewards_mapping,
     _trial_from_harbor_result,
 )
@@ -3503,7 +3506,10 @@ def _harbor_task(root: Path, name: str, toml: str = "") -> None:
     (task / "task.toml").write_text(f'schema_version = "1.1"\n\n[task]\nname = "probe/{name}"\n{toml}')
 
 
-async def _compose_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dataset: Path) -> list[Path]:
+async def _created_jobs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dataset: Path
+) -> list[tuple[str, Path, Any, bool]]:
+    """Run a native job over ``dataset`` with Harbor's Job faked: ``(name, parent, task filter, aliased)`` per job."""
     import harbor.job
 
     created: list[Any] = []
@@ -3521,36 +3527,109 @@ async def _compose_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, da
     config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", agent_name="oracle")
     _, run_job = _build_native_job(config, dataset, None, job_name="j", env_templates={})
     await run_job()
-    return list(created[0].environment.extra_docker_compose)
+    return [
+        (job.job_name, Path(job.jobs_dir), job.datasets[0].task_names, bool(job.environment.extra_docker_compose))
+        for job in created
+    ]
+
+
+RESTRICTED_TASKS = [
+    # Harbor attaches the task container to its egress sidecar's network, and Docker refuses extra_hosts there.
+    '\n[environment]\nnetwork_mode = "allowlist"\nallowed_hosts = ["example.com"]\n',
+    '\n[environment]\nnetwork_mode = "no-network"\n',
+    '\n[agent]\nnetwork_mode = "no-network"\n',
+    # A verifier sharing the agent's container restricts that container too.
+    '\n[verifier]\nnetwork_mode = "no-network"\n',
+]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("toml", "aliased"),
+    "toml",
     [
-        ("", True),
-        # Harbor attaches the task container to its egress sidecar's network, and Docker refuses extra_hosts there.
-        ('\n[environment]\nnetwork_mode = "allowlist"\nallowed_hosts = ["example.com"]\n', False),
-        ('\n[environment]\nnetwork_mode = "no-network"\n', False),
-        ('\n[agent]\nnetwork_mode = "no-network"\n', False),
-        # A verifier sharing the agent's container restricts that container too.
-        ('\n[verifier]\nnetwork_mode = "no-network"\n', False),
+        "",
         # In its own container, a restricted verifier leaves the agent's container public.
-        ('\n[verifier]\nenvironment_mode = "separate"\nnetwork_mode = "no-network"\n', True),
+        '\n[verifier]\nenvironment_mode = "separate"\nnetwork_mode = "no-network"\n',
     ],
 )
-async def test_the_host_gateway_alias_is_left_out_where_harbor_restricts_the_network(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, toml: str, aliased: bool
+async def test_an_all_public_selection_runs_as_one_job_with_the_alias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, toml: str
 ) -> None:
     dataset = tmp_path / "dataset"
     _harbor_task(dataset, "open")
     _harbor_task(dataset, "probe", toml)
 
-    with caplog.at_level(logging.WARNING):
-        overrides = await _compose_overrides(tmp_path, monkeypatch, dataset)
+    jobs = await _created_jobs(tmp_path, monkeypatch, dataset)
 
-    assert bool(overrides) == aliased
-    assert ("['probe'] restrict network access" in caplog.text) == (not aliased)
+    assert jobs == [("j", tmp_path / "jobs", None, True)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("toml", RESTRICTED_TASKS)
+async def test_a_mixed_selection_runs_its_restricted_tasks_as_a_job_without_the_alias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, toml: str
+) -> None:
+    # Public tasks keep the alias a registered Fabric agent needs on Linux Docker Engine.
+    dataset = tmp_path / "dataset"
+    _harbor_task(dataset, "open")
+    _harbor_task(dataset, "probe", toml)
+
+    jobs = await _created_jobs(tmp_path, monkeypatch, dataset)
+
+    job_dir = tmp_path / "jobs" / "j"
+    assert jobs == [
+        (HOST_ALIAS_JOB, job_dir, ["open"], True),
+        (NETWORK_RESTRICTED_JOB, job_dir, ["probe"], False),
+    ]
+    marker = json.loads((job_dir / HARBOR_SPLIT_MARKER).read_text())
+    assert marker == {"jobs": [HOST_ALIAS_JOB, NETWORK_RESTRICTED_JOB]}
+
+
+@pytest.mark.asyncio
+async def test_an_all_restricted_selection_runs_as_one_job_without_the_alias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset = tmp_path / "dataset"
+    _harbor_task(dataset, "probe", RESTRICTED_TASKS[0])
+
+    jobs = await _created_jobs(tmp_path, monkeypatch, dataset)
+
+    assert jobs == [("j", tmp_path / "jobs", None, False)]
+
+
+def test_a_split_job_dir_yields_the_trials_of_both_harbor_jobs(tmp_path: Path) -> None:
+    job_dir = tmp_path / "j"
+    write_harbor_trial_result(job_dir / HOST_ALIAS_JOB / "open__a", task_name="probe/open", rewards={"reward": 1})
+    write_harbor_trial_result(
+        job_dir / NETWORK_RESTRICTED_JOB / "probe__b", task_name="probe/probe", rewards={"reward": 0}
+    )
+    # Each Harbor job also writes its own aggregate result.json, which is not a trial.
+    (job_dir / HOST_ALIAS_JOB / "result.json").write_text("{}")
+    (job_dir / HARBOR_SPLIT_MARKER).write_text(json.dumps({"jobs": [HOST_ALIAS_JOB, NETWORK_RESTRICTED_JOB]}))
+    tasks = [
+        AgentEvalTask(id=task_id, intent="x", inputs={"instruction": "x"}, metrics=[HarborRewardMetric()])
+        for task_id in ("probe/open", "probe/probe")
+    ]
+
+    trials = build_trials_from_job_dir(job_dir, tasks)
+
+    assert sorted(trial.task_id for trial in trials) == ["probe/open", "probe/probe"]
+
+
+@pytest.mark.asyncio
+async def test_a_pinned_job_dir_in_the_other_layout_is_discarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset = tmp_path / "dataset"
+    _harbor_task(dataset, "open")
+    job_dir = tmp_path / "jobs" / "j"
+    (job_dir / HOST_ALIAS_JOB).mkdir(parents=True)
+    (job_dir / HARBOR_SPLIT_MARKER).write_text(json.dumps({"jobs": [HOST_ALIAS_JOB, NETWORK_RESTRICTED_JOB]}))
+
+    await _created_jobs(tmp_path, monkeypatch, dataset)
+
+    assert not (job_dir / HARBOR_SPLIT_MARKER).exists()
+    assert not (job_dir / HOST_ALIAS_JOB).exists()
 
 
 @pytest.mark.asyncio

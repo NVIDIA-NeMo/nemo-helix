@@ -95,18 +95,37 @@ _HARBOR_EXTRA_REQUIRED_MESSAGE = (
 )
 
 
+#: Names the Harbor jobs a split run keeps inside its job dir, as ``{"jobs": [name, ...]}``. A run whose tasks
+#: need different Harbor environments runs one Harbor job per environment, each in ``<job_dir>/<name>``.
+HARBOR_SPLIT_MARKER = ".nemo-eval-harbor-split.json"
+
+
+def _harbor_job_dirs(job_dir: Path) -> list[Path]:
+    """The Harbor job directories under ``job_dir``: the split's sub-jobs, or ``job_dir`` itself."""
+    marker = job_dir / HARBOR_SPLIT_MARKER
+    if not marker.is_file():
+        return [job_dir]
+    try:
+        names = json.loads(marker.read_text(encoding="utf-8"))["jobs"]
+    except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        logger.warning("Ignoring unreadable Harbor split marker %s: %s", marker, exc)
+        return [job_dir]
+    return [job_dir / str(name) for name in names]
+
+
 def _iter_harbor_trial_results(job_dir: Path) -> Iterator[tuple[Path, Mapping[str, Any]]]:
     """Yield Harbor-valid result mappings in deterministic path order.
 
-    Harbor remains a lazy import. The yielded mapping stays uncoerced because the
-    SDK intentionally applies stricter reward rules than Harbor's Pydantic model.
+    Covers both layouts: one Harbor job in ``job_dir``, or a split run's sub-jobs (see
+    :data:`HARBOR_SPLIT_MARKER`). Harbor remains a lazy import. The yielded mapping stays uncoerced
+    because the SDK intentionally applies stricter reward rules than Harbor's Pydantic model.
     """
     try:
         from harbor.models.trial.result import TrialResult  # ty: ignore[unresolved-import,unused-ignore-comment]
     except ModuleNotFoundError as exc:
         raise ModuleNotFoundError(_HARBOR_EXTRA_REQUIRED_MESSAGE) from exc
 
-    for result_path in sorted(job_dir.glob("*/result.json")):
+    for result_path in sorted(path for sub_job in _harbor_job_dirs(job_dir) for path in sub_job.glob("*/result.json")):
         try:
             result_data = json.loads(result_path.read_bytes())
             TrialResult.model_validate(result_data)
