@@ -442,10 +442,18 @@ async def test_job_control_pause_window(test_client: AsyncClient):
         assert unchanged.status_code == 200
         assert unchanged.json()["control"]["pause_ttl_seconds"] == 20
 
-    await test_client.patch(
-        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/attempts/current/status-details",
-        json={"storage_reclaimed_at": "2026-10-08T00:00:00+00:00"},
+    # The storage sweep marks storage reclaimed only while the step it listed is still stopped.
+    status_details_url = f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/attempts/current/status-details"
+    mark = {"storage_reclaimed_at": "2026-10-08T00:00:00+00:00"}
+    step_id = paused_step.json()["id"]
+    moved_on = await test_client.patch(
+        status_details_url, params={"expected_step_id": step_id, "expected_step_status": "active"}, json=mark
     )
+    assert moved_on.status_code == 409
+    marked = await test_client.patch(
+        status_details_url, params={"expected_step_id": step_id, "expected_step_status": "paused"}, json=mark
+    )
+    assert marked.status_code == 200
     reclaimed = await test_client.patch(
         f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/control", json={"pause_ttl_seconds": 30}
     )

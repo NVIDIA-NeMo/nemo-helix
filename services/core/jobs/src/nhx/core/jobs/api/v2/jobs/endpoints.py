@@ -739,6 +739,11 @@ async def get_job_attempt(
 @router.patch(
     "/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/status-details",
     status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_200_OK: {"description": "Successful Response"},
+        status.HTTP_404_NOT_FOUND: {"description": "Attempt not Found"},
+        status.HTTP_409_CONFLICT: {"description": "The expected step is no longer current or in the expected status"},
+    },
 )
 async def update_job_attempt_status_details(
     job: str,
@@ -746,11 +751,26 @@ async def update_job_attempt_status_details(
     request: HelixJobStatusDetailsUpdateRequest,
     workspace: str,
     dispatcher: JobDispatcher = Depends(dep_dispatcher),
+    expected_step_id: str | None = Query(
+        default=None,
+        description="Update only while this step is in this attempt and the attempt is the job's current one.",
+    ),
+    expected_step_status: HelixJobStatus | None = Query(
+        default=None,
+        description="With expected_step_id, update only while the step has this status.",
+    ),
 ) -> None:
     """Update status details for one resolved attempt."""
-    with scoped_app_ctx(JobContext(id=job)):
+    with scoped_app_ctx(JobContext(id=job)), job_operation_errors("update the status details of", job, workspace):
         try:
-            result = await dispatcher.update_attempt_status_details(job, attempt, workspace, request)
+            result = await dispatcher.update_attempt_status_details(
+                job,
+                attempt,
+                workspace,
+                request,
+                expected_step_id=expected_step_id,
+                expected_step_status=expected_step_status,
+            )
         except JobHasNoAttemptError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
         if result is None:

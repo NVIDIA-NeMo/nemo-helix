@@ -1,0 +1,94 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Pause, Resume, and Rerun a Job"
+description: ""
+---
+<a id="ft-pause-resume-rerun-customization-job"></a>
+## Prerequisites
+
+Before you can pause, resume, or rerun a customization job, make sure that you have configured a CLI context that points at your NeMo Helix deployment. Refer to [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
+
+Customization jobs run on the platform's Jobs service, so you pause, resume, and rerun them through that service with the job's name and workspace, the same way for every backend. Submitting a job returns its name. To find it later, list the workspace's customization jobs in the status you want to act on, for example the jobs that ended in `error`:
+
+```bash
+nemo jobs list --workspace default --filter.source customization --filter.status error
+```
+
+---
+
+## Pause a Job
+
+Pausing stops a job without losing its progress. A job can be paused while its current step supports pausing, which depends on the training backend. Otherwise, for example while the model is still downloading, or when the backend's training step does not support pausing, the request returns `409` and names the step.
+
+```bash
+nemo jobs pause automodel-a1b2c3d4e5f6 --workspace default
+```
+
+The training step finishes the step it is on, saves a checkpoint, and exits, which frees its GPUs. The job's status moves from `pausing` to `paused`. Its storage, including the checkpoint, is kept so that the job can resume later.
+
+If training finishes before it acts on the pause, the job completes as usual.
+
+## Resume a Paused Job
+
+```bash
+nemo jobs resume automodel-a1b2c3d4e5f6 --workspace default
+```
+
+Resume restarts the paused step in the same job. Training continues from the checkpoint it saved when it paused, and the job's metrics continue from where they stopped. If the job logs to W&B or MLflow, it continues the same run.
+
+By default, a paused job keeps its storage for 7 days. To keep it for a different period, up to the platform maximum of 30 days, set the job's pause window in seconds:
+
+```bash
+nemo jobs control automodel-a1b2c3d4e5f6 --workspace default --pause-ttl-seconds 1209600
+```
+
+The window is measured from when the job paused, so changing it does not restart it. When the window ends, the job's storage is deleted and the job is cancelled. It can't be resumed after that.
+
+## Rerun a Failed Job
+
+```bash
+nemo jobs rerun automodel-a1b2c3d4e5f6 --workspace default
+```
+
+Rerun starts a new attempt of a job that ended in `error`. Training continues from the newest checkpoint the failed attempt saved, so only the steps after that checkpoint run again. The failed attempt is kept as a record, and if the job logs to W&B or MLflow, the rerun continues the same run.
+
+A rerun uses the same configuration as the failed attempt. If the configuration caused the failure, for example by running out of GPU memory, the rerun fails the same way, so create a new job with a different configuration instead. When the failed attempt reported a cause like this, the rerun's status details include a `rerun_warning`.
+
+By default, a failed job keeps its storage for 4 hours. After that, rerun returns `409`.
+
+## When Each Action Is Allowed
+
+| Job status | Pause | Resume | Rerun |
+| --- | --- | --- | --- |
+| `created`, `pending`, `active` | Yes, if the current step supports pausing, otherwise `409` | Has no effect on `active`, otherwise `409` | `409` |
+| `pausing` | Has no effect | `409` | `409` |
+| `paused` | Has no effect | Yes | `409`: use resume |
+| `error` | `409` | `409`: use rerun | Yes |
+| `completed`, `cancelled` | `409` | `409` | `409` |
+
+The default storage periods are platform settings that each deployment can change.
+
+## Use the SDK
+
+```python
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.jobs.types import JobControl
+
+client = NemoClient.from_config()
+job_name = "automodel-a1b2c3d4e5f6"
+workspace = "default"
+
+# Save a checkpoint and stop, freeing the job's GPUs.
+client.jobs.pause_job(name=job_name, workspace=workspace)
+# Keep the paused job's storage for 14 days instead of the default 7, so it can still resume after a week.
+client.jobs.update_job_control(name=job_name, workspace=workspace, body=JobControl(pause_ttl_seconds=1209600))
+# Continue training from the checkpoint the pause saved.
+client.jobs.resume_job(name=job_name, workspace=workspace)
+
+# For a job that ended in error, start a new attempt from the newest checkpoint.
+client.jobs.rerun_job(job=job_name, workspace=workspace)
+```
+
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
