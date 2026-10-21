@@ -49,8 +49,10 @@ type UseAssistantChatRuntimeOptions = Pick<
   | 'onMessageComplete'
   | 'onRunningChange'
   | 'onEmptyChange'
+  | 'onReset'
   | 'promptData'
   | 'tools'
+  | 'extraHeaders'
   | 'workspace'
   | 'enableImageAttachments'
 >;
@@ -61,12 +63,14 @@ export const useAssistantChatRuntime = ({
   baseURL,
   promptData,
   tools,
+  extraHeaders,
   disabled = false,
   initialMessages = [],
   onError,
   onMessageComplete,
   onRunningChange,
   onEmptyChange,
+  onReset,
   broadcast,
   stopCount,
   enableImageAttachments = true,
@@ -142,6 +146,7 @@ export const useAssistantChatRuntime = ({
           stream: true,
           stream_options: { include_usage: true },
           tools: tools?.length ? tools : undefined,
+          extraHeaders,
           signal: runController.signal,
         });
 
@@ -271,6 +276,7 @@ export const useAssistantChatRuntime = ({
       baseURL,
       createChatCompletion,
       disabled,
+      extraHeaders,
       model,
       onError,
       onMessageComplete,
@@ -344,7 +350,8 @@ export const useAssistantChatRuntime = ({
     abortControllerRef.current?.abort();
     setIsRunning(false);
     setThreadMessages([]);
-  }, [setThreadMessages]);
+    onReset?.();
+  }, [onReset, setThreadMessages]);
 
   // External broadcast — when the caller bumps `broadcast.seq`, append the
   // payload text as a new user message and run a completion. The ref is seeded

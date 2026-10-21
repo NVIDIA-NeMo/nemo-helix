@@ -18,6 +18,7 @@ export type UseChatCompletionParams = ChatCompletionCreateParams & {
   baseURL?: string;
   accessToken?: string;
   signal?: AbortSignal;
+  extraHeaders?: Record<string, string>;
 };
 
 export type UseChatCompletionOptions = Omit<
@@ -55,6 +56,7 @@ export const createChatCompletion = async (
     stream,
     accessToken,
     signal,
+    extraHeaders,
     ...moreOptions
   } = props;
   if (!model) {
@@ -86,6 +88,7 @@ export const createChatCompletion = async (
       headers: {
         ...CHAT_CORS_HEADERS,
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        ...extraHeaders,
       },
       signal,
     }
