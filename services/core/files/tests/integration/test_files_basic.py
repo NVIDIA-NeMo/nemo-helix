@@ -51,6 +51,54 @@ class TestFilesBasic:
                 assert any(fs.id == fileset1.id for fs in filesets)
                 assert any(fs.id == fileset2.id for fs in filesets)
 
+    def test_fileset_created_by_is_returned_on_get_and_list(self, client: NemoClient):
+        """Test that the creator is reported consistently by create, get and list."""
+        files = FilesClient.from_client(client)
+        with create_fileset(files) as fileset:
+            assert fileset.created_by == "test@example.com"
+
+            fetched = files.get_fileset(name=fileset.name, workspace=fileset.workspace).data()
+            assert fetched.created_by == fileset.created_by
+
+            listed = list(files.list_filesets(workspace=fileset.workspace).items())
+            listed_fileset = next((fs for fs in listed if fs.id == fileset.id), None)
+            assert listed_fileset is not None
+            assert listed_fileset.created_by == fileset.created_by
+
+    def test_fileset_update_returns_updated_by(self, client: NemoClient):
+        """Test that PATCH reports the updater from the stored entity."""
+        files = FilesClient.from_client(client)
+        with create_fileset(files) as fileset:
+            assert fileset.updated_by == "test@example.com"
+
+            updated = files.update_fileset(
+                name=fileset.name,
+                workspace=fileset.workspace,
+                body=UpdateFilesetRequest(description="updated"),
+            ).data()
+            assert updated.updated_by == "test@example.com"
+            assert updated.updated_at >= fileset.updated_at
+
+    def test_fileset_list_filter_by_created_by(self, client: NemoClient):
+        """Test listing filesets filtered by creator."""
+        files = FilesClient.from_client(client)
+        with create_fileset(files) as fileset:
+            mine = list(
+                files.list_filesets(
+                    workspace=fileset.workspace,
+                    query_params={"filter": {"created_by": "test@example.com", "name": fileset.name}},
+                ).items()
+            )
+            assert [fs.id for fs in mine] == [fileset.id]
+
+            others = list(
+                files.list_filesets(
+                    workspace=fileset.workspace,
+                    query_params={"filter": {"created_by": "someone-else@example.com"}},
+                ).items()
+            )
+            assert all(fs.id != fileset.id for fs in others)
+
     def test_fileset_list_filter_by_name(self, client: NemoClient):
         """Test listing filesets with name filter."""
         files = FilesClient.from_client(client)
