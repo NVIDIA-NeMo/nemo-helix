@@ -78,7 +78,7 @@ def test_member_profile_references_are_validated(monkeypatch: pytest.MonkeyPatch
         "scaled_evals.api.runnability._append_runtime_checks",
         lambda *_args: (MagicMock(metadata={}), None),
     )
-    db.benchmark_runs.benchmark_revision_for_run.return_value = {"revision": 1}
+    db.benchmarks.revision_for_run.return_value = {"revision": 1}
     db.benchmark_runs.load_members.return_value = [
         {"task_id": "task_0", "task_revision": 1, "revision_status": "ready"}
     ]

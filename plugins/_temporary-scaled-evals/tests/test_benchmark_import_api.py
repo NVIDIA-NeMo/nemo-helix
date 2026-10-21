@@ -12,8 +12,10 @@ import pytest
 pytest.importorskip("scaled_evals")
 
 
-from fastapi import Response
+from fastapi import HTTPException, Response
 from scaled_evals.api.auth import CurrentPrincipal
+from scaled_evals.api.benchmark_import_store import BenchmarkImportStore, import_id_for
+from scaled_evals.api.db import Database
 from scaled_evals.api.routers.benchmark_imports import (
     create_benchmark_import,
     publish_benchmark_import,
@@ -25,6 +27,7 @@ from scaled_evals.benchmark_import import (
     load_import_images,
     write_legacy_import_state,
 )
+from task_fixtures import seed_task_revision
 
 
 def test_import_request_defaults_to_public_for_ci() -> None:
@@ -136,6 +139,7 @@ def test_resumed_import_attaches_opaque_image_metadata_idempotently() -> None:
         "manifest": manifest,
         "visibility": "public",
         "description": None,
+        "populated": True,
         "created_at": now,
         "updated_at": now,
     }
@@ -156,20 +160,89 @@ def test_resumed_import_attaches_opaque_image_metadata_idempotently() -> None:
         "tarball_object_key": "task_one/rev/1/tarball.tar.gz",
     }
     db = MagicMock()
-    db.benchmark_imports.get_by_identity.return_value = row
+    db.benchmark_imports.create.return_value = None
+    db.benchmark_imports.get.return_value = row
     db.benchmark_imports.tasks.return_value = [task]
     db.benchmark_imports.benchmarks.return_value = []
+    response = Response()
 
     result = create_benchmark_import(
         body,
         db,
         CurrentPrincipal(owner_type="user", owner_id="usr_test"),
-        Response(),
+        response,
     )
 
     assert result.id == "bmi_one"
+    assert response.status_code == 200
+    assert db.benchmark_imports.create.call_args.args[0] == import_id_for("usr_test", body.manifest_sha256, "public")
     metadata = db.benchmark_imports.attach_task_image.call_args.kwargs["image_metadata"]
     assert metadata["pipeline_url"] == "https://ci.example/job/1"
+    db.benchmark_imports.add_task.assert_not_called()
+
+
+def test_failed_import_create_leaves_no_import() -> None:
+    seed_task_revision("task_theirs", slug="task", owner_id="usr_other")
+    manifest = {
+        "schema_version": 1,
+        "catalog_id": "fixture",
+        "visibility": "private",
+        "source": {"type": "git", "commit": "b" * 40},
+        "tasks": [{"name": "Task", "slug": "task", "pack": "packs/task.tar.gz", "pack_sha256": "c" * 64}],
+        "benchmarks": [{"name": "Bench", "slug": "bench", "tasks": ["task"]}],
+    }
+    body = BenchmarkImportCreate.model_validate(
+        {"manifest_sha256": canonical_manifest_sha256(manifest), "manifest": manifest, "visibility": "private"}
+    )
+    current = CurrentPrincipal(owner_type="user", owner_id="usr_test")
+
+    with pytest.raises(HTTPException) as exc:
+        create_benchmark_import(body, Database(MagicMock()), current, Response())
+
+    assert exc.value.status_code == 409
+    import_id = import_id_for("usr_test", body.manifest_sha256, "private")
+    assert BenchmarkImportStore().get(import_id, owner_id="usr_test") is None
+
+
+def test_identical_create_while_the_first_is_populating_is_a_conflict() -> None:
+    manifest = {
+        "schema_version": 1,
+        "catalog_id": "fixture",
+        "visibility": "private",
+        "source": {"type": "git", "commit": "b" * 40},
+        "tasks": [{"name": "Task", "slug": "task", "pack": "packs/task.tar.gz", "pack_sha256": "c" * 64}],
+        "benchmarks": [{"name": "Bench", "slug": "bench", "tasks": ["task"]}],
+    }
+    body = BenchmarkImportCreate.model_validate(
+        {"manifest_sha256": canonical_manifest_sha256(manifest), "manifest": manifest, "visibility": "private"}
+    )
+    import_id = import_id_for("usr_test", body.manifest_sha256, "private")
+    store = BenchmarkImportStore()
+    # The first create has made the entity but not yet written its tasks and benchmarks.
+    store.create(
+        import_id,
+        owner_id="usr_test",
+        manifest_sha256=body.manifest_sha256,
+        manifest=manifest,
+        visibility="private",
+        description=None,
+    )
+    current = CurrentPrincipal(owner_type="user", owner_id="usr_test")
+
+    with pytest.raises(HTTPException) as exc:
+        create_benchmark_import(body, Database(MagicMock()), current, Response())
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail == {
+        "error": {
+            "code": "benchmark_import_in_progress",
+            "message": "an identical benchmark import is still being created; retry shortly",
+            "details": {},
+        }
+    }
+    # The in-progress import is left alone for its creator to finish.
+    existing = store.get(import_id, owner_id="usr_test")
+    assert existing is not None and existing["populated"] is False
 
 
 def test_public_import_promotes_reused_owned_task_visibility() -> None:
@@ -202,7 +275,6 @@ def test_public_import_promotes_reused_owned_task_visibility() -> None:
         "updated_at": now,
     }
     db = MagicMock()
-    db.benchmark_imports.get_by_identity.return_value = None
     db.benchmark_imports.create.return_value = row
     db.tasks.get_by_slug.return_value = {
         "id": "task_one",
@@ -299,4 +371,6 @@ def test_public_import_promotes_reused_benchmark_visibility() -> None:
 
     assert result.visibility == "public"
     db.benchmarks.update.assert_called_once_with("bm_one", visibility="public")
-    db.benchmark_imports.lock_benchmark_slug.assert_called_once_with("bench")
+    db.benchmark_imports.set_benchmark_revision.assert_called_once_with(
+        "bmi_one", "bench", benchmark_id="bm_one", benchmark_revision=1
+    )

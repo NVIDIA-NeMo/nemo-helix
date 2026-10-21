@@ -8,9 +8,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_scaled_evals_plugin.authz import admin_only
 
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
+from scaled_evals.api.benchmark_store import TaskRef
 from scaled_evals.api.db import Database, get_db
 from scaled_evals.api.repositories.base_repository import Conflict, InvalidReference
-from scaled_evals.api.repositories.benchmark_repository import TaskRef
 from scaled_evals.api.schemas.benchmarks import (
     SLUG_MAX_LEN,
     Benchmark,
