@@ -102,6 +102,18 @@ class TestToSpec:
                 is_local=False,
             )
 
+    async def test_name_only_agent_fails_at_submit(self) -> None:
+        agent = _agent()
+        agent.config = {}
+        with pytest.raises(ValueError, match="Agent 'default/my-agent' has no configuration"):
+            await PackageAgentJob.to_spec(
+                PackageAgentInput(agent="my-agent"),
+                workspace="default",
+                entity_client=_StubEntityClient(agent),
+                async_sdk=None,
+                is_local=False,
+            )
+
     async def test_nat_workflow_agent_is_rejected(self) -> None:
         with pytest.raises(HelixJobCompilationError, match="packaging supports"):
             await PackageAgentJob.to_spec(
