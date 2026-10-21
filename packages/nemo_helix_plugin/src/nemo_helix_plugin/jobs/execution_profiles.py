@@ -402,6 +402,11 @@ class KubernetesJobExecutionProfile(BaseExecutionProfile):
     config: KubernetesJobExecutionProfileConfig = Field(
         description="Additional configuration for the kubernetes executor",
     )
+    allowed_services: list[str] = Field(
+        default_factory=list,
+        description="Platform services whose Jobs may use this profile, by service name (`builder` for "
+        "`service:builder`). Empty lets any caller use it.",
+    )
 
     @property
     def supports_persistent_storage(self) -> bool:

@@ -69,6 +69,7 @@ from nhx.core.jobs.app.schemas import (
     HelixJobSpec,
 )
 from nhx.core.jobs.config import config, profiles
+from nhx.core.jobs.controllers.backends.kubernetes import KubernetesJobExecutionProfile
 from nhx.core.jobs.entities import HelixJobStep, HelixJobTask
 from pydantic import ValidationError
 from starlette.responses import FileResponse
@@ -266,7 +267,10 @@ def validate_job_spec(
                 detail=f"The execution profile '{step.executor.provider}/{profile_name}' specified in step '{step.name}' does not exist.",
             )
 
-        allowed = [f"service:{service}" for service in execution_profile.allowed_services]
+        services = (
+            execution_profile.allowed_services if isinstance(execution_profile, KubernetesJobExecutionProfile) else []
+        )
+        allowed = [f"service:{service}" for service in services]
         if allowed and creator not in allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

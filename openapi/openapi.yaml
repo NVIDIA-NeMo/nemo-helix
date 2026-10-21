@@ -11936,13 +11936,6 @@ components:
           description: The profile name for the executor, e.g., high_priority_a100,
             low_priority, etc.
           default: default
-        allowed_services:
-          items:
-            type: string
-          type: array
-          title: Allowed Services
-          description: Platform services whose Jobs may use this profile, by service
-            name (`builder` for `service:builder`). Empty lets any caller use it.
         backend:
           type: string
           const: docker
@@ -12090,13 +12083,6 @@ components:
           description: The profile name for the executor, e.g., high_priority_a100,
             low_priority, etc.
           default: default
-        allowed_services:
-          items:
-            type: string
-          type: array
-          title: Allowed Services
-          description: Platform services whose Jobs may use this profile, by service
-            name (`builder` for `service:builder`). Empty lets any caller use it.
         backend:
           type: string
           const: e2e
@@ -16161,13 +16147,6 @@ components:
           description: The profile name for the executor, e.g., high_priority_a100,
             low_priority, etc.
           default: default
-        allowed_services:
-          items:
-            type: string
-          type: array
-          title: Allowed Services
-          description: Platform services whose Jobs may use this profile, by service
-            name (`builder` for `service:builder`). Empty lets any caller use it.
         backend:
           type: string
           const: kubernetes_job
@@ -16177,6 +16156,13 @@ components:
           allOf:
           - $ref: '#/components/schemas/KubernetesJobExecutionProfileConfig'
           description: Additional configuration for the kubernetes executor
+        allowed_services:
+          items:
+            type: string
+          type: array
+          title: Allowed Services
+          description: Platform services whose Jobs may use this profile, by service
+            name (`builder` for `service:builder`). Empty lets any caller use it.
       type: object
       required:
       - config
@@ -18583,13 +18569,6 @@ components:
           description: The profile name for the executor, e.g., high_priority_a100,
             low_priority, etc.
           default: default
-        allowed_services:
-          items:
-            type: string
-          type: array
-          title: Allowed Services
-          description: Platform services whose Jobs may use this profile, by service
-            name (`builder` for `service:builder`). Empty lets any caller use it.
         backend:
           type: string
           const: openshell
@@ -20624,13 +20603,6 @@ components:
           description: The profile name for the executor, e.g., high_priority_a100,
             low_priority, etc.
           default: default
-        allowed_services:
-          items:
-            type: string
-          type: array
-          title: Allowed Services
-          description: Platform services whose Jobs may use this profile, by service
-            name (`builder` for `service:builder`). Empty lets any caller use it.
         backend:
           type: string
           const: subprocess
@@ -21931,13 +21903,6 @@ components:
           description: The profile name for the executor, e.g., high_priority_a100,
             low_priority, etc.
           default: default
-        allowed_services:
-          items:
-            type: string
-          type: array
-          title: Allowed Services
-          description: Platform services whose Jobs may use this profile, by service
-            name (`builder` for `service:builder`). Empty lets any caller use it.
         backend:
           type: string
           const: volcano_job

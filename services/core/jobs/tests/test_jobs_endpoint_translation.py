@@ -8,6 +8,7 @@ from nhx.core.jobs.app.profiles import ExecutionProfileT
 from nhx.core.jobs.app.providers import ContainerSpec, CPUExecutionProvider, SubprocessExecutionProvider
 from nhx.core.jobs.app.schemas import HelixJobSpec, HelixJobStepSpec
 from nhx.core.jobs.controllers.backends.docker import DockerJobExecutionProfile, DockerJobExecutionProfileConfig
+from nhx.core.jobs.controllers.backends.kubernetes import KubernetesJobExecutionProfile
 
 
 def _cpu_step(name: str, profile: str = "default") -> HelixJobStepSpec:
@@ -61,12 +62,8 @@ def test_validate_job_spec_matches_provider_and_profile() -> None:
 
 def _builder_only_profiles() -> list[ExecutionProfileT]:
     return [
-        DockerJobExecutionProfile(
-            provider="cpu",
-            profile="build-push",
-            backend="docker",
-            allowed_services=["builder"],
-            config=DockerJobExecutionProfileConfig(),
+        KubernetesJobExecutionProfile.model_validate(
+            {"provider": "cpu", "profile": "build-push", "allowed_services": ["builder"], "config": {}}
         )
     ]
 

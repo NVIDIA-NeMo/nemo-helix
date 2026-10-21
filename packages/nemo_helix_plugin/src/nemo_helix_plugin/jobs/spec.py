@@ -207,11 +207,6 @@ class BaseExecutionProfile(JobSpecModel):
         default="default",
         description="The profile name for the executor, e.g., high_priority_a100, low_priority, etc.",
     )
-    allowed_services: list[str] = Field(
-        default_factory=list,
-        description="Platform services whose Jobs may use this profile, by service name (`builder` for "
-        "`service:builder`). Empty lets any caller use it.",
-    )
 
     @property
     def supports_persistent_storage(self) -> bool:
