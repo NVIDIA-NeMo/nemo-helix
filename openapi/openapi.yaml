@@ -14142,6 +14142,8 @@ components:
       - -updated_at
       - name
       - -name
+      - created_by
+      - -created_by
       title: GenericSortField
       description: 'Sort options for entity-store-backed list endpoints.
 

@@ -73,6 +73,8 @@ class GenericSortField(StrEnum):
     UPDATED_AT_DESC = "-updated_at"
     NAME_ASC = "name"
     NAME_DESC = "-name"
+    CREATED_BY_ASC = "created_by"
+    CREATED_BY_DESC = "-created_by"
 
 
 class DeleteResponse(Value):

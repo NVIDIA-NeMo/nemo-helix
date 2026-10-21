@@ -159,6 +159,23 @@ class TestFilesBasic:
                 assert any(fs.id == generic_fileset.id for fs in generic_filesets)
                 assert not any(fs.id == dataset_fileset.id for fs in generic_filesets)
 
+    @pytest.mark.parametrize("sort", ["created_by", "-created_by"])
+    def test_fileset_list_sort_by_created_by(self, client: NemoClient, sort: str):
+        """Filesets expose created_by and can be listed sorted by it."""
+        files = FilesClient.from_client(client)
+        with create_fileset(FilesClient.from_client(client)) as fileset:
+            listed = list(files.list_filesets(workspace=DEFAULT_WORKSPACE_ID, query_params={"sort": sort}).items())
+            match = next(fs for fs in listed if fs.id == fileset.id)
+            assert match.created_by == fileset.created_by
+
+    def test_fileset_list_created_by_everyone_else_keeps_null_creators(self, client: NemoClient):
+        """The NULL-safe "everyone else" filter Studio sends ($nin alone skips NULL creators) is accepted."""
+        files = FilesClient.from_client(client)
+        with create_fileset(FilesClient.from_client(client)) as fileset:
+            others = {"$or": [{"created_by": {"$nin": ["someone-else@example.com"]}}, {"created_by": {"$eq": None}}]}
+            listed = files.list_filesets(workspace=DEFAULT_WORKSPACE_ID, query_params={"filter": others})
+            assert fileset.id in {fs.id for fs in listed.items()}
+
     def test_fileset_list_filter_by_storage_type(self, client: NemoClient):
         """Test listing filesets with storage_type filter."""
         files = FilesClient.from_client(client)
