@@ -1237,7 +1237,8 @@ class EvaluationStore:
             _start_terminal_artifacts(entity, now)
             # The summary's own finish time wins over the moment it was written.
             if summary.finished_at:
-                entity.finished_at = datetime.fromisoformat(summary.finished_at)
+                finished = datetime.fromisoformat(summary.finished_at)
+                entity.finished_at = finished if finished.tzinfo else finished.replace(tzinfo=UTC)
             _add_event(entity, terminal_status, detail)
             return True, True
 

@@ -56,7 +56,7 @@ def test_persist_result_writes_the_summary_without_numeric_coercion() -> None:
     result = EvaluationResultWrite(
         result={"note": "x"},
         summary=EvaluationResultSummary(
-            reward=0.5, n_trials=2, n_completed=1, n_errored=1, finished_at="2026-06-23T20:00:00+00:00"
+            reward=0.5, n_trials=2, n_completed=1, n_errored=1, finished_at="2026-06-23T20:00:00"
         ),
         extra_detail="extra",
     )

@@ -24,6 +24,7 @@ from scaled_evals.api.benchmark_run_store import BenchmarkRunStore, derive_run_v
 from scaled_evals.api.config_profile_store import ConfigProfileStore
 from scaled_evals.api.db import get_conn
 from scaled_evals.api.evaluation_store import EvaluationStore
+from scaled_evals.api.repositories.base_repository import Conflict
 from scaled_evals.api.settings import settings
 from task_fixtures import seed_benchmark, seed_benchmark_run, seed_evaluation, seed_task_revision
 
@@ -855,6 +856,25 @@ def test_cancel_run_derives_cancelled() -> None:
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "cancelled"
     assert (EvaluationStore().load_for_dispatch("ev_m0") or {}).get("status") == "cancelled"
+
+
+def test_cancelling_again_finishes_members_a_conflict_left_queued(monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_run(_member_eval(0, status="queued", reward=None), _member_eval(1, status="queued", reward=None))
+    real_cancel = EvaluationStore.cancel
+
+    def conflict_once(self: EvaluationStore, evaluation_id: str, **kwargs: Any) -> Any:
+        monkeypatch.setattr(EvaluationStore, "cancel", real_cancel)
+        raise Conflict("evaluation_changed", "evaluation changed concurrently; retry")
+
+    monkeypatch.setattr(EvaluationStore, "cancel", conflict_once)
+    with pytest.raises(Conflict):
+        BenchmarkRunStore().cancel("bmr_1")
+
+    _row, cancelled_now, members = BenchmarkRunStore().cancel("bmr_1")
+
+    assert cancelled_now is False
+    assert sorted(member["id"] for member in members) == ["ev_m0", "ev_m1"]
+    assert {(EvaluationStore().load_for_dispatch(f"ev_m{i}") or {}).get("status") for i in (0, 1)} == {"cancelled"}
 
 
 def test_cancel_run_tears_down_launched_members(monkeypatch: pytest.MonkeyPatch) -> None:

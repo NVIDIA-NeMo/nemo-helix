@@ -536,13 +536,14 @@ class BenchmarkRunStore:
             return True, True
 
         cancelled_now = bool(self._mutate(run_id, change))
+        run = self._get(run_id)
         cancelled_members: builtins.list[dict] = []
-        if cancelled_now:
+        if run is not None and run.cancelled_at is not None:
             evaluations = EvaluationStore(self._client)
             # ponytail: members are cancelled one write each after the run is
-            # marked, so a crash between them leaves some members running. The
-            # dispatch worker refuses to retry members of a cancelled run, so
-            # they still end. Upgrade path: a reconciler cancelling stragglers.
+            # marked, so a crash or conflict between them leaves some members
+            # queued until the run is cancelled again, which retries them.
+            # Upgrade path: a reconciler cancelling stragglers.
             for member in evaluations.list_for_runs([run_id]):
                 if member["status"] in _TERMINAL_STATUSES:
                     continue
