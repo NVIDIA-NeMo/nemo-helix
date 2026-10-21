@@ -26,7 +26,8 @@ ARG USER_UID=1000
 ARG USER_GID=1000
 
 # Use the patched uv for platform glue and the base runtime.
-COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /uvx /usr/local/bin/-glue
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /uvx /usr/local/bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /usr/local/bin/uv-glue
 
 COPY --from=platform-workspace / /app
 WORKDIR /app
