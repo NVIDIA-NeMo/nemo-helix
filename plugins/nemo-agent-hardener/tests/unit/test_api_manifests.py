@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from nemo_agent_hardener_plugin.agent_resolver import ResolvedManifest
 from nemo_agent_hardener_plugin.api.v2 import manifests as manifests_module
 from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
+from nemo_agent_hardener_plugin.jobs import manifest as job_manifest
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError, NemoPaginationInfo, get_entity_client
 
 NOW = datetime.now(timezone.utc)
@@ -160,6 +161,71 @@ def test_patch_updates_benign_suite_and_port(client, mock_entity_client) -> None
     updated = call.args[0]
     assert updated.port == 9000
     assert updated.benign_suite[0]["payload"] == "what time"
+
+
+@pytest.mark.parametrize("command", ["python app.py --port 8000", 'python app.py --port "$PORT"'])
+@pytest.mark.parametrize("yaml_port", [8000, "8000", 9100])
+def test_patch_saved_default_synchronizes_listener_and_next_run(
+    client, mock_entity_client, monkeypatch, tmp_path, command, yaml_port
+) -> None:
+    original_yaml = yaml.safe_dump(
+        {
+            "agent": {
+                "port": yaml_port,
+                "start_command": command,
+                "env": {"PORT": "8000", "BASE": "keep"},
+            }
+        }
+    )
+    existing = AgentHardenerManifest(
+        name="m1",
+        workspace="default",
+        port=8000,
+        manifest_yaml=original_yaml,
+        env={"PORT": "8000", "OVERRIDE": "keep"},
+    )
+    mock_entity_client.get = AsyncMock(return_value=existing)
+    mock_entity_client.update = AsyncMock(side_effect=lambda entity: entity)
+
+    # Studio's Save as default uses this same PATCH, followed by a run with no override.
+    response = client.patch(
+        "/apis/agent-hardener/v2/workspaces/default/manifests/m1",
+        json={"port": 9100},
+    )
+    assert response.status_code == 200, response.text
+    stored = response.json()
+    agent = yaml.safe_load(stored["manifest_yaml"])["agent"]
+    expected_command = command if "$PORT" in command else command.replace("8000", "9100")
+    assert agent["start_command"] == expected_command
+    assert agent["port"] == stored["port"] == 9100
+    assert agent["env"] == {"PORT": "9100", "BASE": "keep", "OVERRIDE": "keep"}
+    assert stored["env"] == {"PORT": "9100", "OVERRIDE": "keep"}
+    assert existing.manifest_yaml == original_yaml  # request normalization does not mutate the fetched object
+    monkeypatch.setattr(job_manifest, "download_and_extract_project", lambda *_args: tmp_path)
+    monkeypatch.setattr(job_manifest, "gateway_backend", lambda _url: None)
+    restored = job_manifest._materialize_from_bundle(None, "m1", stored, tmp_path, "default/bundle")
+    assert restored["agent"]["start_command"] == expected_command
+    assert restored["agent"]["port"] == 9100
+    assert restored["agent"]["env"]["PORT"] == "9100"
+
+
+def test_patch_unsupported_listener_does_not_persist_partial_changes(client, mock_entity_client) -> None:
+    existing = AgentHardenerManifest(
+        name="m1",
+        workspace="default",
+        port=8000,
+        manifest_yaml=yaml.safe_dump({"agent": {"port": 8000, "start_command": "custom-launcher"}}),
+    )
+    mock_entity_client.get = AsyncMock(return_value=existing)
+    response = client.patch(
+        "/apis/agent-hardener/v2/workspaces/default/manifests/m1",
+        json={"port": 9100, "env": {"NEW": "value"}, "defenders": ["guardrails"]},
+    )
+    assert response.status_code == 422, response.text
+    mock_entity_client.update.assert_not_awaited()
+    assert existing.port == 8000
+    assert existing.env == {}
+    assert existing.defenders == []
 
 
 def test_patch_updates_egress(client, mock_entity_client) -> None:

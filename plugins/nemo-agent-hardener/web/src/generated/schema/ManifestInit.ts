@@ -37,13 +37,17 @@ export interface ManifestInit {
   harness?: string;
   /** The author confirms NeMo Relay is attached (middleware + plugin.initialize()). Not knowable from the project; without Relay the victim emits no telemetry and cannot be scored. */
   relay_integration_confirmed?: boolean;
-  /** Victim port (defaults to 8000). */
+  /**
+     * Victim port (defaults to 8000).
+     * @minimum 1
+     * @maximum 65535
+     */
   port?: number;
-  /** Env-var names the victim requires. Derived from the agent's own declarations (``models.*.api_key_env``, MCP server env) when omitted. */
+  /** Secrets the victim requires, each `NAME` or `NAME=[workspace/]secret`. A `NAME` takes its value from the operator env or `--env-file`; a ref is read from the Secrets store at run time. Derived from the agent's own declarations (``models.*.api_key_env``, MCP server env) and its running deployment when omitted. */
   secrets?: string[];
   /** Allow-listed egress host[:port] entries the victim may reach (external hosts the agent calls, e.g. inference-api.nvidia.com). The sandbox is default-deny, so a host missing here has its traffic dropped mid-run. */
   egress?: string[];
-  /** Non-secret environment variables for the victim (agent-hardener's `agent.env`). Stored in plaintext on the manifest — credentials belong in `secrets`, which names them and resolves the values from the Secrets store at run time. */
+  /** Non-secret environment variables for the victim (agent-hardener's `agent.env`). Stored in plaintext on the manifest — credentials belong in `secrets` as `NAME=workspace/secret`, read from the Secrets store at run time. */
   env?: ManifestInitEnv;
   /** Route-only host backends the agent's tools call, each 'NAME:PORT[,PORT2]' (e.g. 'finance:8086'). Rewrites the agent's localhost:PORT to host.docker.internal:PORT and opens the sandbox->host route. */
   backends?: string[];

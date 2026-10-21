@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import re
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +14,12 @@ from nemo_agent_hardener_plugin.jobs import manifest as manifest_mod
 from nemo_agent_hardener_plugin.jobs.errors import AgentHardenerRunError
 from nemo_helix_plugin.agent_hardener.types import ManifestInit, ManifestUpdate, WarGameSpec
 from pydantic import ValidationError
+
+
+@pytest.mark.parametrize("schema", ["WarGameSpec", "ManifestInit", "ManifestUpdate"])
+def test_studio_generated_port_constraints_match_api(schema: str) -> None:
+    source = Path(__file__).parents[2] / "web" / "src" / "generated" / "schema" / f"{schema}.ts"
+    assert re.search(r"@minimum 1\s+\* @maximum 65535\s+\*/\s+port\?: number", source.read_text())
 
 
 @pytest.mark.parametrize("port", [0, -1, 65536])
@@ -67,7 +74,13 @@ def test_invalid_worker_port_is_atomic(port: Any) -> None:
     [
         {"port": 8000},
         {"port": 8000, "start_command": "python app.py"},
-        {"port": 8000, "start_command": "python app.py --port $PORT", "env": {"PORT": "8000"}},
+        {"port": 8000, "start_command": "python app.py --port $PORT"},
+        {"port": 8000, "start_command": "python app.py --port '$PORT'", "env": {"PORT": "8000"}},
+        {"port": 8000, "start_command": "python app.py --port $PORT --host $HOST", "env": {"PORT": "8000"}},
+        {"port": 8000, "start_command": "python app.py --port ${PORT:-8000}", "env": {"PORT": "8000"}},
+        {"port": 8000, "start_command": "python app.py --port $PORT; other-command", "env": {"PORT": "8000"}},
+        {"port": 8000, "start_command": "python app.py\n--port $PORT", "env": {"PORT": "8000"}},
+        {"port": 8000, "start_command": "python app.py --port $PORT\nother-command", "env": {"PORT": "8000"}},
         {"port": 8000, "start_command": "python app.py --port 8000 --port 8001"},
         {"port": 8000, "start_command": "python app.py --port"},
         {"port": 8000, "start_command": "python app.py --port 8000; other-command"},
@@ -91,10 +104,27 @@ def test_env_only_listener() -> None:
     assert agent == {"port": 9100, "start_command": "python app.py", "env": {"PORT": "9100"}}
 
 
-def test_same_port_preserves_custom_listener() -> None:
-    agent = {"port": 8000, "start_command": "custom-launcher"}
+@pytest.mark.parametrize("stored_port", [8000, "8000", "08000"])
+def test_same_port_preserves_custom_listener(stored_port: int | str) -> None:
+    agent = {"port": stored_port, "start_command": "custom-launcher"}
     manifest_mod._apply_agent_port(agent, 8000)
     assert agent == {"port": 8000, "start_command": "custom-launcher"}
+
+
+@pytest.mark.parametrize("option", ["--port $PORT", "--port=${PORT}", '--port "$PORT"', '--port="${PORT}"'])
+@pytest.mark.parametrize("stored_port", [8000, "8000", 9100])
+def test_env_backed_listener_preserves_command(option: str, stored_port: int | str) -> None:
+    command = f"python app.py {option}"
+    agent = {"port": stored_port, "start_command": command, "env": {"PORT": "8000", "OTHER": "keep"}}
+    manifest_mod._apply_agent_port(agent, 9100)
+    assert agent == {"port": 9100, "start_command": command, "env": {"PORT": "9100", "OTHER": "keep"}}
+
+
+@pytest.mark.parametrize("stored_port", ["8000", 9100, "9100"])
+def test_stale_listener_is_repaired_even_when_routing_port_matches(stored_port: int | str) -> None:
+    agent = {"port": stored_port, "start_command": "python app.py --port 8000", "env": {"PORT": "8000"}}
+    manifest_mod._apply_agent_port(agent, 9100)
+    assert agent == {"port": 9100, "start_command": "python app.py --port 9100", "env": {"PORT": "9100"}}
 
 
 def test_legacy_zero_is_ignored_but_run_zero_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

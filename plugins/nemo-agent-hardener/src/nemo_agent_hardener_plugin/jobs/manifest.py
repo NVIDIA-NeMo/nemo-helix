@@ -148,8 +148,9 @@ def _apply_manifest_overrides(manifest: dict[str, Any], data: dict[str, Any]) ->
         manifest.setdefault("overrides", {})["defenders"] = entries
 
 
-# Only literal numeric arguments on a simple command are supported. Do not reinterpret shell scripts.
+# Only simple commands with numeric or explicitly env-backed port arguments are supported.
 _START_COMMAND_PORT = re.compile(r"(?P<prefix>(?:^|\s)--port(?:=|\s+))(?P<quote>['\"]?)[0-9]+(?P=quote)(?=$|\s)")
+_START_COMMAND_PORT_ENV = re.compile(r'(?:^|\s)--port(?:=|\s+)(?:"\$(?:PORT|\{PORT\})"|\$(?:PORT|\{PORT\}))(?=$|\s)')
 _START_COMMAND_PORT_OPTION = re.compile(r"(?:^|\s)--port(?:=|\s|$)")
 
 
@@ -157,11 +158,24 @@ def _apply_agent_port(agent: dict[str, Any], port: Any) -> None:
     """Update routing and explicit listener declarations together, or leave the agent untouched."""
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise AgentHardenerRunError(CATEGORY_MANIFEST, "Victim port must be an integer between 1 and 65535.")
-    # Reapplying a saved port does not require interpreting a custom listener command.
-    if agent.get("port") == port:
-        return
+    # YAML may quote the stored routing port. Equal routing metadata is not enough
+    # to skip synchronization: older PATCHes could leave the command/env stale.
+    stored_port = agent.get("port")
+    if isinstance(stored_port, str) and re.fullmatch(r"[0-9]+", stored_port.strip()):
+        stored_port = int(stored_port)
+    same_port = type(stored_port) is int and stored_port == port
     command = agent.get("start_command")
     env = agent.get("env")
+    has_port_env = isinstance(env, dict) and "PORT" in env
+    # An opaque custom listener needs no reinterpretation when routing is unchanged.
+    if (
+        same_port
+        and isinstance(command, (str, type(None)))
+        and not _START_COMMAND_PORT_OPTION.search(command or "")
+        and not has_port_env
+    ):
+        agent["port"] = port
+        return
     if env is not None and not isinstance(env, dict):
         raise AgentHardenerRunError(CATEGORY_MANIFEST, "Victim agent.env must be an object to override its port.")
     if command is not None and not isinstance(command, str):
@@ -172,18 +186,23 @@ def _apply_agent_port(agent: dict[str, Any], port: Any) -> None:
         raise AgentHardenerRunError(CATEGORY_MANIFEST, "Cannot override victim port in a malformed command.") from exc
     token_options = [token for token in tokens if token == "--port" or token.startswith("--port=")]
     command_ports = list(_START_COMMAND_PORT.finditer(command or ""))
+    env_ports = list(_START_COMMAND_PORT_ENV.finditer(command or ""))
     options = list(_START_COMMAND_PORT_OPTION.finditer(command or ""))
-    if len(options) > 1 or len(options) != len(command_ports) or len(token_options) != len(command_ports):
+    recognized_ports = len(command_ports) + (len(env_ports) if has_port_env else 0)
+    if len(options) > 1 or len(options) != recognized_ports or len(token_options) != recognized_ports:
         raise AgentHardenerRunError(
             CATEGORY_MANIFEST,
-            "Cannot override victim port: start_command must declare at most one literal numeric --port option.",
+            "Cannot override victim port: start_command must declare at most one numeric --port option "
+            "or --port $PORT backed by agent.env.PORT.",
         )
-    if command and any(character in command for character in ";|&<>`$\\()#\n\r"):
+    # Mask only the recognized $PORT argument, not arbitrary interpolation or shell syntax.
+    literal_command = _START_COMMAND_PORT_ENV.sub(lambda match: match.group(0).replace("$", ""), command or "")
+    if any(character in literal_command for character in ";|&<>`$\\()#\n\r"):
         raise AgentHardenerRunError(
             CATEGORY_MANIFEST,
-            "Cannot override victim port in a shell expression; use a simple command with a numeric --port option.",
+            "Cannot override victim port in a shell expression; use a simple command with a numeric "
+            "or env-backed --port option.",
         )
-    has_port_env = isinstance(env, dict) and "PORT" in env
     if not command_ports and not has_port_env:
         raise AgentHardenerRunError(
             CATEGORY_MANIFEST,

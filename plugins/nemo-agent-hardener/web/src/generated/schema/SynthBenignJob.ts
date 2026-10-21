@@ -7,6 +7,7 @@
  * agent-hardener (plugin)
  */
 import type { HelixJobStatus } from './HelixJobStatus.ts';
+import type { JobControl } from './JobControl.ts';
 import type { SynthBenignJobCustomFields } from './SynthBenignJobCustomFields.ts';
 import type { SynthBenignJobErrorDetails } from './SynthBenignJobErrorDetails.ts';
 import type { SynthBenignJobOwnership } from './SynthBenignJobOwnership.ts';
@@ -27,4 +28,5 @@ export interface SynthBenignJob {
   error_details?: SynthBenignJobErrorDetails;
   ownership?: SynthBenignJobOwnership;
   custom_fields?: SynthBenignJobCustomFields;
+  control?: JobControl;
 }

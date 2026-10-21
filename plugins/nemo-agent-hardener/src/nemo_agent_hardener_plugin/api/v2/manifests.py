@@ -50,6 +50,8 @@ from nemo_agent_hardener_plugin.cli.client import base_url
 from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
 from nemo_agent_hardener_plugin.filesets import delete_fileset, download_and_extract_project, upload_project_dir
 from nemo_agent_hardener_plugin.jobs._common import resolve_model_key
+from nemo_agent_hardener_plugin.jobs.errors import AgentHardenerRunError
+from nemo_agent_hardener_plugin.jobs.manifest import _apply_agent_port
 from nemo_agent_hardener_plugin.model_config import ModelConfigDefaults, WarGameModels, model_config_defaults
 from nemo_agent_hardener_plugin.model_preflight import validate_choice
 from nemo_agent_hardener_plugin.project_resolver import build_project_manifest_dict, inspect_project
@@ -240,7 +242,9 @@ def _yaml_with_agent_settings(manifest_yaml: str, manifest: AgentHardenerManifes
     writes) is the frozen base rather than what will actually run, so an operator who sets `env` sees
     no trace of it and reasonably concludes it was lost.
 
-    Unparseable YAML is returned untouched: a display concern must never cost someone their manifest.
+    Port edits also synchronize the listener and persisted PORT override, using the
+    same validation as run-time overrides. Unsupported listener changes are rejected
+    before storage. Unparseable YAML is returned untouched for legacy display records.
     """
     try:
         data = yaml.safe_load(manifest_yaml) or {}
@@ -249,14 +253,22 @@ def _yaml_with_agent_settings(manifest_yaml: str, manifest: AgentHardenerManifes
     if not (isinstance(data, dict) and isinstance(data.get("agent"), dict)):
         return manifest_yaml
     agent = data["agent"]
-    if manifest.port:
-        agent["port"] = manifest.port
     if manifest.egress:
         agent["egress"] = list(manifest.egress)
     if manifest.secrets:
         agent["secrets"] = list(manifest.secrets)
     if manifest.env:
-        agent["env"] = dict(manifest.env)
+        stored_env = agent.get("env")
+        agent["env"] = {**(stored_env if isinstance(stored_env, dict) else {}), **manifest.env}
+    if manifest.port:
+        try:
+            _apply_agent_port(agent, manifest.port)
+        except AgentHardenerRunError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        # Persist the normalized override too, so the next materialization cannot
+        # layer an old PORT back over the synchronized YAML.
+        if "PORT" in manifest.env:
+            manifest.env = {**manifest.env, "PORT": str(manifest.port)}
     return yaml.safe_dump(data, sort_keys=False)
 
 
@@ -496,7 +508,7 @@ async def update_manifest(
     The agent source itself is immutable — re-create the manifest to point at a different agent, or
     `POST /manifests/{name}/refresh` to re-resolve the one it already targets.
     """
-    existing = await _get_manifest_or_404(entity_client, workspace, name)
+    existing = (await _get_manifest_or_404(entity_client, workspace, name)).model_copy(deep=True)
     if body.benign_suite is not None:
         existing.benign_suite = body.benign_suite
     if body.defenders is not None:

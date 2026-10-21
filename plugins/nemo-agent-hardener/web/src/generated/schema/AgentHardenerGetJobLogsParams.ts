@@ -10,4 +10,9 @@
 export type AgentHardenerGetJobLogsParams = {
 limit?: number;
 page_cursor?: string;
+/**
+ * @maximum 10000
+ * @exclusiveMinimum 0
+ */
+tail?: number;
 };

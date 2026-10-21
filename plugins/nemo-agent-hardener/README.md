@@ -358,11 +358,17 @@ uv run nemo agent-hardener synth-benign --manifest-id react-agent --no-interacti
 
 Victim ports must be between 1 and 65535. A run-level port override updates both the
 probe destination and the listener's literal numeric `--port` argument and/or
-`agent.env.PORT`. Generated Fabric commands are supported, including non-default
-original ports. Custom listeners must declare one of those conventions; ambiguous
-arguments, shell expressions, and unsupported commands are rejected rather than
-silently probing a port where nothing listens. Keeping the existing port does not
-rewrite a custom command. Overrides apply only to that run, not to the saved target.
+`agent.env.PORT`. `--port $PORT`, `--port=${PORT}`, and their double-quoted forms
+are supported when `agent.env.PORT` is declared: the command stays unchanged and
+only the environment value is updated. Generated Fabric commands are supported,
+including non-default original ports. Custom listeners must declare one of those
+conventions; ambiguous arguments, other shell expressions, and unsupported changes
+are rejected rather than silently probing a port where nothing listens. Quoted
+numeric YAML ports are normalized; an unchanged routing port still repairs stale
+numeric listener/env declarations, while an opaque unchanged custom command is
+preserved. Run-level overrides do not change the saved target. PATCH and Studio's
+**Save as default** synchronize the saved routing port, listener command, and PORT
+override together so subsequent runs use the same listener.
 
 ### War-game a local NAT project
 
