@@ -4,6 +4,8 @@
 
 name: evaluator
 description: NeMo Helix evaluator playbook covering metrics, synchronous metric runs, and asynchronous metric jobs through the platform SDK.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 # Evaluator tasks
 

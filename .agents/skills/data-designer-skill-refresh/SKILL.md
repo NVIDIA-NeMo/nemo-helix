@@ -4,6 +4,8 @@
 
 name: data-designer-skill-refresh
 description: Refresh the Data Designer plugin's user-facing skill bundle (`skills/nemo-data-designer-plugin/`) from the upstream NVIDIA-NeMo/DataDesigner repo at the pinned library version, adapting CLI commands and platform-specific guidance to NeMo Helix. Use when upstream ships skill changes that need to land here, when auditing drift, or as a step of `data-designer-version-bump`. For bumping the `data-designer` version itself, use `data-designer-version-bump` instead. Trigger keywords - refresh data designer skill, update data designer skill, vendor data designer skill, sync data designer skill.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Refresh Data Designer Skill

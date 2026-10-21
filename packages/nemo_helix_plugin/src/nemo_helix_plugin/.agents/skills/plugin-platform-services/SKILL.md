@@ -3,7 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: plugin-platform-services
-description: Calls NeMo Helix services (entity store, jobs, files, secrets, models, inference gateway, auth) from a plugin. Use when a plugin needs to submit jobs, access files, read secrets, look up models, call the inference gateway, check permissions, or route calls between services. Trigger keywords: jobs service, files service, secrets service, models service, inference gateway, auth client, typed client, NemoClient, platform client, service-to-service, inter-service call, add_job_routes, job_route_factory, NHX_BASE_URL.
+description: 'Calls NeMo Helix services (entity store, jobs, files, secrets, models, inference gateway, auth) from a plugin. Use when a plugin needs to submit jobs, access files, read secrets, look up models, call the inference gateway, check permissions, or route calls between services. Trigger keywords: jobs service, files service, secrets service, models service, inference gateway, auth client, typed client, NemoClient, platform client, service-to-service, inter-service call, add_job_routes, job_route_factory, NHX_BASE_URL.'
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # NeMo Helix Services for Plugins

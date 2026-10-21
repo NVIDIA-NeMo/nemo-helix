@@ -4,6 +4,8 @@
 
 name: unit-test
 description: Unit testing workflow with Vitest and React Testing Library. Use when writing, running, or debugging unit tests for Studio components and utilities.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Unit Testing Workflow

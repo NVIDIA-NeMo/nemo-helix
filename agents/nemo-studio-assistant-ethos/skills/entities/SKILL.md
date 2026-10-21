@@ -4,6 +4,8 @@
 
 name: entities
 description: NeMo Helix model and dataset CRUD lifecycle through the platform SDK, with strict field matching on final verification entities.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 # Entity tasks
 
