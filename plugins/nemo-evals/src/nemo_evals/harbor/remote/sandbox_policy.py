@@ -17,6 +17,8 @@ the defaults).
 TODO(M2 story 3): egress overrides.
 """
 
+from decimal import Decimal
+
 from harbor.models.task.config import TaskConfig
 from nemo_evals.config import HarborSandboxProfileConfig, HarborTaskJobsConfig
 from nemo_evals.harbor.remote.profile import (
@@ -27,6 +29,7 @@ from nemo_evals.harbor.remote.profile import (
 )
 from nemo_evals.harbor.remote.resources import task_sandboxes
 from nemo_helix_plugin.config import NemoHelixConfig
+from nhx_sandbox.harbor_opensandbox_services import ComposeServices, quantity_value
 
 
 class SandboxPolicyError(ValueError):
@@ -106,4 +109,42 @@ def task_resources_violation(task_config: TaskConfig, policy: ResolvedHarborSand
                     f"{sandbox.role} sandbox {field}={value} ({source}) exceeds sandbox profile "
                     f"{policy.profile!r}'s max_{field}={limit}"
                 )
+    return None
+
+
+def compose_resources_violation(services: ComposeServices, policy: ResolvedHarborSandboxPolicy) -> str | None:
+    """Why a compose service's declared limits, requests or ``shm_size`` exceed the profile's ceilings, or None.
+
+    Only what the task declares is checked, one service at a time: a service that sets nothing runs without
+    limits, as it does today. Memory is compared in MiB. ``shm_size`` is memory-backed, so it counts as memory.
+    """
+    # Each Kubernetes resource, the profile field that bounds it, that bound, and the size of the bound's unit.
+    ceilings = {
+        "cpu": ("cpus", policy.max_cpus, Decimal(1)),
+        "memory": ("memory_mb", policy.max_memory_mb, Decimal(2**20)),
+    }
+
+    for service in services.services:
+        if service.shm_size is not None and policy.max_memory_mb is not None:
+            if quantity_value(service.shm_size) / Decimal(2**20) > policy.max_memory_mb:
+                return (
+                    f"compose service {service.name} shm_size={service.shm_size} exceeds sandbox profile "
+                    f"{policy.profile!r}'s max_memory_mb={policy.max_memory_mb}"
+                )
+
+        if service.resources is None:
+            continue
+
+        declared = {"limit": service.resources.limits or {}, "request": service.resources.requests or {}}
+        for kind, quantities in declared.items():
+            for resource, (field_name, ceiling, unit_size) in ceilings.items():
+                quantity = quantities.get(resource)
+                if ceiling is None or quantity is None:
+                    continue
+
+                if quantity_value(quantity) / unit_size > ceiling:
+                    return (
+                        f"compose service {service.name} {resource} {kind}={quantity} exceeds sandbox profile "
+                        f"{policy.profile!r}'s max_{field_name}={ceiling}"
+                    )
     return None

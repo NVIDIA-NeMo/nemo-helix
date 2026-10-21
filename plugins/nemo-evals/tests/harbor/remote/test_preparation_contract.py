@@ -52,6 +52,15 @@ def test_ready_state_round_trips():
     assert TaskPreparation.model_validate_json(ready.model_dump_json()) == ready
 
 
+def test_an_error_may_name_a_compose_service_but_an_image_record_may_not():
+    error = PreparationErrorInfo(code="image_unavailable", detail="no ready db image", role="service")
+    assert PreparationErrorInfo.model_validate_json(error.model_dump_json()) == error
+    with pytest.raises(ValidationError):
+        ImagePreparation(role="service", preparation_key="k", source="prebuilt")  # ty: ignore[invalid-argument-type]
+    with pytest.raises(ValidationError):
+        TaskPreparation(status="pending", images={"service": AGENT})  # ty: ignore[invalid-argument-type]
+
+
 @pytest.mark.parametrize(
     "ref", ["registry/sort:latest", "registry/sort@sha256:abc", f"registry/sort@sha256:{'A' * 64}"]
 )
