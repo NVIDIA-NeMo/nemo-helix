@@ -361,6 +361,8 @@ def _job_routes_app():
     mock_sdk = MagicMock()
     mock_jobs = MagicMock()
     mock_jobs.with_retry.return_value = mock_jobs
+    # Routes that act on a job first check that it is one of this service's jobs.
+    mock_jobs.get_job = AsyncMock(return_value=_resp(create_mock_platform_job("my-job")))
     router = job_route_factory(
         service_name="test_service",
         job_type="TestJob",
@@ -1967,6 +1969,39 @@ class TestSDKExceptionHandling:
 
         mock_jobs.with_retry.assert_called_once_with(RetryPolicy(max_retries=0))
         mock_jobs.rerun_job.assert_awaited_once()
+
+    @pytest.mark.parametrize(
+        "method,operation,client_method",
+        [
+            ("post", "pause", "pause_job"),
+            ("post", "resume", "resume_job"),
+            ("post", "rerun", "rerun_job"),
+            ("patch", "control", "update_job_control"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "stored",
+        [
+            {"source": "other_service"},
+            # Customization trainers share a source, so another trainer's job differs only by spec.
+            {"spec": {"model": "llama"}},
+        ],
+    )
+    def test_actions_refuse_another_services_job(
+        self, mock_service_with_job_routes, method, operation, client_method, stored
+    ):
+        app, mock_jobs = mock_service_with_job_routes
+        client = TestClient(app, raise_server_exceptions=False)
+        mock_jobs.get_job = AsyncMock(return_value=_resp(create_mock_platform_job("my-job").model_copy(update=stored)))
+        action = AsyncMock()
+        setattr(mock_jobs, client_method, action)
+        body = {"json": {"pause_ttl_seconds": 600}} if method == "patch" else {}
+
+        response = getattr(client, method)(f"/v2/workspaces/default/test/jobs/my-job/{operation}", **body)
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Job 'my-job' was not found among TestJob jobs in workspace 'default'."
+        action.assert_not_awaited()
 
     def test_resume_job_returns_clean_error(self, mock_service_with_job_routes):
         app, mock_jobs = mock_service_with_job_routes

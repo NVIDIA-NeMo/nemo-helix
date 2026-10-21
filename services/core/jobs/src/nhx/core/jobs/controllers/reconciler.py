@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import datetime
 import logging
 import threading
 import time
@@ -8,20 +9,37 @@ from typing import cast
 
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NemoClientError, NemoHTTPError
+from nemo_helix_plugin.entities.client import EntitiesClient
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.types import (
     HelixJobStatusUpdateRequest,
     HelixJobStepWithContext,
+    JobStatusDetailsUpdate,
     ListStepsQueryParams,
 )
 from nhx.common.controller import Controller, HeartbeatMixin
+from nhx.common.entities import SYSTEM_WORKSPACE, EntityConflictError, SyncEntityClient
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.common.observability import scoped_app_ctx, start_span_with_ctx
-from nhx.core.jobs.app.constants import JOB_TASK_CLEANUP_PENDING_KEY
+from nhx.core.jobs.app.constants import (
+    JOB_TASK_CLEANUP_PENDING_KEY,
+    STOPPED_AT,
+    STORAGE_RECLAIMED_AT,
+    STORAGE_SWEPT_AT,
+)
 from nhx.core.jobs.app.ctx import JobBackendContext, JobContext
+from nhx.core.jobs.app.lifecycle import (
+    effective_pause_ttl_seconds,
+    parse_timestamp,
+    storage_targets,
+    storage_window_expired,
+)
+from nhx.core.jobs.config import JobsStorageConfig
+from nhx.core.jobs.config import config as jobs_config
 from nhx.core.jobs.controllers.backends import extract_provider_profile
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
 from nhx.core.jobs.controllers.diagnostics import log_job_diagnostics_if_debug
+from nhx.core.jobs.entities import HelixJobStorageReclaim, JobStorageTarget
 from opentelemetry import metrics, trace
 
 tracer = trace.get_tracer(__name__)
@@ -35,9 +53,12 @@ class JobReconciler(HeartbeatMixin, Controller):
         backend_registry: BackendRegistry,
         nemo_client: NemoClient,
         stop_signal: threading.Event | None = None,
+        storage_config: JobsStorageConfig | None = None,
+        system_entity_client: SyncEntityClient | None = None,
     ) -> None:
         self._backend_registry = backend_registry
         self._nemo_client = nemo_client
+        self._storage_config = storage_config or jobs_config.storage
         # Typed Jobs client sharing the platform client's transport; every call passes
         # ``workspace=`` explicitly (incl. cross-workspace "-"), so the client's
         # default workspace is never relied upon.
@@ -45,6 +66,12 @@ class JobReconciler(HeartbeatMixin, Controller):
         self._stop_signal = stop_signal
         self._is_healthy = False
         self._logger = logger
+        self._last_retention_at: float | None = None
+        # Storage reclaim records outlive the jobs they describe, so they are read from the
+        # entity store as the jobs service rather than through the jobs API.
+        self._system_entities = system_entity_client or SyncEntityClient(
+            EntitiesClient.from_client(nemo_client)
+        ).as_service("jobs", internal=True)
 
         self._step_reconciliation_total = meter.create_counter(
             name="nhx.jobs.reconciler.step.reconciliation.total",
@@ -188,6 +215,168 @@ class JobReconciler(HeartbeatMixin, Controller):
                 finally:
                     self.emit_heartbeat()
 
+        self._enforce_storage_retention()
+
+    def _enforce_storage_retention(self) -> None:
+        """Reclaim queued storage every tick, and queue stopped jobs' storage on the retention interval."""
+        if self._stop_signal and self._stop_signal.is_set():
+            return
+        self._reclaim_queued_storage()
+
+        # Listing every stopped step is the expensive part, so it runs on a slower interval.
+        now = time.monotonic()
+        interval = self._storage_config.retention_interval_seconds
+        if self._last_retention_at is not None and now - self._last_retention_at < interval:
+            return
+        self._last_retention_at = now
+        try:
+            steps = self._list_steps_with_status(
+                [HelixJobStatus.PAUSED.value, HelixJobStatus.ERROR.value, HelixJobStatus.CANCELLED.value]
+            )
+        except NemoClientError:
+            logger.exception("Could not fetch paused and failed steps for storage retention")
+            return
+
+        for step in steps:
+            if (step.status_details or {}).get(STORAGE_SWEPT_AT):
+                continue
+            try:
+                self._retain_step_storage(step)
+            except Exception:
+                logger.exception(
+                    "Could not enforce storage retention",
+                    extra={"job": step.job, "step": step.name, "workspace": step.workspace},
+                )
+            finally:
+                self.emit_heartbeat()
+
+    def _reclaim_queued_storage(self) -> None:
+        """Reclaim the storage of deleted and stopped jobs, and clear each record once it is gone.
+
+        Runs every tick: a deleted job's record holds its name, and some backends remove storage
+        in the background, so a record stays until a later tick finds the removal done.
+        """
+        try:
+            # One page per tick. Anything beyond it is picked up on the next tick.
+            reclaims = list(self._system_entities.list(HelixJobStorageReclaim, workspace=SYSTEM_WORKSPACE).data)
+        except Exception:
+            logger.exception("Could not list job storage to reclaim")
+            return
+        for reclaim in reclaims:
+            extra = {"job": reclaim.job_name, "workspace": reclaim.job_workspace}
+            try:
+                if not self._reclaim_storage(reclaim.job_workspace, reclaim.job_name, reclaim.targets):
+                    continue
+                self._system_entities.delete_by_id(HelixJobStorageReclaim, reclaim.id)
+                logger.info("Reclaimed job storage", extra=extra)
+            except Exception:
+                logger.exception("Could not reclaim job storage", extra=extra)
+            finally:
+                self.emit_heartbeat()
+
+    def _reclaim_storage(self, workspace: str, job: str, targets: list[JobStorageTarget]) -> bool:
+        """Return True once the storage is gone from every target."""
+        done = True
+        for target in targets:
+            try:
+                backend = self._backend_registry.get_backend(provider=target.provider, profile=target.profile)
+            except KeyError:
+                # The profile is no longer configured, so nothing here can reach its storage.
+                logger.warning(
+                    "Skipping storage reclaim for an execution profile this controller does not have",
+                    extra={"job": job, "workspace": workspace, "provider": target.provider, "profile": target.profile},
+                )
+                continue
+            done = backend.reclaim_persistent_storage(workspace, job) and done
+        return done
+
+    def _retain_step_storage(self, step: HelixJobStepWithContext) -> None:
+        job = self._jobs.get_job(name=step.job, workspace=step.workspace).data()
+        # An older attempt's stopped step must not reclaim storage from under a rerun.
+        current_attempt_id = getattr(job, "attempt_id", None)
+        if current_attempt_id is not None and step.attempt_id != current_attempt_id:
+            self._mark_step_swept(step)
+            return
+        targets = storage_targets(job.platform_spec)
+        if not targets:
+            self._mark_step_swept(step)
+            return
+        # A job already marked is queued again: an earlier pass may have marked it and stopped there.
+        if not (job.status_details or {}).get(STORAGE_RECLAIMED_AT):
+            if step.status == HelixJobStatus.CANCELLED:
+                pass
+            elif step.status == HelixJobStatus.PAUSED:
+                ttl_seconds = effective_pause_ttl_seconds(job.control, self._storage_config)
+                if not storage_window_expired(_storage_clock(step), ttl_seconds):
+                    return
+            elif step.status == HelixJobStatus.ERROR:
+                ttl_seconds = self._storage_config.failed_storage_ttl_seconds
+                if not storage_window_expired(_storage_clock(step), ttl_seconds):
+                    return
+            else:
+                return
+            if not self._mark_storage_reclaimed(step):
+                return
+
+        self._queue_storage_reclaim(job.id, step, targets)
+        if step.status == HelixJobStatus.PAUSED:
+            self._jobs.cancel_job(name=step.job, workspace=step.workspace)
+        self._mark_step_swept(step)
+
+    def _mark_storage_reclaimed(self, step: HelixJobStepWithContext) -> bool:
+        """Mark the job's storage reclaimed before reclaiming it. Return False if a resume got there first.
+
+        Resume, rerun and control updates refuse a marked job. A resume that moved the step
+        before the mark was written keeps its storage, so the mark is taken back.
+        """
+        self._set_storage_reclaimed_at(step, datetime.datetime.now(datetime.timezone.utc).isoformat())
+        current = self._jobs.get_job_step(name=step.name, workspace=step.workspace, job=step.job).data()
+        if current.status == step.status:
+            return True
+        self._set_storage_reclaimed_at(step, None)
+        logger.info(
+            "Kept the storage of a job that left its stopped state",
+            extra={"job": step.job, "step": step.name, "workspace": step.workspace, "status": current.status},
+        )
+        return False
+
+    def _set_storage_reclaimed_at(self, step: HelixJobStepWithContext, reclaimed_at: str | None) -> None:
+        self._jobs.update_job_status_details(
+            name=step.job,
+            workspace=step.workspace,
+            body=JobStatusDetailsUpdate({STORAGE_RECLAIMED_AT: reclaimed_at}),
+        )
+
+    def _queue_storage_reclaim(
+        self, job_id: str, step: HelixJobStepWithContext, targets: list[JobStorageTarget]
+    ) -> None:
+        """Hand the job's storage to the reclaim pass, which runs every tick until the storage is gone."""
+        try:
+            self._system_entities.create(
+                HelixJobStorageReclaim(
+                    name=HelixJobStorageReclaim.name_for_job(job_id),
+                    workspace=SYSTEM_WORKSPACE,
+                    job_id=job_id,
+                    job_workspace=step.workspace,
+                    job_name=step.job,
+                    targets=targets,
+                )
+            )
+        except EntityConflictError:
+            pass  # Already queued.
+
+    def _mark_step_swept(self, step: HelixJobStepWithContext) -> None:
+        """Record on the step that the sweep is done with it, so later passes skip it without a lookup."""
+        self._jobs.update_job_step_status(
+            name=step.name,
+            workspace=step.workspace,
+            job=step.job,
+            body=HelixJobStatusUpdateRequest(
+                status=step.status,
+                status_details={STORAGE_SWEPT_AT: datetime.datetime.now(datetime.timezone.utc).isoformat()},
+            ),
+        )
+
     def _update_step_status_with_timing(
         self,
         *,
@@ -245,24 +434,7 @@ class JobReconciler(HeartbeatMixin, Controller):
         """
         Return the list of steps to reconcile.
         """
-        # Iterate through all pages to get all steps.
-        # deepObject query param: sent as ``filter[status]=pending,active,...``
-        # (comma form), which the steps-list route splits back into a list. The
-        # bracketed key isn't expressible as a TypedDict field, so cast the dict.
-        steps = []
-        query = cast(
-            ListStepsQueryParams,
-            {
-                "filter[status]": ",".join(statuses),
-                "sort": "updated_at",
-            },
-        )
-        for step in self._jobs.list_steps(
-            name="-",  # Use "-" to indicate all jobs
-            workspace="-",  # Cross-workspace query
-            query_params=query,
-        ).items():
-            steps.append(step)
+        steps = self._list_steps_with_status(statuses)
         cleanup_query = cast(
             ListStepsQueryParams,
             {
@@ -278,3 +450,32 @@ class JobReconciler(HeartbeatMixin, Controller):
             logger.exception("Could not fetch terminal steps pending task cleanup")
             self._step_reconciliation_errors.add(1, attributes={"error_type": "task_cleanup_fetch"})
         return steps
+
+    def _list_steps_with_status(self, statuses: list[str]) -> list[HelixJobStepWithContext]:
+        """Return every step, across jobs and workspaces, in one of ``statuses``."""
+        # Iterate through all pages to get all steps.
+        # deepObject query param: sent as ``filter[status]=pending,active,...``
+        # (comma form), which the steps-list route splits back into a list. The
+        # bracketed key isn't expressible as a TypedDict field, so cast the dict.
+        query = cast(
+            ListStepsQueryParams,
+            {
+                "filter[status]": ",".join(statuses),
+                "sort": "updated_at",
+            },
+        )
+        return list(
+            self._jobs.list_steps(
+                name="-",  # Use "-" to indicate all jobs
+                workspace="-",  # Cross-workspace query
+                query_params=query,
+            ).items()
+        )
+
+
+def _storage_clock(step: HelixJobStepWithContext) -> datetime.datetime | None:
+    """Prefer ``stopped_at``. Fall back to ``updated_at`` for steps stopped before it was written."""
+    stopped_at = parse_timestamp((step.status_details or {}).get(STOPPED_AT))
+    if stopped_at is not None:
+        return stopped_at
+    return step.updated_at

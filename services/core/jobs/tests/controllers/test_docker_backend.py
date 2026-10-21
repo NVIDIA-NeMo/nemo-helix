@@ -6,7 +6,7 @@ import json
 import uuid
 from types import SimpleNamespace
 from typing import Iterator
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import httpx
 import pytest
@@ -690,13 +690,16 @@ def test_docker_job_sync_pausing_leaves_running_container(docker_job, docker_cli
     test_job_step.step_spec.lifecycle = StepLifecycle(pause_deadline_seconds=3600)
     container_mock = MagicMock()
     container_mock.status = "running"
-    container_mock.attrs = {"State": {"ExitCode": 0}}
+    container_mock.attrs = {"State": {"ExitCode": 0}, "Image": "sha256:running"}
+    # Reading the image through the container would look it up again and fail once it is pruned.
+    type(container_mock).image = PropertyMock(side_effect=AssertionError("image lookup"))
     docker_client_mock.containers.get.side_effect = None
     docker_client_mock.containers.get.return_value = container_mock
 
     update = docker_job.sync(test_job_step)
 
     assert update.status == HelixJobStatus.PAUSING
+    assert update.status_details["image_digest"] == "sha256:running"
     container_mock.stop.assert_not_called()
     container_mock.kill.assert_not_called()
 
@@ -2771,6 +2774,35 @@ def test_cleanup_job_persistent_storage_labels_cleanup_container_owner(docker_jo
     cleanup_args = docker_client_mock.containers.create.call_args[1]
     assert cleanup_args["labels"][JOB_CONTROLLER_INSTANCE_ID_LABEL] == TEST_JOBS_CONTROLLER_INSTANCE_ID
     assert cleanup_args["labels"][JOB_TYPE_LABEL] == JOB_TYPE_STORAGE_CLEANUP
+
+
+def _cleanup_container(docker_client_mock, exit_code: int = 0, wait_error: Exception | None = None) -> None:
+    container = MagicMock()
+    container.wait.return_value = {"StatusCode": exit_code}
+    container.wait.side_effect = wait_error
+    docker_client_mock.containers.create.side_effect = None
+    docker_client_mock.containers.create.return_value = container
+
+
+def test_reclaim_reports_storage_removed_by_the_cleanup_container(docker_job, docker_client_mock):
+    _cleanup_container(docker_client_mock)
+
+    assert docker_job.reclaim_persistent_storage("default", "job-1") is True
+
+
+@pytest.mark.parametrize("failure", ["exit", "create", "wait"])
+def test_reclaim_raises_when_the_cleanup_container_fails(docker_job, docker_client_mock, failure):
+    """The reconciler keeps the reclaim record on a raise, and retries on a later tick."""
+    _cleanup_container(
+        docker_client_mock,
+        exit_code=1 if failure == "exit" else 0,
+        wait_error=APIError("daemon unavailable") if failure == "wait" else None,
+    )
+    if failure == "create":
+        docker_client_mock.containers.create.side_effect = APIError("daemon unavailable")
+
+    with pytest.raises(JobStorageError):
+        docker_job.reclaim_persistent_storage("default", "job-1")
 
 
 def test_created_step_does_not_ttl_before_backend_acceptance(docker_job, docker_client_mock, test_job_step):

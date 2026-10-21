@@ -34,6 +34,8 @@ from nhx.core.jobs.app.constants import (
     JOB_MANAGED_BY_LABEL,
     JOB_STEP_ID_LABEL,
     JOB_STEP_NAME_LABEL,
+    JOB_TYPE_LABEL,
+    JOB_TYPE_STORAGE_CLEANUP,
     JOB_USES_PERSISTENT_STORAGE_LABEL,
     JOB_WORKSPACE_ID_LABEL,
     KUBE_JOB_SELECTOR_LABELS,
@@ -53,7 +55,7 @@ from nhx.core.jobs.controllers.backends.base import (
     WORKLOAD_IDENTITY_VOLUME_PATH,
     JobUpdate,
 )
-from nhx.core.jobs.controllers.backends.exceptions import FailedToScheduleError, SchedulingDeferred
+from nhx.core.jobs.controllers.backends.exceptions import FailedToScheduleError, JobStorageError, SchedulingDeferred
 from nhx.core.jobs.controllers.backends.kubernetes import (
     CPUKubernetesJobBackend,
     GPUKubernetesJobBackend,
@@ -85,8 +87,10 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     create_step_network_policy,
     delete_configmap,
     delete_step_network_policy,
+    first_task_image_id,
     last_task_exit_time,
     name_for_step,
+    reclaim_job_persistent_storage,
 )
 from nhx.core.jobs.controllers.backends.workload_tokens import WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS
 from pydantic import ValidationError
@@ -640,6 +644,100 @@ def test_cleanup_job_persistent_storage_omits_security_context_when_unconfigured
     )
     body = batch_v1.create_namespaced_job.call_args.kwargs["body"]
     assert body.spec.template.spec.security_context is None
+
+
+def _reclaim_storage(batch_v1: MagicMock) -> bool:
+    return reclaim_job_persistent_storage(
+        namespace="ns",
+        batch_v1=batch_v1,
+        pvc_name="pvc",
+        workspace="ws",
+        job_id="jid",
+        permissions_image="perm:img",
+        execution_backend="kubernetes_job",
+        execution_profile="default",
+        job_metadata=KubernetesObjectMetadata(),
+        pod_metadata=KubernetesObjectMetadata(),
+    )
+
+
+def _cleanup_job(name: str, finished: str | None = None) -> client.V1Job:
+    conditions = [client.V1JobCondition(type=finished, status="True")] if finished else None
+    return client.V1Job(metadata=client.V1ObjectMeta(name=name), status=client.V1JobStatus(conditions=conditions))
+
+
+def _cleanup_jobs(batch_v1: MagicMock, *jobs: client.V1Job) -> None:
+    batch_v1.list_namespaced_job.return_value = SimpleNamespace(items=list(jobs))
+
+
+def test_reclaim_starts_a_cleanup_job_and_reports_it_pending():
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1)
+
+    assert _reclaim_storage(batch_v1) is False
+
+    selector = batch_v1.list_namespaced_job.call_args.kwargs["label_selector"].split(",")
+    for label in (
+        f"{JOB_TYPE_LABEL}={JOB_TYPE_STORAGE_CLEANUP}",
+        f"{JOB_WORKSPACE_ID_LABEL}=ws",
+        f"{JOB_ID_LABEL}=jid",
+        f"{JOB_STEP_NAME_LABEL}=retention",
+        f"{JOB_EXECUTION_BACKEND_LABEL}=kubernetes_job",
+        f"{JOB_EXECUTION_PROFILE_LABEL}=default",
+    ):
+        assert label in selector
+    labels = batch_v1.create_namespaced_job.call_args.kwargs["body"].metadata.labels
+    assert all(labels[key] == value for key, value in (item.split("=") for item in selector))
+
+
+def test_reclaim_waits_for_a_running_cleanup_job():
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1, _cleanup_job("cleanup-1"))
+
+    assert _reclaim_storage(batch_v1) is False
+
+    batch_v1.create_namespaced_job.assert_not_called()
+    batch_v1.delete_namespaced_job.assert_not_called()
+
+
+def test_reclaim_reports_done_and_deletes_the_succeeded_cleanup_job():
+    """A later reclaim of a job with the same name must run its own cleanup, not read this result."""
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1, _cleanup_job("cleanup-1", "Complete"))
+
+    assert _reclaim_storage(batch_v1) is True
+
+    assert batch_v1.delete_namespaced_job.call_args.kwargs["name"] == "cleanup-1"
+
+
+def test_reclaim_waits_while_another_cleanup_job_runs():
+    """The running one could still delete storage that a new job with the same name wrote."""
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1, _cleanup_job("cleanup-1", "Complete"), _cleanup_job("cleanup-2"))
+
+    assert _reclaim_storage(batch_v1) is False
+
+    assert [c.kwargs["name"] for c in batch_v1.delete_namespaced_job.call_args_list] == ["cleanup-1"]
+
+
+def test_reclaim_raises_and_deletes_a_failed_cleanup_job():
+    """The next call starts a new cleanup Job."""
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1, _cleanup_job("cleanup-1", "Failed"))
+
+    with pytest.raises(JobStorageError):
+        _reclaim_storage(batch_v1)
+
+    assert batch_v1.delete_namespaced_job.call_args.kwargs["name"] == "cleanup-1"
+
+
+def test_reclaim_raises_when_the_cleanup_job_cannot_be_created():
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1)
+    batch_v1.create_namespaced_job.side_effect = ApiException(status=403)
+
+    with pytest.raises(ApiException):
+        _reclaim_storage(batch_v1)
 
 
 def test_build_affinity_without_affinity():
@@ -1581,7 +1679,9 @@ def test_sync_pausing_deadline_deletes_job_and_returns_error(kubernetes_job, tes
 
 def _terminated_task_pod(exit_code: int, finished_at: datetime.datetime | None = None) -> client.V1Pod:
     pod = _task_pod("uid-1", exit_code)
-    pod.status.container_statuses[0].state.terminated.finished_at = finished_at
+    task = pod.status.container_statuses[0]
+    task.state.terminated.finished_at = finished_at
+    task.image_id = "sha256:training"
     return pod
 
 
@@ -3778,3 +3878,11 @@ def test_delete_step_network_policy_raises_other_errors():
 
     with pytest.raises(ApiException):
         delete_step_network_policy(networking_v1, "test-namespace", "step")
+
+
+def test_image_digest_comes_from_the_task_container():
+    sidecar = SimpleNamespace(name="istio-proxy", image_id="sha256:proxy")
+    task = SimpleNamespace(name="nemo-job-task", image_id="sha256:training")
+    pod = SimpleNamespace(status=SimpleNamespace(container_statuses=[sidecar, task]))
+
+    assert first_task_image_id([pod]) == "sha256:training"

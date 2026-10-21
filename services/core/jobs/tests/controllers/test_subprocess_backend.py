@@ -769,3 +769,25 @@ def test_sync_cancelling_step_older_than_the_ttl_is_cancelled(
     update = backend.sync(step)
 
     assert update.status == HelixJobStatus.CANCELLED
+
+
+def test_reclaim_removes_job_storage_and_tolerates_a_missing_directory(
+    mock_nemo_client, tmp_path, mock_platform_config
+):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    job_dir = backend._root_dir / "default" / "train-llama"
+    (job_dir / "checkpoints").mkdir(parents=True)
+
+    assert backend.reclaim_persistent_storage("default", "train-llama") is True
+    assert not job_dir.exists()
+    assert backend.reclaim_persistent_storage("default", "train-llama") is True
+
+
+def test_reclaim_raises_when_storage_cannot_be_removed(mock_nemo_client, tmp_path, mock_platform_config):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.subprocess.shutil.rmtree", side_effect=PermissionError),
+        pytest.raises(PermissionError),
+    ):
+        backend.reclaim_persistent_storage("default", "train-llama")
