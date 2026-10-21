@@ -40,7 +40,7 @@ describe('AgentDetailRoute optimization form', () => {
     await user.click(await screen.findByRole('button', { name: 'Optimize' }));
 
     expect(
-      await screen.findByRole('radio', { name: /Hyperparameter optimization/ })
+      await screen.findByRole('radio', { name: /Hyper-parameter and prompt optimization/ })
     ).not.toBeChecked();
     expect(
       screen.getByRole('radio', { name: /Model routing using Switchyard/ })
@@ -74,7 +74,7 @@ describe('AgentDetailRoute optimization form', () => {
     await user.click(within(emptyState).getByRole('button', { name: 'Optimize' }));
 
     expect(
-      await screen.findByRole('radio', { name: /Hyperparameter optimization/ })
+      await screen.findByRole('radio', { name: /Hyper-parameter and prompt optimization/ })
     ).toBeInTheDocument();
   });
 
@@ -85,7 +85,7 @@ describe('AgentDetailRoute optimization form', () => {
     });
 
     expect(
-      await screen.findByRole('radio', { name: /Hyperparameter optimization/ })
+      await screen.findByRole('radio', { name: /Hyper-parameter and prompt optimization/ })
     ).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'Optimize agent' })).not.toBeInTheDocument();
   });
@@ -93,10 +93,12 @@ describe('AgentDetailRoute optimization form', () => {
   it('shows one tile per installed strategy, in its own words', async () => {
     renderDetail('?tab=optimizations&view=strategy');
 
-    expect(await screen.findByRole('radio', { name: /Hyperparameter optimization/ })).toBeEnabled();
+    expect(
+      await screen.findByRole('radio', { name: /Hyper-parameter and prompt optimization/ })
+    ).toBeEnabled();
     for (const [index, title] of [
       'Upload a config',
-      'Hyperparameter optimization',
+      'Hyper-parameter and prompt optimization',
       'Model routing using Switchyard',
     ].entries()) {
       expect(screen.getAllByRole('radio')[index]).toHaveAccessibleName(
@@ -149,7 +151,9 @@ describe('AgentDetailRoute optimization form', () => {
     const user = userEvent.setup();
     renderDetail('?tab=optimizations&view=strategy');
 
-    await user.click(await screen.findByRole('radio', { name: /Hyperparameter optimization/ }));
+    await user.click(
+      await screen.findByRole('radio', { name: /Hyper-parameter and prompt optimization/ })
+    );
 
     expect(await screen.findByRole('button', { name: 'Run optimization' })).toBeInTheDocument();
   });
@@ -196,7 +200,7 @@ describe('AgentDetailRoute optimization form', () => {
 
     expect(await screen.findByText('brevity-sweep-3')).toBeInTheDocument();
     expect(
-      screen.queryByRole('radio', { name: /Hyperparameter optimization/ })
+      screen.queryByRole('radio', { name: /Hyper-parameter and prompt optimization/ })
     ).not.toBeInTheDocument();
   });
 
@@ -207,7 +211,7 @@ describe('AgentDetailRoute optimization form', () => {
     await user.click(await screen.findByRole('button', { name: 'Back' }));
 
     expect(
-      await screen.findByRole('radio', { name: /Hyperparameter optimization/ })
+      await screen.findByRole('radio', { name: /Hyper-parameter and prompt optimization/ })
     ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run optimization' })).not.toBeInTheDocument();
   });
