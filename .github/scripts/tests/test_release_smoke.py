@@ -89,6 +89,7 @@ def test_cleanup_runs_when_diagnostics_fail(smoke):
 
 
 def test_pod_logs_are_collected_before_deleting_agent(smoke):
+    smoke.stage("agent-invoke")
     Path(smoke.nemo).parent.mkdir(parents=True, exist_ok=True)
     Path(smoke.nemo).touch()
     with patch.object(smoke, "command") as command:
