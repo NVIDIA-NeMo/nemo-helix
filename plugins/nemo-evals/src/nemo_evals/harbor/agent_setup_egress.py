@@ -18,7 +18,7 @@ own policy.
 from __future__ import annotations
 
 import shlex
-from collections.abc import AsyncGenerator, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from functools import cache
 from typing import Any
@@ -41,59 +41,62 @@ def _inner_agent_class(inner: str) -> type[BaseAgent]:
     return AgentFactory.get_agent_class_from_config(AgentConfig(name=inner))
 
 
-class _CommandGuard:
-    """Refuses every command on ``environment`` while its setup egress window is closing.
+# Every BaseEnvironment method that runs something inside the environment or moves files in or out of it.
+# Providers implement transfers through their own private exec (Daytona, Modal and Beam run tar), so
+# guarding exec alone would let a download run. start, stop, attach and set_network_policy stay usable.
+GUARDED_METHODS = (
+    "exec",
+    "service_exec",
+    "upload_file",
+    "upload_dir",
+    "download_file",
+    "download_dir",
+    "download_dir_with_exclusions",
+    "download_dir_filtered",
+    "service_download_file",
+    "service_download_dir",
+    "service_download_dir_with_exclusions",
+    "is_dir",
+    "is_file",
+    "service_is_dir",
+    "reset_dirs",
+    "ensure_dirs",
+    "empty_dirs",
+    "run_healthcheck",
+)
 
-    ``exec`` and ``service_exec`` are wrapped on the instance; the cleanup's own commands go through the
-    originals. A close that fails or is cancelled leaves the guard refusing, so task commands (artifact
-    collection, the verifier) never run with the setup hosts possibly still reachable.
+
+class _CommandGuard:
+    """Refuses every command and file transfer on ``environment`` while its setup egress window is closing.
+
+    The :data:`GUARDED_METHODS` are wrapped on the instance; the cleanup's own commands go through the
+    original ``exec``. A close that fails or is cancelled leaves the guard refusing, so task commands
+    (artifact collection, log downloads, the verifier) never run with the setup hosts possibly still reachable.
     """
 
     def __init__(self, environment: BaseEnvironment) -> None:
         self.closing = False
         self._environment = environment
         self._exec = environment.exec
-        self._service_exec = environment.service_exec
-        self._shadowed = {
-            name: vars(environment)[name] for name in ("exec", "service_exec") if name in vars(environment)
-        }
-        # Instance attributes shadow the class's methods; Harbor's own service_exec calls self.exec.
-        setattr(environment, "exec", self.exec)
-        setattr(environment, "service_exec", self.service_exec)
+        self._shadowed = {name: vars(environment)[name] for name in GUARDED_METHODS if name in vars(environment)}
+        # Instance attributes shadow the class's methods, including where Harbor calls them on self.
+        for name in GUARDED_METHODS:
+            setattr(environment, name, self._refusing(getattr(environment, name)))
 
-    def _refuse_while_closing(self) -> None:
-        if self.closing:
-            raise RuntimeError(
-                "the agent setup egress window did not close cleanly; refusing to run more commands in this environment"
-            )
+    def _refusing(self, method: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+        async def refusing(*args: Any, **kwargs: Any) -> Any:
+            if self.closing:
+                raise RuntimeError(
+                    "the agent setup egress window did not close cleanly; refusing to run more commands in this "
+                    "environment"
+                )
+            return await method(*args, **kwargs)
 
-    async def exec(
-        self,
-        command: str,
-        cwd: str | None = None,
-        env: dict[str, str] | None = None,
-        timeout_sec: int | None = None,
-        user: str | int | None = None,
-    ) -> ExecResult:
-        self._refuse_while_closing()
-        return await self._exec(command, cwd=cwd, env=env, timeout_sec=timeout_sec, user=user)
-
-    async def service_exec(
-        self,
-        command: str,
-        *,
-        service: str | None = None,
-        cwd: str | None = None,
-        env: dict[str, str] | None = None,
-        timeout_sec: int | None = None,
-        user: str | int | None = None,
-    ) -> ExecResult:
-        self._refuse_while_closing()
-        return await self._service_exec(command, service=service, cwd=cwd, env=env, timeout_sec=timeout_sec, user=user)
+        return refusing
 
     def release(self) -> None:
-        """Puts the environment's own ``exec`` and ``service_exec`` back; only after a clean close."""
-        for name in ("exec", "service_exec"):
+        """Puts the environment's own methods back; only after a clean close."""
+        for name in GUARDED_METHODS:
             if name in self._shadowed:
                 setattr(self._environment, name, self._shadowed[name])
             else:
@@ -122,24 +125,31 @@ class _CommandGuard:
 async def _network_policy_window(environment: BaseEnvironment, hosts: tuple[str, ...]) -> AsyncGenerator[None, None]:
     """Add ``hosts`` to the environment's network policy for the block, then restore the policy.
 
-    A public baseline is already open, and an environment that can't switch to an allowlist after start
-    keeps the task's policy. Harbor's ``set_network_policy()`` rejects hosts the provider can't express.
+    A public baseline is already open, and an environment that can't switch to an allowlist after start,
+    or that runs compose services, keeps the task's policy. A policy the provider can't express (a wildcard
+    host it doesn't support) raises before anything changes.
 
     Providers keep established connections across a policy change, so closing also kills every process
     started since entry that still holds a connection outside the environment. Until closing has finished,
-    the environment refuses every other command (see :class:`_CommandGuard`).
+    the environment refuses every other command and transfer (see :class:`_CommandGuard`), as it does for
+    good once opening fails partway.
     """
     if not hosts:
         yield
         return
     capabilities = environment.capabilities
     baseline = environment.network_policy
-    if baseline.network_mode == NetworkMode.PUBLIC or not (
-        capabilities.dynamic_network_policy and capabilities.network_allowlist
+    if (
+        baseline.network_mode == NetworkMode.PUBLIC
+        or not (capabilities.dynamic_network_policy and capabilities.network_allowlist)
+        or _uses_compose(environment)
     ):
         yield
         return
-    allowed = list(dict.fromkeys([*baseline.allowed_hosts, *hosts]))
+    opened = NetworkPolicy(
+        network_mode=NetworkMode.ALLOWLIST, allowed_hosts=list(dict.fromkeys([*baseline.allowed_hosts, *hosts]))
+    )
+    environment.validate_network_policy_support(opened)
     guard = _CommandGuard(environment)
     try:
         keep = await guard.list_processes()
@@ -147,7 +157,13 @@ async def _network_policy_window(environment: BaseEnvironment, hosts: tuple[str,
         guard.release()
         raise
     try:
-        await environment.set_network_policy(NetworkPolicy(network_mode=NetworkMode.ALLOWLIST, allowed_hosts=allowed))
+        await environment.set_network_policy(opened)
+    except BaseException:
+        # The provider may have applied part of the policy, but Harbor still caches the baseline, so
+        # restoring it would be a no-op. The policy is unknown: refuse everything from here on.
+        guard.closing = True
+        raise
+    try:
         yield
     finally:
         guard.closing = True
@@ -155,6 +171,15 @@ async def _network_policy_window(environment: BaseEnvironment, hosts: tuple[str,
         await guard.kill_connection_holders_except(keep)
         guard.closing = False
         guard.release()
+
+
+def _uses_compose(environment: BaseEnvironment) -> bool:
+    """Whether the environment runs compose services, which share its network but not its processes.
+
+    The cleanup only sees the main service's processes, so a compose environment keeps the task's policy.
+    Every Harbor provider that supports compose reports per instance whether it uses it.
+    """
+    return environment.capabilities.docker_compose and environment._uses_compose
 
 
 @cache

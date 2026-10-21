@@ -7,6 +7,7 @@ import asyncio
 import shlex
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -17,6 +18,7 @@ from harbor.environments.capabilities import EnvironmentCapabilities
 from harbor.models.task.config import NetworkMode, NetworkPolicy
 from harbor.models.trial.config import AgentConfig
 from nemo_evals.harbor.agent_setup_egress import (
+    GUARDED_METHODS,
     INNER_AGENT_KWARG,
     SETUP_EGRESS_AGENT,
     SETUP_HOSTS_KWARG,
@@ -47,10 +49,11 @@ class _WindowEnvironment:
 
 
 class _PolicyEnvironment:
-    """The part of Harbor's ``BaseEnvironment`` the wrapper uses, recording each policy switch and command.
+    """The part of Harbor's ``BaseEnvironment`` the wrapper uses, recording each policy switch, command and transfer.
 
-    The cleanup scripts are recognised by their text: listing processes prints :data:`SNAPSHOT`, and the
-    kill sweep records the ``KEEP`` it was given.
+    Like Harbor's, ``set_network_policy`` returns early for the cached policy and caches a new one only once
+    it was applied. The cleanup scripts are recognised by their text: listing processes prints
+    :data:`SNAPSHOT`, and the kill sweep records the ``KEEP`` it was given.
     """
 
     def __init__(
@@ -64,13 +67,44 @@ class _PolicyEnvironment:
         self.capabilities = capabilities
         self.list_exit = 0
         self.kill_exit = 0
+        self.policy_supported = True
         self.policy_hook: Callable[[NetworkPolicy], Awaitable[None]] | None = None
+        self._uses_compose = False
+
+    def validate_network_policy_support(self, network_policy: NetworkPolicy) -> None:
+        if not self.policy_supported:
+            raise ValueError("network_mode='allowlist' with wildcard hostnames is not supported")
 
     async def set_network_policy(self, network_policy: NetworkPolicy) -> None:
+        self.validate_network_policy_support(network_policy)
+        if network_policy == self.network_policy:
+            return
         self.events.append(network_policy)
         if self.policy_hook is not None:
             await self.policy_hook(network_policy)
         self.network_policy = network_policy
+
+    async def upload_file(self, source_path: Path | str, target_path: str) -> None:
+        self.events.append(("upload_file", target_path))
+
+    async def upload_dir(self, source_dir: Path | str, target_dir: str) -> None:
+        self.events.append(("upload_dir", target_dir))
+
+    async def download_file(self, source_path: str, target_path: Path | str) -> None:
+        self.events.append(("download_file", source_path))
+
+    async def download_dir(self, source_dir: str, target_dir: Path | str) -> None:
+        self.events.append(("download_dir", source_dir))
+
+    def __getattr__(self, name: str) -> Callable[..., Awaitable[None]]:
+        """The rest of the guarded methods, which these tests don't call."""
+        if name not in GUARDED_METHODS:
+            raise AttributeError(name)
+
+        async def method(*args: Any, **kwargs: Any) -> None:
+            self.events.append((name, args))
+
+        return method
 
     async def exec(
         self,
@@ -101,7 +135,9 @@ class _PolicyEnvironment:
         timeout_sec: int | None = None,
         user: str | int | None = None,
     ) -> ExecResult:
-        return await self.exec(command, cwd=cwd, env=env, timeout_sec=timeout_sec, user=user)
+        # Not through self.exec: providers with sidecars run service commands their own way.
+        self.events.append(("service_exec", command))
+        return ExecResult(return_code=0)
 
 
 class _PolicyAndWindowEnvironment(_PolicyEnvironment, _WindowEnvironment):
@@ -258,11 +294,34 @@ async def test_the_environments_own_window_is_preferred_over_the_network_policy(
     assert events == ["open", ("setup", NO_NETWORK), "close"]
 
 
+REFUSED_CALLS = {
+    "exec": lambda environment: environment.exec("echo task"),
+    "service_exec": lambda environment: environment.service_exec("echo task", service="main"),
+    "upload_file": lambda environment: environment.upload_file("task.sh", "/tests/task.sh"),
+    "upload_dir": lambda environment: environment.upload_dir("tests", "/tests"),
+    "download_file": lambda environment: environment.download_file("/logs/agent.log", "agent.log"),
+    "download_dir": lambda environment: environment.download_dir("/logs/agent", "agent"),
+}
+
+
 async def _refuses_commands(environment: _PolicyEnvironment) -> None:
+    for call in REFUSED_CALLS.values():
+        with pytest.raises(RuntimeError, match="did not close cleanly"):
+            await call(environment)
+
+
+@pytest.mark.parametrize("name", list(REFUSED_CALLS))
+async def test_each_command_and_transfer_is_refused_after_a_failed_close(tmp_path, monkeypatch, name):
+    events: list[Any] = []
+    _record_setup(monkeypatch, events)
+    environment = _PolicyEnvironment(events)
+    environment.kill_exit = 1
+    with pytest.raises(RuntimeError, match="could not stop processes"):
+        await _agent(tmp_path, hosts=SETUP_HOSTS).setup(environment)
+    recorded = len(events)
     with pytest.raises(RuntimeError, match="did not close cleanly"):
-        await environment.exec("echo task")
-    with pytest.raises(RuntimeError, match="did not close cleanly"):
-        await environment.service_exec("echo task", service="main")
+        await REFUSED_CALLS[name](environment)
+    assert len(events) == recorded
 
 
 async def test_commands_run_while_open_and_after_a_clean_close(tmp_path, monkeypatch):
@@ -277,17 +336,19 @@ async def test_commands_run_while_open_and_after_a_clean_close(tmp_path, monkeyp
     await _agent(tmp_path, hosts=SETUP_HOSTS).setup(environment)
     await environment.exec("echo task")
     await environment.service_exec("echo verifier")
+    await environment.download_dir("/logs/agent", "agent")
     assert events == [
         "list",
         _allowlist(*SETUP_HOSTS),
         ("exec", "npm install -g agent"),
-        ("exec", "pip install agent"),
+        ("service_exec", "pip install agent"),
         NO_NETWORK,
         ("kill", KEEP),
         ("exec", "echo task"),
-        ("exec", "echo verifier"),
+        ("service_exec", "echo verifier"),
+        ("download_dir", "/logs/agent"),
     ]
-    assert "exec" not in vars(environment) and "service_exec" not in vars(environment)
+    assert not set(GUARDED_METHODS) & set(vars(environment))
 
 
 async def test_a_failed_kill_raises_and_keeps_refusing_commands(tmp_path, monkeypatch):
@@ -340,23 +401,71 @@ async def test_a_restore_cancelled_by_the_setup_timeout_keeps_refusing_commands(
     await _refuses_commands(environment)
 
 
-async def test_an_open_that_fails_partway_still_restores_and_sweeps(tmp_path, monkeypatch):
+async def test_an_open_that_fails_partway_keeps_refusing_commands(tmp_path, monkeypatch):
+    """Harbor still caches the baseline, so a restore would be a no-op; nothing may run afterwards."""
     events: list[Any] = []
     _record_setup(monkeypatch, events)
     environment = _PolicyEnvironment(events)
     opened = _allowlist(*SETUP_HOSTS)
 
     async def fail_partway(network_policy: NetworkPolicy) -> None:
-        if network_policy == opened:
-            environment.network_policy = network_policy
-            raise RuntimeError("applied some rules, then failed")
+        raise RuntimeError("applied some rules, then failed")
 
     environment.policy_hook = fail_partway
     with pytest.raises(RuntimeError, match="applied some rules"):
         await _agent(tmp_path, hosts=SETUP_HOSTS).setup(environment)
-    assert events == ["list", opened, NO_NETWORK, ("kill", KEEP)]
+    assert events == ["list", opened]
     assert environment.network_policy == NO_NETWORK
-    await environment.exec("echo task")
+    await _refuses_commands(environment)
+
+
+async def test_an_open_cancelled_partway_keeps_refusing_commands(tmp_path, monkeypatch):
+    events: list[Any] = []
+    _record_setup(monkeypatch, events)
+    environment = _PolicyEnvironment(events)
+    opening = asyncio.Event()
+
+    async def hang_open(network_policy: NetworkPolicy) -> None:
+        opening.set()
+        await asyncio.Event().wait()
+
+    environment.policy_hook = hang_open
+    task = asyncio.create_task(_agent(tmp_path, hosts=SETUP_HOSTS).setup(environment))
+    await opening.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert events == ["list", _allowlist(*SETUP_HOSTS)]
+    await _refuses_commands(environment)
+
+
+async def test_a_policy_the_provider_cannot_express_fails_before_anything_changes(tmp_path, monkeypatch):
+    events: list[Any] = []
+    _record_setup(monkeypatch, events)
+    environment = _PolicyEnvironment(events)
+    environment.policy_supported = False
+    with pytest.raises(ValueError, match="not supported"):
+        await _agent(tmp_path, hosts=["*.npmjs.org"]).setup(environment)
+    assert events == []
+    assert not set(GUARDED_METHODS) & set(vars(environment))
+
+
+async def test_a_compose_environment_keeps_the_task_policy(tmp_path, monkeypatch):
+    events: list[Any] = []
+    _record_setup(monkeypatch, events)
+    environment = _PolicyEnvironment(events, capabilities=DYNAMIC_ALLOWLIST.model_copy(update={"docker_compose": True}))
+    environment._uses_compose = True
+    await _agent(tmp_path, hosts=SETUP_HOSTS).setup(environment)
+    assert events == [("setup", NO_NETWORK)]
+
+
+async def test_a_compose_capable_environment_without_compose_services_opens_the_window(tmp_path, monkeypatch):
+    events: list[Any] = []
+    _record_setup(monkeypatch, events)
+    environment = _PolicyEnvironment(events, capabilities=DYNAMIC_ALLOWLIST.model_copy(update={"docker_compose": True}))
+    await _agent(tmp_path, hosts=SETUP_HOSTS).setup(environment)
+    opened = _allowlist(*SETUP_HOSTS)
+    assert events == ["list", opened, ("setup", opened), NO_NETWORK, ("kill", KEEP)]
 
 
 async def test_a_failed_snapshot_opens_nothing_and_leaves_commands_alone(tmp_path, monkeypatch):
@@ -367,7 +476,7 @@ async def test_a_failed_snapshot_opens_nothing_and_leaves_commands_alone(tmp_pat
     with pytest.raises(RuntimeError, match="could not list environment processes"):
         await _agent(tmp_path, hosts=SETUP_HOSTS).setup(environment)
     assert events == ["list"]
-    assert "exec" not in vars(environment) and "service_exec" not in vars(environment)
+    assert not set(GUARDED_METHODS) & set(vars(environment))
 
 
 def test_preflight_is_the_real_agents_without_the_wrapper_kwarg(monkeypatch):
