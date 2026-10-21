@@ -9,6 +9,7 @@ import {
   Flex,
   FormField,
   SegmentedControl,
+  Skeleton,
   Stack,
   Switch,
   Text,
@@ -51,7 +52,7 @@ export const PromptSection: FC<PromptSectionProps> = ({ workspace, agentName }) 
   const prompt = watch('prompt');
   const trials = budgetById(watch('budget')).trials;
 
-  const { data: agent } = useAgentsGetAgent(workspace, agentName ?? '', {
+  const { data: agent, isLoading: isAgentLoading } = useAgentsGetAgent(workspace, agentName ?? '', {
     query: { enabled: !!agentName && prompt.enabled },
   });
   const currentPrompt = agentSystemPrompt(agent?.config);
@@ -148,7 +149,15 @@ export const PromptSection: FC<PromptSectionProps> = ({ workspace, agentName }) 
             </>
           )}
 
-          {prompt.mode === 'versions' && (
+          {prompt.mode === 'versions' && isAgentLoading && (
+            <Stack gap="density-lg" aria-busy aria-label="Loading the current prompt">
+              {Array.from({ length: MIN_VERSIONS }, (_, index) => (
+                <Skeleton key={index} className="h-24 w-full" />
+              ))}
+            </Stack>
+          )}
+
+          {prompt.mode === 'versions' && !isAgentLoading && (
             <Stack gap="density-lg">
               {prompt.versions.map((version, index) => (
                 <FormField
