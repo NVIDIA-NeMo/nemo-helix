@@ -44,6 +44,7 @@ class FabricInvocationRequest:
     input: Any = ""
     request_id: str | None = None
     caller_context: dict[str, Any] = field(default_factory=dict)
+    relay_session_root: str | None = None
     timeout_seconds: float | None = None
 
 
@@ -61,6 +62,7 @@ class FabricOneShotRequest:
     input: Any = ""
     request_id: str | None = None
     caller_context: dict[str, Any] = field(default_factory=dict)
+    relay_session_root: str | None = None
     overrides: dict[str, Any] | None = None
     timeout_seconds: float | None = None
 
@@ -240,6 +242,7 @@ async def stream_fabric_agent_once(
                 input=request.input,
                 request_id=request.request_id,
                 caller_context=request.caller_context,
+                relay_session_root=request.relay_session_root,
                 timeout_seconds=request.timeout_seconds,
             ),
         )
@@ -278,6 +281,8 @@ def _with_platform_invocation_context(request: FabricInvocationRequest | FabricO
     }
     if request.request_id is not None:
         request_kwargs["request_id"] = request.request_id
+    if request.relay_session_root is not None:
+        request_kwargs["relay_session_root"] = request.relay_session_root
 
     return RunRequest(**request_kwargs)
 
