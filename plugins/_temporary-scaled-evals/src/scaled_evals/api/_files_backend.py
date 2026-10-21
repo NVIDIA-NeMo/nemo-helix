@@ -167,7 +167,7 @@ def fileset_prefix(object_prefix: str) -> tuple[str, str]:
 #
 # The transport is an injectable object that holds its SDK handle + derived
 # FilesResource on the instance (the house pattern — see nhx_common
-# jobs.log_client, nemo-insights controller, core/models entity services).
+# jobs.log_client, nemo-compass controller, core/models entity services).
 # A process-wide default instance is lazily built via inject-or-default;
 # tests construct their own FilesArtifactBackend(resource=...) and install it
 # with use_backend(), so there is no module-global mutable state to leak.

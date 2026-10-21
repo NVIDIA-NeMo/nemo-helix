@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
-import { getInsightsGetInsightQueryKey } from '@nemo/sdk/generated/insights/insights-insights';
-import type { Insight } from '@nemo/sdk/generated/insights/schema';
+import { getCompassGetInsightQueryKey } from '@nemo/sdk/generated/compass/compass-insights';
+import type { Insight } from '@nemo/sdk/generated/compass/schema';
 import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
 import { getListExperimentsQueryKey } from '@nemo/sdk/generated/platform/experiments';
 import type { ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
@@ -19,7 +19,7 @@ import { useParams } from 'react-router';
 
 const WORKSPACE = 'workspace-a';
 const INSIGHT_ID = 'insight-a';
-const INSIGHT_URL = mockApiUrl(getInsightsGetInsightQueryKey, ':workspace', ':insightId');
+const INSIGHT_URL = mockApiUrl(getCompassGetInsightQueryKey, ':workspace', ':insightId');
 const GROUPS_URL = mockApiUrl(getListExperimentsQueryKey, ':workspace');
 const EVALUATIONS_URL = mockApiUrl(getListEvaluationsQueryKey, ':workspace');
 

@@ -5,4 +5,4 @@
 set -euo pipefail
 # Run Python type checker in CI.
 
-uv run --frozen --group insights --group typecheck ty check --exit-zero-on-warning
+uv run --frozen --group compass --group typecheck ty check --exit-zero-on-warning

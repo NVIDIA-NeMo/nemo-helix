@@ -44,7 +44,7 @@ COPY plugins/nemo-safe-synthesizer/openapi /app/plugins/nemo-safe-synthesizer/op
 COPY plugins/nemo-evals/openapi /app/plugins/nemo-evals/openapi
 COPY plugins/nemo-customizer/openapi /app/plugins/nemo-customizer/openapi
 COPY plugins/nemo-agent-hardener/openapi /app/plugins/nemo-agent-hardener/openapi
-COPY plugins/nemo-insights/openapi /app/plugins/nemo-insights/openapi
+COPY plugins/nemo-compass/openapi /app/plugins/nemo-compass/openapi
 COPY plugins/nemo-agent-optimization/openapi /app/plugins/nemo-agent-optimization/openapi
 
 # Install pnpm modules and generate SDK artifacts during postinstall.
