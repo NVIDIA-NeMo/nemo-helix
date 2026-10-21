@@ -13,6 +13,8 @@ from nhx.intake.spans.domain import NEMO_STEP_ID_ATTRIBUTE, SpanKind, SpanStatus
 from nhx.intake.spans.ingest.atif import AtifIngestRequest
 from nhx.intake.spans.ingest.atif_domain import (
     AtifAgent,
+    AtifContentPartImage,
+    AtifContentPartText,
     AtifStepAgent,
     AtifStepUser,
     AtifSubagentTrajectoryRef,
@@ -1422,3 +1424,155 @@ def test_atif_mapping_uses_session_id_as_trace_id_without_trajectory_id() -> Non
     )
 
     assert {span.trace_id for span in spans} == {"conversation-1"}
+
+
+def test_text_content_part_drops_cache_control_and_keeps_text() -> None:
+    part = AtifContentPartText.model_validate({"type": "text", "text": "hello", "cache_control": {"type": "ephemeral"}})
+
+    dumped = part.model_dump()
+    assert dumped == {"type": "text", "text": "hello"}
+    assert "cache_control" not in dumped
+    assert "extra" not in dumped
+
+
+def test_text_content_part_without_unknown_keys_is_unchanged() -> None:
+    part = AtifContentPartText.model_validate({"type": "text", "text": "hello"})
+
+    assert part.model_dump() == {"type": "text", "text": "hello"}
+
+
+def test_text_content_part_still_requires_text() -> None:
+    with pytest.raises(ValidationError):
+        AtifContentPartText.model_validate({"type": "text", "cache_control": {"type": "ephemeral"}})
+
+
+def test_image_content_part_drops_unknown_sibling_and_keeps_source() -> None:
+    part = AtifContentPartImage.model_validate(
+        {
+            "type": "image",
+            "source": {"media_type": "image/png", "path": "images/a.png"},
+            "cache_control": {"type": "ephemeral"},
+        }
+    )
+
+    assert part.model_dump() == {
+        "type": "image",
+        "source": {"media_type": "image/png", "path": "images/a.png"},
+    }
+
+
+def test_ingest_request_promotes_extra_evaluation_context() -> None:
+    request = AtifIngestRequest.model_validate(
+        {
+            "schema_version": "ATIF-v1.7",
+            "agent": {"name": "sample-agent", "version": "1.0"},
+            "extra": {
+                "evaluation_context": {
+                    "evaluation_name": "eval-from-extra",
+                    "test_case_name": "case-1",
+                }
+            },
+        }
+    )
+
+    assert request.evaluation_context is not None
+    assert request.evaluation_context.evaluation_name == "eval-from-extra"
+    assert request.evaluation_context.test_case_name == "case-1"
+    assert request.extra is not None
+    assert request.extra["evaluation_context"]["evaluation_name"] == "eval-from-extra"
+
+
+def test_ingest_request_accepts_matching_evaluation_context_spellings() -> None:
+    request = AtifIngestRequest.model_validate(
+        {
+            "schema_version": "ATIF-v1.7",
+            "agent": {"name": "sample-agent", "version": "1.0"},
+            "evaluation_context": {"evaluation_name": "eval-from-extra", "test_case_name": "case-1"},
+            "extra": {"evaluation_context": {"evaluation_id": "eval-from-extra", "test_case_id": "case-1"}},
+        }
+    )
+
+    assert request.evaluation_context is not None
+    assert request.evaluation_context.evaluation_name == "eval-from-extra"
+    assert request.evaluation_context.test_case_name == "case-1"
+
+
+def test_ingest_request_rejects_conflicting_evaluation_context() -> None:
+    with pytest.raises(ValidationError, match=r"evaluation_context .* and extra.evaluation_context .* must match"):
+        AtifIngestRequest.model_validate(
+            {
+                "schema_version": "ATIF-v1.7",
+                "agent": {"name": "sample-agent", "version": "1.0"},
+                "evaluation_context": {"evaluation_name": "eval-a"},
+                "extra": {"evaluation_context": {"evaluation_name": "eval-b"}},
+            }
+        )
+
+
+def test_ingest_request_treats_null_extra_evaluation_context_as_absent() -> None:
+    request = AtifIngestRequest.model_validate(
+        {
+            "schema_version": "ATIF-v1.7",
+            "agent": {"name": "sample-agent", "version": "1.0"},
+            "evaluation_context": {"evaluation_name": "eval-from-alias"},
+            "extra": {"evaluation_context": None},
+        }
+    )
+
+    assert request.evaluation_context is not None
+    assert request.evaluation_context.evaluation_name == "eval-from-alias"
+    assert request.extra == {"evaluation_context": None}
+
+
+def test_ingest_request_ignores_empty_extra_evaluation_context() -> None:
+    request = AtifIngestRequest.model_validate(
+        {
+            "schema_version": "ATIF-v1.7",
+            "agent": {"name": "sample-agent", "version": "1.0"},
+            "evaluation_context": {"evaluation_name": "eval-from-alias", "test_case_name": "case-1"},
+            "extra": {"evaluation_context": {}},
+        }
+    )
+
+    assert request.evaluation_context is not None
+    assert request.evaluation_context.evaluation_name == "eval-from-alias"
+    assert request.evaluation_context.test_case_name == "case-1"
+
+
+def test_ingest_request_promotes_extra_when_top_level_context_is_empty() -> None:
+    request = AtifIngestRequest.model_validate(
+        {
+            "schema_version": "ATIF-v1.7",
+            "agent": {"name": "sample-agent", "version": "1.0"},
+            "evaluation_context": {},
+            "extra": {"evaluation_context": {"evaluation_name": "eval-from-extra"}},
+        }
+    )
+
+    assert request.evaluation_context is not None
+    assert request.evaluation_context.evaluation_name == "eval-from-extra"
+
+
+def test_ingest_request_rejects_partial_evaluation_context_overlap() -> None:
+    with pytest.raises(ValidationError, match=r"evaluation_context .* and extra.evaluation_context .* must match"):
+        AtifIngestRequest.model_validate(
+            {
+                "schema_version": "ATIF-v1.7",
+                "agent": {"name": "sample-agent", "version": "1.0"},
+                "evaluation_context": {"evaluation_name": "eval-a"},
+                "extra": {
+                    "evaluation_context": {"evaluation_name": "eval-a", "test_case_name": "case-1"},
+                },
+            }
+        )
+
+
+def test_ingest_request_rejects_non_object_extra_evaluation_context() -> None:
+    with pytest.raises(ValidationError):
+        AtifIngestRequest.model_validate(
+            {
+                "schema_version": "ATIF-v1.7",
+                "agent": {"name": "sample-agent", "version": "1.0"},
+                "extra": {"evaluation_context": "not-an-object"},
+            }
+        )

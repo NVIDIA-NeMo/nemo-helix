@@ -9743,7 +9743,11 @@ components:
     AtifIngestRequest:
       properties:
         evaluation_context:
-          $ref: '#/components/schemas/EvaluationContext'
+          allOf:
+          - $ref: '#/components/schemas/EvaluationContext'
+          description: Intake extension outside ATIF. Spec-valid producers put the
+            same object at extra.evaluation_context. Existing callers may keep sending
+            this top-level alias.
         schema_version:
           type: string
           enum:
@@ -9797,7 +9801,11 @@ components:
 
         ATIF project scoping is intentionally not accepted here; use the workspace
 
-        route and ``evaluation_context`` for evaluation identity.'
+        route. Evaluation identity is an Intake extension: spec-valid ATIF puts it
+
+        at ``extra.evaluation_context``. The top-level field is a compatibility alias
+
+        for existing callers.'
     AtifMetrics:
       properties:
         prompt_tokens:
