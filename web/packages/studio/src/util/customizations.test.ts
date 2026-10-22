@@ -987,7 +987,10 @@ describe('getCurrentStage', () => {
 
 /** The visible text of a tile value that may be wrapped in a Badge. */
 const textOf = (node: ReactNode): string =>
-  renderToStaticMarkup(createElement('span', null, node)).replace(/<[^>]+>/g, '');
+  new DOMParser().parseFromString(
+    renderToStaticMarkup(createElement('span', null, node)),
+    'text/html'
+  ).body.textContent ?? '';
 
 describe('getTrainingDiagnosticsTiles', () => {
   const running = { isTerminal: false, duration: '1m 12s' };
