@@ -9,7 +9,7 @@ ARG PYTHON_VERSION=3.13
 FROM ${BASE_IMAGE_URL}:${BASE_IMAGE_TAG}@${BASE_IMAGE_DIGEST}
 ARG PYTHON_VERSION
 
-COPY --from=ghcr.io/astral-sh/uv:0.9.14@sha256:fef8e5fb8809f4b57069e919ffcd1529c92b432a2c8d8ad1768087b0b018d840 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.4@sha256:9f130421e930bfbdc563c00740466603f8723158e90297d07957c2294640262b /uv /uvx /bin/
 
 ENV PYTHONDONTWRITEBYTECODE=1
 
@@ -19,7 +19,8 @@ ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python \
 RUN apt-get update && \
     apt-get install -y --no-install-recommends g++ gcc ca-certificates curl && \
     update-ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge "20260816ubuntu0.24.04.1"
 
 # Claude and Codex Relay integration launches this external CLI. Authenticate
 # the immutable installer before root execution; it separately verifies the

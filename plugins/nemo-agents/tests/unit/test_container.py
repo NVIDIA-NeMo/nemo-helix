@@ -104,7 +104,7 @@ class TestRenderNatDockerfile:
         assert "uv sync" not in result
         assert "NAT_CONFIG_FILE=/workspace/config.yaml" in result
         assert "ARG NAT_VERSION=1.4.0" in result
-        assert "ghcr.io/astral-sh/uv:0.9.14" in result
+        assert "ghcr.io/astral-sh/uv:0.13.4" in result
 
     def test_project_mode(self, project_dir: tuple[Path, Path]) -> None:
         """Project mode trusts pyproject.toml as the single source of truth.
@@ -454,7 +454,7 @@ class TestRenderFabricDockerfile:
         assert '" .' not in install_line
         assert "ENV AGENT_CONFIG_PATH=/workspace/agent.yaml" in result
         assert "NAT_VERSION" not in result
-        assert "ghcr.io/astral-sh/uv:0.9.14" in result
+        assert "ghcr.io/astral-sh/uv:0.13.4" in result
 
     def test_non_string_default_harness_uses_base_plugin(self, tmp_path: Path) -> None:
         from nemo_agents_plugin.container.template import get_contract_version, render_fabric_dockerfile

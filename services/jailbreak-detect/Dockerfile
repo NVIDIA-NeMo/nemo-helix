@@ -17,7 +17,17 @@ ARG DISTROLESS_IMAGE_VERSION=v4.0.8
 
 FROM python:${PYTHON_VERSION}-slim AS builder
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && \
+    . /etc/os-release && \
+    case "${VERSION_CODENAME}" in \
+        bookworm) minimum=20250419~deb12u2 ;; \
+        trixie) minimum=20250419+deb13u1 ;; \
+        *) echo "Unverified CA package for ${VERSION_CODENAME}" >&2; exit 1 ;; \
+    esac && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge "${minimum}" && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /bin/
 
 ENV JAILBREAK_CHECK_DEVICE=cpu \
     HF_HOME=/opt/jailbreak-detect/.cache/huggingface \
@@ -39,6 +49,8 @@ RUN useradd --create-home --uid 1000 jbd && \
     chmod -R g+rwX /opt/jailbreak-detect
 
 FROM nvcr.io/nvidia/distroless/python:${PYTHON_VERSION}-${DISTROLESS_IMAGE_VERSION} AS runtime
+RUN ["python", "-c", "import shutil; shutil.rmtree('/etc/ssl/certs')"]
+COPY --from=builder /etc/ssl/certs/ /etc/ssl/certs/
 
 ENV PATH="/app/.venv/bin:$PATH"
 ENV JAILBREAK_CHECK_DEVICE=cpu \

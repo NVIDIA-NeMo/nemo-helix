@@ -41,6 +41,7 @@ classifiers = [
 # should install `nemo-helix[all]` for the full packaged install; `[services]`
 # is retained as the underlying aggregate and continues to work.
 dependencies = [
+  "certifi>=2026.10.19",
   "nemo-helix-ext",
   "nemo-helix-plugin",
   "nhx-common",
@@ -414,6 +415,7 @@ nemo-helix-ext = [
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-helix-plugin = [
   "anthropic>=0.88.0",
+  "certifi>=2026.10.19",
   "fastapi>=0.115.4",
   "filesets",
   "jsonschema>=4.0.0",
