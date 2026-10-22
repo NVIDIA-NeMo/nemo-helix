@@ -9,6 +9,7 @@ Every test writes its own task directory under ``tmp_path``.
 from __future__ import annotations
 
 import json
+import os
 import textwrap
 from pathlib import Path
 from typing import Any
@@ -110,7 +111,7 @@ def test_image_and_build_sources(tmp_path: Path) -> None:
         """
         services:
           a: {build: ./api}
-          b: {build: {context: ., dockerfile: odoo/Dockerfile, args: {V: 1}, target: prod}}
+          b: {build: {context: ., dockerfile: odoo/Dockerfile, args: {V: 1}, target: prod, no_cache: true}}
           c: {image: acme/c:1, build: {context: ./c}}
           d: {image: postgres:18}
         """,
@@ -118,7 +119,7 @@ def test_image_and_build_sources(tmp_path: Path) -> None:
 
     assert task.services["a"].source == ComposeBuild(context_path="environment/api")
     assert task.services["b"].source == ComposeBuild(
-        context_path="environment", dockerfile="odoo/Dockerfile", args={"V": "1"}, target="prod"
+        context_path="environment", dockerfile="odoo/Dockerfile", args={"V": "1"}, target="prod", no_cache=True
     )
     # Harbor runs `docker compose build` before starting a built task, so a build wins over `image`.
     assert task.services["c"].source == ComposeBuild(context_path="environment/c")
@@ -251,6 +252,7 @@ def test_main_settings(tmp_path: Path) -> None:
         """
         services:
           main:
+            cap_add: [SYS_PTRACE]
             environment: {MODE: test}
             healthcheck:
               test: ["CMD", "test", "-f", "/tmp/ready"]
@@ -263,6 +265,7 @@ def test_main_settings(tmp_path: Path) -> None:
     assert spec["main"] == {
         "entrypoint": ["/app/start.sh"],
         "env": {"MODE": "test"},
+        "add_capabilities": ["SYS_PTRACE"],
         # The default timeout (300 s) is left out of the kwarg.
         "readiness": {"exec": ["test", "-f", "/tmp/ready"]},
     }
@@ -485,13 +488,30 @@ def test_ready_timeout_is_the_longest_healthcheck_budget_clamped(tmp_path: Path)
     assert main_timeout("1h", 1000) == 3600  # an hour is the ceiling
 
 
+def test_without_a_main_healthcheck_the_wait_is_carried_by_services_timeout_sec(tmp_path: Path) -> None:
+    def services_timeout(start: str, retries: int) -> int | None:
+        """``services_timeout_sec`` when a ``slow`` service takes ``start + 2s * retries`` and ``main`` has no check."""
+        compose = f"""
+            services:
+              slow:
+                image: redis
+                healthcheck: {{test: [CMD, redis-cli, ping], start_period: {start}, interval: 2s, retries: {retries}}}
+            """
+        services = to_compose_services(_parsed(tmp_path / f"{start}-{retries}", compose))
+        assert services.main.readiness is None
+        return services.services_timeout_sec
+
+    assert services_timeout("300s", 180) == 660  # 300 + 2 * 180
+    assert services_timeout("5s", 30) is None  # within the sandbox's default wait
+    assert services_timeout("1h", 1000) == 3600  # an hour is the ceiling
+
+
 def test_run_once_healthchecks_do_not_count_toward_the_wait(tmp_path: Path) -> None:
     spec = _spec(
         tmp_path,
         """
         services:
           main:
-            healthcheck: {test: [CMD, true]}
             depends_on:
               job: {condition: service_completed_successfully}
           job:
@@ -499,8 +519,8 @@ def test_run_once_healthchecks_do_not_count_toward_the_wait(tmp_path: Path) -> N
             healthcheck: {test: [CMD, true], start_period: 1h}
         """,
     )
-    # The default timeout (300 s) is left out of the kwarg; an hour-long budget would have set one.
-    assert spec["main"]["readiness"] == {"exec": ["true"]}
+    # An hour-long budget would have set a timeout; the default (300 s) is left out of the kwarg.
+    assert "services_timeout_sec" not in spec
 
 
 def test_services_run_by_normalized_tag_unless_the_caller_supplies_an_image(tmp_path: Path) -> None:
@@ -534,7 +554,10 @@ def test_features_with_no_effect_in_a_pod_are_accepted(tmp_path: Path) -> None:
           main:
             network_mode: "service:a"
             pull_policy: build
+            networks: [default]
             labels: {a: b}
+            tty: true
+            stdin_open: true
           a:
             <<: *common
             image: redis
@@ -542,6 +565,7 @@ def test_features_with_no_effect_in_a_pod_are_accepted(tmp_path: Path) -> None:
             container_name: cache
             hostname: cache
             labels: [a=b]
+            networks: {default: {}}
             network_mode: "service:b"
             healthcheck:
               test: [CMD, redis-cli, ping]
@@ -549,7 +573,7 @@ def test_features_with_no_effect_in_a_pod_are_accepted(tmp_path: Path) -> None:
               start_interval: 1s
           b:
             image: redis
-            build: {context: .}
+            build: {context: ., no_cache: true}
         x-note: ignored
         """,
         images={"b": "registry.example.com/demo/b:1"},
@@ -604,6 +628,354 @@ def test_a_service_may_be_named_verifier(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------------------------------------------------
+# Volumes, resources, networks and Harbor's conventions
+
+
+def test_named_volumes_and_mounts(tmp_path: Path) -> None:
+    spec = _spec(
+        tmp_path,
+        """
+        services:
+          main:
+            volumes:
+              - shared:/data:ro
+          a:
+            image: redis
+            volumes:
+              - shared:/data
+              - {type: volume, source: cache, target: /cache, read_only: true}
+        volumes:
+          shared: {}
+          cache:
+          unused:
+        """,
+    )
+
+    assert spec["volumes"] == ["shared", "cache"]
+    assert spec["main"]["volume_mounts"] == [{"name": "shared", "mount_path": "/data", "read_only": True}]
+    assert _service(spec, "a")["volume_mounts"] == [
+        {"name": "shared", "mount_path": "/data"},
+        {"name": "cache", "mount_path": "/cache", "read_only": True},
+    ]
+
+
+def test_volume_names_become_names_a_pod_accepts(tmp_path: Path) -> None:
+    spec = _spec(
+        tmp_path,
+        """
+        services:
+          main:
+            volumes: [agent1_out:/shared/agent1]
+          agent1:
+            image: redis
+            volumes: [agent1_out:/agent_output, Cache.V2:/cache]
+        volumes:
+          agent1_out:
+          Cache.V2:
+        """,
+    )
+    assert spec["volumes"] == ["agent1-out", "cache-v2"]
+    assert spec["main"]["volume_mounts"] == [{"name": "agent1-out", "mount_path": "/shared/agent1"}]
+    assert [mount["name"] for mount in _service(spec, "agent1")["volume_mounts"]] == ["agent1-out", "cache-v2"]
+
+
+def test_volumes_whose_pod_names_would_clash_are_invalid(tmp_path: Path) -> None:
+    task = _parsed(
+        tmp_path,
+        """
+        services:
+          a:
+            image: redis
+            volumes: [data_1:/one, data.1:/two]
+        volumes:
+          data_1:
+          data.1:
+        """,
+    )
+    with pytest.raises(ComposeError) as caught:
+        to_compose_services(task)
+    assert caught.value.code == "compose_invalid"
+    assert caught.value.paths == ("data_1", "data.1")
+
+
+def test_harbor_log_mounts_on_main_need_nothing(tmp_path: Path) -> None:
+    spec = _spec(
+        tmp_path,
+        """
+        services:
+          main:
+            volumes:
+              - ${HOST_VERIFIER_LOGS_PATH}:${ENV_VERIFIER_LOGS_PATH}
+              - ${HOST_AGENT_LOGS_PATH}:${ENV_AGENT_LOGS_PATH}
+          db:
+            image: redis
+        """,
+    )
+    assert "volume_mounts" not in spec.get("main", {})
+    assert "volumes" not in spec
+
+
+def test_a_harbor_log_mount_on_a_service_is_shared_with_main(tmp_path: Path) -> None:
+    spec = _spec(
+        tmp_path,
+        """
+        services:
+          main:
+            volumes:
+              - ${HOST_VERIFIER_LOGS_PATH}:${ENV_VERIFIER_LOGS_PATH}
+          game:
+            image: redis
+            volumes:
+              - ${HOST_VERIFIER_LOGS_PATH}:${ENV_VERIFIER_LOGS_PATH}
+        """,
+    )
+    assert spec["volumes"] == ["harbor-verifier-logs"]
+    assert _service(spec, "game")["volume_mounts"] == [{"name": "harbor-verifier-logs", "mount_path": "/logs/verifier"}]
+    assert spec["main"]["volume_mounts"] == [{"name": "harbor-verifier-logs", "mount_path": "/logs/verifier"}]
+
+
+@pytest.mark.parametrize(
+    "volume",
+    [
+        "$HOST_AGENT_LOGS_PATH:$ENV_AGENT_LOGS_PATH:ro",
+        {"type": "bind", "source": "${HOST_AGENT_LOGS_PATH}", "target": "${ENV_AGENT_LOGS_PATH}", "read_only": True},
+    ],
+)
+def test_harbor_log_mounts_are_recognized_in_every_spelling(tmp_path: Path, volume: Any) -> None:
+    task = _parsed(tmp_path, json.dumps({"services": {"game": {"image": "redis", "volumes": [volume]}}}))
+    assert task.services["game"].volume_mounts[0].model_dump() == {
+        "name": "harbor-agent-logs",
+        "mount_path": "/logs/agent",
+        "read_only": True,
+    }
+
+
+def test_only_harbor_log_mounts_written_exactly_are_recognized(tmp_path: Path) -> None:
+    error = _error(tmp_path, "services:\n  a:\n    image: redis\n    volumes: ['${HOST_AGENT_LOGS_PATH}:/elsewhere']\n")
+    assert error.code == "compose_unsupported"
+    assert any(path.startswith("services.a.volumes[0]") for path in error.paths)
+
+
+def test_a_volume_named_like_a_harbor_log_volume_is_invalid(tmp_path: Path) -> None:
+    error = _error(tmp_path, "services:\n  a:\n    image: redis\nvolumes:\n  harbor-agent-logs: {}\n")
+    assert error.code == "compose_invalid"
+    assert "volumes.harbor-agent-logs: this name is reserved" in error.detail
+
+
+def test_harbor_log_directory_variables_fill_in(tmp_path: Path) -> None:
+    spec = _spec(tmp_path, "services:\n  a:\n    image: redis\n    environment: {LOGS: '${ENV_VERIFIER_LOGS_PATH}'}\n")
+    assert _service(spec, "a")["env"] == {"LOGS": "/logs/verifier"}
+
+
+@pytest.mark.parametrize(
+    "volume",
+    ["./data:/data", "/host:/data", "~/x:/data", "/anonymous", {"type": "bind", "source": "/h", "target": "/t"}],
+)
+def test_bind_mounts_and_anonymous_volumes_are_rejected(tmp_path: Path, volume: Any) -> None:
+    compose = {"services": {"a": {"image": "redis", "volumes": [volume]}}}
+    error = _error(tmp_path, json.dumps(compose))
+    assert error.code == "compose_unsupported"
+    assert error.paths and error.paths[0].startswith("services.a.volumes[0]")
+
+
+def test_mount_of_an_undeclared_volume_is_invalid(tmp_path: Path) -> None:
+    error = _error(tmp_path, "services:\n  a:\n    image: redis\n    volumes: ['v:/data']\n")
+    assert error.code == "compose_invalid"
+
+
+@pytest.mark.parametrize(
+    ("shm_size", "quantity"),
+    [
+        ("1gb", "1Gi"),
+        ('"512m"', "512Mi"),
+        ("64mb", "64Mi"),
+        ("2g", "2Gi"),
+        ("1024k", "1024Ki"),
+        ("67108864", "67108864"),
+    ],
+)
+def test_shm_size_becomes_a_kubernetes_quantity(tmp_path: Path, shm_size: str, quantity: str) -> None:
+    spec = _spec(tmp_path, f"services:\n  a:\n    image: redis\n    shm_size: {shm_size}\n")
+    assert _service(spec, "a")["shm_size"] == quantity
+
+
+@pytest.mark.parametrize(
+    ("limits", "task_toml"),
+    [
+        ("{cpus: '${CPUS}', memory: '${MEMORY}'}", "[environment]\ncpus = 1\nmemory_mb = 2048\n"),
+        ("{cpus: '${CPUS:-4}', memory: '${MEMORY:-16G}'}", "[environment]\ncpus = 4\nmemory_mb = 16384\n"),
+    ],
+)
+def test_limits_on_main_that_repeat_task_toml_are_accepted(tmp_path: Path, limits: str, task_toml: str) -> None:
+    compose = f"services:\n  main:\n    deploy:\n      resources:\n        limits: {limits}\n  a:\n    image: redis\n"
+    spec = _spec(tmp_path, compose, task_toml=task_toml)
+    assert "resources" not in spec.get("main", {})
+
+
+def test_limits_on_main_that_differ_from_task_toml_are_unsupported(tmp_path: Path) -> None:
+    error = _error(
+        tmp_path,
+        "services:\n  main:\n    cpus: 2\n  a:\n    image: redis\n",
+        task_toml="[environment]\ncpus = 1\n",
+    )
+    assert error.code == "compose_unsupported"
+    assert error.paths == ("services.main: resource limits {'cpu': '2'} differ from task.toml's {'cpu': '1'}",)
+
+
+@pytest.mark.parametrize(
+    ("reservations", "path"),
+    [
+        (
+            "{devices: [{driver: nvidia, count: all, capabilities: [gpu]}]}",
+            "services.main.deploy.resources.reservations.devices",
+        ),
+        ("{cpus: '1'}", "services.main.deploy.resources.reservations"),
+    ],
+)
+def test_reservations_on_main_are_unsupported(tmp_path: Path, reservations: str, path: str) -> None:
+    compose = f"services:\n  main:\n    deploy:\n      resources:\n        reservations: {reservations}\n  a:\n    image: redis\n"
+    error = _error(tmp_path, compose)
+    assert error.code == "compose_unsupported"
+    assert path in error.paths
+
+
+def test_resources_from_cpus_mem_limit_and_deploy(tmp_path: Path) -> None:
+    spec = _spec(
+        tmp_path,
+        """
+        services:
+          a:
+            image: redis
+            cpus: 1.0
+            mem_limit: 512m
+          b:
+            image: redis
+            cpus: 0.5
+            deploy:
+              resources:
+                limits: {cpus: "2", memory: 1g}
+                reservations: {cpus: "0.25", memory: 256m}
+        """,
+    )
+
+    assert _service(spec, "a")["resources"] == {"limits": {"cpu": "1", "memory": "512Mi"}}
+    assert _service(spec, "b")["resources"] == {
+        "limits": {"cpu": "2", "memory": "1Gi"},
+        "requests": {"cpu": "0.25", "memory": "256Mi"},
+    }
+
+
+def test_platform_is_read_for_services_and_main(tmp_path: Path) -> None:
+    task = _parsed(
+        tmp_path,
+        """
+        services:
+          main: {platform: linux/arm64}
+          a: {image: redis, platform: linux/amd64}
+          b: {image: redis}
+          c: {image: redis, platform: "${UNSET_PLATFORM}"}
+        """,
+    )
+
+    assert task.main.platform == "linux/arm64"
+    assert task.services["a"].platform == "linux/amd64"
+    assert task.services["b"].platform is None
+    # An unset variable leaves the platform empty, which names none.
+    assert task.services["c"].platform is None
+
+
+def test_a_platform_that_is_not_a_string_is_invalid(tmp_path: Path) -> None:
+    error = _error(tmp_path, "services:\n  a:\n    image: redis\n    platform: [linux/amd64]\n")
+    assert error.code == "compose_invalid"
+    assert "services.a.platform" in error.detail
+
+
+def test_networks_every_service_joins_are_accepted(tmp_path: Path) -> None:
+    spec = _spec(
+        tmp_path,
+        """
+        services:
+          main:
+            networks: [internal]
+          game:
+            image: redis
+            networks: {internal: {}}
+        networks:
+          internal: {driver: bridge, internal: false}
+        """,
+    )
+    assert [service["name"] for service in spec["services"]] == ["game"]
+
+
+def test_services_on_different_networks_are_unsupported(tmp_path: Path) -> None:
+    error = _error(
+        tmp_path,
+        """
+        services:
+          main:
+            networks: [outside]
+          bastion:
+            image: redis
+            networks: [outside, inside]
+          db:
+            image: redis
+            networks: [inside]
+        networks:
+          outside: {}
+          inside: {}
+        """,
+    )
+    assert error.code == "compose_unsupported"
+    assert set(error.paths) == {
+        "services.bastion.networks: not the same networks as main",
+        "services.db.networks: not the same networks as main",
+    }
+
+
+def test_fixed_addresses_and_network_options_are_unsupported(tmp_path: Path) -> None:
+    error = _error(
+        tmp_path,
+        """
+        services:
+          main:
+            networks: {corp: {ipv4_address: 10.0.0.2}}
+          a:
+            image: redis
+            networks: {corp: {aliases: [db]}}
+        networks:
+          corp:
+            internal: true
+            ipam: {config: [{subnet: 10.0.0.0/24}]}
+        """,
+    )
+    assert set(error.paths) == {
+        "services.main.networks.corp.ipv4_address",
+        "services.a.networks.corp.aliases",
+        "networks.corp.internal",
+        "networks.corp.ipam",
+    }
+
+
+def test_a_network_that_is_not_declared_is_invalid(tmp_path: Path) -> None:
+    error = _error(tmp_path, "services:\n  main:\n    networks: [nope]\n  a:\n    image: redis\n    networks: [nope]\n")
+    assert error.code == "compose_invalid"
+    assert "network 'nope' is not declared" in error.detail
+
+
+def test_networks_that_are_not_names_are_unsupported_not_a_crash(tmp_path: Path) -> None:
+    error = _error(tmp_path, "services:\n  db:\n    image: redis\n    networks: [{backend: {}}]\n")
+
+    assert error.code == "compose_unsupported"
+    assert "services.db.networks" in error.paths
+
+
+def test_a_cpu_count_written_with_an_underscore_is_invalid(tmp_path: Path) -> None:
+    error = _error(tmp_path, "services:\n  db:\n    image: redis\n    cpus: '1_0'\n")
+
+    assert error.code == "compose_invalid"
+
+
+# ---------------------------------------------------------------------------------------------------------------------
 # Rejections
 
 
@@ -633,13 +1005,14 @@ def test_every_unsupported_feature_is_listed(tmp_path: Path) -> None:
             image: redis
             build: {context: ., args: {A: "${NOPE}"}, ssh: [default]}
         secrets: {s: {file: ./s}}
+        networks: {backend: {ipam: {config: []}}}
         """,
     )
 
     assert error.code == "compose_unsupported"
     assert set(error.paths) >= {
         "services.main.privileged",
-        "services.main.cap_add",
+        "services.main.cap_add: NET_ADMIN",
         "services.main.network_mode",
         "services.main.shm_size",
         "services.a.privileged",
@@ -651,9 +1024,10 @@ def test_every_unsupported_feature_is_listed(tmp_path: Path) -> None:
         "services.a.cap_add",
         "services.a.network_mode",
         "services.a.user",
-        "services.a.deploy",
+        "services.a.deploy.replicas",
         "services.b.build.ssh",
         "secrets",
+        "networks.backend.ipam",
     }
 
 
@@ -696,6 +1070,36 @@ def test_every_unsupported_feature_is_listed(tmp_path: Path) -> None:
             "compose_invalid",
             "services.db.depends_on.cache",
             id="malformed-depends-on",
+        ),
+        pytest.param(
+            "services:\n  db:\n    image: redis\n    deploy: {resources: [cpus]}\n",
+            "compose_invalid",
+            "services.db.deploy.resources",
+            id="malformed-resources",
+        ),
+        pytest.param(
+            "services:\n  db:\n    image: redis\n    deploy: {resources: {limits: [cpus]}}\n",
+            "compose_invalid",
+            "services.db.deploy.resources.limits",
+            id="malformed-limits",
+        ),
+        pytest.param(
+            "services:\n  db:\n    image: redis\n    cpus: .nan\n",
+            "compose_invalid",
+            "services.db.cpus",
+            id="cpus-not-a-number",
+        ),
+        pytest.param(
+            "services:\n  db:\n    image: redis\n    cpus: -1\n",
+            "compose_invalid",
+            "services.db.cpus",
+            id="cpus-negative",
+        ),
+        pytest.param(
+            "services:\n  main:\n    cap_add: SYS_PTRACE\n  db:\n    image: redis\n",
+            "compose_invalid",
+            "services.main.cap_add",
+            id="cap-add-not-a-list",
         ),
         pytest.param(
             'services:\n  a:\n    image: redis\n    ports: ["8000-8005:8000-8005"]\n',
@@ -886,6 +1290,7 @@ def test_prebuilt_main_with_redis_and_postgres_sidecars(tmp_path: Path) -> None:
     assert _service(spec, "redis")["readiness"] == {"exec": ["redis-cli", "ping"]}
     assert _service(spec, "postgres")["env"] == {"POSTGRES_PASSWORD": "secret"}
     assert "main" not in spec
+    assert "services_timeout_sec" not in spec
     ComposeServices.model_validate(spec)
 
 
@@ -895,6 +1300,8 @@ def test_built_main_with_a_sidecar_a_run_once_and_an_after_main_service(tmp_path
         """
         services:
           main:
+            cap_add: [SYS_PTRACE]
+            volumes: ["shared:/shared"]
             depends_on:
               api: {condition: service_healthy}
               seeder: {condition: service_completed_successfully}
@@ -904,12 +1311,15 @@ def test_built_main_with_a_sidecar_a_run_once_and_an_after_main_service(tmp_path
               test: ["CMD-SHELL", "curl -sf localhost:8000/health"]
           seeder:
             image: acme/seeder:1
+            volumes: ["shared:/shared"]
             depends_on:
               api: {condition: service_healthy}
           loadgen:
             image: acme/loadgen:1
             depends_on:
               main: {condition: service_started}
+        volumes:
+          shared: {}
         """,
         images={"api": "registry.example.com/demo/api:1"},
         dockerfile='FROM python:3.12-slim\nENTRYPOINT ["/start.sh"]\n',
@@ -923,6 +1333,9 @@ def test_built_main_with_a_sidecar_a_run_once_and_an_after_main_service(tmp_path
     ]
     assert _service(spec, "api")["image"] == "registry.example.com/demo/api:1"
     assert spec["main"]["entrypoint"] == ["/start.sh"]
+    assert spec["volumes"] == ["shared"]
+    assert spec["main"]["add_capabilities"] == ["SYS_PTRACE"]
+    assert spec["main"]["volume_mounts"] == [{"name": "shared", "mount_path": "/shared"}]
     ComposeServices.model_validate(spec)
 
 
@@ -931,3 +1344,24 @@ def test_compose_services_kwarg_round_trips_through_the_environment_model(tmp_pa
 
     spec = _spec(tmp_path, "services:\n  db:\n    image: postgres:16\n")
     assert parse_compose_services(spec).names() == ["db"]
+
+
+@pytest.mark.skipif(not os.environ.get("TB3_TASKS_DIR"), reason="set TB3_TASKS_DIR to a Terminal-Bench tasks/ checkout")
+def test_every_local_terminal_bench_compose_task_maps_to_a_valid_spec() -> None:
+    """A local sweep: each task parses to a spec the environment accepts; only a reserved port may be rejected."""
+    from nhx_sandbox.harbor_opensandbox_services import parse_compose_services
+
+    tasks = sorted(
+        path.parent.parent for path in Path(os.environ["TB3_TASKS_DIR"]).glob("*/environment/docker-compose.y*ml")
+    )
+    assert tasks, "no compose tasks under TB3_TASKS_DIR"
+    rejected: dict[str, str] = {}
+    for task_dir in tasks:
+        parsed = parse_compose(task_dir)
+        assert parsed is not None
+        images = {name: f"registry.example.com/{task_dir.name}/{name}:test" for name in parsed.services}
+        try:
+            parse_compose_services(compose_services_kwarg(task_dir, images))
+        except ComposeError as error:
+            rejected[task_dir.name] = error.code
+    assert set(rejected.values()) <= {"compose_reserved_port"}, rejected
