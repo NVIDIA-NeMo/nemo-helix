@@ -96,7 +96,7 @@ As of 0.9.5 the hand-edited sources are:
 | `plugins/nemo-data-designer/pyproject.toml` | runtime dependency, plus a generated `data-designer-nemo` extra block |
 | `plugins/nemo-anonymizer/pyproject.toml` | the anonymizer plugin pins `data-designer` too. Bump it even though the anonymizer library itself stays put. |
 | `packages/nemo_helix/pyproject.toml` | **generated** by `make vendor`. Don't hand-edit. Regenerate. |
-| `.github/wheel-constraints/*.txt` | handled in Step 4 |
+| `tools/wheel-constraints/*.txt` | handled in Step 4 |
 
 ```bash
 sed -i '' "s/\"data-designer==$OLD\"/\"data-designer==$NEW\"/" \
@@ -137,10 +137,10 @@ uv sync --frozen --all-packages
 
 ## Step 4: Wheel constraints
 
-`.github/wheel-constraints/*.txt` pin each wheel's direct external dependencies for CI's install smoke test. The full regeneration (`script/compile-wheel-constraints.sh`) needs built wheels, including the Studio toolchain. For a dependency bump, hand-editing is the established practice. For every package in the Step 3 `Updated` list, update its line in any constraints file that lists it:
+`tools/wheel-constraints/*.txt` pin each wheel's direct external dependencies for CI's install smoke test. The full regeneration (`tools/wheel-constraints/compile-wheel-constraints.sh`) needs built wheels, including the Studio toolchain. For a dependency bump, hand-editing is the established practice. For every package in the Step 3 `Updated` list, update its line in any constraints file that lists it:
 
 ```bash
-grep -n -E '^(data-designer|datasets|fsspec)==' .github/wheel-constraints/*.txt   # extend with the Step 3 packages
+grep -n -E '^(data-designer|datasets|fsspec)==' tools/wheel-constraints/*.txt   # extend with the Step 3 packages
 ```
 
 Constraints files can disagree with each other and with `uv.lock` before you start. In 0.9.5 the services file listed `huggingface-hub==1.27.0` while the lock had 1.26.0. Make every line you touch match `uv.lock`; don't just swap old for new.

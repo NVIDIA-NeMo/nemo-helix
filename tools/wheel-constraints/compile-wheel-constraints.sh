@@ -4,7 +4,7 @@
 
 #
 # Regenerate the partial dependency constraints used by CI's wheel install-smoke-test
-# (.github/wheel-constraints/*.txt).
+# (tools/wheel-constraints/*.txt).
 #
 # Why partial (constraints, not a full lock): the smoke test installs the freshly
 # built nemo-helix / nemo-helix-plugin wheels. Without any pin it resolves
@@ -16,16 +16,18 @@
 # resolve normally, so they cannot self-conflict.
 #
 # Usage:
-#   script/compile-wheel-constraints.sh <dir-with-both-wheels>
+#   tools/wheel-constraints/compile-wheel-constraints.sh <dir-with-both-wheels>
 #
-# Wheels come from `uv build --package nemo-helix[-plugin]` (nemo-helix
-# needs the Studio/node toolchain) or a CI "<pkg>-wheel-py3.12" artifact
+# Wheels come from `uv build --wheel --package <pkg> --out-dir <dir>` for both nemo-helix and
+# nemo-helix-plugin (nemo-helix needs the Studio/node toolchain; --wheel is required, a bare
+# `uv build` builds an sdist first) or a CI "<pkg>-wheel-py3.12" artifact
 # (`gh run download <run-id> -n nemo-helix-wheel-py3.12 -D <dir>`).
 set -euo pipefail
 
-WHEEL_DIR="${1:?usage: script/compile-wheel-constraints.sh <dir-with-built-wheels>}"
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT_DIR="${REPO_ROOT}/.github/wheel-constraints"
+WHEEL_DIR="${1:?usage: tools/wheel-constraints/compile-wheel-constraints.sh <dir-with-built-wheels>}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+OUT_DIR="${SCRIPT_DIR}"
 
 # uv accepts a pre-release version only for a package named in a first-party requirement or
 # constraint, and a pre-release dependency can reach the wheel transitively. Feed the
@@ -79,7 +81,7 @@ PY
     printf '# Pins the DIRECT external deps of the built %s wheel (plus any pre-release\n' "${label}"
     printf '# transitive, which uv resolves only when named) to vetted versions for\n'
     printf '# reproducibility; deep transitives resolve normally and cannot self-conflict.\n'
-    printf '# Regenerate with: script/compile-wheel-constraints.sh <dir-with-built-wheels>\n#\n'
+    printf '# Regenerate with: tools/wheel-constraints/compile-wheel-constraints.sh <dir-with-built-wheels>\n#\n'
     while read -r name; do
       [[ -n "${name}" ]] || continue
       ver="$("${venv}/bin/python" -c "import importlib.metadata as m; print(m.version('${name}'))" 2>/dev/null || true)"
